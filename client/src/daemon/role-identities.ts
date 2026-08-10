@@ -3,59 +3,39 @@
  * once in an encrypted local store, then each boot proves their real, effective-time trust
  * binding before any native component may use them. Legacy EOA signing deliberately lives in
  * `trust-keys.ts` and is not imported here.
+ *
+ * The encrypted store CODEC — the envelope, the `StoredIdentitySetV3` parse/validate, and
+ * `IdentityStore` with its exclusive-link create and atomic rewrite — now lives in
+ * `@jinn-network/trust-authoring` (spec/2026-08-07-native-identity-ceremony.md §3.1): the format is
+ * a shared artifact, written by the ceremony and read here, so there is exactly one implementation
+ * of it. Everything below is verification-side and unchanged — which store bytes mean what is not a
+ * decision this file makes, but whether a key may sign is.
  */
 import {
-  createCipheriv,
-  createDecipheriv,
   createPrivateKey,
   createPublicKey,
-  generateKeyPairSync,
-  randomBytes,
-  scryptSync,
   sign as cryptoSign,
   verify as cryptoVerify,
   type KeyObject,
 } from 'node:crypto';
-import { chmod, mkdir, open as openFile, readFile, rename, unlink } from 'node:fs/promises';
-import { dirname, isAbsolute } from 'node:path';
-import bs58 from 'bs58';
+import { stat } from 'node:fs/promises';
+import { isAbsolute } from 'node:path';
 import type { BindingResolver } from '@jinn-network/trust-core';
+import {
+  IdentityStore,
+  IdentityStoreError,
+  NATIVE_ROLE_IDENTITY_REQUIREMENTS,
+  NATIVE_ROLE_IDENTITY_ROLES,
+  type NativeRoleIdentityRole,
+} from '@jinn-network/trust-authoring';
 
-export const NATIVE_ROLE_IDENTITY_ROLES = [
-  'requester-submission',
-  'admission',
-  'requester-discovery',
-  'solver-delivery',
-  'solver-settlement',
-  'solver-discovery',
-  'evaluator-verdict',
-  'evaluator-settlement',
-  'evaluator-discovery',
-] as const;
-
-export type NativeRoleIdentityRole = (typeof NATIVE_ROLE_IDENTITY_ROLES)[number];
-
-/** Trust-core record families each native key is permitted to sign. */
-export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdentityRole, readonly string[]>> = {
-  'requester-submission': ['authorizations'],
-  admission: ['authorizations'],
-  'requester-discovery': ['observations'],
-  'solver-delivery': ['deliveries'],
-  'solver-settlement': ['settlements'],
-  'solver-discovery': ['observations'],
-  'evaluator-verdict': ['verdicts', 'deliveries'],
-  'evaluator-settlement': ['settlements'],
-  'evaluator-discovery': ['observations'],
+export {
+  IdentityStore,
+  IdentityStoreError,
+  NATIVE_ROLE_IDENTITY_REQUIREMENTS,
+  NATIVE_ROLE_IDENTITY_ROLES,
 };
-
-const ENVELOPE_VERSION = 1;
-const STORE_VERSION = 3;
-const SCRYPT_KEY_LENGTH = 32;
-const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
-
-export class IdentityStoreError extends Error {
-  override readonly name = 'IdentityStoreError';
-}
+export type { NativeRoleIdentityRole };
 
 export interface NativeRoleIdentity {
   readonly role: NativeRoleIdentityRole;
@@ -96,291 +76,12 @@ export type NativeRoleBindingDecision =
         | 'not-effective' | 'expired' | 'scope-policy-rejected' | 'revoked';
     };
 
-interface StoredRoleIdentity {
-  readonly role: NativeRoleIdentityRole;
-  readonly keyId: string;
-  readonly publicKeyDer: string;
-  readonly privateKeyDer: string;
-  readonly createdAt: string;
-}
-
-interface StoredRoleMetadata {
-  readonly role: NativeRoleIdentityRole;
-  readonly keyId: string;
-  readonly algorithm: 'Ed25519';
-  readonly createdAt: string;
-}
-
-interface StoredIdentitySetV3 {
-  readonly version: 3;
-  readonly metadata: {
-    readonly format: 'jinn.native-role-identities/2';
-    readonly ownedRoles: readonly NativeRoleIdentityRole[];
-    readonly roles: readonly StoredRoleMetadata[];
-  };
-  readonly roles: readonly StoredRoleIdentity[];
-}
-
-interface EncryptedIdentityEnvelope {
-  readonly version: 1;
-  readonly kdf: 'scrypt';
-  readonly cipher: 'aes-256-gcm';
-  readonly salt: string;
-  readonly iv: string;
-  readonly authTag: string;
-  readonly ciphertext: string;
-}
-
-function asNativeRole(value: string): NativeRoleIdentityRole {
-  if ((NATIVE_ROLE_IDENTITY_ROLES as readonly string[]).includes(value)) {
-    return value as NativeRoleIdentityRole;
-  }
-  throw new IdentityStoreError(`identity store contains unknown role "${value}"`);
-}
-
 function parseTime(value: string, label: string): number {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) {
     throw new IdentityStoreError(`${label} is not a valid effective time`);
   }
   return time;
-}
-
-function publicKeyId(publicKey: KeyObject): string {
-  const der = Buffer.from(publicKey.export({ type: 'spki', format: 'der' }));
-  if (der.length !== ED25519_SPKI_PREFIX.length + 32 || !der.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)) {
-    throw new IdentityStoreError('identity store key is not an Ed25519 SPKI key');
-  }
-  const multicodec = Buffer.concat([Buffer.from([0xed, 0x01]), der.subarray(ED25519_SPKI_PREFIX.length)]);
-  return `did:key:z${bs58.encode(multicodec)}`;
-}
-
-function createStoredRole(role: NativeRoleIdentityRole, createdAt: string): StoredRoleIdentity {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-  return {
-    role,
-    keyId: publicKeyId(publicKey),
-    publicKeyDer: Buffer.from(publicKey.export({ type: 'spki', format: 'der' })).toString('base64'),
-    privateKeyDer: Buffer.from(privateKey.export({ type: 'pkcs8', format: 'der' })).toString('base64'),
-    createdAt,
-  };
-}
-
-function metadataFor(roles: readonly StoredRoleIdentity[]): readonly StoredRoleMetadata[] {
-  return roles.map((role) => ({
-    role: role.role,
-    keyId: role.keyId,
-    algorithm: 'Ed25519',
-    createdAt: role.createdAt,
-  }));
-}
-
-function validateRoles(
-  roles: readonly StoredRoleIdentity[],
-  expectedRoles: readonly NativeRoleIdentityRole[],
-): readonly StoredRoleIdentity[] {
-  if (roles.length !== expectedRoles.length) {
-    throw new IdentityStoreError('identity store role set does not equal the explicitly owned role set');
-  }
-  const byRole = new Map<NativeRoleIdentityRole, StoredRoleIdentity>();
-  for (const candidate of roles) {
-    const role = asNativeRole(candidate.role);
-    if (byRole.has(role)) throw new IdentityStoreError(`identity store contains duplicate role "${role}"`);
-    if (typeof candidate.keyId !== 'string' || typeof candidate.publicKeyDer !== 'string' || typeof candidate.privateKeyDer !== 'string') {
-      throw new IdentityStoreError(`identity store role "${role}" has invalid key material`);
-    }
-    let privateKey: KeyObject;
-    let publicKey: KeyObject;
-    try {
-      privateKey = createPrivateKey({ key: Buffer.from(candidate.privateKeyDer, 'base64'), format: 'der', type: 'pkcs8' });
-      publicKey = createPublicKey(privateKey);
-    } catch (cause) {
-      throw new IdentityStoreError(`identity store role "${role}" cannot be decoded: ${String(cause)}`);
-    }
-    const derivedPublicDer = Buffer.from(publicKey.export({ type: 'spki', format: 'der' })).toString('base64');
-    if (derivedPublicDer !== candidate.publicKeyDer || publicKeyId(publicKey) !== candidate.keyId) {
-      throw new IdentityStoreError(`identity store role "${role}" has inconsistent public key metadata`);
-    }
-    byRole.set(role, { ...candidate, role });
-  }
-  return expectedRoles.map((role) => {
-    const stored = byRole.get(role);
-    if (stored === undefined) throw new IdentityStoreError(`identity store is missing required role "${role}"`);
-    return stored;
-  });
-}
-
-function parseStoredIdentitySet(
-  bytes: Uint8Array,
-  expectedRoles: readonly NativeRoleIdentityRole[],
-): { readonly value: StoredIdentitySetV3; readonly migrated: boolean } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(bytes));
-  } catch (cause) {
-    throw new IdentityStoreError(`identity store plaintext is invalid JSON: ${String(cause)}`);
-  }
-  if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as { roles?: unknown }).roles)) {
-    throw new IdentityStoreError('identity store plaintext has no role list');
-  }
-  const version = (parsed as { version?: unknown }).version;
-  if (version === 1 || version === 2) {
-    if (expectedRoles.length !== NATIVE_ROLE_IDENTITY_ROLES.length
-      || expectedRoles.some((role, index) => role !== NATIVE_ROLE_IDENTITY_ROLES[index])) {
-      throw new IdentityStoreError('legacy all-role identity store cannot be narrowed or reused by a scoped production role');
-    }
-    const roles = validateRoles((parsed as { roles: StoredRoleIdentity[] }).roles, expectedRoles);
-    // Add metadata only. The stored key bytes/key IDs retain their exact authority; legacy EVM
-    // material is never read, transformed, or treated as a native role identity.
-    return {
-      value: {
-        version: STORE_VERSION,
-        metadata: { format: 'jinn.native-role-identities/2', ownedRoles: expectedRoles, roles: metadataFor(roles) },
-        roles,
-      },
-      migrated: true,
-    };
-  }
-  if (version !== STORE_VERSION) throw new IdentityStoreError(`identity store version ${String(version)} is unsupported`);
-  const metadata = (parsed as Partial<StoredIdentitySetV3>).metadata;
-  if (metadata?.format !== 'jinn.native-role-identities/2'
-    || !Array.isArray(metadata.ownedRoles)
-    || !Array.isArray(metadata.roles)) {
-    throw new IdentityStoreError('identity store key metadata is missing');
-  }
-  if (JSON.stringify(metadata.ownedRoles) !== JSON.stringify(expectedRoles)) {
-    throw new IdentityStoreError('identity store owned role set does not match the process role set');
-  }
-  const roles = validateRoles((parsed as { roles: StoredRoleIdentity[] }).roles, expectedRoles);
-  const expectedMetadata = metadataFor(roles);
-  if (JSON.stringify(metadata.roles) !== JSON.stringify(expectedMetadata)) {
-    throw new IdentityStoreError('identity store key metadata does not match stored role keys');
-  }
-  return {
-    value: {
-      version: STORE_VERSION,
-      metadata: { format: 'jinn.native-role-identities/2', ownedRoles: expectedRoles, roles: expectedMetadata },
-      roles,
-    },
-    migrated: false,
-  };
-}
-
-function encrypt(value: StoredIdentitySetV3, password: string): EncryptedIdentityEnvelope {
-  const salt = randomBytes(16);
-  const iv = randomBytes(12);
-  const key = scryptSync(password, salt, SCRYPT_KEY_LENGTH);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const plaintext = Buffer.from(JSON.stringify(value));
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  return {
-    version: ENVELOPE_VERSION,
-    kdf: 'scrypt',
-    cipher: 'aes-256-gcm',
-    salt: salt.toString('base64'),
-    iv: iv.toString('base64'),
-    authTag: cipher.getAuthTag().toString('base64'),
-    ciphertext: ciphertext.toString('base64'),
-  };
-}
-
-function decrypt(bytes: Uint8Array, password: string): Uint8Array {
-  let envelope: Partial<EncryptedIdentityEnvelope>;
-  try {
-    envelope = JSON.parse(new TextDecoder().decode(bytes)) as Partial<EncryptedIdentityEnvelope>;
-  } catch (cause) {
-    throw new IdentityStoreError(`identity store envelope is invalid JSON: ${String(cause)}`);
-  }
-  if (
-    envelope.version !== ENVELOPE_VERSION
-    || envelope.kdf !== 'scrypt'
-    || envelope.cipher !== 'aes-256-gcm'
-    || typeof envelope.salt !== 'string'
-    || typeof envelope.iv !== 'string'
-    || typeof envelope.authTag !== 'string'
-    || typeof envelope.ciphertext !== 'string'
-  ) {
-    throw new IdentityStoreError('identity store envelope is malformed');
-  }
-  try {
-    const key = scryptSync(password, Buffer.from(envelope.salt, 'base64'), SCRYPT_KEY_LENGTH);
-    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64'));
-    return Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]);
-  } catch (cause) {
-    throw new IdentityStoreError(`identity store cannot be decrypted: ${String(cause)}`);
-  }
-}
-
-/** Encrypted, durable custody for one explicit process-owned role set. */
-export class IdentityStore {
-  private constructor(
-    private readonly path: string,
-    private readonly password: string,
-  ) {}
-
-  static async open(input: { readonly path: string; readonly password: string }): Promise<IdentityStore> {
-    if (input.password.length === 0) throw new IdentityStoreError('identity store password is required');
-    if (!isAbsolute(input.path)) throw new IdentityStoreError('identity store path must be absolute');
-    await mkdir(dirname(input.path), { recursive: true, mode: 0o700 });
-    await chmod(dirname(input.path), 0o700);
-    return new IdentityStore(input.path, input.password);
-  }
-
-  async loadOrCreate(
-    now: Date,
-    ownedRoles: readonly NativeRoleIdentityRole[],
-  ): Promise<readonly StoredRoleIdentity[]> {
-    let encrypted: Uint8Array | undefined;
-    try {
-      encrypted = await readFile(this.path);
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw new IdentityStoreError(`identity store cannot be read: ${String(cause)}`);
-      }
-    }
-
-    if (encrypted === undefined) {
-      const createdAt = now.toISOString();
-      const roles = ownedRoles.map((role) => createStoredRole(role, createdAt));
-      await this.write({
-        version: STORE_VERSION,
-        metadata: { format: 'jinn.native-role-identities/2', ownedRoles, roles: metadataFor(roles) },
-        roles,
-      });
-      return roles;
-    }
-
-    const parsed = parseStoredIdentitySet(decrypt(encrypted, this.password), ownedRoles);
-    if (parsed.migrated) await this.write(parsed.value);
-    return parsed.value.roles;
-  }
-
-  private async write(value: StoredIdentitySetV3): Promise<void> {
-    const tempPath = `${this.path}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
-    const serialized = `${JSON.stringify(encrypt(value, this.password))}\n`;
-    let temporary: Awaited<ReturnType<typeof openFile>> | undefined;
-    try {
-      temporary = await openFile(tempPath, 'wx', 0o600);
-      await temporary.writeFile(serialized, 'utf8');
-      await temporary.sync();
-      await temporary.close();
-      temporary = undefined;
-      await chmod(tempPath, 0o600);
-      await rename(tempPath, this.path);
-      await chmod(this.path, 0o600);
-      const directory = await openFile(dirname(this.path), 'r');
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
-      }
-    } catch (cause) {
-      await temporary?.close().catch(() => undefined);
-      await unlink(tempPath).catch(() => undefined);
-      throw new IdentityStoreError(`identity store cannot be written atomically: ${String(cause)}`);
-    }
-  }
 }
 
 /**
@@ -409,7 +110,7 @@ export class RoleIdentitySet {
     }
     if (required.size === 0) throw new IdentityStoreError('native process must own at least one role identity');
     const orderedRequired = NATIVE_ROLE_IDENTITY_ROLES.filter((role) => required.has(role));
-    const storedRoles = await store.loadOrCreate(now, orderedRequired);
+    const { roles: storedRoles } = await store.loadOrCreate(now, orderedRequired);
     const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
 
     for (const stored of storedRoles) {
@@ -473,6 +174,52 @@ export class RoleIdentitySet {
     );
   }
 
+  /**
+   * Unions several per-store role sets into the ONE `RoleIdentitySet` the fleet daemon's native
+   * composition takes (one-swap M2, umbrella #2461).
+   *
+   * `identityStores` (config shape-v2, M1) is keyed by role FAMILY — requester, admission, solver,
+   * evaluator — each a separate encrypted file, and `RoleIdentitySet.open` loads exactly one of
+   * them. `composition-root.ts`'s native mode, however, reads across families off a single set:
+   * `solver-delivery` / `solver-settlement` / `solver-discovery` for delivery signing, publication
+   * and settlement, plus `requester-submission` for the projector's requester-association
+   * resolver. A multi-role fleet process therefore has to present one set over several stores.
+   *
+   * This is a union, never a widening of authority. Every input set was already opened by
+   * `RoleIdentitySet.open`, so each key in it has already proved its own effective-time binding,
+   * scope and non-revocation. Merging adds no role that no store owned, re-resolves nothing, and
+   * caches no decision: `resolveEffective` on the merged set still goes back to the resolver at
+   * the signed record's own effective time.
+   *
+   * Refuses two things outright rather than picking a winner: an empty input, and sets that do not
+   * share one Agent IRI (a merged set has exactly one `agent`, and `composition-root.ts` checks it
+   * against `nativeClaimRuntime.operatorAgent`). A role owned by two sets is also a refusal — two
+   * files claiming the same signing authority is a custody fault, not something to resolve by
+   * order.
+   */
+  static merge(sets: readonly RoleIdentitySet[]): RoleIdentitySet {
+    const [first, ...rest] = sets;
+    if (first === undefined) throw new IdentityStoreError('native role identity merge requires at least one set');
+    for (const set of rest) {
+      if (set.agent !== first.agent) {
+        throw new IdentityStoreError('native role identity sets do not share one Agent IRI');
+      }
+      if (set.bindingResolver !== first.bindingResolver) {
+        throw new IdentityStoreError('native role identity sets do not share one binding resolver');
+      }
+    }
+    const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
+    for (const set of sets) {
+      for (const [role, identity] of set.byRole) {
+        if (byRole.has(role)) {
+          throw new IdentityStoreError(`native role "${role}" is owned by more than one identity store`);
+        }
+        byRole.set(role, identity);
+      }
+    }
+    return new RoleIdentitySet(first.agent, byRole, first.bindingResolver, first.now);
+  }
+
   get(role: NativeRoleIdentityRole): NativeRoleIdentity {
     const identity = this.byRole.get(role);
     if (identity === undefined) throw new IdentityStoreError(`native role identity "${role}" is unavailable`);
@@ -521,4 +268,54 @@ export class RoleIdentitySet {
 
 export function openRoleIdentitySet(input: NativeRoleIdentitySetInput): Promise<RoleIdentitySet> {
   return RoleIdentitySet.open(input);
+}
+
+/** Public role material only — never a private key, never enough to sign. */
+export interface RoleIdentitySummary {
+  readonly role: NativeRoleIdentityRole;
+  readonly keyId: string;
+}
+
+/**
+ * Opens the identity store at `storePath` for `ownedRoles` (minting it first when `create` is
+ * true and no store exists yet) and returns only public role -> keyId material for trust-catalog
+ * authoring. Reuses `IdentityStore` directly rather than `RoleIdentitySet.open`: keygen/listing
+ * has no agent or binding resolver to check against, and the return shape structurally excludes
+ * the private key bytes `IdentityStore.loadOrCreate` also holds.
+ *
+ * Concurrency: correctness against a concurrent creator (e.g. this call racing a native daemon's
+ * own first boot on the same store path) lives entirely in `IdentityStore.loadOrCreate`'s
+ * exclusive-link create path, not here. A verify-after-the-fact re-read cannot be made correct —
+ * it only catches the narrow interleaving where the competing write lands inside the verify
+ * window, not the dominant one where this call's own write, read-back, and print all complete
+ * before the competitor's later write clobbers the file. `created`/`identities` below are exactly
+ * what `loadOrCreate` reports as actually persisted; there is no second read here.
+ */
+export async function listRoleIdentityKeyIds(input: {
+  readonly storePath: string;
+  readonly password: string;
+  readonly ownedRoles: readonly NativeRoleIdentityRole[];
+  readonly create: boolean;
+  readonly now?: () => Date;
+}): Promise<{ readonly created: boolean; readonly identities: readonly RoleIdentitySummary[] }> {
+  if (!isAbsolute(input.storePath)) throw new IdentityStoreError('identity store path must be absolute');
+  if (!input.create) {
+    try {
+      await stat(input.storePath);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new IdentityStoreError(`identity store cannot be accessed: ${String(cause)}`);
+      }
+      throw new IdentityStoreError(
+        `identity store does not exist at ${input.storePath}; pass create: true to mint its role identities`,
+      );
+    }
+  }
+  const store = await IdentityStore.open({ path: input.storePath, password: input.password });
+  const now = input.now?.() ?? new Date();
+  const { created, roles } = await store.loadOrCreate(now, input.ownedRoles);
+  return {
+    created,
+    identities: roles.map((role) => ({ role: role.role, keyId: role.keyId })),
+  };
 }

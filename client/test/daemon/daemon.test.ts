@@ -262,6 +262,31 @@ describe('Daemon — C8 loop startup', () => {
     store.close();
   });
 
+  it('threads the evidence driver into the status config so /v1/status can carry evidenceIndexing (M6)', () => {
+    // Regression guard: the consumer paths (gather-status, notifications-build) existed, but
+    // nothing set `status.evidenceDriver`, so the block was always absent. The daemon must wire it.
+    const { composition } = fakeComposition();
+    const status: import('../../src/api/gather-status.js').StatusGatherConfig = {};
+    // eslint-disable-next-line no-new
+    new Daemon({
+      adapter: new LocalAdapter(),
+      runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
+      taskSources: [],
+      dbPath: ':memory:',
+      apiPort: 0,
+      restorationEngine: minimalEngineConfig(),
+      composition,
+      status,
+      evidenceDriverIntervalMs: 20,
+      shutdownTimeoutMs: 200,
+    });
+    expect(status.evidenceDriver).toBeTypeOf('function');
+    const source = status.evidenceDriver!();
+    expect(source).not.toBeNull();
+    expect(source!.pending).toBeTypeOf('function');
+    expect(source!.failures).toBeTypeOf('function');
+  });
+
   it('starts the work loop alongside the projector and evidence-driver loops when `work` is supplied', async () => {
     const { composition } = fakeComposition();
     const archiveSince = vi.fn(async () => []);
@@ -319,7 +344,9 @@ describe('Daemon — C8 loop startup', () => {
         nativeDiscovery: {
           sync,
           takePending: () => [],
+          takePendingWithdrawals: () => [],
           acknowledge: vi.fn(),
+          acknowledgeWithdrawal: vi.fn(),
           checkpoint: () => undefined,
           resumeSse: () => ({ close: () => undefined }),
         },
@@ -333,6 +360,7 @@ describe('Daemon — C8 loop startup', () => {
           reconcileStartup: vi.fn(async () => []),
           reconcileEngagement: vi.fn(),
         },
+        nativeSolutionCorrections: { reconcile: vi.fn(async () => undefined) },
         ledger: {} as never,
         claimGate: composition.claimGate,
         estimateAiUnits: () => 0,

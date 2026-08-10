@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'trust');
-const trustDirectories = ['core', 'resolve', 'testing'];
+const trustDirectories = ['authoring', 'core', 'resolve', 'testing'];
 
 // Program ruling §7.9: trust-core's boundary guard allowlists exactly these
 // three externals (@noble/hashes + zod, the evidence floor, plus @noble/curves
@@ -26,6 +26,18 @@ const CORE_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
 const RESOLVE_ALLOWED_EXTERNALS = ['@jinn-network/trust-core', 'viem'];
 const RESOLVE_ALLOWED_DEPENDENCIES = ['@jinn-network/trust-core', 'viem'];
 const RESOLVE_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
+
+// Task PR1 (spec/2026-08-07-native-identity-ceremony.md §3): trust-authoring's own allowlist. It
+// owns the encrypted custody codec and writes catalog files, so `node:crypto`, `node:fs` and
+// `node:path` are expected here; `bs58` is the did:key multibase encoder the store format already
+// used. viem, every network builtin, and every other `@jinn-network/*` name -- including the
+// sibling `resolve` package, which authoring must not import -- fail this allowlist without a
+// separate ban-list entry.
+const AUTHORING_ALLOWED_EXTERNALS = [
+  '@jinn-network/trust-core', 'bs58', 'node:crypto', 'node:fs', 'node:path',
+];
+const AUTHORING_ALLOWED_DEPENDENCIES = ['@jinn-network/trust-core', 'bs58'];
+const AUTHORING_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
@@ -281,6 +293,33 @@ test('trust-resolve manifest dependencies match the approved externals allowlist
   );
   assert.deepEqual(Object.keys(resolveManifest.optionalDependencies ?? {}), []);
   assert.deepEqual(Object.keys(resolveManifest.peerDependencies ?? {}), []);
+});
+
+test('trust-authoring production source imports only the allowed externals', () => {
+  const source = join(packages, 'authoring', 'src');
+  const production = files(source).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  assert.deepEqual(
+    disallowedExternalsInFiles(production, AUTHORING_ALLOWED_EXTERNALS),
+    [],
+    'trust-authoring production source may import only @jinn-network/trust-core, bs58, and node:crypto/fs/path',
+  );
+});
+
+test('trust-authoring manifest dependencies match the approved externals allowlist', () => {
+  const authoringManifest = manifest('authoring');
+  assert.deepEqual(
+    Object.keys(authoringManifest.dependencies ?? {}).sort(),
+    [...AUTHORING_ALLOWED_DEPENDENCIES].sort(),
+    'trust-authoring dependencies must be exactly @jinn-network/trust-core and bs58',
+  );
+  const devDependencies = Object.keys(authoringManifest.devDependencies ?? {}).sort();
+  assert.deepEqual(
+    devDependencies.filter((name) => !AUTHORING_ALLOWED_DEV_DEPENDENCIES.includes(name)),
+    [],
+    'trust-authoring devDependencies must stay within the toolchain allowlist',
+  );
+  assert.deepEqual(Object.keys(authoringManifest.optionalDependencies ?? {}), []);
+  assert.deepEqual(Object.keys(authoringManifest.peerDependencies ?? {}), []);
 });
 
 test('trust production source never uses ambient network APIs', () => {

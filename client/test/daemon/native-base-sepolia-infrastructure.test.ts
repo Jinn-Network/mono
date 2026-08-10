@@ -66,6 +66,9 @@ describe('first-party Base Sepolia target inspection', () => {
         canonicalTaskCreated: expect.any(Function),
       },
       anchorClient: { lookupFinalizedAnchor: expect.any(Function) },
+      // §2.3c step 5: the deployment path opens the trust catalog with only `infrastructure.*`,
+      // so the Safe-ownership read has to be surfaced here or that path cannot supply it.
+      settlementOwnership: { isOwner: expect.any(Function) },
       records: {
         byLocation: expect.any(Function),
         byDigest: expect.any(Function),
@@ -439,14 +442,54 @@ describe('canonical today-mode requester association', () => {
     });
   });
 
+  // #2531 F4. `unfinalized` used to sit in this table and return `null` — the same `null` as a
+  // forged taskId or a substituted payment — and the requester raised the lot as
+  // "refuses non-canonical or mismatched TaskCreated association". It is now its own state.
+  it('reports a mined-but-unfinalized transaction as awaiting finality, not as a refusal', () => {
+    expect(verifyCanonicalTodayTaskCreated(expected, { ...facts, finalizedBlock: 89n })).toEqual({
+      canonical: false,
+      pending: 'awaiting-finality',
+      blockNumber: 90n,
+      finalizedBlock: 89n,
+    });
+  });
+
+  it('accepts the moment the finalized head reaches the block, boundary included', () => {
+    expect(verifyCanonicalTodayTaskCreated(expected, { ...facts, finalizedBlock: 90n }))
+      .toEqual({ canonical: true, ...expected });
+  });
+
+  // The other half of the mandate: EVERY mismatch predicate is evaluated before finality, so a
+  // tampered association can never disguise itself as merely pending. Each row is a refusal that
+  // must stay a refusal, and each is asserted against an UNFINALIZED block so the pending branch
+  // is the one it has to beat.
   it.each([
-    ['unfinalized', { finalizedBlock: 89n }],
+    ['reverted transaction', { transaction: { ...facts.transaction, status: 'reverted' as const } }],
+    ['wrong transaction hash', { transaction: { ...facts.transaction, hash: `0x${'99'.repeat(32)}` } }],
     ['orphaned', { canonicalBlockHash: `0x${'01'.repeat(32)}` }],
-    ['wrong rate', { payment: { ...facts.payment, solutionMaxDeliveryRateWei: 4n } }],
-    ['self evaluation', { task: { ...facts.task, allowSolverSelfEvaluation: true } }],
+    ['wrong event creator', { event: { ...facts.event, creator: `0x${'22'.repeat(20)}` } }],
+    ['wrong taskId', { event: { ...facts.event, taskId: 8n } }],
+    ['wrong event task digest', { event: { ...facts.event, taskDigest: `sha256:${'ba'.repeat(32)}` } }],
+    ['wrong maxClaims', { event: { ...facts.event, maxClaims: 2 } }],
+    ['wrong solution budget', { event: { ...facts.event, solutionBudget: 4n } }],
     ['wrong budget', { event: { ...facts.event, verdictBudget: 4n } }],
-  ])('refuses %s facts', (_label, override) => {
-    expect(verifyCanonicalTodayTaskCreated(expected, { ...facts, ...override })).toBeNull();
+    ['wrong task creator', { task: { ...facts.task, creator: `0x${'22'.repeat(20)}` } }],
+    ['wrong task digest', { task: { ...facts.task, taskDigest: `sha256:${'ba'.repeat(32)}` } }],
+    ['wrong task maxClaims', { task: { ...facts.task, maxClaims: 2 } }],
+    ['self evaluation', { task: { ...facts.task, allowSolverSelfEvaluation: true } }],
+    ['wrong payment creator', { payment: { ...facts.payment, creator: `0x${'22'.repeat(20)}` } }],
+    ['wrong payment task digest', { payment: { ...facts.payment, taskDigest: `sha256:${'ba'.repeat(32)}` } }],
+    ['wrong rate', { payment: { ...facts.payment, solutionMaxDeliveryRateWei: 4n } }],
+    ['wrong verdict rate', { payment: { ...facts.payment, verdictMaxDeliveryRateWei: 4n } }],
+    ['wrong response timeout', { payment: { ...facts.payment, responseTimeoutSeconds: 61n } }],
+  ])('refuses %s outright, even while unfinalized', (_label, override) => {
+    expect(
+      verifyCanonicalTodayTaskCreated(expected, { ...facts, finalizedBlock: 89n, ...override }),
+    ).toBeNull();
+  });
+
+  it('refuses a foreign chain id outright', () => {
+    expect(verifyCanonicalTodayTaskCreated({ ...expected, chainId: 8453 }, facts)).toBeNull();
   });
 });
 

@@ -23,7 +23,7 @@ import {
   type BindingStore,
   type SealedKeyBindingRecord,
 } from '@jinn-network/trust-resolve';
-import type { ConsumerTrustPorts } from '../fixtures/native-vertical-consumer/src/verification.js';
+import type { ConsumerTrustPorts } from '../../src/native-consumer/verification.js';
 
 export interface RealIdentity {
   readonly keyId: string;

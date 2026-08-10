@@ -4,6 +4,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Pull requests from forks receive a restricted token. The reusable verifier's
 # artifact attestations need id-token/attestations write, so fork runs can stop
 # at that permission boundary and must be rerun by a maintainer in the trusted
@@ -32,7 +36,8 @@ jobs:
             .github/scripts/observation-reader-gate-boundary.test.mjs \
             .github/scripts/architecture-control.test.mjs \
             .github/scripts/branch-protection-audit.test.mjs \
-            .github/scripts/architecture-control-workflow.test.mjs
+            .github/scripts/architecture-control-workflow.test.mjs \
+            .github/scripts/platform-verification-selection.test.mjs
           node .github/scripts/architecture-control.mjs \
             --out .architecture-control/coverage.json
           node .github/scripts/generate-architecture.mjs --check
@@ -43,6 +48,43 @@ jobs:
           path: .architecture-control/coverage.json
           if-no-files-found: error
           retention-days: 30
+
+  # `platform-verification.yml` fans into six domain lanes through `workflow_call`,
+  # which ignores `paths:` filters, so every pull request paid for all six lanes.
+  # Selection is gated here at the caller rather than per-lane inside the reusable
+  # workflow: a skipped lane reaches `platform-verification-receipt.mjs` as
+  # `skipped`, and that script requires every gate to be exact success before the
+  # receipt is attested. Gating the whole call keeps the receipt's meaning intact —
+  # whenever a receipt exists, every lane it names genuinely ran and passed.
+  verification-selection:
+    name: verification-selection
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Select verification from the changed-package closure
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "${EVENT_NAME}" != pull_request ]; then
+            echo 'non-pull_request event verifies in full'
+            echo 'run=true' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          selection="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" \
+            | node .github/scripts/platform-verification-selection.mjs)"
+          echo "${selection}"
+          echo "run=$(jq -r '.run' <<<"${selection}")" >> "${GITHUB_OUTPUT}"
 
   platform-release-surface:
     name: platform-release-surface
@@ -81,6 +123,8 @@ jobs:
 
   platform-verification-reusable:
     name: platform-verification-reusable
+    needs: verification-selection
+    if: needs.verification-selection.outputs.run == 'true'
     permissions:
       contents: read
       id-token: write
@@ -97,11 +141,25 @@ jobs:
 
   platform-verification:
     name: platform-verification
-    needs: platform-verification-reusable
+    needs:
+      - verification-selection
+      - platform-verification-reusable
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require exact reusable-verification success
+      # When verification is selected the bar is unchanged: exact success. When it is
+      # not selected the reusable call must be exactly `skipped` — a failed or
+      # cancelled call still fails this gate, so unselection can never launder a red.
+      - name: Require exact reusable-verification success unless unselected
         env:
+          SELECTED: ${{ needs.verification-selection.outputs.run }}
+          SELECTION_RESULT: ${{ needs.verification-selection.result }}
           VERIFICATION_RESULT: ${{ needs.platform-verification-reusable.result }}
-        run: test "${VERIFICATION_RESULT}" = success
+        run: |
+          test "${SELECTION_RESULT}" = success
+          if [ "${SELECTED}" != true ]; then
+            test "${VERIFICATION_RESULT}" = skipped
+            echo 'no changed package reaches a verified lane; verification unselected'
+            exit 0
+          fi
+          test "${VERIFICATION_RESULT}" = success

@@ -22,7 +22,7 @@
 import { config as dotenvConfig } from 'dotenv';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync as writeFileSyncMain } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
-import { randomBytes as cryptoRandomBytes } from 'node:crypto';
+import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
@@ -81,10 +81,16 @@ import {
   type DaemonStartupInfo,
 } from './daemon/daemon-startup-info.js';
 import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
+import { resolveFleetCompositionMode } from './daemon/native-composition-mode.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
 import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
+import type { PluginPublicationReader } from './plugin-registry/publication-reader.js';
+import {
+  createPluginPublicationReader,
+  createRpcPluginLogSource,
+} from './plugin-registry/publication-host.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Address } from 'viem';
 import {
@@ -222,6 +228,14 @@ if (passwordResolution.source === 'generated') {
 
 const CONFIG_PATH = getConfigPathFromArgs();
 const config = loadConfig(CONFIG_PATH);
+/**
+ * One-swap M2 (#2461): the network AS WRITTEN, captured before the pre-launch clamp below rewrites
+ * mainnet to testnet. `resolveFleetCompositionMode` gates on THIS value, not the clamped one — an
+ * operator who wrote `network: "mainnet"` with `compositionMode: "native"` must see the refusal
+ * (DR-2026-08-05 decision 8). Letting the clamp turn that into a quiet native-on-testnet boot would
+ * be exactly the silent fallback the decision forbids.
+ */
+const CONFIGURED_NETWORK: 'mainnet' | 'testnet' = config.network;
 if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') {
   console.warn('[main] Mainnet is disabled before launch; using testnet defaults.');
   config.network = 'testnet';
@@ -238,6 +252,24 @@ const { effectiveMode: reportedEffectiveMode, warning: verticalModeWarning } =
   resolveMainEntryEffectiveMode(verticalDecision);
 if (verticalModeWarning !== undefined) {
   console.warn(`[main] WARNING: ${verticalModeWarning}`);
+}
+/**
+ * One-swap M2 (#2461, DR-2026-08-05): which composition this ONE fleet daemon assembles.
+ *
+ * Absent `compositionMode` is legacy, so today's boot is byte-identical — nothing native is
+ * constructed and `native-fleet-runtime.js` is not even imported. Wave 3's deploy PR sets the key.
+ *
+ * Resolved HERE, at the top of boot, deliberately: `assertNativeDeployment` throws on native +
+ * mainnet, and that refusal must happen before a wallet is unlocked or a loop is built, not
+ * halfway through composition. Distinct from `verticalDecision` above, which selects an ENTRY
+ * POINT (this file vs. the retiring `native-main.ts`); this selects a COMPOSITION inside this one.
+ */
+const COMPOSITION_MODE = resolveFleetCompositionMode({
+  compositionMode: config.compositionMode,
+  configuredNetwork: CONFIGURED_NETWORK,
+});
+if (COMPOSITION_MODE === 'native') {
+  console.log('[main] composition mode: native (one-swap; compositionMode="native")');
 }
 // Issue #326: the embedded Claude agent chat surface (right rail + onboarding
 // "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
@@ -628,6 +660,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./discovery/types.js').DiscoveryAPI | undefined;
   } = { current: undefined };
 
+  // One-swap R3 (#2461): the plugin-publication reader backing the /build page's
+  // plug-in routes, carved off `discovery/` onto the IdentityRegistry log source
+  // so those routes survive the D-wave deletion. Populated post-bootstrap
+  // alongside `discoveryApiHolder`; same eager-register / late-populate pattern.
+  const pluginReaderHolder: { current: PluginPublicationReader | undefined } = {
+    current: undefined,
+  };
+
   // #1037: same eager-register / late-populate pattern for the join applier.
   // The join endpoint registers eagerly inside startApiServer; the applier is
   // built only after the latest join-consuming subsystem (the engine view,
@@ -851,6 +891,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       harnessReadinessRegistry: { holder: harnessReadinessRegistryHolder },
       // jinn-mono-u34i: see discoveryApiHolder comment above.
       discovery: { holder: discoveryApiHolder },
+      // One-swap R3 (#2461): plugin-publication routes read through the carved
+      // host reader (IdentityRegistry log source), not `discovery/`.
+      pluginReader: { holder: pluginReaderHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -1640,6 +1683,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // the panel's next refetch. Before this, the routes 404'd forever and
   // the /build page rendered "Discovery unavailable" permanently.
   discoveryApiHolder.current = sharedDiscoveryApi;
+
+  // One-swap R3 (#2461): populate the carved plugin-publication reader over the
+  // IdentityRegistry log source. Reuses the already-built `publicClient` and the
+  // fallback-chain RPC. When no IdentityRegistry address is known the routes
+  // fall back to `discovery` inside addDiscoveryRoutes.
+  if (identityRegistryAddress) {
+    pluginReaderHolder.current = createPluginPublicationReader({
+      logSource: createRpcPluginLogSource({
+        publicClient,
+        identityRegistry: identityRegistryAddress,
+        chainId: config.network === 'testnet' ? 84532 : 8453,
+      }),
+    });
+  }
 
   // #1037: the live task-discovery descriptor. Always present with a mutable
   // `solverNetManifestCids` array (`taskDiscoveryManifestCids` is a fresh
@@ -2467,17 +2524,63 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // `work`/projector/evidence-driver config below is gated on it being defined.
   let composition: import('./daemon/composition-root.js').OperatorComposition | undefined;
   let workLoopConfig: Omit<import('./daemon/work-loop.js').WorkLoopConfig, 'composition' | 'store'> | undefined;
+  // One-swap M4a (#2461): the native evaluator composition + loop. Built only in native mode when
+  // the operator configured an evaluator; its resources (backend, evidence, discovery store) are
+  // closed in `shutdown()` below, alongside the composition the daemon's evaluator loop drives.
+  let fleetEvaluator: import('./daemon/native-fleet-evaluator.js').FleetNativeEvaluator | undefined;
+  let evaluatorConfig: import('./daemon/daemon.js').DaemonConfig['evaluator'] | undefined;
+  // One-swap M5d (#2461): the native posting loop config. Built only in native mode; the daemon's
+  // `buildPostingLoop` gate then makes it inert unless `posting[]` is non-empty.
+  let postingConfig: import('./daemon/daemon.js').DaemonConfig['posting'] | undefined;
+  // One-swap M6 (#2461): the opt-in public record-discovery archive plane. A separate listener
+  // over EVERY native signed source this operator owns — requester, solver and (when configured)
+  // evaluator (#2519); closed in `shutdown()` below.
+  let publicArchiveServer: import('./api/public-archive-server.js').PublicArchiveServer | undefined;
+  // #2519 F1: the requester's serving plane, captured where the requester write path is built (it
+  // needs the composition's venue, so it cannot be built at the archive mount) and mounted with
+  // the other archives once every native leg exists.
+  let fleetRequesterDiscovery:
+    | import('./daemon/native-fleet-serving-plane.js').FleetServedSource
+    | undefined;
   if (config.network === 'testnet') {
     const { buildOperatorComposition } = await import('./daemon/composition-root.js');
     const { BASE_SEPOLIA_TODAY } = await import('@jinn-network/marketplace-binding');
-    const { buildRepositoryWorkProfile, buildEvaluationTaskProfile, sealTaskProfile } =
-      await import('@jinn-network/task-execution-profiles');
-    const profileDocuments = [buildRepositoryWorkProfile(), buildEvaluationTaskProfile()];
-    const profilesByDigest = new Map(
-      profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]),
-    );
+    // #2534 F3a: the registered documents and the claim allowlist are one list now, not two that
+    // drift. `prediction-forecast/1.0` — the sole `PHASE_B_NATIVE_PROFILE_ALLOWLIST` entry, i.e.
+    // the only profile a native operator may claim — was missing here, so every claimed
+    // prediction task failed to resolve its own profile and went terminal.
+    const { buildNativeProfileStore } = await import('./daemon/native-profile-documents.js');
+    const nativeProfileStore = buildNativeProfileStore();
+    // One-swap M2 (#2461): built ONLY when `compositionMode: "native"` selected it. The dynamic
+    // import keeps the native runtime graph (trust catalog, record transport, Base Sepolia read
+    // clients) off a legacy boot's module graph entirely — a default config loads none of it.
+    const nativeRuntime = COMPOSITION_MODE === 'native'
+      ? await (await import('./daemon/native-fleet-runtime.js')).buildFleetNativeRuntime({
+          config,
+          store: sharedStore,
+          publicClient,
+          safeAddress,
+          stateRoot: join(config.earningDir, '..', 'native'),
+          password: PASSWORD,
+          workerOwnerId: cryptoRandomUUID(),
+        })
+      : undefined;
     composition = await buildOperatorComposition({
-      mode: 'legacy',
+      ...(nativeRuntime === undefined
+        ? {
+            mode: 'legacy' as const,
+            // The bridge signer is explicitly legacy-only. Native delivery/discovery keys must come
+            // from a persistent, effective-time-trusted RoleIdentitySet; native boot refuses without
+            // it, and `buildOperatorComposition` refuses a native composition that receives one.
+            legacyBridgeSigner: deriveLegacyBridgeSigner(agentPrivateKey),
+          }
+        : {
+            mode: 'native' as const,
+            nativeRoleIdentities: nativeRuntime.identities,
+            nativeClaimRuntime: nativeRuntime.claimRuntime,
+            nativeProjectorPorts: nativeRuntime.projectorPorts,
+            nativeRequesterStateDir: nativeRuntime.nativeRequesterStateDir,
+          }),
       config,
       publicClient,
       // Service Safe is owned by the agent EOA (index N), not the master (index 0).
@@ -2489,11 +2592,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       stateRoot: join(config.earningDir, '..', 'engine', 'backend'),
       evidenceRoot: join(config.earningDir, '..', 'evidence'),
       venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
-      profileStore: { get: (digest) => profilesByDigest.get(digest) },
+      profileStore: nativeProfileStore,
       store: sharedStore,
-      // The bridge signer is explicitly legacy-only. Native delivery/discovery keys must come
-      // from a persistent, effective-time-trusted RoleIdentitySet; native boot refuses without it.
-      legacyBridgeSigner: deriveLegacyBridgeSigner(agentPrivateKey),
       ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
     });
 
@@ -2517,14 +2617,30 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // a today-generation TaskCreated — a real, documented gap, not a stub this loop introduces.
     // `claimGate`/`ledger` reuse the SAME instances `verifySettlementGrade` already reads
     // (contract 2's dispatch-binding correlation).
+    //
+    // One-swap M3 (#2461): in native mode the SAME loop runs a different set of ports. Every
+    // native port below is the instance the composition (or `buildFleetNativeRuntime`) already
+    // returned — never a second construction — because program contract 2's dispatch-binding
+    // correlation only holds when the coordinator that admitted the claim intent is the one the
+    // loop drives, and `verifySettlementGrade` reads back through those same instances.
+    //
+    // `archive` is omitted and `acceptLegacyCards` is false: `WorkLoop`'s constructor refuses a
+    // native composition that carries either, so the two shapes cannot be mixed by accident.
+    const nativeWorkPorts = nativeRuntime === undefined ? undefined : {
+      nativeDiscovery: nativeRuntime.discovery,
+      nativeClaimCoordinator: composition.nativeClaimCoordinator!,
+      nativeSolutionCoordinator: composition.nativeSolutionCoordinator!,
+      nativeSolutionCorrections: composition.nativeSolutionCorrections!,
+    };
     workLoopConfig = {
-      archive: composition.archive,
+      ...(nativeWorkPorts === undefined
+        ? { archive: composition.archive, acceptLegacyCards: true }
+        : { ...nativeWorkPorts, acceptLegacyCards: false }),
       ledger: composition.engagementLedger,
       claimGate: composition.claimGate,
       estimateAiUnits: () => 0,
       readSealedDocuments: composition.readSealedDocuments,
       pollIntervalMs: config.pollIntervalMs,
-      acceptLegacyCards: true,
       // Finding E39: without a logger, `WorkLoopConfig.logger` falls back to a silent no-op
       // (`work-loop.ts`'s `noopLogger`) and the per-tick outcome line (E39's fix) never reaches
       // an operator. Same console-based shape every other loop in this file wires up.
@@ -2533,6 +2649,178 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         warn: (message) => console.warn(message),
       },
     };
+
+    // One-swap M4a (#2461): mount the native evaluator loop alongside the WorkLoop. Native mode
+    // only, and only when the operator configured an evaluator deployment + identity store — a
+    // native solver-only operator constructs no evaluator composition. The dynamic import keeps the
+    // evaluator graph off a legacy boot's module graph, exactly like `native-fleet-runtime`.
+    if (nativeRuntime !== undefined) {
+      const { buildFleetNativeEvaluator, fleetEvaluatorConfigured } =
+        await import('./daemon/native-fleet-evaluator.js');
+      if (fleetEvaluatorConfigured(config)) {
+        // Reuse the ONE Safe's venue verdict ports rather than opening a second venue on the same
+        // Safe (composition-root.ts's #525/#562/#897 nonce-race warning). `venue.verdict` is
+        // present for the "today" (V3) generation `BASE_SEPOLIA_TODAY` runs against.
+        const verdictPorts = composition.venue.verdict;
+        if (verdictPorts === undefined) {
+          throw new Error('native evaluator loop requires the composition venue to expose V3 verdict ports');
+        }
+        fleetEvaluator = await buildFleetNativeEvaluator({
+          config,
+          store: sharedStore,
+          publicClient,
+          safeAddress: safeAddress as `0x${string}`,
+          agentEoaAddress,
+          trust: nativeRuntime.trust,
+          records: nativeRuntime.records,
+          agentIri: nativeRuntime.agentIri,
+          verdictPorts,
+          password: PASSWORD,
+          stateRoot: join(config.earningDir, '..', 'native'),
+        });
+        // One-swap M4b (#2461): CLOSE FLIP-GATE 1. The projector was handed a late-bound
+        // verdict-observation port that refuses fail-closed by default; now that the durable
+        // evaluator `state` and the coordinator's own verification gate exist, install the REAL
+        // adapter so the projector re-verifies this operator's own announced verdicts against
+        // durable state instead of refusing them.
+        const { buildNativeVerdictObservationAdapter } =
+          await import('./daemon/native-verdict-observation.js');
+        nativeRuntime.installVerdictObservation(buildNativeVerdictObservationAdapter({
+          state: fleetEvaluator.state,
+          verification: fleetEvaluator.composition.verification,
+        }));
+        evaluatorConfig = {
+          composition: fleetEvaluator.composition,
+          pollIntervalMs: config.pollIntervalMs,
+          logger: {
+            info: (message) => console.log(message),
+            warn: (message) => console.warn(message),
+          },
+        };
+      }
+    }
+
+    // One-swap M5d (#2461): the native posting loop's host-wire. Native mode only, and same-instance
+    // by construction — the ports read THIS operator's one service Safe + agent EOA balances through
+    // the one `publicClient`, and `config.posting[]`. `buildFleetPostingRuntime` opens no store,
+    // wallet, or discovery consumer (the M5d provenance ledger: it is not a `native_discovery_*`
+    // consumer, so there is nothing to separate from the solver/evaluator queues). The daemon's
+    // `buildPostingLoop` gate then makes the loop inert unless `posting[]` is non-empty.
+    if (nativeRuntime !== undefined) {
+      const { buildFleetPostingRuntime } = await import('./daemon/native-fleet-posting.js');
+      // One-swap M5e (#2461): the requester WRITE port. Built only when the runtime produced the
+      // requester write authority (admission custody configured). It reuses the composition's ONE
+      // Safe broadcaster (`composition.venue.safe` — the SAME single-nonce authority the solver,
+      // evaluator and verdict legs serialize through) plus that venue's posting WAL and scope store;
+      // it opens NO second wallet or venue. When the authority is absent, `postTask` stays undefined
+      // and the posting loop's `post` remains the M5d fail-closed seam.
+      let fleetPostTask:
+        | ((target: import('./daemon/posting-loop.js').PostingLoopTarget) => Promise<{ readonly taskId?: string }>)
+        | undefined;
+      // One-swap M5f (#2461): the requester's reconcile step, which recovers durable posting drafts
+      // AND runs the G-loop adopt leg. Wired into the posting loop's reconcile port only on the write
+      // path — a solver-only boot has no posted tasks to adopt.
+      let fleetReconcile: (() => Promise<void>) | undefined;
+      if (nativeRuntime.requesterWrite !== undefined) {
+        const { buildFleetRequesterWrite } = await import('./daemon/native-fleet-requester-write.js');
+        const { createFileAdoptionReceiptStore } = await import('./daemon/native-adoption-receipt-store.js');
+        const { createRegistryPinPort } = await import('@jinn-network/marketplace-binding');
+        const ipfsApiUrl = config.ipfs?.apiUrl;
+        if (ipfsApiUrl === undefined) {
+          throw new Error('native requester write path requires config.ipfs.apiUrl to pin the task document');
+        }
+        const requesterWrite = buildFleetRequesterWrite({
+          ...nativeRuntime.requesterWrite,
+          creatorSafe: safeAddress as `0x${string}`,
+          safeBroadcast: composition.venue.safe,
+          intents: composition.venue.intents,
+          observe: composition.venue.observe,
+          ipfsPin: createRegistryPinPort({
+            registryUrl: ipfsApiUrl,
+            fetchImpl: globalThis.fetch.bind(globalThis),
+          }),
+          // Durable adoption receipts live next to the requester's associations, under its state dir.
+          adoptionReceipts: createFileAdoptionReceiptStore({
+            dir: join(nativeRuntime.requesterWrite.requesterStateDir, 'adoptions'),
+          }),
+          logger: {
+            info: (message) => console.log(message),
+            warn: (message) => console.warn(message),
+          },
+        });
+        fleetPostTask = (target) => requesterWrite.postTarget(target);
+        fleetReconcile = () => requesterWrite.reconcile();
+        // #2519 F1: the requester archive this operator must SERVE. Peers resolve the announced
+        // Submission bytes from it, and this operator's own discovery consumer resolves its
+        // `.well-known` introduction from it at boot.
+        fleetRequesterDiscovery = requesterWrite.discovery;
+      }
+      const postingRuntime = buildFleetPostingRuntime({
+        config,
+        safeAddress: safeAddress as `0x${string}`,
+        agentEoaAddress,
+        readBalanceWei: (address) => publicClient.getBalance({ address }),
+        logger: { warn: (message) => console.warn(message) },
+        ...(fleetPostTask === undefined ? {} : { postTask: fleetPostTask }),
+        ...(fleetReconcile === undefined ? {} : { reconcile: fleetReconcile }),
+      });
+      postingConfig = {
+        compositionMode: COMPOSITION_MODE,
+        postingEntryCount: postingRuntime.postingEntryCount,
+        ports: postingRuntime.ports,
+        intervalMs: config.pollIntervalMs,
+        logger: {
+          info: (message) => console.log(message),
+          warn: (message) => console.warn(message),
+        },
+      };
+    }
+
+    // One-swap M6 (#2461), corrected by #2519: expose the native signed archives on their OWN
+    // listener when the operator opts in (`publicArchive.enabled`; default off, loopback host).
+    // Structural exposure scoping — the listener carries only archive handlers, never an operator
+    // route (headless design §6). Legacy and default boots start nothing here.
+    //
+    // M6 mounted ONLY the solver publisher, which is what made a two-operator native loop
+    // impossible: nothing served this operator's requester (or evaluator) archive, so no consumer
+    // — including this operator's own, over its own requester source — could resolve those
+    // introductions. It runs HERE, after the evaluator and requester-write legs exist, because
+    // those two archives do not exist at composition time.
+    //
+    // That ordering is now safe rather than merely unavoidable: since #2521 nothing above resolves
+    // a source. `buildFleetNativeRuntime` constructs its consumers with the endpoints deferred, so
+    // this mount reliably precedes the first poll no matter how many statements sit between them,
+    // and a PEER that is not up yet — which no reordering here could ever fix — is refused at that
+    // poll instead of preventing this daemon from starting.
+    //
+    // ONE listener, not one port per role: every announcement's record locations are stamped
+    // against the single `config.publicBaseUrl`, so all three archives must answer on one origin.
+    // See `native-fleet-serving-plane.ts` for the full argument (and for the cold-start
+    // introduction that breaks the "publish before you can boot" deadlock).
+    if (COMPOSITION_MODE === 'native' && config.publicArchive.enabled) {
+      const { buildFleetArchiveHandler, fleetServedSource } =
+        await import('./daemon/native-fleet-serving-plane.js');
+      const served = [
+        ...(fleetRequesterDiscovery === undefined ? [] : [fleetRequesterDiscovery]),
+        ...(composition.nativeSolutionPublisher === undefined
+          ? []
+          : [fleetServedSource(composition.nativeSolutionPublisher)]),
+        ...(fleetEvaluator === undefined ? [] : [fleetServedSource(fleetEvaluator.composition.publisher)]),
+      ];
+      if (served.length === 0) {
+        console.warn('[archive] publicArchive.enabled but this native boot owns no signed source — not serving.');
+      } else {
+        const { startPublicArchiveServer } = await import('./api/public-archive-server.js');
+        publicArchiveServer = await startPublicArchiveServer({
+          handler: buildFleetArchiveHandler(served),
+          host: config.publicArchive.host,
+          port: config.publicArchive.port,
+        });
+        console.log(
+          `[archive] serving ${served.length} signed source(s): ${served.map(({ source }) => source.name).join(', ')}`,
+        );
+      }
+    }
   }
 
   const daemon = new Daemon({
@@ -2543,6 +2831,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     store: sharedStore,
     composition,
     work: workLoopConfig,
+    evaluator: evaluatorConfig,
+    posting: postingConfig,
     apiServer: setupApiServer,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
@@ -2777,6 +3067,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         harnessReadinessRegistry.stop();
         await daemon.stop();
         await setupApiServer.close().catch(() => undefined);
+        // Close the evaluator composition's own resources (backend children, evidence runtime,
+        // discovery store) after the loop that drives it has stopped.
+        await fleetEvaluator?.close().catch(() => undefined);
+        await publicArchiveServer?.close().catch(() => undefined);
         await closeCaptureReceiver();
       } catch (err) {
         exitCode = 1;

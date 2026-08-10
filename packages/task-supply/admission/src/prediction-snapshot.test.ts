@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
 import {
+  PREDICTION_FORECAST_PROFILE_DIGEST_HEX,
+  PREDICTION_FORECAST_PROFILE_URI,
+  buildPredictionForecastProfile,
+  sealTaskProfile,
+} from "@jinn-network/task-execution-profiles";
+import {
   PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1,
   admitPredictionSnapshot,
 } from "./prediction-snapshot.js";
@@ -9,8 +15,8 @@ const seal = (value: unknown) => canonicalJsonBytes(value);
 const taskDocument = {
   protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   profile: {
-    uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
-    digest: { sha256: "e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937" },
+    uri: PREDICTION_FORECAST_PROFILE_URI,
+    digest: { sha256: PREDICTION_FORECAST_PROFILE_DIGEST_HEX },
   },
   instructions: "Forecast the named market.",
   payload: {
@@ -56,10 +62,12 @@ const evaluationSpec = seal({
   evidenceConventions: { requiredRefs: [] },
 });
 
-const task = seal({
-  ...taskDocument,
-  evaluation: { name: "evaluation-spec.json", digest: { sha256: recordDigest(evaluationSpec).slice("sha256:".length) } },
-});
+const evaluationBinding = {
+  name: "evaluation-spec.json",
+  digest: { sha256: recordDigest(evaluationSpec).slice("sha256:".length) },
+};
+
+const task = seal({ ...taskDocument, evaluation: evaluationBinding });
 
 describe("prediction-snapshot-admission/1", () => {
   it("admits the exact native profile/spec pair into a deterministic receipt body", () => {
@@ -137,5 +145,28 @@ describe("prediction-snapshot-admission/1", () => {
       expect(() => admitPredictionSnapshot({ taskBytes: task, evaluationSpecBytes: candidate, issuer: "did:jinn:admitter" }))
         .toThrow("compatible prediction evaluator");
     }
+  });
+
+  // #2534 F3b. Every case above builds its Task from this file's own `taskDocument`, so before the
+  // fix the fixture and the policy agreed on `sha256:e61dc765…` and the suite stayed green while
+  // the profile the network actually seals had moved to `sha256:7e451784…`. Admission has to name
+  // the digest a real sealed prediction-forecast/1.0 document carries, not a transcribed one.
+  it("admits the digest the sealed prediction-forecast/1.0 profile actually carries", () => {
+    const sealedHex = sealTaskProfile(buildPredictionForecastProfile()).digest.slice("sha256:".length);
+    const sealedTask = seal({ ...taskDocument, profile: { uri: PREDICTION_FORECAST_PROFILE_URI, digest: { sha256: sealedHex } }, evaluation: evaluationBinding });
+
+    expect(admitPredictionSnapshot({ taskBytes: sealedTask, evaluationSpecBytes: evaluationSpec, issuer: "did:jinn:admitter" }).task.documentDigest)
+      .toBe(recordDigest(sealedTask));
+  });
+
+  it("still rejects a Task naming a profile digest the sealed profile does not have", () => {
+    const wrongTask = seal({
+      ...taskDocument,
+      profile: { uri: PREDICTION_FORECAST_PROFILE_URI, digest: { sha256: "e".repeat(64) } },
+      evaluation: evaluationBinding,
+    });
+
+    expect(() => admitPredictionSnapshot({ taskBytes: wrongTask, evaluationSpecBytes: evaluationSpec, issuer: "did:jinn:admitter" }))
+      .toThrow("sealed prediction-forecast/1.0 profile");
   });
 });

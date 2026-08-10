@@ -31,6 +31,18 @@ import {
   ExecutionWiringConfigEntrySchema,
   PostingConfigEntrySchema,
 } from './config/shape-v2.js';
+import {
+  NativeAgentIriSchema,
+  NativeCompositionModeSchema,
+  NativeEvaluatorConfigSchema,
+  NativeFinalityConfigSchema,
+  NativeIdentityStoresConfigSchema,
+  NativeIpfsConfigSchema,
+  NativePublicBaseUrlSchema,
+  NativeRecordSourcesSchema,
+  NativeTrustPolicyGenesisDigestSchema,
+  NativeTrustRootsPathSchema,
+} from './config/native-sections.js';
 import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
 import { recordPhaseDTransitionUse } from './compatibility/phase-d-transition-usage.js';
 
@@ -143,6 +155,30 @@ export const JinnConfigSchema = z.object({
    * Env: JINN_API_BIND_HOST.
    */
   apiBindHost: z.string().optional(),
+
+  /**
+   * The public record-discovery archive plane (headless design §6; one-swap M6, corrected by
+   * #2519). Off by default. When `enabled`, the native daemon serves EVERY signed source it owns
+   * — requester, solver, and evaluator when configured — on a SEPARATE listener carrying no other
+   * route, never on the operator API.
+   *
+   * One listener for all three, deliberately: every announcement's record locations are stamped
+   * against the single `publicBaseUrl`, so a peer resolves requester, solver and evaluator bytes
+   * from one origin. That is why this block carries no per-role port — see
+   * `daemon/native-fleet-serving-plane.ts`. `publicBaseUrl` must therefore address THIS listener.
+   * Serving from a
+   * residential connection discloses this machine's IP address to every consumer; the
+   * operator app says so where the opt-in lives, and the daemon logs it on bind. The default
+   * host is loopback so an accidental enable stays local; widen it deliberately.
+   * Env: JINN_PUBLIC_ARCHIVE (enable), JINN_PUBLIC_ARCHIVE_BIND_HOST, JINN_PUBLIC_ARCHIVE_PORT.
+   */
+  publicArchive: z
+    .object({
+      enabled: z.boolean().default(false),
+      host: z.string().default('127.0.0.1'),
+      port: z.number().int().positive().default(7332),
+    })
+    .default({}),
 
   /** Path to claude CLI binary */
   claudePath: z.string().default('claude'),
@@ -500,6 +536,80 @@ export const JinnConfigSchema = z.object({
   claimPolicy: ClaimPolicyConfigSchema.optional(),
   executionWiring: z.array(ExecutionWiringConfigEntrySchema).optional(),
   posting: z.array(PostingConfigEntrySchema).optional(),
+
+  /**
+   * Dark shape-v2 native sections (one-swap M1, umbrella #2461,
+   * DR-2026-08-05). The config surface the swap's native machinery reads,
+   * landed ahead of the machinery itself and consumed by nothing today.
+   *
+   * All optional and absent-tolerant, matching the stage-1 keys above: an
+   * operator who runs none of the native loops carries none of these keys.
+   * Each section is `.strict()` in `config/native-sections.ts` so a typo
+   * inside a configured section refuses instead of being silently dropped;
+   * the root deliberately stays non-strict.
+   *
+   * These carry no network, chainId, or contract coupling — native mode on
+   * mainnet is an explicit boot refusal (`assertNativeDeployment`, DR
+   * decision 8), never something a config file can express as a fallback.
+   * Enablement semantics (including `evaluator.enabled`) belong to M2's mode
+   * selection: on the pre-swap daemon these keys are inert, so a stray
+   * `enabled: true` annotates nothing and refuses nothing.
+   *
+   * No env overrides — a dark surface has nothing to override. Env vars are
+   * added by the milestone that gives a key runtime meaning.
+   */
+  evaluator: NativeEvaluatorConfigSchema.optional(),
+  identityStores: NativeIdentityStoresConfigSchema.optional(),
+  trustRootsPath: NativeTrustRootsPathSchema.optional(),
+  trustPolicyGenesisDigest: NativeTrustPolicyGenesisDigestSchema.optional(),
+  finality: NativeFinalityConfigSchema.optional(),
+
+  /**
+   * One-swap M2 (umbrella #2461, DR-2026-08-05) — the four keys the native machinery needs that
+   * M1's dark surface did not carry, plus the flip switch itself.
+   *
+   * `compositionMode` selects which composition the ONE fleet daemon assembles. **Absent means
+   * legacy**, and so does an explicit `'legacy'`; M2 lands the native assembly dark and Wave 3's
+   * deploy PR is the change that sets this key. Native mode is additionally gated at boot by
+   * `assertNativeDeployment` (testnet + the pinned `BASE_SEPOLIA_TODAY` deployment only) — native
+   * on mainnet is a loud refusal, never a silent legacy fallback (DR decision 8).
+   *
+   * The other three are the values `RoleIdentitySet.open`, the native record transport, and the
+   * native solution publisher need and cannot infer: `agentIri` (M1 finding 4 — an identity-store
+   * path alone cannot open a role set), `ipfs.apiUrl`, and `publicBaseUrl`. All optional; native
+   * mode refuses at boot when one is missing, rather than the loader refusing a legacy operator
+   * who will never run native.
+   *
+   * No env overrides: the flip is a config-file decision, deliberately not something an env var
+   * on a restarted container can do silently.
+   */
+  compositionMode: NativeCompositionModeSchema.optional(),
+  agentIri: NativeAgentIriSchema.optional(),
+  ipfs: NativeIpfsConfigSchema.optional(),
+  publicBaseUrl: NativePublicBaseUrlSchema.optional(),
+
+  /**
+   * One-swap M5e (umbrella #2461) — the DISTINCT admission Agent IRI the requester WRITE path
+   * needs. The requester seals an admission receipt with a signer whose custody
+   * (`identityStores.admission`) is separate from the requester's own (design: admission is a
+   * distinct authority from the requester it admits for). Absent on a legacy boot and unread there;
+   * the native requester write path is simply unavailable (posting stays fail-closed) when this or
+   * `identityStores.admission` is missing, rather than the loader refusing an operator who will
+   * never post. Must differ from `agentIri` — the runtime refuses an admission Agent equal to the
+   * requester Agent at assembly.
+   *
+   * No env override: like the other native keys, admission custody is a config-file decision.
+   */
+  admissionAgent: NativeAgentIriSchema.optional(),
+
+  /**
+   * One-swap M3 (umbrella #2461) — the signed public record sources the native discovery consumer
+   * pulls from. Absent on a legacy boot and unread there; native mode refuses at boot when it is
+   * missing or carries no `requester` source, for the same reason M2's four keys do.
+   *
+   * See `NativeRecordSourcesSchema` for why this is `recordSources` and not the landed `sources`.
+   */
+  recordSources: NativeRecordSourcesSchema.optional(),
 
   /**
    * Set true once the operator clicks "Enter dashboard" at the end of the
@@ -1063,6 +1173,28 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
+  {
+    // Public archive plane: env wins over the config file (regression guard — `apiBindHost`
+    // once shipped inert by reading only its env var and ignoring the config field).
+    const current = (merged.publicArchive ?? {}) as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...current };
+    let touched = false;
+    if (env['JINN_PUBLIC_ARCHIVE'] !== undefined) {
+      const raw = env['JINN_PUBLIC_ARCHIVE'].trim().toLowerCase();
+      next.enabled = raw === '' ? true : !(raw === '0' || raw === 'false' || raw === 'no');
+      touched = true;
+    }
+    if (env['JINN_PUBLIC_ARCHIVE_BIND_HOST']) {
+      next.host = env['JINN_PUBLIC_ARCHIVE_BIND_HOST'];
+      next.enabled = true;
+      touched = true;
+    }
+    if (env['JINN_PUBLIC_ARCHIVE_PORT']) {
+      next.port = Number.parseInt(env['JINN_PUBLIC_ARCHIVE_PORT'], 10);
+      touched = true;
+    }
+    if (touched) merged.publicArchive = next;
+  }
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
   if (env['JINN_HERMES_PATH'])       merged.hermesPath = env['JINN_HERMES_PATH'];
@@ -1593,6 +1725,9 @@ const TRACKED_ENV_VARS = [
   'JINN_BALANCE_TOPUP_INTERVAL_MS',
   'JINN_API_PORT',
   'JINN_API_BIND_HOST',
+  'JINN_PUBLIC_ARCHIVE',
+  'JINN_PUBLIC_ARCHIVE_BIND_HOST',
+  'JINN_PUBLIC_ARCHIVE_PORT',
   'JINN_CLAUDE_PATH',
   'JINN_CLAUDE_MODEL',
   'JINN_HERMES_PATH',

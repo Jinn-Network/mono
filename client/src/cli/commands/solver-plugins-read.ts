@@ -1,9 +1,10 @@
 /**
  * `jinn solver-plugins {list-feedback, discover, status}` — read verbs.
  *
- * None of the read verbs resolve the keystore password. They use the same
- * `discoveryApiFactory` the daemon uses, plus a read-only
- * `ReputationRegistryClient` (`password: undefined` → `walletClient`
+ * None of the read verbs resolve the keystore password. They read published
+ * plug-in records through the neutral `PluginPublicationReader`
+ * (`deps.pluginReaderFactory`, on-chain over the IdentityRegistry), plus a
+ * read-only `ReputationRegistryClient` (`password: undefined` → `walletClient`
  * unbuilt → reads work, writes throw).
  *
  * Output envelopes mirror the write-verb convention (`verb` field +
@@ -11,7 +12,7 @@
  *   - `agentid_unresolvable` (list-feedback only — `status` reports
  *     `{ status: 'not_published' }` instead, since "no record" is the
  *     answer to a status read).
- *   - `discovery_unavailable` (factory throws `DiscoveryUnavailableError`).
+ *   - `discovery_unavailable` (reader throws `PluginPublicationUnavailableError`).
  *   - `config_load_failed`.
  */
 
@@ -20,7 +21,10 @@ import type { CommandContext } from '../command.js';
 import { writeJson } from './solver-plugins.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
 import { getReputationRegistryAddress } from '../../erc8004/addresses.js';
-import { DiscoveryUnavailableError, type PluginPublication } from '../../discovery/types.js';
+import {
+  PluginPublicationUnavailableError,
+  type PluginPublication,
+} from '../../plugin-registry/publication-reader.js';
 
 export interface StatusOptions {
   pluginCid: string;
@@ -67,7 +71,7 @@ function loadConfigOrEmit(
 function emitDiscoveryUnavailable(
   ctx: CommandContext,
   config: LoadedConfig,
-  err: DiscoveryUnavailableError,
+  err: PluginPublicationUnavailableError,
 ): void {
   writeJson(ctx, {
     error: {
@@ -100,7 +104,7 @@ export async function discoverHandler(
   if (!config) return;
 
   try {
-    const api = deps.discoveryApiFactory(config);
+    const api = deps.pluginReaderFactory(config);
     const plugins = await api.listPluginPublications({
       ...(opts.solverType ? { solverType: opts.solverType } : {}),
       ...(opts.builderAgentId ? { builderAgentId: opts.builderAgentId } : {}),
@@ -123,7 +127,7 @@ export async function discoverHandler(
       })),
     });
   } catch (err) {
-    if (err instanceof DiscoveryUnavailableError) {
+    if (err instanceof PluginPublicationUnavailableError) {
       emitDiscoveryUnavailable(ctx, config, err);
       return;
     }
@@ -149,11 +153,11 @@ export async function statusHandler(
 
   let row: PluginPublication | undefined;
   try {
-    const api = deps.discoveryApiFactory(config);
+    const api = deps.pluginReaderFactory(config);
     const rows = await api.listPluginPublications({});
     row = rows.find((r) => r.cid === opts.pluginCid);
   } catch (err) {
-    if (err instanceof DiscoveryUnavailableError) {
+    if (err instanceof PluginPublicationUnavailableError) {
       emitDiscoveryUnavailable(ctx, config, err);
       return;
     }
@@ -244,11 +248,11 @@ export async function listFeedbackHandler(
 
   let builderAgentIdStr: string | undefined;
   try {
-    const api = deps.discoveryApiFactory(config);
+    const api = deps.pluginReaderFactory(config);
     const rows = await api.listPluginPublications({});
     builderAgentIdStr = rows.find((r) => r.cid === opts.pluginCid)?.builderAgentId;
   } catch (err) {
-    if (err instanceof DiscoveryUnavailableError) {
+    if (err instanceof PluginPublicationUnavailableError) {
       emitDiscoveryUnavailable(ctx, config, err);
       return;
     }

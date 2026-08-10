@@ -71,6 +71,8 @@ import type { EngagementLedger } from './engagement-ledger.js';
 import type { ClaimGate } from './claim-gate.js';
 import type { OperatorComposition } from './composition-root.js';
 import type { NativeDiscoveryConsumer, NativeDiscoveryQueuedCard } from './native-discovery.js';
+import { drainNativeDiscoveryWithdrawals } from './native-discovery-withdrawals.js';
+import type { NativeSolutionCorrections } from './native-solution-corrections.js';
 import type {
   NativeClaimCoordinator,
   NativeClaimCoordinatorResult,
@@ -125,6 +127,16 @@ export interface WorkLoopConfig {
   readonly nativeDiscovery?: NativeDiscoveryConsumer;
   readonly nativeClaimCoordinator?: Pick<NativeClaimCoordinator, 'startWorker' | 'renewWorker' | 'reconcileStartup' | 'process'>;
   readonly nativeSolutionCoordinator?: Pick<NativeSolutionCoordinator, 'reconcileStartup' | 'reconcileEngagement'>;
+  /**
+   * Append-only signed corrections to already-published delivery announcements when a reorg
+   * orphans (or re-canonicalises) their settlement event — `native-solution-corrections.ts`.
+   *
+   * Required in native mode, like the other three. The solver host ran this every tick before
+   * consuming its source (one-swap M3, #2461); the fleet loop runs it in the same position, so a
+   * card is never admitted while this operator's own published deliveries still advertise an
+   * orphaned block as available.
+   */
+  readonly nativeSolutionCorrections?: NativeSolutionCorrections;
   readonly ledger: EngagementLedger;
   readonly claimGate: ClaimGate;
   readonly store: Store;
@@ -241,13 +253,18 @@ export class WorkLoop {
         config.nativeDiscovery === undefined
         || config.nativeClaimCoordinator === undefined
         || config.nativeSolutionCoordinator === undefined
+        || config.nativeSolutionCorrections === undefined
       ) {
-        throw new Error('native work loop requires verified discovery and durable claim/solution coordinators');
+        throw new Error(
+          'native work loop requires verified discovery, durable claim/solution coordinators, '
+          + 'and the signed reorg-correction reconciler',
+        );
       }
     } else if (
       config.nativeDiscovery !== undefined
       || config.nativeClaimCoordinator !== undefined
       || config.nativeSolutionCoordinator !== undefined
+      || config.nativeSolutionCorrections !== undefined
     ) {
       throw new Error('legacy work loop cannot receive native discovery, claim, or solution coordinator');
     }
@@ -300,10 +317,20 @@ export class WorkLoop {
     if (native === undefined) return undefined;
     if (!this.nativeInitialized) throw new Error('native work loop must initialize before polling');
     this.config.nativeClaimCoordinator!.renewWorker();
+    // Before consuming any source: correct this operator's own already-published delivery
+    // announcements against the current canonical chain. Same position the native solver host ran
+    // it in (one-swap M3, #2461) — a reorged delivery must be signed-withdrawn before new work is
+    // admitted, not after.
+    await this.config.nativeSolutionCorrections!.reconcile();
     // `sync()` is the verified signed-head gate. A stale/tampered/rewound head rejects before
     // `takePending()` is reached, so even previously queued cards cannot start native work under
     // a failed current sync.
     await native.sync();
+    // A requester's signed withdrawal retires the cards it retracts BEFORE this tick decides what
+    // to claim, so a retracted announcement cannot be picked up in the same pass that learned of
+    // its retraction. `drainNativeDiscoveryWithdrawals` refuses a withdrawal naming an
+    // announcement absent from this operator's authenticated local history.
+    await drainNativeDiscoveryWithdrawals({ store: this.config.store, discovery: native });
     return native.takePending();
   }
 

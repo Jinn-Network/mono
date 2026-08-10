@@ -121,7 +121,8 @@ E22):
       reaches the finalized chain head. (Post-merge closed-loop both daemons healthy → settle.)
 - [x] Confirm one claim → deliver → settle cycle on the fleet. (Task **1217**.)
 - [ ] Confirm the two chain readers running in parallel (the retiring discovery floor until
-      stage 4, plus the new projector) are not storming RPC quota — this window is accepted
+      the one-swap *(was "stage 4" — amended 2026-08-05 per DR-2026-08-05)*, plus the new
+      projector) are not storming RPC quota — this window is accepted
       explicitly and kept short. (Spot-check when Railway fleet is live.)
 
 ## Rollback

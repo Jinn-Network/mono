@@ -19,7 +19,10 @@ import {
 } from '../../src/daemon/loop-heartbeat.js';
 
 describe('LOOP_REGISTRY admission field (#2407)', () => {
-  const READY_ONLY = new Set(['creator', 'engine-tick', 'work']);
+  // `posting` (one-swap M5, #2461) is the native counterpart of `creator` — the claim/work-path
+  // requester leg — so it is `ready-only` too. `evaluator` (one-swap M4a, #2461) is the native
+  // counterpart of `work` — the evaluator claim/verdict-settlement path — so it is `ready-only`.
+  const READY_ONLY = new Set(['creator', 'posting', 'engine-tick', 'work', 'evaluator']);
 
   it('every entry declares admission: always | ready-only', () => {
     for (const entry of LOOP_REGISTRY) {
@@ -27,7 +30,7 @@ describe('LOOP_REGISTRY admission field (#2407)', () => {
     }
   });
 
-  it('assigns ready-only exactly to the claim/work path: creator, engine-tick, work', () => {
+  it('assigns ready-only exactly to the claim/work path: creator, posting, engine-tick, work, evaluator', () => {
     const readyOnly = LOOP_REGISTRY.filter((r) => r.admission === 'ready-only').map((r) => r.name);
     expect(new Set(readyOnly)).toEqual(READY_ONLY);
   });

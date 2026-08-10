@@ -44,6 +44,81 @@ export const DEFAULT_POSTING_TERMS: DefaultPostingTerms = {
 };
 
 /**
+ * How far past the posting's authority instant a freshly sealed Submission's `deadline` is set.
+ *
+ * This exists as a NAMED posting default, beside the terms above, because the alternative is what
+ * shipped: the native requester never set `deadline` at all, so every posting inherited the literal
+ * `2026-08-02T12:00:00Z` from the digest-pinned admission fixture — test data that had silently
+ * become production policy. The live DR-2026-08-05 gate posted task 1218 on 2026-08-07 carrying
+ * that five-day-stale instant verbatim, and no solver could ever claim it (issue #2526).
+ *
+ * ## Why this is NOT `responseTimeoutSeconds`
+ *
+ * The obvious-looking move — reuse the posting terms' own timeout — is wrong, and wrong in a way
+ * that would have reproduced the bug in a subtler form. They are different clocks measuring
+ * different things:
+ *
+ *  - `responseTimeoutSeconds` is the marketplace's per-claim DELIVERY window. It starts when a
+ *    solver claims, and it is capped by the deployed substrate: the Base Sepolia MechMarketplace's
+ *    `maxResponseTimeout()` is 300s, which is exactly the value above.
+ *  - `deadline` is the requester's absolute deadline for the work, in the record plane, read at
+ *    DISCOVERY time by a prospective solver deciding whether the job is still worth claiming.
+ *
+ * The solver's claim gate (`native-claim-policy.ts`) refuses non-retryably when
+ * `deadline - now < minDeadlineLeadMs`, and that minimum is 5 minutes — numerically identical to
+ * the 300s ceiling above. So a deadline derived from `responseTimeoutSeconds` would clear the gate
+ * by exactly zero margin at the instant of posting and fail one millisecond later, before the
+ * announcement was ever polled. The lead has to comfortably exceed the claim minimum AND leave the
+ * whole delivery window inside itself, so it cannot be a marketplace term at all.
+ *
+ * ## The budget this number solves for (#2531 F5)
+ *
+ * One hour was the first value here, chosen against the claim gate's 5-minute minimum and the
+ * 300s delivery window. It was measured against the wrong clock. The deadline is anchored to the
+ * FINALIZED block at seal time, but the task is not discoverable until the POST's block finalizes
+ * and the announcement is published -- and both of those come out of the same hour.
+ *
+ * Round 6 of the live DR-2026-08-05 gate measured it end to end: seal at `23:20:46`, publish at
+ * `00:05:26`. **45 of the 60 minutes were gone before any solver could see the task.** Minus the
+ * claim gate's 5-minute floor, that left a ~10-minute window, and task 1219's deadline expired
+ * unclaimed.
+ *
+ * The budget, with the measured legs marked:
+ *
+ * | leg                                                          |        |
+ * |--------------------------------------------------------------|--------|
+ * | finalized-block anchor already lags the head at seal time     | ~27 min (Base Sepolia finality) |
+ * | broadcast -> mined                                            | ~1 min  |
+ * | mined -> post's block finalized, association admitted         | ~27 min (overlaps the anchor lag) |
+ * | *measured seal -> publish, round 6*                           | **45 min** |
+ * | consumer discovery poll + archive fetch                       | ~1 min  |
+ * | claim gate floor (`minDeadlineLeadMs`)                        | 5 min   |
+ * | delivery window (`responseTimeoutSeconds`, 300s)              | 5 min   |
+ * | **non-discretionary total**                                   | **~56 min** |
+ *
+ * So one hour left about four minutes of slack for a solver to actually decide and claim -- the
+ * whole lead was consumed by machinery before the work was visible.
+ *
+ * Four hours is sized so the *solver-visible* window, not the nominal lead, is the useful number:
+ *
+ *  - at the measured 45-minute pre-discovery cost, a solver sees ~3h 15m of claimable window;
+ *  - at DOUBLE that cost (90 min, a slow-finality day or a missed reconcile tick), ~2h 30m;
+ *  - even then it clears the 5-minute claim floor by ~30x and contains the 5-minute delivery
+ *    window ~30 times over.
+ *
+ * The anchor deliberately does NOT move. It is the same finalized authority every other
+ * time-bearing field in the bundle is pinned to, and `sealedDeadline`'s determinism requirement is
+ * load-bearing: the Submission's digest is its identity, `draftKey` is built from it, and a retry
+ * of the same run must reproduce the same bytes. A wall-clock anchor would break that. Paying for
+ * the anchor lag in the lead is the cheaper trade.
+ *
+ * Still bounded: a post nobody claims releases its escrow the same day rather than sitting open
+ * indefinitely. And raising the claim gate's `minDeadlineLeadMs` above this value would strand
+ * postings again, so the two numbers move together or not at all.
+ */
+export const DEFAULT_SUBMISSION_DEADLINE_LEAD_MS = 4 * 60 * 60 * 1000;
+
+/**
  * The escrow formula, in one place: `(solutionMaxDeliveryRateWei + verdictMaxDeliveryRateWei) x
  * maxClaims`. This is the `msg.value` `postTask` sends **when the sealed Submission's
  * `attempts.maxTotal` equals `terms.maxClaims`** -- `postTask` takes its multiplier from the

@@ -251,3 +251,70 @@ describe('discovery-endpoint — auth gating (jinn-mono-0nih)', () => {
     }
   });
 });
+
+// ── One-swap R3 (#2461): plugin-publication reader injection ──────────────────
+
+describe('discovery-endpoint plugin-reader injection (R3, #2461)', () => {
+  it('prefers the injected pluginReader over discovery for plugin routes', async () => {
+    const discovery = stubDiscovery({
+      listPluginPublications: vi.fn().mockResolvedValue([]),
+    });
+    const readerPub: PluginPublication = {
+      builderAgentId: '9',
+      cid: 'bafyFromReader',
+      name: '@you/host',
+      version: '2.0.0',
+      supports: ['swe-rebench-v2.v1'],
+      publishedAt: 1_715_600_001,
+      artifactType: 'plugin',
+      revoked: false,
+      pluginSha256: '0xdef',
+    };
+    const pluginReader = {
+      listPluginPublications: vi.fn().mockResolvedValue([readerPub]),
+      getPluginScores: vi.fn().mockResolvedValue([]),
+      listBuilderArtifacts: vi.fn().mockResolvedValue([readerPub]),
+    };
+    const app = new Hono();
+    addDiscoveryRoutes(app, { discovery: () => discovery, pluginReader: () => pluginReader });
+    const res = await app.request('/v1/discovery/plugin-publications');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.publications[0].cid).toBe('bafyFromReader');
+    // The reader was used; the DiscoveryAPI plugin method was not.
+    expect(pluginReader.listPluginPublications).toHaveBeenCalledOnce();
+    expect(discovery.listPluginPublications).not.toHaveBeenCalled();
+  });
+
+  it('maps PluginPublicationUnavailableError to 503 discovery_unavailable', async () => {
+    const { PluginPublicationUnavailableError } = await import(
+      '../../src/plugin-registry/publication-reader.js'
+    );
+    const pluginReader = {
+      listPluginPublications: vi.fn().mockRejectedValue(
+        new PluginPublicationUnavailableError('rpc down'),
+      ),
+      getPluginScores: vi.fn(),
+      listBuilderArtifacts: vi.fn(),
+    };
+    const app = new Hono();
+    addDiscoveryRoutes(app, { getDiscovery: () => null, pluginReader: () => pluginReader });
+    const res = await app.request('/v1/discovery/plugin-publications');
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('discovery_unavailable');
+  });
+
+  it('serves plugin routes with pluginReader-only wiring (no DiscoveryAPI)', async () => {
+    const pluginReader = {
+      listPluginPublications: vi.fn().mockResolvedValue([]),
+      getPluginScores: vi.fn().mockResolvedValue([]),
+      listBuilderArtifacts: vi.fn().mockResolvedValue([]),
+    };
+    const app = new Hono();
+    addDiscoveryRoutes(app, { getDiscovery: () => null, pluginReader: () => pluginReader });
+    // plugin route works…
+    expect((await app.request('/v1/discovery/plugin-publications')).status).toBe(200);
+    // …while the non-plugin discovery route 503s (no DiscoveryAPI).
+    expect((await app.request('/v1/discovery/solvernet-operator-count?cid=x')).status).toBe(503);
+  });
+});

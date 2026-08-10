@@ -54,8 +54,11 @@ import type {
   NativeTargetInspection,
   NativeWriteSession,
 } from './native-infrastructure-bundle.js';
-import type { NativeFinalizedAnchorReadClient } from './native-trust-catalog.js';
-import type { CanonicalTaskCreated } from '../native-requester/requester.js';
+import type {
+  NativeFinalizedAnchorReadClient,
+  NativeSettlementOwnershipReadClient,
+} from './native-trust-catalog.js';
+import type { CanonicalTaskCreated, CanonicalTaskCreatedRead } from '../native-requester/requester.js';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
 import { decryptMnemonic, deriveAgentSigner, deriveMasterSigner } from '../earning/wallet.js';
 import type { NativeClaimBroadcastPort } from './native-claim-coordinator.js';
@@ -242,6 +245,7 @@ export interface NativeBaseSepoliaAnchorReadClient {
 export function createViemBaseSepoliaReadClients(publicClient: PublicClient): {
   readonly target: NativeBaseSepoliaTargetReadClient;
   readonly anchor: NativeBaseSepoliaAnchorReadClient;
+  readonly settlementOwnership: NativeSettlementOwnershipReadClient;
 } {
   const target: NativeBaseSepoliaTargetReadClient = {
     chainId: () => publicClient.getChainId(),
@@ -311,7 +315,20 @@ export function createViemBaseSepoliaReadClients(publicClient: PublicClient): {
       return value.number;
     },
   };
-  return { target, anchor };
+  // The settlement-authority association's one chain read (spec/2026-08-07 §2.3c step 5). No new
+  // dependency: `SAFE_ABI`'s `isOwner(address) → bool` is the ABI the daemon already carries. A
+  // revert or transport failure propagates — `verifyOnchainAuthority` turns it into a refusal.
+  const settlementOwnership: NativeSettlementOwnershipReadClient = {
+    async isOwner(safe, candidate) {
+      return publicClient.readContract({
+        address: safe,
+        abi: SAFE_ABI,
+        functionName: 'isOwner',
+        args: [candidate],
+      });
+    },
+  };
+  return { target, anchor, settlementOwnership };
 }
 
 function sameHex(left: string | null, right: string): boolean {
@@ -361,16 +378,30 @@ interface TodayTaskCreatedFacts {
   };
 }
 
+/**
+ * ## Waiting for finality is not evidence of tampering (#2531 F4)
+ *
+ * `blockNumber > finalizedBlock` used to sit in the same `||` chain as every mismatch predicate
+ * below, so a freshly-mined post -- correct in every respect, just young -- was indistinguishable
+ * from a reverted transaction or a forged taskId. Both returned `null`; the requester raised both
+ * as "refuses non-canonical or mismatched TaskCreated association".
+ *
+ * It is now evaluated LAST and on its own. Order is the whole point: every mismatch predicate is
+ * checked first, so anything genuinely non-canonical still returns `null` and still refuses
+ * loudly, and `awaiting-finality` is reachable ONLY for an association that already agrees with
+ * the durable draft on chain id, transaction hash, canonical block hash, creator, task id, task
+ * digest, maxClaims, both budgets, self-evaluation policy, both delivery rates and the response
+ * timeout. A tampered association can never present itself as merely pending.
+ */
 export function verifyCanonicalTodayTaskCreated(
   expected: ExpectedTodayTaskCreated,
   facts: TodayTaskCreatedFacts,
-): CanonicalTaskCreated | null {
+): CanonicalTaskCreatedRead {
   const sameAddress = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
   const terms = expected.terms;
   if (expected.chainId !== 84532
     || facts.transaction.status !== 'success'
     || !sameHex(facts.transaction.hash, expected.txHash)
-    || facts.transaction.blockNumber > facts.finalizedBlock
     || !sameHex(facts.transaction.blockHash, facts.canonicalBlockHash)
     || !sameAddress(facts.event.creator, expected.creator)
     || facts.event.taskId !== expected.taskId
@@ -389,6 +420,14 @@ export function verifyCanonicalTodayTaskCreated(
     || facts.payment.responseTimeoutSeconds !== terms.responseTimeoutSeconds) {
     return null;
   }
+  if (facts.transaction.blockNumber > facts.finalizedBlock) {
+    return {
+      canonical: false,
+      pending: 'awaiting-finality',
+      blockNumber: facts.transaction.blockNumber,
+      finalizedBlock: facts.finalizedBlock,
+    };
+  }
   return { canonical: true, ...expected };
 }
 
@@ -397,7 +436,22 @@ function sha256Digest(value: Hex): `sha256:${string}` {
   return `sha256:${value.slice(2).toLowerCase()}`;
 }
 
-function marketplaceChain(input: NativeInfrastructureFactoryInput): MarketplaceChainConfig {
+/**
+ * The only two fields the canonical READ primitives take off the infrastructure factory input:
+ * this operator's Safe (whose claims they filter to) and the chain identity they refuse outside
+ * of. Named separately (one-swap M2, umbrella #2461) so the ONE fleet daemon can build the same
+ * readers from its shape-v2 `config.json` and the pinned `BASE_SEPOLIA_TODAY` deployment, without
+ * assembling the full `NativeInfrastructureFactoryInput` — most of which describes write custody,
+ * a public listener and an IPFS API that the read path never touches.
+ * `NativeInfrastructureFactoryInput` satisfies this structurally, so `createNativeInfrastructure`
+ * keeps passing exactly what it always passed.
+ */
+export interface NativeCanonicalReadIdentity {
+  readonly safeAddress: `0x${string}`;
+  readonly chain: NativeInfrastructureFactoryInput['chain'];
+}
+
+function marketplaceChain(input: NativeCanonicalReadIdentity): MarketplaceChainConfig {
   return {
     chainId: input.chain.chainId,
     generation: input.chain.generation,
@@ -412,7 +466,7 @@ async function canonicalTodayTaskCreated(
   publicClient: PublicClient,
   chain: MarketplaceChainConfig,
   expected: Parameters<NativeRequesterReadPrimitives['canonicalTaskCreated']>[0],
-): Promise<CanonicalTaskCreated | null> {
+): Promise<CanonicalTaskCreatedRead> {
   if (expected.chainId !== chain.chainId
     || !sameHex(expected.coordinator, chain.taskCoordinator)) return null;
   let receipt;
@@ -547,6 +601,26 @@ async function verifyAuthorityTime(
     && new Date(Number(block.timestamp) * 1_000).toISOString() === anchor.timestamp;
 }
 
+/**
+ * Canonical, finalized Base authority-time reads over a plain viem `PublicClient`.
+ *
+ * Exported for the same reason `createSolverReads` is (one-swap M3, #2461): the native discovery
+ * decode needs `verifyFinalized`, and the ONE fleet daemon owns a `PublicClient` and no
+ * `NativeInfrastructurePrimitives`. Same two functions `createNativeInfrastructure` has always
+ * installed on `authorityTime` — this names them rather than duplicating them.
+ */
+export function createBaseSepoliaAuthorityTime(publicClient: PublicClient): {
+  readonly latestFinalized: () => Promise<import('../native-requester/requester.js').NativeAuthorityTimeAnchor>;
+  readonly verifyFinalized: (
+    anchor: import('../native-requester/requester.js').NativeAuthorityTimeAnchor,
+  ) => Promise<boolean>;
+} {
+  return {
+    latestFinalized: () => latestAuthorityTime(publicClient),
+    verifyFinalized: (anchor) => verifyAuthorityTime(publicClient, anchor),
+  };
+}
+
 function createRequesterReads(input: {
   readonly config: NativeInfrastructureFactoryInput;
   readonly publicClient: PublicClient;
@@ -576,7 +650,7 @@ function createRequesterReads(input: {
 }
 
 export function createBaseSepoliaEvaluatorReads(input: {
-  readonly config: NativeInfrastructureFactoryInput;
+  readonly config: NativeCanonicalReadIdentity;
   readonly publicClient: PublicClient;
   readonly records: NativePublicRecordTransport;
 }): NativeEvaluatorReadPrimitives {
@@ -758,8 +832,14 @@ async function canonicalTransactionBlock(input: {
   };
 }
 
-function createSolverReads(input: {
-  readonly config: NativeInfrastructureFactoryInput;
+/**
+ * Canonical, finalized-only solver reads over a plain viem `PublicClient`. Exported (one-swap M2)
+ * so the ONE fleet daemon builds the SAME readers the native solver host does rather than a second
+ * implementation of "is this claim canonical" — the fleet path already owns a `PublicClient` and
+ * has no `NativeInfrastructurePrimitives`.
+ */
+export function createSolverReads(input: {
+  readonly config: NativeCanonicalReadIdentity;
   readonly publicClient: PublicClient;
   readonly records: NativePublicRecordTransport;
 }): NativeSolverReadPrimitives {
@@ -1239,10 +1319,8 @@ export async function createNativeInfrastructure(
   return {
     inspectTarget: () => inspectBaseSepoliaNativeTarget(input, viemReads.target),
     anchorClient,
-    authorityTime: {
-      latestFinalized: () => latestAuthorityTime(publicClient),
-      verifyFinalized: (authority) => verifyAuthorityTime(publicClient, authority),
-    },
+    settlementOwnership: viemReads.settlementOwnership,
+    authorityTime: createBaseSepoliaAuthorityTime(publicClient),
     records,
     ...(requester === undefined ? {} : { requester: requester.reads }),
     ...(evaluator === undefined ? {} : { evaluator }),

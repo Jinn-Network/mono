@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
-import { canonicalJson } from '../../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../../src/util/canonical-json.js';
 import {
   ExternalCommandEnvironmentAttestor,
   parseEnvironmentPublicationCliConfig,

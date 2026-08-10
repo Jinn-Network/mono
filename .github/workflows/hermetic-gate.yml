@@ -176,10 +176,13 @@ jobs:
         working-directory: client
         run: yarn playwright install --with-deps chromium
 
-      # Scoped allowlist (solvernet-flow + join) — deliberately NOT
-      # `yarn e2e:dashboard`, which drags in the quarantined stale dashboard
-      # tests. A failure here short-circuits the job into the product-red
-      # verdict below, same as any other deterministic regression.
+      # Scoped allowlist (solvernet-flow + join) — deliberately NOT the whole
+      # dashboard suite. This gate's remit is the determinism verdict on the
+      # two mocked-daemon journeys above, not dashboard coverage; the full
+      # top-level dashboard surface is gated by ci.yml's `dashboard-e2e` job
+      # (`yarn e2e:dashboard-app`). A failure here short-circuits the job into
+      # the product-red verdict below, same as any other deterministic
+      # regression.
       - name: App-flow determinism (Playwright, mocked daemon)
         id: appflow
         working-directory: client

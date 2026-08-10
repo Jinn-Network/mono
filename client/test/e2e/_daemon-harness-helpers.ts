@@ -77,11 +77,7 @@ import { buildOperatorComposition, type OperatorComposition } from '../../src/da
 import type { JinnConfig } from '../../src/config.js';
 import { CONFIG_SHAPE_VERSION, type ExecutionWiringConfigEntry } from '../../src/config/shape-v2.js';
 import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
-import {
-  buildRepositoryWorkProfile,
-  buildEvaluationTaskProfile,
-  sealTaskProfile,
-} from '@jinn-network/task-execution-profiles';
+import { buildNativeProfileStore } from '../../src/daemon/native-profile-documents.js';
 import type { ProfileStore } from '@jinn-network/task-execution-profiles';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
@@ -1275,9 +1271,9 @@ export async function startDaemon(
       hermesPath: process.env['JINN_HERMES_PATH'] ?? 'hermes',
     } as unknown as JinnConfig;
 
-    const profileDocuments = [buildRepositoryWorkProfile(), buildEvaluationTaskProfile()];
-    const profilesByDigest = new Map(profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]));
-    const profileStore: ProfileStore = { get: (digest) => profilesByDigest.get(digest) };
+    // #2534 F3a: the same registration production uses, so this fixture cannot pass with a
+    // profile set the daemon does not actually register.
+    const profileStore: ProfileStore = buildNativeProfileStore();
 
     // `taskCoordinator`/`activityChecker` MUST be the locally-deployed V3 addresses, not
     // `BASE_SEPOLIA_TODAY`'s real Base Sepolia addresses — this fixture runs on an Anvil fork of

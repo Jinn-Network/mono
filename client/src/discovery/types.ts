@@ -280,90 +280,23 @@ export type AutopilotDeliveryCandidateLookup =
 
 // ── PublishedArtifact base (attd) ────────────────────────────────────────────
 //
-// A common read-shape for builder-published artifacts. Today only plug-ins
-// are published (kind `plugin:<cid>` on the IdentityRegistry); a future Path 2
-// publishing epic adds `harness:<cid>` as a sibling kind with its own payload
-// schema (the `client/schemas/jinn-manifest-v1.json` shape) and adds it to the
-// `artifactType` union below. The unified shape is the read-layer integration
-// point per spec §5.6 — the on-chain layer stays per-artifact-type with
-// distinct payload tuples; this interface unifies the read API.
+// The builder-published-artifact read shapes moved to the neutral
+// `plugin-registry/publication-reader.ts` under one-swap R3 (umbrella #2461,
+// DR-2026-08-05) so the plugin-publication read path survives the D-wave
+// deletion of `discovery/`. They are re-exported here so the `DiscoveryAPI`
+// interface below and its HTTP / on-chain backings keep compiling unchanged.
+export type {
+  PublishedArtifact,
+  PluginPublication,
+  PluginScoreHistoryRow,
+  BuilderAttributedRun,
+} from '../plugin-registry/publication-reader.js';
 
-/**
- * Base shape for a builder-published artifact. Discriminated on `artifactType`
- * so future kinds (`harness`) add without breaking consumers.
- */
-export interface PublishedArtifact {
-  /** Builder agentId (decimal string of the uint256). */
-  builderAgentId: string;
-  /** IPFS CID of the published artifact tarball / manifest. */
-  cid: string;
-  /** Display name from the payload (e.g. npm package name, or harness name). */
-  name: string;
-  /** Display version (semver or harness version string). */
-  version: string;
-  /** SolverType ids the artifact supports. */
-  supports: readonly string[];
-  /** Publish time — unix seconds, from the payload's payload-stamped time. */
-  publishedAt: number;
-  /** Discriminator. Today only `'plugin'`; future: `| 'harness'`. */
-  artifactType: 'plugin';
-  /** True when the most-recent record is a revocation. */
-  revoked: boolean;
-  /** Reason from the revocation record, when revoked. */
-  revokedReason?: string;
-}
-
-/**
- * The plug-in flavour of `PublishedArtifact`. Adds `pluginSha256` which is the
- * fork-attribution join key against envelope `executor.plugins[].sha256`.
- */
-export interface PluginPublication extends PublishedArtifact {
-  artifactType: 'plugin';
-  /** digestDirectory output for the packed tarball. */
-  pluginSha256: `0x${string}`;
-}
-
-/**
- * One row of score history for a published plug-in. The join key is the cid
- * — the indexer matches envelope `executor.plugins[].cid` against
- * `pluginPublication.pluginCid`. When the envelope's sha256 mismatches the
- * publication's sha256, `forkSuspected` is true and the row is excluded from
- * builder-credit aggregations per spec §5.3.
- */
-export interface PluginScoreHistoryRow {
-  pluginCid: string;
-  taskId: string;
-  /** Operator agentId of the daemon that ran the task. */
-  operatorAgentId: string;
-  /** 'Pass' | 'Fail' | 'Rejected' | 'Indeterminate' | 'Unknown'. */
-  verdict: string;
-  /** Numeric score when the verdict is graded (Pass=100, Fail=0); undefined when not. */
-  score?: number;
-  /** Unix seconds the verdict envelope was published. */
-  ts: number;
-  /** True when the envelope's plug-in sha256 did not match the publication's sha256. */
-  forkSuspected: boolean;
-}
-
-/**
- * One read-time row of a builder-attributed task run. Joins `pluginPublication`
- * against `attemptEnvelopeMeta` and `verdict` in the indexer. Fork-suspected
- * rows are flagged but still returned so the SPA can render them with a
- * "modified plug-in" badge per spec §5.3.
- */
-export interface BuilderAttributedRun {
-  builderAgentId: string;
-  pluginCid: string;
-  pluginName: string;
-  pluginVersion: string;
-  taskId: string;
-  attemptRequestId: `0x${string}`;
-  operatorAgentId: string;
-  verdict: string;
-  score?: number;
-  forkSuspected: boolean;
-  ts: number;
-}
+import type {
+  PublishedArtifact,
+  PluginPublication,
+  PluginScoreHistoryRow,
+} from '../plugin-registry/publication-reader.js';
 
 // ── Interface ────────────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
  * `PersistedTaskRun` is the canonical persisted-row shape read by both the
  * engine persistence layer and the API read path. It lives here — in the
  * neutral `types/` layer — so the API can type-import it without depending on
- * `harnesses/engine/persistence`. `harnesses/engine/persistence.ts` re-exports
+ * `store/task-run-persistence`. `store/task-run-persistence.ts` re-exports
  * it for back-compat. `TaskRunState` is re-exported from
  * `harnesses/engine/state.ts` (its canonical const+type home) for one-stop
  * neutral access.

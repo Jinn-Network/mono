@@ -12,6 +12,10 @@ import {
 } from "@jinn-network/trust-core";
 import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
+  PREDICTION_FORECAST_PROFILE_DIGEST_HEX,
+  PREDICTION_FORECAST_PROFILE_URI,
+} from "@jinn-network/task-execution-profiles";
+import {
   admitPredictionSnapshot,
   sealPredictionSnapshotAdmissionReceipt,
 } from "../dist/index.js";
@@ -67,8 +71,8 @@ const evaluationSpecBytes = bytes(evaluationSpec);
 const task = {
   protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   profile: {
-    uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
-    digest: { sha256: "e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937" },
+    uri: PREDICTION_FORECAST_PROFILE_URI,
+    digest: { sha256: PREDICTION_FORECAST_PROFILE_DIGEST_HEX },
   },
   instructions: "Forecast the named market.",
   payload: { forecast: {

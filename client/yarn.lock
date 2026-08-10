@@ -1082,6 +1082,7 @@ __metadata:
     "@jinn-network/record-discovery-facts-task-execution": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     "@jinn-network/record-discovery-serve": "npm:0.1.0"
+    "@jinn-network/record-discovery-testing": "portal:../packages/discovery/testing"
     "@jinn-network/record-discovery-transport-http": "npm:0.1.0"
     "@jinn-network/sdk": "npm:0.2.0"
     "@jinn-network/task-admission": "npm:0.1.0"
@@ -1094,6 +1095,7 @@ __metadata:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/task-execution-supervisor": "npm:0.1.0"
     "@jinn-network/task-execution-workspace": "npm:0.1.0"
+    "@jinn-network/trust-authoring": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
     "@jinn-network/trust-resolve": "npm:0.1.0"
     "@lmoe/gliner-onnx": "npm:0.1.0"
@@ -1451,6 +1453,20 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/record-discovery-testing@portal:../packages/discovery/testing::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-testing@portal:../packages/discovery/testing::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/record-discovery-transport-http@portal:../packages/discovery/transport-http::locator=%40jinn-network%2Fclient%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/record-discovery-transport-http@portal:../packages/discovery/transport-http::locator=%40jinn-network%2Fclient%40workspace%3A."
@@ -1475,6 +1491,7 @@ __metadata:
   resolution: "@jinn-network/task-admission@portal:../packages/task-supply/admission::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
     "@jinn-network/environment-record": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
     zod: "npm:4.4.3"
@@ -1582,6 +1599,15 @@ __metadata:
   dependencies:
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/trust-authoring@portal:../packages/trust/authoring::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/trust-authoring@portal:../packages/trust/authoring::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    "@jinn-network/trust-core": "npm:0.1.0"
+    bs58: "npm:^6.0.0"
   languageName: node
   linkType: soft
 

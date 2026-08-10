@@ -62,6 +62,7 @@ import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
 import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 import { addDiscoveryRoutes } from './discovery-endpoint.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
+import type { PluginPublicationReader } from '../plugin-registry/publication-reader.js';
 import { addDebugReportRoutes, type DebugReportRoutesConfig } from './debug-report-endpoint.js';
 import { addRewardsRoutes } from './rewards-endpoint.js';
 import { addHealthRoutes, type HealthRoutesConfig } from './health-endpoint.js';
@@ -197,6 +198,18 @@ export interface ApiServerConfig {
   discovery?:
     | DiscoveryAPI
     | { holder: { current: DiscoveryAPI | undefined } };
+  /**
+   * One-swap R3 (#2461): the plugin-publication reader backing the /build
+   * page's plug-in routes (`plugin-publications` / `builder-artifacts` /
+   * `plugin-scores`), carved off `discovery/` onto the IdentityRegistry log
+   * source so those routes survive the D-wave deletion. When set it supersedes
+   * `discovery` for those three routes; when absent they fall back to
+   * `discovery`. Direct instance or holder ref (same lazy pattern as
+   * `discovery`).
+   */
+  pluginReader?:
+    | PluginPublicationReader
+    | { holder: { current: PluginPublicationReader | undefined } };
   /**
    * One-click operator debug report (issue #420). When set, mounts
    * `GET /v1/debug-report/manifest` + `POST /v1/debug-report` under the UI
@@ -699,18 +712,40 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     getBootstrapExtras: () => config.bootstrap?.configReader?.(),
   });
 
-  if (config.discovery) {
+  if (config.discovery || config.pluginReader) {
+    // One-swap R3 (#2461): resolve the plugin-publication reader provider that
+    // backs the three /build plug-in routes. Direct instance or holder ref;
+    // when unset the routes fall back to `discovery` inside addDiscoveryRoutes.
+    const pr = config.pluginReader;
+    const pluginReader: (() => PluginPublicationReader | null) | undefined =
+      pr === undefined
+        ? undefined
+        : 'holder' in pr
+          ? () => pr.holder.current ?? null
+          : () => pr;
+
     const disc = config.discovery;
-    if ('holder' in disc) {
+    if (disc && 'holder' in disc) {
       // Lazy holder shape — register routes eagerly; handler returns 503
       // subsystem_not_ready until main.ts populates holder.current after
       // bootstrap. Same pattern as harnessReadinessRegistry.
       addDiscoveryRoutes(app, {
         getDiscovery: () => disc.holder.current ?? null,
+        ...(pluginReader ? { pluginReader } : {}),
+      });
+    } else if (disc) {
+      const discoveryInstance = disc;
+      addDiscoveryRoutes(app, {
+        discovery: () => discoveryInstance,
+        ...(pluginReader ? { pluginReader } : {}),
       });
     } else {
-      const discoveryInstance = disc;
-      addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
+      // pluginReader-only: no DiscoveryAPI. The plugin routes work; the
+      // operator-count / task-post-counts routes 503 (getDiscovery → null).
+      addDiscoveryRoutes(app, {
+        getDiscovery: () => null,
+        ...(pluginReader ? { pluginReader } : {}),
+      });
     }
   }
 

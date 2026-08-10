@@ -19,13 +19,13 @@ import type {
   SourceHead,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { ConsumerState } from '../fixtures/native-vertical-consumer/src/state.js';
+import { ConsumerState } from '../../src/native-consumer/state.js';
 import {
   ConsumerSyncError,
   createProtocolSourceVerifier,
   syncPublicSource,
   type PublicSourceVerifier,
-} from '../fixtures/native-vertical-consumer/src/sync.js';
+} from '../../src/native-consumer/sync.js';
 
 const roots: string[] = [];
 const BASE = 'https://requester.example';
@@ -292,5 +292,30 @@ describe('independent public source sync', () => {
       reason: 'unauthorized-source-signer',
     });
     unknownState.close();
+  });
+
+  it('wraps a malformed/tampered head document as a typed ConsumerSyncError, not a raw schema error', async () => {
+    const state = await ConsumerState.open(await stateRoot());
+    const source = publicSource([entry(1, null)], '2026-08-02T12:01:00.000Z');
+    const tamperedTransport: Transport = {
+      async fetch(url) {
+        if (url === `${BASE}${headPath(SOURCE.name)}`) {
+          return { status: 200, bytes: sealJson({ garbage: true }).bytes };
+        }
+        return source.transport.fetch(url);
+      },
+    };
+    const verifier = recordingVerifier([]);
+
+    const rejection = await syncPublicSource({
+      endpoint: source.endpoint, transport: tamperedTransport, state, verifier,
+    }).catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(ConsumerSyncError);
+    expect((rejection as ConsumerSyncError).reason).toBe('source-head-invalid');
+    // The typed envelope wraps the detail; it must never leak an unwrapped, multi-line schema dump
+    // as the entire error shape (that was the pre-fix behavior a bare ZodError would produce).
+    expect((rejection as ConsumerSyncError).name).toBe('ConsumerSyncError');
+    state.close();
   });
 });

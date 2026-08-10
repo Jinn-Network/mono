@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { keccak256, toBytes } from 'viem';
 import { computePrevSpanHash, computeGenesisHash } from '../../src/trajectory/hash-chain.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import type { Span } from '../../src/trajectory/schema.js';
 
 describe('computeGenesisHash', () => {

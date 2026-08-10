@@ -44,6 +44,7 @@ COPY packages/task-execution/protocol/package.json packages/task-execution/proto
 COPY packages/task-execution/backend/package.json packages/task-execution/backend/yarn.lock packages/task-execution/backend/.yarnrc.yml ./packages/task-execution/backend/
 COPY packages/task-execution/profiles/package.json packages/task-execution/profiles/yarn.lock packages/task-execution/profiles/.yarnrc.yml ./packages/task-execution/profiles/
 COPY packages/trust/core/package.json packages/trust/core/yarn.lock packages/trust/core/.yarnrc.yml ./packages/trust/core/
+COPY packages/trust/authoring/package.json packages/trust/authoring/yarn.lock packages/trust/authoring/.yarnrc.yml ./packages/trust/authoring/
 COPY packages/trust/resolve/package.json packages/trust/resolve/yarn.lock packages/trust/resolve/.yarnrc.yml ./packages/trust/resolve/
 COPY packages/environments/record/package.json packages/environments/record/yarn.lock packages/environments/record/.yarnrc.yml ./packages/environments/record/
 COPY packages/task-supply/admission/package.json packages/task-supply/admission/yarn.lock packages/task-supply/admission/.yarnrc.yml ./packages/task-supply/admission/
@@ -63,6 +64,7 @@ COPY packages/marketplace/venue-base/package.json packages/marketplace/venue-bas
 COPY packages/discovery/client/package.json packages/discovery/client/yarn.lock packages/discovery/client/.yarnrc.yml ./packages/discovery/client/
 COPY packages/discovery/facts/task-execution/package.json packages/discovery/facts/task-execution/yarn.lock packages/discovery/facts/task-execution/.yarnrc.yml ./packages/discovery/facts/task-execution/
 COPY packages/discovery/transport-http/package.json packages/discovery/transport-http/yarn.lock packages/discovery/transport-http/.yarnrc.yml ./packages/discovery/transport-http/
+COPY packages/discovery/testing/package.json packages/discovery/testing/yarn.lock packages/discovery/testing/.yarnrc.yml ./packages/discovery/testing/
 RUN corepack enable && cd client && yarn install --immutable
 
 # Copy portal-package sources before the client build; `yarn build` builds them
@@ -90,6 +92,7 @@ COPY packages/task-execution/protocol/tsconfig.json ./packages/task-execution/pr
 COPY packages/task-execution/backend/tsconfig.json ./packages/task-execution/backend/
 COPY packages/task-execution/profiles/tsconfig.json ./packages/task-execution/profiles/
 COPY packages/trust/core/tsconfig.json ./packages/trust/core/
+COPY packages/trust/authoring/tsconfig.json ./packages/trust/authoring/
 COPY packages/policy/identity/tsconfig.json packages/policy/identity/tsconfig.build.json ./packages/policy/identity/
 COPY packages/policy/identity/scripts/ ./packages/policy/identity/scripts/
 COPY packages/trust/resolve/tsconfig.json ./packages/trust/resolve/
@@ -110,6 +113,7 @@ COPY packages/marketplace/venue-base/tsconfig.json ./packages/marketplace/venue-
 COPY packages/discovery/client/tsconfig.json ./packages/discovery/client/
 COPY packages/discovery/facts/task-execution/tsconfig.json ./packages/discovery/facts/task-execution/
 COPY packages/discovery/transport-http/tsconfig.json ./packages/discovery/transport-http/
+COPY packages/discovery/testing/tsconfig.json ./packages/discovery/testing/
 COPY packages/evidence/protocol/src/ ./packages/evidence/protocol/src/
 COPY packages/evidence/repository/src/ ./packages/evidence/repository/src/
 COPY packages/evidence/discovery/src/ ./packages/evidence/discovery/src/
@@ -121,6 +125,7 @@ COPY packages/task-execution/protocol/src/ ./packages/task-execution/protocol/sr
 COPY packages/task-execution/backend/src/ ./packages/task-execution/backend/src/
 COPY packages/task-execution/profiles/src/ ./packages/task-execution/profiles/src/
 COPY packages/trust/core/src/ ./packages/trust/core/src/
+COPY packages/trust/authoring/src/ ./packages/trust/authoring/src/
 COPY packages/policy/identity/src/ ./packages/policy/identity/src/
 COPY packages/trust/resolve/src/ ./packages/trust/resolve/src/
 COPY packages/environments/record/src/ ./packages/environments/record/src/
@@ -140,6 +145,7 @@ COPY packages/marketplace/venue-base/src/ ./packages/marketplace/venue-base/src/
 COPY packages/discovery/client/src/ ./packages/discovery/client/src/
 COPY packages/discovery/facts/task-execution/src/ ./packages/discovery/facts/task-execution/src/
 COPY packages/discovery/transport-http/src/ ./packages/discovery/transport-http/src/
+COPY packages/discovery/testing/src/ ./packages/discovery/testing/src/
 COPY packages/evidence/catalog-sqlite/README.md ./packages/evidence/catalog-sqlite/README.md
 COPY packages/evidence/discovery/README.md ./packages/evidence/discovery/README.md
 COPY packages/evidence/discovery/docs/ ./packages/evidence/discovery/docs/
@@ -159,6 +165,7 @@ COPY packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c
 COPY packages/task-execution/backend-local/supervisor/README.md ./packages/task-execution/backend-local/supervisor/README.md
 COPY packages/trust/core/fixtures/ ./packages/trust/core/fixtures/
 COPY packages/trust/core/README.md ./packages/trust/core/README.md
+COPY packages/trust/authoring/README.md ./packages/trust/authoring/README.md
 COPY packages/policy/identity/fixtures/ ./packages/policy/identity/fixtures/
 COPY packages/policy/identity/README.md ./packages/policy/identity/README.md
 COPY packages/environments/record/schemas/ ./packages/environments/record/schemas/

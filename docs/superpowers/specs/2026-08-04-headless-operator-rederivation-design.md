@@ -447,6 +447,17 @@ deltas with same-PR OPERATOR-APP-SPEC updates; the two CI e2e gates (`e2e:app-fl
 `e2e:funding-sequence`) centrally assert that mutations fired — removing the surface
 mid-cutover voids the gates guarding the cutover.
 
+> **Amended 2026-08-05** per
+> [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)
+> decision 5: the one-swap retires the surfaces `e2e:app-flow`'s current specs exercise,
+> so the gate's **composition** changes inside the swap train (this section's ruling —
+> never a green-less commit — is unchanged): a train PR before the retirement wave
+> authors replacement specs (mutation-asserting claim-policy/execution-wiring; read-plane
+> posting-status) and re-points `e2e:app-flow` while the old specs still pass; the
+> retirement PR then deletes the old specs with their surfaces. `e2e:funding-sequence`
+> is untouched. Stage 6's re-home precondition is unchanged in kind and ranges over the
+> re-scoped spec set.
+
 - **Now:** contract discipline (§8) binds all new work; §11's bootstrap repairs
   (degrade-open boot, the unified phase list, the reward-claim default) land as
   ordinary work — §5's runtime model takes effect with them; security repairs land per

@@ -8,7 +8,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../util/canonical-json.js';
 import {
   hashDifferentialAdmissionReceiptV2,
   verifyDifferentialAdmissionReceiptV2,
