@@ -91,7 +91,7 @@ export const DEFAULT_POSTING_TERMS: DefaultPostingTerms = {
  * | broadcast -> mined                                            | ~1 min  |
  * | mined -> post's block finalized, association admitted         | ~27 min (overlaps the anchor lag) |
  * | *measured seal -> publish, round 6*                           | **45 min** |
- * | consumer discovery poll + archive fetch                       | ~1 min  |
+ * | consumer discovery poll + archive retrieval                   | ~1 min  |
  * | claim gate floor (`minDeadlineLeadMs`)                        | 5 min   |
  * | delivery window (`responseTimeoutSeconds`, 300s)              | 5 min   |
  * | **non-discretionary total**                                   | **~56 min** |
