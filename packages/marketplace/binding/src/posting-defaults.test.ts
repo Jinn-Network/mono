@@ -3,7 +3,9 @@ import { describe, expect, test, vi } from "vitest";
 import { BASE_SEPOLIA_TODAY } from "./addresses.js";
 import { createInMemoryPostingIntentStore } from "./broadcast-intent.js";
 import {
+  DEFAULT_EVALUATOR_RESPONSE_SLA_MS,
   DEFAULT_POSTING_TERMS,
+  DEFAULT_SUBMISSION_DEADLINE_LEAD_MS,
   assertMaxClaimsAgreement,
   postingEscrowValueWei,
 } from "./posting-defaults.js";
@@ -109,6 +111,23 @@ describe("DEFAULT_POSTING_TERMS", () => {
       verdictMaxDeliveryRateWei: 5n,
       maxClaims: 0,
     })).toThrow(RangeError);
+  });
+});
+
+describe("DEFAULT_EVALUATOR_RESPONSE_SLA_MS", () => {
+  test("is the intended 4 hours, not a snapshot of whatever the constant happens to be", () => {
+    expect(DEFAULT_EVALUATOR_RESPONSE_SLA_MS).toBe(4 * 60 * 60 * 1000);
+  });
+
+  test("is decoupled from responseTimeoutSeconds -- it must clear the deployed marketplace's 300s "
+    + "claim-response ceiling by orders of magnitude, not sit near it (issue #27)", () => {
+    expect(DEFAULT_EVALUATOR_RESPONSE_SLA_MS)
+      .toBeGreaterThan(Number(DEFAULT_POSTING_TERMS.responseTimeoutSeconds) * 1_000 * 10);
+  });
+
+  test("matches DEFAULT_SUBMISSION_DEADLINE_LEAD_MS's horizon (both reason from the same "
+    + "container-grade + finality + gate-debug-slack budget)", () => {
+    expect(DEFAULT_EVALUATOR_RESPONSE_SLA_MS).toBe(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS);
   });
 });
 
