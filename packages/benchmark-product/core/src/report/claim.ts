@@ -27,13 +27,13 @@
 import { z } from "zod";
 import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { PRODUCT_BRANDING } from "../branding.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { claimPackageArtifactPath } from "../workspace/layout.js";
 import type { VenueHonesty } from "../operations/run-results.js";
 
-/** The published CLI bin name (`package.json`'s `bin` field) — not `PRODUCT_BRANDING` (which
- * carries display name/tagline/attribution copy, not the invocation name a terminal runs). */
-const CLI_BIN_NAME = "benchmark-product";
+/** The preferred public CLI alias. The internal compatibility alias remains in package metadata. */
+const CLI_BIN_NAME = PRODUCT_BRANDING.commandName;
 
 export const CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/1";
 

@@ -41724,6 +41724,9 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@fontsource-variable/newsreader",
+          "@fontsource-variable/public-sans",
+          "@fontsource/ibm-plex-mono",
           "@jinn-network/benchmarking-aggregate",
           "@jinn-network/benchmarking-interop",
           "@jinn-network/benchmarking-local",
@@ -41776,6 +41779,9 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@fontsource-variable/newsreader",
+          "@fontsource-variable/public-sans",
+          "@fontsource/ibm-plex-mono",
           "@jinn-network/benchmark-product-core",
           "class-variance-authority",
           "clsx",

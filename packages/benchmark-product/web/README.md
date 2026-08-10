@@ -1,7 +1,6 @@
-# `@jinn-network/benchmark-product-web`
+# Colophon web — `@jinn-network/benchmark-product-web`
 
-This private Next.js App Router application is the human surface of the
-benchmark product. It is a server-only, in-process client of the public
+This private Next.js App Router application is Colophon's human surface. It is a server-only, in-process client of the public
 `@jinn-network/benchmark-product-core` entry. It contains no second lifecycle,
 orchestrator, statistic, verifier, record reader, HTTP API route, or browser-side
 core import.
@@ -57,6 +56,9 @@ exist and is the direct Playwright command.
 ## Routes
 
 - `/` — neutral product landing page.
+- `/preview/[surface]` — clearly labeled, read-only previews of the future
+  hosted reports, registries, account, billing, documentation, and pricing
+  experience; previews never claim a service is live and invoke no operations.
 - `/workspace/new` — workspace initialization.
 - `/workspace` — workspace, drafts, and audit summary.
 - `/workspace/[draftId]` — intake, arms, authority, preview, quote, and lock.
@@ -72,9 +74,12 @@ server/browser boundary.
 
 ## Privacy, security, and deployment
 
-The app is **private and local**. Deployment status is **none**; it has no
-hosted authentication, tenant isolation, TLS/HSTS claim, public API, report
-hosting, or authorization to deploy. Every private HTML and Server Action
+The operational app is **private and local today**. Deployment status is
+**none**; it has no hosted authentication, tenant isolation, TLS/HSTS claim,
+public API, report hosting, or authorization to deploy. The future-service
+previews deliberately remain visible and are permanently labeled as previews,
+so the eventual SaaS experience can be judged without simulating its backend.
+Every private HTML and Server Action
 response is `no-store` and carries the CSP, frame denial, nosniff, no-referrer,
 and empty Permissions Policy documented in the security note.
 

@@ -121,7 +121,7 @@ function reportedView() {
             disclosures: { perSubject: [{ independence: 0 }], integrityTierCounts: { "re-derivable": 1, "attested-only": 1 }, pinningUnverifiableCounts: { harness: 1, model: 2, loadout: 1, isolation: 2 } },
             limitations: ["Local self-run venue."],
             venueHonesty: { venue: "self-run" },
-            verification: { command: "benchmark-product bundle verify --bundle <bundle-dir> --json", checks: ["matrix re-derivation"], trustRoot: "Workspace-local report key." },
+            verification: { command: "colophon bundle verify --bundle <bundle-dir> --json", checks: ["matrix re-derivation"], trustRoot: "Workspace-local report key." },
             rehearsal: { previewCount: 2, timestamps: ["2026-08-06T00:00:00.000Z", "2026-08-06T00:01:00.000Z"] },
           },
         },
@@ -178,8 +178,8 @@ describe("semantic results and report surface", () => {
     expect(markup).toContain("direct-check");
     expect(markup).toContain("Agent-distinctness is not party-independence.");
     expect(markup).toContain("Preview count");
-    expect(markup).toContain("benchmark-product bundle verify");
-    expect(markup).toContain("benchmark-product verify --workspace");
+    expect(markup).toContain("colophon bundle verify");
+    expect(markup).toContain("colophon verify --workspace");
     expect(markup).toContain("Workspace-local report key.");
     expect(markup).toContain("Run verification before relying on the signature.");
     expect(markup).toContain("Verify records");

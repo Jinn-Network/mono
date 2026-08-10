@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ActionForm } from "@/components/action-form";
 import { RunMonitorRefresh } from "@/components/run-monitor-refresh";
+import { LifecycleRail } from "@/components/lifecycle-rail";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
@@ -20,9 +21,10 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
 
   return <main id="main-content" tabIndex={-1} className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 outline-none">
     <header className="flex flex-wrap items-center justify-between gap-4">
-      <div><p className="text-sm text-muted-foreground">Draft {draftId}</p><h1 className="text-3xl font-semibold">Durable run monitor</h1></div>
+      <div><p className="colophon-eyebrow text-muted-foreground">Draft <span className="font-mono normal-case tracking-normal">{draftId}</span></p><h1 className="mt-2 text-5xl">Durable run monitor</h1><p className="colophon-body mt-2 text-muted-foreground">Expected work stays visible through delivery, judgment, failure, and cancellation.</p></div>
       <nav aria-label="Run navigation" className="flex flex-wrap gap-2"><RunMonitorRefresh poll={poll} /><Button asChild variant="outline"><Link href={`/workspace/${draftId}/results`}>Results</Link></Button><Button asChild variant="outline"><Link href={`/workspace/${draftId}`}>Draft</Link></Button></nav>
     </header>
+    <LifecycleRail state={state} />
     {!view.ok ? <p role="alert">{view.detail}</p> : !view.status.ok ? (
       <Card><CardHeader><CardTitle>Run unavailable</CardTitle></CardHeader><CardContent role="alert"><p className="font-semibold">{view.status.error.code}</p><p>{view.status.error.detail}</p></CardContent></Card>
     ) : <>

@@ -1,0 +1,8 @@
+:root{
+--space-0:0;--space-1:2px;--space-2:4px;--space-3:6px;--space-4:8px;--space-5:12px;--space-6:16px;
+--space-7:20px;--space-8:24px;--space-9:32px;--space-10:40px;--space-11:56px;--space-12:72px;
+--space-13:96px;--space-14:128px;--space-15:160px;
+--gutter:24px;--gutter-lg:40px;
+--page-max:1240px;--reading-max:720px;--report-max:880px;
+--baseline:8px; /* @kind spacing */
+}

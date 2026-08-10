@@ -6,6 +6,7 @@ import { GATED_OPERATIONS } from "./authority/policy.js";
 import { BUNDLE_FORMAT, BUNDLE_MANIFEST_FILENAME } from "./bundle/manifest.js";
 import { PUBLIC_BUNDLE_FILES } from "./bundle/materialize.js";
 import { PRODUCT_ERROR_CODES } from "./errors.js";
+import { PRODUCT_BRANDING } from "./branding.js";
 
 const coreRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const productRoot = resolve(coreRoot, "..");
@@ -76,10 +77,10 @@ describe("product documentation consistency", () => {
     expect(parity.entries).toHaveLength(27);
     for (const entry of parity.entries) {
       expect(coreReadme, entry.operation).toContain(`\`${entry.operation}\``);
-      expect(coreReadme, entry.cliVerb).toContain(`\`benchmark-product ${entry.cliVerb}`);
+      expect(coreReadme, entry.cliVerb).toContain(`\`${PRODUCT_BRANDING.commandName} ${entry.cliVerb}`);
     }
     expect(parity.exclusions.map((entry) => entry.name)).toContain("bundle verify");
-    expect(coreReadme).toContain("`benchmark-product bundle verify --bundle <dir> --json`");
+    expect(coreReadme).toContain(`\`${PRODUCT_BRANDING.commandName} bundle verify --bundle <dir> --json\``);
 
     for (const operation of GATED_OPERATIONS) expect(coreReadme).toContain(`\`${operation}\``);
     for (const code of PRODUCT_ERROR_CODES) expect(coreReadme).toContain(`\`${code}\``);
