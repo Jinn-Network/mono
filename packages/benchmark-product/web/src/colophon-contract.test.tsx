@@ -45,4 +45,18 @@ describe("Colophon production presentation contract", () => {
     expect(globals).toContain("--paper: #f7f4ed");
     expect(globals).toContain("--font-display");
   });
+
+  test("gives nested workspace navigation landmarks distinct names", () => {
+    const newDraft = source("src/app/workspace/new/page.tsx");
+    expect(source("src/components/workspace-shell.tsx")).toContain('aria-label="Workspace navigation"');
+    expect(newDraft).toContain('aria-label="New draft navigation"');
+    expect(newDraft).toContain("flex-col items-start");
+    expect(newDraft).toContain("sm:flex-row");
+  });
+
+  test("keeps the horizontally scrollable lifecycle rail keyboard reachable", () => {
+    const rail = source("src/components/lifecycle-rail.tsx");
+    expect(rail).toContain('aria-label="Benchmark lifecycle"');
+    expect(rail).toContain("tabIndex={0}");
+  });
 });

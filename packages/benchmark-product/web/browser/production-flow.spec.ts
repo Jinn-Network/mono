@@ -62,7 +62,7 @@ async function audit(page: Page, label: string): Promise<void> {
   // Next may stream the document head after an action-driven server-component refresh; audit the
   // settled document rather than the transient head replacement frame. No rule, impact, or node is
   // waived: any axe violation fails with its complete diagnostic.
-  await expect(page).toHaveTitle(/Benchmark Product/u);
+  await expect(page).toHaveTitle(/Colophon/u);
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations, `${label}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([]);
 }
@@ -155,7 +155,7 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "Benchmark Product" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Compare agents on the same work." })).toBeVisible();
   await auditState(page, "landing route");
 
   await page.goto("/workspace/new");
