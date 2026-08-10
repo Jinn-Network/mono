@@ -251,6 +251,32 @@ describe("runCollect — guards", () => {
     expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
   }, 30_000);
 
+  test("refuses conflict when solve delivery is terminal but an evaluation leg is still in flight", async () => {
+    const clock = makeClock();
+    await setUpDrivenRun(clock);
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const finalEvaluation = [...fullEntries].reverse().find((entry) => entry.kind === "evaluation");
+    expect(finalEvaluation).toBeDefined();
+    if (finalEvaluation === undefined || finalEvaluation.kind !== "evaluation") return;
+
+    // Reproduce the production race: the solve-side driver has durably delivered every cell,
+    // while the last evaluation leg has not yet appended its terminal verdict. The old collect
+    // guard looked only at solve-side outstanding cells, sealed a partial Matrix here, and the
+    // later evaluation append made run.verify re-derive different bytes.
+    const evaluationStillInFlight = fullEntries.filter((entry) => entry !== finalEvaluation);
+    atomicWriteFileSync(
+      runJournalPath(workspaceDir, "draft-1"),
+      `${evaluationStillInFlight.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+
+    const outcome = await runCollect(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error).toMatchObject({ code: "conflict" });
+    expect(outcome.error.detail).toMatch(/evaluation/u);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
+  }, 30_000);
+
   test("succeeds despite an outstanding cell once closeAt has passed", async () => {
     const clock = makeClock();
     await setUpDrivenRun(clock);
