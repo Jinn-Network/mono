@@ -15,14 +15,7 @@ export interface FreshWaitContextFactory {
   create(): AttemptWaitPort;
 }
 
-const DIGEST = /^sha256:[a-f0-9]{64}$/u;
-
-/**
- * Persists cancellation first, forbids further dispatch through journal phase, then cancels and
- * drains every role-scoped attempt with a fresh wait context. A partial failure deliberately leaves
- * the campaign in CANCELLING so restart repeats reconciliation instead of pretending it closed.
- */
-export async function requestCancellationAndDrain(input: {
+export interface CancellationRequest {
   readonly transaction: LiveHostJournalTransaction;
   readonly backends: CancellationBackends;
   readonly waitContexts: FreshWaitContextFactory;
@@ -33,7 +26,16 @@ export async function requestCancellationAndDrain(input: {
     readonly attempt: string;
     readonly role: "solver" | "evaluator";
   }): string | Promise<string>;
-}): Promise<void> {
+}
+
+const DIGEST = /^sha256:[a-f0-9]{64}$/u;
+
+/**
+ * Persists cancellation first, forbids further dispatch through journal phase, then cancels and
+ * drains every role-scoped attempt with a fresh wait context. A partial failure deliberately leaves
+ * the campaign in CANCELLING so restart repeats reconciliation instead of pretending it closed.
+ */
+export async function requestCancellationAndDrain(input: CancellationRequest): Promise<void> {
   if (input.transaction.state.phase === "ACTIVE") {
     input.transaction.append({
       type: "cancellation-requested",
@@ -96,4 +98,40 @@ export async function requestCancellationAndDrain(input: {
   }));
   const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
   if (rejected !== undefined) throw rejected.reason;
+}
+
+/**
+ * Waits for one role backend without losing an operator interrupt. The first interrupt persists
+ * CANCELLING before cancellation side effects, drains with fresh non-aborted wait contexts, and
+ * then lets the caller close the journal without assembling late evidence into a Matrix.
+ */
+export async function drainOrCancel(input: {
+  readonly signal?: AbortSignal;
+  drain(): Promise<void>;
+  readonly cancellation: CancellationRequest;
+}): Promise<"drained" | "cancelled"> {
+  if (input.signal?.aborted === true) {
+    await requestCancellationAndDrain(input.cancellation);
+    await input.drain();
+    return "cancelled";
+  }
+  const drain = input.drain().then(() => "drained" as const);
+  if (input.signal === undefined) return drain;
+
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<"cancelled">((resolve) => {
+    if (input.signal!.aborted) {
+      resolve("cancelled");
+      return;
+    }
+    onAbort = () => resolve("cancelled");
+    input.signal!.addEventListener("abort", onAbort, { once: true });
+  });
+  const outcome = await Promise.race([drain, aborted]);
+  if (onAbort !== undefined) input.signal.removeEventListener("abort", onAbort);
+  if (outcome === "drained" && !input.signal.aborted) return outcome;
+
+  await requestCancellationAndDrain(input.cancellation);
+  await drain;
+  return "cancelled";
 }

@@ -12,6 +12,22 @@ Program:
 
 Publication is disabled. Nothing in tiers 1–3 may reference this package, and nothing does.
 
+## The operator loop
+
+The live host presents policy optimization as a repeated **explore → confirm → use or keep →
+observe** loop. The split is configurable per campaign:
+
+- `balanced-3-3-6@1` is the default, with three proposal groups, three challenger-selection
+  groups, and at least six fresh confirmation groups;
+- `test-this-change@1` skips exploration and compares one operator-supplied change directly on all
+  eligible confirmation groups;
+- `custom@1` lets the operator choose the proposal, selection, and confirmation counts.
+
+The six-group number is only the smallest uniformly favorable whole-group result that can cross
+the exact `.05` proof threshold. Smaller campaigns are valid; they return `promising` or
+`inconclusive` evidence and keep the current policy by default. Confirmation evidence is consumed
+when first revealed or dispatched and cannot be recycled into a later cycle.
+
 ## What is here now
 
 The whole product: **C7a** (the core state layer), **C7b** (the wave engine), **C7c** (admission and
@@ -34,11 +50,68 @@ proposers), **C7d** (the archive and the CLI), and **C8** (the two observation a
 | The archive | §8.3 | A pure, re-derivable projection: `lineageGraph`, `evaluatedHistory`, `frontier` (a **set**, never a ranking), plus a host-directory layout that puts the derivable half under `derived/`. |
 | Adoption | §9 | `adopt` / `rollback` over an append-only, explicitly **non-derivable** log, gated per §7.4 payload class. Emits an operator-config fragment; changes no daemon. |
 | The `optimize` CLI | program §1 C7d | Six verbs as this package's own bin (`policy-optimization optimize …`), argv-shaped so `jinn optimize …` is a later dispatch entry, not a re-design. |
+| The private local host | live-host design §5 | Role-separated backend composition, prepared-Submission recovery, exact solver/evaluator dispatch bindings, cancellation, the relational host journal, pinned-OCI grading, and the zero-document real-task journey. |
 
-This package
-implements **no execution, assembly, or aggregation machinery** — re-implementing any of it is
-forbidden duplication (§6.1), and statistics reach this product only as `benchmarking-aggregate`
-method-registry references (program ruling R3). The source-boundary guard enforces both.
+The neutral engine implements **no replacement execution, assembly, or aggregation machinery** —
+re-implementing any of it is forbidden duplication (§6.1), and statistics reach this product only
+as `benchmarking-aggregate` method-registry references (program ruling R3). Concrete composition is
+confined to the private `host-local/` subtree and the process wrapper. The source-boundary guard
+enforces that distinction.
+
+## Running the first real-task journey
+
+After building the package, run the executable in a terminal with no arguments:
+
+```bash
+cd packages/policy-optimization
+yarn build
+node dist/cli/bin.js
+```
+
+Choose **Test a change**. The guide asks for the current and changed learner-loadout directories,
+the selected route's harness and model, and private state location. It then:
+
+1. captures each loadout under `learner-public.v1`, refusing unknown roots, links, binary files,
+   and secret-bearing public bytes;
+2. reads real public `nebius/SWE-rebench-leaderboard` rows;
+3. chooses six repository- and lineage-independent task groups;
+4. resolves every mutable image tag to an immutable registry manifest digest;
+5. derives exact Tasks with the upstream row timestamp, EvaluationSpecs, and locally signed
+   admission receipts;
+6. seals a confirmation-only split, current-policy snapshot, campaign inputs, and a local run plan
+   binding both exact loadout archives;
+7. shows the route, group count, proof limitation, payload class, and same-operator limitation;
+8. writes campaign artifacts only after the operator types `yes`; and
+9. prints the exact `campaign run` command, which separately asks for spend confirmation.
+
+The explicit run command is:
+
+```bash
+node dist/cli/bin.js campaign run --prepared <prepared-campaign-dir> --confirm
+```
+
+It revalidates every prepared byte and pin, freezes the operator-supplied challenger, seals the
+single promotion Run, persists each solver Submission before submitting it, and executes one
+current-policy and one changed-policy cell per task. Solver Deliveries are graded by the separate
+evaluator role in each task's pinned OCI image with a read-only root. Network is disabled by
+default; when the sealed EvaluationSpec explicitly requires public network access, the host creates
+a one-use isolated bridge for that grader and removes it afterwards. The
+host verifies the unsigned evaluator statement, signs it with the evaluator-verdict key, assembles
+the Matrix, produces the preregistered registry Reports, and writes a recomputable recommendation.
+The run never applies that recommendation or changes the daemon. Candidate loadouts carrying
+`hooks/` or `tools/` additionally require `--approve-executable-change`. An operator interrupt
+is recorded before cancellation side effects; restart resumes the drain, admits no new dispatch,
+and closes without a Matrix or recommendation.
+
+The real public-source test exercises the dataset and Docker registry preparation path with:
+
+```bash
+JINN_POLICY_OPTIMIZATION_REAL_SOURCE=1 yarn test src/host-local/swe-rebench-journey.live.test.ts
+```
+
+This source check uses the public dataset and registry, but performs no model call and starts no
+grader container. Only the separately confirmed `campaign run` step performs real solver calls and
+container grading.
 
 ## Running your first campaign
 
@@ -48,7 +121,7 @@ yarn install
 yarn e2e:campaign
 ```
 
-One miniature campaign, whole, in a few seconds. It touches no network, spends no money, reads
+One **simulated** miniature campaign, whole, in a few seconds. It touches no network, spends no money, reads
 none of your operator state, and writes only inside a fresh temporary directory it prints on the
 first line. Add `--dir <path>` to keep the campaign somewhere you choose, `--without-learner` to
 run with the reference proposer alone, `--help` for the rest.
@@ -87,7 +160,7 @@ campaign), the derived archive projection (safe to delete), and the append-only 
 
 ### What the run does not prove
 
-The last thing it prints, always, is the honest half — the campaign ran on the **local venue**, so
+The last thing it prints, always, is the honest half — its verdicts are fixtures on the **local venue**, so
 its recommendation is *operator-local*: it protects an honest owner from self-deception and proves
 nothing to a stranger. The full list is §11's, printed in the run's own output rather than left
 here for you to go and find. Read it; a campaign that prints a recommendation without printing
@@ -599,14 +672,14 @@ eventually move.
   `lineageFromEntries`, which takes digests this module did not derive — the surface an indexer or a
   cross-operator import would use, and the only surface on which a forged self-parent or a parent
   cycle can actually arrive. Both refusals are asserted there.
-- **F-C7d-2 (honest gap, `campaign run`).** `run` decides the allocation, plans the wave, seals the
-  Run, journals all three, and writes the sealed Benchmark and Run to `<campaign-dir>/waves/<n>/` —
-  and then stops. Dispatching cells needs a `TaskExecutionBackend` **binding**, and this package
-  names the backend *contract* while its own source boundary denies every implementation of it by
-  name (`task-execution-backend-local`, `-launchers`, `-supervisor`, `-workspace`). A CLI inside
-  this package therefore cannot execute a wave, and it prints the gap rather than implying it ran
-  something. Closing it is a host-side item: a caller holding a backend drives `executeWave` on the
-  sealed Run, then journals `matrix-assembled` and `report-recorded`.
+- **F-C7d-2 (closed at the private host boundary).** The neutral
+  `policy-optimization optimize campaign run` path still stops after sealing its wave: it owns no
+  backend composition. The separate `jinn-optimize campaign run` process wrapper now executes an
+  explicitly confirmed, already-prepared local campaign. Its concrete backend, launcher,
+  evaluator, workspace, evidence, and trust imports are confined to `host-local/`; the public
+  barrel does not re-export them, and the path-aware source guard refuses the same imports from
+  neutral engine code. This closes the real local journey without turning the reusable campaign
+  engine into a client or daemon host.
 - **F-C7d-3 (cross-unit schema boundary).** `status` renders the arms of the most recently *planned*
   wave, read off C7b's frozen `wave-planned` payload — not the admitted population, which would mean
   reading `candidate-admitted`, whose schema is C7c's and which C7a's rule ("a payload schema belongs

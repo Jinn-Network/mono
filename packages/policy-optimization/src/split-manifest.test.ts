@@ -43,7 +43,7 @@ function candidate(index: number, overrides: Partial<SplitPoolCandidate> = {}): 
 const seed = { tupleDigest: `sha256:${"1".repeat(64)}`, snapshotDigest: `sha256:${"2".repeat(64)}` };
 
 describe("PolicyOptimizationSplitManifest/1.0", () => {
-  test("forms connected components and gives every extra group to promotion", () => {
+  test("uses balanced 3/3/6 as the default and gives every extra group to confirmation", () => {
     const candidates = Array.from({ length: 14 }, (_, index) => candidate(index));
     candidates.push(candidate(14, { repository: "org/repo-0", sourceLineage: ["source-14"] }));
     const sealed = formPolicyOptimizationSplit({ candidates, tupleClass: "repository-work/1.0", seed });
@@ -51,6 +51,46 @@ describe("PolicyOptimizationSplitManifest/1.0", () => {
     expect(sealed.manifest.assignments.training).toHaveLength(3);
     expect(sealed.manifest.assignments.development).toHaveLength(3);
     expect(sealed.manifest.assignments.promotion).toHaveLength(8);
+    expect(sealed.manifest.allocation).toEqual({
+      preset: "balanced-3-3-6@1",
+      journey: "explore-confirm",
+      exploration: { proposalGroups: 3, selectionGroups: 3 },
+      confirmation: { minimumGroups: 6 },
+      remainder: "confirmation",
+    });
+    expect(parseExactPolicyOptimizationSplitManifest(sealed.bytes)).toEqual(sealed.manifest);
+  });
+
+  test("supports a smaller custom explore/confirm campaign without relabelling it as proof", () => {
+    const sealed = formPolicyOptimizationSplit({
+      candidates: Array.from({ length: 8 }, (_, index) => candidate(index)),
+      tupleClass: "repository-work/1.0",
+      seed,
+      allocation: {
+        preset: "custom@1",
+        journey: "explore-confirm",
+        proposalGroups: 2,
+        selectionGroups: 2,
+        confirmationGroups: 2,
+      },
+    });
+    expect(sealed.manifest.assignments.training).toHaveLength(2);
+    expect(sealed.manifest.assignments.development).toHaveLength(2);
+    expect(sealed.manifest.assignments.promotion).toHaveLength(4);
+    expect(parseExactPolicyOptimizationSplitManifest(sealed.bytes)).toEqual(sealed.manifest);
+  });
+
+  test("supports testing one operator-supplied change directly on all fresh groups", () => {
+    const sealed = formPolicyOptimizationSplit({
+      candidates: Array.from({ length: 5 }, (_, index) => candidate(index)),
+      tupleClass: "repository-work/1.0",
+      seed,
+      allocation: { preset: "test-this-change@1" },
+    });
+    expect(sealed.manifest.allocation.journey).toBe("confirm-only");
+    expect(sealed.manifest.assignments.training).toEqual([]);
+    expect(sealed.manifest.assignments.development).toEqual([]);
+    expect(sealed.manifest.assignments.promotion).toHaveLength(5);
     expect(parseExactPolicyOptimizationSplitManifest(sealed.bytes)).toEqual(sealed.manifest);
   });
 
@@ -66,6 +106,18 @@ describe("PolicyOptimizationSplitManifest/1.0", () => {
     expect(() => formPolicyOptimizationSplit({
       candidates: candidates.slice(0, 11), tupleClass: "repository-work/1.0", seed,
     })).toThrow(/never split or padded/u);
+    expect(() => formPolicyOptimizationSplit({
+      candidates: candidates.slice(0, 1),
+      tupleClass: "repository-work/1.0",
+      seed,
+      allocation: {
+        preset: "custom@1",
+        journey: "explore-confirm",
+        proposalGroups: Number.MAX_SAFE_INTEGER,
+        selectionGroups: Number.MAX_SAFE_INTEGER,
+        confirmationGroups: Number.MAX_SAFE_INTEGER,
+      },
+    })).toThrow(/safe integer range/u);
   });
 
   test("refuses digest substitution, unknown fields, and duplicate-key encodings", () => {
@@ -101,6 +153,11 @@ describe("PolicyOptimizationSplitManifest/1.0", () => {
     changedAssignment.assignments.development.sort();
     expect(() => parseExactPolicyOptimizationSplitManifest(canonicalJsonBytes(changedAssignment)))
       .toThrow(/allocation algorithm/u);
+
+    const changedPreset = JSON.parse(JSON.stringify(valid.manifest));
+    changedPreset.allocation.confirmation.minimumGroups = 5;
+    expect(() => parseExactPolicyOptimizationSplitManifest(canonicalJsonBytes(changedPreset)))
+      .toThrow(/fixed 3\/3\/6 defaults/u);
   });
 
   test("excludes an admission receipt that was not cryptographically verified", () => {
@@ -120,7 +177,7 @@ describe("PolicyOptimizationSplitManifest/1.0", () => {
       prior: [],
     });
     expect(() => consumePromotionGroups({
-      manifestDigest: `sha256:${"3".repeat(64)}`,
+      manifestDigest: `sha256:${"5".repeat(64)}`,
       promotionGroupIds: [`sha256:${"4".repeat(64)}`],
       cause: "dispatched",
       prior: first,

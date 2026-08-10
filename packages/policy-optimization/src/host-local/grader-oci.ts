@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { ResultEvaluationStatementSchema, type ResultEvaluationStatement } from "@jinn-network/evidence-protocol";
+import { canonicalAttestationJsonBytes } from "@jinn-network/attestation-issuer";
 import {
   createEvaluatorDeployment,
   type EvaluatorDeploymentOptions,
@@ -8,19 +9,39 @@ import {
 import {
   DSSE_PAYLOAD_TYPE,
   parseExactDsseEnvelope,
-  sealSignedRecord,
+  sealSignedPayload,
   type DsseSigner,
   type SealedRecord,
 } from "@jinn-network/trust-core";
-import { canonicalJsonBytes, type JsonValue } from "@jinn-network/policy-identity";
 import { spawn } from "node:child_process";
-import { lstatSync, readdirSync, realpathSync } from "node:fs";
+import { constants, accessSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 import { ensurePrivateDirectory, HostStateError, secureRead } from "./state.js";
 
 const PINNED_IMAGE = /^[^\s@]+(?:\/[^\s@]+)*@sha256:[a-f0-9]{64}$/u;
 const SAFE_TARGET = /^\/jinn\/(?:input\/[a-z0-9][a-z0-9._-]*|out)$/u;
 const SECRET_SEGMENT = /^(?:\.aws|\.config|\.docker|\.gnupg|\.ssh|credentials?|keys?|secrets?)$/iu;
+
+function runtimeExecutable(runtime: "docker" | "podman"): string {
+  const candidates = runtime === "docker"
+    ? [
+        "/usr/local/bin/docker",
+        "/opt/homebrew/bin/docker",
+        "/usr/bin/docker",
+        "/Applications/Docker.app/Contents/Resources/bin/docker",
+      ]
+    : ["/usr/local/bin/podman", "/opt/homebrew/bin/podman", "/usr/bin/podman"];
+  for (const candidate of candidates) {
+    try {
+      const exact = realpathSync(candidate);
+      accessSync(exact, constants.X_OK);
+      return exact;
+    } catch {
+      // Try the next host-owned installation root; never consult task material.
+    }
+  }
+  return runtime;
+}
 
 export interface PinnedOciGraderInput {
   readonly runtime: "docker" | "podman";
@@ -29,6 +50,8 @@ export interface PinnedOciGraderInput {
   readonly inputs: readonly { readonly source: string; readonly targetName: string }[];
   readonly outputDirectory: string;
   readonly command: readonly [string, ...string[]];
+  /** Overrides an image's deployment entrypoint with a reviewed executable inside the image. */
+  readonly entrypoint?: string;
   readonly timeoutMs: number;
   readonly profileRequiresNetwork: boolean;
   /** Must be an explicit isolated runtime network, never `host`. */
@@ -40,6 +63,13 @@ export interface PinnedOciInvocation {
   readonly args: readonly string[];
   readonly containerName: string;
   readonly statementPath: string;
+}
+
+export interface PinnedOciImageIdentity {
+  readonly runtime: "docker" | "podman";
+  readonly image: string;
+  readonly platform: "linux/amd64" | "linux/arm64";
+  readonly timeoutMs: number;
 }
 
 function assertNoSymlinksOrSecrets(path: string): void {
@@ -63,6 +93,10 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
   if (input.command.length === 0 || input.command.some((part) => part.length === 0)) {
     throw new HostStateError("state-io", "grader command is empty");
   }
+  if (input.entrypoint !== undefined
+    && (input.entrypoint.length === 0 || /[\u0000\r\n]/u.test(input.entrypoint))) {
+    throw new HostStateError("state-io", "grader entrypoint is invalid");
+  }
   const network = input.profileRequiresNetwork ? input.allowedNetwork : "none";
   if (network === undefined || network === "" || network === "host") {
     throw new HostStateError("state-io", "network is disabled unless the profile explicitly requires an isolated network");
@@ -83,7 +117,7 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
   }
   const containerName = `jinn-optimize-grader-${crypto.randomUUID()}`;
   const args = [
-    "run", "--rm", "--name", containerName,
+    "run", "--rm", "--pull", "never", "--name", containerName,
     "--platform", input.platform,
     "--network", network,
     "--read-only",
@@ -93,8 +127,10 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
     "--memory", "4g",
     "--cpus", "2",
     "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=512m",
+    "--env", "HOME=/tmp/jinn-grader-home",
     ...mounts,
     "--mount", `type=bind,src=${output},dst=/jinn/out`,
+    ...(input.entrypoint === undefined ? [] : ["--entrypoint", input.entrypoint]),
     input.image,
     ...input.command,
   ];
@@ -106,30 +142,110 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
   };
 }
 
-/** Runs one bounded grader and returns only its unsigned canonical statement bytes. */
-export async function runPinnedOciGrader(input: PinnedOciGraderInput): Promise<Uint8Array> {
-  const invocation = buildPinnedOciInvocation(input);
-  const child = spawn(invocation.command, [...invocation.args], {
+async function boundedRuntimeExit(input: {
+  readonly command: "docker" | "podman";
+  readonly args: readonly string[];
+  readonly timeoutMs: number;
+}): Promise<{ readonly code: number | null; readonly timedOut: boolean }> {
+  const child = spawn(runtimeExecutable(input.command), [...input.args], {
     stdio: "ignore",
     env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
   });
-  const exit = await new Promise<{ code: number | null; timedOut: boolean }>((resolveExit, reject) => {
+  return new Promise<{ readonly code: number | null; readonly timedOut: boolean }>((resolveExit, reject) => {
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
-      const cleanup = spawn(invocation.command, ["rm", "-f", invocation.containerName], {
-        stdio: "ignore", env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
-      });
-      cleanup.unref();
     }, input.timeoutMs);
     child.once("error", (cause) => { clearTimeout(timer); reject(cause); });
     child.once("exit", (code) => { clearTimeout(timer); resolveExit({ code, timedOut }); });
   }).catch(() => { throw new HostStateError("state-io", "grader runtime is unavailable"); });
-  if (exit.timedOut || exit.code !== 0) {
-    throw new HostStateError("state-io", exit.timedOut ? "grader exceeded its bounded time" : "grader failed");
+}
+
+/** Fetches only an exact digest and positively re-inspects it before any solver work may begin. */
+export async function ensurePinnedOciImage(input: PinnedOciImageIdentity): Promise<void> {
+  if (!PINNED_IMAGE.test(input.image)) {
+    throw new HostStateError("state-io", "grader image must be pinned by sha256 digest");
   }
-  return secureRead(invocation.statementPath);
+  const timeoutMs = Math.min(3_600_000, Math.max(60_000, input.timeoutMs));
+  const inspect = () => boundedRuntimeExit({
+    command: input.runtime,
+    args: ["image", "inspect", input.image],
+    timeoutMs: Math.min(30_000, timeoutMs),
+  });
+  const existing = await inspect();
+  if (!existing.timedOut && existing.code === 0) return;
+  const pulled = await boundedRuntimeExit({
+    command: input.runtime,
+    args: ["pull", "--platform", input.platform, input.image],
+    timeoutMs,
+  });
+  if (pulled.timedOut || pulled.code !== 0) {
+    throw new HostStateError("state-io", "pinned grader image is unavailable");
+  }
+  const verified = await inspect();
+  if (verified.timedOut || verified.code !== 0) {
+    throw new HostStateError("state-io", "pinned grader image could not be verified locally");
+  }
+}
+
+/** Runs one bounded grader and returns only its unsigned canonical statement bytes. */
+export async function runPinnedOciGrader(input: PinnedOciGraderInput): Promise<Uint8Array> {
+  await ensurePinnedOciImage(input);
+  let ownedNetwork: string | undefined;
+  if (input.profileRequiresNetwork && input.allowedNetwork === undefined) {
+    ownedNetwork = `jinn-optimize-grader-network-${crypto.randomUUID()}`;
+    const created = await boundedRuntimeExit({
+      command: input.runtime,
+      args: ["network", "create", "--driver", "bridge", ownedNetwork],
+      timeoutMs: Math.min(30_000, input.timeoutMs),
+    });
+    if (created.timedOut || created.code !== 0) {
+      throw new HostStateError("state-io", "isolated grader network could not be created");
+    }
+  }
+  try {
+    const invocation = buildPinnedOciInvocation({
+      ...input,
+      ...(ownedNetwork === undefined ? {} : { allowedNetwork: ownedNetwork }),
+    });
+    const runtime = runtimeExecutable(invocation.command);
+    const child = spawn(runtime, [...invocation.args], {
+      stdio: "ignore",
+      env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
+    });
+    const exit = await new Promise<{ code: number | null; timedOut: boolean }>((resolveExit, reject) => {
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, input.timeoutMs);
+      child.once("error", (cause) => { clearTimeout(timer); reject(cause); });
+      child.once("exit", (code) => { clearTimeout(timer); resolveExit({ code, timedOut }); });
+    }).catch(() => { throw new HostStateError("state-io", "grader runtime is unavailable"); });
+    if (exit.timedOut) {
+      await boundedRuntimeExit({
+        command: input.runtime,
+        args: ["rm", "-f", invocation.containerName],
+        timeoutMs: Math.min(30_000, input.timeoutMs),
+      });
+    }
+    if (exit.timedOut || exit.code !== 0) {
+      throw new HostStateError("state-io", exit.timedOut ? "grader exceeded its bounded time" : "grader failed");
+    }
+    return secureRead(invocation.statementPath);
+  } finally {
+    if (ownedNetwork !== undefined) {
+      const removed = await boundedRuntimeExit({
+        command: input.runtime,
+        args: ["network", "rm", ownedNetwork],
+        timeoutMs: Math.min(30_000, input.timeoutMs),
+      });
+      if (removed.timedOut || removed.code !== 0) {
+        throw new HostStateError("state-io", "isolated grader network could not be removed");
+      }
+    }
+  }
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -160,7 +276,7 @@ export async function validateAndSignEvaluatorStatement(input: {
   try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(input.statementBytes)); }
   catch { throw new HostStateError("state-io", "evaluator statement is not UTF-8 JSON"); }
   const parsed = ResultEvaluationStatementSchema.safeParse(value);
-  if (!parsed.success || !sameBytes(canonicalJsonBytes(parsed.data as JsonValue), input.statementBytes)) {
+  if (!parsed.success || !sameBytes(canonicalAttestationJsonBytes(parsed.data), input.statementBytes)) {
     throw new HostStateError("state-io", "evaluator statement is not exact canonical data");
   }
   const statement: ResultEvaluationStatement = parsed.data;
@@ -179,8 +295,8 @@ export async function validateAndSignEvaluatorStatement(input: {
     || descriptorKey(predicate.evaluationMethod) !== descriptorKey(input.expected.evaluationMethod)) {
     throw new HostStateError("state-io", "evaluator statement binding does not match the exact evaluation dispatch");
   }
-  const sealed = await sealSignedRecord({
-    record: statement,
+  const sealed = await sealSignedPayload({
+    payloadBytes: input.statementBytes,
     payloadType: DSSE_PAYLOAD_TYPE,
     signer: input.signer,
     ...(input.signal === undefined ? {} : { signal: input.signal }),

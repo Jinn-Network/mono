@@ -44,9 +44,27 @@ function validStatement(overrides: Record<string, unknown> = {}): Record<string,
   };
 }
 
+function issuerStatementBytes(value: unknown): Uint8Array {
+  const sort = (candidate: unknown): unknown => Array.isArray(candidate)
+    ? candidate.map(sort)
+    : typeof candidate === "object" && candidate !== null
+      ? Object.fromEntries(Object.entries(candidate).sort(([left], [right]) =>
+        left < right ? -1 : left > right ? 1 : 0).map(([key, nested]) => [key, sort(nested)]))
+      : candidate;
+  return new TextEncoder().encode(`${JSON.stringify(sort(value), null, 2)}\n`);
+}
+
 describe("exact referenced Verdict bytes", () => {
   test("validates the minimal frozen Result Evaluation identity/outcome/time fields", () => {
     const bytes = envelope(canonicalJsonBytes(validStatement()));
+    const digest = recordDigest(bytes);
+    expect(resolveVerdictOutcome(digest, {
+      resolveVerdictBytes: (requested) => requested === digest ? bytes : undefined,
+    })).toEqual({ verdict: "pass" });
+  });
+
+  test("accepts the evidence issuer's exact deterministic Result Evaluation spelling", () => {
+    const bytes = envelope(issuerStatementBytes(validStatement()));
     const digest = recordDigest(bytes);
     expect(resolveVerdictOutcome(digest, {
       resolveVerdictBytes: (requested) => requested === digest ? bytes : undefined,

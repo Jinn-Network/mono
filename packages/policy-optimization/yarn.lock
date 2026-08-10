@@ -130,6 +130,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/policy-optimization@workspace:."
   dependencies:
+    "@jinn-network/attestation-issuer": "npm:0.1.0"
     "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
     "@jinn-network/benchmarking-local": "npm:0.1.0"
     "@jinn-network/benchmarking-records": "npm:0.1.0"
@@ -139,10 +140,14 @@ __metadata:
     "@jinn-network/policy-outcomes": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-backend-local": "npm:0.1.0"
+    "@jinn-network/task-execution-evaluation-harness": "npm:0.1.0"
     "@jinn-network/task-execution-evaluator-adapters": "npm:0.1.0"
+    "@jinn-network/task-execution-launchers": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
     "@jinn-network/task-execution-testing": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"

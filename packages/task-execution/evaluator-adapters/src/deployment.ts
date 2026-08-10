@@ -12,7 +12,10 @@ import {
   createPredictionEvaluatorRegistration,
   createSweRebenchEvaluatorRegistration,
 } from "./registrations.js";
-import { contextGraderReportSource } from "./swe-rebench/adapter.js";
+import {
+  contextGraderReportSource,
+  type GraderReportSource,
+} from "./swe-rebench/adapter.js";
 
 export interface EvaluatorDeploymentOptions {
   /** Deployment-owned evaluator identity; it is never inferred from Task material. */
@@ -25,6 +28,8 @@ export interface EvaluatorDeploymentOptions {
   readonly evidenceWriter: EvidenceRepositoryWriter;
   /** Explicit deployment cap for evidence written for a single evaluator claim. */
   readonly maxClaimEvidenceBytes: number;
+  /** Host-owned live grader seam. Omitted deployments retain the context-backed test adapter. */
+  readonly sweRebenchGraderReportSource?: GraderReportSource;
 }
 
 function requireNonEmpty(value: string, label: string): void {
@@ -53,7 +58,7 @@ export function createEvaluatorDeployment(
       evaluatorId: options.evaluatorId,
       signerHandle: options.signerHandle,
       evaluationMethod: options.evaluationMethod,
-      graderReportSource: contextGraderReportSource(),
+      graderReportSource: options.sweRebenchGraderReportSource ?? contextGraderReportSource(),
     }),
     createPredictionEvaluatorRegistration({
       evaluatorId: options.evaluatorId,

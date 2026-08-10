@@ -23,6 +23,19 @@ describe("harvest", () => {
     expect(result.manifest).toEqual([]);
   });
 
+  it("carries the Task-declared media type onto a harvested output", async () => {
+    const paths = await workspace();
+    await writeFile(join(paths.out, "patch"), "diff --git a/a b/a\n");
+
+    const result = await harvest(paths, [
+      { name: "patch", mediaType: "text/x-diff", required: true },
+    ]);
+
+    expect(result.manifest).toEqual([
+      expect.objectContaining({ path: "patch", mediaType: "text/x-diff" }),
+    ]);
+  });
+
   it("is deterministic and sorts artifact paths by code unit", async () => {
     const paths = await workspace();
     await writeFile(join(paths.out, "a"), "a"); await writeFile(join(paths.out, "Z"), "z");

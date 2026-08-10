@@ -168,6 +168,17 @@ describe("prepareAdoption", () => {
     });
   });
 
+  it("preserves the promising label on an advanced operator override", () => {
+    const promising = { ...decision, status: "promising" as const };
+    const record = prepareAdoption({
+      log: emptyAdoptionLog(), scope: SCOPE, tupleDigest: SECOND, requires: [], approved: [],
+      recommendation: promising, baseConfigurationRevision: "r1", currentConfigurationRevision: "r1",
+      routePayloadConsent: true, explicitConfirmation: true,
+      overrideInconclusive: { warningAcknowledged: true, reason: "continue learning in production" },
+    });
+    expect(record.recommendationStatus).toBe("promising");
+  });
+
   it("refuses an override when configuration moved after the campaign snapshot", () => {
     expect(() => prepareAdoption({
       log: emptyAdoptionLog(), scope: SCOPE, tupleDigest: SECOND, requires: [], approved: [],

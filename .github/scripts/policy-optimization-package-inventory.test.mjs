@@ -48,6 +48,7 @@ const PRODUCT_PACKAGES = [
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['.', {
     dependencies: [
+      '@jinn-network/attestation-issuer',
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-local',
       '@jinn-network/benchmarking-records',
@@ -57,9 +58,13 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/policy-outcomes',
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-evaluation-harness',
       '@jinn-network/task-execution-evaluator-adapters',
+      '@jinn-network/task-execution-launchers',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-workspace',
       '@jinn-network/trust-core',
     ],
     devDependencies: ['@jinn-network/task-execution-testing'],
@@ -74,14 +79,9 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     // the assembly/launchers/supervisor/workspace packages and their evidence edges into a tier-4
     // product's install graph. `benchmarking-run` takes the same medicine for the same reason.
     portalResolutions: [
-      '@jinn-network/attestation-issuer',
       '@jinn-network/evidence-discovery',
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
-      '@jinn-network/task-execution-evaluation-harness',
-      '@jinn-network/task-execution-launchers',
-      '@jinn-network/task-execution-supervisor',
-      '@jinn-network/task-execution-workspace',
     ],
   }],
 ]);

@@ -7,6 +7,7 @@ export {
 export { commitPreparedAttestation } from "./commit.js";
 export {
   buildResultEvaluationPayload,
+  canonicalAttestationJsonBytes,
   prepareExecutionVerification,
   prepareResultEvaluation,
 } from "./prepare.js";

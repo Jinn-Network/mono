@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalJsonBytes } from "@jinn-network/policy-identity";
+import { canonicalAttestationJsonBytes } from "@jinn-network/attestation-issuer";
 import { describe, expect, test } from "vitest";
 import {
   buildPinnedOciInvocation,
@@ -33,8 +33,11 @@ describe("pinned OCI grader", () => {
       profileRequiresNetwork: false,
     });
     expect(invocation.args).toContain("--read-only");
+    expect(invocation.args).toContain("--pull");
+    expect(invocation.args).toContain("never");
     expect(invocation.args).toContain("none");
     expect(invocation.args).toContain("ALL");
+    expect(invocation.args).toContain("HOME=/tmp/jinn-grader-home");
     expect(invocation.args).toContain(IMAGE);
     expect(invocation.args.join(" ")).toContain("readonly");
     expect(invocation.args.join(" ")).not.toMatch(/secret|credential/u);
@@ -96,7 +99,7 @@ describe("host-side evaluator signing", () => {
   }
 
   test("signs only after exact canonical binding validation", async () => {
-    const bytes = canonicalJsonBytes(statement());
+    const bytes = canonicalAttestationJsonBytes(statement());
     let signed = false;
     const sealed = await validateAndSignEvaluatorStatement({
       statementBytes: bytes,
@@ -126,14 +129,14 @@ describe("host-side evaluator signing", () => {
     const changed = statement();
     changed.predicate.evaluator.id = "urn:jinn:fixture-evaluator";
     await expect(validateAndSignEvaluatorStatement({
-      statementBytes: canonicalJsonBytes(changed), expected, signer,
+      statementBytes: canonicalAttestationJsonBytes(changed), expected, signer,
     })).rejects.toThrow(/binding/u);
     expect(signed).toBe(false);
   });
 
   test("refuses a signer from any role other than the evaluator verdict role", async () => {
     await expect(validateAndSignEvaluatorStatement({
-      statementBytes: canonicalJsonBytes(statement()),
+      statementBytes: canonicalAttestationJsonBytes(statement()),
       expected,
       signer: async () => [{
         keyid: "journal-author-key",

@@ -27,6 +27,7 @@ const RunPayload = z.strictObject({
 const PayloadSchemas = {
   "plan-recorded": z.strictObject({ planDigest: Digest, splitManifestDigest: Digest }),
   "run-recorded": RunPayload,
+  "operator-challenger-frozen": z.strictObject({ challengerTupleDigest: Digest, runPlanDigest: Digest }),
   "challenger-frozen": z.strictObject({ challengerTupleDigest: Digest, developmentRunDigest: Digest }),
   "promotion-revealed": z.strictObject({ promotionRunDigest: Digest, splitManifestDigest: Digest }),
   "submission-prepared": Coordinate.extend({ role: Role, bindingDigest: Digest }),
@@ -221,17 +222,34 @@ export function reduceLiveHostEntry(
       if (state.phase !== "ACTIVE" || state.planDigest === undefined) fail("Run requires an active plan");
       const run = entry.payload as LiveHostPayload<"run-recorded">;
       if (state.runs.has(run.runDigest)) fail("a sealed Run is recorded once");
-      if (run.kind === "promotion") {
-        if (state.promotionRunDigest !== undefined) fail("exactly one promotion Run is permitted");
-        if (state.challengerTupleDigest === undefined) fail("promotion Run requires a frozen challenger");
-        state.promotionRunDigest = run.runDigest;
-      }
       for (const arm of run.arms) {
         const prior = state.armTuples.get(arm.armId);
         if (prior !== undefined && prior !== arm.tupleDigest) fail("an armId cannot move to another tuple");
+      }
+      if (run.kind === "promotion") {
+        if (state.promotionRunDigest !== undefined) fail("exactly one promotion Run is permitted");
+        if (state.challengerTupleDigest === undefined) fail("promotion Run requires a frozen challenger");
+        if (!run.arms.some((arm) => arm.tupleDigest === state.challengerTupleDigest)) {
+          fail("promotion Run does not contain the frozen challenger tuple");
+        }
+        state.promotionRunDigest = run.runDigest;
+      }
+      for (const arm of run.arms) {
         state.armTuples.set(arm.armId, arm.tupleDigest);
       }
       state.runs.set(run.runDigest, { kind: run.kind, arms: run.arms.map((arm) => arm.armId) });
+      break;
+    }
+    case "operator-challenger-frozen": {
+      const frozen = entry.payload as LiveHostPayload<"operator-challenger-frozen">;
+      if (state.phase !== "ACTIVE" || state.planDigest !== frozen.runPlanDigest) {
+        fail("operator challenger must bind the exact active run plan");
+      }
+      if (state.challengerTupleDigest !== undefined || state.promotionConsumed
+        || state.runs.size > 0) {
+        fail("operator challenger must be frozen once, before its confirmation Run");
+      }
+      state.challengerTupleDigest = frozen.challengerTupleDigest;
       break;
     }
     case "challenger-frozen": {

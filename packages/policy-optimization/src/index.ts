@@ -64,11 +64,16 @@ export {
 } from "./next-run-policy-snapshot.js";
 export {
   POLICY_OPTIMIZATION_ALLOCATION_ALGORITHM,
+  POLICY_OPTIMIZATION_ALLOCATION_PRESETS,
   POLICY_OPTIMIZATION_SPLIT_MANIFEST_FORMAT_TOKEN,
   consumePromotionGroups,
   formPolicyOptimizationSplit,
   parseExactPolicyOptimizationSplitManifest,
+  type PolicyOptimizationAllocationPreset,
+  type PolicyOptimizationAllocationRequest,
+  type PolicyOptimizationJourney,
   type PolicyOptimizationSplitManifest,
+  type PolicyOptimizationSplitAllocation,
   type PromotionConsumption,
   type SealedPolicyOptimizationSplitManifest,
   type SplitExclusionReason,
@@ -87,6 +92,7 @@ export {
   type ProjectRecommendationInput,
   type RecommendationDecision,
   type RecommendationReasonCode,
+  type RecommendationStatus,
 } from "./recommendation.js";
 export {
   LIVE_CAMPAIGN_AUTHORING_FORMAT_TOKEN,

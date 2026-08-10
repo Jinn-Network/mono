@@ -16,7 +16,16 @@ const current = `sha256:${"1".repeat(64)}`;
 const challenger = `sha256:${"2".repeat(64)}`;
 const author = "urn:uuid:10000000-0000-5000-8000-000000000001";
 
-function fixture(signP = "0.03125") {
+function fixture(options: {
+  readonly signP?: string;
+  readonly nonTied?: number;
+  readonly improved?: number;
+  readonly regressed?: number;
+} = {}) {
+  const signP = options.signP ?? "0.03125";
+  const nonTied = options.nonTied ?? 6;
+  const improved = options.improved ?? 6;
+  const regressed = options.regressed ?? 0;
   const objective = compileObjectivePreset("more-tasks-succeed@1", {
     baselineArm: "current", candidateArm: "challenger",
   });
@@ -67,9 +76,9 @@ function fixture(signP = "0.03125") {
     attrition: { perArm: { current: counts, challenger: counts }, asymmetryFlags: [] },
   };
   const resultFor = (id: string) => id === BENCHMARKING_METHOD_IDS.pairedMcnemar
-    ? { improved: 6, regressed: 0, "pValue": "0.03125" }
+    ? { improved, regressed, "pValue": "0.03125" }
     : id === BENCHMARKING_METHOD_IDS.provenanceClusterSign
-      ? { favorable: 6, unfavorable: 0, nonTied: 6, "pValue": signP }
+      ? { favorable: nonTied, unfavorable: 0, nonTied, "pValue": signP }
       : { arms: {} };
   const reports = objective.methods.map((method) => sealReport({
     protocol: BENCHMARKING_PROTOCOL,
@@ -96,15 +105,38 @@ describe("projectRecommendation", () => {
     expect(decision.basis.runDigest).toBe(documentDigest(value.run));
   });
 
-  test("keeps current with explicit reason codes when a proof gate misses", () => {
-    const value = fixture("0.0625");
+  test("labels favorable evidence promising when a proof gate misses", () => {
+    const value = fixture({ signP: "0.0625" });
+    const decision = projectRecommendation({
+      objectivePreset: "more-tasks-succeed@1", objective: value.objective,
+      currentTupleDigest: current, challengerTupleDigest: challenger,
+      runBytes: value.run, matrixBytes: value.matrix, reportBytes: value.reports,
+    });
+    expect(decision.status).toBe("promising");
+    expect(decision.recommendedTupleDigest).toBe(current);
+    expect(decision.reasonCodes).toContain("provenance-sign-not-significant");
+  });
+
+  test("allows a five-group confirmation but cannot call it proven", () => {
+    const value = fixture({ signP: "0.0625", nonTied: 5 });
+    const decision = projectRecommendation({
+      objectivePreset: "more-tasks-succeed@1", objective: value.objective,
+      currentTupleDigest: current, challengerTupleDigest: challenger,
+      runBytes: value.run, matrixBytes: value.matrix, reportBytes: value.reports,
+    });
+    expect(decision.status).toBe("promising");
+    expect(decision.recommendedTupleDigest).toBe(current);
+    expect(decision.reasonCodes).toContain("insufficient-provenance-groups");
+  });
+
+  test("keeps unfavorable evidence inconclusive", () => {
+    const value = fixture({ improved: 2, regressed: 3, signP: "1" });
     const decision = projectRecommendation({
       objectivePreset: "more-tasks-succeed@1", objective: value.objective,
       currentTupleDigest: current, challengerTupleDigest: challenger,
       runBytes: value.run, matrixBytes: value.matrix, reportBytes: value.reports,
     });
     expect(decision.status).toBe("inconclusive");
-    expect(decision.recommendedTupleDigest).toBe(current);
-    expect(decision.reasonCodes).toContain("provenance-sign-not-significant");
+    expect(decision.reasonCodes).toContain("improvements-not-greater-than-regressions");
   });
 });

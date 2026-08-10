@@ -36,10 +36,19 @@ if (argv.length === 0) {
 } else if (argv[0] === "help" || argv[0] === "--help") {
   result = ok(JINN_OPTIMIZE_USAGE);
 } else {
-  result = runLiveHostCommand(argv, process.cwd()) ?? runCli(
-    argv[0] === "optimize" ? argv : ["optimize", ...argv],
-    { cwd: process.cwd(), now: () => new Date().toISOString() },
-  );
+  const controller = new AbortController();
+  const interrupt = () => controller.abort();
+  process.once("SIGINT", interrupt);
+  process.once("SIGTERM", interrupt);
+  try {
+    result = await runLiveHostCommand(argv, process.cwd(), controller.signal) ?? runCli(
+        argv[0] === "optimize" ? argv : ["optimize", ...argv],
+        { cwd: process.cwd(), now: () => new Date().toISOString() },
+      );
+  } finally {
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", interrupt);
+  }
 }
 
 if (result.stdout !== "") process.stdout.write(result.stdout);

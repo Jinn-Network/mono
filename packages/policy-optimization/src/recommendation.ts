@@ -26,10 +26,13 @@ export type RecommendationReasonCode =
   | "provenance-sign-not-significant"
   | "noninferiority-iut-not-passed";
 
+export type RecommendationStatus = "proven" | "promising" | "inconclusive";
+
 export interface RecommendationDecision {
   /** Local, recomputable projection — never a sealed authority record. */
   readonly projection: "RecommendationDecision";
-  readonly status: "proven" | "inconclusive";
+  /** Promising means directionally favorable with sound evidence, but below the proof threshold. */
+  readonly status: RecommendationStatus;
   readonly recommendedTupleDigest: string;
   readonly currentTupleDigest: string;
   readonly challengerTupleDigest: string;
@@ -167,9 +170,17 @@ export function projectRecommendation(input: ProjectRecommendationInput): Recomm
 
   const reasonCodes = [...new Set(reasons)];
   const proven = reasonCodes.length === 0;
+  const proofOnlyReasons = new Set<RecommendationReasonCode>([
+    "mcnemar-not-significant",
+    "insufficient-provenance-groups",
+    "provenance-sign-not-significant",
+  ]);
+  const promising = input.objectivePreset === "more-tasks-succeed@1"
+    && reasonCodes.length > 0
+    && reasonCodes.every((reason) => proofOnlyReasons.has(reason));
   return {
     projection: "RecommendationDecision",
-    status: proven ? "proven" : "inconclusive",
+    status: proven ? "proven" : promising ? "promising" : "inconclusive",
     recommendedTupleDigest: proven ? input.challengerTupleDigest : input.currentTupleDigest,
     currentTupleDigest: input.currentTupleDigest,
     challengerTupleDigest: input.challengerTupleDigest,

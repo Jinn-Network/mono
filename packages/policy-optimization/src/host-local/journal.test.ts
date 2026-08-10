@@ -52,6 +52,32 @@ async function development(root: string) {
 }
 
 describe("live host relational journal", () => {
+  test("freezes an operator-supplied challenger before a confirmation-only Run", async () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-live-operator-challenger-"));
+    await append(root, event("plan-recorded", { planDigest: PLAN, splitManifestDigest: SPLIT }));
+    await append(root, event("operator-challenger-frozen", {
+      challengerTupleDigest: CHALLENGER,
+      runPlanDigest: PLAN,
+    }));
+    const state = await append(root, event("run-recorded", {
+      runDigest: PROMOTION,
+      kind: "promotion",
+      arms: [
+        { armId: "current", tupleDigest: CURRENT },
+        { armId: "challenger", tupleDigest: CHALLENGER },
+      ],
+    }));
+    expect(state.challengerTupleDigest).toBe(CHALLENGER);
+    expect(state.promotionRunDigest).toBe(PROMOTION);
+
+    const movedRoot = mkdtempSync(join(tmpdir(), "jinn-live-moved-challenger-"));
+    await append(movedRoot, event("plan-recorded", { planDigest: PLAN, splitManifestDigest: SPLIT }));
+    await expect(append(movedRoot, event("operator-challenger-frozen", {
+      challengerTupleDigest: CHALLENGER,
+      runPlanDigest: `sha256:${"d".repeat(64)}`,
+    }))).rejects.toThrow(/exact active run plan/u);
+  });
+
   test("restarts at every durable boundary and resumes CANCELLING until all attempts drain", async () => {
     const root = mkdtempSync(join(tmpdir(), "jinn-live-journal-"));
     await development(root);

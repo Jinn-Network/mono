@@ -75,7 +75,10 @@ export function deriveEvaluationDispatch(input: {
     if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(sha256)) {
       throw new HostStateError("state-io", "solver Delivery output lacks an exact sha256 digest");
     }
-    const name = `result.${output.name}`;
+    // Evaluation subject verification joins supplied Result material to Delivery outputs by the
+    // exact output name. Renaming `patch` to `result.patch` makes otherwise valid subject bytes
+    // unverifiable, so the derived evaluation Task preserves the Delivery vocabulary verbatim.
+    const name = output.name;
     if (names.has(name)) throw new HostStateError("state-io", "solver Delivery output names are ambiguous");
     names.add(name);
     return { name, digest: `sha256:${sha256}` as `sha256:${string}` };

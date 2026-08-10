@@ -20,18 +20,28 @@ const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
 // Ordered: each entry's prepack build reads the already-built `dist/` of the ones before it.
-// `task-execution-protocol`, `-profiles`, and `trust-core` are not this package's dependencies --
-// they are `benchmarking-records`', `benchmarking-run`'s, and `benchmarking-aggregate`'s own
-// runtime edges, and an unpacked transitive Jinn dependency makes `npm install` reach for a
-// registry version that does not exist.
+// The private live host adds concrete backend, evaluator, evidence, and trust edges. Every runtime
+// dependency and transitive Jinn edge must therefore be present as a local archive; otherwise the
+// isolated consumer reaches for a registry version that intentionally does not exist.
 //
 // `task-execution-testing` is deliberately absent: it is a devDependency, so no installer of this
 // package ever receives it, and packing it would drag the whole local-backend tree into a canary
 // whose subject is the product's public types.
 const CROSS_TREE_PACKAGES = [
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
+  ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
+  ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
+  ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
+  ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
+  ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
+  ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],

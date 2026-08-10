@@ -56,6 +56,17 @@ describe("deterministic evaluation dispatch", () => {
     expect(first.expectation).toEqual(second.expectation);
   });
 
+  test("preserves Delivery output names in the evaluation subject bindings", () => {
+    const derived = derive();
+    const task = JSON.parse(new TextDecoder().decode(derived.taskBytes)) as {
+      payload: { subjectResults: readonly { name: string }[] };
+    };
+
+    expect(task.payload.subjectResults).toEqual([
+      expect.objectContaining({ name: "patch" }),
+    ]);
+  });
+
   test("refuses a Delivery object substituted beside different exact bytes", () => {
     const material = fixture();
     const substituted = DeliveryRecordSchema.parse({

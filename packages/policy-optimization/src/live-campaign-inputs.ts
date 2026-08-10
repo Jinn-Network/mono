@@ -12,6 +12,10 @@ import {
   type PolicyOptimizationObjectivePreset,
 } from "./objective-presets.js";
 import { parseExactPolicyOptimizationSplitManifest } from "./split-manifest.js";
+import type {
+  PolicyOptimizationAllocationPreset,
+  PolicyOptimizationJourney,
+} from "./split-manifest.js";
 import { SAME_OPERATOR_EVALUATION_LIMITATION } from "./recommendation.js";
 import type { CampaignObjective } from "./types.js";
 
@@ -37,18 +41,22 @@ export interface LiveCampaignInputs {
   readonly snapshotDigest: string;
   readonly splitManifestDigest: string;
   readonly seed: { readonly kind: "tuple"; readonly digest: string };
+  readonly journey: PolicyOptimizationJourney;
+  readonly allocationPreset: PolicyOptimizationAllocationPreset;
   readonly pool: {
     readonly snapshotDigest: string;
     readonly eligibleGroups: number;
     readonly exclusions: readonly { readonly id: string; readonly reason: string }[];
   };
   readonly evidenceAccess: {
-    readonly proposerGroups: readonly string[];
-    readonly developmentGroups: readonly string[];
-    readonly promotionGroups: readonly string[];
-    readonly selectExactlyOneChallenger: true;
-    readonly freezeSelectionBeforePromotionReveal: true;
-    readonly consumePromotionOnFirstRevealOrDispatch: true;
+    readonly exploration: {
+      readonly proposerGroups: readonly string[];
+      readonly selectionGroups: readonly string[];
+    };
+    readonly confirmationGroups: readonly string[];
+    readonly challengerSource: "selected-from-exploration" | "operator-supplied";
+    readonly freezeChallengerBeforeConfirmationReveal: true;
+    readonly consumeConfirmationOnFirstRevealOrDispatch: true;
   };
   readonly objectivePreset: PolicyOptimizationObjectivePreset;
   readonly objective: CampaignObjective;
@@ -56,8 +64,8 @@ export interface LiveCampaignInputs {
   readonly candidatePayloadRisks: readonly string[];
   readonly executionCells: {
     readonly replicates: number;
-    readonly development: number;
-    readonly promotion: number;
+    readonly selection: number;
+    readonly confirmation: number;
     readonly total: number;
   };
   readonly independence: "disclosed";
@@ -91,9 +99,9 @@ export function compileLiveCampaignInputs(input: LiveCampaignCompileInput): Seal
     splitManifestBytes: input.splitManifestBytes,
     splitManifestDigest,
   });
-  const development = split.assignments.development.length * 2 * input.replicates;
-  const promotion = split.assignments.promotion.length * 2 * input.replicates;
-  if (!Number.isSafeInteger(development + promotion)) {
+  const selection = split.assignments.development.length * 2 * input.replicates;
+  const confirmation = split.assignments.promotion.length * 2 * input.replicates;
+  if (!Number.isSafeInteger(selection + confirmation)) {
     refuse("invalid-document", "executionCells", "execution cell count exceeds safe integer range");
   }
   const campaign: LiveCampaignInputs = {
@@ -103,18 +111,24 @@ export function compileLiveCampaignInputs(input: LiveCampaignCompileInput): Seal
     snapshotDigest,
     splitManifestDigest,
     seed: { kind: "tuple", digest: snapshot.seed.digest },
+    journey: split.allocation.journey,
+    allocationPreset: split.allocation.preset,
     pool: {
       snapshotDigest: split.poolSnapshot.digest,
       eligibleGroups: split.groups.length,
       exclusions: split.exclusions.map((entry) => ({ ...entry })),
     },
     evidenceAccess: {
-      proposerGroups: [...split.assignments.training],
-      developmentGroups: [...split.assignments.development],
-      promotionGroups: [...split.assignments.promotion],
-      selectExactlyOneChallenger: true,
-      freezeSelectionBeforePromotionReveal: true,
-      consumePromotionOnFirstRevealOrDispatch: true,
+      exploration: {
+        proposerGroups: [...split.assignments.training],
+        selectionGroups: [...split.assignments.development],
+      },
+      confirmationGroups: [...split.assignments.promotion],
+      challengerSource: split.allocation.journey === "explore-confirm"
+        ? "selected-from-exploration"
+        : "operator-supplied",
+      freezeChallengerBeforeConfirmationReveal: true,
+      consumeConfirmationOnFirstRevealOrDispatch: true,
     },
     objectivePreset: input.objectivePreset,
     objective,
@@ -122,9 +136,9 @@ export function compileLiveCampaignInputs(input: LiveCampaignCompileInput): Seal
     candidatePayloadRisks: sortedUnique(input.candidatePayloadRisks),
     executionCells: {
       replicates: input.replicates,
-      development,
-      promotion,
-      total: development + promotion,
+      selection,
+      confirmation,
+      total: selection + confirmation,
     },
     independence: "disclosed",
     limitations: [SAME_OPERATOR_EVALUATION_LIMITATION],

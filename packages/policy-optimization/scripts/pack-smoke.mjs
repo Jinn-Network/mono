@@ -151,9 +151,13 @@ const expectedJinnDependencies = [
   "@jinn-network/policy-outcomes",
   "@jinn-network/task-execution-backend",
   "@jinn-network/task-execution-backend-local",
+  "@jinn-network/task-execution-evaluation-harness",
   "@jinn-network/task-execution-evaluator-adapters",
+  "@jinn-network/task-execution-launchers",
   "@jinn-network/task-execution-profiles",
   "@jinn-network/task-execution-protocol",
+  "@jinn-network/task-execution-supervisor",
+  "@jinn-network/task-execution-workspace",
   "@jinn-network/trust-core",
 ];
 if (jinnDependencies.join(",") !== expectedJinnDependencies.join(",")) {

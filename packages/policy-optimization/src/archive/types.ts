@@ -184,8 +184,8 @@ export interface AdoptionRecord {
    */
   readonly payloadClassesApproved: readonly AdoptionComponentClass[];
   /** Evidence label at consent time. Added for the guided host; absent on replay-era records. */
-  readonly recommendationStatus?: "proven" | "inconclusive";
-  /** Present only for the advanced inconclusive override path. */
+  readonly recommendationStatus?: "proven" | "promising" | "inconclusive";
+  /** Present only for the advanced non-proven override path (`--override-inconclusive`). */
   readonly overrideReason?: string;
   /** Exact configuration revision the prepared change and rollback target. */
   readonly baseConfigurationRevision?: string;

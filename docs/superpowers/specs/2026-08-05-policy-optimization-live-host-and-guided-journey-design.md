@@ -2,6 +2,7 @@
 
 **Status:** approved implementation design
 **Date:** 2026-08-05
+**Amended:** 2026-08-07 — configurable explore/confirm journeys; `3/3/6` restored as a default
 **Base:** `integration/evidence-v1`
 **Extends:** `2026-08-03-policy-optimization-product-design.md`
 
@@ -15,7 +16,7 @@ replaceable. Adoption remains local.
 
 This design adds the first complete operator journey and the missing live host. The standalone
 `jinn-optimize` executable captures the exact policy a selected route would use next, freezes an
-eligible SupplyPool into training, development, and promotion partitions, dispatches real solve
+eligible SupplyPool into exploration and confirmation partitions, dispatches real solve
 and evaluation Attempts, computes registry-owned comparisons, and prepares an operator-approved
 configuration change and rollback.
 
@@ -32,8 +33,9 @@ The guided journey guarantees:
   bytes rather than a remembered or reconstructed setup;
 - the split is one immutable content-addressed artifact with whole-source grouping and explicit
   exclusions;
-- development chooses exactly one challenger before promotion is revealed;
-- promotion is evaluated through ordinary Task Execution Protocol Attempts and signed evaluation
+- exploration chooses exactly one challenger before confirmation is revealed, unless the operator
+  brought a preselected change through the confirmation-only journey;
+- confirmation is evaluated through ordinary Task Execution Protocol Attempts and signed evaluation
   evidence;
 - every recommendation is a deterministic projection of exact Run, Matrix, Report, and registered
   method results;
@@ -46,6 +48,22 @@ processes running as the same OS user. Its Runs declare `independence: "disclose
 
 Detailed progress/waiting UX, monetary budget displays, rich mid-run failure UX, continuous
 optimization, automatic apply/canary, and hostile cross-operator execution remain deferred.
+
+### 2.1 First runnable slice and truth in labeling
+
+The first runnable slice is the confirmation-only journey over one operator-supplied loadout
+change and six fresh public SWE-rebench provenance groups. It may land in two explicit stages:
+
+1. **prepare** captures both loadouts, resolves real upstream tasks and immutable grader-image
+   manifests, verifies local admissions, seals the snapshot/split/campaign/run-plan artifacts, and
+   writes them only after confirmation;
+2. **run** binds those artifacts to the role-scoped solver and evaluator backends, container grader,
+   journal reducer, recovery, Reports, and recommendation.
+
+The product must label the stage it has reached. A prepare-only build never calls itself a live
+campaign, never shows a recommendation, and never implies that tasks were solved or graded. The
+simulated fixture campaign remains separately named. This staging changes no eventual guarantee
+in this design; it prevents partial implementation from presenting input realism as measurement.
 
 ## 3. Operator journey
 
@@ -63,11 +81,17 @@ largest tuple class, or latest successful execution. It then:
 2. validates and groups the selected SupplyPool;
 3. seals the split and objective preset;
 4. captures the current policy tuple seed;
-5. prepares candidate-generation evidence from training only;
+5. follows either the explore/confirm journey or the confirmation-only "test this change" journey;
 6. shows the complete plan and same-operator limitation;
 7. asks once for execution confirmation;
-8. executes development, freezes one challenger, and executes promotion;
+8. executes exploration selection when requested, freezes one challenger, and executes confirmation;
 9. renders the recommendation and explicit adoption actions.
+
+The ordinary journey is the familiar learning loop: **explore → confirm → use or keep → observe →
+explore again**. Each cycle is a new sealed campaign over still-eligible evidence. It may spend
+more or less on proposal evidence, challenger selection, and fresh confirmation. The simpler
+**test this change** journey skips proposal and selection: the operator supplies one challenger,
+freezes it, and compares it directly with the current policy on fresh confirmation groups.
 
 ### 3.2 Next-run policy snapshot
 
@@ -112,8 +136,8 @@ normalized, domain-separated digests over the sorted member Task digests and nor
 keys, never caller-provided labels.
 
 The authoritative attempted/consumed set is an append-only local campaign index, not SupplyPool
-metadata. It includes every promotion Task or group ever revealed or dispatched by any campaign.
-A promotion group is consumed on first reveal or dispatch; cancellation, infrastructure failure,
+metadata. It includes every confirmation Task or group ever revealed or dispatched by any campaign.
+A confirmation group is consumed on first reveal or dispatch; cancellation, infrastructure failure,
 or an inconclusive result never makes it reusable.
 
 `PolicyOptimizationSplitManifest/1.0` is strict RFC 8785/I-JSON. Duplicate object keys, invalid
@@ -127,19 +151,30 @@ manifest records:
 - selected execution tuple class;
 - group-extractor version and normalized connected components;
 - a deterministic split seed;
-- training, development, and promotion assignments;
-- training evidence/query, revealed development Benchmark, and committed promotion Benchmark
+- proposal-evidence, selection, and confirmation assignments (encoded under the current internal
+  training, development, and promotion field names);
+- proposal evidence/query, revealed selection Benchmark, and committed confirmation Benchmark
   references.
 
-Allocation reserves promotion first, development second, and assigns the remainder to training.
-The minimums are 3 training groups, 3 development groups, and 6 promotion groups. All groups above
-the twelve-group minimum go to promotion. An item-level fallback, padding, or silent ratio is
-forbidden. The floor makes a proof outcome attainable but is not a power guarantee.
+Allocation is explicit and sealed. `balanced-3-3-6@1` is the default: three proposal groups, three
+selection groups, and at least six confirmation groups. It is a product default, not a protocol
+minimum. `test-this-change@1` uses no exploration groups and sends every eligible group directly
+to confirmation. `custom@1` lets the operator set the three counts; explore/confirm requires at
+least one proposal and one selection group, while every journey requires at least one fresh
+confirmation group. Confirmation is reserved first, selection second, and proposal evidence last;
+all groups above the requested counts go to confirmation. An item-level fallback, padding, or
+silent ratio is forbidden.
 
-The product supplies only training evidence to its proposer. Development is available after
-candidate sealing. Promotion is committed but not made available through the product proposer
-interface until exactly one promotion Run is sealed. This is an interface discipline, not a
-same-UID confidentiality guarantee.
+Six non-tied confirmation groups are the smallest all-favorable result that can satisfy the exact
+whole-group proof gate. That statistical fact controls the `proven` label only. It does not prevent
+a smaller campaign from running, learning, or returning `promising`/`inconclusive` evidence, and
+it is not a power guarantee.
+
+In the explore/confirm journey the product supplies only proposal evidence to its proposer.
+Selection evidence is available after candidate sealing. Confirmation is committed but not made
+available through the product proposer interface until exactly one confirmation Run is sealed.
+The confirmation-only journey exposes neither proposal nor selection evidence. This is an
+interface discipline, not a same-UID confidentiality guarantee.
 
 ## 4. Objectives and recommendation
 
@@ -164,21 +199,23 @@ cluster. It reports favorable, unfavorable, tied, and non-tied clusters plus the
 binomial sign-test probability for the non-tied votes. Six uniformly favorable groups yield
 `2 / 2^6 = 0.03125`; five cannot cross `.05`.
 
-Development evaluates the baseline and all admitted candidates. Before promotion reveal it selects
+Exploration selection evaluates the baseline and all admitted candidates. Before confirmation reveal it selects
 exactly one challenger only when the candidate passes fidelity/constraints and has a strictly
 higher registered `avg-at-k` result than the baseline and every other candidate. Ties or no
 improvement select no challenger. Digest ordering is display ordering only.
 
-Promotion contains exactly the baseline and frozen challenger with `replicates: 1`. The derived
+Confirmation contains exactly the baseline and frozen challenger with `replicates: 1`. The derived
 recommendation is `proven-challenger` only when:
 
-- the preregistered promotion Run is complete and all required cells are judged;
+- the preregistered confirmation Run is complete and all required cells are judged;
 - fidelity, payload consent, and objective constraints pass;
 - improved Tasks exceed regressed Tasks;
 - exact McNemar `pValue < .05`;
 - exact provenance-cluster sign `pValue < .05`.
 
-Every other state produces `keep-current` and stable reason codes. The result is a deterministic
+If all integrity and direction gates pass but the statistical proof gates do not, the evidence is
+`promising`; hard gate failures or non-favorable direction are `inconclusive`. Both keep the current
+policy by default and carry stable reason codes. The result is a deterministic
 `RecommendationDecision` projection, not a new sealed authority record. Persisted caches or journal
 events carry only input references and cannot replace re-derivation.
 
@@ -196,7 +233,7 @@ Normal adoption is a separate explicit command. It records consent bound to rout
 tuple digest, recommendation input digests, and base `configRevision`, then prints the exact
 next-run configuration change and exact rollback. It never writes the daemon configuration.
 
-An inconclusive challenger may be prepared only through `--override-inconclusive`. The command
+Any non-proven challenger may be prepared only through `--override-inconclusive`. The command
 requires an override reason, repeats the evidence warning, requires explicit confirmation in the
 interactive path, records the recommendation status and reason, and still performs all payload and
 revision checks. The override preserves operator authority but does not change the evidence label
@@ -304,6 +341,9 @@ The implementation is accepted only when:
 
 - six favorable clusters produce `.03125`, five cannot pass, and ties/mixed/relabelled clusters
   produce the documented deterministic result;
+- the balanced preset produces 3/3/6 plus confirmation remainder, custom smaller campaigns run
+  without receiving a proven label, and test-this-change sends all eligible groups to confirmation;
+- a confirmation group consumed in one campaign cannot be reused by a later explore/confirm cycle;
 - derivation fixtures carry honest timestamps and regenerated SupplyPool Tasks pass benchmarking
   judgeability without weakening checks;
 - two live backend instances prove exclusive roots, identities, keys, and locks;

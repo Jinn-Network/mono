@@ -48,6 +48,7 @@ const ALLOWED_JINN_PACKAGES = [
 // host authority or local-machine capabilities.
 const HOST_LOCAL_ALLOWED_JINN_PACKAGES = [
   ...ALLOWED_JINN_PACKAGES,
+  '@jinn-network/attestation-issuer',
   '@jinn-network/evidence-discovery',
   '@jinn-network/evidence-protocol',
   '@jinn-network/evidence-repository',

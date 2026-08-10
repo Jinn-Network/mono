@@ -12,9 +12,47 @@ import { refuse } from "./errors.js";
 export const POLICY_OPTIMIZATION_SPLIT_MANIFEST_FORMAT_TOKEN =
   "network.jinn.policy-optimization.split-manifest/1.0" as const;
 export const POLICY_OPTIMIZATION_ALLOCATION_ALGORITHM = {
-  id: "promotion-first-connected-components",
-  version: "1",
+  id: "configurable-confirmation-first-connected-components",
+  version: "2",
 } as const;
+export const POLICY_OPTIMIZATION_ALLOCATION_PRESETS = [
+  "balanced-3-3-6@1",
+  "test-this-change@1",
+  "custom@1",
+] as const;
+
+export type PolicyOptimizationAllocationPreset =
+  (typeof POLICY_OPTIMIZATION_ALLOCATION_PRESETS)[number];
+export type PolicyOptimizationJourney = "explore-confirm" | "confirm-only";
+
+/**
+ * The split's resolved learning strategy. The old 3/3/6 layout is the balanced default, not a
+ * protocol floor. Confirmation always receives unallocated groups so asking for more evidence can
+ * only strengthen the fresh comparison; a group is never split or padded.
+ */
+export interface PolicyOptimizationSplitAllocation {
+  readonly preset: PolicyOptimizationAllocationPreset;
+  readonly journey: PolicyOptimizationJourney;
+  readonly exploration: {
+    readonly proposalGroups: number;
+    readonly selectionGroups: number;
+  };
+  readonly confirmation: {
+    readonly minimumGroups: number;
+  };
+  readonly remainder: "confirmation";
+}
+
+export type PolicyOptimizationAllocationRequest =
+  | { readonly preset: "balanced-3-3-6@1" }
+  | { readonly preset: "test-this-change@1" }
+  | {
+      readonly preset: "custom@1";
+      readonly journey: PolicyOptimizationJourney;
+      readonly proposalGroups: number;
+      readonly selectionGroups: number;
+      readonly confirmationGroups: number;
+    };
 
 const DIGEST = /^sha256:[a-f0-9]{64}$/u;
 const Digest = z.string().regex(DIGEST);
@@ -66,6 +104,7 @@ export interface PolicyOptimizationSplitManifest {
   readonly exclusions: readonly { readonly id: string; readonly reason: SplitExclusionReason }[];
   readonly tupleClass: string;
   readonly allocationAlgorithm: typeof POLICY_OPTIMIZATION_ALLOCATION_ALGORITHM;
+  readonly allocation: PolicyOptimizationSplitAllocation;
   readonly seed: { readonly tupleDigest: string; readonly snapshotDigest: string };
   readonly groups: readonly {
     readonly groupId: string;
@@ -96,6 +135,7 @@ const Group = z.strictObject({
   sourceLineage: z.array(NonEmpty),
   members: z.array(NonEmpty),
 });
+const SafeCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const ManifestSchema = z.strictObject({
   formatToken: z.literal(POLICY_OPTIMIZATION_SPLIT_MANIFEST_FORMAT_TOKEN),
   poolSnapshot: z.strictObject({
@@ -112,6 +152,16 @@ const ManifestSchema = z.strictObject({
   allocationAlgorithm: z.strictObject({
     id: z.literal(POLICY_OPTIMIZATION_ALLOCATION_ALGORITHM.id),
     version: z.literal(POLICY_OPTIMIZATION_ALLOCATION_ALGORITHM.version),
+  }),
+  allocation: z.strictObject({
+    preset: z.enum(POLICY_OPTIMIZATION_ALLOCATION_PRESETS),
+    journey: z.enum(["explore-confirm", "confirm-only"]),
+    exploration: z.strictObject({
+      proposalGroups: SafeCount,
+      selectionGroups: SafeCount,
+    }),
+    confirmation: z.strictObject({ minimumGroups: SafeCount }),
+    remainder: z.literal("confirmation"),
   }),
   seed: z.strictObject({ tupleDigest: Digest, snapshotDigest: Digest }),
   groups: z.array(Group),
@@ -136,6 +186,101 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 
 function sameJson(left: JsonValue, right: JsonValue): boolean {
   return sameBytes(canonicalJsonBytes(left), canonicalJsonBytes(right));
+}
+
+function resolvedAllocation(
+  request: PolicyOptimizationAllocationRequest | undefined,
+): PolicyOptimizationSplitAllocation {
+  if (request === undefined || request.preset === "balanced-3-3-6@1") {
+    return {
+      preset: "balanced-3-3-6@1",
+      journey: "explore-confirm",
+      exploration: { proposalGroups: 3, selectionGroups: 3 },
+      confirmation: { minimumGroups: 6 },
+      remainder: "confirmation",
+    };
+  }
+  if (request.preset === "test-this-change@1") {
+    return {
+      preset: "test-this-change@1",
+      journey: "confirm-only",
+      exploration: { proposalGroups: 0, selectionGroups: 0 },
+      confirmation: { minimumGroups: 1 },
+      remainder: "confirmation",
+    };
+  }
+  const counts = [request.proposalGroups, request.selectionGroups, request.confirmationGroups];
+  if (counts.some((count) => !Number.isSafeInteger(count) || count < 0)) {
+    refuse("invalid-document", "allocation", "custom allocation counts must be non-negative safe integers");
+  }
+  if (request.confirmationGroups < 1) {
+    refuse("invalid-document", "allocation.confirmationGroups", "every campaign needs at least one fresh confirmation group");
+  }
+  if (request.journey === "explore-confirm"
+    && (request.proposalGroups < 1 || request.selectionGroups < 1)) {
+    refuse("invalid-document", "allocation", "explore-confirm needs at least one proposal and one selection group");
+  }
+  if (request.journey === "confirm-only"
+    && (request.proposalGroups !== 0 || request.selectionGroups !== 0)) {
+    refuse("invalid-document", "allocation", "confirm-only cannot reveal proposal or selection evidence");
+  }
+  return {
+    preset: "custom@1",
+    journey: request.journey,
+    exploration: {
+      proposalGroups: request.proposalGroups,
+      selectionGroups: request.selectionGroups,
+    },
+    confirmation: { minimumGroups: request.confirmationGroups },
+    remainder: "confirmation",
+  };
+}
+
+function validateResolvedAllocation(allocation: PolicyOptimizationSplitAllocation): void {
+  const counts = [
+    allocation.exploration.proposalGroups,
+    allocation.exploration.selectionGroups,
+    allocation.confirmation.minimumGroups,
+  ];
+  if (counts.some((count) => !Number.isSafeInteger(count) || count < 0)
+    || allocation.confirmation.minimumGroups < 1) {
+    refuse("invalid-document", "splitManifest.allocation", "allocation counts are invalid");
+  }
+  if (!Number.isSafeInteger(counts.reduce((total, count) => total + count, 0))) {
+    refuse("invalid-document", "splitManifest.allocation", "the combined allocation exceeds the safe integer range");
+  }
+  if (allocation.preset === "balanced-3-3-6@1"
+    && (allocation.journey !== "explore-confirm"
+      || allocation.exploration.proposalGroups !== 3
+      || allocation.exploration.selectionGroups !== 3
+      || allocation.confirmation.minimumGroups !== 6)) {
+    refuse("invalid-document", "splitManifest.allocation", "balanced-3-3-6@1 has fixed 3/3/6 defaults");
+  }
+  if (allocation.preset === "test-this-change@1"
+    && (allocation.journey !== "confirm-only"
+      || allocation.exploration.proposalGroups !== 0
+      || allocation.exploration.selectionGroups !== 0
+      || allocation.confirmation.minimumGroups !== 1)) {
+    refuse("invalid-document", "splitManifest.allocation", "test-this-change@1 sends every eligible group directly to confirmation");
+  }
+  if (allocation.journey === "explore-confirm"
+    && (allocation.exploration.proposalGroups < 1 || allocation.exploration.selectionGroups < 1)) {
+    refuse("invalid-document", "splitManifest.allocation", "explore-confirm needs proposal and selection evidence");
+  }
+  if (allocation.journey === "confirm-only"
+    && (allocation.exploration.proposalGroups !== 0 || allocation.exploration.selectionGroups !== 0)) {
+    refuse("invalid-document", "splitManifest.allocation", "confirm-only cannot carry exploration evidence");
+  }
+}
+
+function requestedGroupCount(allocation: PolicyOptimizationSplitAllocation): number {
+  const count = allocation.exploration.proposalGroups
+    + allocation.exploration.selectionGroups
+    + allocation.confirmation.minimumGroups;
+  if (!Number.isSafeInteger(count)) {
+    refuse("invalid-document", "allocation", "the combined allocation exceeds the safe integer range");
+  }
+  return count;
 }
 
 function firstIneligibility(
@@ -197,6 +342,7 @@ export function formPolicyOptimizationSplit(input: {
   readonly candidates: readonly SplitPoolCandidate[];
   readonly tupleClass: string;
   readonly seed: PolicyOptimizationSplitManifest["seed"];
+  readonly allocation?: PolicyOptimizationAllocationRequest;
 }): SealedPolicyOptimizationSplitManifest {
   if (input.tupleClass.length === 0
     || !DIGEST.test(input.seed.tupleDigest) || !DIGEST.test(input.seed.snapshotDigest)) {
@@ -249,15 +395,18 @@ export function formPolicyOptimizationSplit(input: {
     return { groupId: prefixedDigest(canonicalJsonBytes(body)), ...body };
   }).sort((left, right) => compareCodeUnitStrings(left.groupId, right.groupId));
 
-  if (groups.length < 12) {
+  const allocation = resolvedAllocation(input.allocation);
+  const requestedGroups = requestedGroupCount(allocation);
+  if (groups.length < requestedGroups) {
     refuse("invalid-document", "groups",
-      `${groups.length} eligible connected groups cannot satisfy the 3 training / 3 development / 6 promotion floors; groups are never split or padded`);
+      `${groups.length} eligible connected groups cannot satisfy the selected allocation's ${requestedGroups}-group minimum; groups are never split or padded`);
   }
   const ranked = shuffledGroups(groups, input.seed);
-  const promotionCount = ranked.length - 6;
+  const promotionCount = allocation.confirmation.minimumGroups + (ranked.length - requestedGroups);
+  const developmentEnd = promotionCount + allocation.exploration.selectionGroups;
   const promotion = ranked.slice(0, promotionCount).map((group) => group.groupId).sort(compareCodeUnitStrings);
-  const development = ranked.slice(promotionCount, promotionCount + 3).map((group) => group.groupId).sort(compareCodeUnitStrings);
-  const training = ranked.slice(promotionCount + 3).map((group) => group.groupId).sort(compareCodeUnitStrings);
+  const development = ranked.slice(promotionCount, developmentEnd).map((group) => group.groupId).sort(compareCodeUnitStrings);
+  const training = ranked.slice(developmentEnd).map((group) => group.groupId).sort(compareCodeUnitStrings);
 
   const poolEntries = [...input.candidates].map((candidate) => ({
     id: candidate.id || "<missing-id>",
@@ -272,6 +421,7 @@ export function formPolicyOptimizationSplit(input: {
     exclusions: exclusions.sort((a, b) => compareCodeUnitStrings(a.id, b.id)),
     tupleClass: input.tupleClass,
     allocationAlgorithm: POLICY_OPTIMIZATION_ALLOCATION_ALGORITHM,
+    allocation,
     seed: input.seed,
     groups,
     assignments: { training, development, promotion },
@@ -294,6 +444,7 @@ export function parseExactPolicyOptimizationSplitManifest(
     refuse("invalid-document", "splitManifest", "bytes are not the exact canonical encoding");
   }
   const manifest = parsed.data as PolicyOptimizationSplitManifest;
+  validateResolvedAllocation(manifest.allocation);
   const poolEntries = [...manifest.poolSnapshot.entries]
     .sort((left, right) => compareCodeUnitStrings(left.id, right.id));
   if (prefixedDigest(canonicalJsonBytes({ entries: poolEntries })) !== manifest.poolSnapshot.digest
@@ -370,16 +521,17 @@ export function parseExactPolicyOptimizationSplitManifest(
   if (all.some((group) => !declared.has(group))) {
     refuse("invalid-document", "splitManifest.assignments", "an assignment names an unknown group");
   }
-  if (manifest.assignments.training.length < 3
-    || manifest.assignments.development.length < 3
-    || manifest.assignments.promotion.length < 6) {
-    refuse("invalid-document", "splitManifest.assignments", "the 3/3/6 formation floors are mandatory");
+  const requestedGroups = requestedGroupCount(manifest.allocation);
+  if (manifest.groups.length < requestedGroups) {
+    refuse("invalid-document", "splitManifest.assignments", "the selected allocation cannot be satisfied without splitting or padding groups");
   }
   const ranked = shuffledGroups(manifest.groups, manifest.seed);
-  const promotionCount = ranked.length - 6;
+  const promotionCount = manifest.allocation.confirmation.minimumGroups
+    + (ranked.length - requestedGroups);
+  const developmentEnd = promotionCount + manifest.allocation.exploration.selectionGroups;
   const expectedAssignments = {
-    training: ranked.slice(promotionCount + 3).map((group) => group.groupId).sort(compareCodeUnitStrings),
-    development: ranked.slice(promotionCount, promotionCount + 3).map((group) => group.groupId).sort(compareCodeUnitStrings),
+    training: ranked.slice(developmentEnd).map((group) => group.groupId).sort(compareCodeUnitStrings),
+    development: ranked.slice(promotionCount, developmentEnd).map((group) => group.groupId).sort(compareCodeUnitStrings),
     promotion: ranked.slice(0, promotionCount).map((group) => group.groupId).sort(compareCodeUnitStrings),
   };
   const actualAssignmentBytes = canonicalJsonBytes(manifest.assignments);
@@ -404,13 +556,12 @@ export function consumePromotionGroups(input: {
   readonly cause: PromotionConsumption["cause"];
   readonly prior: readonly PromotionConsumption[];
 }): readonly PromotionConsumption[] {
-  const consumed = new Set(input.prior.map((entry) => `${entry.manifestDigest}\0${entry.groupId}`));
+  const consumed = new Set(input.prior.map((entry) => entry.groupId));
   const additions = sortedUnique(input.promotionGroupIds).map((groupId) => {
-    const key = `${input.manifestDigest}\0${groupId}`;
-    if (consumed.has(key)) {
+    if (consumed.has(groupId)) {
       refuse("promotion-discipline", "promotionGroups", `${groupId} was already consumed; cancellation and inconclusive results never make promotion reusable`);
     }
-    consumed.add(key);
+    consumed.add(groupId);
     return { manifestDigest: input.manifestDigest, groupId, cause: input.cause } as const;
   });
   return [...input.prior, ...additions];

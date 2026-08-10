@@ -300,21 +300,23 @@ export interface SealSignedRecordInput {
   readonly signal?: AbortSignal;
 }
 
+export interface SealSignedPayloadInput {
+  /** Exact payload bytes already validated against their family-specific canonical convention. */
+  readonly payloadBytes: Uint8Array;
+  readonly payloadType: string;
+  readonly signer: DsseSigner;
+  readonly signal?: AbortSignal;
+}
+
 export interface SealedRecord {
   readonly envelopeBytes: Uint8Array;
   readonly payloadBytes: Uint8Array;
   readonly recordDigest: Sha256Digest;
 }
 
-/**
- * Canonicalizes `input.record`, signs its DSSE pre-authentication encoding
- * via the injected `signer`, and seals the DSSE envelope under
- * `input.payloadType`. `recordDigest` is the digest of the sealed envelope
- * bytes (the record's identity), matching the evidence-protocol precedent
- * (`recordDigest(envelopeBytes)`, not the bare payload).
- */
-export async function sealSignedRecord(input: SealSignedRecordInput): Promise<SealedRecord> {
-  const payloadBytes = canonicalJsonBytes(input.record);
+/** Signs already-validated exact payload bytes without silently reserializing them. */
+export async function sealSignedPayload(input: SealSignedPayloadInput): Promise<SealedRecord> {
+  const payloadBytes = Uint8Array.from(input.payloadBytes);
   const preAuthEncoding = dssePreAuthEncoding(input.payloadType, payloadBytes);
   const signatures = await input.signer({
     payloadType: input.payloadType,
@@ -332,6 +334,23 @@ export async function sealSignedRecord(input: SealSignedRecordInput): Promise<Se
     payloadBytes,
     recordDigest: recordDigest(envelopeBytes),
   };
+}
+
+/**
+ * Canonicalizes `input.record`, signs its DSSE pre-authentication encoding
+ * via the injected `signer`, and seals the DSSE envelope under
+ * `input.payloadType`. `recordDigest` is the digest of the sealed envelope
+ * bytes (the record's identity), matching the evidence-protocol precedent
+ * (`recordDigest(envelopeBytes)`, not the bare payload).
+ */
+export async function sealSignedRecord(input: SealSignedRecordInput): Promise<SealedRecord> {
+  const payloadBytes = canonicalJsonBytes(input.record);
+  return sealSignedPayload({
+    payloadBytes,
+    payloadType: input.payloadType,
+    signer: input.signer,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
 }
 
 export interface ParsedSignedRecordEnvelope {

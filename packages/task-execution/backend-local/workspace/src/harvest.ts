@@ -98,6 +98,11 @@ export async function harvest(
     walk(logsRoot, logsRoot, "logs", manifest, integrityViolations);
   }
   manifest.sort((a, b) => compareCodeUnitStrings(a.path, b.path));
+  const declarations = new Map(declaredOutputs.map((output) => [output.name, output]));
+  const typedManifest = manifest.map((artifact) => {
+    const mediaType = declarations.get(artifact.path)?.mediaType;
+    return mediaType === undefined ? artifact : { ...artifact, mediaType };
+  });
   integrityViolations.push(...inputViolations(paths));
   integrityViolations.sort((a, b) => compareCodeUnitStrings(a.path, b.path));
   const names = new Set(manifest.map((entry) => entry.path));
@@ -105,5 +110,5 @@ export async function harvest(
     .filter((output) => !names.has(output.name))
     .map((output) => output.name)
     .sort(compareCodeUnitStrings);
-  return { manifest, omissions, integrityViolations };
+  return { manifest: typedManifest, omissions, integrityViolations };
 }

@@ -9,7 +9,11 @@ import {
 } from "./live-campaign-inputs.js";
 import { captureNextRunPolicySnapshot, sealNextRunPolicySnapshot } from "./next-run-policy-snapshot.js";
 import { formPolicyOptimizationSplit, type SplitPoolCandidate } from "./split-manifest.js";
-import { compilePrepareArguments, runGuidedJourney } from "./host-local/guide.js";
+import {
+  compilePrepareArguments,
+  liveCampaignConfirmationSummary,
+  runGuidedJourney,
+} from "./host-local/guide.js";
 
 function snapshot() {
   const rows = JSON.parse(readFileSync(
@@ -112,7 +116,7 @@ describe("live campaign input compilation", () => {
     const authored = compilePrepareArguments([
       "campaign", "prepare", "--document", "authoring.json",
     ], root).sealed;
-    const answers = ["authoring.json", "state", "yes"];
+    const answers = ["3", "authoring.json", "state", "yes"];
     const guidedResult = await runGuidedJourney({
       cwd: root,
       io: { question: async () => answers.shift() ?? "", write: () => undefined },
@@ -132,9 +136,41 @@ describe("live campaign input compilation", () => {
     expect(guidedBytes).toEqual(direct.bytes);
     expect(flagged.bytes).toEqual(direct.bytes);
     expect(authored.bytes).toEqual(direct.bytes);
-    expect(direct.campaign.evidenceAccess.proposerGroups).toHaveLength(3);
-    expect(direct.campaign.evidenceAccess.developmentGroups).toHaveLength(3);
-    expect(direct.campaign.evidenceAccess.promotionGroups).toHaveLength(7);
+    expect(direct.campaign.journey).toBe("explore-confirm");
+    expect(direct.campaign.allocationPreset).toBe("balanced-3-3-6@1");
+    expect(direct.campaign.evidenceAccess.exploration.proposerGroups).toHaveLength(3);
+    expect(direct.campaign.evidenceAccess.exploration.selectionGroups).toHaveLength(3);
+    expect(direct.campaign.evidenceAccess.confirmationGroups).toHaveLength(7);
+    expect(direct.campaign.evidenceAccess.challengerSource).toBe("selected-from-exploration");
     expect(direct.campaign.candidatePayloadRisks).toEqual(["hook", "prompt"]);
+  });
+
+  test("compiles a preselected challenger straight into fresh confirmation", () => {
+    const captured = snapshot();
+    const split = formPolicyOptimizationSplit({
+      candidates: Array.from({ length: 5 }, (_, index) => candidate(index)),
+      tupleClass: "repository-work/1.0",
+      seed: { tupleDigest: captured.snapshot.seed.digest, snapshotDigest: captured.digest },
+      allocation: { preset: "test-this-change@1" },
+    });
+    const sealed = compileLiveCampaignInputs({
+      snapshotBytes: captured.bytes,
+      splitManifestBytes: split.bytes,
+      objectivePreset: "more-tasks-succeed@1",
+      baselineArm: "current",
+      candidateArm: "operator-change",
+      replicates: 1,
+      candidatePayloadRisks: [],
+    });
+    expect(sealed.campaign.journey).toBe("confirm-only");
+    expect(sealed.campaign.evidenceAccess.exploration).toEqual({
+      proposerGroups: [], selectionGroups: [],
+    });
+    expect(sealed.campaign.evidenceAccess.confirmationGroups).toHaveLength(5);
+    expect(sealed.campaign.evidenceAccess.challengerSource).toBe("operator-supplied");
+    expect(sealed.campaign.executionCells).toEqual({
+      replicates: 1, selection: 0, confirmation: 10, total: 10,
+    });
+    expect(liveCampaignConfirmationSummary(sealed)).toContain("cannot reach proven");
   });
 });
