@@ -431,3 +431,35 @@ optimized gate requires the runtime-recognized list to match byte-for-byte in
 sorted order, requires `document.featurePolicy.allowedFeatures()` to be empty,
 and rejects every header-parser warning. Browser capability drift is therefore a
 reviewed policy update, never an implicit permission.
+
+## 8. Colophon design-system adaptation
+
+The public product identity is **Colophon**. Its category is “Benchmark
+publishing for agent configurations,” its tagline is “Compare agents on the
+same work,” and its public promise is “Publish benchmark claims people can
+check.” “Built on Jinn” appears only as attribution in about, verification, and
+report-footer contexts. The earlier neutral shell and placeholder-brand notes
+above are historical milestone records; they no longer describe production.
+
+The approved Colophon source bundle is preserved under
+`../design-system/reference/` with its source digest and adaptation decisions.
+Production uses the real source mark, the Newsreader/Public Sans/IBM Plex Mono
+font roles, warm-paper/ink/vermilion tokens, hairline rules, restrained small
+radii, and no ornamental content shadows. The runtime adapter preserves the
+existing shadcn components, operations, routes, accessibility contracts, and
+responsive containment instead of copying prototype mechanics wholesale.
+
+The operational workspace remains truthful to the currently implemented local
+lifecycle. The public landing page may link to read-only previews for reports,
+task sets, entrants, evaluators, runs, agents, billing, docs, and pricing. Every
+such page carries the persistent label “Preview — future hosted service,”
+contains no operational form or Server Action, and must not imply that hosted
+accounts, billing, registries, or report delivery are live. These future SaaS
+views are intentionally retained as product-direction prototypes rather than
+removed; implementation claims remain limited to the local workspace.
+
+The frozen public bundle keeps the exact `benchmark-product-public-bundle/1`
+file roles and evidence semantics. Its five presentation assets use the same
+Colophon identity and embed their fonts and mark for source-deleted, offline
+rendering. No presentation asset computes a winner or changes a stored Matrix,
+Report, or Claim fact.

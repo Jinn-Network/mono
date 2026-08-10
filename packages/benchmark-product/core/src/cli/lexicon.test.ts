@@ -56,7 +56,7 @@ describe("CLI branding isolation (spec §9)", () => {
     for (const file of collectTsFiles(SRC_DIR)) {
       const text = readFileSync(file, "utf8");
       if (file.endsWith(`${join("src", "branding.ts")}`)) {
-        expect(text).toContain("Runs on Jinn benchmarking records");
+        expect(text).toContain("Built on Jinn.");
         continue;
       }
       expect(text, `${file} mentions Jinn outside the branding attribution`).not.toMatch(/Jinn/);

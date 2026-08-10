@@ -1,4 +1,4 @@
-# Benchmark product security and threat model
+# Colophon security and threat model
 
 This note applies only to the incubating `packages/benchmark-product` Tier 4
 product. It describes the local implementation shipped in this tree; it does
@@ -8,12 +8,16 @@ the product consumes.
 ## Deployment status: none
 
 There is no hosted service, deployed web application, remote account system,
-or hosted authentication boundary. The web app is a private local-process
+or hosted authentication boundary today. The web app is a private local-process
 client of the core operations library. The response headers documented below
 are defense in depth for `next start`, not a claim that the product is safe to
 place on the public internet. TLS, HSTS, proxy hardening, tenant isolation,
 rate limiting, session authentication, and deployment operations remain
 outside the implemented product.
+
+Colophon's hosted account, billing, registry, and report screens are retained as
+explicit read-only previews of the planned service. They carry no operational
+forms, create no authority, and do not weaken this deployment boundary.
 
 ## Protected assets
 

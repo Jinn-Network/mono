@@ -26,6 +26,7 @@ const BANNED_LEXICON = [
 ];
 
 const PROTOCOL_NAME = ["J", "inn"].join("");
+const EXPECTED_ATTRIBUTION = ["Built on ", PROTOCOL_NAME, "."].join("");
 
 const DESIGN_SYSTEM_REFS = [
   ["j", "inn-design-system"].join(""),
@@ -100,7 +101,13 @@ describe("web package lexicon and brand-neutrality sweep", () => {
 
 describe("branding drift pin", () => {
   test("the web identity is the public core branding object", () => {
-    expect(PRODUCT_BRANDING.displayName).toBe("Benchmark Product (placeholder name)");
-    expect(PRODUCT_BRANDING.tagline).toContain("hand every number to a verifier");
+    expect(PRODUCT_BRANDING).toEqual({
+      displayName: "Colophon",
+      categoryDescriptor: "Benchmark publishing for agent configurations",
+      tagline: "Compare agents on the same work.",
+      promise: "Publish benchmark claims people can check.",
+      attribution: EXPECTED_ATTRIBUTION,
+      commandName: "colophon",
+    });
   });
 });
