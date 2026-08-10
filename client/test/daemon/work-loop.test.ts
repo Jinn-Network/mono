@@ -359,18 +359,22 @@ describe('work loop', () => {
       reconcileStartup: vi.fn(async () => []),
       reconcileEngagement: vi.fn(),
     };
+    const corrections = { reconcile: vi.fn(async () => undefined) };
     const { loop } = build({
       composition: { ...composition(), mode: 'native' },
       archive: undefined,
       nativeDiscovery: {
         sync,
         takePending,
+        takePendingWithdrawals: () => [],
         acknowledge: vi.fn(),
+        acknowledgeWithdrawal: vi.fn(),
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
       nativeClaimCoordinator: coordinator,
       nativeSolutionCoordinator: solutionCoordinator,
+      nativeSolutionCorrections: corrections,
       acceptLegacyCards: false,
     });
 
@@ -381,6 +385,10 @@ describe('work loop', () => {
     expect(coordinator.renewWorker).toHaveBeenCalledOnce();
     expect(solutionCoordinator.reconcileStartup).toHaveBeenCalledOnce();
     expect(archiveSince).not.toHaveBeenCalled();
+    // The signed reorg-correction pass runs once per tick, and NOT during initialize() --
+    // initialization owns the worker and reconciles chain effects; correcting already-published
+    // announcements is per-tick work that must precede each source read.
+    expect(corrections.reconcile).toHaveBeenCalledOnce();
   });
 
   it('initializes native ownership, reconciliation, and verified source sync in that order', async () => {
@@ -391,8 +399,10 @@ describe('work loop', () => {
       acceptLegacyCards: false,
       nativeDiscovery: {
         sync: vi.fn(async () => { order.push('sync'); return { accepted: 0, verifiedSources: 1 }; }),
-        takePending: () => [],
+        takePending: () => { order.push('take-pending'); return []; },
+        takePendingWithdrawals: () => { order.push('withdrawals'); return []; },
         acknowledge: vi.fn(),
+        acknowledgeWithdrawal: vi.fn(),
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
@@ -406,11 +416,27 @@ describe('work loop', () => {
         reconcileStartup: async () => { order.push('solution-reconcile'); return []; },
         reconcileEngagement: vi.fn(),
       },
+      nativeSolutionCorrections: {
+        reconcile: async () => { order.push('corrections'); },
+      },
     });
     await loop.initialize();
     expect(order).toEqual(['lease', 'reconcile', 'solution-reconcile', 'sync']);
     await loop.tick();
-    expect(order).toEqual(['lease', 'reconcile', 'solution-reconcile', 'sync', 'renew', 'sync']);
+    // Per tick, and every step's position is load-bearing:
+    //   renew        - own the worker lease before touching anything.
+    //   corrections  - correct this operator's own published announcements against the canonical
+    //                  chain BEFORE accepting a source head. Correcting after the read would let a
+    //                  card be admitted while a reorged delivery still advertises as available.
+    //   sync         - the verified signed-head gate. A stale/tampered/rewound head rejects here.
+    //   withdrawals  - drain the requester's signed retractions BEFORE deciding what to claim, so
+    //                  a retracted announcement cannot be picked up in the same pass that learned
+    //                  of its retraction.
+    //   take-pending - only now is the queue read.
+    expect(order).toEqual([
+      'lease', 'reconcile', 'solution-reconcile', 'sync',
+      'renew', 'corrections', 'sync', 'withdrawals', 'take-pending',
+    ]);
   });
 
   it('fails an idle native tick before source sync when lease renewal fails', async () => {
@@ -422,7 +448,9 @@ describe('work loop', () => {
       nativeDiscovery: {
         sync,
         takePending: () => [],
+        takePendingWithdrawals: () => [],
         acknowledge: vi.fn(),
+        acknowledgeWithdrawal: vi.fn(),
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
@@ -436,6 +464,7 @@ describe('work loop', () => {
         reconcileStartup: vi.fn(async () => []),
         reconcileEngagement: vi.fn(),
       },
+      nativeSolutionCorrections: { reconcile: vi.fn(async () => undefined) },
     });
     await loop.initialize();
     sync.mockClear();
@@ -478,7 +507,9 @@ describe('work loop', () => {
       nativeDiscovery: {
         sync: async () => ({ accepted: 0, verifiedSources: 1 }),
         takePending: () => [queued],
+        takePendingWithdrawals: () => [],
         acknowledge,
+        acknowledgeWithdrawal: vi.fn(),
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
@@ -492,6 +523,7 @@ describe('work loop', () => {
         reconcileStartup: vi.fn(async () => []),
         reconcileEngagement,
       },
+      nativeSolutionCorrections: { reconcile: vi.fn(async () => undefined) },
       readSealedDocuments,
     });
 
@@ -762,6 +794,206 @@ describe('work loop', () => {
       expect(info).toHaveBeenCalledOnce();
       const payload = JSON.parse(info.mock.calls[0]![0] as string) as { cards: unknown[] };
       expect(payload.cards).toEqual([]);
+    });
+  });
+
+  /**
+   * #2540. `reconcileStartup()` ran only in `initialize()`, and `tick()` processes only PENDING
+   * discovery cards — a card is acknowledged inside the coordinator's claim-admission
+   * transaction, so once a claim is admitted nothing re-drives it. Task 1221 sat at claim
+   * `observed-safe` for 35 minutes with the projector's finalized cursor 855 blocks past it;
+   * restarting the daemon advanced it to `finalized` in 35 seconds. Round 7's task 1220 shows the
+   * same signature — promoted 42ms before its restart's startup event.
+   *
+   * The property under test is exactly the acceptance criterion: an ADMITTED claim reaches its
+   * terminal on-chain state with NO restart.
+   */
+  describe('steady-state reconcile (#2540)', () => {
+    /**
+     * A claim coordinator standing in for the live shape: the card is admitted once and then
+     * disappears from the pending queue (acknowledged inside admission), and the operation needs a
+     * later canonical promotion that only a reconcile pass can observe.
+     */
+    function admittedClaimAwaitingPromotion() {
+      const state = { admitted: false, terminal: false, promotions: 0 };
+      const queued = { id: 1, announcementId: 'announcement-1', card: card() };
+      const claim = {
+        startWorker: vi.fn(),
+        renewWorker: vi.fn(),
+        reconcileStartup: vi.fn(async () => {
+          if (!state.admitted || state.terminal) return { reconciled: 0, finalized: 0 };
+          state.promotions += 1;
+          // The live promotion: observed-safe becomes finalized once the projector catches up.
+          state.terminal = true;
+          return { reconciled: 1, finalized: 1 };
+        }),
+        process: vi.fn(async () => {
+          state.admitted = true;
+          return { kind: 'claim-pending' as const, operationId: `sha256:${'b'.repeat(64)}` as const, reason: 'observed-safe' as const };
+        }),
+      };
+      return { state, queued, claim };
+    }
+
+    function nativeBuild(overrides: Record<string, unknown>, extras: Record<string, unknown> = {}) {
+      return build({
+        composition: { ...composition(), mode: 'native' },
+        archive: undefined,
+        acceptLegacyCards: false,
+        nativeSolutionCorrections: { reconcile: vi.fn(async () => undefined) },
+        ...overrides,
+        ...extras,
+      });
+    }
+
+    it('drives an admitted claim to its terminal state with no restart', async () => {
+      const { state, queued, claim } = admittedClaimAwaitingPromotion();
+      let pending = [queued];
+      let now = 0;
+      const { loop } = nativeBuild({
+        nativeDiscovery: {
+          sync: async () => ({ accepted: 0, verifiedSources: 1 }),
+          takePending: () => pending,
+          takePendingWithdrawals: () => [],
+          acknowledge: vi.fn(),
+          acknowledgeWithdrawal: vi.fn(),
+          checkpoint: () => undefined,
+          resumeSse: () => ({ close: () => undefined }),
+        },
+        nativeClaimCoordinator: claim,
+        nativeSolutionCoordinator: { reconcileStartup: vi.fn(async () => []), reconcileEngagement: vi.fn() },
+        nativeReconcileIntervalMs: 30_000,
+        now: () => now,
+      });
+
+      await loop.initialize();
+      await loop.tick();                       // admits the claim; it is now unacknowledged nowhere
+      pending = [];                            // acknowledged inside admission — nothing re-drives it
+      expect(state.admitted).toBe(true);
+      expect(state.terminal).toBe(false);
+
+      // Ticking inside the cadence changes nothing — the frozen state the live gate observed.
+      now = 10_000;
+      await loop.tick();
+      expect(state.terminal).toBe(false);
+
+      // One cadence later, with no restart and no new card, the claim reaches its terminal state.
+      now = 40_000;
+      await loop.tick();
+      expect(state.terminal).toBe(true);
+      expect(state.promotions).toBe(1);
+    });
+
+    it('reconciles claims and solutions in the same order initialize() does', async () => {
+      const order: string[] = [];
+      let now = 0;
+      const { loop } = nativeBuild({
+        nativeDiscovery: {
+          sync: async () => ({ accepted: 0, verifiedSources: 1 }),
+          takePending: () => [],
+          takePendingWithdrawals: () => [],
+          acknowledge: vi.fn(),
+          acknowledgeWithdrawal: vi.fn(),
+          checkpoint: () => undefined,
+          resumeSse: () => ({ close: () => undefined }),
+        },
+        nativeClaimCoordinator: {
+          startWorker: vi.fn(),
+          renewWorker: vi.fn(),
+          reconcileStartup: vi.fn(async () => { order.push('claim'); return { reconciled: 0, finalized: 0 }; }),
+          process: vi.fn(),
+        },
+        nativeSolutionCoordinator: {
+          reconcileStartup: vi.fn(async () => { order.push('solution'); return []; }),
+          reconcileEngagement: vi.fn(),
+        },
+        nativeReconcileIntervalMs: 1_000,
+        now: () => now,
+      });
+
+      await loop.initialize();
+      order.length = 0;
+      now = 5_000;
+      await loop.tick();
+
+      expect(order).toStrictEqual(['claim', 'solution']);
+    });
+
+    // Isolation, the same lesson as #2529/#2530/#2533/#2539: a recovery that cannot run is not a
+    // reason to stop taking new work.
+    it('keeps claiming when the steady-state reconcile fails, and names the cause', async () => {
+      const warn = vi.fn();
+      let now = 0;
+      const process = vi.fn(async () => ({
+        kind: 'claim-finalized' as const,
+        operationId: `sha256:${'b'.repeat(64)}` as const,
+        engagementId: `sha256:${'c'.repeat(64)}` as const,
+      }));
+      const { loop } = nativeBuild({
+        nativeDiscovery: {
+          sync: async () => ({ accepted: 0, verifiedSources: 1 }),
+          takePending: () => [{ id: 1, announcementId: 'announcement-1', card: card() }],
+          takePendingWithdrawals: () => [],
+          acknowledge: vi.fn(),
+          acknowledgeWithdrawal: vi.fn(),
+          checkpoint: () => undefined,
+          resumeSse: () => ({ close: () => undefined }),
+        },
+        nativeClaimCoordinator: {
+          startWorker: vi.fn(),
+          renewWorker: vi.fn(),
+          // Boot reconciles fine; the chain read goes away afterwards. `initialize()` stays
+          // fail-fast — it is the STEADY-STATE reconcile whose failure must not cost a claim.
+          reconcileStartup: (() => {
+            let calls = 0;
+            return vi.fn(async (): Promise<{ reconciled: number; finalized: number }> => {
+              calls += 1;
+              if (calls === 1) return { reconciled: 0, finalized: 0 };
+              throw new Error('canonical claim read unavailable');
+            });
+          })(),
+          process,
+        },
+        nativeSolutionCoordinator: { reconcileStartup: vi.fn(async () => []), reconcileEngagement: vi.fn() },
+        nativeReconcileIntervalMs: 1_000,
+        now: () => now,
+        logger: { info: vi.fn(), warn },
+      });
+
+      await loop.initialize();
+      now = 5_000;
+      const results = await loop.tick();
+
+      expect(process).toHaveBeenCalledOnce();
+      expect(results).toHaveLength(1);
+      expect((warn.mock.calls.at(-1)![0] as string)).toContain('canonical claim read unavailable');
+    });
+
+    /**
+     * The secondary defect. `logOutcomes` deduped identical summaries with no time bound, so B
+     * logged one line at 03:12:06 and nothing for 25 minutes while ticking normally — a healthy
+     * idle loop was indistinguishable from a dead one, and the wrong diagnosis cost a round.
+     */
+    it('re-logs an unchanged tick summary once the silence bound elapses', async () => {
+      const info = vi.fn();
+      let now = 0;
+      const { loop } = build({
+        archive: { since: async () => [] },
+        logger: { info, warn: vi.fn() },
+        tickSummaryMaxSilenceMs: 60_000,
+        now: () => now,
+      });
+
+      await loop.tick();
+      expect(info).toHaveBeenCalledOnce();
+
+      now = 30_000;
+      await loop.tick();
+      expect(info).toHaveBeenCalledOnce();      // still deduped inside the bound
+
+      now = 61_000;
+      await loop.tick();
+      expect(info).toHaveBeenCalledTimes(2);    // and audible again once it elapses
     });
   });
 });

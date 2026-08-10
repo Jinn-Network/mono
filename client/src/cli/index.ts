@@ -53,8 +53,11 @@ import codedigestRevertCheckCommand from './commands/codedigest-revert-check.js'
 import evalCommand from './commands/eval.js';
 import scrubCommand from './commands/scrub.js';
 import nativeRequesterCommand from './commands/native-requester.js';
+import ceremonyCommand from './commands/ceremony.js';
 import bootstrapRetryCommand from './commands/bootstrap-retry.js';
 import onboardingCompleteCommand from './commands/onboarding-complete.js';
+import policyCommand from './commands/policy.js';
+import wiringCommand from './commands/wiring.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -98,6 +101,9 @@ const COMMANDS: CommandModule[] = [
   evalCommand,
   scrubCommand,
   nativeRequesterCommand,
+  ceremonyCommand,
+  policyCommand,
+  wiringCommand,
 ];
 
 /**

@@ -11,6 +11,7 @@ import { verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
   BASE_SEPOLIA_TODAY,
+  DEFAULT_SUBMISSION_DEADLINE_LEAD_MS,
   type MarketplaceChainConfig,
   type MarketplaceRequesterBackend,
   type PostingOutcome,
@@ -95,6 +96,13 @@ import {
 // internal snapshot fixture directory; that storage detail must not leak into
 // the accepted requester command contract.
 const FIXTURE = 'prediction-forecast-golden.json' as const;
+
+/**
+ * The single today-mode requester fixture name, exported so a composing host (the fleet posting
+ * write path, one-swap M5e) can name the `NativeRequesterRequest.fixture` it drives `request()`
+ * with without duplicating the literal. `request()` still refuses any other value.
+ */
+export const NATIVE_REQUESTER_FIXTURE = FIXTURE;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://spec.jinn.network/facts/native-requester-association/v1';
 const UINT256_MAX = (1n << 256n) - 1n;
@@ -135,6 +143,77 @@ export interface CanonicalTaskCreated {
   readonly txHash: `0x${string}`;
   readonly terms: PostingTerms;
   readonly maxClaims: 1;
+}
+
+/**
+ * The association's transaction is mined, matches on EVERY other canonical predicate, and is
+ * simply not finalized yet (#2531 F4).
+ *
+ * This exists because there was no way to say it. A freshly-mined post fails
+ * `blockNumber > finalizedBlock` and the reader returned `null` -- the same `null` it returns for
+ * a reverted transaction, a forged taskId, a mismatched escrow or a substituted Submission graph
+ * -- and the requester raised all of it as "refuses non-canonical or mismatched TaskCreated
+ * association". On Base Sepolia that fired on every posting tick for the ~27 minutes an ordinary
+ * finality wait takes, and because `reconcile()` runs before `adopt()` it took the whole adopt
+ * leg down with it for every posted task.
+ *
+ * Waiting is not a refusal, so it does not read as one and it does not throw. It is also NOT an
+ * acceptance: no association is written, no announcement is published, nothing advances. The
+ * draft is simply left where it is and re-read on the next tick.
+ */
+export interface PendingFinalityTaskCreated {
+  readonly canonical: false;
+  readonly pending: 'awaiting-finality';
+  /** The mined block the association is waiting on. */
+  readonly blockNumber: bigint;
+  /** The chain's finalized head at the time of the read; `blockNumber` is above it. */
+  readonly finalizedBlock: bigint;
+}
+
+/**
+ * What a canonical `TaskCreated` read can say: it is canonical, it is still finalizing, or it is
+ * refused (`null`). Producers that never report pending stay assignable unchanged.
+ */
+export type CanonicalTaskCreatedRead = CanonicalTaskCreated | PendingFinalityTaskCreated | null;
+
+/** Narrows the read's waiting case without every call site re-deriving the discriminator. */
+export function isAwaitingFinality(read: CanonicalTaskCreatedRead): read is PendingFinalityTaskCreated {
+  return read !== null && read.canonical === false && read.pending === 'awaiting-finality';
+}
+
+/** Internal marker: this draft is finalizing, so reconcile left it alone rather than refusing it. */
+const AWAITING_FINALITY = Symbol('awaiting-finality');
+
+/**
+ * `request()` was asked for an association whose transaction is mined and canonical but not yet
+ * finalized (#2531 F4).
+ *
+ * Distinct from the non-canonical refusal on purpose. Nothing is wrong: the post is on chain and
+ * its draft is durable, so the next `reconcile()` tick completes the association without any
+ * re-broadcast. The posting loop already treats a per-target throw as a logged skip, which is the
+ * correct handling — but the operator has to be able to tell "wait ~27 minutes" apart from
+ * "someone substituted your Submission graph", and before this they read identically.
+ */
+export class NativeRequesterAwaitingFinalityError extends Error {
+  override readonly name = 'NativeRequesterAwaitingFinalityError';
+
+  readonly retryable = true;
+
+  constructor(readonly runId: string) {
+    super(
+      `native requester posting ${runId} is mined and canonical but not yet finalized; `
+      + 'it will be associated on a later reconcile tick',
+    );
+  }
+}
+
+/** What one `reconcile()` pass observed. Empty `awaitingFinality` is the steady state. */
+export interface NativeRequesterReconcileSummary {
+  /**
+   * `runId`s whose posted transaction is mined and canonical but not yet finalized. They are
+   * retried on the next tick; they are NOT refusals, and they no longer abort the pass (#2531 F4).
+   */
+  readonly awaitingFinality: readonly string[];
 }
 
 /** Finalized chain time sealed into both admission and requester authority. */
@@ -304,7 +383,7 @@ export interface NativeRequesterDeps {
       readonly txHash: `0x${string}`;
       readonly terms: PostingTerms;
       readonly maxClaims: 1;
-    }) => Promise<CanonicalTaskCreated | null>;
+    }) => Promise<CanonicalTaskCreatedRead>;
   };
   readonly now: () => Date;
   /** Test-only failure-injection seam. Production composition does not provide it. */
@@ -833,6 +912,20 @@ class NativeRequesterState {
     return stored === undefined ? undefined : toAssociation(stored);
   }
 
+  /** Every durable canonical association this requester has posted (read-only; mirrors `allDrafts`). */
+  async allAssociations(): Promise<readonly NativeRequesterAssociation[]> {
+    try {
+      const names = (await readdir(this.associationsDir())).filter((name) => name.endsWith('.json')).sort();
+      const stored = await Promise.all(
+        names.map((name) => readJson<StoredAssociation>(join(this.associationsDir(), name))),
+      );
+      return stored.filter((value): value is StoredAssociation => value !== undefined).map(toAssociation);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
   async writeAssociation(key: string, association: NativeRequesterAssociation): Promise<void> {
     const stored: StoredAssociation = { ...association, taskId: association.taskId.toString(10) };
     await writeJsonAtomic(this.associationPath(key), stored);
@@ -965,6 +1058,33 @@ async function storeExactRecords(
   };
 }
 
+/**
+ * The sealed Submission's `deadline` (issue #2526).
+ *
+ * Derived from the posting's own FINALIZED chain authority time rather than a local wall clock, for
+ * two reasons. It is the same authority every other time-bearing field in this bundle is pinned to
+ * (`authorityTime` is already validated as a canonical finalized Base Sepolia block above, and is
+ * already sealed verbatim into the Submission's `authority-time` annotation). And it keeps sealing
+ * DETERMINISTIC: the Submission's digest is its identity here — `draftKey` is built from it and a
+ * retry of the same run must reproduce the same bytes — which a `Date.now()` reading would break.
+ *
+ * The lead itself is `DEFAULT_SUBMISSION_DEADLINE_LEAD_MS`, a named posting default; see its doc
+ * for why it is deliberately not the posting terms' `responseTimeoutSeconds`. Note that a finalized
+ * block lags the head by roughly two epochs, so the lead a solver actually observes at discovery is
+ * this interval minus that lag — another reason the interval is generous rather than tight.
+ */
+function sealedDeadline(authorityTime: NativeAuthorityTimeAnchor): string {
+  const anchored = Date.parse(authorityTime.timestamp);
+  if (!Number.isFinite(anchored)) {
+    throw new Error('native requester cannot derive a Submission deadline from a non-instant authority time');
+  }
+  const deadline = anchored + DEFAULT_SUBMISSION_DEADLINE_LEAD_MS;
+  if (!Number.isSafeInteger(deadline)) {
+    throw new Error('native requester Submission deadline exceeds JavaScript time bounds');
+  }
+  return new Date(deadline).toISOString();
+}
+
 async function sealRunBundle(input: {
   readonly runId: string;
   readonly requesterAgent: string;
@@ -1005,6 +1125,7 @@ async function sealRunBundle(input: {
 
   const templateSubmission = bytesToObject(template.submission, 'B1 Submission template');
   const taskDigest = rawDigest(taskBytes);
+  const deadline = sealedDeadline(input.authorityTime);
   const seed = runSeed(input.runId, taskDigest, sealedReceipt.receiptDigest);
   const annotations = {
     ...(templateSubmission.annotations as Record<string, unknown> ?? {}),
@@ -1023,6 +1144,10 @@ async function sealRunBundle(input: {
     idempotencyKey: `native-prediction-forecast:${input.runId}:${taskDigest.slice(7, 23)}`,
     nonce: seed.slice(0, 32),
     task: { digest: { sha256: taskDigest.slice('sha256:'.length) } },
+    // Set at seal time like every other per-posting field above. Before issue #2526 `deadline` was
+    // the one field NOT overridden here, so it fell through the spread from the pinned fixture as
+    // the literal `2026-08-02T12:00:00Z` and every native posting shipped an already-past deadline.
+    deadline,
     annotations,
   });
   const submissionDigest = rawDigest(submissionBytes);
@@ -1711,10 +1836,31 @@ export function createNativeRequesterSubmissionResolver(input: {
  * all key, chain, post, recovery, and canonical-read authority through this seam.
  */
 export function createNativeRequester(deps: NativeRequesterDeps): {
-  /** Reconciles every durable posting/outbox before the native host admits new work. */
-  reconcile(): Promise<void>;
+  /**
+   * Reconciles every durable posting/outbox before the native host admits new work.
+   *
+   * Returns what the pass observed rather than throwing on a draft that is merely finalizing
+   * (#2531 F4): a pending-finality association leaves its draft in place for the next tick, and
+   * critically does NOT abort the pass, so the adopt leg that runs after this still runs for every
+   * other posted task. A genuinely non-canonical or mismatched association still throws.
+   */
+  reconcile(): Promise<NativeRequesterReconcileSummary>;
   request(input: NativeRequesterRequest): Promise<NativeRequesterResult>;
   handleDiscoveryRequest(request: Request): Promise<Response>;
+  /**
+   * The signed source identity this requester publishes under, and therefore the identity a host
+   * must introduce when it mounts {@link handleDiscoveryRequest}. Exposed for #2519: the fleet
+   * daemon's serving plane composes several archives behind one listener and needs each handler's
+   * identity to merge the well-known introduction, and re-deriving `name` at the mount site would
+   * be a second copy of a literal that lives here.
+   */
+  readonly source: SourceIdentity;
+  /**
+   * Read-only enumeration of this operator's own posted tasks (the durable canonical associations).
+   * The one-swap M5f adoption leg reads these to observe + adopt deliveries for tasks THIS requester
+   * posted; it opens no new store — it reads the same durable association directory `request` writes.
+   */
+  postedAssociations(): Promise<readonly NativeRequesterAssociation[]>;
 } {
   const state = new NativeRequesterState(deps.stateDir);
   const source: SourceIdentity = { agent: deps.requesterAgent, name: 'requester' };
@@ -1724,7 +1870,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
     draft: NativeRequesterDraft,
     chain: MarketplaceChainConfig,
     roles: NativeRequesterRoles,
-  ): Promise<NativeRequesterAssociation | undefined> {
+  ): Promise<NativeRequesterAssociation | typeof AWAITING_FINALITY | undefined> {
     if (draft.outcome === undefined) return undefined;
     const outcome = asPostingOutcome(draft.outcome);
     const durableTerms = postingTermsFromWire(draft.postingTerms);
@@ -1738,6 +1884,11 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       terms: durableTerms,
       maxClaims: 1,
     });
+    // The post is mined and agrees with the draft on every canonical predicate; it is simply not
+    // finalized yet (#2531 F4). Return without writing an association or publishing anything --
+    // the next reconcile tick re-reads it. Deliberately checked BEFORE the refusal below so a
+    // ~27-minute Base Sepolia finality wait is never raised as tamper.
+    if (isAwaitingFinality(canonical)) return AWAITING_FINALITY;
     if (
       canonical === null
       || canonical.canonical !== true
@@ -1822,8 +1973,12 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
     return published;
   }
 
-  async function reconcile(chain: MarketplaceChainConfig, roles: NativeRequesterRoles): Promise<void> {
+  async function reconcile(
+    chain: MarketplaceChainConfig,
+    roles: NativeRequesterRoles,
+  ): Promise<string[]> {
     const drafts = await state.allDrafts();
+    const awaitingFinality: string[] = [];
     for (const draft of drafts) {
       let current = draft;
       if (current.version === 1 && current.stage === 'broadcasting' && current.outcome === undefined) {
@@ -1872,17 +2027,22 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
           : { ...current, outcome: asStoredOutcome(outcome) };
         await state.updateDraft(current);
       }
-      if (current.outcome !== undefined) await canonicalAssociation(current, chain, roles);
+      if (current.outcome !== undefined) {
+        const association = await canonicalAssociation(current, chain, roles);
+        if (association === AWAITING_FINALITY) awaitingFinality.push(current.runId);
+      }
     }
+    return awaitingFinality;
   }
 
   return {
-    async reconcile(): Promise<void> {
+    async reconcile(): Promise<NativeRequesterReconcileSummary> {
       const chain = assertBaseSepoliaTarget('base-sepolia', await deps.readChain());
       assertPostingRecoverySafe(await deps.posting.recoverPosting(), { allowRetryable: true });
       const roles = await deps.loadRoles();
-      await reconcile(chain, roles);
+      const awaitingFinality = await reconcile(chain, roles);
       assertPostingRecoverySafe(await deps.posting.recoverPosting(), { allowRetryable: false });
+      return { awaitingFinality };
     },
     async request(input): Promise<NativeRequesterResult> {
       assertRunId(input.runId);
@@ -1918,6 +2078,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       ));
       if (priorForRun?.outcome !== undefined) {
         const association = await canonicalAssociation(priorForRun, chain, roles);
+        if (association === AWAITING_FINALITY) throw new NativeRequesterAwaitingFinalityError(input.runId);
         if (association === undefined) throw new Error('native requester lost its durable canonical association');
         return { association, reused: true };
       }
@@ -1962,6 +2123,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       await deps.checkpoints?.('draft-durable');
       if (durable.outcome !== undefined) {
         const association = await canonicalAssociation(durable, chain, roles);
+        if (association === AWAITING_FINALITY) throw new NativeRequesterAwaitingFinalityError(input.runId);
         if (association === undefined) throw new Error('native requester lost its durable canonical association');
         return { association, reused: true };
       }
@@ -1982,9 +2144,14 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       await state.updateDraft(durable);
       await deps.checkpoints?.('after-broadcast');
       const association = await canonicalAssociation(durable, chain, roles);
+      if (association === AWAITING_FINALITY) throw new NativeRequesterAwaitingFinalityError(input.runId);
       if (association === undefined) throw new Error('native requester could not persist its canonical association');
       return { association, reused: false };
     },
     handleDiscoveryRequest: handler,
+    source,
+    async postedAssociations(): Promise<readonly NativeRequesterAssociation[]> {
+      return state.allAssociations();
+    },
   };
 }

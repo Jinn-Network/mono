@@ -102,6 +102,12 @@ import type {
   WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
 import { ProvisioningRejectedError } from "@jinn-network/task-execution-workspace";
+// #2538 F5: the two backend-written stdio capture filenames — one source, shared with the harvest
+// that deliberately excludes them from the Delivery's `outputs`.
+import {
+  HARNESS_STDERR_LOG,
+  HARNESS_STDOUT_LOG,
+} from "@jinn-network/task-execution-workspace";
 import {
   acquireStateRootWriter,
   CapacityGate,
@@ -142,6 +148,30 @@ const CORE_REQUIREMENT_CLASSES: Readonly<Record<string, ComparisonClass>> = {
 
 const SCOPE_DELIMITER = "\u001f";
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * How much captured stderr rides along in the terminal observation's `detail`. The observation
+ * schema bounds free text at 4096 characters and the reason code shares the field, so this stays
+ * well inside it; `logs/harness.stderr.log` holds the untruncated stream either way.
+ */
+const TERMINAL_DETAIL_STDERR_BUDGET = 1024;
+
+/**
+ * The tail of a captured harness log, whitespace-collapsed to one line so it can ride in a
+ * bounded observation `detail`. Absent or unreadable is not an error: this is a diagnostic, and
+ * an unreadable diagnostic must never change an attempt's outcome.
+ */
+export function harnessLogTail(path: string, budget = TERMINAL_DETAIL_STDERR_BUDGET): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  const collapsed = text.replace(/\s+/gu, " ").trim();
+  if (collapsed.length === 0) return undefined;
+  return collapsed.length <= budget ? collapsed : `…${collapsed.slice(-budget)}`;
+}
 
 function scopeKey(requester: string, key: string): string {
   return `${requester}${SCOPE_DELIMITER}${key}`;
@@ -797,6 +827,13 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       });
     }
     if (!this.writer.acquired) throw this.writer.error;
+  }
+
+  /** Synchronous host seam proving this constructor owns the state-root writer. Unlike
+   * `preflight`, this performs no launcher/readiness probes and therefore cannot cross an async
+   * response boundary before ownership is known. */
+  assertStateRootOwnership(): void {
+    this.assertWriter();
   }
 
   private recordShutdownDrainFailure(error: unknown): void {
@@ -1464,10 +1501,19 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     try {
       const launcher = selectedLauncher;
       const plan = preplanned;
-      const spawn: SpawnRequest = {
+      // #2538 F5: the shim has always supported redirecting the harness's stdio into `logs/`
+      // (backend-written, outside the executor's write surface — design §7.1), but nothing ever
+      // passed the paths, so every launcher's stdout and stderr went to `ignore`. Live, the
+      // prediction launcher wrote a precise one-line diagnostic to stderr and exited 2; the
+      // attempt's `logs/` and `out/` were empty and the terminal detail read `"failed"`, which is
+      // why the defect was first misread as a different one. The harness's own words are the
+      // cheapest diagnostic there is; keep them.
+      const spawn: SpawnRequest & { readonly stdoutPath: string; readonly stderrPath: string } = {
         argv: plan.argv,
         env: provisioner.executionEnv({ env: plan.env, cwd: plan.cwd }),
         cwd: plan.cwd,
+        stdoutPath: join(this.paths(attempt).logs, HARNESS_STDOUT_LOG),
+        stderrPath: join(this.paths(attempt).logs, HARNESS_STDERR_LOG),
       };
       const planBytes = serializeCanonicalJson({
         argv: [...plan.argv],
@@ -1609,7 +1655,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     readonly provisioner: ProvisionerContract;
     readonly plan: LaunchPlan;
     readonly planBytes: Uint8Array;
-    readonly spawn: SpawnRequest;
+    readonly spawn: SpawnRequest & { readonly stdoutPath?: string; readonly stderrPath?: string };
   }): Promise<void> {
     const attempt = input.attempt.attemptUri;
     const capturePosture = this.config.recorderAvailability ?? "none";
@@ -1809,7 +1855,16 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       return;
     }
     if (interpreted.state === "failed") {
-      this.appendTerminal(attempt, { state: "failed", blame: interpreted.blame ?? "task", category: "protocol-violation", detail: interpreted.reasonCode ?? "executor reported failure" });
+      // #2538 F5: name what the harness said, not just how it exited. `invalid-exit` alone sent a
+      // live diagnosis down the wrong path for most of a round.
+      const stderrTail = harnessLogTail(join(input.paths.logs, HARNESS_STDERR_LOG));
+      const reason = interpreted.reasonCode ?? "executor reported failure";
+      this.appendTerminal(attempt, {
+        state: "failed",
+        blame: interpreted.blame ?? "task",
+        category: "protocol-violation",
+        detail: stderrTail === undefined ? reason : `${reason}: ${stderrTail}`,
+      });
       return;
     }
     if (existsSync(this.deliveryCheckpointPath(attempt))) {

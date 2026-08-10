@@ -25,6 +25,7 @@ import {
 import { coldSync, createVerifyDriver, fetchHead, type SyncedEntry } from '@jinn-network/record-discovery-client';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
 import {
+  DEFAULT_SUBMISSION_DEADLINE_LEAD_MS,
   createInMemoryMarketplaceObserveStore,
   createInMemoryPostingIntentStore,
   makeMarketplaceBackend,
@@ -40,6 +41,7 @@ import {
   createNativeRequesterSubmissionResolver,
   verifyNativeRequesterSubmissionEnvelope,
 } from '../../src/native-requester/requester.js';
+import { buildNativeClaimPolicy } from '../../src/daemon/native-assembly.js';
 
 const CHAIN = {
   chainId: 84532,
@@ -59,6 +61,14 @@ const AUTHORITY_TIME = {
   finalized: true as const,
 };
 const REQUESTER_AGENT = 'urn:jinn:requester:test';
+/**
+ * The `deadline` literal inside the digest-pinned admission fixture
+ * (`packages/task-supply/admission/fixtures/prediction-snapshot-v1/submission.json`). It is TEST
+ * DATA, and issue #2526 is the record of it having silently become production policy: every native
+ * posting inherited it verbatim through the template spread. Named here so the regression below
+ * asserts against the real string rather than a paraphrase of it.
+ */
+const FIXTURE_TEMPLATE_DEADLINE = '2026-08-02T12:00:00Z';
 const TERMS = {
   solutionMaxDeliveryRateWei: 2n,
   verdictMaxDeliveryRateWei: 3n,
@@ -246,8 +256,13 @@ describe('native requester', () => {
     )) as { predicate?: { issuer?: string } };
     expect(admissionPayload.predicate?.issuer).toBe('urn:jinn:admission:test');
     expect(admissionPayload.predicate?.issuer).not.toContain('run-one');
+    // #2534 F3b: was `sha256:5f021ff3…`, the digest of a Task naming the transcribed and by then
+    // stale `sha256:e61dc765…` profile. That is exactly the Task the live gate posted as 1218 /
+    // 1219 / 1220 and that no solver could execute, because no sealed prediction-forecast/1.0
+    // document has carried `e61dc765…` since the profile was re-sealed under spec.jinn.network.
+    // The template now names the derived digest, so the sealed Task digest moved with it.
     expect(recordDigest(postInput.taskBytes)).toBe(
-      'sha256:5f021ff3ba8f132c19d43e0ec4bb927ac53da9f659827e2490c6e181d687fe69',
+      'sha256:c0c3d703b3938a944095dcc91b4ec7da96f1bc10b1bb85b0419440a5f44d1204',
     );
     expect(recordDigest(postInput.evaluationSpecBytes)).toBe(
       'sha256:a6821a066168cb199adf550ec515ad14dc7f9a27587963cbb5cc549732a31e0c',
@@ -940,6 +955,66 @@ describe('native requester', () => {
     await expect(decodeNativeRequesterAnnouncement({
       discovery, canonicalTaskCreated: canonical, submissionBytes: tampered,
     })).rejects.toThrow(/native requester association refused/u);
+
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  // --- issue #2526: the sealed deadline is derived at post time, not inherited -----------------
+
+  it('derives the sealed Submission deadline from the posting authority time, never from the pinned fixture', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-deadline-'));
+    const { requester, post } = fixture({ stateDir });
+
+    await requester.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'deadline-run',
+    });
+
+    const sealed = SubmissionRecordSchema.parse(
+      JSON.parse(new TextDecoder().decode(post.mock.calls[0]![0].submissionBytes)),
+    );
+
+    // The literal that shipped live on task 1218: the digest-pinned admission fixture's own
+    // `deadline`, which fell through the template spread because the requester never set the field.
+    expect(sealed.deadline).not.toBe(FIXTURE_TEMPLATE_DEADLINE);
+    // Derived from THIS posting's finalized authority instant plus the named posting default.
+    expect(Date.parse(sealed.deadline)).toBe(
+      Date.parse(AUTHORITY_TIME.timestamp) + DEFAULT_SUBMISSION_DEADLINE_LEAD_MS,
+    );
+    // And the lead clears the solver claim gate's minimum with room to spare — the whole point of
+    // the field. `buildNativeClaimPolicy` is the production source of that minimum.
+    const { minDeadlineLeadMs } = buildNativeClaimPolicy({
+      chainId: CHAIN.chainId,
+      generation: 'today',
+      contracts: {
+        taskCoordinator: CHAIN.taskCoordinator,
+        jinnRouter: CHAIN.jinnRouter,
+        mechMarketplace: CHAIN.mechMarketplace,
+        activityChecker: CHAIN.activityChecker,
+      },
+      transactionCaps: { escrowMaxWei: '1000000000000000000' },
+    });
+    expect(Date.parse(sealed.deadline) - Date.parse(AUTHORITY_TIME.timestamp))
+      .toBeGreaterThan(minDeadlineLeadMs);
+
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('keeps the sealed deadline deterministic across a same-run retry', async () => {
+    // The Submission digest is the run's identity (`draftKey` is built from it), so the deadline
+    // has to be a pure function of the posting's authority time — a wall-clock reading here would
+    // make a retry re-seal different bytes.
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-deadline-retry-'));
+    const first = fixture({ stateDir });
+    const initial = await first.requester.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'deadline-retry',
+    });
+    const restarted = fixture({ stateDir });
+    const replayed = await restarted.requester.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'deadline-retry',
+    });
+
+    expect(replayed.reused).toBe(true);
+    expect(replayed.association.submissionDigest).toBe(initial.association.submissionDigest);
 
     await rm(stateDir, { recursive: true, force: true });
   });

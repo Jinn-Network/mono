@@ -112,6 +112,24 @@ describe("runtime root", () => {
     expect(marker.repositoryId).toMatch(/^local:/u);
   });
 
+  it("creates a root whose parent chain does not exist yet, 0o700 the whole way", async () => {
+    // Issue #2523 F2: the fleet evaluator asks for `<stateRoot>/evaluator/evidence` and nothing
+    // creates `<stateRoot>/evaluator`, so a fresh operator died on a non-recursive `mkdir`'s
+    // ENOENT before it could serve or publish anything.
+    const container = await root();
+    const requestedRoot = join(container, "evaluator", "evidence");
+
+    const paths = await prepareRuntimePaths(requestedRoot);
+
+    expect(paths.rootDir).toBe(join(await realpath(container), "evaluator", "evidence"));
+    await openRuntimeMarker(paths);
+    if (process.platform !== "win32") {
+      // The intermediate directory this created is as private as the leaf, not umask-default.
+      expect((await lstat(join(container, "evaluator"))).mode & 0o777).toBe(0o700);
+      expect((await lstat(paths.rootDir)).mode & 0o777).toBe(0o700);
+    }
+  });
+
   it("creates a valid nonexisting leaf root with private ownership and modes", async () => {
     const container = await root();
     const requestedRoot = join(container, "runtime");

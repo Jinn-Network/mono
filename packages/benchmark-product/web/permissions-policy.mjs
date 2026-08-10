@@ -1,0 +1,100 @@
+/**
+ * Exact feature-policy surface recognized by Chromium 147.0.7727.15, the browser
+ * pinned by @playwright/test 1.59.1. Chromium exposes Web Bluetooth's policy on
+ * Darwin but not Linux, so the optimized runtime gate pins that one platform
+ * difference while still requiring every recognized feature to be denied.
+ */
+export const PINNED_CHROMIUM_VERSION = "147.0.7727.15";
+
+const PINNED_PERMISSIONS_POLICY_COMMON_FEATURES = [
+  "accelerometer",
+  "aria-notify",
+  "attribution-reporting",
+  "autoplay",
+  "browsing-topics",
+  "camera",
+  "captured-surface-control",
+  "ch-device-memory",
+  "ch-downlink",
+  "ch-dpr",
+  "ch-ect",
+  "ch-prefers-color-scheme",
+  "ch-prefers-reduced-motion",
+  "ch-prefers-reduced-transparency",
+  "ch-rtt",
+  "ch-save-data",
+  "ch-ua",
+  "ch-ua-arch",
+  "ch-ua-bitness",
+  "ch-ua-form-factors",
+  "ch-ua-full-version",
+  "ch-ua-full-version-list",
+  "ch-ua-high-entropy-values",
+  "ch-ua-mobile",
+  "ch-ua-model",
+  "ch-ua-platform",
+  "ch-ua-platform-version",
+  "ch-ua-wow64",
+  "ch-viewport-height",
+  "ch-viewport-width",
+  "ch-width",
+  "clipboard-read",
+  "clipboard-write",
+  "compute-pressure",
+  "cross-origin-isolated",
+  "deferred-fetch",
+  "deferred-fetch-minimal",
+  "digital-credentials-get",
+  "display-capture",
+  "encrypted-media",
+  "fullscreen",
+  "gamepad",
+  "geolocation",
+  "gyroscope",
+  "hid",
+  "identity-credentials-get",
+  "idle-detection",
+  "interest-cohort",
+  "join-ad-interest-group",
+  "keyboard-map",
+  "language-detector",
+  "local-fonts",
+  "local-network",
+  "local-network-access",
+  "loopback-network",
+  "magnetometer",
+  "microphone",
+  "midi",
+  "on-device-speech-recognition",
+  "otp-credentials",
+  "payment",
+  "picture-in-picture",
+  "private-aggregation",
+  "private-state-token-issuance",
+  "private-state-token-redemption",
+  "publickey-credentials-create",
+  "publickey-credentials-get",
+  "run-ad-auction",
+  "screen-wake-lock",
+  "serial",
+  "shared-storage",
+  "shared-storage-select-url",
+  "storage-access",
+  "summarizer",
+  "sync-xhr",
+  "translator",
+  "unload",
+  "usb",
+  "window-management",
+  "xr-spatial-tracking",
+];
+
+export const PINNED_PERMISSIONS_POLICY_FEATURES = Object.freeze(
+  process.platform === "darwin"
+    ? [...PINNED_PERMISSIONS_POLICY_COMMON_FEATURES, "bluetooth"].sort()
+    : PINNED_PERMISSIONS_POLICY_COMMON_FEATURES,
+);
+
+export const PINNED_PERMISSIONS_POLICY = PINNED_PERMISSIONS_POLICY_FEATURES
+  .map((feature) => `${feature}=()`)
+  .join(", ");

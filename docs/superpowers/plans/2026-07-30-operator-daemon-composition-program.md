@@ -49,7 +49,7 @@ Authored next (parallel planning agents), one per row; executed in dependency or
 | `2026-07-30-cutover-stage-2-evaluator-flow.md` | Evaluator loop (evaluation-profile Attempts on the embedded backend; evaluator-seals carve-out); durable intent store wired; verdict-gate policy assembly; retire delivery-watcher + mech-adapter evaluation machinery + legacy TaskEngine; drain runbook | stage 1; evaluator-adapters |
 | `2026-07-30-cutover-stage-3-posting-flow.md` | Posting loop (extractable work-client module); requester-side adoption; requester-side evaluation sealing; CLI `jinn tasks` lifecycle exits + `jinn policy`/`jinn wiring`; retire creator loop + launched-record generators + lifecycle publishing; posting SPA surface | stage 2 |
 | `2026-07-30-cutover-stage-4-discovery-serving.md` | Public archive mount (exposure scoping, opt-in bind, IP-disclosure copy); retire peer-sync + registry client + `client/src/discovery/`; evidence/indexing status surface; discovery kit against the live surface | stage 3; transport-http (HTTP surface) |
-| `2026-07-30-cutover-stage-5-rename-closure.md` | `client/` → `operator/` rename (paths-only commit); guard trio on the operator tree; delete `task_runs`; delete legacy config keys + prune migration backups; #2297 fix; bridge-retirement chore filed | stage 4 |
+| `2026-07-30-cutover-stage-5-rename-closure.md` | `client/` → `operator/` rename (paths-only commit); guard trio on the operator tree; delete `task_runs`; delete legacy config keys + prune migration backups; #2297 fix; bridge-retirement chore filed | stage 4 *(amended 2026-08-05 per DR-2026-08-05: the one-swap deploy PR merged and its gate green)* |
 
 ## 2. Streams, phases, critical path
 
@@ -64,6 +64,13 @@ S2 joins the path at stage 1 (blob store) and again at stage 4 (HTTP surface); S
 stage 2. Each phase ends with tests/kits/guards green, the per-component review done and
 resolved, and a phase report.
 
+> **Amended 2026-08-05** per
+> [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md): stages
+> 2–4 are no longer separate phases — they collapse into **one wholesale swap** (§10
+> below). The critical path reads: venue-base → stage 1 → **the one-swap** → stage 5.
+> "Strictly sequential" survives only as: the swap deploys after stage 1's gate (already
+> green) and stage 5 deploys after the swap's gate.
+
 ## 3. Commit/PR-train structure
 
 Stacked PRs into `integration/evidence-v1`, one train per component plan. Each hard-swap
@@ -71,6 +78,11 @@ stage ends in exactly one deploy PR whose description carries the drain-runbook 
 and the rollback statement (pin previous canary; new-flow in-flight engagements abandon
 with the §4 state message). No agent self-merge; the stage deploy PRs are
 operator-approved.
+
+> **Amended 2026-08-05** per DR-2026-08-05: the collapsed stages 2–4 form **one** train
+> ending in exactly one deploy PR, whose description carries the **combined** drain
+> checklist ([`cutover-one-swap-drain.md`](../../runbooks/cutover-one-swap-drain.md)) and
+> one rollback statement — rollback is all-or-nothing across the three collapsed flows.
 
 ## 4. Review and verification gates
 
@@ -81,6 +93,18 @@ via the still-legacy evaluator**; stage 2's verdict closed-loop; stage 3's own-t
 adoption; stage 4's archive consumed by a second daemon; stage 5's
 extraction-gate-shaped build check. Between reviews, correctness is carried by automated
 gates.
+
+> **Amended 2026-08-05** per DR-2026-08-05: the stage-2/3/4 gates fuse into the
+> one-swap's two-probe gate — **G-loop** (a natively-posted own task solved by a second
+> operator, container-graded through the native evaluator to `decisionGrade: true`, and
+> adopted requester-side — stronger than the separate gates, since the subject carries a
+> real Submission and admission receipt with no bridge synthesis) and **G-archive**
+> (second-daemon archive consumption + serving-plane kit). Grader-container execution
+> blocks the gate (DR decision 3a). The closure manifest is non-gating Class O evidence.
+>
+> **Corrected 2026-08-07:** G-loop is **not** container-graded — decision 3a decoupled
+> into two artifacts (G-loop on the prediction profile + a separately run container-grade
+> proof); same bar, different shape. See the DR's 2026-08-07 addendum.
 
 ## 5. Naming decisions (settled here, used everywhere)
 
@@ -118,7 +142,11 @@ gates.
 4. **Config migration** — additive, atomic (temp+rename), idempotent
    (`configShapeVersion`); legacy keys live until stage 5 (spec §9).
 5. **Evaluator-seals carve-out** — public evaluation specs only until stage 3 brings
-   requester-side sealing (spec §4).
+   requester-side sealing (spec §4). *Dissolved 2026-08-05 per DR-2026-08-05 decision 9:
+   the native derivation seals evaluation Submissions grant-free
+   (`capabilityGrants: {}`), so there is no carve-out; what requester-side sealing still
+   owes is sealing for the operator's own posted tasks carrying private material under
+   capability grants.*
 6. **Evidence publication policy** — only records sealed for delivery/announcement;
    never capability-grant material or secret-forwards; idempotent by digest;
    announce-after-indexed (spec §4).
@@ -132,9 +160,18 @@ gates.
    guard-forbidden in venue-base.
 9. **Bridge-era documents** — projector synthesizes legacy facts cards under a `legacy`
    derivation annotation; converged-Delivery legacy-evaluator parseability is a stage-1
-   fixture (spec §10).
+   fixture (spec §10). *Amended 2026-08-05 per DR-2026-08-05 decision 4: the
+   legacy-evaluator-parseability fixture retires with the train **unconditionally** (the
+   legacy evaluator is deleted, so no parser survives to satisfy); the legacy-task
+   **synthesis** is the conditional part — an empty straggler table at deploy closes the
+   bridge-era window, a non-empty table keeps the synthesis alive for exactly those
+   subjects until stage 5.*
 10. **Drain rules** — every retiring flow drains before its swap; stragglers strand loudly
-    (spec §10).
+    (spec §10). *Amended 2026-08-05 per DR-2026-08-05 decision 2: the collapsed stages
+    2–4 run ONE combined drain — every retiring flow's intake freezes before the single
+    deploy, one shared patience bound, one straggler table
+    ([`cutover-one-swap-drain.md`](../../runbooks/cutover-one-swap-drain.md)); the
+    per-flow rule stands unchanged for stage 5.*
 11. **venue-base npm posture** — signer-injection only; no keystore or key-loading code
     (spec §6.1, recorded for #2293).
 12. **Fresh rewrite, legacy as fixtures** — revert-classification tables, nonce/eviction
@@ -194,3 +231,53 @@ fix applied at the final integrated review pass. The transport-http executor's
 guard-evasion attempt (unicode escapes against the ambient-network scan) was blocked,
 reverted, and self-reported; the guard's underlying false-positive (filename matching in
 import specifiers) was fixed properly and re-proven to bite.
+
+## 10. One-swap collapse (2026-08-05)
+
+Ruled by [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)
+(operator Ritsu). Stages 2–4 collapse into one wholesale swap. This section is the
+program-level scope statement; the DR carries the decisions, the stage-plan addenda carry
+the per-plan restatements.
+
+### Scope
+
+| Swaps in (one train) | Retires (one train) |
+| --- | --- |
+| Native evaluator production mounted in the fleet daemon (largely landed via #2363; the train's duty is composition + verification) + grader-container execution (port from `docs/salvage/stage-2/`) | delivery-watcher; mech adapter's evaluation machinery; legacy TaskEngine (last flow out) |
+| Posting flow: extractable work-client module + posting loop + `posting[]` config + launched-record migration + CLI lifecycle exits (`jinn tasks close\|cancel\|release`) + `jinn policy`/`jinn wiring`; posting **status** on the read plane only | creator loop; launched-record generators; lifecycle publishing; all `jinn solver-nets` subverbs (the ruling-5 stage-3/4 split dissolves) |
+| Public discovery archive on its **own listener only** (headless §6); evidence/indexing status on the versioned read contract; server-side `indexing_degraded` notification | peer-sync; ERC-8004 registry client; all of `client/src/discovery/` (plugin-publication read path carved out first) |
+
+**Out (unchanged):** stage 5 (rename, `task_runs` deletion, legacy config keys, backup
+pruning, `verticalMode` manifest rows); stage 6 (console + application-tier
+re-derivation, including the support/earning loops); contract 4 (legacy keys parseable
+until stage 5); the core/layer/plugin portal surface; npm publish (#2293).
+
+### Task dispositions (summary; the stage-plan addenda carry the details)
+
+- **Stage 2 (17 tasks):** 7 done-native (verify-only: verdict gate/adapter,
+  self-evaluation, opportunities, subject material, derivation, the evaluator loop
+  itself — Tasks 2–6, 9, 13), 3 re-scope (verdict
+  broadcaster leg, durable intent admission, composition/config/observability parity —
+  the dashboard must not go dark), 3 kill (T7 bridge-subject R2, T8 self-signer R1, T12
+  signer secret-forward — all dissolved), 2 keep (T15/T16 retirements), T17 superseded
+  by the combined drain/gate. **T11's grader-container execution is the one genuinely
+  unbuilt deliverable and blocks the gate (DR decision 3a).**
+- **Stage 3 (25 tasks):** keeps the preflights, adoption, lifecycle exits, work-client
+  facade, posting loop, CLI verbs, and retirements; T12 re-scoped (carve-out framing
+  dead — owed: sealing for own posted tasks with private material under grants); T22
+  widened (all solver-nets subverbs retire here); **T23 killed** (no mutating posting
+  routes — read-plane status projection instead); T24 read-only; T25 superseded.
+- **Stage 4 (15 tasks):** keeps the kit-first chain (conformance suite, handler,
+  listener, second-daemon e2e, status fields, plugin-publication carve-out, repoints,
+  deletion); **T3 killed** (operator-API mount never built); T8 rewritten against the
+  contract module + landed server-side notifications; T15 superseded.
+- **Killed program-wide:** converged-Delivery-legacy-evaluator-parseability maintenance
+  (no legacy parser survives the train; the stage-1 fixture retires with it, citing the
+  drain evidence).
+
+### Names-as-landed
+
+§5's namings for machinery the native estate already owns yield to the landed module
+names (`client/src/daemon/native-evaluator-*`, `client/src/native-requester/`,
+`client/src/evaluator/*`). §5 stays authoritative for genuinely new modules (the posting
+loop host wiring, the requester work-client facade, CLI verbs).

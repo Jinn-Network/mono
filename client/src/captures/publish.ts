@@ -3,7 +3,7 @@ import type { Artifact, ArtifactSource, SignedEnvelope, UnsignedEnvelope } from 
 import { SignedEnvelopeSchema, UnsignedEnvelopeSchema } from '../types/envelope.js';
 import type { SessionProvenance } from '../types/session-provenance.js';
 import type { CapturesStore, PendingCaptureRow, SpanRow } from '../store/captures.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import { signCanonical } from '../harnesses/engine/signing.js';
 import { EMPTY_BUNDLE_SHA256 } from '../trajectory/schema.js';
 import {

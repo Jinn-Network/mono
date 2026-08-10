@@ -34,7 +34,7 @@ import {
 import type { TaskEnvironmentSpecV1 } from '../task-creator/environment/contracts.js';
 import type { JinnDifferentialAttesterPolicyV1 } from '../task-creator/environment/jinn-differential-policy.js';
 import { isAcceptedIpfsCid } from '../task-creator/proofs/ipfs-cid.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import {
   DifferentialAdmissionPolicyV2,
   hashDifferentialAdmissionReceiptV2,

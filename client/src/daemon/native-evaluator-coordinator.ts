@@ -92,7 +92,16 @@ function parseJson(bytes: Uint8Array, label: string): unknown {
   }
 }
 
-function materialFromState(state: NativeEvaluatorStateRepository, id: NativeOperationId): SubjectMaterial {
+/**
+ * Assembles the durable {@link SubjectMaterial} an evaluation's exact subject artifacts encode.
+ * Exported (and typed to the `listSubjectArtifacts` reader subset only) so M4b's verdict-observation
+ * adapter (one-swap M4b, #2461) builds the SAME subject graph the coordinator's own decision-grade
+ * gate reads — the two paths cannot drift on role names or cardinality.
+ */
+export function materialFromState(
+  state: Pick<NativeEvaluatorStateRepository, "listSubjectArtifacts">,
+  id: NativeOperationId,
+): SubjectMaterial {
   const rows = state.listSubjectArtifacts(id);
   const one = (role: string): ExactSubjectArtifact => {
     const candidates = rows.filter((row) => row.role === role);

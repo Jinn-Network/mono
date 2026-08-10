@@ -303,7 +303,7 @@
       "owner": "client native production store coupling",
       "entryPoints": [
         "client/src/store/store.ts",
-        "client/src/harnesses/engine/persistence.ts",
+        "client/src/store/task-run-persistence.ts",
         "client/src/daemon/native-evaluator-production.ts",
         "client/src/daemon/native-solver-production.ts"
       ],

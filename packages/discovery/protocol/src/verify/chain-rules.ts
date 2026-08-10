@@ -113,19 +113,60 @@ export type LinkageResult =
   | { ok: false; failure: LinkageFailure };
 
 /**
+ * A returning consumer's high-water mark, as the linkage walk's stopping point.
+ *
+ * BOTH fields are required, and that is the whole point of the shape. The boundary entry is
+ * normally NOT in the fed set (see `walkLinkage`), so the walk cannot read the boundary's own
+ * sequence off a `DigestedEntry` the way it reads every interior parent's — it has to be told.
+ * Passing the digest alone would silently drop the increment-by-one check across the one link
+ * that joins new history to old, so the digest cannot be passed alone.
+ */
+export interface LinkageBoundary {
+  /** The high-water-mark entry's digest. */
+  readonly digest: string;
+  /** That same entry's `sequence`, so contiguity is still checked ACROSS the boundary. */
+  readonly sequence: string;
+}
+
+/**
  * Walks entries backward from `headEntryDigest` via `previous`, verifying
  * sequence contiguity (increment-by-one, §5.1) and the published-source
  * profile's hard entry ceilings (§5.1) as it goes, until reaching either
- * `stopAtDigest` (the consumer's high-water mark entry, for a returning
+ * `stopAt` (the consumer's high-water mark entry, for a returning
  * consumer) or genesis (`previous === null`, first adoption, §5.3 rule 5).
- * Returns the walked entries in walk order (head-to-boundary, inclusive).
+ * Returns the walked entries in walk order (head-to-boundary, exclusive of a
+ * boundary that was not fed).
+ *
+ * ## The boundary entry does not have to be in the fed set (#2531 F1)
+ *
+ * `returningSync` yields entries STRICTLY ABOVE the high-water mark — that is its contract, and
+ * `native-consumer/sync.ts` asserts on it (`synced[0].entry.previous === prior.entry`). The walk
+ * therefore MUST be able to terminate on a boundary it was never handed, or a returning consumer
+ * can never accept a second announcement: it would walk the one new entry, fail to resolve its
+ * `previous`, and report `linkage` — a broken-chain refusal — on a perfectly sound chain. That is
+ * the live-gate wall #2531 describes, and it is unrecoverable from the consumer side, because the
+ * durable checkpoint stores the boundary's digest and never its body.
+ *
+ * So the walk terminates on EITHER form of reaching the boundary:
+ *
+ *  - `node.digest === stopAt.digest` — the boundary IS fed (a cold-shaped set handed to a
+ *    returning verification, e.g. the rewind path). Unchanged from before: the boundary is walked
+ *    into, ceiling-checked and returned in `walked`.
+ *  - `node.entry.previous === stopAt.digest` and the boundary is absent — the ordinary returning
+ *    case. The link itself is still a hash commitment: the oldest fed entry must name the exact
+ *    boundary digest this consumer recorded, so a fork, a rollback or a substituted parent still
+ *    fails to terminate and still returns `linkage`.
+ *
+ * What is NOT given up: the increment-by-one check across that boundary link, which the interior
+ * of the walk gets from the parent `DigestedEntry`. `stopAt.sequence` supplies it, and the type
+ * makes it impossible to ask for a boundary stop without supplying it.
  */
 export function walkLinkage(params: {
   byDigest: Map<string, DigestedEntry>;
   headEntryDigest: string;
-  stopAtDigest: string | undefined; // undefined => walk to genesis
+  stopAt: LinkageBoundary | undefined; // undefined => walk to genesis
 }): LinkageResult {
-  const { byDigest, headEntryDigest, stopAtDigest } = params;
+  const { byDigest, headEntryDigest, stopAt } = params;
   const walked: DigestedEntry[] = [];
   let cursor = headEntryDigest;
   for (;;) {
@@ -148,11 +189,21 @@ export function walkLinkage(params: {
     }
     walked.push(node);
 
-    if (stopAtDigest !== undefined && node.digest === stopAtDigest) {
-      return { ok: true, walked };
+    if (stopAt !== undefined) {
+      // The boundary was fed and we have walked into it: done, exactly as before.
+      if (node.digest === stopAt.digest) return { ok: true, walked };
+      // The boundary was NOT fed but this entry names it as its parent: the hash link to the
+      // recorded high-water mark holds, so terminate here — after checking the one contiguity
+      // step the absent parent would otherwise have supplied.
+      if (node.entry.previous === stopAt.digest && !byDigest.has(stopAt.digest)) {
+        if (nextSequence(stopAt.sequence) !== node.entry.sequence) {
+          return { ok: false, failure: { kind: "sequence-contiguity" } };
+        }
+        return { ok: true, walked };
+      }
     }
     if (node.entry.previous === null) {
-      return stopAtDigest === undefined
+      return stopAt === undefined
         ? { ok: true, walked }
         : { ok: false, failure: { kind: "linkage" } }; // returning consumer's high-water mark never reached
     }

@@ -174,6 +174,33 @@ export class NativeMarketplaceEventRepository {
   }
 }
 
+/**
+ * Applies ONE already-polled log batch to the marketplace-event read model.
+ *
+ * Split out of `syncNativeMarketplaceEvents` (one-swap M3, #2461) because the fleet daemon must
+ * not poll for itself. `ChainLogSource.poll()` advances a durable per-stream cursor, so a second
+ * caller polling the projector's source would split the log stream between them and each would
+ * silently miss what the other consumed. On the fleet path the projector loop remains the ONE
+ * poller and hands its batch here (`composition-root.ts`'s native branch); the solver host, which
+ * owns its raw source outright, keeps polling through `syncNativeMarketplaceEvents` below.
+ */
+export function applyNativeMarketplaceBatch(input: {
+  readonly batch: Pick<Awaited<ReturnType<NativeReadOnlyVenuePrimitives['rawLogSource']['poll']>>, 'logs' | 'reorg'>;
+  readonly repository: NativeMarketplaceEventRepository;
+  readonly chain: MarketplaceChainConfig;
+  readonly isAuthorizedMechOrigin: (address: Address) => boolean;
+}): number {
+  const events = decodeMarketplaceLogs(
+    input.batch.logs,
+    marketplaceEventOriginAuthority(input.chain, input.isAuthorizedMechOrigin),
+  );
+  input.repository.apply({
+    events,
+    orphanedBlockHashes: input.batch.reorg?.orphanedBlockHashes,
+  });
+  return events.length;
+}
+
 /** One canonical raw-venue pass shared by the solver/evaluator product graphs. */
 export async function syncNativeMarketplaceEvents(input: {
   readonly venue: NativeReadOnlyVenuePrimitives;
@@ -181,14 +208,10 @@ export async function syncNativeMarketplaceEvents(input: {
   readonly chain: MarketplaceChainConfig;
   readonly isAuthorizedMechOrigin: (address: Address) => boolean;
 }): Promise<number> {
-  const batch = await input.venue.rawLogSource.poll();
-  const events = decodeMarketplaceLogs(
-    batch.logs,
-    marketplaceEventOriginAuthority(input.chain, input.isAuthorizedMechOrigin),
-  );
-  input.repository.apply({
-    events,
-    orphanedBlockHashes: batch.reorg?.orphanedBlockHashes,
+  return applyNativeMarketplaceBatch({
+    batch: await input.venue.rawLogSource.poll(),
+    repository: input.repository,
+    chain: input.chain,
+    isAuthorizedMechOrigin: input.isAuthorizedMechOrigin,
   });
-  return events.length;
 }

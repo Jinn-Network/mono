@@ -28,6 +28,10 @@ describe("admission is attestation-agnostic by construction (design §7.1, progr
     peerDependencies?: Record<string, string>;
   };
 
+  // profiles joined this set in #2534: the prediction-snapshot policy names the sealed digest of
+  // prediction-forecast/1.0 and profiles owns that document. It is the same purity tier as
+  // protocol — its only Jinn dependency IS protocol — so it adds no verifier or issuer surface,
+  // which is what this guard is actually protecting.
   it("declares only record, portable protocol, and trust dependencies with no verifier or issuer", () => {
     const jinn = [
       ...Object.keys(manifest.dependencies ?? {}),
@@ -36,6 +40,7 @@ describe("admission is attestation-agnostic by construction (design §7.1, progr
     ].filter((name) => name.startsWith("@jinn-network/")).sort();
     expect(jinn).toStrictEqual([
       "@jinn-network/environment-record",
+      "@jinn-network/task-execution-profiles",
       "@jinn-network/task-execution-protocol",
       "@jinn-network/trust-core",
     ]);

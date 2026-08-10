@@ -45,8 +45,12 @@ import { blockHandler } from './solver-plugins-block.js';
 import { listFeedbackHandler, discoverHandler, statusHandler } from './solver-plugins-read.js';
 import { getAddress } from 'viem';
 import { ReputationRegistryClient } from '../../erc8004/reputation.js';
-import { createDiscoveryAPI } from '../../discovery/factory.js';
-import type { DiscoveryAPI } from '../../discovery/types.js';
+import { getIdentityRegistryAddress } from '../../erc8004/addresses.js';
+import type { PluginPublicationReader } from '../../plugin-registry/publication-reader.js';
+import {
+  createPluginPublicationReader,
+  createRpcPluginLogSource,
+} from '../../plugin-registry/publication-host.js';
 
 export function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
@@ -126,7 +130,14 @@ export interface SolverPluginsDeps extends BaseCommandDeps {
     revoke: PluginRegistryPublisher['revoke'];
   };
   reputationClientFactory: (args: ReputationClientFactoryArgs) => ReputationClientHandle;
-  discoveryApiFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => DiscoveryAPI;
+  /**
+   * Reads published plug-in records for the `discover` / `status` /
+   * `list-feedback` verbs. One-swap R3 (#2461): narrowed from the legacy
+   * `DiscoveryAPI` to the neutral `PluginPublicationReader` port so the read
+   * verbs no longer depend on `discovery/` (deleted in the D-wave). The
+   * production factory reads them on-chain from the IdentityRegistry.
+   */
+  pluginReaderFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => PluginPublicationReader;
   ipfsFetch: typeof defaultFetchFromIpfs;
   readConfigFile: ConfigFileIo['readConfigFile'];
   writeConfigFile: ConfigFileIo['writeConfigFile'];
@@ -319,11 +330,16 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
       },
     };
   },
-  discoveryApiFactory: (cfg) => {
+  pluginReaderFactory: (cfg) => {
     const chainId = cfg.network === 'testnet' ? 84532 : 8453;
-    return createDiscoveryAPI(cfg.discovery ?? { mode: 'onchain' }, {
-      rpcUrl: cfg.rpcUrl,
-      chainId,
+    const network: JinnOnchainNetwork = cfg.network === 'testnet' ? 'base-sepolia' : 'base';
+    const identityRegistry = getIdentityRegistryAddress(chainId);
+    if (!identityRegistry) {
+      throw new Error(`No IdentityRegistry address known for chainId ${chainId}.`);
+    }
+    const publicClient = createJinnPublicClient(cfg.rpcUrl, network);
+    return createPluginPublicationReader({
+      logSource: createRpcPluginLogSource({ publicClient, identityRegistry, chainId }),
     });
   },
   ipfsFetch: defaultFetchFromIpfs,
@@ -372,8 +388,8 @@ endorse / warn / block / review / respond are OPERATOR-trust write verbs:
     reads the block list at startup — restart for it to take effect.
 
 list-feedback / discover / status are READ verbs (no password required):
-  • Use the configured DiscoveryAPI (defaults to the on-chain RPC floor on
-    mainnet; the privately-operated Ponder indexer on testnet).
+  • Read published plug-in records on-chain from the IdentityRegistry
+    (the neutral PluginPublicationReader over the configured RPC).
   • \`list-feedback\` reads ReputationRegistry rows for the cid's builder.
   • \`discover\` lists published plug-ins, optionally filtered by SolverType.
   • \`status\` summarises publication state + reputation summary +

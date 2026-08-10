@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PREDICTION_FORECAST_PROFILE_DIGEST } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes, recordDigest, sealSignedRecord, type DsseSigner } from "@jinn-network/trust-core";
 import { ADMISSION_RECEIPT_MEDIA_TYPE, IN_TOTO_STATEMENT_TYPE } from "./identifiers.js";
 import { refuse } from "./refusals.js";
@@ -9,7 +10,10 @@ export const PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1 = {
   predicateType: "https://spec.jinn.network/attestations/prediction-snapshot-admission/v1",
 } as const;
 
-const PREDICTION_PROFILE_DIGEST = "sha256:e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937";
+// #2534 F3b: derived from the profile builder, never transcribed. This constant used to be the
+// literal `sha256:e61dc765…`; re-sealing prediction-forecast/1.0 under `spec.jinn.network` moved
+// the real digest and this copy stayed behind, so admission refused every conforming Task.
+const PREDICTION_PROFILE_DIGEST = PREDICTION_FORECAST_PROFILE_DIGEST;
 const DECIMAL_PROBABILITY = /^(0(?:\.\d+)?|1(?:\.0+)?)$/u;
 const RFC3339_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u;
 const PREDICTION_PARSER_DIGEST = "sha256:fdf33b359e1d142a372b374abddab4e582fd4cbff5a32e53de9333a5515c2d1a";

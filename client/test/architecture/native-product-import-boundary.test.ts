@@ -37,9 +37,12 @@ function matchesForbidden(relativePath: string, pattern: string): boolean {
 }
 
 /**
- * Dated, narrowly-scoped exemption list (added 2026-08-04, D0b hygiene fix).
+ * Dated, narrowly-scoped exemption list (added 2026-08-04, D0b hygiene fix;
+ * `/harnesses/engine/persistence.ts` removed 2026-08-05 by one-swap P0-1,
+ * which relocated that module to `store/task-run-persistence.ts` and so took
+ * it out of the native production graph).
  *
- * These three files are real, verified leaks on today's tree, reached from
+ * These files are real, verified leaks on today's tree, reached from
  * `daemon/native-production-deployment.ts` (via the dynamic import at
  * `native-main.ts:43`) through `daemon/native-evaluator-production.ts` and
  * `daemon/native-solver-production.ts`, both of which construct the legacy
@@ -56,16 +59,11 @@ const KNOWN_LEAK_ALLOWLIST: Record<string, string> = {
     '`task_runs` DDL (store.ts:610), creating the legacy table on the ' +
     'native path. Remove once native evaluator/solver production stop ' +
     'depending on the legacy Store class for persistence.',
-  '/harnesses/engine/persistence.ts':
-    'Pulled in transitively by store/store.ts, which imports ' +
-    'TASK_RUNS_SCHEMA and TaskRunPersistence from it. Remove once ' +
-    'store/store.ts no longer depends on the legacy TaskEngine ' +
-    'persistence module (i.e. once the /store/store.ts entry above is gone).',
   '/harnesses/engine/state.ts':
-    'Pulled in transitively by harnesses/engine/persistence.ts, which ' +
+    'Pulled in transitively by store/task-run-persistence.ts, which ' +
     'imports assertValidTransition and TERMINAL_STATES from it. Remove ' +
-    'once harnesses/engine/persistence.ts is no longer part of the native ' +
-    'production graph.',
+    'once store/task-run-persistence.ts owns its own state vocabulary and ' +
+    'is no longer reaching back into the engine tree.',
 };
 
 function resolveModule(from: string, specifier: string): string | undefined {

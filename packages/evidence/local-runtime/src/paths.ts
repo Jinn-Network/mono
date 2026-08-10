@@ -160,7 +160,15 @@ async function secureDirectory(path: string): Promise<void> {
       stat = await lstat(path);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await mkdir(path, { mode: 0o700 });
+      // `recursive` so a caller may name a runtime root whose PARENT chain does not exist yet
+      // (issue #2523: the fleet evaluator asks for `<stateRoot>/evaluator/evidence` and nothing
+      // creates `<stateRoot>/evaluator`, so a fresh operator died here on ENOENT). Node applies
+      // `mode` to every directory it creates, so each new ancestor is 0o700-at-creation and
+      // owned by this process, exactly like the leaf. The safety envelope is unchanged: the
+      // whole chain is already anchored under the realpath'd, symlink-checked ancestor
+      // `canonicalizeConfiguredRoot` resolved, every component was absent a moment ago, and the
+      // `rejectSymlinkComponents(path)` below re-walks the now-complete chain.
+      await mkdir(path, { recursive: true, mode: 0o700 });
       stat = await lstat(path);
     }
     if (!stat.isDirectory() || stat.isSymbolicLink()) {

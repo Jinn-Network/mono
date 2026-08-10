@@ -71,6 +71,8 @@ import type { EngagementLedger } from './engagement-ledger.js';
 import type { ClaimGate } from './claim-gate.js';
 import type { OperatorComposition } from './composition-root.js';
 import type { NativeDiscoveryConsumer, NativeDiscoveryQueuedCard } from './native-discovery.js';
+import { drainNativeDiscoveryWithdrawals } from './native-discovery-withdrawals.js';
+import type { NativeSolutionCorrections } from './native-solution-corrections.js';
 import type {
   NativeClaimCoordinator,
   NativeClaimCoordinatorResult,
@@ -125,6 +127,16 @@ export interface WorkLoopConfig {
   readonly nativeDiscovery?: NativeDiscoveryConsumer;
   readonly nativeClaimCoordinator?: Pick<NativeClaimCoordinator, 'startWorker' | 'renewWorker' | 'reconcileStartup' | 'process'>;
   readonly nativeSolutionCoordinator?: Pick<NativeSolutionCoordinator, 'reconcileStartup' | 'reconcileEngagement'>;
+  /**
+   * Append-only signed corrections to already-published delivery announcements when a reorg
+   * orphans (or re-canonicalises) their settlement event — `native-solution-corrections.ts`.
+   *
+   * Required in native mode, like the other three. The solver host ran this every tick before
+   * consuming its source (one-swap M3, #2461); the fleet loop runs it in the same position, so a
+   * card is never admitted while this operator's own published deliveries still advertise an
+   * orphaned block as available.
+   */
+  readonly nativeSolutionCorrections?: NativeSolutionCorrections;
   readonly ledger: EngagementLedger;
   readonly claimGate: ClaimGate;
   readonly store: Store;
@@ -134,8 +146,20 @@ export interface WorkLoopConfig {
   readonly aiUnits?: AiUnitsConfig;
   readonly spendCap?: SpendCapConfig;
   readonly pollIntervalMs: number;
+  /**
+   * How often the native loop re-drives its in-flight engagements, in milliseconds (#2540).
+   * Defaults to `NATIVE_RECONCILE_INTERVAL_MS`. `0` reconciles on every tick.
+   */
+  readonly nativeReconcileIntervalMs?: number;
+  /**
+   * How long an unchanged tick summary may go unlogged, in milliseconds (#2540). Defaults to
+   * `TICK_SUMMARY_MAX_SILENCE_MS`. `0` disables the dedupe entirely (log every tick).
+   */
+  readonly tickSummaryMaxSilenceMs?: number;
   readonly acceptLegacyCards: boolean;
   readonly logger?: { info(m: string): void; warn(m: string): void };
+  /** Injectable clock for the two cadences above. Production uses `Date.now`. */
+  readonly now?: () => number;
 }
 
 export type WorkLoopOutcome =
@@ -153,6 +177,36 @@ export type WorkLoopOutcome =
 
 const noopLogger = { info: (): void => undefined, warn: (): void => undefined };
 const LEGACY_ARCHIVE_START_SEQUENCE = '';
+
+/**
+ * #2540: how often the native fleet loop re-drives its in-flight engagements.
+ *
+ * `initialize()` reconciled once and never again, and `tick()` only ever processes PENDING
+ * discovery cards — a card is acknowledged inside the coordinator's claim-admission transaction,
+ * so the moment a claim is admitted nothing re-drives it. A claim whose next step is a later
+ * on-chain promotion therefore just sits: live, task 1221 stayed at `observed-safe` for 35 minutes
+ * with the projector's finalized cursor 855 blocks past it, and restarting the daemon — which is
+ * to say, running `initialize()` again — advanced it to `finalized` in 35 seconds. A restart is
+ * not a recovery mechanism.
+ *
+ * 30s rather than every tick: both reconciles walk only non-terminal rows, so an idle operator
+ * pays one empty SELECT, but a busy one pays a canonical chain read per in-flight operation. The
+ * shortest promotion this can delay is bounded by that interval, which is far inside the finality
+ * horizon these promotions wait on anyway.
+ */
+const NATIVE_RECONCILE_INTERVAL_MS = 30_000;
+
+/**
+ * #2540: how long the tick-summary dedupe may stay silent before re-logging an unchanged summary.
+ *
+ * This deliberately reverses the call recorded in `logOutcomes`'s own doc comment below, which
+ * rejected a bounded re-log on the grounds that "an operator can already tell the loop is alive
+ * from other loops' liveness signals". Round 8 disproved that: operator B logged one work line at
+ * 03:12:06 and nothing for the next 25 minutes while ticking normally every few seconds, and a
+ * whole diagnostic round was spent on a solver loop that had never stopped. A healthy idle loop
+ * and a dead one have to be distinguishable from the loop's OWN output.
+ */
+const TICK_SUMMARY_MAX_SILENCE_MS = 60_000;
 
 function idempotencyKeyFor(chain: { chainId: number; taskCoordinator: string }, taskId: bigint): string {
   return `${chain.chainId}:${chain.taskCoordinator}:${taskId.toString()}`;
@@ -231,6 +285,10 @@ export class WorkLoop {
   private nativeInitialized = false;
   /** Last tick's serialized per-card outcome summary, for the log-on-change dedupe (E39). */
   private lastLoggedOutcomeSummary: string | undefined;
+  /** When that summary was last actually emitted, for the dedupe's time bound (#2540). */
+  private lastLoggedOutcomeAt: number | undefined;
+  /** When the steady-state native reconcile last ran (#2540). */
+  private lastNativeReconcileAt: number | undefined;
 
   constructor(private readonly config: WorkLoopConfig) {
     if (config.composition.mode === 'native') {
@@ -241,13 +299,18 @@ export class WorkLoop {
         config.nativeDiscovery === undefined
         || config.nativeClaimCoordinator === undefined
         || config.nativeSolutionCoordinator === undefined
+        || config.nativeSolutionCorrections === undefined
       ) {
-        throw new Error('native work loop requires verified discovery and durable claim/solution coordinators');
+        throw new Error(
+          'native work loop requires verified discovery, durable claim/solution coordinators, '
+          + 'and the signed reorg-correction reconciler',
+        );
       }
     } else if (
       config.nativeDiscovery !== undefined
       || config.nativeClaimCoordinator !== undefined
       || config.nativeSolutionCoordinator !== undefined
+      || config.nativeSolutionCorrections !== undefined
     ) {
       throw new Error('legacy work loop cannot receive native discovery, claim, or solution coordinator');
     }
@@ -261,6 +324,38 @@ export class WorkLoop {
     await this.config.nativeSolutionCoordinator!.reconcileStartup();
     await this.config.nativeDiscovery!.sync();
     this.nativeInitialized = true;
+    this.lastNativeReconcileAt = this.now();
+  }
+
+  private now(): number {
+    return (this.config.now ?? Date.now)();
+  }
+
+  /**
+   * #2540: the steady-state half of `initialize()`'s reconcile.
+   *
+   * Same two calls, same order, on a cadence instead of once. It never blocks the tick that
+   * follows it: a reconcile is RECOVERY, and a recovery that cannot run is not a reason to stop
+   * taking new work — that is the same collateral-damage shape as #2529/#2530/#2533/#2539, and it
+   * would be a poor trade to fix the "nothing re-drives an admitted claim" freeze by introducing a
+   * "one unreconcilable operation blocks every claim" freeze. The failure is named and logged, and
+   * the cadence timestamp still advances so a persistent failure retries on the next interval
+   * rather than on every tick.
+   */
+  private async reconcileInFlight(): Promise<void> {
+    const interval = this.config.nativeReconcileIntervalMs ?? NATIVE_RECONCILE_INTERVAL_MS;
+    const at = this.now();
+    if (this.lastNativeReconcileAt !== undefined && at - this.lastNativeReconcileAt < interval) return;
+    this.lastNativeReconcileAt = at;
+    try {
+      await this.config.nativeClaimCoordinator!.reconcileStartup();
+      await this.config.nativeSolutionCoordinator!.reconcileStartup();
+    } catch (cause) {
+      this.logger().warn(
+        `[work] steady-state reconcile failed (non-fatal, retrying next cadence): `
+        + `${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
   }
 
   /** One pass over new archive cards. Returns per-card outcomes for assertions. */
@@ -300,10 +395,24 @@ export class WorkLoop {
     if (native === undefined) return undefined;
     if (!this.nativeInitialized) throw new Error('native work loop must initialize before polling');
     this.config.nativeClaimCoordinator!.renewWorker();
+    // #2540: re-drive whatever is already in flight before looking for anything new. Same position
+    // and same order as `initialize()`, so an admitted claim awaiting a later on-chain promotion
+    // reaches its terminal state on a cadence rather than at the next daemon restart.
+    await this.reconcileInFlight();
+    // Before consuming any source: correct this operator's own already-published delivery
+    // announcements against the current canonical chain. Same position the native solver host ran
+    // it in (one-swap M3, #2461) — a reorged delivery must be signed-withdrawn before new work is
+    // admitted, not after.
+    await this.config.nativeSolutionCorrections!.reconcile();
     // `sync()` is the verified signed-head gate. A stale/tampered/rewound head rejects before
     // `takePending()` is reached, so even previously queued cards cannot start native work under
     // a failed current sync.
     await native.sync();
+    // A requester's signed withdrawal retires the cards it retracts BEFORE this tick decides what
+    // to claim, so a retracted announcement cannot be picked up in the same pass that learned of
+    // its retraction. `drainNativeDiscoveryWithdrawals` refuses a withdrawal naming an
+    // announcement absent from this operator's authenticated local history.
+    await drainNativeDiscoveryWithdrawals({ store: this.config.store, discovery: native });
     return native.takePending();
   }
 
@@ -332,6 +441,13 @@ export class WorkLoop {
    * bounded-interval re-log (e.g. "at least once a minute even if unchanged") was considered and
    * rejected: a steady-state refusal needs exactly one clear line, not a heartbeat of copies -- an
    * operator can already tell the loop is alive from other loops' liveness signals.
+   *
+   * #2540 REVERSES that last sentence, because round 8 disproved it. B logged one line at 03:12:06
+   * and nothing for 25 minutes while ticking normally the whole time, and the resulting "the
+   * solver loop died silently" diagnosis cost a round and produced a fix (#2535) for a defect that
+   * did not exist. The dedupe still collapses a steady state to one line per change; it is now
+   * bounded by `tickSummaryMaxSilenceMs`, so an unchanged summary is re-emitted at most once a
+   * minute and a working loop is never mistakable for a stopped one from its own output.
    */
   private logOutcomes(
     cards: readonly AnnouncedSubmissionCard[],
@@ -343,8 +459,12 @@ export class WorkLoop {
       reason: describeOutcome(r.outcome),
     }));
     const serialized = JSON.stringify(summary);
-    if (serialized === this.lastLoggedOutcomeSummary) return;
+    const at = this.now();
+    const maxSilence = this.config.tickSummaryMaxSilenceMs ?? TICK_SUMMARY_MAX_SILENCE_MS;
+    const silent = this.lastLoggedOutcomeAt === undefined ? Number.POSITIVE_INFINITY : at - this.lastLoggedOutcomeAt;
+    if (serialized === this.lastLoggedOutcomeSummary && silent < maxSilence) return;
     this.lastLoggedOutcomeSummary = serialized;
+    this.lastLoggedOutcomeAt = at;
     const payload = {
       ts: new Date().toISOString(),
       level: 'info',

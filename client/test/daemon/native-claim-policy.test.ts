@@ -11,10 +11,12 @@ import {
   buildPredictionForecastProfile,
   sealTaskProfile,
 } from '@jinn-network/task-execution-profiles';
+import { DEFAULT_SUBMISSION_DEADLINE_LEAD_MS } from '@jinn-network/marketplace-binding';
 import {
   evaluateNativeClaim,
   type NativeClaimEvaluationInput,
 } from '../../src/daemon/native-claim-policy.js';
+import { buildNativeClaimPolicy } from '../../src/daemon/native-assembly.js';
 
 const COORDINATOR = '0x8a34793e10595c89b7e41cc7ff0f76850f44ad98' as const;
 const SUBMISSION_URI = 'urn:uuid:11111111-1111-4111-8111-111111111111' as const;
@@ -258,6 +260,135 @@ describe('evaluateNativeClaim', () => {
   ] as const)('refuses %s before any claim intent', async (reason, overrides) => {
     await expect(evaluateNativeClaim(input(overrides as Partial<NativeClaimEvaluationInput>)))
       .resolves.toMatchObject({ ok: false, reason });
+  });
+
+  // --- issue #2526: the deadline predicate against a REAL posting ------------------------------
+  //
+  // The block above pins the predicate against the suite's own 60s lead. This one joins the two
+  // production constants that actually decide leg 3 — the requester's sealed lead
+  // (`DEFAULT_SUBMISSION_DEADLINE_LEAD_MS`) and the shipped claim policy's floor
+  // (`buildNativeClaimPolicy().minDeadlineLeadMs`) — because the live gate's failure was precisely
+  // that nobody had ever evaluated one against the other.
+  describe('deadline predicate against production constants', () => {
+    const POLICY = buildNativeClaimPolicy({
+      chainId: 84532,
+      generation: 'today',
+      contracts: {
+        taskCoordinator: COORDINATOR,
+        jinnRouter: '0x6f47863Ac4120A5a97Af224a5e30C3Ec2c9eA247',
+        mechMarketplace: '0xD3233FdAaB51E9775f6bFCE8242B02C181D7c0e7',
+        activityChecker: '0x0e1B5f264F4FAdcFAA950fb00c58d9A39C040f70',
+      },
+      transactionCaps: { escrowMaxWei: '10' },
+    });
+    /** The authority instant a posting seals against, and the wall clock a solver discovers it at. */
+    const POSTED_AT = '2026-08-02T00:00:00.000Z';
+
+    function atDeadline(deadline: string, overrides: Partial<NativeClaimEvaluationInput> = {}) {
+      const docs = documents(deadline);
+      const base = input();
+      return input({
+        taskBytes: docs.taskBytes,
+        submissionBytes: docs.submissionBytes,
+        card: {
+          ...base.card,
+          record: { kind: RECORD_KINDS.submission, digest: documentDigest(docs.submissionBytes) },
+          facts: { ...base.card.facts, taskDigest: documentDigest(docs.taskBytes) },
+        },
+        policy: { ...POLICY, maxSpendWei: 10n },
+        now: new Date(POSTED_AT),
+        ...overrides,
+      });
+    }
+
+    /** Exactly what `sealedDeadline` produces for a posting whose authority time is `POSTED_AT`. */
+    const freshlySealed = new Date(
+      Date.parse(POSTED_AT) + DEFAULT_SUBMISSION_DEADLINE_LEAD_MS,
+    ).toISOString();
+
+    it('accepts a freshly posted task on the deadline predicate', async () => {
+      await expect(evaluateNativeClaim(atDeadline(freshlySealed)))
+        .resolves.toMatchObject({ ok: true, policy: { ok: true } });
+    });
+
+    it.each([
+      // The live case: the digest-pinned fixture literal, five days stale at task 1218's post time.
+      ['the pinned fixture literal at a later post time', '2026-08-02T12:00:00Z', '2026-08-07T15:30:00.000Z'],
+      ['a past deadline', '2026-08-01T23:59:59.000Z', POSTED_AT],
+      // One millisecond inside the floor — the boundary, not a comfortable miss.
+      ['a deadline one ms inside the minimum lead',
+        new Date(Date.parse(POSTED_AT) + 5 * 60 * 1_000 - 1).toISOString(), POSTED_AT],
+    ])('still refuses %s, non-retryably', async (_label, deadline, now) => {
+      await expect(evaluateNativeClaim(atDeadline(deadline, { now: new Date(now) })))
+        .resolves.toMatchObject({ ok: false, reason: 'deadline-policy', retryable: false });
+    });
+
+    it('leaves the sealed lead comfortably clear of the floor rather than exactly on it', () => {
+      // `responseTimeoutSeconds` is capped at 300s by the deployed marketplace and the floor is
+      // also 300s, so a deadline derived from the posting terms would clear by zero. This pins that
+      // the lead the requester actually seals is not that value.
+      expect(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS).toBeGreaterThan(POLICY.minDeadlineLeadMs * 2);
+    });
+
+    // --- issue #2531 F5: the lead is measured from SEAL, but spent before DISCOVERY -------------
+    //
+    // The block above evaluates the deadline at the posting instant, which is the one moment no
+    // solver can ever observe. A task is discoverable only after the post's block finalizes and
+    // the announcement publishes; round 6 measured that at 45 minutes (seal 23:20:46 -> publish
+    // 00:05:26). Under the old 1-hour lead that left ~10 minutes and task 1219 expired unclaimed.
+    // These pin the budget `DEFAULT_SUBMISSION_DEADLINE_LEAD_MS`'s doc comment states.
+    describe('the window a solver actually sees, after finality + publish (#2531 F5)', () => {
+      /** Measured round 6, seal -> publish, dominated by ~27 min Base Sepolia finality. */
+      const MEASURED_PRE_DISCOVERY_MS = 45 * 60 * 1_000;
+      /** A slow-finality day, or one missed reconcile tick: the margin the lead is sized for. */
+      const DOUBLE_PRE_DISCOVERY_MS = 2 * MEASURED_PRE_DISCOVERY_MS;
+      /** The delivery window that must fit INSIDE the remaining lead once claimed (300s cap). */
+      const DELIVERY_WINDOW_MS = 300 * 1_000;
+
+      it.each([
+        ['the measured round-6 cost', MEASURED_PRE_DISCOVERY_MS],
+        ['double the measured cost', DOUBLE_PRE_DISCOVERY_MS],
+      ])('still claims when discovery happens %s after seal', async (_label, elapsed) => {
+        await expect(
+          evaluateNativeClaim(
+            atDeadline(freshlySealed, { now: new Date(Date.parse(POSTED_AT) + elapsed) }),
+          ),
+        ).resolves.toMatchObject({ ok: true, policy: { ok: true } });
+      });
+
+      it('leaves a usable window, not a technically-passing sliver', () => {
+        const visible = DEFAULT_SUBMISSION_DEADLINE_LEAD_MS - MEASURED_PRE_DISCOVERY_MS;
+        // The failure this replaces left ~10 minutes. A solver has to read the card, decide, and
+        // claim, then still fit the whole delivery window: an hour of visible window is the bar.
+        expect(visible).toBeGreaterThanOrEqual(60 * 60 * 1_000);
+        // And the budget holds with the margin doubled.
+        expect(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS - DOUBLE_PRE_DISCOVERY_MS)
+          .toBeGreaterThan(POLICY.minDeadlineLeadMs + DELIVERY_WINDOW_MS);
+      });
+
+      it('pins how little the superseded one-hour lead left — the regression this replaces', () => {
+        const supersededLeadMs = 60 * 60 * 1_000;
+        expect(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS).toBeGreaterThan(supersededLeadMs);
+
+        // At the measured cost the old lead left 15 min of visible window. Five of those are the
+        // claim floor and five more are the delivery window, so a solver had ~5 minutes of real
+        // slack to read the card, decide and claim. That is task 1219.
+        const supersededSlack = supersededLeadMs - MEASURED_PRE_DISCOVERY_MS
+          - POLICY.minDeadlineLeadMs - DELIVERY_WINDOW_MS;
+        expect(supersededSlack).toBe(5 * 60 * 1_000);
+
+        // The same slack under the shipped lead, which is what makes the window usable rather
+        // than technically-nonzero.
+        const shippedSlack = DEFAULT_SUBMISSION_DEADLINE_LEAD_MS - MEASURED_PRE_DISCOVERY_MS
+          - POLICY.minDeadlineLeadMs - DELIVERY_WINDOW_MS;
+        expect(shippedSlack).toBeGreaterThanOrEqual(30 * supersededSlack);
+
+        // And the sharp edge: one slow-finality day and the old lead did not survive to discovery
+        // at all — the deadline had already passed before any solver could see the task.
+        expect(supersededLeadMs - DOUBLE_PRE_DISCOVERY_MS).toBeLessThan(0);
+        expect(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS - DOUBLE_PRE_DISCOVERY_MS).toBeGreaterThan(0);
+      });
+    });
   });
 
   it('rejects a bridge card or any exact-byte identity mismatch', async () => {

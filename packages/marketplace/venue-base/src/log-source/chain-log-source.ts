@@ -220,13 +220,49 @@ export function createChainLogSource(input: {
       if (latest.blockNumber <= persisted.live.blockNumber) {
         return { logs: [], cursor: persisted.live, finalizedCheckpoint: persisted.finalized };
       }
+      // The checkpoint is monotone: a provider that regresses its `finalized` tag never moves it back.
+      const checkpoint = finalized.blockNumber > persisted.finalized.blockNumber ? finalized : persisted.finalized;
+
+      // Catch-up fast path (idle-gap wedge, #2552). When the live cursor has fallen more than one
+      // chunk below `finalized`, the region `(persisted.live, finalized]` is entirely below the
+      // finality boundary -- immutable, never displaceable. Per the `scanBlockHashes` contract
+      // above, per-block hash sampling exists ONLY to retain provenance for blocks that can still
+      // be reorged, i.e. blocks strictly above `finalized`. So this immutable region needs no hash
+      // sampling: advance the cursor straight to `finalized`, persist the jump, and let the next
+      // poll scan the (bounded) unfinalized tail. This collapses catch-up from O(idle gap) to
+      // O(unfinalized tail), and the persisted jump means a transient error in the tail scan
+      // resumes from `finalized` rather than restarting from the stale cursor. The threshold keeps
+      // the jump one-shot: after landing at `finalized`, the residual `finalized - live` gap is a
+      // few blocks (< a chunk), so the very next poll takes the steady-state branch below and
+      // advances to `latest`, scanning the tail exactly as before -- never sticky at `finalized`.
+      if (finalized.blockNumber - persisted.live.blockNumber > chunkBlocks) {
+        // On this path `checkpoint` provably resolves to `finalized`: the branch condition gives
+        // `finalized > persisted.live`, and the cursor invariant gives `persisted.live >=
+        // persisted.finalized`, so `finalized > persisted.finalized`. The ternary is kept (rather
+        // than hardcoding `finalized`) so the near-head path below still sees the monotone guard.
+        // Fetch the immutable region's logs -- they are marketplace events in the operator's idle
+        // window and MUST be ingested; only their per-block hash provenance is skipped, not their logs.
+        const logs = await fetchChunked(
+          persisted.live.blockNumber + 1n,
+          finalized.blockNumber,
+          finalized.blockNumber,
+        );
+        input.state.transaction(() => {
+          store.write(stream, input.chain.chainId, finalized, checkpoint);
+          store.pruneThroughFinalized(stream, checkpoint.blockNumber);
+        });
+        return { logs, cursor: finalized, finalizedCheckpoint: checkpoint };
+      }
+
+      // Steady-state tail: `persisted.live` is at or near `finalized`, so the whole advance is (at
+      // most a chunk) around and above the finality boundary and must be hash-sampled exactly as
+      // before. `scanBlockHashes` from `persisted.live + 1` keeps the retained/pruned tail set
+      // byte-for-byte identical to pre-#2552 behavior.
       const logs = await fetchChunked(
         persisted.live.blockNumber + 1n,
         latest.blockNumber,
         finalized.blockNumber,
       );
-      // The checkpoint is monotone: a provider that regresses its `finalized` tag never moves it back.
-      const checkpoint = finalized.blockNumber > persisted.finalized.blockNumber ? finalized : persisted.finalized;
       const scanned = await scanBlockHashes(persisted.live.blockNumber + 1n, latest.blockNumber);
       input.state.transaction(() => {
         store.recordScanned(stream, input.chain.chainId, scanned);

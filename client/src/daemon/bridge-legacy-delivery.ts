@@ -17,7 +17,7 @@ import { REPOSITORY_WORK_PROFILE_URI } from '@jinn-network/task-execution-profil
 import type { HarvestResult } from '@jinn-network/task-execution-workspace';
 import { keccak256, type Hex } from 'viem';
 import { keccakEvidenceHash } from '@jinn-network/marketplace-binding';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import { SignedEnvelopeSchema } from '../types/envelope.js';
 import type { SignedTaskV1 } from '../types/task-document.js';
 import {

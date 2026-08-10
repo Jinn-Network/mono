@@ -12,7 +12,7 @@ import {
   type InputRightsRefV1,
   type TaskEnvironmentSpecV1,
 } from './contracts.js';
-import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../util/canonical-json.js';
 import type {
   EnvironmentArtifactUploader,
   EnvironmentAttestor,

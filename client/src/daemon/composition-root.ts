@@ -198,6 +198,12 @@ import {
   type NativeSolutionPublisher,
 } from './native-solution-publisher.js';
 import { buildNativeSolutionVerification } from './native-solution-verification.js';
+import {
+  buildNativeSolutionCorrections,
+  teeNativeMarketplaceEvents,
+  type NativeSolutionCorrections,
+} from './native-solution-corrections.js';
+import { NativeMarketplaceEventRepository } from './native-canonical-observations.js';
 import { buildNativeSolutionSettlementPort } from './native-solution-settlement.js';
 import {
   createNativeRequesterSubmissionResolver,
@@ -268,6 +274,8 @@ export interface OperatorComposition {
   readonly nativeSolutionCoordinator?: NativeSolutionCoordinator;
   /** Dedicated `solver-records` source; never shares the ProjectorLoop source tuple or root. */
   readonly nativeSolutionPublisher?: NativeSolutionPublisher;
+  /** Present only in native mode; the WorkLoop's per-tick signed reorg-correction reconciler. */
+  readonly nativeSolutionCorrections?: NativeSolutionCorrections;
   readonly nativeOperatorState?: NativeOperatorStateRepository;
   readonly nativeLauncherInspector?: NativeLauncherCapabilityPort;
   close(): Promise<void>;
@@ -1194,12 +1202,27 @@ export async function buildOperatorComposition(
           sig: solverDiscoveryIdentity.sign(pae),
         }],
       };
+  // One-swap M3 (#2461): the fleet path's marketplace-event read model, fed off the projector's
+  // own batches rather than a second poller on the same single-consumer cursor. See
+  // `teeNativeMarketplaceEvents`.
+  const nativeMarketplaceEvents = input.mode === 'native'
+    ? new NativeMarketplaceEventRepository(input.store)
+    : undefined;
   projectorParts = buildProjector({
     mode: input.mode,
     chain: input.chain,
     publicClient: input.publicClient,
     mechAddress: input.mechAddress,
-    logSource: venue.logSource,
+    logSource: nativeMarketplaceEvents === undefined ? venue.logSource : teeNativeMarketplaceEvents({
+      source: venue.logSource,
+      repository: nativeMarketplaceEvents,
+      chain: input.chain,
+      isAuthorizedMechOrigin: (address: Address) =>
+        address.toLowerCase() === input.mechAddress.toLowerCase(),
+      // The tee never rethrows into the projector; without a logger here its named failure event
+      // would go to `console.warn` instead of this composition's own log stream.
+      ...(input.logger === undefined ? {} : { logger: input.logger }),
+    }),
     archiveRoot: join(dirname(input.venueStateDbPath), 'discovery-archive'),
     discoverySigner,
     ipfsGatewayUrl: config.ipfsGatewayUrl,
@@ -1453,6 +1476,11 @@ export async function buildOperatorComposition(
       nativeClaimCoordinator,
       nativeSolutionCoordinator: nativeSolutionCoordinator!,
       nativeSolutionPublisher: nativeSolutionPublisher!,
+      nativeSolutionCorrections: buildNativeSolutionCorrections({
+        store: input.store,
+        publisher: nativeSolutionPublisher!,
+        marketplaceEvents: nativeMarketplaceEvents!,
+      }),
       nativeOperatorState: input.nativeClaimRuntime!.state,
       nativeLauncherInspector: nativeLauncherInspector!,
     }),

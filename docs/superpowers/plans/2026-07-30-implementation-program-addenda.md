@@ -46,7 +46,9 @@ the stage plans:
 4. **Config-backup filename contract:** `config.json.pre-v2.<ISO8601>.bak`,
    permission-preserving; stage 1 writes it, stage 5 prunes by exactly that shape.
 5. **`solver-nets` CLI retirement split:** stage 3 retires launcher-side subverbs; stage 4
-   retires join / list / doctor with the registry client.
+   retires join / list / doctor with the registry client. *Amended 2026-08-05 per
+   DR-2026-08-05: the split dissolves — all `solver-nets` subverbs retire in the one-swap
+   train with their machinery.*
 6. **Plugin-content CLI re-key** (manifestCid → wiring entries) is stage-1 scope (wiring
    entries are born in its config migration); the deeper disposition stays with the plugin
    session.
@@ -70,9 +72,9 @@ the stage plans:
 
 | # | Item | Origin | Affected law | Blocked work |
 | --- | --- | --- | --- | --- |
-| R1 | Evaluator-sealed evaluations cannot execute: `assertSealerRule` forbids all `capabilityGrants`, but the evaluation launcher requires a signer secret-forward. Proposed: admit exactly one declared self-signer grant under `publicSpec`. | stage-2 plan, Task 8 | binding design §6.4 (adjacent to frozen interface 8 — the sealer rule) | stage-2 evaluator loop execution |
-| R2 | Bridge-era evaluation lacks a subject Submission and admission receipt until stage 3. Proposed third §10 bridge-era rule: deterministic subject-Submission synthesis + a fleet admission-agent receipt, bridge-marked, advisory. Corollary (stage-3 plan): requester-side sealing covers stage-3-posted Submissions only; the evaluator-seals carve-out persists for legacy tasks until they drain. | stage-2 plan, Task 7 | daemon design §10 bridge-era rules | stage-2 derivation leg |
-| R3 | Archive exposure: the main operator API serves several unauthenticated routes held safe only by the localhost bind, so §6.2's "mount on the operator API" cannot be the public path. Proposed: the separate listener is the ONLY public path (archive routes + catch-all 404); the same-process mount remains localhost-only. | stage-4 plan | daemon design §6.2 / cross-plan contract 7 | stage-4 public exposure tasks |
+| R1 | Evaluator-sealed evaluations cannot execute: `assertSealerRule` forbids all `capabilityGrants`, but the evaluation launcher requires a signer secret-forward. Proposed: admit exactly one declared self-signer grant under `publicSpec`. — **Dissolved 2026-08-05 per [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md) decision 9:** the 2026-08-03 host byte-equality reseal removed the sandbox's need for a signer, and the native derivation seals grant-free (`capabilityGrants: {}`). Nothing to ratify. | stage-2 plan, Task 8 | binding design §6.4 (adjacent to frozen interface 8 — the sealer rule) | ~~stage-2 evaluator loop execution~~ (unblocked) |
+| R2 | Bridge-era evaluation lacks a subject Submission and admission receipt until stage 3. Proposed third §10 bridge-era rule: deterministic subject-Submission synthesis + a fleet admission-agent receipt, bridge-marked, advisory. Corollary (stage-3 plan): requester-side sealing covers stage-3-posted Submissions only; the evaluator-seals carve-out persists for legacy tasks until they drain. — **Dissolved 2026-08-05 per DR-2026-08-05 decision 9:** the native path acquires real digest-verified subject material, and the one-swap's combined drain empties the legacy-posted set the synthesis existed for (DR decision 4's conditional governs stragglers). Nothing to ratify. | stage-2 plan, Task 7 | daemon design §10 bridge-era rules | ~~stage-2 derivation leg~~ (unblocked) |
+| R3 | Archive exposure: the main operator API serves several unauthenticated routes held safe only by the localhost bind, so §6.2's "mount on the operator API" cannot be the public path. Proposed: the separate listener is the ONLY public path (archive routes + catch-all 404); the same-process mount remains localhost-only. — *Ratified in substance 2026-08-04 by DR-2026-08-04-b (headless design §6); the one-swap builds only the separate listener.* | stage-4 plan | daemon design §6.2 / cross-plan contract 7 | stage-4 public exposure tasks |
 | R4 | No pure-parse grader family exists: the prediction evaluator must be authored as `deterministic-process` with a meaningless nominal image. Proposed: taxonomy amendment adding a pure-parse family; interim, the prediction spec builder ships in `./testing` only. | evaluator-adapters plan | task profiles / EvaluationSpecs design | cosmetic only (interim shipped) |
 
 ## 4. Standing findings routed elsewhere

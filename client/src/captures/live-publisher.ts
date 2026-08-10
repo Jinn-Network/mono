@@ -3,7 +3,7 @@ import type { Hex } from 'viem';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import type { Store } from '../store/store.js';
 import type { CapturesStore } from '../store/captures.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import type { IdentityPublisher, ExecutionPayloadV2 } from '../erc8004/index.js';
 import {
   codeDigestSha256ToBytes32,

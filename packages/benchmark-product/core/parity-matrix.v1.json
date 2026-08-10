@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "@jinn-network/benchmark-product-core@0.1.0",
+  "entries": [
+    {
+      "operation": "armAdd",
+      "cliVerb": "arm add",
+      "authorityGated": false,
+      "description": "Adds a solver arm (pinning) to a draft.",
+      "gui": {
+        "status": "shipped",
+        "action": "arm.add"
+      }
+    },
+    {
+      "operation": "armList",
+      "cliVerb": "arm list",
+      "authorityGated": false,
+      "description": "Lists a draft's arms.",
+      "gui": {
+        "status": "shipped",
+        "action": "arm.list"
+      }
+    },
+    {
+      "operation": "armRemove",
+      "cliVerb": "arm remove",
+      "authorityGated": false,
+      "description": "Removes an arm from a draft.",
+      "gui": {
+        "status": "shipped",
+        "action": "arm.remove"
+      }
+    },
+    {
+      "operation": "armUpdate",
+      "cliVerb": "arm update",
+      "authorityGated": false,
+      "description": "Updates an existing arm's pinning and/or notes.",
+      "gui": {
+        "status": "shipped",
+        "action": "arm.update"
+      }
+    },
+    {
+      "operation": "authorityGrant",
+      "cliVerb": "authority grant",
+      "authorityGated": false,
+      "description": "Grants workspace membership and/or gated-operation grants to a principal (sponsor-only).",
+      "gui": {
+        "status": "shipped",
+        "action": "authority.grant"
+      }
+    },
+    {
+      "operation": "authorityRevoke",
+      "cliVerb": "authority revoke",
+      "authorityGated": false,
+      "description": "Revokes a principal's gated-operation grants (sponsor-only).",
+      "gui": {
+        "status": "shipped",
+        "action": "authority.revoke"
+      }
+    },
+    {
+      "operation": "authorityShow",
+      "cliVerb": "authority show",
+      "authorityGated": false,
+      "description": "Reads the workspace's authority policy.",
+      "gui": {
+        "status": "shipped",
+        "action": "authority.show"
+      }
+    },
+    {
+      "operation": "createDraft",
+      "cliVerb": "draft create",
+      "authorityGated": false,
+      "description": "Creates a new draft in a workspace, optionally seeded from a spec file.",
+      "gui": {
+        "status": "shipped",
+        "action": "draft.create"
+      }
+    },
+    {
+      "operation": "getDraft",
+      "cliVerb": "draft show",
+      "authorityGated": false,
+      "description": "Reads one draft's current document.",
+      "gui": {
+        "status": "shipped",
+        "action": "draft.show"
+      }
+    },
+    {
+      "operation": "importSweBenchRows",
+      "cliVerb": "import swebench",
+      "authorityGated": false,
+      "description": "Imports SWE-bench rows as a sealed benchmark attached to a draft.",
+      "gui": {
+        "status": "shipped",
+        "action": "intake.swebench"
+      }
+    },
+    {
+      "operation": "initWorkspace",
+      "cliVerb": "init",
+      "authorityGated": false,
+      "description": "Creates a new workspace directory and its founding-sponsor authority policy.",
+      "gui": {
+        "status": "shipped",
+        "action": "workspace.init"
+      }
+    },
+    {
+      "operation": "inspectDraft",
+      "cliVerb": "inspect",
+      "authorityGated": false,
+      "description": "Resolves and displays a draft's arms, benchmark, and assurance settings.",
+      "gui": {
+        "status": "shipped",
+        "action": "draft.inspect"
+      }
+    },
+    {
+      "operation": "listDrafts",
+      "cliVerb": "draft list",
+      "authorityGated": false,
+      "description": "Lists every draft in a workspace.",
+      "gui": {
+        "status": "shipped",
+        "action": "draft.list"
+      }
+    },
+    {
+      "operation": "runCancel",
+      "cliVerb": "cancel",
+      "authorityGated": true,
+      "description": "Requests an authority-gated stop, drains outstanding work, and seals a completely accounted cancelled Matrix.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.cancel"
+      }
+    },
+    {
+      "operation": "runCollect",
+      "cliVerb": "collect",
+      "authorityGated": false,
+      "description": "Assembles and seals the Matrix once the run's close boundary is reached.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.collect"
+      }
+    },
+    {
+      "operation": "runLaunch",
+      "cliVerb": "launch",
+      "authorityGated": true,
+      "description": "Launches the locked run on the real local venue (authority-gated).",
+      "gui": {
+        "status": "shipped",
+        "action": "run.launch"
+      }
+    },
+    {
+      "operation": "runLock",
+      "cliVerb": "lock",
+      "authorityGated": true,
+      "description": "Seals the Run record and transitions the draft to locked (authority-gated).",
+      "gui": {
+        "status": "shipped",
+        "action": "run.lock"
+      }
+    },
+    {
+      "operation": "runPreview",
+      "cliVerb": "preview",
+      "authorityGated": false,
+      "description": "Runs a disposable rehearsal of the draft's arms on the local venue in a throwaway area; never official evidence, never advances the lifecycle.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.preview"
+      }
+    },
+    {
+      "operation": "runPublish",
+      "cliVerb": "publish",
+      "authorityGated": true,
+      "description": "Verifies and emits one immutable deletion-portable public bundle from a reported draft (authority-gated).",
+      "gui": {
+        "status": "shipped",
+        "action": "run.publish"
+      }
+    },
+    {
+      "operation": "runQuote",
+      "cliVerb": "quote",
+      "authorityGated": false,
+      "description": "Prices a compiled run against the local venue's capabilities, without spending.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.quote"
+      }
+    },
+    {
+      "operation": "runReport",
+      "cliVerb": "report",
+      "authorityGated": true,
+      "description": "Produces the sealed Report and claim package from the closed run's Matrix (authority-gated).",
+      "gui": {
+        "status": "shipped",
+        "action": "run.report"
+      }
+    },
+    {
+      "operation": "runResults",
+      "cliVerb": "results",
+      "authorityGated": false,
+      "description": "Reads the sealed Matrix as a results document with venue-honesty disclosures.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.results"
+      }
+    },
+    {
+      "operation": "runResume",
+      "cliVerb": "resume",
+      "authorityGated": false,
+      "description": "Resumes an interrupted run, dispatching only outstanding work.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.resume"
+      }
+    },
+    {
+      "operation": "runStatus",
+      "cliVerb": "status",
+      "authorityGated": false,
+      "description": "Reads per-cell live status folded from the run journal.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.status"
+      }
+    },
+    {
+      "operation": "runVerify",
+      "cliVerb": "verify",
+      "authorityGated": false,
+      "description": "Independently re-derives the Matrix (and, once reported, the Report and claim package) from durable workspace state.",
+      "gui": {
+        "status": "shipped",
+        "action": "run.verify"
+      }
+    },
+    {
+      "operation": "sampleInit",
+      "cliVerb": "sample init",
+      "authorityGated": false,
+      "description": "Attaches the bundled sample benchmark to a draft.",
+      "gui": {
+        "status": "shipped",
+        "action": "intake.sample"
+      }
+    },
+    {
+      "operation": "updateDraft",
+      "cliVerb": "draft update",
+      "authorityGated": false,
+      "description": "Applies a JSON patch to a draft's spec.",
+      "gui": {
+        "status": "shipped",
+        "action": "draft.update"
+      }
+    }
+  ],
+  "exclusions": [
+    {
+      "name": "unverifiableAxisCounts",
+      "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
+    },
+    {
+      "name": "bundle verify",
+      "reason": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal"
+    }
+  ]
+}

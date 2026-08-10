@@ -43,6 +43,9 @@ import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
 import type { OperatorComposition } from './composition-root.js';
 import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
+import { EvaluatorLoop } from './evaluator-loop.js';
+import type { NativeEvaluatorComposition } from './native-evaluator-composition.js';
+import { PostingLoop, buildPostingLoop, type PostingLoopPorts } from './posting-loop.js';
 import { EvidenceDriverLoop } from './evidence-driver.js';
 import type { ProjectorLoop } from './projector-loop.js';
 import type { NativeOperatorHost } from './native-operator-host.js';
@@ -289,6 +292,35 @@ export interface DaemonConfig {
   work?: Omit<WorkLoopConfig, 'composition' | 'store'>;
 
   /**
+   * The native evaluator loop (one-swap M4a, #2461, `client/src/daemon/evaluator-loop.ts`): drives
+   * the fleet evaluator composition's tick. `composition` is built by `main.ts`
+   * (`buildFleetNativeEvaluator`) and passed in; the daemon supplies `store` itself. Omitted -> the
+   * loop is not started. The composition's own resources (backend, evidence, discovery store) are
+   * closed by `main.ts`'s shutdown handler, not the daemon — the daemon owns only the loop cadence.
+   */
+  evaluator?: {
+    readonly composition: NativeEvaluatorComposition;
+    readonly pollIntervalMs?: number;
+    readonly logger?: { info(message: string): void; warn(message: string): void };
+  };
+
+  /**
+   * The native posting loop (one-swap M5d, #2461, `client/src/daemon/posting-loop.ts`): drives the
+   * requester's `posting[]` config into posted Submissions. `main.ts` builds the ports
+   * (`native-fleet-posting.ts`) and passes them plus the composition mode and posting-entry count;
+   * the daemon supplies `store` itself and constructs the loop through `buildPostingLoop`, which is
+   * the single boot-inertness gate — a legacy composition or an empty `posting[]` yields no loop,
+   * so this daemon never registers the `posting` heartbeat or watchdog entry on a default boot.
+   */
+  posting?: {
+    readonly compositionMode: 'legacy' | 'native';
+    readonly postingEntryCount: number;
+    readonly ports: PostingLoopPorts;
+    readonly intervalMs?: number;
+    readonly logger?: { info(message: string): void; warn(message: string): void };
+  };
+
+  /**
    * Evidence-driver loop poll interval (ms), close-out C8. Only meaningful when `composition` is
    * present — the loop drives `composition.evidence`'s local runtime `sync()` and publication
    * policy (contract 6). Defaults to `LOOP_REGISTRY`'s own `evidence-driver` entry (30000).
@@ -318,6 +350,8 @@ export class Daemon {
   private harvestLoop?: HarvestLoop;
   private checkpointLoop?: CheckpointLoop;
   private workLoop?: WorkLoop;
+  private evaluatorLoop?: EvaluatorLoop;
+  private postingLoop?: PostingLoop;
   private projectorLoop?: ProjectorLoop;
   private evidenceDriverLoop?: EvidenceDriverLoop;
   private watchdogLoop?: WatchdogLoop;
@@ -419,6 +453,28 @@ export class Daemon {
     if (config.composition && config.work) {
       this.workLoop = new WorkLoop({ ...config.work, composition: config.composition, store: this.store });
     }
+    if (config.evaluator) {
+      this.evaluatorLoop = new EvaluatorLoop({
+        composition: config.evaluator.composition,
+        store: this.store,
+        pollIntervalMs: config.evaluator.pollIntervalMs ?? config.pollIntervalMs ?? 5000,
+        ...(config.evaluator.logger ? { logger: config.evaluator.logger } : {}),
+      });
+    }
+    if (config.posting) {
+      // `buildPostingLoop` is the boot-inertness gate: legacy composition or empty `posting[]`
+      // returns undefined, so no loop is constructed, heartbeated, or watchdog-registered.
+      this.postingLoop = buildPostingLoop({
+        compositionMode: config.posting.compositionMode,
+        postingEntryCount: config.posting.postingEntryCount,
+        options: {
+          store: this.store,
+          ports: config.posting.ports,
+          ...(config.posting.intervalMs !== undefined ? { intervalMs: config.posting.intervalMs } : {}),
+          ...(config.posting.logger ? { logger: config.posting.logger } : {}),
+        },
+      });
+    }
     if (config.composition) {
       // C8: the projector and evidence-driver loops are independent of `work` — both are started
       // whenever a composition exists, regardless of whether the work loop is configured.
@@ -428,6 +484,14 @@ export class Daemon {
         intervalMs: config.evidenceDriverIntervalMs ?? 30_000,
         store: this.store,
       });
+      // One-swap M6 (#2461): thread the driver into the status config so `/v1/status` carries
+      // the `evidenceIndexing` block and `GET /v1/notifications` derives `evidence_indexing_failed`.
+      // The producer was previously unconnected — the consumer paths existed, but nothing set
+      // `evidenceDriver`, so the block was always absent. `EvidenceDriverLoop` structurally
+      // satisfies `EvidenceIndexingSource` (failures()/pending()).
+      if (config.status) {
+        config.status.evidenceDriver = () => this.evidenceDriverLoop ?? null;
+      }
     }
   }
 
@@ -652,6 +716,32 @@ export class Daemon {
         }),
       );
     }
+    if (this.evaluatorLoop) {
+      this.loopPromises.push(
+        this.evaluatorLoop.run().catch(err => {
+          console.error('[daemon] evaluator loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'evaluator loop crashed',
+            errorCode: 'evaluator_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.postingLoop) {
+      this.loopPromises.push(
+        this.postingLoop.run().catch(err => {
+          console.error('[daemon] posting loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'posting loop crashed',
+            errorCode: 'posting_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     if (this.projectorLoop) {
       this.loopPromises.push(
         this.projectorLoop.run().catch(err => {
@@ -706,6 +796,8 @@ export class Daemon {
       if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
       if (this.workLoop) started.add('work');
+      if (this.evaluatorLoop) started.add('evaluator');
+      if (this.postingLoop) started.add('posting');
       if (this.projectorLoop) started.add('projector');
       if (this.evidenceDriverLoop) started.add('evidence-driver');
       if (peers.length > 0) started.add('peer-sync');
@@ -717,6 +809,8 @@ export class Daemon {
         checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
         work: this.config.work?.pollIntervalMs,
+        evaluator: this.config.evaluator?.pollIntervalMs ?? this.config.pollIntervalMs,
+        posting: this.config.posting?.intervalMs,
         'evidence-driver': this.config.evidenceDriverIntervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
@@ -775,6 +869,8 @@ export class Daemon {
     this.harvestLoop?.stop();
     this.checkpointLoop?.stop();
     this.workLoop?.stop();
+    this.evaluatorLoop?.stop();
+    this.postingLoop?.stop();
     this.projectorLoop?.stop();
     this.evidenceDriverLoop?.stop();
     this.peerSync?.stop();

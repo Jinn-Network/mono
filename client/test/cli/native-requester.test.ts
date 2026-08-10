@@ -245,4 +245,158 @@ describe('native requester CLI surface', () => {
     });
     expect(io.exits).toEqual([11]);
   });
+
+  describe('consume subcommand', () => {
+    it('registers the accepted consume spelling (runConsumer is wired, not feature-disabled)', async () => {
+      const io = captureIo();
+
+      await runCli(['native-vertical', 'consume', '--consumer-config', './does-not-exist.json'], {
+        writer: io.writer, exit: io.exit, stdoutIsTty: false,
+      });
+
+      // The wired production runConsumer really executed (a missing config file surfaces as the
+      // operator's own config problem, `invalid_invocation` -- see F5's config-vs-verification
+      // classification below), which is distinct from the disabled-build envelope tested next.
+      const result = JSON.parse(io.writes.at(-1)!);
+      expect(result.details?.state).not.toBe('feature-disabled');
+      expect(result.code).toBe('invalid_invocation');
+      expect(result.details?.state).toBe('config-invalid');
+    });
+
+    it('is feature-disabled when no runConsumer dep is supplied', async () => {
+      const command = createNativeRequesterCommand({
+        async preflightRequest() { throw new Error('must not run'); },
+        async loadExecutor() { throw new Error('must not run'); },
+      });
+      const { ctx, io } = context(['consume', '--consumer-config', './consumer.json']);
+
+      await command.run(ctx);
+
+      const result = JSON.parse(io.writes.join(''));
+      expect(result.code).not.toBe('invalid_invocation');
+      expect(result.details?.state).toBe('feature-disabled');
+    });
+
+    it('documents consume in --help', async () => {
+      const io = captureIo();
+
+      await runCli(['native-vertical', '--help'], { writer: io.writer, exit: io.exit, stdoutIsTty: false });
+
+      expect(io.writes.join('')).toContain('jinn native-vertical consume --consumer-config <path>');
+    });
+
+    it('requires a non-empty --consumer-config', async () => {
+      const command = createNativeRequesterCommand({
+        async preflightRequest() { throw new Error('must not run'); },
+        async loadExecutor() { throw new Error('must not run'); },
+        async runConsumer() { throw new Error('must not run'); },
+      });
+      const { ctx, io } = context(['consume']);
+
+      await command.run(ctx);
+
+      expect(JSON.parse(io.writes.join(''))).toMatchObject({ code: 'invalid_invocation' });
+      expect(io.exits).toEqual([11]);
+    });
+
+    it('runs directly without an --execute gate and reports the digest', async () => {
+      const events: string[] = [];
+      const command = createNativeRequesterCommand({
+        async preflightRequest() { throw new Error('must not run'); },
+        async loadExecutor() { throw new Error('must not run'); },
+        async runConsumer(input) {
+          events.push(`consume:${input.configPath}:${input.outPath ?? 'none'}`);
+          return {
+            runId: 'driver-golden-run',
+            reportPath: '/tmp/consumer/native-vertical-verification.json',
+            reportDigest: `sha256:${'1'.repeat(64)}`,
+            syncModes: { requester: 'cold', solver: 'cold', evaluator: 'cold' },
+          };
+        },
+      });
+      const { ctx, io } = context(['consume', '--consumer-config', './consumer.json', '--out', './report.json']);
+
+      await command.run(ctx);
+
+      expect(events).toEqual(['consume:./consumer.json:./report.json']);
+      expect(JSON.parse(io.writes.join(''))).toEqual({
+        schemaVersion: 1,
+        kind: 'native_vertical_consume_report',
+        runId: 'driver-golden-run',
+        reportPath: '/tmp/consumer/native-vertical-verification.json',
+        reportDigest: `sha256:${'1'.repeat(64)}`,
+        syncModes: { requester: 'cold', solver: 'cold', evaluator: 'cold' },
+      });
+      expect(io.exits).toEqual([]);
+    });
+
+    it('emits a fatal envelope when verification fails', async () => {
+      const command = createNativeRequesterCommand({
+        async preflightRequest() { throw new Error('must not run'); },
+        async loadExecutor() { throw new Error('must not run'); },
+        async runConsumer() {
+          throw new Error('solution-settlement-correspondence-failed');
+        },
+      });
+      const { ctx, io } = context(['consume', '--consumer-config', './consumer.json']);
+
+      await command.run(ctx);
+
+      expect(JSON.parse(io.writes.join(''))).toMatchObject({
+        code: 'fatal',
+        details: {
+          feature: 'native-vertical',
+          state: 'verification-failed',
+          reason: 'solution-settlement-correspondence-failed',
+        },
+      });
+      expect(io.exits).toEqual([50]);
+    });
+
+    it('emits invalid_invocation (not fatal) when the config file is malformed', async () => {
+      const command = createNativeRequesterCommand({
+        async preflightRequest() { throw new Error('must not run'); },
+        async loadExecutor() { throw new Error('must not run'); },
+        async runConsumer() {
+          const error = new Error('native consumer config at ./consumer.json is not valid JSON: SyntaxError');
+          error.name = 'NativeConsumerConfigError';
+          throw error;
+        },
+      });
+      const { ctx, io } = context(['consume', '--consumer-config', './consumer.json']);
+
+      await command.run(ctx);
+
+      expect(JSON.parse(io.writes.join(''))).toMatchObject({
+        code: 'invalid_invocation',
+        details: {
+          feature: 'native-vertical',
+          state: 'config-invalid',
+          reason: 'native consumer config at ./consumer.json is not valid JSON: SyntaxError',
+        },
+      });
+      expect(io.exits).toEqual([11]);
+    });
+
+    it('emits invalid_invocation (not fatal) when the trust catalog is invalid', async () => {
+      const command = createNativeRequesterCommand({
+        async preflightRequest() { throw new Error('must not run'); },
+        async loadExecutor() { throw new Error('must not run'); },
+        async runConsumer() {
+          const error = new Error('native trust catalog cannot be inspected: ENOENT');
+          error.name = 'NativeTrustCatalogError';
+          throw error;
+        },
+      });
+      const { ctx, io } = context(['consume', '--consumer-config', './consumer.json']);
+
+      await command.run(ctx);
+
+      expect(JSON.parse(io.writes.join(''))).toMatchObject({
+        code: 'invalid_invocation',
+        details: { feature: 'native-vertical', state: 'config-invalid' },
+      });
+      expect(io.exits).toEqual([11]);
+    });
+  });
 });

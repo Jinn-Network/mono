@@ -34,10 +34,20 @@ const SIBLING_TREE_DIRS = new Map([
 // Admission consumes environments/record types + digests, trust-core's DSSE spine, and the
 // portable Task/EvaluationSpec descriptor types used by its deterministic prediction fixture.
 // Every addition to this graph is a design question first.
+//
+// profiles (#2534): the prediction-snapshot policy has to name the sealed digest of
+// prediction-forecast/1.0, and profiles is the package that OWNS that document — the same
+// tier-3 -> tier-2 edge derivation already declares below, for the same reason. It was
+// previously a transcribed `sha256:e61dc765…` literal; re-sealing the profile under
+// spec.jinn.network moved the real digest and the literal stayed behind, so admission refused
+// every conforming Task on the live gate. Importing the derived constant removes the copy that
+// can go stale. profiles is the same purity tier as protocol (its only Jinn dependency IS
+// protocol), so this adds no verifier or issuer surface.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['admission', {
     dependencies: [
       '@jinn-network/environment-record',
+      '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
       '@jinn-network/trust-core',
     ],

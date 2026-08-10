@@ -2,9 +2,37 @@ import { isAbsolute } from 'node:path';
 import { AgentIriSchema } from '@jinn-network/trust-core';
 import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
 import { z } from 'zod/v3';
+import type {
+  NativeEvaluationMethodDigests,
+  NativeGraderReportBinding,
+} from './native-evaluator-composition.js';
 
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/u);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
+// A `sha256:<64 hex>` whose INFERRED type is the `sha256:${string}` template literal the native
+// composition consumes, so `evaluationMethodDigest` threads to `buildNativeEvaluatorComposition`
+// without a narrowing cast (the regex is the whole runtime check; `.transform` only re-types).
+const brandedDigest = digest.transform((value) => value as `sha256:${string}`);
+/**
+ * One digest every configured registration's evaluation-method descriptor must declare, or an
+ * exact per-`registrationId` map for a deployment serving more than one method (M1's map form,
+ * PR #2463). The `satisfies` clause keeps the parsed output assignable to the type the composition
+ * accepts (`NativeEvaluationMethodDigests`) — the two stop compiling if they ever diverge.
+ */
+const evaluationMethodDigests = z.union([
+  brandedDigest,
+  z.record(z.string().min(1), brandedDigest),
+]) satisfies z.ZodType<NativeEvaluationMethodDigests, z.ZodTypeDef, unknown>;
+/**
+ * Grader-execution binding per container-graded registration the deployment declares. Only the
+ * `"deployment-owned"` literal is expressible in a config file: a live host `GraderReportSource`
+ * object cannot cross the spawned-child boundary (#2467 Finding P0-5-A). The `satisfies` clause
+ * keeps the parsed value assignable to the composition's `NativeGraderReportBinding`.
+ */
+const graderReportSources = z.record(
+  z.string().min(1),
+  z.literal('deployment-owned'),
+) satisfies z.ZodType<Record<string, NativeGraderReportBinding>, z.ZodTypeDef, unknown>;
 const UINT256_MAX = (1n << 256n) - 1n;
 const wei = z.string().regex(/^(0|[1-9]\d{0,77})$/u, 'must be a canonical uint256 decimal')
   .refine((value) => BigInt(value) <= UINT256_MAX, 'must fit uint256');
@@ -89,7 +117,13 @@ export const NativeOperatorConfigSchema = z.object({
     deploymentModule: moduleLocation,
     moduleDigest: digest,
     signerHandle: z.string().min(1),
-    evaluationMethodDigest: digest,
+    evaluationMethodDigest: evaluationMethodDigests,
+    /**
+     * Grader-execution binding per container-graded registration the deployment declares. Omitted
+     * for a deployment with no container-graded registration (today's prediction-only shape); a
+     * container-graded registration with no binding is refused at composition (#2467).
+     */
+    graderReportSources: graderReportSources.optional(),
   }).strict().optional(),
   finality: z.object({ confirmations: z.number().int().positive() }).strict(),
   liveClosureReceiptPath: absolutePath,

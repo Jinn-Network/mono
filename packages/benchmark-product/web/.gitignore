@@ -1,0 +1,9 @@
+node_modules/
+.yarn/
+.next/
+out/
+playwright-report/
+test-results/
+*.tsbuildinfo
+next-env.d.ts
+.env*

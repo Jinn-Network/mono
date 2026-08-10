@@ -319,4 +319,215 @@ describe("chain log source (design §7 ruling 2)", () => {
     const events = decodeMarketplaceLogs(logs, marketplaceEventOriginAuthority(BASE_SEPOLIA_TODAY, () => true));
     expect(Array.isArray(events)).toBe(true);
   });
+
+  // ---------------------------------------------------------------------------------------------
+  // Idle-gap catch-up (#2552): a cursor that fell days/100k blocks behind must reach head in
+  // bounded work. The immutable region at/below `finalized` is never per-block hash-scanned; only
+  // the unfinalized tail is. Catch-up is O(unfinalized tail), not O(idle gap), and the finalized
+  // jump is persisted so a transient tail-scan error resumes rather than restarting from stale.
+  // ---------------------------------------------------------------------------------------------
+
+  /** Counts `getBlock({ blockNumber })` (the per-block hash scan) and can fail it once, at a height. */
+  function countingHashReads(chain: ScriptedChain): {
+    readonly publicClient: PublicClient;
+    blockNumberReads(): number;
+    failNextHashAt(blockNumber: bigint): void;
+  } {
+    let reads = 0;
+    let failAt: bigint | undefined;
+    const inner = chain.publicClient as unknown as {
+      getBlock: (args?: { blockTag?: "latest" | "finalized"; blockNumber?: bigint }) => Promise<unknown>;
+      getLogs: (args: unknown) => Promise<unknown>;
+    };
+    const publicClient = {
+      async getBlock(args: { blockTag?: "latest" | "finalized"; blockNumber?: bigint } = {}) {
+        if (args.blockNumber !== undefined) {
+          reads += 1;
+          if (failAt !== undefined && args.blockNumber === failAt) {
+            failAt = undefined;
+            throw new Error(`transient RPC error at block ${args.blockNumber}`);
+          }
+        }
+        return inner.getBlock(args);
+      },
+      getLogs: (args: unknown) => inner.getLogs(args),
+    } as unknown as PublicClient;
+    return {
+      publicClient,
+      blockNumberReads: () => reads,
+      failNextHashAt: (blockNumber) => { failAt = blockNumber; },
+    };
+  }
+
+  test("catch-up over a >10k-block idle gap is O(unfinalized tail), not O(gap), in per-block hash reads", async () => {
+    const chain = buildScriptedChain();
+    // Establish a persisted cursor near block 50.
+    chain.mine(50);
+    chain.setFinalized(40n);
+    const instrument = countingHashReads(chain);
+    const s = createChainLogSource({
+      chain: BASE_SEPOLIA_TODAY,
+      publicClient: instrument.publicClient,
+      state,
+      addresses: [BASE_SEPOLIA_TODAY.jinnRouter],
+      options: { startBlock: 0n },
+    });
+    await s.poll();
+    expect(s.cursor()!.blockNumber).toBe(50n);
+
+    // Now open a ~12,000-block idle gap: latest jumps to 12,050, finalized to 12,000.
+    chain.mine(12_000); // latest = 12,050
+    chain.setFinalized(12_000n);
+    const gap = 12_000n - 50n; // finalized - persisted.live
+    const tail = 12_050n - 12_000n; // latest - finalized
+
+    const readsBefore = instrument.blockNumberReads();
+    const catchUp = await s.poll();
+    // The catch-up poll advances the cursor straight to the immutable finalized boundary...
+    expect(catchUp.cursor.blockNumber).toBe(12_000n);
+    expect(catchUp.finalizedCheckpoint.blockNumber).toBe(12_000n);
+    // ...without per-block hash-scanning the ~12k immutable region. A handful of reads at most
+    // (the single reorg-check read of the old cursor), never anything close to the gap.
+    const catchUpReads = instrument.blockNumberReads() - readsBefore;
+    expect(catchUpReads).toBeLessThan(10);
+    expect(catchUpReads).toBeLessThan(Number(gap));
+
+    // The next poll scans the bounded unfinalized tail and reaches latest.
+    const readsBeforeTail = instrument.blockNumberReads();
+    const tailPoll = await s.poll();
+    expect(tailPoll.cursor.blockNumber).toBe(12_050n);
+    const tailReads = instrument.blockNumberReads() - readsBeforeTail;
+    // Bounded by the tail (plus the one reorg-check read), never by the idle gap.
+    expect(BigInt(tailReads)).toBeLessThanOrEqual(tail + 2n);
+    expect(tailReads).toBeLessThan(Number(gap));
+  });
+
+  test("the catch-up jump still INGESTS marketplace logs from the skipped immutable region (logs not dropped)", async () => {
+    // The catch-up jump skips per-block HASH sampling of `(persisted.live, finalized]`, but the
+    // region's marketplace LOGS are the operator's idle-window events and must still be returned.
+    // A mutation that makes the jump return `[]` (no-op its getLogs) must redden this test.
+    const chain = buildScriptedChain();
+    chain.mine(50);
+    chain.setFinalized(40n);
+    const s = source(chain, { startBlock: 0n });
+    await s.poll();
+    expect(s.cursor()!.blockNumber).toBe(50n);
+
+    // Open a >chunk-sized idle gap and place a marketplace log at a block BELOW finalized,
+    // inside the region the jump skips for hash sampling.
+    chain.mine(12_000); // latest = 12,050
+    chain.setFinalized(12_000n); // finalized - live = 11,950 > chunk (1000) → catch-up jump
+    const idleWindowTx = `0x${"e".repeat(64)}` as Hex;
+    chain.addLog(6_000n, {
+      address: BASE_SEPOLIA_TODAY.jinnRouter,
+      topics: [`0x${"f".repeat(64)}` as Hex],
+      data: "0x" as Hex,
+      transactionHash: idleWindowTx,
+      logIndex: 0,
+    });
+
+    const catchUp = await s.poll();
+    expect(catchUp.cursor.blockNumber).toBe(12_000n); // took the jump path
+    const ingested = catchUp.logs.find((log) => log.blockNumber === 6_000n);
+    expect(ingested).toBeDefined();
+    expect(ingested!.transactionHash).toBe(idleWindowTx);
+    // The whole skipped region is at/below finalized, so the event is tagged `finalized`.
+    expect(ingested!.finalityTier).toBe("finalized");
+  });
+
+  test("a transient hash-read error during catch-up loses no progress: the next poll resumes past the immutable region", async () => {
+    const chain = buildScriptedChain();
+    chain.mine(50);
+    chain.setFinalized(40n);
+    const instrument = countingHashReads(chain);
+    const s = createChainLogSource({
+      chain: BASE_SEPOLIA_TODAY,
+      publicClient: instrument.publicClient,
+      state,
+      addresses: [BASE_SEPOLIA_TODAY.jinnRouter],
+      options: { startBlock: 0n },
+    });
+    await s.poll();
+    expect(s.cursor()!.blockNumber).toBe(50n);
+
+    chain.mine(12_000); // latest = 12,050
+    chain.setFinalized(12_000n);
+
+    // First poll takes the catch-up fast path and durably persists the jump to finalized.
+    await s.poll();
+    expect(s.cursor()!.blockNumber).toBe(12_000n);
+
+    // The tail scan then hits a transient error partway through.
+    instrument.failNextHashAt(12_030n);
+    await expect(s.poll()).rejects.toThrow(/transient RPC error/u);
+
+    // Progress is NOT lost: the cursor is still at the finalized jump (12,000), well past the
+    // original stale cursor (50). A pre-#2552 build would have thrown from the O(gap) scan and
+    // left the cursor at 50 forever — the live wedge.
+    expect(s.cursor()!.blockNumber).toBe(12_000n);
+
+    // A subsequent poll (no injected error) resumes from 12,000 and reaches head.
+    const resumed = await s.poll();
+    expect(resumed.cursor.blockNumber).toBe(12_050n);
+  });
+
+  test("a reorg in the unfinalized tail after a catch-up jump is still detected exactly as normal", async () => {
+    const chain = buildScriptedChain();
+    chain.mine(50);
+    chain.setFinalized(40n);
+    const s = source(chain, { startBlock: 0n });
+    await s.poll();
+
+    chain.mine(12_000); // latest = 12,050
+    chain.setFinalized(12_000n);
+    await s.poll(); // catch-up jump to 12,000
+    const tail = await s.poll(); // scans + advances to 12,050
+    expect(tail.cursor.blockNumber).toBe(12_050n);
+
+    // Reorg inside the unfinalized tail (above the finalized checkpoint at 12,000).
+    chain.reorgFrom(12_040n);
+    const reorged = await s.poll();
+    expect(reorged.reorg).toBeDefined();
+    expect(reorged.reorg!.rolledBackTo.blockNumber).toBe(12_000n);
+    expect(reorged.reorg!.displacedBlocks.map((b) => b.blockNumber)).toEqual([
+      12_040n, 12_041n, 12_042n, 12_043n, 12_044n, 12_045n,
+      12_046n, 12_047n, 12_048n, 12_049n, 12_050n,
+    ]);
+    expect(reorged.reorg!.orphanedBlockHashes.length).toBe(11);
+  });
+
+  test("the catch-up jump prunes scanned hashes through the advanced finalized checkpoint", async () => {
+    const chain = buildScriptedChain();
+    chain.mine(50);
+    chain.setFinalized(40n);
+    const s = source(chain, { startBlock: 0n });
+    await s.poll();
+    const scannedBelow = (boundary: number): number => (state.db
+      .prepare("SELECT COUNT(*) AS n FROM scanned_block_hashes WHERE block_number < ?")
+      .get(boundary) as { n: number }).n;
+    // After the first poll, blocks 41..50 (above the finalized checkpoint 40) are retained.
+    expect(scannedBelow(51)).toBeGreaterThan(0);
+
+    chain.mine(12_000); // latest = 12,050
+    chain.setFinalized(12_000n);
+    const catchUp = await s.poll();
+    expect(catchUp.finalizedCheckpoint.blockNumber).toBe(12_000n);
+    // pruneThroughFinalized ran through the ADVANCED checkpoint: nothing below 12,000 remains.
+    expect(scannedBelow(12_000)).toBe(0);
+  });
+
+  test("a below-threshold gap that still straddles finalized keeps the pre-#2552 single-poll behavior", async () => {
+    // persisted.live is below finalized but by less than a chunk, so the steady-state branch (not
+    // the catch-up jump) runs: one poll advances straight to latest and hash-scans the tail.
+    const chain = buildScriptedChain();
+    chain.mine(50);
+    chain.setFinalized(40n);
+    const s = source(chain, { startBlock: 0n });
+    await s.poll(); // cursor = 50
+    chain.mine(60); // latest = 110
+    chain.setFinalized(100n); // finalized - live = 100 - 50 = 50 < chunk (1000)
+    const batch = await s.poll();
+    expect(batch.cursor.blockNumber).toBe(110n); // reached latest in ONE poll
+    expect(batch.finalizedCheckpoint.blockNumber).toBe(100n);
+  });
 });
