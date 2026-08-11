@@ -62,7 +62,7 @@ async function audit(page: Page, label: string): Promise<void> {
   // Next may stream the document head after an action-driven server-component refresh; audit the
   // settled document rather than the transient head replacement frame. No rule, impact, or node is
   // waived: any axe violation fails with its complete diagnostic.
-  await expect(page).toHaveTitle(/Benchmark Product/u);
+  await expect(page).toHaveTitle(/Colophon/u);
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations, `${label}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([]);
 }
@@ -155,7 +155,7 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "Benchmark Product" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Compare agents on the same work." })).toBeVisible();
   await auditState(page, "landing route");
 
   await page.goto("/workspace/new");
@@ -221,6 +221,11 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await auditState(page, "active run monitor");
   const delivered = page.getByRole("heading", { level: 2, name: "Delivered" }).locator("../..");
   await expect(delivered).toContainText("6", { timeout: 180_000 });
+  // Delivery is the solve-side terminal, not the evaluation-side durability barrier. Collect
+  // must wait until every evaluation verdict is journaled too; otherwise it would race the last
+  // evaluation append and verification could honestly re-derive different Matrix bytes.
+  const judged = page.getByRole("heading", { level: 2, name: "Judged / failed" }).locator("../..");
+  await expect(judged).toContainText("6 / 0", { timeout: 180_000 });
   await submitAction(page, "Collect", /closed/u);
   await expect(page.getByRole("button", { name: "Collect", exact: true })).toBeDisabled();
   await expect(lifecycle).toContainText("closed");

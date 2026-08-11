@@ -1,0 +1,18 @@
+<!-- @dsCard group="Components" viewport="700x380" name="Evidence" subtitle="VerdictChip, AssuranceMeter, CompletenessBar, DisagreementStrip" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css"><style>html,body{margin:0}#root{padding:20px 24px}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.lbl{font:var(--type-label);letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--text-faint);margin-bottom:8px}.grp{margin-bottom:18px}</style><script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script></head><body><div id="root"></div>
+<script type="text/babel">
+const { Button, IconButton, Input, Select, Checkbox, Switch, Tag, Card, SectionHead, Footnote, Callout, Imprint, VerdictChip, AssuranceMeter, CompletenessBar, DisagreementStrip, ClaimBadge, ReportCard, CiteBlock, MethodLock } = window.ColophonDesignSystem_55942c;
+const Ico=({d,s=15})=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
+function Demo(){const [a,setA]=React.useState('majority');return <div style={{display:'flex',flexDirection:'column',gap:20}}>
+<div><div className="lbl">Verdicts — colour and fill are redundant</div><div className="row">
+<VerdictChip verdict="met" count={1065}/><VerdictChip verdict="unmet" count={255}/><VerdictChip verdict="conflicted" count={88}/><VerdictChip verdict="attested"/><VerdictChip verdict="incomplete" count={92}/><VerdictChip verdict="unverifiable"/></div></div>
+<CompletenessBar size="lg" total={1500} label="1,500 expected executions" segments={[{verdict:'met',count:1065},{verdict:'unmet',count:255},{verdict:'conflicted',count:88},{verdict:'incomplete',count:92}]}/>
+<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,alignItems:'start'}}>
+<AssuranceMeter value={a} onChange={setA}/>
+<DisagreementStrip taskId="astropy__astropy-12907" resolution="retained" evaluators={[{id:'ev/deterministic-tests',verdict:'met'},{id:'ev/rubric-b',verdict:'unmet',note:'Passes tests but changes public API shape.'}]}/>
+</div></div>;}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script></body></html>

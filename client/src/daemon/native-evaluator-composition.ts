@@ -721,6 +721,12 @@ export async function buildNativeEvaluatorComposition(
       },
       publisher,
       verification,
+      // No `maxAttempts`: a live evaluation lives 25+ minutes across multiple finality waits, polled
+      // every ~5s, and deliberately marks normal projector-lag conditions retryable. A fixed cumulative
+      // budget terminal-failed verdicts on ordinary lag; the 4h admission deadline is the real cap
+      // (retry-until-deadline), with the counter reset on each phase advance. Capped exponential backoff
+      // keeps a sustained dependency outage from hammering RPC.
+      retry: { delayMs: 5_000, maxDelayMs: 300_000 },
     });
 
     return {

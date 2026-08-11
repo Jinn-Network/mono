@@ -44,6 +44,6 @@ test("Chromium 147 recognizes exactly the pinned feature set and permits none", 
   });
   expect(policy.recognized).toEqual(PINNED_PERMISSIONS_POLICY_FEATURES);
   expect(policy.allowed).toEqual([]);
-  await expect(page).toHaveTitle(/Benchmark Product/u);
+  await expect(page).toHaveTitle(/Colophon/u);
   expect(warnings).toEqual([]);
 });

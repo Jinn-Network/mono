@@ -1,10 +1,12 @@
-# `@jinn-network/benchmark-product-core`
+# Colophon core — `@jinn-network/benchmark-product-core`
 
 The private Tier 4 core package is the single trusted product boundary. It owns
 workspace and draft state, lifecycle transitions, authority checks, the audit
 journal, real local-venue composition, Report and claim production, local
 public-bundle emission, and portable verification. The CLI and private web app
 are clients of these public operations; neither is a second implementation.
+The preferred CLI command is `colophon`; `benchmark-product` remains an
+internal compatibility alias while packages keep their established names.
 
 Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
 Start at the [product overview](../README.md); see the
@@ -36,42 +38,42 @@ GUI:
 
 | Library operation | CLI command | Purpose |
 |---|---|---|
-| `armAdd` | `benchmark-product arm add` | Add a pinned solver arm. |
-| `armList` | `benchmark-product arm list` | List a draft's arms. |
-| `armRemove` | `benchmark-product arm remove` | Remove an arm. |
-| `armUpdate` | `benchmark-product arm update` | Update arm pinning or notes. |
-| `authorityGrant` | `benchmark-product authority grant` | Sponsor-only membership or grant change. |
-| `authorityRevoke` | `benchmark-product authority revoke` | Sponsor-only grant or membership revocation. |
-| `authorityShow` | `benchmark-product authority show` | Read the authority policy. |
-| `createDraft` | `benchmark-product draft create` | Create a draft, optionally from JSON. |
-| `getDraft` | `benchmark-product draft show` | Read one draft. |
-| `importSweBenchRows` | `benchmark-product import swebench` | Import SWE-bench-shaped rows through interop. |
-| `initWorkspace` | `benchmark-product init` | Create a workspace and founding sponsor. |
-| `inspectDraft` | `benchmark-product inspect` | Resolve benchmark, arms, and assurance facts. |
-| `listDrafts` | `benchmark-product draft list` | List drafts. |
-| `runCancel` | `benchmark-product cancel` | Durably request or finalize cancellation. |
-| `runCollect` | `benchmark-product collect` | Seal the terminal Matrix. |
-| `runLaunch` | `benchmark-product launch` | Drive the real local venue. |
-| `runLock` | `benchmark-product lock` | Seal the preregistered Run. |
-| `runPreview` | `benchmark-product preview` | Run a disclosed, non-official rehearsal. |
-| `runPublish` | `benchmark-product publish` | Verify and emit one immutable local bundle. |
-| `runQuote` | `benchmark-product quote` | Present size, coverage, cap, and honest estimates. |
-| `runReport` | `benchmark-product report` | Produce the signed Report and claim package. |
-| `runResults` | `benchmark-product results` | Read the sealed Matrix result projection. |
-| `runResume` | `benchmark-product resume` | Resume only outstanding real-venue work. |
-| `runStatus` | `benchmark-product status` | Read durable per-cell and driver status. |
-| `runVerify` | `benchmark-product verify` | Re-derive Matrix, Report, and claim consistency. |
-| `sampleInit` | `benchmark-product sample init` | Attach the bundled three-task benchmark. |
-| `updateDraft` | `benchmark-product draft update` | Apply a validated JSON draft patch. |
+| `armAdd` | `colophon arm add` | Add a pinned solver arm. |
+| `armList` | `colophon arm list` | List a draft's arms. |
+| `armRemove` | `colophon arm remove` | Remove an arm. |
+| `armUpdate` | `colophon arm update` | Update arm pinning or notes. |
+| `authorityGrant` | `colophon authority grant` | Sponsor-only membership or grant change. |
+| `authorityRevoke` | `colophon authority revoke` | Sponsor-only grant or membership revocation. |
+| `authorityShow` | `colophon authority show` | Read the authority policy. |
+| `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
+| `getDraft` | `colophon draft show` | Read one draft. |
+| `importSweBenchRows` | `colophon import swebench` | Import SWE-bench-shaped rows through interop. |
+| `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
+| `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
+| `listDrafts` | `colophon draft list` | List drafts. |
+| `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
+| `runCollect` | `colophon collect` | Seal the terminal Matrix. |
+| `runLaunch` | `colophon launch` | Drive the real local venue. |
+| `runLock` | `colophon lock` | Seal the preregistered Run. |
+| `runPreview` | `colophon preview` | Run a disclosed, non-official rehearsal. |
+| `runPublish` | `colophon publish` | Verify and emit one immutable local bundle. |
+| `runQuote` | `colophon quote` | Present size, coverage, cap, and honest estimates. |
+| `runReport` | `colophon report` | Produce the signed Report and claim package. |
+| `runResults` | `colophon results` | Read the sealed Matrix result projection. |
+| `runResume` | `colophon resume` | Resume only outstanding real-venue work. |
+| `runStatus` | `colophon status` | Read durable per-cell and driver status. |
+| `runVerify` | `colophon verify` | Re-derive Matrix, Report, and claim consistency. |
+| `sampleInit` | `colophon sample init` | Attach the bundled three-task benchmark. |
+| `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI
 parity:
 
 The exact machine command is
-`benchmark-product bundle verify --bundle <dir> --json`.
+`colophon bundle verify --bundle <dir> --json`.
 
 ```text
-benchmark-product bundle verify --bundle <dir> --json
+colophon bundle verify --bundle <dir> --json
 ```
 
 It reads only the caller-selected immutable bundle, needs no workspace or
@@ -79,7 +81,7 @@ principal, and returns the six checks documented in the
 [public-bundle guide](../PUBLIC-BUNDLE.md).
 
 Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
-`--json`; command-specific flags are listed by `benchmark-product help`.
+`--json`; command-specific flags are listed by `colophon help`.
 
 ## Authority and lifecycle behavior
 

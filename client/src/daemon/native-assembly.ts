@@ -23,6 +23,7 @@
  *    the native graph.
  */
 import { documentDigest } from '@jinn-network/task-execution-protocol';
+import { recordPath } from '@jinn-network/record-discovery-protocol';
 import type { NativeTier4ClaimPolicy } from './native-claim-policy.js';
 import type { NativeEngagementRow, NativeOperatorStateRepository } from './native-operator-state.js';
 import type { RoleIdentitySet } from './role-identities.js';
@@ -36,6 +37,16 @@ export interface NativeExactDocuments {
 /** The one record port these helpers need: exact bytes for an exact digest. */
 export interface NativeRecordsByDigest {
   byDigest(digest: `sha256:${string}`): Promise<Uint8Array>;
+}
+
+/**
+ * The record ports the EvaluationSpec resolver reads: the marketplace IPFS plane
+ * (`byDigest`) plus the requester's HTTP serving plane (`byLocation`). Native records — the
+ * EvaluationSpec among them — are published only to the HTTP serving plane and never pushed to
+ * IPFS, so the resolver needs both.
+ */
+export interface NativeEvaluationSpecRecords extends NativeRecordsByDigest {
+  byLocation(url: string): Promise<Uint8Array>;
 }
 
 /**
@@ -193,17 +204,34 @@ export function buildNativeExactDocuments(
  * Resolves a Task's advertised public EvaluationSpec by exact digest. A miss, a transport
  * failure, and a digest mismatch are all `undefined` — the verification port treats an
  * unresolvable spec as "not proven", never as "no spec was required".
+ *
+ * Two planes are tried, in order. First the marketplace IPFS plane (`byDigest`), where the
+ * on-chain post path uploads the Task. Then, on any IPFS miss/failure/mismatch, the requester's
+ * HTTP serving plane (`byLocation` of `<requesterServingBaseUrl>/records/<digest>`) — where native
+ * records, the EvaluationSpec included, are actually published (they are never pushed to IPFS).
+ * This is the same serving plane the solver already resolves the Submission through at discovery.
+ * The transport stays untrusted on both planes: bytes are accepted only when their digest re-derives
+ * to `expected`, so a substituted HTTP response is rejected exactly as a substituted IPFS block is.
  */
 export function buildNativeEvaluationSpecResolver(
-  records: NativeRecordsByDigest,
+  records: NativeEvaluationSpecRecords,
+  requesterServingBaseUrls: readonly string[] = [],
 ): (expected: `sha256:${string}`) => Promise<Uint8Array | undefined> {
+  const verified = (bytes: Uint8Array, expected: `sha256:${string}`): Uint8Array | undefined =>
+    documentDigest(bytes) === expected ? bytes : undefined;
   return async (expected) => {
     try {
-      const bytes = await records.byDigest(expected);
-      return documentDigest(bytes) === expected ? bytes : undefined;
-    } catch {
-      return undefined;
+      const bytes = verified(await records.byDigest(expected), expected);
+      if (bytes !== undefined) return bytes;
+    } catch { /* IPFS miss/failure — fall through to the HTTP serving plane */ }
+    for (const base of requesterServingBaseUrls) {
+      try {
+        const url = `${base.replace(/\/+$/u, '')}${recordPath(expected)}`;
+        const bytes = verified(await records.byLocation(url), expected);
+        if (bytes !== undefined) return bytes;
+      } catch { /* serving-plane miss/failure — try the next configured origin */ }
     }
+    return undefined;
   };
 }
 

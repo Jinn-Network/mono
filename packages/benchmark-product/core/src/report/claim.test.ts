@@ -335,7 +335,7 @@ describe("buildClaimPackage", () => {
       reportSha256,
       reportEnvelopeSha256,
     });
-    expect(claim.verification.command).toBe("benchmark-product bundle verify --bundle <bundle-dir> --json");
+    expect(claim.verification.command).toBe("colophon bundle verify --bundle <bundle-dir> --json");
     expect(claim.verification.checks.length).toBeGreaterThan(0);
     expect(claim.verification.trustRoot.length).toBeGreaterThan(0);
   });

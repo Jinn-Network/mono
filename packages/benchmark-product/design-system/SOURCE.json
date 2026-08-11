@@ -1,0 +1,23 @@
+{
+  "source": "Colophon Design System.zip (user-supplied Downloads archive)",
+  "archiveSha256": "1e01ec1ef9f2db4b2862996fe401231785e98801d96706c679c67e1bb4330a50",
+  "importedAt": "2026-08-10",
+  "importedRoots": [
+    "assets",
+    "components",
+    "guidelines",
+    "tokens",
+    "ui_kits",
+    "uploads",
+    "readme.md",
+    "styles.css",
+    "_ds_manifest.json"
+  ],
+  "omitted": [
+    "_ds_bundle.js",
+    ".thumbnail",
+    "_adherence.oxlintrc.json",
+    "thumbnail.html",
+    "SKILL.md"
+  ]
+}

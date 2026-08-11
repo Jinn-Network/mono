@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { JINN_ROUTER_V3_ABI, SAFE_ABI } from '@jinn-network/marketplace-binding';
+import { encodeFunctionData, zeroAddress } from 'viem';
 import {
   createBaseSepoliaFinalizedAnchorClient,
   createBaseSepoliaEvaluatorReads,
   createBaseSepoliaRecordTransport,
   createNativeInfrastructure,
+  createSolverReads,
   createViemBaseSepoliaReadClients,
   mountBaseSepoliaPublicSource,
   verifyCanonicalTodayTaskCreated,
@@ -12,7 +15,11 @@ import {
   type NativeBaseSepoliaAnchorReadClient,
   type NativeBaseSepoliaTargetReadClient,
 } from '../../src/daemon/native-base-sepolia-infrastructure.js';
+import { documentDigest } from '@jinn-network/task-execution-protocol';
+import { recordPath } from '@jinn-network/record-discovery-protocol';
+import { buildNativeEvaluationSpecResolver } from '../../src/daemon/native-assembly.js';
 import type { NativeInfrastructureFactoryInput } from '../../src/daemon/native-infrastructure-bundle.js';
+import type { NativeEngagementRow, NativeOperationRow } from '../../src/daemon/native-operator-state.js';
 
 const ADDRESSES = {
   taskCoordinator: '0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98',
@@ -240,6 +247,57 @@ describe('first-party Base Sepolia public record transport', () => {
     await expect(transport.byLocation('file:///private/operator.db')).rejects.toThrow(/HTTP\(S\)/u);
     await expect(transport.byLocation('https://records.example.invalid/one')).rejects.toThrow(/size limit/u);
   });
+
+  // #30: an unpinned eval-spec CID makes kubo `block/get` do a DHT lookup that never returns. With
+  // no AbortSignal the fetch hangs the single-threaded solver work loop for minutes (round-17 gate:
+  // `loop 'work' stale 325973ms`). The bounded IPFS timeout must abandon the hang FAST so the caller
+  // rejects instead of blocking forever. Mutation check: revert the timeout and this test hangs to
+  // the vitest timeout (RED) rather than rejecting quickly.
+  it('abandons a hanging IPFS block fetch after the bounded timeout instead of blocking forever', async () => {
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      ipfsFetchTimeoutMs: 20,
+      fetchImpl: () => new Promise<Response>(() => { /* DHT lookup that never returns */ }),
+    });
+    await expect(transport.byDigest(`sha256:${'00'.repeat(32)}`)).rejects.toThrow(/timed out/u);
+  });
+
+  it('abandons a hanging HTTP location fetch after the bounded timeout instead of blocking forever', async () => {
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      httpFetchTimeoutMs: 20,
+      fetchImpl: () => new Promise<Response>(() => { /* serving plane that never responds */ }),
+    });
+    await expect(transport.byLocation('https://records.example.invalid/slow')).rejects.toThrow(/timed out/u);
+  });
+
+  // #30 root fix, integrated: the eval-spec resolver's #2559 HTTP-locator fallback only fires on a
+  // clean IPFS *rejection*, never on a hang. Once `byDigest` is bounded, a DHT hang becomes a
+  // rejection with the SAME shape as a clean miss, so the resolver falls through to the HTTP serving
+  // plane and resolves — digest-verified — after the timeout, exactly as round-18's fresh task will.
+  it('bounded IPFS timeout lets the eval-spec resolver fall back to the HTTP serving plane on a DHT hang', async () => {
+    const specBytes = new TextEncoder().encode('{"kind":"evaluation-spec","for":"#30"}');
+    const specDigest = documentDigest(specBytes);
+    const servingBase = 'https://requester.example.test';
+    const fetchImpl = vi.fn(async (request: string | URL): Promise<Response> => {
+      const url = String(request);
+      if (url.includes('/api/v0/block/get')) {
+        return new Promise<Response>(() => { /* unpinned CID: DHT lookup hangs */ });
+      }
+      if (url === `${servingBase}${recordPath(specDigest)}`) return new Response(specBytes);
+      throw new Error(`unexpected fetch to ${url}`);
+    });
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      ipfsFetchTimeoutMs: 20,
+      fetchImpl,
+    });
+    const resolve = buildNativeEvaluationSpecResolver(transport, [servingBase]);
+
+    await expect(resolve(specDigest)).resolves.toEqual(specBytes);
+    expect(fetchImpl.mock.calls.some(([request]) => String(request).includes('/api/v0/block/get'))).toBe(true);
+    expect(fetchImpl.mock.calls.some(([request]) => String(request) === `${servingBase}${recordPath(specDigest)}`)).toBe(true);
+  });
 });
 
 describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
@@ -262,12 +320,25 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
     advertisedDeliveryDigest,
   };
 
+  const deliveryLocation = 'https://solver-b.example/records/delivery' as const;
+
   function fixture(options: {
     readonly duplicateRouter?: boolean;
     readonly mechDigest?: `0x${string}`;
     readonly bytes?: Uint8Array;
+    /** When set, the IPFS plane (`byDigest`) misses — mirrors a native record never pinned to IPFS. */
+    readonly ipfsMiss?: boolean;
+    /** What the HTTP serving plane (`byLocation`) returns; absent means the plane is never reachable. */
+    readonly httpBytes?: Uint8Array;
   } = {}) {
-    const byDigest = vi.fn(async () => options.bytes ?? deliveryBytes);
+    const byDigest = vi.fn(async () => {
+      if (options.ipfsMiss) throw new Error('block was not found locally');
+      return options.bytes ?? deliveryBytes;
+    });
+    const byLocation = vi.fn(async () => {
+      if (options.httpBytes === undefined) throw new Error('no public replica in this fixture');
+      return options.httpBytes;
+    });
     const routerEvent = {
       args: { operator, requestId, taskId: 42n, attemptIndex: 3 },
       transactionHash,
@@ -316,11 +387,11 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
       publicClient: publicClient as never,
       records: {
         byDigest,
-        async byLocation() { throw new Error('unused'); },
+        byLocation,
         async byRawCid() { throw new Error('unused'); },
       },
     });
-    return { reads, byDigest };
+    return { reads, byDigest, byLocation };
   }
 
   it('joins one canonical finalized router settlement to the exact Mech digest and public Delivery bytes', async () => {
@@ -341,6 +412,178 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
     await expect(mechMismatch.reads.readCanonicalSolutionDelivery(expected)).resolves.toBeNull();
     expect(mechMismatch.byDigest).not.toHaveBeenCalled();
     await expect(fixture({ bytes: new TextEncoder().encode('tampered') }).reads.readCanonicalSolutionDelivery(expected)).resolves.toBeNull();
+  });
+
+  // #2559 sibling (CP6): the delivery payload is a native record published ONLY to the solver's
+  // HTTP serving plane and NEVER pinned to IPFS. The re-fetch must resolve it via the delivery
+  // card's advertised HTTP locations, not the IPFS-only `byDigest`.
+  it('resolves the exact public Delivery via the HTTP locator when the IPFS plane misses', async () => {
+    const { reads, byLocation, byDigest } = fixture({ ipfsMiss: true, httpBytes: deliveryBytes });
+    await expect(reads.readCanonicalSolutionDelivery({
+      ...expected,
+      deliveryPublicLocations: [deliveryLocation],
+    })).resolves.toEqual({
+      transactionHash,
+      blockHash: routerBlockHash,
+      blockNumber: 90n,
+      finalized: true,
+    });
+    expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+    // The HTTP plane produced the exact bytes, so the IPFS plane is never consulted.
+    expect(byDigest).not.toHaveBeenCalled();
+  });
+
+  it('rejects forged HTTP Delivery bytes and never accepts a payload off the anchored digest', async () => {
+    const forged = new TextEncoder().encode('{"delivery":"forged"}');
+    // HTTP serves a digest-mismatched payload and IPFS also misses — no plane yields the anchored
+    // bytes, so no canonical fact is returned and no verdict can form on a forged payload.
+    const { reads, byLocation } = fixture({ ipfsMiss: true, httpBytes: forged });
+    await expect(reads.readCanonicalSolutionDelivery({
+      ...expected,
+      deliveryPublicLocations: [deliveryLocation],
+    })).rejects.toThrow(/not found locally/u);
+    expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+  });
+});
+
+describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
+  // Sibling of #2561 (the evaluator path), solver-side. The solver's OWN settlement reconcile
+  // re-fetches its delivery payload to bind the on-chain settlement to the exact public Delivery.
+  // Native delivery records are published only to the operator's HTTP serving plane and are never
+  // pinned to IPFS, so the re-fetch must resolve via the solver's own advertised HTTP location.
+  const requestId = `0x${'12'.repeat(32)}` as const;
+  const transactionHash = `0x${'34'.repeat(32)}` as const;
+  const routerBlockHash = `0x${'56'.repeat(32)}` as const;
+  const mechBlockHash = `0x${'78'.repeat(32)}` as const;
+  const deliveryMech = '0x9999999999999999999999999999999999999999' as const;
+  const operator = SAFE;
+  const deliveryBytes = new TextEncoder().encode('{"delivery":"exact"}');
+  const advertisedDeliveryDigest = `sha256:${createHash('sha256').update(deliveryBytes).digest('hex')}` as const;
+  const solutionDigest = `0x${'ab'.repeat(32)}` as const;
+  const deliveryLocation = 'https://solver-b.example:7402/records/delivery' as const;
+
+  const innerData = encodeFunctionData({
+    abi: JINN_ROUTER_V3_ABI,
+    functionName: 'claimSolutionDelivery',
+    args: [requestId, solutionDigest],
+  });
+  const settlementInput = encodeFunctionData({
+    abi: SAFE_ABI,
+    functionName: 'execTransaction',
+    args: [ADDRESSES.jinnRouter, 0n, innerData, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, '0x'],
+  });
+
+  const operation = {
+    operationId: 'op-settlement-1',
+    engagementId: 'eng-1',
+    kind: 'solution-settlement',
+    status: 'broadcast',
+    txHash: transactionHash,
+    priorTxHash: null,
+    blockHash: null,
+    blockNumber: null,
+    detail: { attempt: 'urn:jinn:attempt:1', deliveryDigest: advertisedDeliveryDigest },
+    createdAt: '2026-08-10T19:00:00.000Z',
+    updatedAt: '2026-08-10T19:00:00.000Z',
+  } as unknown as NativeOperationRow;
+  const engagement = {
+    engagementId: 'eng-1',
+    chainId: 84532,
+    coordinator: ADDRESSES.taskCoordinator,
+    taskId: 42n,
+    role: 'solver',
+    operatorAgent: 'did:key:solver',
+    taskDigest: `sha256:${'aa'.repeat(32)}`,
+    submissionUri: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+    submissionDigest: `sha256:${'bb'.repeat(32)}`,
+    state: 'solution-settlement-pending',
+    attemptIndex: 3,
+    attemptUri: 'urn:jinn:attempt:1',
+    requestId,
+    createdAt: '2026-08-10T19:00:00.000Z',
+    updatedAt: '2026-08-10T19:00:00.000Z',
+  } as unknown as NativeEngagementRow;
+
+  function fixture(options: { readonly httpBytes?: Uint8Array } = {}) {
+    // The IPFS plane always misses — the native delivery record was never pinned there.
+    const byDigest = vi.fn(async () => { throw new Error('block was not found locally'); });
+    const byLocation = vi.fn(async () => {
+      if (options.httpBytes === undefined) throw new Error('no public replica in this fixture');
+      return options.httpBytes;
+    });
+    const routerEvent = {
+      args: { operator, requestId, taskId: 42n, attemptIndex: 3 },
+      transactionHash,
+      blockHash: routerBlockHash,
+      blockNumber: 90n,
+    };
+    const publicClient = {
+      async getBlockNumber() { return 100n; },
+      async getTransaction() { return { input: settlementInput }; },
+      async readContract(input: { functionName: string }) {
+        if (input.functionName === 'mapRequestIdInfos') {
+          return [deliveryMech, deliveryMech, operator, 60n, 1n, `0x${'00'.repeat(32)}`] as const;
+        }
+        if (input.functionName === 'getOperator') return operator;
+        if (input.functionName === 'mapAgentMechFactories') return '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        throw new Error(`unexpected read ${input.functionName}`);
+      },
+      async getContractEvents(input: { eventName: string; address?: string }) {
+        if (input.eventName === 'SolutionDeliveryClaimed') return [routerEvent];
+        expect(input.address!.toLowerCase()).toBe(deliveryMech.toLowerCase());
+        return [{
+          args: { requestId, mechServiceMultisig: operator, data: `0x${advertisedDeliveryDigest.slice(7)}` },
+          transactionHash: `0x${'9a'.repeat(32)}`,
+          blockHash: mechBlockHash,
+          blockNumber: 80n,
+        }];
+      },
+      async getBlock(input: { blockTag?: string; blockNumber?: bigint }) {
+        if (input.blockTag === 'finalized') {
+          return { number: 95n, hash: `0x${'bc'.repeat(32)}`, timestamp: 1_000n };
+        }
+        return {
+          number: input.blockNumber!,
+          hash: input.blockNumber === 90n ? routerBlockHash : input.blockNumber === 80n ? mechBlockHash : `0x${'cd'.repeat(32)}`,
+          timestamp: 0n,
+        };
+      },
+    };
+    const reads = createSolverReads({
+      config: { safeAddress: SAFE, chain: { chainId: 84532, generation: 'today', contracts: ADDRESSES } },
+      publicClient: publicClient as never,
+      records: {
+        byDigest,
+        byLocation,
+        async byRawCid() { throw new Error('unused'); },
+      },
+    });
+    return { reads, byDigest, byLocation };
+  }
+
+  it('resolves the finalized settlement via the solver HTTP locator when the IPFS plane misses', async () => {
+    const { reads, byLocation, byDigest } = fixture({ httpBytes: deliveryBytes });
+    await expect(reads.solutionSettlementCanonical({
+      operation,
+      engagement,
+      deliveryPublicLocations: [deliveryLocation],
+    })).resolves.toMatchObject({ kind: 'finalized', txHash: transactionHash, blockNumber: 90n });
+    expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+    // The HTTP plane produced the exact bytes, so the IPFS plane is never consulted.
+    expect(byDigest).not.toHaveBeenCalled();
+  });
+
+  it('does not complete settlement on forged HTTP Delivery bytes off the anchored digest', async () => {
+    const forged = new TextEncoder().encode('{"delivery":"forged"}');
+    const { reads, byLocation } = fixture({ httpBytes: forged });
+    // HTTP serves a digest-mismatched payload and IPFS also misses — no plane yields the anchored
+    // bytes, so the reconcile throws (holds the engagement) rather than settling a forged Delivery.
+    await expect(reads.solutionSettlementCanonical({
+      operation,
+      engagement,
+      deliveryPublicLocations: [deliveryLocation],
+    })).rejects.toThrow(/not found locally/u);
+    expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
   });
 });
 

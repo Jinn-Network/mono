@@ -20,6 +20,7 @@ import { DSSE_ENVELOPE_MEDIA_TYPE } from '@jinn-network/trust-core';
 import {
   NativeOperatorStateRepository,
   NativeOperatorStateConflictError,
+  NativeWorkerLeaseError,
   type NativeEngagementRow,
   type NativeOperationRow,
   type NativePublicationRow,
@@ -82,6 +83,14 @@ export interface NativeSolutionSettlementPort {
   readCanonical(input: {
     readonly operation: NativeOperationRow;
     readonly engagement: NativeEngagementRow;
+    /**
+     * HTTP serving locations the solver advertised when it published its OWN Delivery record.
+     * Native solution records live only on the solver's HTTP serving plane and are never pinned to
+     * IPFS (#2561 sibling), so the settlement re-fetch that binds the on-chain settlement to the
+     * exact public Delivery tries these locations before the IPFS plane. Every plane is
+     * digest-verified against the on-chain-anchored delivery digest; omit for IPFS-only readers.
+     */
+    readonly deliveryPublicLocations?: readonly string[];
   }): Promise<NativeSolutionSettlementCanonicalFact>;
 }
 
@@ -155,6 +164,21 @@ function sha256Descriptor(descriptor: ResourceDescriptor): `sha256:${string}` {
   return `sha256:${sha256}`;
 }
 
+/** Minimum representable ISO gap between two adjacent record announcements (1ms). */
+const RECORD_ANNOUNCEMENT_STEP_MS = 1;
+
+/**
+ * Announcement timestamp for the record at `ordinal` in an engagement's publication set, based at
+ * the outbox-shared `createdAt`. Distinct ordinals yield strictly-increasing instants so each
+ * record advances the append-only signed source head; the value is a pure function of the persisted
+ * base and ordinal, so a resumed publish recomputes the identical timestamp.
+ */
+function advanceAnnouncementTimestamp(base: string, ordinal: number): string {
+  const baseMs = Date.parse(base);
+  if (!Number.isFinite(baseMs)) throw new NativeSolutionFailure('publication-timestamp-invalid', base);
+  return new Date(baseMs + ordinal * RECORD_ANNOUNCEMENT_STEP_MS).toISOString();
+}
+
 export class NativeSolutionCoordinator {
   constructor(private readonly input: {
     readonly state: NativeOperatorStateRepository;
@@ -199,9 +223,16 @@ export class NativeSolutionCoordinator {
       }
       return await this.drive(engagementId);
     } catch (error) {
-      const reason = error instanceof NativeSolutionFailure ? error.reason : 'solution-internal-failed';
+      // #30 Part B: a lost worker lease is a LOCAL single-writer coordination loss (the lease lapsed
+      // while a bounded-but-non-trivial op ran), NOT a solution failure. It must be retried once the
+      // lease is held again, never converted to a terminal `failed` engagement that permanently kills
+      // on-chain-claimed work. Every other non-`NativeSolutionFailure` is a genuine internal fault.
+      const leaseLost = error instanceof NativeWorkerLeaseError;
+      const reason = error instanceof NativeSolutionFailure ? error.reason
+        : leaseLost ? 'worker-lease-lost' : 'solution-internal-failed';
       const detail = error instanceof Error ? error.message : String(error);
-      if (!(error instanceof NativeSolutionFailure) || !error.retryable) {
+      const retryable = leaseLost || (error instanceof NativeSolutionFailure && error.retryable);
+      if (!retryable) {
         this.input.state.recordSolutionFailed(engagementId, { reason, detail });
         return { kind: 'failed', reason };
       }
@@ -365,7 +396,15 @@ export class NativeSolutionCoordinator {
       outputs: artifactRows.filter(({ role }) => role === 'output'),
       evidence: artifactRows.filter(({ role }) => role === 'evidence'),
     }));
-    if (!verification.ok) throw new NativeSolutionFailure(verification.reason);
+    if (!verification.ok) {
+      // #30 Part B: `evaluation-spec-unavailable` means the EvaluationSpec could not be FETCHED (the
+      // resolver's IPFS plane missed/timed out and its HTTP-locator fallback did not yet resolve) —
+      // an availability failure that recovers, not proof the delivery is invalid. It must be
+      // retryable, matching the other availability failures above (evidence/output/delivery-envelope).
+      // Every other verification failure is deterministic invalidity and stays terminal (fail-closed).
+      const retryable = verification.reason === 'evaluation-spec-unavailable';
+      throw new NativeSolutionFailure(verification.reason, undefined, retryable);
+    }
     this.input.state.recordSolutionReady(engagementId, {
       sourceId: this.input.publisher.sourceId,
       artifacts,
@@ -374,27 +413,70 @@ export class NativeSolutionCoordinator {
 
   private async publish(engagementId: NativeOperationId): Promise<void> {
     const artifacts = this.input.state.listSolutionArtifacts(engagementId);
+    // A solution publishes several records (evidence, outputs, Delivery, Delivery envelope) into
+    // ONE append-only signed source whose head must STRICTLY advance per announcement (see
+    // packages/discovery/serve/src/source-writer.ts). The outbox stamps every record of an
+    // engagement with the same createdAt, so announcing them all at that shared instant collides
+    // on record 2+. Derive each record's announcement timestamp from its stable ordinal over the
+    // full publication set, based at the shared createdAt: distinct ordinals give strictly-
+    // increasing timestamps in publish order, they advance past whatever the head already holds
+    // (including a partially-published solution whose first record already advanced the head), and
+    // the derivation is deterministic — a resumed publish reproduces the exact timestamp, so any
+    // record already committed to the source reconciles idempotently instead of re-colliding.
+    const ordinals = new Map<string, number>(
+      this.input.state.listSolutionPublications(engagementId)
+        .map((publication, index) => [publication.publicationKey, index] as const),
+    );
     for (const publication of this.input.state.listPendingPublications()
       .filter((candidate) => candidate.engagementId === engagementId)) {
       const artifact = artifacts.find(
         (candidate) => candidate.role === publication.role && candidate.digest === publication.recordDigest,
       );
       if (artifact === undefined) throw new NativeSolutionFailure('publication-artifact-missing');
+      const announceAt = advanceAnnouncementTimestamp(
+        publication.createdAt,
+        ordinals.get(publication.publicationKey) ?? 0,
+      );
       const receipt = await dependency('solution publication', () => this.input.publisher.publish({
-        publication,
+        publication: { ...publication, createdAt: announceAt },
         artifact,
         bytes: artifact.bytes,
       }));
       this.input.state.recordPublicationPublished(publication.publicationKey, receipt);
     }
+    // A second engagement whose byte-identical solution content a prior engagement already
+    // announced owns no `intent` outbox rows, so the loop above drained nothing and
+    // `recordPublicationPublished` never fired the `solution-published` transition. Its records
+    // are nonetheless served (content-addressed dedupe in `recordSolutionReady`), so promote it
+    // explicitly. Idempotent and a no-op for the ordinary engagement that just published its own.
+    this.input.state.promoteSolutionPublishedIfComplete(engagementId);
+  }
+
+  /**
+   * HTTP serving locations this solver advertised when it published its own Delivery record. The
+   * settlement reader re-fetches the delivery payload to bind the on-chain settlement to the exact
+   * public Delivery; native records are HTTP-served and never IPFS-pinned (#2561 sibling), so an
+   * IPFS-only re-fetch throws and wedges the engagement in `solution-settlement-pending`, holding
+   * the operator's concurrency slot forever. Handing the reader the record's own advertised
+   * location lets it resolve off the solver's serving plane, digest-verified, before IPFS.
+   */
+  private deliveryPublicLocations(engagementId: NativeOperationId): readonly string[] {
+    const locations: string[] = [];
+    for (const publication of this.input.state.listSolutionPublications(engagementId)) {
+      if (publication.role !== 'delivery' || publication.status !== 'published') continue;
+      const location = (publication.detail as { readonly location?: unknown } | null)?.location;
+      if (typeof location === 'string' && location.length > 0) locations.push(location);
+    }
+    return locations;
   }
 
   private async settle(engagementId: NativeOperationId): Promise<NativeSolutionCoordinatorResult> {
     const engagement = this.engagement(engagementId);
+    const deliveryPublicLocations = this.deliveryPublicLocations(engagementId);
     const intent = this.input.state.beginSolutionSettlement(engagementId);
     let operation = this.input.state.getOperation(intent.operationId)!;
     let fact = await dependency('solution settlement canonical read', () =>
-      this.input.settlement.readCanonical({ operation, engagement }));
+      this.input.settlement.readCanonical({ operation, engagement, deliveryPublicLocations }));
     if (fact.kind === 'finalized') {
       this.input.state.recordSolutionSettlementFinalized(intent.operationId, fact);
       return { kind: 'solution-settled', operationId: intent.operationId };
@@ -423,7 +505,7 @@ export class NativeSolutionCoordinator {
     this.input.state.recordSolutionSettlementBroadcast(intent.operationId, broadcast.txHash);
     operation = this.input.state.getOperation(intent.operationId)!;
     fact = await dependency('solution settlement canonical read', () =>
-      this.input.settlement.readCanonical({ operation, engagement }));
+      this.input.settlement.readCanonical({ operation, engagement, deliveryPublicLocations }));
     if (fact.kind === 'finalized') {
       this.input.state.recordSolutionSettlementFinalized(intent.operationId, fact);
       return { kind: 'solution-settled', operationId: intent.operationId };

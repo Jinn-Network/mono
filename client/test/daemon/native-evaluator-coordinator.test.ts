@@ -289,6 +289,68 @@ describe("NativeEvaluatorCoordinator", () => {
     expect(opened).not.toHaveBeenCalled();
   });
 
+  it("retries transient evaluator-dependency lag to the deadline rather than a fixed cumulative budget", async () => {
+    const { store, state, id } = setup();
+    store.db.prepare("DELETE FROM native_evaluation_authority WHERE evaluation_id = ?").run(id);
+    const authority = vi.fn(async () => { throw new Error("trusted authority unavailable"); });
+    let nowMs = Date.parse("2026-08-02T12:00:00Z");
+    const coordinator = new NativeEvaluatorCoordinator({
+      state,
+      backend: {} as never,
+      authority: { claim: authority, dependencies: {} as never },
+      deadline: () => "2026-08-03T00:00:00Z",
+      evaluatorAddress,
+      verdictPorts: {} as never,
+      chain: {} as never,
+      deliverySignature: {} as never,
+      evidence: {} as never,
+      publisher: {} as never,
+      verification: {} as never,
+      // Composition default: no `maxAttempts`, so the deadline is the sole cap. The old `?? 5`
+      // terminal-failed on the 6th cumulative lag even though nothing about the evaluation failed.
+      retry: { now: () => new Date(nowMs), delayMs: 1_000 },
+    });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
+      kind: "paused",
+      reason: "evaluator-dependency-failed",
+    });
+    for (let attempt = 2; attempt <= 8; attempt++) {
+      nowMs += 1_001;
+      await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
+        kind: "paused",
+        reason: "evaluator-dependency-failed",
+      });
+    }
+    expect(state.getEvaluation(id)).toMatchObject({ state: "paused" });
+    expect(state.getEvaluationRetryCount(id)).toBe(8);
+  });
+
+  it("resets the retry counter when a paused evaluation advances to a later phase", async () => {
+    const { store, state, id } = setup();
+    // Two lags recorded against the claim phase.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      state.recordEvaluationPaused(id, {
+        reason: "evaluation-evidence-not-indexed",
+        nextAttemptAt: "2026-08-02T12:00:05Z",
+        deadline: "2026-08-03T00:00:00Z",
+      });
+    }
+    expect(state.getEvaluationRetryCount(id)).toBe(2);
+
+    // A successful drive that leaves the evaluation in a new phase clears the schedule.
+    store.db.prepare("UPDATE native_evaluations SET state = 'evaluating' WHERE evaluation_id = ?").run(id);
+    expect(state.resetEvaluationRetryOnAdvance(id)).toBe(true);
+    expect(state.getEvaluationRetryCount(id)).toBe(0);
+
+    // A fresh lag in the new phase starts its own budget from one, not from three.
+    state.recordEvaluationPaused(id, {
+      reason: "evaluation-delivery-envelope-missing",
+      nextAttemptAt: "2026-08-02T12:00:05Z",
+      deadline: "2026-08-03T00:00:00Z",
+    });
+    expect(state.getEvaluationRetryCount(id)).toBe(1);
+  });
+
   it("never opens an evaluation claim without persisted verified subject authority", async () => {
     const { store, state, id } = setup();
     store.db.prepare("DELETE FROM native_evaluation_authority WHERE evaluation_id = ?").run(id);

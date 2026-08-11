@@ -1,10 +1,13 @@
-# Benchmark Product (placeholder name)
+# Colophon
 
-This Tier 4 product compares agent configurations on the same tasks and emits a
-credible, portable benchmark claim. Humans use the private local web app;
-authorized agents use the operations library or CLI. Both surfaces operate the
-same workspace, permissions, records, and evidence. The product is incubating
-under the internal `benchmark-product` codename and has no final public brand.
+**Compare agents on the same work.** Colophon is benchmark publishing for agent
+configurations: it turns a preregistered comparison into a portable claim that
+people can inspect and verify. Humans use the local workspace; authorized agents
+use the same operations library or the `colophon` CLI. All surfaces operate the
+same permissions, records, evidence, and lifecycle. `benchmark-product` remains
+the internal package codename and a compatibility CLI alias.
+
+Public promise: **Publish benchmark claims people can check.** Built on Jinn.
 
 The implemented path is public-first and local: create or import a benchmark,
 configure at least two arms, quote and lock the method, run the real local
@@ -22,9 +25,11 @@ real-world custody.
   and default real local venue.
 
 Both packages are private, `publishPolicy: never`, and not released. Deployment
-status is **none**: there is no hosted app, account service, remote API, report
-host, package release, or authorization to deploy. Product `publish` means
-local immutable bundle emission only.
+status is **none today**: the hosted account, team, billing, registry, and public
+report experiences shown in the preview catalog are deliberate views of the
+planned service, not available SaaS capabilities. Product `publish` currently
+means local immutable bundle emission only. The previews stay in the product so
+the intended hosted experience can be evaluated before its services exist.
 
 ## Cold public quickstart
 
@@ -57,6 +62,8 @@ does not use the in-memory kit backend.
   limitations, and portable verification.
 - [Security and threat model](./SECURITY.md) — protected assets, boundaries,
   hardening evidence, residuals, and deployment truth.
+- [Colophon design system](./design-system/ADAPTATION.md) — the curated source,
+  production-token adapter, real brand assets, and deliberate runtime changes.
 
 The product design authority is the
 [standalone benchmark product design](../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).

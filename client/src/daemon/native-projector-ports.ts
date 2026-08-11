@@ -7,6 +7,15 @@ import type { ProjectorPortsInput } from './projector-ports.js';
 export interface NativeProjectorExactPorts {
   readonly resolveRecord: ProjectorPortsInput['resolveRecord'];
   readonly verifyVerdictObservation: ProjectorPortsInput['verifyVerdictObservation'];
+  /**
+   * HTTP-first delivery-content resolution over the configured record-source locations, digest
+   * verified (undefined on any miss). Native deliveries are HTTP-served and may never reach the
+   * IPFS gateway the projector otherwise queries, so without this the today-mode delivery
+   * correspondence that CP7 adopt reads never resolves. Composition layers the IPFS gateway after
+   * it; absent leaves the projector on the IPFS-only path (the legacy composition has no record
+   * source).
+   */
+  readonly resolveDeliveryBytes?: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
 }
 
 export function assertNativeProjectorExactPorts(

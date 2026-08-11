@@ -163,7 +163,7 @@ function fixture(overrides: {
         trustBoundary: "workspace-minted public keys; no third-party trust anchor",
       },
       verification: {
-        command: "benchmark-product bundle verify --bundle <bundle-dir> --json",
+        command: "colophon bundle verify --bundle <bundle-dir> --json",
         checks: ["manifest", "matrix-rederivation", "report-verification", "claim-consistency", "asset-projection"],
         trustRoot: "Bundle-carried public keys minted by the self-run workspace.",
       },
@@ -181,6 +181,30 @@ function text(asset: Uint8Array | undefined): string {
 }
 
 describe("BP-41 public report assets", () => {
+  test("adopts the Colophon identity with embedded source mark and OFL fonts", () => {
+    const assets = buildPublicAssets(fixture());
+    const html = text(assets["index.html"]);
+    expect(html).toContain("Colophon report");
+    expect(html).toContain("Built on Jinn.");
+    expect(html).toContain("Newsreader");
+    expect(html).toContain("Public Sans");
+    expect(html).toContain("IBM Plex Mono");
+    expect(html).toContain("data:font/woff2;base64,");
+    expect(html).toContain("data:image/svg+xml;base64,");
+    expect(html).not.toMatch(/https?:\/\//u);
+    const readme = text(assets["README.md"]);
+    expect(readme.match(/SIL OPEN FONT LICENSE Version 1\.1/gu)).toHaveLength(3);
+    expect(readme).toContain("The Newsreader Project Authors");
+    expect(readme).toContain("Public Sans Project Authors");
+    expect(readme).toContain("IBM Corp");
+    for (const path of ["badge.svg", "social-card.svg"] as const) {
+      const svg = text(assets[path]);
+      expect(svg).toContain("Colophon");
+      expect(svg).toContain("data:font/woff2;base64,");
+      expect(svg).not.toMatch(/(?:href|src)\s*=\s*["'](?:https?:|\/\/)/iu);
+    }
+  });
+
   test.each(["complete", "partial", "cancelled"] as const)(
     "renders the %s outcome and adverse facts without inferring a winner",
     (outcome) => {
@@ -244,10 +268,18 @@ describe("BP-41 public report assets", () => {
       const body = text(assets[path]);
       const actualTags = body.match(/<[^>]+>/gu)?.join("\n") ?? "";
       expect(body).not.toMatch(/<script\b/iu);
-      expect(body).not.toMatch(/<img\b/iu);
+      if (path === "index.html") {
+        expect(body.match(/<img\b/giu)).toHaveLength(1);
+        expect(body).toMatch(/<img[^>]+src="data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+"/u);
+      } else {
+        expect(body).not.toMatch(/<img\b/iu);
+      }
       expect(actualTags).not.toMatch(/\son(?:load|error)\s*=/iu);
-      expect(body).not.toMatch(/(?:href|src)\s*=\s*["'](?:https?:|\/\/|javascript:|data:)/iu);
-      expect(body).not.toMatch(/@import|url\s*\(/iu);
+      expect(body).not.toMatch(/(?:href|src)\s*=\s*["'](?:https?:|\/\/|javascript:)/iu);
+      expect(body).not.toMatch(/@import/iu);
+      for (const match of body.matchAll(/url\(([^)]+)\)/giu)) {
+        expect(match[1]).toMatch(/^data:font\/woff2;base64,[A-Za-z0-9+/=]+$/u);
+      }
     }
     const html = text(assets["index.html"]);
     expect(html).toContain("&lt;script");
