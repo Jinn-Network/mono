@@ -33,6 +33,15 @@ export class EvaluatorLoop {
 
   async tick(): Promise<void> {
     const outcome = await this.config.composition.tick();
+    // Surface every terminal coordinator failure with its reason. The coordinator's only durable
+    // diagnostic is the failure reason it records; without this the process log showed a bare
+    // `coordinator=N` count and a deterministic refusal (e.g. a subject-authority refusal, #33) left
+    // no line to read — its reason had to be recovered by DB spelunking.
+    for (const result of outcome.coordinator) {
+      if (result.kind === 'failed') {
+        this.logger().warn(`[evaluator] evaluation failed: ${result.reason}`);
+      }
+    }
     this.logger().info(
       `[evaluator] tick: sourceEvents=${outcome.sourceEvents} coordinator=${outcome.coordinator.length}`,
     );

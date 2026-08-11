@@ -23,6 +23,8 @@ import {
   type TrustPolicy,
 } from '@jinn-network/trust-core';
 import {
+  NativeTrustCatalogError,
+  NativeTrustCatalogReadError,
   openNativeTrustCatalog,
   verifyNativeDsse,
   type NativeFinalizedAnchorReadClient,
@@ -617,20 +619,26 @@ describe('settlement-authority association (§2.3c)', () => {
     const fixture = await buildCatalog({ settlement: {} });
     const authority = await openSettlement(fixture, { async isOwner() { return false; } });
 
-    await expect(authority.verifyOnchainAuthority(probe(fixture)))
-      .rejects.toThrow(/does not own ceremony signer/u);
+    const outcome = await authority.verifyOnchainAuthority(probe(fixture)).catch((cause) => cause);
+    // A `false` verdict is a DETERMINISTIC refusal — the plain (terminal) error, NOT the retryable
+    // read-error subtype, so the evaluator never retries a genuinely non-owning Safe to the SLA.
+    expect(outcome).toBeInstanceOf(NativeTrustCatalogError);
+    expect(outcome).not.toBeInstanceOf(NativeTrustCatalogReadError);
+    expect((outcome as Error).message).toMatch(/does not own ceremony signer/u);
   });
 
-  it('refuses fail-closed, with a DISTINCT error, when the ownership read itself fails', async () => {
+  it('refuses fail-closed, with the RETRYABLE read-error subtype, when the ownership read itself fails', async () => {
     const fixture = await buildCatalog({ settlement: {} });
     const authority = await openSettlement(fixture, {
       async isOwner() { throw new Error('rpc unavailable'); },
     });
 
     // Distinct from the `false` refusal: an unreachable chain must never read as "not an owner",
-    // and must never read as authorized either.
-    await expect(authority.verifyOnchainAuthority(probe(fixture)))
-      .rejects.toThrow(/Safe-ownership read for .* failed: .*rpc unavailable/u);
+    // and must never read as authorized either. It is the `NativeTrustCatalogReadError` subtype so
+    // the evaluator classifies it RETRYABLE rather than terminalizing a maybe-valid subject (#33).
+    const outcome = await authority.verifyOnchainAuthority(probe(fixture)).catch((cause) => cause);
+    expect(outcome).toBeInstanceOf(NativeTrustCatalogReadError);
+    expect((outcome as Error).message).toMatch(/Safe-ownership read for .* failed: .*rpc unavailable/u);
   });
 
   it('never reaches the chain read when the unchanged verified() pipeline already refuses', async () => {
