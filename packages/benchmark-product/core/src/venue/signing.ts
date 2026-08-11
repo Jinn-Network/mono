@@ -40,17 +40,21 @@
  * BP-13 CORRECTION (F1): it is not, however, sufficient. The aggregation boundary this module's
  * output feeds — `@jinn-network/benchmarking-aggregate`'s `resolveVerdictOutcome`
  * (`resolved-inputs.ts`'s `parseCanonicalJson`) — requires every referenced verdict's DSSE
- * payload bytes to be the EXACT trust-core canonical (compact, code-unit-sorted) encoding of the
- * statement; `bytesEqual(bytes, canonicalJsonBytes(value))` is asserted at wilson-recompute time,
- * not just at seal time. Wrapping the harness's pretty-printed bytes verbatim therefore sealed a
- * verdict that would fail `verifyReport`/`produceReport`'s own recompute for every real evaluation
- * — the earlier fix satisfied this module's local tests but not the boundary one packet later
- * actually reads through. The correction: after the evaluator-id and spec-digest validations
- * below, this module re-encodes the PARSED statement with trust-core's `canonicalJsonBytes` and
- * DSSE-wraps and signs THOSE bytes — a semantic-content-preserving re-encoding of the harness's
- * own statement (same fields, same values, canonical byte order/whitespace), signed once at seal
- * time. This is still "seal once, never re-derive the platform's judgment of the statement's
- * content" in spirit: no field is added, dropped, or recomputed, only re-serialized.
+ * payload bytes to be the EXACT encoding produced by one of its accepted canonicalizers
+ * (`resolved-inputs.ts:203` passes `[canonicalJsonBytes, canonicalAttestationJsonBytes]` — the
+ * same two exact, deterministic spellings described above); arbitrary re-serialization is
+ * refused, and `bytesEqual(bytes, canonicalize(value))` is asserted against that accepted list at
+ * wilson-recompute time, not just at seal time. Wrapping the harness's pretty-printed bytes
+ * verbatim therefore sealed a verdict that would fail `verifyReport`/`produceReport`'s own
+ * recompute for every real evaluation — the earlier fix satisfied this module's local tests but
+ * not the boundary one packet later actually reads through. The correction: after the
+ * evaluator-id and spec-digest validations below, this module re-encodes the PARSED statement
+ * with trust-core's `canonicalJsonBytes` — the compact spelling, one of the boundary's two
+ * accepted encodings — and DSSE-wraps and signs THOSE bytes — a semantic-content-preserving
+ * re-encoding of the harness's own statement (same fields, same values, canonical byte
+ * order/whitespace), signed once at seal time. This is still "seal once, never re-derive the
+ * platform's judgment of the statement's content" in spirit: no field is added, dropped, or
+ * recomputed, only re-serialized.
  *
  * One consequence, deliberately fail-loud rather than silently reshaping data:
  * `canonicalJsonBytes` refuses any JSON number that is not an exact safe integer (program ruling
