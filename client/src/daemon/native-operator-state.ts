@@ -1283,11 +1283,25 @@ export class NativeOperatorStateRepository {
           recordDigest: artifact.digest,
           availabilityState: 'available',
         });
+        // The outbox is content-addressed: `publication_key` (and the equivalent
+        // `UNIQUE (source_id, role, record_digest, availability)`) name a record by its exact
+        // bytes, NOT by the engagement that produced it. Two engagements that solve distinct
+        // tasks with byte-identical solution content therefore name the SAME record. The serving
+        // plane already dedupes it — one announcement per content digest, owned by whichever
+        // engagement announced it first — so a second engagement must REUSE that published record,
+        // not re-announce it (a re-announce always conflicts: `native-signed-source` fingerprints
+        // include the announcement facts, which carry the engagement id). Dedupe here on the exact
+        // content key. `record_digest` is part of that key and every artifact's digest was already
+        // verified against its exact bytes above, so DO NOTHING can only ever skip a genuinely
+        // identical record — a different digest is a different key and still inserts. The engagement
+        // reaches `solution-published` via `promoteSolutionPublishedIfComplete` once every record it
+        // references is served, whether it announced them or reused a prior engagement's.
         this.store.db.prepare(
           `INSERT INTO native_publication_outbox
             (publication_key, engagement_id, source_id, role, record_digest, availability,
              status, detail_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'available', 'intent', ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, 'available', 'intent', ?, ?, ?)
+           ON CONFLICT (source_id, role, record_digest, availability) DO NOTHING`,
         ).run(
           publication,
           engagementIdValue,
@@ -1357,18 +1371,70 @@ export class NativeOperatorStateRepository {
    * on the append-only source head.
    */
   listSolutionPublications(engagement: NativeOperationId): NativePublicationRow[] {
+    // Resolve the publications backing this engagement's solution by CONTENT — the outbox rows
+    // whose (role, record_digest) an artifact of this engagement names — not by the outbox row's
+    // own `engagement_id`. The two agree for the engagement that first announced a record, but a
+    // second engagement with byte-identical content owns no outbox rows of its own (the insert
+    // deduped); it must still see the shared published records so its Delivery resolves to the
+    // already-served location and settlement can bind to it. `EXISTS` (rather than a JOIN) keeps
+    // one row per publication even when several artifacts share a digest under different names.
     return (this.store.db.prepare(
-      `SELECT * FROM native_publication_outbox WHERE engagement_id = ?
-       ORDER BY created_at,
-         CASE role
+      `SELECT o.* FROM native_publication_outbox o
+        WHERE o.availability = 'available'
+          AND EXISTS (
+            SELECT 1 FROM native_solution_artifacts a
+             WHERE a.engagement_id = ?
+               AND a.role = o.role
+               AND a.record_digest = o.record_digest
+          )
+       ORDER BY o.created_at,
+         CASE o.role
            WHEN 'output' THEN 0
            WHEN 'evidence' THEN 1
            WHEN 'delivery-envelope' THEN 2
            WHEN 'delivery' THEN 3
            ELSE 4
          END,
-         publication_key`,
+         o.publication_key`,
     ).all(engagement) as RawPublication[]).map(publicationRow);
+  }
+
+  /**
+   * Advance a `solution-ready` engagement to `solution-published` when every record it references
+   * is already served — the terminal path for a second engagement whose byte-identical content was
+   * announced by a prior one (its own publish loop has nothing to drain, since it owns no `intent`
+   * outbox rows). Idempotent and guarded on `solution-ready`, so the ordinary per-record path
+   * (`recordPublicationPublished`) that first reaches `solution-published` wins and this is a no-op.
+   * Returns whether it promoted.
+   */
+  promoteSolutionPublishedIfComplete(engagementIdValue: NativeOperationId): boolean {
+    const now = this.timestamp();
+    return this.store.db.transaction(() => {
+      const engagement = this.store.db.prepare(`SELECT state FROM native_engagements WHERE engagement_id = ?`)
+        .get(engagementIdValue) as { state: string } | undefined;
+      if (engagement === undefined || engagement.state !== 'solution-ready') return false;
+      const referenced = this.store.db.prepare(
+        `SELECT o.publication_key AS publicationKey, o.status AS status
+           FROM native_publication_outbox o
+          WHERE o.availability = 'available'
+            AND EXISTS (
+              SELECT 1 FROM native_solution_artifacts a
+               WHERE a.engagement_id = ?
+                 AND a.role = o.role
+                 AND a.record_digest = o.record_digest
+            )`,
+      ).all(engagementIdValue) as Array<{ publicationKey: NativeOperationId; status: string }>;
+      if (referenced.length === 0) return false;
+      if (referenced.some(({ status }) => status !== 'published')) return false;
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'solution-published', updated_at = ?
+          WHERE engagement_id = ? AND state = 'solution-ready'`,
+      ).run(now, engagementIdValue);
+      this.insertAudit(engagementIdValue, null, 'solution-records-already-published', {
+        publicationKeys: referenced.map(({ publicationKey }) => publicationKey),
+      }, now);
+      return true;
+    })();
   }
 
   recordPublicationPublished(
