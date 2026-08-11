@@ -8,7 +8,10 @@ import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:p
 import { refuse, unavailable } from "./errors.js";
 
 function refuseSymlink(path: string): void {
-  if (lstatSync(path).isSymbolicLink()) {
+  // The existence guard keeps a missing path on the caller's typed error path: `secureRead` calls
+  // this before its own try/catch, so without it an absent file escapes as a raw ENOENT instead of
+  // the typed `unavailable` refusal the evaluation harness expects.
+  if (existsSync(path) && lstatSync(path).isSymbolicLink()) {
     refuse(`grader path "${path}" is a symbolic link`);
   }
 }

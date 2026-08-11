@@ -53,8 +53,11 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
   if (input.command.length === 0 || input.command.some((part) => part.length === 0)) {
     refuse("grader command is empty");
   }
+  // Matches the source's check (grader-oci.ts:97): a NUL or newline in an argv element is the
+  // injection-shaped input worth refusing. A space is legitimate in an entrypoint path and is
+  // safe here because every element reaches the runtime as its own argv slot, never via a shell.
   if (input.entrypoint !== undefined
-    && (input.entrypoint.length === 0 || /[ \r\n]/u.test(input.entrypoint))) {
+    && (input.entrypoint.length === 0 || /[\0\r\n]/u.test(input.entrypoint))) {
     refuse("grader entrypoint is invalid");
   }
   const network = input.profileRequiresNetwork ? input.allowedNetwork : "none";

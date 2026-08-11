@@ -188,4 +188,22 @@ describe("runPinnedOciGrader", () => {
 
     await expect(promise).rejects.toThrow(/runtime is unavailable/u);
   });
+
+  it("reports a clean-exiting grader that wrote no output as a typed refusal, not a raw ENOENT", async () => {
+    // A grader that exits 0 without leaving its statement is the ungradeable-without-output case.
+    // It must reach the harness as an EvaluationOperationalError, never as a bare filesystem error.
+    const input = scratchInput();
+    const inspect = new FakeChild();
+    const run = new FakeChild();
+    const { spawn } = recordingSpawner([inspect, run]);
+    const promise = runPinnedOciGrader(input, { spawn });
+    const rejection = expect(promise).rejects.toMatchObject({
+      name: "EvaluationOperationalError",
+    });
+    inspect.exit(0);
+    await flushMicrotasks();
+    run.exit(0);
+
+    await rejection;
+  });
 });
