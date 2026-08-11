@@ -17,3 +17,10 @@ export {
   type GraderProcessSpawner,
   type PinnedOciRunnerOptions,
 } from "./runner.js";
+
+export { canonicalJsonBytes, sha256Hex } from "./canonical.js";
+export {
+  graderProgramDigest,
+  SWE_REBENCH_OCI_GRADER_PROGRAM,
+  SWE_REBENCH_OCI_GRADER_PROGRAM_BYTES,
+} from "./grader-program.js";
