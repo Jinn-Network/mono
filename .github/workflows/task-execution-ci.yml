@@ -680,7 +680,7 @@ jobs:
           yarn pack:smoke
 
   verify:
-    needs: [architecture, foundation, backend, testing, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness, evaluator-adapters]
+    needs: [architecture, foundation, backend, testing, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness, evaluator-adapters, oci-grader]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -697,6 +697,7 @@ jobs:
           BACKEND_LOCAL_RESULT: ${{ needs.backend-local.result }}
           EVALUATION_HARNESS_RESULT: ${{ needs.evaluation-harness.result }}
           EVALUATOR_ADAPTERS_RESULT: ${{ needs.evaluator-adapters.result }}
+          OCI_GRADER_RESULT: ${{ needs.oci-grader.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
@@ -709,7 +710,8 @@ jobs:
             "$LAUNCHERS_RESULT" \
             "$BACKEND_LOCAL_RESULT" \
             "$EVALUATION_HARNESS_RESULT" \
-            "$EVALUATOR_ADAPTERS_RESULT"; do
+            "$EVALUATOR_ADAPTERS_RESULT" \
+            "$OCI_GRADER_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
