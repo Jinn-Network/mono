@@ -1189,7 +1189,13 @@ export class NativeEvaluatorStateRepository {
     readonly reason: string;
     readonly nextAttemptAt: string;
     readonly deadline: string;
-    readonly maxAttempts: number;
+    /**
+     * Per-phase attempt ceiling. Undefined means unbounded: the admission `deadline` is then the
+     * sole cap (retry-until-deadline). The retry counter is reset on every successful phase advance
+     * (see `resetEvaluationRetryOnAdvance`), so a finite ceiling bounds a single stuck phase, never
+     * the cumulative transient lag of a normal 25+ minute lifecycle.
+     */
+    readonly maxAttempts?: number;
   }): "paused" | "failed" {
     const current = this.getEvaluation(evaluation);
     if (current === undefined) throw new NativeEvaluatorStateConflictError("unknown evaluation aggregate");
@@ -1199,7 +1205,7 @@ export class NativeEvaluatorStateRepository {
       this.recordEvaluationFailed(evaluation, "evaluator-retry-deadline");
       return "failed";
     }
-    if (!Number.isSafeInteger(input.maxAttempts) || input.maxAttempts <= 0) {
+    if (input.maxAttempts !== undefined && (!Number.isSafeInteger(input.maxAttempts) || input.maxAttempts <= 0)) {
       throw new RangeError("evaluator retry maxAttempts must be positive");
     }
     const now = this.timestamp();
@@ -1208,7 +1214,7 @@ export class NativeEvaluatorStateRepository {
         "SELECT resume_state, retry_count FROM native_evaluation_retries WHERE evaluation_id = ?",
       ).get(evaluation) as { resume_state: NativeEvaluationState; retry_count: number } | undefined;
       const retryCount = (existing?.retry_count ?? 0) + 1;
-      if (retryCount > input.maxAttempts) {
+      if (input.maxAttempts !== undefined && retryCount > input.maxAttempts) {
         this.store.db.prepare("UPDATE native_evaluations SET state = 'failed', updated_at = ? WHERE evaluation_id = ?")
           .run(now, evaluation);
         this.audit(evaluation, "evaluation-retry-exhausted", {
@@ -1264,6 +1270,33 @@ export class NativeEvaluatorStateRepository {
       .run(retry.resume_state, now, evaluation);
     this.audit(evaluation, "evaluation-retry-resumed", { resumeState: retry.resume_state }, now);
     return "resumed";
+  }
+
+  /** Attempts already recorded against the current pause schedule (0 when none is open). */
+  getEvaluationRetryCount(evaluation: NativeOperationId): number {
+    const row = this.store.db.prepare(
+      "SELECT retry_count FROM native_evaluation_retries WHERE evaluation_id = ?",
+    ).get(evaluation) as { retry_count: number } | undefined;
+    return row?.retry_count ?? 0;
+  }
+
+  /**
+   * Clears the retry schedule once the evaluation has advanced past the phase it was retrying, so
+   * cumulative transient lag across a multi-phase lifecycle never exhausts a per-phase budget.
+   * Does nothing when no schedule is open or the current phase still equals the paused
+   * `resume_state`. Returns whether a schedule was cleared.
+   */
+  resetEvaluationRetryOnAdvance(evaluation: NativeOperationId): boolean {
+    const retry = this.store.db.prepare(
+      "SELECT resume_state FROM native_evaluation_retries WHERE evaluation_id = ?",
+    ).get(evaluation) as { resume_state: NativeEvaluationState } | undefined;
+    if (retry === undefined) return false;
+    const current = this.getEvaluation(evaluation);
+    if (current === undefined || current.state === retry.resume_state) return false;
+    const now = this.timestamp();
+    this.store.db.prepare("DELETE FROM native_evaluation_retries WHERE evaluation_id = ?").run(evaluation);
+    this.audit(evaluation, "evaluation-retry-reset", { advancedTo: current.state, from: retry.resume_state }, now);
+    return true;
   }
 
   recordEvaluationFailed(evaluation: NativeOperationId, reason: string): void {

@@ -991,6 +991,14 @@ function buildProjector(input: {
       fetchIpfsBytes,
     });
   const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(input.engagementLedger);
+  // HTTP-first delivery resolution for native mode (the record-source serving plane), IPFS gateway
+  // after it. Native deliveries are HTTP-served and may never reach the gateway, so an IPFS-only
+  // resolver leaves the today-mode delivery correspondence CP7 adopt reads permanently null. Legacy
+  // mode has no record source, so it stays on the IPFS-only path.
+  const resolveDeliveryBytes = input.nativeProjectorPorts?.resolveDeliveryBytes;
+  const fetchDeliveryBytes: ProjectorEnrichPorts['fetchDeliveryBytes'] = resolveDeliveryBytes === undefined
+    ? undefined
+    : async (digest) => (await resolveDeliveryBytes(digest)) ?? fetchIpfsBytes(digest);
   const enrich = createProjectorEnrich({
     chain: input.chain,
     publicClient: input.publicClient,
@@ -999,6 +1007,7 @@ function buildProjector(input: {
     resolveDispatchContext,
     readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator),
     allowLegacySignedTaskV1: input.mode === 'legacy',
+    ...(fetchDeliveryBytes === undefined ? {} : { fetchDeliveryBytes }),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 

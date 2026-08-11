@@ -89,6 +89,15 @@ export interface ProjectorEnrichPorts {
    */
   readonly fetchIpfsBytes: (digest: Sha256Digest) => Promise<Uint8Array | undefined>;
   /**
+   * Resolves a delivery record's raw content bytes for its sha256-CID anchor. Native deliveries are
+   * HTTP-served and may never land on the queried IPFS gateway, so this port must try the configured
+   * record-source locations first and only then fall back to IPFS (the #23/#2559/#2561 class, already
+   * fixed on evaluator reads via the HTTP-first `recordFetcher`). Undefined on any miss; the caller
+   * still re-derives and checks the digest, so untrusted bytes are never admitted. Absent falls back
+   * to `fetchIpfsBytes` — the legacy composition has no HTTP record source.
+   */
+  readonly fetchDeliveryBytes?: (digest: Sha256Digest) => Promise<Uint8Array | undefined>;
+  /**
    * Host-resolved signed Submission bytes for an on-chain task. Revised generation supplies the
    * on-chain `submissionDigest` anchor as a hint; today generation has no on-chain anchor at all,
    * so the host resolves purely from task identity (e.g. its own creation record). Undefined when
@@ -371,9 +380,11 @@ export function createProjectorEnrich(
       // (mirrors the reducer's own `data.length === 66` gate, which handles absence explicitly).
       return { taskId: facts.taskId, attemptIndex: facts.attemptIndex, correspondence: undefined };
     }
-    const deliveryBytes = await ports.fetchIpfsBytes(onChainSha256CidDigest);
+    // HTTP-first (native records are HTTP-served), then IPFS. `fetchDeliveryBytes` already layers
+    // both; only the legacy composition, which has no HTTP record source, falls back to IPFS alone.
+    const deliveryBytes = await (ports.fetchDeliveryBytes ?? ports.fetchIpfsBytes)(onChainSha256CidDigest);
     if (deliveryBytes === undefined) {
-      // Unresolvable-right-now is overwhelmingly transient (IPFS hasn't caught up yet) --
+      // Unresolvable-right-now is overwhelmingly transient (the record hasn't propagated yet) --
       // dropping lets the next tick retry it. Admitting instead would permanently mark this log
       // id processed with no correspondence, so a later, genuine "content is corrupt" rejection
       // and a merely-not-yet-fetched delivery would be indistinguishable and both permanent.
@@ -384,6 +395,16 @@ export function createProjectorEnrich(
       return undefined;
     }
     const sha256Digest = computeRawCodecCid(deliveryBytes).sha256Digest;
+    if (sha256Digest !== onChainSha256CidDigest) {
+      // Fail closed: resolved bytes that do not hash to the on-chain anchor are forged or corrupt
+      // (whichever source served them), never a correspondence to admit. Drop so a later tick can
+      // re-resolve against an untampered replica.
+      ports.logger?.warn(
+        `[projector-enrich] delivery content ${onChainSha256CidDigest} for requestId ${requestId} `
+          + `hashed to ${sha256Digest} -- dropping forged/corrupt Deliver bytes`,
+      );
+      return undefined;
+    }
     const evidenceHash = keccakEvidenceHash(deliveryBytes);
     return {
       taskId: facts.taskId,
