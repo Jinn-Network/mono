@@ -31,6 +31,16 @@
       }
     },
     {
+      "methodId": "jinn.benchmarking.method/paired-delta",
+      "parameters": {
+        "baseline": "armA",
+        "candidate": "armB",
+        "seed": 123456789,
+        "resamples": 100,
+        "alpha": "0.05"
+      }
+    },
+    {
       "methodId": "jinn.benchmarking.method/clean-subset",
       "parameters": {
         "basis": "self-declared",

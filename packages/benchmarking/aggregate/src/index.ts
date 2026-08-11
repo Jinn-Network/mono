@@ -39,6 +39,8 @@ export { avgAtOne, passAtK } from "./stats/pass-at-k.js";
 export { clusterBy } from "./stats/clustering.js";
 export { clusteredVariance, mcnemarExact, pairedMcnemar } from "./stats/paired-mcnemar.js";
 export type { ClusteredVariance, DiscordantPair, PairedMcnemarResult } from "./stats/paired-mcnemar.js";
+export { clusteredPairedDeltaInterval } from "./stats/paired-delta.js";
+export type { PairedDeltaIntervalOptions, PairedDeltaIntervalResult } from "./stats/paired-delta.js";
 export { provenanceClusterSign } from "./stats/provenance-cluster-sign.js";
 export type {
   ProvenanceClusterPair,

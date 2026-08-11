@@ -756,6 +756,15 @@ Initial registry (working URIs under `jinn.benchmarking.method/`):
   pinned clustering rule (the Miller 2024 correction; naive SEs on clustered
   suites understate error ≥3×). Pairing is native: arms share Task digests by
   construction.
+- `provenance-cluster-sign@1` — two-arm comparison by one exact sign vote per
+  provenance cluster: Task deltas are summed inside a cluster, ties disclosed
+  and excluded, and the exact two-sided binomial tail reported. Requires
+  `replicates == 1`.
+- `paired-delta@1` — two-arm comparison by the paired mean difference in pass
+  rate, with a two-sided BCa confidence interval bootstrapped over whole
+  provenance clusters. Replicate-aware: a Task's per-arm rate averages all its
+  judged replicates. Reports an estimate, not a gate; the interval is withheld
+  (with a stated reason) below five paired Tasks or two source clusters.
 - `noninferiority-iut@1` — the capability-eval composite gate: quality
   non-inferior (one-sided BCa bootstrap lower bound + relative-regression
   cap) AND cost strictly lower (one-sided Wilcoxon on both-solve pairs),

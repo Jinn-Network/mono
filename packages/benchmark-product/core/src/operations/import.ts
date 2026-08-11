@@ -13,8 +13,8 @@
  * synchronous filesystem writes `atomicWriteFileSync`/`putSealedBytes` already do.
  */
 
-import { convertSweBenchRows } from "../intake/swebench.js";
 import type { DraftDocument } from "../domain/draft.js";
+import { convertSweBenchRows } from "../intake/swebench.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import { attachBenchmarkToDraft } from "./attach.js";
 import type { OperationContext } from "./context.js";
@@ -30,12 +30,15 @@ export interface ImportSweBenchRowsInput {
   readonly description?: string;
   readonly version?: string;
   readonly provenanceTimestamp?: string;
+  /** Per-instance RFC 3339 timestamps keyed by `instance_id` (see `ConvertSweBenchRowsOptions`). */
+  readonly provenanceTimestamps?: Readonly<Record<string, string>>;
 }
 
 export interface ImportSweBenchRowsResult {
   readonly draft: DraftDocument;
   readonly benchmarkSha256: string;
   readonly taskSha256s: readonly string[];
+  readonly evaluationSpecSha256s: readonly string[];
 }
 
 /** Strips the platform's `sha256:` digest prefix; the store deals in bare hex only. */
@@ -65,9 +68,11 @@ export function importSweBenchRows(
         description: input.description ?? document.spec.description ?? "",
         version: input.version ?? "1.0.0",
         ...(input.provenanceTimestamp !== undefined ? { provenanceTimestamp: input.provenanceTimestamp } : {}),
+        ...(input.provenanceTimestamps !== undefined ? { provenanceTimestamps: input.provenanceTimestamps } : {}),
       });
+      const imported = converted.imported;
 
-      const taskSha256s = converted.tasks.map((task) => {
+      const taskSha256s = imported.tasks.map((task) => {
         const stored = putSealedBytes(clockedContext.workspaceDir, task.bytes);
         const expected = bareHex(task.digest);
         // putSealedBytes derives its returned digest from sha256(bytes) itself, so this
@@ -80,8 +85,21 @@ export function importSweBenchRows(
         return stored;
       });
 
-      const benchmarkSha256 = putSealedBytes(clockedContext.workspaceDir, converted.benchmark.bytes);
-      const expectedBenchmarkSha256 = bareHex(converted.benchmark.digest);
+      const evaluationSpecSha256s = converted.evaluationSpecs.map((spec) => {
+        const stored = putSealedBytes(clockedContext.workspaceDir, spec.bytes);
+        // Bare throw, matching the two structurally identical assertions above: this is a
+        // platform/store invariant violation, not a caller error, and `operate()` audits it as
+        // `execution`. (`record-integrity` is documented as the read-side digest check.)
+        if (stored !== spec.digest) {
+          throw new Error(
+            `sealed evaluation spec digest mismatch: intake reported ${spec.digest}, store computed ${stored}`,
+          );
+        }
+        return stored;
+      });
+
+      const benchmarkSha256 = putSealedBytes(clockedContext.workspaceDir, imported.benchmark.bytes);
+      const expectedBenchmarkSha256 = bareHex(imported.benchmark.digest);
       if (benchmarkSha256 !== expectedBenchmarkSha256) {
         throw new Error(
           `sealed benchmark digest mismatch: platform reported ${expectedBenchmarkSha256}, store computed ${benchmarkSha256}`,
@@ -90,7 +108,7 @@ export function importSweBenchRows(
 
       const draft = attachBenchmarkToDraft(clockedContext.workspaceDir, input.draftId, benchmarkSha256, at);
 
-      return { draft, benchmarkSha256, taskSha256s };
+      return { draft, benchmarkSha256, taskSha256s, evaluationSpecSha256s };
     },
   });
 }
