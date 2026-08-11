@@ -378,6 +378,11 @@ export async function buildFleetNativeRuntime(
         records,
         selectFleetRequesterSources(config.recordSources).map(({ baseUrl }) => baseUrl),
       ),
+      // #29: the same chain-direct settlement reader the single-host solver wires as the settlement
+      // port's `canonicalReader`. Without it the fleet settlement port derives finality solely from
+      // the projector observation stream, so a delivery below this operator's clean-break projector
+      // window never settles, holds its `maxConcurrent` slot, and blocks every fresh claim.
+      solutionSettlementCanonical: solverReads.solutionSettlementCanonical,
     },
   };
 

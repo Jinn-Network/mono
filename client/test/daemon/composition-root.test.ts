@@ -27,8 +27,12 @@ import {
   NATIVE_ROLE_IDENTITY_ROLES,
   type RoleIdentitySet,
 } from '../../src/daemon/role-identities.js';
+import type { NativeEngagementRow, NativeOperationRow } from '../../src/daemon/native-operator-state.js';
 import { NativeOperatorStateRepository } from '../../src/daemon/native-operator-state.js';
-import { NativeSolutionCoordinator } from '../../src/daemon/native-solution-coordinator.js';
+import {
+  NativeSolutionCoordinator,
+  type NativeSolutionSettlementPort,
+} from '../../src/daemon/native-solution-coordinator.js';
 
 const { createBaseVenueMock, safeExecuteMock, venueCloseMock } = vi.hoisted(() => ({
   createBaseVenueMock: vi.fn(),
@@ -253,6 +257,11 @@ function nativeClaimRuntime(
       publicBaseUrl: 'https://operator.example/solver',
       exactDocuments: async () => { throw new Error('solution documents not exercised'); },
       resolveEvaluationSpec: async () => undefined,
+      // Chain-direct settlement reader (#29). Default is neutral; the wiring test below overrides
+      // it with a reader that finalizes on an EMPTY projector observation stream, proving the fleet
+      // composition threads it as the settlement port's `canonicalReader` rather than defaulting to
+      // the projector-only fallback.
+      solutionSettlementCanonical: async () => ({ kind: 'absent' as const, checkedAtBlock: 0n }),
     },
   };
 }
@@ -557,6 +566,125 @@ describe('buildOperatorComposition', () => {
     await composition.close();
     expect(evidenceCloseMock).toHaveBeenCalledTimes(1);
     expect(venueCloseMock).toHaveBeenCalledTimes(1);
+    store.close();
+  });
+
+  it('threads the chain-direct settlement reader into the fleet solution settlement port (#29)', async () => {
+    // #29 regression: the single-host solver wires `solutionSettlementCanonical` as the settlement
+    // port's `canonicalReader` (`native-solver-production.ts`), but the fleet composition dropped it
+    // and fell back to the projector-only reader. A finalized delivery BELOW this operator's clean-
+    // break projector window (empty observation stream) then settled as `broadcast` forever, held
+    // its `maxConcurrent: 1` slot, and blocked every fresh claim with `capacity-policy`. This asserts
+    // the fleet-composed settlement port routes through the chain-direct reader — which finalizes on
+    // an EMPTY observation stream — instead of the projector fallback (which would report `broadcast`).
+    createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
+    evidenceCloseMock.mockClear();
+    venueCloseMock.mockClear();
+    openOperatorEvidenceMock.mockReset().mockResolvedValue({
+      runtime: {},
+      ports: { repository: {}, catalog: {}, awaitIndexed: vi.fn() },
+      close: evidenceCloseMock,
+    });
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+
+    const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-settlement-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-settlement-evidence-'));
+    const store = new Store(':memory:');
+    const chain = {
+      chainId: 84532,
+      taskCoordinator: '0x3333333333333333333333333333333333333333',
+      jinnRouter: '0x4444444444444444444444444444444444444444',
+      mechMarketplace: '0x5555555555555555555555555555555555555555',
+      activityChecker: '0x6666666666666666666666666666666666666666',
+      generation: 'today',
+    };
+    const safeAddress = '0x1111111111111111111111111111111111111111' as const;
+    const publicClient = { getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }) };
+
+    // A chain-direct reader that finalizes on an EMPTY projector observation stream — the below-
+    // projector-window delivery the projector fallback can never resolve.
+    const finalizedFact = {
+      kind: 'finalized' as const,
+      txHash: `0x${'b'.repeat(64)}` as const,
+      blockHash: `0x${'c'.repeat(64)}` as const,
+      blockNumber: 120n,
+    };
+    const chainDirectReader = vi.fn(async () => finalizedFact);
+    const runtime = nativeClaimRuntime(store, chain.taskCoordinator);
+    const claimRuntime = {
+      ...runtime,
+      solution: { ...runtime.solution, solutionSettlementCanonical: chainDirectReader },
+    };
+
+    const composition = await buildOperatorComposition({
+      mode: 'native',
+      config: {
+        ipfsRegistryUrl: 'https://registry.example',
+        rpcUrl: 'http://127.0.0.1:8545',
+        claudePath: 'claude',
+        executionWiring: [],
+        claimPolicy: { mode: 'every-runnable', spendCapWei: '999', aiUnitCap: 3 },
+      } as never,
+      publicClient: publicClient as never,
+      walletClient: { account: { address: safeAddress } } as never,
+      safeAddress,
+      mechAddress: '0x2222222222222222222222222222222222222222',
+      chain: chain as never,
+      stateRoot,
+      evidenceRoot,
+      venueStateDbPath: join(stateRoot, 'venue.db'),
+      profileStore: { get: () => undefined },
+      store,
+      nativeRoleIdentities: nativeRoleIdentities(),
+      nativeClaimRuntime: claimRuntime,
+      nativeProjectorPorts: nativeProjectorPorts(),
+    });
+
+    const settlement = (composition.nativeSolutionCoordinator as unknown as {
+      readonly input: { readonly settlement: NativeSolutionSettlementPort };
+    }).input.settlement;
+
+    const engagement = {
+      engagementId: `sha256:${'1'.repeat(64)}`,
+      chainId: 84532,
+      coordinator: chain.taskCoordinator,
+      taskId: 7n,
+      role: 'solver',
+      operatorAgent: 'urn:jinn:operator:test',
+      taskDigest: `sha256:${'2'.repeat(64)}`,
+      submissionUri: 'urn:uuid:22222222-2222-4222-8222-222222222222',
+      submissionDigest: `sha256:${'3'.repeat(64)}`,
+      state: 'solution-settlement-pending',
+      attemptIndex: 0,
+      attemptUri: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+      requestId: `0x${'e'.repeat(64)}`,
+      createdAt: '2026-08-02T00:00:00.000Z',
+      updatedAt: '2026-08-02T00:05:00.000Z',
+    } satisfies NativeEngagementRow;
+    // A valid deliveryDigest + txHash makes the projector fallback (the #29 bug / mutation) return a
+    // definite `broadcast` rather than throw — so the assertion cleanly distinguishes chain-direct
+    // (`finalized`) from projector-only (`broadcast`).
+    const operation = {
+      operationId: `sha256:${'a'.repeat(64)}`,
+      engagementId: engagement.engagementId,
+      kind: 'solution-settlement',
+      status: 'broadcast',
+      txHash: `0x${'b'.repeat(64)}`,
+      priorTxHash: null,
+      blockHash: null,
+      blockNumber: null,
+      detail: {
+        attempt: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+        deliveryDigest: `sha256:${'d'.repeat(64)}`,
+      },
+      createdAt: '2026-08-02T00:05:00.000Z',
+      updatedAt: '2026-08-02T00:05:00.000Z',
+    } satisfies NativeOperationRow;
+
+    await expect(settlement.readCanonical({ operation, engagement })).resolves.toEqual(finalizedFact);
+    expect(chainDirectReader).toHaveBeenCalledOnce();
+
+    await composition.close();
     store.close();
   });
 
