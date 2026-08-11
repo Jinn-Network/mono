@@ -26,9 +26,11 @@ This plan is **provisional**. Three things can change it, and the affected tasks
 
 1. **Gap assignment is unratified.** The program coordinator has recommended homing the interop importer fixes + minting path as a new **P0-interop** packet in lane C4, and grader-image publication + registry + parser identity as **P3c** in lane C2, with `timeout = FAIL` as the declared default. **The operator has not ruled.** This plan assumes that recommendation holds and scopes P5 as the *pure e2e gate only*. If the gaps land back on P5, this plan is materially under-scoped and the lane must re-escalate rather than absorb them.
 
-2. **The grading design is contested.** Two designs now exist in-repo. P3 as specced wires the shipped `jinn.grader-context.v1` contract with per-instance grader images pushed to a registry (PR #2558, `client/deployments/evaluator/swe-rebench-v2-grader/`). PR #2556 landed a working alternative in `packages/policy-optimization/src/host-local/` that pulls the digest-pinned *upstream* image and bind-mounts a host-authored grader read-only — no build, no push, no registry. **This plan is deliberately grading-design-agnostic:** P5 consumes grading only through the seam P3 publishes (Task 3's `Interfaces: Consumes` block). A change of design costs P5 one interface line, not a rewrite.
+2. ~~**The grading design is contested.**~~ **RESOLVED 2026-08-11 by C2.** Adopt PR #2556's pull-and-mount at the **port** level: `GraderReportSource` stays the shipped contract, and `packages/task-execution/evaluator-adapters/src/deployment.ts:31` blesses a host-owned `sweRebenchGraderReportSource` seam. Shared OCI-grader code moves to a new task-execution package. **No registry, no per-instance image builds — P3c is deleted.** Parser identity already ships as `SWE_REBENCH_PARSER`. The EvaluationSpec-bytes fix is descoped to a product-side re-seal at intake (~0.3d); nobody widens `ImportedBenchmark`. This plan stays grading-design-agnostic in structure — P5 consumes grading only through the seam P3 publishes — which is what made absorbing this ruling free.
 
 3. **One statistics field name is outstanding.** C3 supplies the exact field for the no-interval outcome at P4 plan time. Task 4 asserts on *behavior* and names the field as a single, clearly-marked substitution point.
+
+4. **`testMaterial` content is a P3 seam, so the slate needs a SECOND re-mint.** Under pull-and-mount the grader reads its evaluation material from the sealed `EvaluationSpec`; policy-optimization's current internal shape is a `swe-rebench-evaluation-row` descriptor carrying canonical-JSON base64 (`swe-rebench-journey.ts:599-632`, decoded at `swe-rebench-grader-source.ts:271-309`, which re-canonicalizes and byte-compares). That contract belongs to P3's new shared package, not to this fixture. Task 1 therefore ships `testMaterial: []` — schema-legal (`family-blocks.ts:82` has no `.min(1)`) and honest — and **the slate is re-minted once when P3 publishes the contract, and again after P0-interop's cluster-key fix.** Both re-mints are one command.
 
 **Blocking precondition, non-negotiable:** the cluster-key importer fix must land before any slate is minted for official use. It changes sealed Task bytes and therefore every downstream digest. P5's own fixture is disposable and may be minted before the fix; **nothing minted before the fix may be reused for the official run.**
 
@@ -53,7 +55,7 @@ Copied verbatim from the program docs; every task's requirements implicitly incl
 | `packages/benchmark-product/core/fixtures/p5-micro-slate/rows.json` | **Create.** The committed 3-row `SweRebenchRow[]` micro-slate. |
 | `packages/benchmark-product/core/fixtures/p5-micro-slate/provenance.json` | **Create.** Mint metadata — dataset, split, fetch timestamp, per-row source URL and resolved image digest. Makes the fixture auditable without a re-fetch. |
 | `packages/benchmark-product/core/src/intake/p5-micro-slate.test.ts` | **Create.** Validates the committed fixture against the R5 exclusion rules and the `SweBenchRowSchema`. Runs in CI; no network, no Docker. |
-| `packages/benchmark-product/core/scripts/p5-green-baseline.mjs` | **Create.** Grader-validity control: proves the grader returns PASS on the gold patch and FAIL on an empty patch, per exclusion rule 5. Local, Docker-gated. |
+| `packages/benchmark-product/core/scripts/p5-green-baseline.mjs` | **Create — BLOCKED ON P3.** Grader-validity control: proves the grader returns PASS on the gold patch and FAIL on an empty patch, per exclusion rule 5. Local, Docker-gated. Needs the shared grader package P3 creates; deliver alongside Task 3, not Task 1. |
 | `packages/benchmark-product/core/src/run/p5-e2e.integration.test.ts` | **Create.** The gate test. Docker-gated by env; skipped by default. |
 | `packages/benchmark-product/core/scripts/p5-walkthrough.mjs` | **Create.** Drives the built CLI end-to-end as real child processes. Mirrors `m1-walkthrough.mjs`. |
 | `docs/superpowers/plans/demo-report-1/P5-evidence.md` | **Create.** Recorded evidence: sealed digests, honest limits. Mirrors the M1 evidence doc. |
@@ -68,7 +70,31 @@ Instead the pass path is proven **deterministically at the grader**, by Task 1's
 
 ---
 
-## Task 1: Micro-slate fixture and its validation
+## Task 1: Micro-slate fixture and its validation — ✅ DELIVERED (`f777795bf`)
+
+> **The committed implementation supersedes the code sketches below**, which are retained as the
+> design record. Three things changed on contact with the source, all verified:
+>
+> 1. **`parser` carries the shipped `SWE_REBENCH_PARSER`** (`evaluator-adapters/src/parser-identity.ts:24-28`),
+>    not the placeholder digest this plan originally proposed. `@jinn-network/task-execution-evaluator-adapters`
+>    was already a dependency of `benchmark-product/core`, so no new package edge was needed and no
+>    architecture-control work was triggered. A hand-assigned parser digest would have made the
+>    report's grader claim untrue.
+> 2. **The image reference is carried on `name` with no `uri`.** `pinnedImageReference`
+>    (`container-grader-source.ts:180-200`) resolves `image.uri ?? image.name` and refuses anything
+>    that is not a bare docker repository reference — so the `docker://` scheme
+>    `swe-rebench-journey.ts:623` uses for its own grader would be *refused* by the shipped path.
+>    Carrying the reference on `name` satisfies both readings.
+> 3. **`testMaterial: []`** — see Provisionality item 4. The material contract is P3's.
+>
+> **`p5-green-baseline.mjs` is NOT delivered and is blocked on P3.** It must invoke a grader to
+> prove gold-PASS / empty-FAIL, and under the C2 ruling that grader lives in a shared
+> task-execution package P3 has not yet created. There is no non-Docker half worth writing either:
+> with `testMaterial: []` there is no material to validate against the grader's decoder. Writing a
+> stub that cannot run would be a placeholder, so it waits for P3.
+>
+> Verified: 9/9 new tests green; full core suite 692/692 across 69 files; typecheck clean; working
+> tree clean apart from the three intended paths.
 
 Self-contained. Depends on no other packet — **start here regardless of operator rulings.**
 
