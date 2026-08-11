@@ -1953,6 +1953,58 @@ git commit -m "test(task-execution): freeze the oci-grader public surface and pa
 
 **Type consistency.** `PinnedOciGraderInput` / `PinnedOciInvocation` are defined once in T2 and consumed unchanged in T3, T5, T6. `refuse` / `unavailable` / `deadlineExceeded` / `refuseSubjectDigest` are defined in T2 and used in T3 and T5. `canonicalJsonBytes` / `sha256Hex` are defined in T4 and used in T5 — T4 must therefore land before T5, which the ordering respects. One fixed inconsistency: T4's test imports `canonical.js` indirectly via `grader-program.js`, so `canonical.ts` is created in T4 even though `errors.ts` (its import) comes from T2 — the dependency runs backwards in file-creation order but forwards in task order, which is correct.
 
+## Why this package and `benchmark-product/core/src/runtime/inspect` are both "an OCI runner"
+
+PR #2578 landed `packages/benchmark-product/core/src/runtime/` — a runtime-neutral
+`EvaluationRuntimeAdapter` boundary, a `BenchmarkRuntimeHost` process-owning port, and an
+Inspect-specific subtree including its own container runner (`runtime/inspect/oci.ts`, plus a
+`Dockerfile`, `oci-runner.mjs`, and `worker.py`). A reviewer will reasonably ask why one product
+family now contains two things that shell out to `docker run`. It is a fair question with a
+concrete answer, so it is recorded here rather than left to the PR thread.
+
+They sit on different legs of the loop, at different tiers, behind different ports:
+
+| | `runtime/inspect/oci.ts` (PR #2578) | `@jinn-network/task-execution-oci-grader` (this plan) |
+|---|---|---|
+| Leg of the loop | **Solve** — hosts an evaluation-authoring framework so an arm's work runs hermetically | **Evaluate** — runs the grader that judges a completed solve |
+| Tier | Product (tier 4), inside `benchmark-product-core` | Platform (tier 3), `packages/task-execution/` |
+| Port it serves | `EvaluationRuntimeAdapter` / `BenchmarkRuntimeHost` (`runtime/adapter.ts`, `runtime/host-port.ts`) | `GraderReportSource` (`evaluator-adapters/src/swe-rebench/adapter.ts`) |
+| What it pins | An Inspect image digest plus the Inspect/Evals/OpenAI-SDK version triple (`INSPECT-RUNTIME.md`) | The upstream task image digest from the sealed `EvaluationSpec`, plus `graderProgramDigest()` |
+| What it produces | Native Inspect `.eval` logs | One canonical `{ report, log }` the swe-rebench parser scores |
+| Reusable off-product | No — Inspect-specific, product-scoped by design | Yes — that is why it is a platform package |
+
+They compose rather than compete: a single Run can have an Inspect-hosted solve leg and a
+pinned-grader evaluation leg, because the product's runtime adapter chooses *how an arm does the
+work* while `GraderReportSource` chooses *how the verdict is produced*. Neither imports the other,
+and neither is a generalization of the other — merging them would mean a package that both hosts a
+third-party eval framework and grades sealed specifications, which is precisely the coupling the
+`EvaluationRuntimeAdapter` boundary was introduced to prevent.
+
+**Why P3b must not route this package through `BenchmarkRuntimeHost`.** The new host port is a
+*parent-process* seam: `createDefaultBenchmarkRuntimeHost()` returns live objects the product holds.
+The evaluation deployment module runs in the **spawned evaluation-harness child**, which re-imports
+its module from scratch — no live object from the parent reaches it (`venue.ts`'s generated-module
+header and `client/deployments/evaluator/swe-rebench-v2-deployment.mjs:9-20` both state this). So
+the grader source must be constructed *inside* the generated module, exactly as the prediction
+registration is today. The two seams do not overlap and P3b keeps the deployment-module design
+unchanged.
+
+## Citation refresh (2026-08-12, after merging `b78da983e`)
+
+Upstream moved under this plan. Verified against the merged tree:
+
+- `benchmark-product-ci.yml` portal build order: the block now starts at `:77`; the
+  `evaluator-adapters` build line is **`:97`** (was `:89`). A new task-execution package inserts
+  after `:97`. P3b uses these numbers, not the ones in the "Out of scope" section below.
+- `venue.ts`: `writeEvaluationDeploymentModule` is now **`:313`** (was `:283`);
+  `resolveTaskProfileFor` is now **`:360`** (was `:330`). `venue.ts` also gained imports from
+  `../runtime/inspect/*` (`:61-68`) and an `evaluationRuntime` option, so P3b starts with a fresh
+  read of that file rather than the citations in the C2 recon report.
+- **The EvaluationSpec-bytes gap is CLOSED upstream** by #2585. `convertSweBenchRows` now returns
+  `evaluationSpecs: { digest, bytes }[]` (`core/src/intake/swebench.ts:72, 122-144`), re-sealing
+  product-side and cross-checking each re-seal against the digest the Task references. This is the
+  descope the C2 recon recommended; P3/P3b carry no work for it.
+
 ## Out of scope for this plan (P3b)
 
 The benchmark-product-core dependency edge, the `CORE_ALLOWED_JINN_PACKAGES` allowlist entry, the `benchmark-product-ci.yml` portal build-order insertion, the venue's generated deployment module, the venue-side `ensurePinnedOciImage` call, and the per-verdict recording of `graderProgramDigest()` all land in P3b, stacked on this branch.
