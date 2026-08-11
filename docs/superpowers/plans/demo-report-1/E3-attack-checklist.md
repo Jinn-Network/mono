@@ -1,10 +1,15 @@
 # E3 — Red-Team Attack Checklist (pre-lock)
 
-**Version:** 0.2 (weapons prepared; operator-ratified mitigations folded in; no verdicts issued)
+**Version:** 0.3 (weapons prepared; operator-ratified mitigations folded in; review findings applied; no verdicts issued)
 **Date:** 2026-08-12
 **Author:** E3 method-stream agent
 **Program:** `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` (Stage 2, packet E3)
-**Object under attack:** `docs/superpowers/plans/demo-report-1/E1-comparison-frame.md` v0.2
+**Object under attack:** `docs/superpowers/plans/demo-report-1/E1-comparison-frame.md`, pinned by content at blob `dd8a7244ec85ca6bfbac02145ef3f9ae49f055d0` (commit `6da31a636`, E1 v0.3, operator-approved frame). A version label is not a pin — E1 moved twice while this checklist was being written and will move again before lock. The digest names the object these attacks were actually written against; K3 asserts the frozen draft at lock is that object, or that the delta has been re-attacked.
+
+At the pinned digest, E1 §2.8 records the pinning-asymmetry question as **withdrawn** — arm-A/arm-B symmetric enforcement treated as a settled finding, arm C's mechanics settled by pre-lock evidence rather than operator fiat (B5 is the evidence gate for that). One operator question remains open there, publication framing, tracked here at J7.
+
+**Known in-flight delta at time of writing.** E1's independent review found the work-directory placement claim underlying that withdrawal unsupported at head, and §2.8's question is being restored in re-scoped form: not withdrawn, but *confirmed by P2's acceptance gate*. This checklist already treats placement as unsettled and attacks it directly (B4, B9), so the restore narrows the gap between the two documents rather than opening a new one. It is recorded here because it is exactly why the pin is a digest: when E1's head moves, K3 forces a re-read rather than letting a stale "withdrawn" propagate into the lock as if E3 had accepted it.
+
 **Status:** All items `open`. This document is the attack surface enumeration and the executable check for each attack. It does not yet pass or fail the method. Eleven items carry an operator-ratified mitigation, which changes what the check tests but does not close the item — a ratified plan is not a verified one.
 
 ---
@@ -63,8 +68,8 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### A4 — The instruction content itself may be memorized
 - **Attack:** the chosen skill is a widely-published public artifact (Anthropic's skills repository is the C2 default). The model may reproduce its guidance from parametric memory whether or not the file is delivered. That compresses both arms toward the same behavior and, worse, compresses arm C toward them — collapsing the manipulation check by construction.
-- **Check:** on the preview slate, run a no-file probe that asks the model to reproduce the content's distinctive procedural steps verbatim without the file present. Score recall against the frozen `source.md`.
-- **Pass:** either recall is low enough that the content is not effectively always-on, or the finding is published as a limitation on the manipulation check's power and the arm-C contrast is interpreted accordingly. A high-recall result with no disclosure fails.
+- **Check:** on the preview slate, run a no-file probe that asks the model to reproduce the content's distinctive procedural steps without the file present. **Metric, declared before the probe runs:** extract from `source.md` a fixed list of *k* distinctive procedural claims (the extraction is done once, committed, and published alongside the probe); recall = fraction of those *k* claims present in the probe output, scored by exact-match on a pre-committed key phrase per claim, not by judgement. Run the probe *n* = 20 times and report mean recall with its Wilson interval.
+- **Pass:** **mean recall < 0.25** (the pre-declared cutoff) — the content is not effectively always-on, and arm C is a usable baseline. **Recall ≥ 0.25** does not fail the run; it fails silently *reporting* the run, so the measured recall is published as a limitation on the manipulation check's power and the arm-C contrast is interpreted against it. Both the cutoff and *k* are fixed before the probe runs; adjusting either after seeing recall is the failure this item exists to prevent.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
@@ -144,6 +149,21 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Stage:** post-run
 - **Status:** open · **Origin:** novel
 
+### B8 — The frozen source drifted after cells executed
+- **Attack:** B1 freezes the `description`. Nothing yet freezes the **body**. If `source.md` is edited mid-program — a typo fix, a clarification, a "small improvement" after a disappointing preview — then cells executed before and after the edit ran different content, and the arms are no longer comparing packagings of one artifact. This is the most tempting edit in the whole program precisely because it feels harmless, and it is the one a digest makes impossible to hide.
+- **Check:** extend B1's no-touch assertion from the description to the entire frozen source. `git log --follow` on `source.md`, `SKILL.md` and `AGENTS.md`; compare every commit timestamp against the first preview cell's dispatch timestamp from the preview log. Independently, assert the digests sealed in the Benchmark record match the files at HEAD at publication.
+- **Pass:** **zero commits touching `source.md`, `SKILL.md`, or `AGENTS.md` at or after the first preview cell's dispatch** — official or preview, no exceptions for whitespace or typos. Sealed digests equal the published files. If an edit did occur, every cell executed before it is void and the run is a re-lock, disclosed as one.
+- **Stage:** pre-lock, then post-run `standing-guard`
+- **Status:** open · **Origin:** novel
+
+### B9 — The instruction file leaks into the extracted patch
+- **Attack:** arm B's `AGENTS.md` is placed inside the task's git working tree on a SWE slate, so it is visible to `git status` and `git diff` and can be swept into the extracted candidate patch — contaminating the very artifact that gets graded, and doing so asymmetrically between arms because arm A's file sits at a different path. A patch carrying an unrelated root-level markdown file can also fail to apply cleanly in the grader, converting a contamination bug into an arm-correlated infrastructure failure. B4 tests this at the preview level against a no-loadout control; this item is the census across the official run, because a control that passed once does not prove every cell was clean.
+- **Check:** for **every judged cell in every arm**, parse the extracted candidate patch and assert zero hunks touch the instruction file path (`AGENTS.md`, the skill path, or arm C's materialized path). Publish the per-arm count of cells with any such hunk — expected zero, and published as zero rather than omitted. B4's byte-identity control covers the no-loadout comparison; this covers the population.
+- **Pass:** zero instruction-file hunks across all judged cells in all arms, asserted programmatically over the sealed records rather than sampled; the per-arm count published in the report's disclosures.
+- **Ratified mitigation:** this is now a **P2 acceptance criterion** alongside B4's byte-identity condition, so the arm-wiring packet cannot land while the leak is possible. E3 verifies independently against the built system rather than accepting P2's own green — same pattern as B4.
+- **Stage:** pre-lock (P2 acceptance), then post-run spot-verification
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
+
 ---
 
 ## Surface C — Harness, version, and environment drift between arms
@@ -171,8 +191,8 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### C4 — Run order aliases onto arm
 - **Attack:** if all arm-A cells run before all arm-B cells, then any time-varying nuisance — provider load, container cache warmth, disk pressure, rate limiting — is confounded with the arm.
-- **Check:** the execution schedule is a pre-declared, seeded interleave of `(task, arm, replicate)` triples committed before lock. Post-run, assert the realized dispatch timestamps show no arm-by-time separation: compare median dispatch time per arm and the Kolmogorov-style spread of dispatch times.
-- **Pass:** schedule committed pre-lock; realized per-arm dispatch-time distributions overlap; any forced re-ordering (a retry, a resume) is logged and reported.
+- **Check:** the execution schedule is a pre-declared, seeded interleave of `(task, arm, replicate)` triples committed before lock. Post-run, assert the realized dispatch timestamps show no arm-by-time separation: **a two-sample Kolmogorov–Smirnov test on the per-arm dispatch-time distributions, plus the difference in per-arm median dispatch time expressed as a fraction of total run duration.**
+- **Pass:** schedule committed pre-lock; **KS test does not reject at α = 0.05, and the per-arm median dispatch times differ by less than 10% of total run duration**; any forced re-ordering (a retry, a resume) is logged and reported. Both thresholds declared pre-lock.
 - **Stage:** pre-lock, then post-run
 - **Status:** open · **Origin:** novel
 
@@ -185,16 +205,23 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### C6 — Replicate independence: shared caches and state bleed
 - **Attack:** replicates are treated as independent draws, but they may share a warm package cache, a persisted harness state directory, a resumed session, or a Docker layer cache mutated by an earlier replicate. Correlated replicates inflate apparent precision exactly the way singleton clustering did.
-- **Check:** enumerate every path shared across replicates (harness state root, working-dir root, container volumes, HTTP or package caches). For each, decide isolate-or-declare. Then test empirically: run one task's replicates in a deliberately reversed order and compare the outcome vector to the forward order.
-- **Pass:** every shared path either isolated per cell or declared in the report; the order-reversal probe produces no systematic first-replicate-differs pattern; if state is intentionally shared, replicates are treated as within-cluster and the statistics account for it.
+- **Check:** enumerate every path shared across replicates (harness state root, working-dir root, container volumes, HTTP or package caches). For each, decide isolate-or-declare. Then test empirically on **at least 10 tasks × 5 replicates** in both forward and reversed order, and test for a position effect: **Cochran's Q across replicate positions** on the paired outcome bits (the correct test for correlated binary outcomes at k > 2 positions; McNemar's is its k = 2 special case).
+- **Pass:** every shared path either isolated per cell or declared in the report; **Cochran's Q does not reject at α = 0.05 across replicate positions**; if state is intentionally shared, replicates are treated as within-cluster and the statistics account for it. Test, sample size, and α declared pre-lock.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
 ### C7 — Clock and budget asymmetry: does loading count against the agent?
 - **Attack:** if the agent operates under a wall-clock or turn budget, arm B spends part of its first turn ingesting an always-on block while arm A may spend a whole turn deciding to load and then loading. Whichever way it falls, one arm has less budget left for the actual task, and the reported effect is partly a budget effect.
 - **Check:** record per cell: wall time to first tool call, total turns, total wall time, and whether any budget limit was hit. Compare distributions across arms. Separately, confirm the grader's own per-task `timeout` (sealed in the familyBlock) is identical across arms — it derives from the task, so this should hold by construction; assert it rather than assume it.
-- **Pass:** budget-limit-hit rate published per arm; if it differs materially between arms, the report says the contrast includes a budget-consumption component; grader timeouts identical across arms by assertion.
+- **Pass:** budget-limit-hit rate published per arm; **if the per-arm rates differ by more than 2 percentage points, or a two-proportion test on them rejects at α = 0.05**, the report says the contrast includes a budget-consumption component; grader timeouts identical across arms by assertion. The threshold is declared here, before the counts exist.
 - **Stage:** post-run
+- **Status:** open · **Origin:** novel
+
+### C8 — Preview and official runs used different builds
+- **Attack:** E2's power analysis, the MDE, and B5's arm-C decision all rest on preview evidence. If the previews ran on a different harness version, model, grader image, or container runtime than the official run, then the variance estimate calibrates a system that never executed, and the declared MDE is a number about a different experiment. This is a silent failure — previews happen early, while the stack is still being built, which is exactly when drift is most likely and least noticed.
+- **Check:** record the full build fingerprint on every preview cell and every official cell — harness version, model identifier and provider fingerprint, grader program digest (D1), per-task image digests (D2), container runtime version. Assert the fingerprint set used by the previews that fed E2 and B5 is identical to the official run's.
+- **Pass:** **identical fingerprints across MDE-feeding previews and the official run**, asserted field by field. Where a component legitimately changed after the previews, the affected previews are re-run on the official build before their numbers are used, or the MDE and the arm-C decision are recomputed and the earlier previews disclosed as superseded rehearsals under F3's count.
+- **Stage:** pre-lock `standing-guard`
 - **Status:** open · **Origin:** novel
 
 ---
@@ -234,14 +261,14 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 ### D5 — `unscorable` is grader-declared and one-sided
 - **Attack:** the sealed spec declares `unscorable: [{ name: "environment-setup-failure", disposition: "retryable-infrastructure" }]`. Whether a failure is "environment setup" versus "the agent broke the environment" is a judgement made by the grading path, and it decides whether the cell is retried or scored. A systematically different rate of that judgement between arms is a denominator game the venue commits against itself without intending to.
 - **Check:** publish `unscorable` counts per arm from the Report's `attrition.perArm` block (the record schema already carries `unscorable`, `unjudged`, `expired`, `invalidated`, `excluded`, `replacements` per arm). Test whether the arm difference in unscorable rate is larger than chance.
-- **Pass:** per-arm unscorable counts published; a material asymmetry is investigated and disclosed, never silently absorbed by retries.
+- **Pass:** per-arm unscorable counts published; **an asymmetry exceeding 2 percentage points of the per-arm expected-cell count, or rejecting at α = 0.05 under a two-proportion test**, is investigated and disclosed, never silently absorbed by retries. Threshold declared pre-lock.
 - **Stage:** post-run
 - **Status:** open · **Origin:** novel
 
 ### D6 — Parser identity is pinned but not validated
 - **Attack:** `parser.digest` pins the test-output parser, but a pinned parser can still mis-parse a suite it was not written for, producing false negatives concentrated in whichever arm produces unusual output.
-- **Check:** on the gold-patch validation pass (D3), assert the parser reports full pass on every task. Sample raw grader stdout for a handful of failing official cells and hand-confirm the parse.
-- **Pass:** gold-patch parse is clean on 100% of the slate; sampled failure parses hand-confirmed correct.
+- **Check:** on the gold-patch validation pass (D3), assert the parser reports full pass on every task. Then hand-confirm the parse on a sample of failing official cells: **30 cells, drawn by the pre-registered bootstrap seed, stratified to at least 10 per arm** so a parser failure concentrated in one arm is detectable rather than averaged away.
+- **Pass:** gold-patch parse is clean on 100% of the slate; **all 30 sampled failure parses hand-confirmed correct — any single mis-parse escalates to a full-slate re-parse rather than being recorded as an acceptable rate.** Sample size, stratification and draw procedure declared pre-lock.
 - **Stage:** pre-lock, then post-run
 - **Status:** open · **Origin:** novel
 
@@ -252,7 +279,7 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 ### E1 — Asymmetric infra retries and timeouts between arms
 - **Attack:** one arm got more attempts, or one arm hit the wall clock more often. Neither is visible in a pass rate. Timeouts are the sharper version: if a timeout is silently retried, the slower arm gets extra attempts; if it is silently dropped, the slower arm gets a smaller denominator. Either way the arm that the mechanism makes slower is scored on different terms.
 - **Check:** log retry count per cell with its trigger, and timeout count per cell, separately. Publish both totals per arm. Assert the retry policy text and the timeout scoring rule were frozen pre-lock and applied identically. Assert no timed-out cell was retried or excluded.
-- **Pass:** per-arm retry counts **and** per-arm timeout counts both published as disclosures; policies identical and pre-declared; a material asymmetry in either disclosed and discussed rather than netted out.
+- **Pass:** per-arm retry counts **and** per-arm timeout counts both published as disclosures; policies identical and pre-declared; **an asymmetry in either exceeding 2 percentage points of the per-arm expected-cell count, or rejecting at α = 0.05 under a two-proportion test**, disclosed and discussed rather than netted out. Same threshold as D5, declared pre-lock.
 - **Ratified mitigation:** **timeout = FAIL, declared pre-lock.** A timed-out cell scores as a failure; it is not retried and not excluded. This removes the discretion that made the timeout path a denominator game, and makes the slower arm's slowness show up in the result rather than in the accounting. Per-arm timeout counts join per-arm retry counts as required published disclosures, so a reader can see how much of any effect is timeout-driven.
 - **Stage:** pre-lock (policy), post-run (counts)
 - **Status:** open — mitigation ratified, verification pending · **Origin:** seeded
@@ -324,6 +351,13 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
+### F6 — Content-artifact selection is an unregistered forking path
+- **Attack:** E1 §2.3 narrows the content candidates but does not name one. The viable set is explicitly "narrow and must be named before lock" — which means somebody chooses, and the choice can be made after preview effect sizes are visible. Selecting the skill that previewed best is the garden of forking paths in its purest form: every individual step defensible, the aggregate a guarantee of an inflated effect. It is more dangerous than the exclusion-rule version (F2) because it never appears in any record — an unchosen candidate leaves no trace.
+- **Check:** the selection procedure is written and committed **before any preview effect size exists**: the candidate set enumerated, the selection criteria stated (domain compatibility with the slate, license, upstream description present, non-triviality), and the decision rule fixed. Post-hoc, assert from commit timestamps that the artifact was named before the first preview cell dispatched. Publish the full candidate set and the reason each non-selected candidate was rejected.
+- **Pass:** selection procedure and chosen artifact committed **before the first preview cell's dispatch timestamp**; the full candidate list published with rejection reasons, so a reader can see what was not chosen; zero changes of artifact after any effect size is visible. A change after that point is a re-lock, disclosed as one — not a re-selection.
+- **Stage:** pre-lock
+- **Status:** open · **Origin:** novel
+
 ---
 
 ## Surface G — Prompt injection and task content
@@ -338,7 +372,7 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 ### G2 — The issue text contains the fix
 - **Attack:** some upstream issues include the patch, a link to the fixing commit, or a maintainer's exact instruction. Those tasks measure transcription, not engineering, and they compress the arm difference toward zero.
 - **Check:** for each task, test whether the problem statement contains a diff hunk, a commit URL, or the changed file paths from the gold patch. Publish counts.
-- **Pass:** counts published; if the share is material, either excluded by a pre-declared rule or named as a limitation on the slate's discriminative power.
+- **Pass:** counts published; **if the share exceeds 10% of the locked slate**, the affected tasks are either excluded by a pre-declared rule or the share is named as a limitation on the slate's discriminative power. Threshold declared here, before the slate is scanned.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
@@ -357,8 +391,8 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Attack:** the importer keys task provenance on `repo@base_commit` (`packages/benchmarking/interop/src/import/swebench.ts:70`), so every task is its own cluster — measured 100/100 singletons against 77 distinct repositories. A cluster bootstrap over singleton clusters is just an i.i.d. bootstrap, and the published interval understates uncertainty by roughly the square root of the design effect.
 - **Check:** after the interop fix, assert over the sealed slate that `clusterCount < taskCount` and that cluster membership matches repository identity. The e2e gate carries the standing regression guard `draws === resamples × clusterCount` — `clusteredPairedRateDiffBca` increments `draws` once per cluster draw per replicate (`stats/noninferiority.ts:174-181`), so the identity is exact and a silent regression to singletons breaks it.
 - **Pass:** clusterCount equals the distinct-repository count on the locked slate; the e2e assertion is present and green; the cluster manifest (keys and members) appears in the report's method disclosures.
-- **Stage:** pre-lock `standing-guard`
 - **Ratified mitigation:** the clustering-key fix lands in the interop packet pre-lock, and the `draws === resamples × clusterCount` assertion becomes a standing e2e guard so a regression to singleton clusters cannot pass CI silently.
+- **Stage:** pre-lock `standing-guard`
 - **Status:** open — mitigation ratified, verification pending · **Origin:** seeded
 
 ### H2 — Design effect and paired ICC assumed rather than measured
@@ -378,15 +412,15 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### H4 — Two-sided interval built from two one-sided calls
 - **Attack:** `clusteredPairedRateDiffBca` returns a `lowerBound` only. A two-sided interval assembled by calling it at α and at 1−α is a legitimate BCa construction, but three details make it auditable rather than obvious: both endpoints use `Math.floor(adjustedQuantile * resamples)` (`stats/noninferiority.ts:198`), so the upper endpoint is taken from the floor-indexed order statistic where convention takes the ceiling — the two endpoints are not constructed symmetrically; both calls must use the same seed and the same resample set or the endpoints come from different bootstrap distributions; and the returned field is named `lowerBound` in both calls, so a mislabeled endpoint is an easy and invisible bug.
-- **Check:** conformance fixtures for `paired-delta@1` compared against an independent oracle (R `boot::boot.ci(type="bca")` or an independently written Python implementation) on at least three synthetic datasets with known structure, including one with unequal cluster sizes. Assert both endpoints match the oracle within a declared tolerance, and assert the two calls share a seed.
-- **Pass:** oracle agreement within tolerance on every fixture; the construction (two calls, α and 1−α, shared seed, index rule) documented in the method's published description; endpoint labels correct.
+- **Check:** conformance fixtures for `paired-delta@1` compared against an independent oracle (R `boot::boot.ci(type="bca")` or an independently written Python implementation) on at least three synthetic datasets with known structure, including one with unequal cluster sizes. Assert both endpoints match the oracle, and assert the two calls share a seed.
+- **Pass:** **each endpoint agrees with the oracle to within 1 order statistic of the sorted resample vector, and within 0.002 in absolute rate units**, on every fixture. Both bounds are declared here, pre-lock: the order-statistic bound is what a floor-versus-ceiling index rule can legitimately cost, and the absolute bound keeps that from being a licence for arbitrary drift. Construction (two calls, α and 1−α, shared seed, index rule) documented in the method's published description; endpoint labels correct.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
 ### H5 — Bias correction under a coarsely discrete statistic
 - **Attack:** `z0` is computed from `below = means.filter(v => v < observed).length` — a strict inequality (`stats/noninferiority.ts:185`). The paired-delta statistic is discrete: with N tasks and R replicates its values are multiples of 1/(N·R). Bootstrap means therefore tie with the observed value at non-trivial mass, and strict `<` assigns all tie mass to the upper side, biasing `z0` low and shifting the whole interval.
 - **Check:** report the tie mass `#{means === observed} / resamples` alongside the interval. Recompute the interval under the mid-p convention (`below + ties/2`) and compare endpoints.
-- **Pass:** tie mass published; endpoints under both conventions differ by less than a declared tolerance, or the convention is declared pre-lock and its effect published.
+- **Pass:** tie mass published; **endpoints under the strict-`<` and mid-p conventions differ by less than 0.005 in absolute rate units and the verdict is identical under both** — or, where they differ by more, the convention is declared pre-lock and the size of its effect published next to the interval. Bound declared here, pre-lock.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
@@ -400,7 +434,7 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 ### H7 — Estimand weighting: point estimate vs bootstrap statistic
 - **Attack:** the point estimate is the unweighted mean over tasks (`mean(ordered)`), but each bootstrap replicate draws whole clusters and averages over the drawn *members*, so with unequal cluster sizes the resample statistic is a size-weighted ratio whose expectation is not the observed task-mean. The interval is then centered on a slightly different estimand than the point estimate. The BCa bias correction absorbs some of this, which is exactly why it is easy to miss.
 - **Check:** on the locked slate's cluster-size profile, simulate: draw from a known-truth generator, compute the observed statistic and the bootstrap distribution, and measure the offset between the bootstrap mean and the observed value. Declare which estimand the report claims — mean over tasks, or mean over repositories — and confirm the point estimate and the resampling scheme agree with it.
-- **Pass:** the estimand named in one sentence in the report; simulation shows offset below a declared tolerance, or the report uses the cluster-mean estimand consistently in both places.
+- **Pass:** the estimand named in one sentence in the report; **the simulated offset between the bootstrap mean and the observed statistic is below 0.005 in absolute rate units, and below 10% of the reported interval's half-width** — or the report uses the cluster-mean estimand consistently in both the point estimate and the resampling scheme. Both bounds declared here, pre-lock; the half-width-relative bound is the load-bearing one, since a fixed absolute bound means little against a wide interval.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
@@ -420,8 +454,8 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### H10 — Interval misreporting
 - **Attack:** a 95% interval described as "95% probability the true effect lies in this range," or a one-sided bound presented as a two-sided interval, or a bound whose sign convention is flipped.
-- **Check:** the sign convention is fixed in code as `delta = pB - pA` (`stats/noninferiority.ts:169`), so the report must state which arm is `baseline` and which is `candidate` and confirm the published sign matches the parameters actually passed. Read the report's interval sentence against a frequentist-correct template.
-- **Pass:** arm-to-parameter mapping published; sign of the published estimate reproducible by hand from the per-arm rates; interval language frequentist-correct.
+- **Check:** the sign convention is fixed in code as `delta = pB - pA` (`stats/noninferiority.ts:169`), so the report must state which arm is `baseline` and which is `candidate` and confirm the published sign matches the parameters actually passed. Read the report's interval sentence against this template, declared here so the check is a comparison rather than a judgement: *"The estimated difference in per-task pass rate (arm X minus arm Y) is D. A 95% bias-corrected and accelerated bootstrap interval, clustered on task provenance source, runs from L to U. Under repeated application of this procedure, 95% of such intervals would contain the true difference."* Assert the report contains no probability statement about the parameter — grep for `probability that the true`, `95% chance`, `we are 95% confident that the effect is`.
+- **Pass:** arm-to-parameter mapping published; sign of the published estimate reproducible by hand from the per-arm rates; the interval sentence matches the template's claim structure; zero grep hits for the forbidden phrasings.
 - **Stage:** post-run
 - **Status:** open · **Origin:** novel
 
@@ -438,6 +472,13 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Pass:** both numbers printed together; if the MDE exceeds what the slate has ever resolved, the report says so in the limitations before it reports any result.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** seeded
+
+### H13 — The replicate-aggregation rule is unstated and outcome-changing
+- **Attack:** each `(task, arm)` pair has R replicates, and how they collapse to one per-task rate decides the headline. Three defensible rules give three different answers: **mean-rate** (`c/n`, what `avgAtOne` computes — `packages/benchmarking/aggregate/src/stats/pass-at-k.ts`), **any-pass** (`passAtK` at k = n, which scores a task solved if any replicate solved it), and **majority**. Any-pass systematically favors the higher-variance arm, because variance alone buys you a pass; mean-rate does not. If the mechanism under test changes variance rather than mean — entirely plausible, since arm A's activation is itself a stochastic event (B3) — then the choice of rule can flip the sign of the reported effect. The registry offers both estimators, so this is a live fork, not a hypothetical.
+- **Check:** the aggregation rule is named in the locked method document and asserted equal to the rule the sealed method parameters actually invoke. Post-run, recompute the primary contrast under all three rules and publish the sensitivity table.
+- **Pass:** rule pre-declared and matching the sealed method parameters exactly; **the sensitivity table published regardless of whether the rules agree**, and if they disagree in sign or verdict, that disagreement appears next to the headline rather than in an appendix. The pre-declared rule is the headline whatever the others say.
+- **Stage:** pre-lock, then post-run
+- **Status:** open · **Origin:** novel
 
 ---
 
@@ -493,7 +534,7 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 ### J1 — §8.1 must-not-imply pass over the report
 - **Attack:** the report implies one of the eight prohibited things: distinct identities prove distinct parties; an evaluator majority is correct; local execution proves owner honesty; every runtime property was enforced; network execution is confidential; every benchmark is cheaper on the network; the report is a certification or universal ranking; the branded product is required to verify the result.
 - **Check:** line-by-line pass over the report against the eight-item list, recorded as an eight-row table with the report line that discharges each.
-- **Pass:** all eight discharged with a cited line; guarantees, observations, estimates, attestations and unverifiable claims visually and linguistically distinct.
+- **Pass:** all eight discharged with a cited line; guarantees, observations, estimates, attestations and unverifiable claims **visually, linguistically, and structurally** distinct — §8.1 requires all three, and structural distinctness (separate blocks or fields, not merely different wording in the same paragraph) is the one most easily lost in edit passes.
 - **Stage:** post-run
 - **Status:** open · **Origin:** seeded
 
@@ -543,6 +584,8 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Attack:** the report says a reader can verify the numbers independently, and nobody has ever tried. The failure modes are mundane and fatal: the verifier is not actually published, the bundle omits an input the recompute needs, the method package is unreleased or version-drifted, a fixture is referenced but not shipped, or the recompute needs a credential only the run owner has. "Verifiable in principle" published as "verifiable" is the same overclaim §8.1 forbids everywhere else, and it is the one a hostile reader will test first because it is the cheapest to test.
 - **Check:** a clean-environment rehearsal, performed by someone who did not build the run. Fetch only the published artifacts, install only published package versions, run the published verifier, and recompute every number the report states. Compare byte-for-byte against the published report values. Record anything the recompute needed that was not in the published bundle.
 - **Pass:** clean-environment recompute reproduces every published number byte-for-byte, from published artifacts alone, with no private input and no credential. Any gap is closed before publication or the recomputability claim is removed from the report — not softened, removed.
+- **Scope, and why it stops where it does:** this is **statistical recomputation from published outcome bits** — the Matrix's per-cell outcomes, the Report record, the sealed Run parameters, and the released method package — not re-execution of the tasks. Re-execution is foreclosed by A3's license posture: the report deliberately does not redistribute upstream problem statements or test material, so a third party cannot re-run the slate from our bundle and this item must not imply they can. The two items are consistent by construction and the report states the boundary: *the arithmetic is independently checkable; the agent runs are not independently repeatable from this bundle.*
+- **Ratified mitigation:** a **clean-environment third-party recompute from published artifacts alone**, performed by someone who did not build the run, is a required pre-publication step rather than an assurance offered in prose.
 - **Stage:** post-run
 - **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
@@ -550,6 +593,15 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Attack:** the report is produced by a party that built the venue, wrote the estimator, chose the slate, selected the content artifact, ran both arms, graded the results, and stands to benefit from the benchmark product gaining credibility. Each of those facts is disclosed somewhere in the bundle; none of them is collected in one place where a reader meets them before the numbers. A reviewer who assembles that list themselves will present it as something we concealed, and the diffuse disclosure will not read as a defense.
 - **Check:** the limitations section contains an explicit conflict-of-interest statement naming, at minimum: the venue is self-run by the report's author; the estimator was built by the same program that publishes the result (H11); the grading environment was produced by the run owner (D1); and the report's purpose includes demonstrating the product it runs on. Confirm it appears in the report and in any derived asset long enough to carry it.
 - **Pass:** the statement is present, in one place, stated plainly rather than distributed across footnotes, and positioned so a reader encounters it with the result rather than after it.
+- **Ratified mitigation:** a **conflict-of-interest statement is required in the report's limitations**. The disclosures it collects already exist across the bundle; the ratified decision is that they must appear together, as a statement, rather than being reconstructable by a determined reader.
+- **Stage:** post-run
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
+
+### J10 — Post-publication data availability
+- **Attack:** the report links artifacts that later move, expire, or sit behind a service the run owner stops paying for, and the verification path rots. A published benchmark whose evidence is unresolvable in a year is a claim, not a record — and this program's own charter puts evidence outliving the product at the center. The subtler version: a reader cannot tell *what* is guaranteed to remain resolvable, so they assume everything is, and discover otherwise at the worst moment.
+- **Check:** state explicitly in the report that **sealed Task records are self-contained** — the sealed bytes carry the instructions, payload, inputs and the EvaluationSpec digest, so a Task is interpretable from its own content without a live upstream fetch. Then enumerate what is *not* self-contained and depends on an external host staying up: the grader container images, the upstream repositories at their base commits, and the dataset rows. For each, state the retention posture and where a copy lives. Re-resolve every published link from a clean environment at publication time.
+- **Pass:** the self-containment statement present and accurate; the not-self-contained list published with a retention posture for each; every published link resolves from a clean environment at publication. Nothing is described as permanently available that the run owner does not control or has not archived.
+- **Ratified mitigation:** post-publication data availability is addressed explicitly rather than left implicit, and the report **states that sealed Tasks are self-contained** so the boundary between what survives independently and what depends on a host is legible to a reader instead of assumed.
 - **Stage:** post-run
 - **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
@@ -571,10 +623,10 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Stage:** pre-lock, then post-run
 - **Status:** open · **Origin:** novel
 
-### K3 — Operator sign-off is on the register, not the summary
-- **Attack:** sign-off happens on a one-paragraph summary and the operator never sees the open items.
-- **Check:** the sign-off references this file at a specific commit digest.
-- **Pass:** sign-off recorded with the file's digest; the digest matches the version that ships in the report bundle.
+### K3 — Sign-off, and the attacked object, are both pinned by digest
+- **Attack:** two versions of the same failure. (i) Sign-off happens on a one-paragraph summary and the operator never sees the open items. (ii) **The register was written against a draft that has since moved.** E1 has already changed twice during this packet's authoring — including a `withdrawn` disposition on placement that its own review then found unsupported. A register that attacks digest X and is signed against a frozen draft at digest Y is a register that certifies nothing, and the gap is invisible unless someone asserts it.
+- **Check:** the sign-off references this file at a specific commit digest. **Additionally, assert that the E1 blob digest pinned in this document's header equals the digest of the frozen draft at lock.** If they differ, diff the two versions and re-attack every changed section before the register may close; record the diff and the re-attack outcome in this item.
+- **Pass:** sign-off recorded with this file's digest, matching the version that ships in the report bundle; **the header's pinned E1 digest equals the frozen-draft digest at lock, or a recorded re-attack of the delta exists and the header pin has been updated to the frozen draft.**
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
@@ -582,26 +634,28 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ## Register summary
 
+All figures below are recounted programmatically from this file's own headings and status lines, not incremented by hand.
+
 | Surface | Items | Seeded | Novel |
 |---|---|---|---|
 | A — Contamination and leakage | 7 | 3 | 4 |
-| B — Skill-content confounds and arm identity | 7 | 1 | 6 |
-| C — Harness, version, environment drift | 7 | 2 | 5 |
+| B — Skill-content confounds and arm identity | 9 | 1 | 8 |
+| C — Harness, version, environment drift | 8 | 2 | 6 |
 | D — Grader validity | 6 | 0 | 6 |
 | E — Denominator games and attrition | 5 | 2 | 3 |
-| F — Stopping rules, exclusions, Goodharting | 5 | 1 | 4 |
+| F — Stopping rules, exclusions, Goodharting | 6 | 1 | 5 |
 | G — Prompt injection and task content | 3 | 1 | 2 |
-| H — Statistics | 12 | 5 | 7 |
+| H — Statistics | 13 | 5 | 8 |
 | I — Venue self-trust and integrity tiers | 6 | 2 | 4 |
-| J — Publication-surface honesty | 9 | 4 | 5 |
+| J — Publication-surface honesty | 10 | 4 | 6 |
 | K — Red-team process integrity | 3 | 0 | 3 |
-| **Total** | **70** | **21** | **49** |
+| **Total** | **76** | **21** | **55** |
 
-**Markers:** 5 `blocker-candidate` (A2, B3, B4, B5, D2) — each one, if it fails, confounds the primary contrast itself and cannot be discharged by a limitation line. 2 `hard-pre-lock` (H3, J4). 7 `standing-guard` (B2, C3, C5, D1, D2, H1, I5) — checks that become permanent automated assertions rather than one-time inspections.
+**Markers:** 5 `blocker-candidate` (A2, B3, B4, B5, D2) — each one, if it fails, confounds the primary contrast itself and cannot be discharged by a limitation line. 2 `hard-pre-lock` (H3, J4). 9 `standing-guard` (B2, B8, C3, C5, C8, D1, D2, H1, I5) — checks that become permanent automated assertions rather than one-time inspections.
 
-**By stage:** design 5, pre-lock 41, post-run 24 (several items are checked at two stages and are counted at the earlier one).
+**By stage:** design 4, pre-lock 52, post-run 20 (items checked at two stages are counted at the earlier one).
 
-**Status:** 70 open, 0 closed — 59 plain `open`, 11 `open — mitigation ratified, verification pending`. This is still the pre-attack state; no check in this file has been executed.
+**Status:** 76 open, 0 closed — 63 plain `open`, 13 `open — mitigation ratified, verification pending`. This is still the pre-attack state; no check in this file has been executed.
 
 **Ratified mitigations folded in (v0.2), by the item they answer:**
 
@@ -618,5 +672,9 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 | I6 | E4 public pre-registration committed, conditional on the e2e gate |
 | J8 | Clean-environment third-party recompute from published artifacts alone |
 | J9 | Conflict-of-interest statement required in the limitations |
+| B9 | Zero instruction-file hunks in the extracted patch — a P2 acceptance criterion alongside B4 |
+| J10 | Post-publication data availability addressed explicitly; sealed Tasks stated to be self-contained |
 
 None of these closes an item. Each one changes what the pre-lock check tests, and every one of them still has to pass.
+
+**Items added in v0.3, after independent review:** B8 (frozen source drifted after cells executed), B9 (instruction file leaks into the extracted patch), C8 (preview and official runs used different builds), F6 (content-artifact selection is an unregistered forking path), H13 (replicate-aggregation rule unstated and outcome-changing), J10 (post-publication data availability). Five of the six are forking paths or freeze failures — the class of defect that leaves no trace in the published record unless something asserts against it beforehand, which is why they belong in a pre-lock register rather than a post-run review.
