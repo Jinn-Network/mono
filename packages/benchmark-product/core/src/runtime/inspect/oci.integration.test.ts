@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -277,13 +277,16 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "from inspect_ai.log import list_eval_logs,read_eval_log; logs=[read_eval_log(x) for x in list_eval_logs('/logs')]; assert len(logs)==2; assert all(x.status=='success' for x in logs); events=[e for x in logs for s in (x.samples or []) for e in (s.events or []) if e.event=='model']; assert len(events)==2; assert all(e.call and e.call.request['model']=='gpt-5.6-luna' and e.call.response['model']=='gpt-5.6-luna' for e in events)",
     ], { encoding: "utf8" });
     expect(officialRead).toBe("");
-    const viewerDir = join(detachedRoot, "inspect-view-bundle");
+    const viewerOutputRoot = join(detachedRoot, "viewer-output");
+    mkdirSync(viewerOutputRoot, { mode: 0o777 });
+    chmodSync(viewerOutputRoot, 0o777);
+    const viewerDir = join(viewerOutputRoot, "inspect-view-bundle");
     execFileSync(dockerPath, [
       "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
       "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
       "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864", "--env=HOME=/tmp/home",
       "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
-      "--mount", `type=bind,src=${detachedRoot},dst=/output`,
+      "--mount", `type=bind,src=${viewerOutputRoot},dst=/output`,
       "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
     ], { encoding: "utf8" });
     expect(readdirSync(viewerDir).length).toBeGreaterThan(0);
