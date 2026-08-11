@@ -9,3 +9,11 @@ export {
   type PinnedOciGraderInput,
   type PinnedOciInvocation,
 } from "./invocation.js";
+
+export {
+  ensurePinnedOciImage,
+  runPinnedOciGrader,
+  type GraderChildProcess,
+  type GraderProcessSpawner,
+  type PinnedOciRunnerOptions,
+} from "./runner.js";
