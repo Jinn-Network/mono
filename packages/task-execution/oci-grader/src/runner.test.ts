@@ -144,6 +144,31 @@ describe("runPinnedOciGrader", () => {
     expect(new TextDecoder().decode(await promise)).toBe('{"log":"ok","report":{}}');
   });
 
+  it("returns a completed grade even when removing the isolated network afterwards fails", async () => {
+    // A `finally` block that throws replaces whatever the try block produced. Before the fix, a
+    // failing `network rm` after a successful grade discarded the grade and surfaced a generic
+    // "network could not be removed" instead.
+    const input = { ...scratchInput(), profileRequiresNetwork: true };
+    const inspect = new FakeChild();
+    const created = new FakeChild();
+    const run = new FakeChild();
+    const remover = new FakeChild();
+    const { spawn, calls } = recordingSpawner([inspect, created, run, remover]);
+    const promise = runPinnedOciGrader(input, { spawn });
+    inspect.exit(0);
+    await flushMicrotasks();
+    created.exit(0);
+    await flushMicrotasks();
+    writeFileSync(join(input.outputDirectory, "verdict"), '{"log":"ok","report":{}}', { mode: 0o600 });
+    run.exit(0);
+    await flushMicrotasks();
+    remover.exit(1);
+
+    expect(new TextDecoder().decode(await promise)).toBe('{"log":"ok","report":{}}');
+    expect(calls.map((call) => call.args[0])).toEqual(["image", "network", "run", "network"]);
+    expect(calls.at(-1)!.args.slice(0, 2)).toEqual(["network", "rm"]);
+  });
+
   it("reports a nonzero grader exit as unavailable, not as a graded outcome", async () => {
     const input = scratchInput();
     const inspect = new FakeChild();
@@ -177,6 +202,30 @@ describe("runPinnedOciGrader", () => {
     await rejection;
     expect(run.killed).toBe("SIGKILL");
     expect(calls.at(-1)!.args.slice(0, 2)).toEqual(["rm", "-f"]);
+  });
+
+  it("reports the deadline, not a network cleanup failure, when the network rm also fails", async () => {
+    // Before the fix, a `finally` block that threw its own "network could not be removed" here
+    // replaced the deadlineExceeded already in flight, misreporting a timeout as a cleanup error.
+    const input = { ...scratchInput(), timeoutMs: 20, profileRequiresNetwork: true };
+    const inspect = new FakeChild();
+    const created = new FakeChild();
+    const run = new FakeChild();
+    const containerRemover = new FakeChild();
+    const networkRemover = new FakeChild();
+    const { spawn, calls } = recordingSpawner([inspect, created, run, containerRemover, networkRemover]);
+    const promise = runPinnedOciGrader(input, { spawn });
+    const rejection = expect(promise).rejects.toThrow(/bounded time/u);
+    inspect.exit(0);
+    await flushMicrotasks();
+    created.exit(0);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    containerRemover.exit(0);
+    await flushMicrotasks();
+    networkRemover.exit(1);
+
+    await rejection;
+    expect(calls.at(-1)!.args.slice(0, 2)).toEqual(["network", "rm"]);
   });
 
   it("reports a runtime that cannot be spawned as unavailable", async () => {

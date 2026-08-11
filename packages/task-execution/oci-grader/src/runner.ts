@@ -137,6 +137,12 @@ export async function runPinnedOciGrader(
       unavailable("isolated grader network could not be created");
     }
   }
+  // Captured rather than returned/thrown directly, so that cleanup below always runs and never
+  // discards this outcome: a `finally` block that throws (the previous shape here) replaces
+  // whatever the try produced, silently turning a completed grade — or a more specific failure
+  // such as the deadline below — into a generic "network could not be removed".
+  let result: Uint8Array | undefined;
+  let failure: unknown;
   try {
     const invocation = buildPinnedOciInvocation({
       ...input,
@@ -158,9 +164,14 @@ export async function runPinnedOciGrader(
       deadlineExceeded("grader exceeded its bounded time");
     }
     if (exit.code !== 0) unavailable("grader failed");
-    return secureRead(invocation.statementPath);
-  } finally {
-    if (ownedNetwork !== undefined) {
+    result = secureRead(invocation.statementPath);
+  } catch (error) {
+    failure = error;
+  }
+
+  let cleanupFailure: unknown;
+  if (ownedNetwork !== undefined) {
+    try {
       const removed = await boundedExit({
         runtime: input.runtime,
         args: ["network", "rm", ownedNetwork],
@@ -170,6 +181,15 @@ export async function runPinnedOciGrader(
       if (removed.timedOut || removed.code !== 0) {
         unavailable("isolated grader network could not be removed");
       }
+    } catch (error) {
+      cleanupFailure = error;
     }
   }
+
+  // A completed grade, or a more specific failure the try block already classified (e.g. the
+  // deadline above), always wins over a problem cleaning up the now-unused isolated network.
+  if (result !== undefined) return result;
+  if (failure !== undefined) throw failure;
+  if (cleanupFailure !== undefined) throw cleanupFailure;
+  throw new Error("unreachable: runPinnedOciGrader produced neither a result nor an error");
 }
