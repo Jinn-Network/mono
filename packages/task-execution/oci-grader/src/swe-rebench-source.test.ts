@@ -76,6 +76,21 @@ describe("pinnedSweRebenchImage", () => {
       image: { uri: "docker://swerebench/sweb.eval:latest" },
     }))).toThrow(/exact docker sha256 reference/u);
   });
+
+  it("refuses a docker-flag-shaped image URI, never admitting it as an image reference", () => {
+    const hex = "a".repeat(64);
+    const flagShaped = [
+      `--volume=/:/hostfs@sha256:${hex}`,
+      `--privileged@sha256:${hex}`,
+      `../../etc/passwd@sha256:${hex}`,
+      `UPPER/Repo@sha256:${hex}`,
+    ];
+    for (const body of flagShaped) {
+      expect(() => pinnedSweRebenchImage(specification({
+        image: { uri: `docker://${body}` },
+      }))).toThrow(/exact docker sha256 reference/u);
+    }
+  });
 });
 
 describe("exactSweRebenchTestCommands", () => {

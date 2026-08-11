@@ -6,8 +6,19 @@ import { basename, join } from "node:path";
 import { refuse } from "./errors.js";
 import { ensurePrivateDirectory } from "./private-fs.js";
 
-/** A grader image is identified by its digest, never a mutable tag. */
-export const PINNED_IMAGE = /^[^\s@]+(?:\/[^\s@]+)*@sha256:[a-f0-9]{64}$/u;
+/**
+ * OCI reference grammar (docker/distribution `reference` package), restricted to lowercase
+ * registry-host and path components. A grader image is identified by its digest, never a mutable
+ * tag — and the grammar itself must admit only real references, never a docker-flag-shaped string
+ * such as `--volume=/:/hostfs@sha256:<hex>`, which `docker run` would parse as a flag, not an
+ * image, because `familyBlock.image.uri` is untrusted specification data.
+ */
+const REGISTRY = String.raw`[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::[0-9]{1,5})?`;
+const COMPONENT = String.raw`[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*`;
+/** Non-anchored so `swe-rebench-source.ts` can wrap it in its own `docker://(...)` capture. */
+export const PINNED_IMAGE_BODY =
+  `(?:${REGISTRY}/)?${COMPONENT}(?:/${COMPONENT})*@sha256:[a-f0-9]{64}`;
+export const PINNED_IMAGE = new RegExp(`^${PINNED_IMAGE_BODY}$`, "u");
 const SAFE_TARGET = /^\/jinn\/(?:input\/[a-z0-9][a-z0-9._-]*|out)$/u;
 const SECRET_SEGMENT = /^(?:\.aws|\.config|\.docker|\.gnupg|\.ssh|credentials?|keys?|secrets?)$/iu;
 const MAX_TIMEOUT_MS = 3_600_000;
@@ -46,6 +57,7 @@ function assertNoSymlinksOrSecrets(path: string): void {
 
 /** Pure command builder so the security posture is reviewable and testable without a daemon. */
 export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOciInvocation {
+  if (input.image.startsWith("-")) refuse("grader image must not begin with a dash");
   if (!PINNED_IMAGE.test(input.image)) refuse("grader image must be pinned by sha256 digest");
   if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > MAX_TIMEOUT_MS) {
     refuse("grader timeout must be a positive bounded duration");

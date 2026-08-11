@@ -15,7 +15,7 @@ import type {
 import { canonicalJsonBytes, sha256Hex } from "./canonical.js";
 import { refuse, refuseSubjectDigest } from "./errors.js";
 import { SWE_REBENCH_OCI_GRADER_PROGRAM } from "./grader-program.js";
-import type { PinnedOciGraderInput } from "./invocation.js";
+import { PINNED_IMAGE_BODY, type PinnedOciGraderInput } from "./invocation.js";
 import { runPinnedOciGrader, type PinnedOciRunnerOptions } from "./runner.js";
 
 export const SWE_REBENCH_PUBLIC_NETWORK_EXTENSION =
@@ -23,7 +23,8 @@ export const SWE_REBENCH_PUBLIC_NETWORK_EXTENSION =
 
 const MAX_LOG_BYTES = 1024 * 1024;
 const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
-const PINNED_IMAGE_URI = /^docker:\/\/([^\s@]+(?:\/[^\s@]+)*@sha256:[a-f0-9]{64})$/u;
+/** Same OCI-reference grammar `invocation.ts` refuses by, wrapped in the `docker://` URI form. */
+const PINNED_IMAGE_URI = new RegExp(`^docker://(${PINNED_IMAGE_BODY})$`, "u");
 
 interface EvaluationRowMaterial {
   readonly instance_id: string;

@@ -67,6 +67,25 @@ describe("buildPinnedOciInvocation", () => {
       .toThrow(/pinned by sha256 digest/u);
   });
 
+  it("accepts the real upstream docker-hub form with no explicit registry host", () => {
+    const upstream = `swerebench/sweb.eval.x86_64.acme__widget-1@sha256:${"a".repeat(64)}`;
+    expect(() => buildPinnedOciInvocation(baseInput({ image: upstream }))).not.toThrow();
+  });
+
+  it("refuses a docker-flag-shaped image string, never handing it to the runtime as argv", () => {
+    const hex = "a".repeat(64);
+    const flagShaped = [
+      `--volume=/:/hostfs@sha256:${hex}`,
+      `--privileged@sha256:${hex}`,
+      `../../etc/passwd@sha256:${hex}`,
+      `UPPER/Repo@sha256:${hex}`,
+    ];
+    for (const image of flagShaped) {
+      expect(() => buildPinnedOciInvocation(baseInput({ image })))
+        .toThrow(/must not begin with a dash|pinned by sha256 digest/u);
+    }
+  });
+
   it("refuses an unsafe or duplicated mount target", () => {
     const { inputFile, output } = scratch();
     expect(() => buildPinnedOciInvocation(baseInput({
