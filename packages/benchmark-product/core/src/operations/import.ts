@@ -13,8 +13,9 @@
  * synchronous filesystem writes `atomicWriteFileSync`/`putSealedBytes` already do.
  */
 
-import { convertSweBenchRows } from "../intake/swebench.js";
 import type { DraftDocument } from "../domain/draft.js";
+import { refuse } from "../errors.js";
+import { convertSweBenchRows } from "../intake/swebench.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import { attachBenchmarkToDraft } from "./attach.js";
 import type { OperationContext } from "./context.js";
@@ -36,6 +37,7 @@ export interface ImportSweBenchRowsResult {
   readonly draft: DraftDocument;
   readonly benchmarkSha256: string;
   readonly taskSha256s: readonly string[];
+  readonly evaluationSpecSha256s: readonly string[];
 }
 
 /** Strips the platform's `sha256:` digest prefix; the store deals in bare hex only. */
@@ -66,8 +68,9 @@ export function importSweBenchRows(
         version: input.version ?? "1.0.0",
         ...(input.provenanceTimestamp !== undefined ? { provenanceTimestamp: input.provenanceTimestamp } : {}),
       });
+      const imported = converted.imported;
 
-      const taskSha256s = converted.tasks.map((task) => {
+      const taskSha256s = imported.tasks.map((task) => {
         const stored = putSealedBytes(clockedContext.workspaceDir, task.bytes);
         const expected = bareHex(task.digest);
         // putSealedBytes derives its returned digest from sha256(bytes) itself, so this
@@ -80,8 +83,16 @@ export function importSweBenchRows(
         return stored;
       });
 
-      const benchmarkSha256 = putSealedBytes(clockedContext.workspaceDir, converted.benchmark.bytes);
-      const expectedBenchmarkSha256 = bareHex(converted.benchmark.digest);
+      const evaluationSpecSha256s = converted.evaluationSpecs.map((spec) => {
+        const stored = putSealedBytes(clockedContext.workspaceDir, spec.bytes);
+        if (stored !== spec.digest) {
+          refuse("record-integrity", "rows", `stored EvaluationSpec digest ${stored} does not match ${spec.digest}`);
+        }
+        return stored;
+      });
+
+      const benchmarkSha256 = putSealedBytes(clockedContext.workspaceDir, imported.benchmark.bytes);
+      const expectedBenchmarkSha256 = bareHex(imported.benchmark.digest);
       if (benchmarkSha256 !== expectedBenchmarkSha256) {
         throw new Error(
           `sealed benchmark digest mismatch: platform reported ${expectedBenchmarkSha256}, store computed ${benchmarkSha256}`,
@@ -90,7 +101,7 @@ export function importSweBenchRows(
 
       const draft = attachBenchmarkToDraft(clockedContext.workspaceDir, input.draftId, benchmarkSha256, at);
 
-      return { draft, benchmarkSha256, taskSha256s };
+      return { draft, benchmarkSha256, taskSha256s, evaluationSpecSha256s };
     },
   });
 }

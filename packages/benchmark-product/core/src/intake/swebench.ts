@@ -25,6 +25,7 @@
 
 import { importSweBench, type ImportedBenchmark, type SweBenchRow } from "@jinn-network/benchmarking-interop";
 import { checkItemDistinctness } from "@jinn-network/benchmarking-records";
+import { sealEvaluationSpec, sweRebenchRowToTaskAndSpec } from "@jinn-network/task-execution-profiles";
 import { z } from "zod";
 import { refuse, refuseWithIssues } from "../errors.js";
 
@@ -60,6 +61,13 @@ export interface ConvertSweBenchRowsOptions {
   readonly provenanceTimestamp?: string;
 }
 
+export interface ConvertedSweBenchRows {
+  readonly imported: ImportedBenchmark;
+  /** One entry per row, keyed by its own digest. The platform's `ImportedBenchmark` deliberately
+   *  carries only the digest, so the product re-seals to retain the bytes the venue requires. */
+  readonly evaluationSpecs: readonly { readonly digest: string; readonly bytes: Uint8Array }[];
+}
+
 function issuesFromZodError(error: z.ZodError) {
   return error.issues.map((issue) => ({
     path: issue.path.length > 0 ? `rows.${issue.path.join(".")}` : "rows",
@@ -76,7 +84,7 @@ function issuesFromZodError(error: z.ZodError) {
  *  - with a single `"benchmark-item-distinctness"` issue naming the duplicate task
  *    digest when two rows import to the same Task.
  */
-export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRowsOptions): ImportedBenchmark {
+export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRowsOptions): ConvertedSweBenchRows {
   const parsedRows = SweBenchRowsFileSchema.safeParse(rowsInput);
   if (!parsedRows.success) {
     refuseWithIssues("validation", issuesFromZodError(parsedRows.error));
@@ -106,5 +114,17 @@ export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRow
     ]);
   }
 
-  return imported;
+  const evaluationSpecs = (parsedRows.data as unknown as readonly SweBenchRow[]).map((row) => {
+    const mapped = sweRebenchRowToTaskAndSpec(row);
+    const sealed = sealEvaluationSpec(mapped.evaluationSpec);
+    // Sealing is deterministic, so re-sealing reproduces the exact bytes the Task already commits
+    // to. Assert rather than assume — a drift here would persist bytes under a digest no Task
+    // references, which is silent and would only surface as an ungradeable cell mid-run.
+    if (sealed.digest !== mapped.evaluationSpecDigest) {
+      refuse("record-integrity", "rows", `re-sealed EvaluationSpec digest ${sealed.digest} does not match ${mapped.evaluationSpecDigest}`);
+    }
+    return { digest: sealed.digest.slice("sha256:".length), bytes: sealed.bytes };
+  });
+
+  return { imported, evaluationSpecs };
 }

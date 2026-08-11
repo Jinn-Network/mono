@@ -87,6 +87,53 @@ describe("importSweBenchRows", () => {
     expect(importEntries[0]?.outcome).toBe("ok");
   });
 
+  test("persists every imported task's EvaluationSpec bytes under the digest its Task references", () => {
+    const clock = makeClock();
+    const context = contextFor(workspaceDir, clock);
+    expect(initWorkspace(context).ok).toBe(true);
+    expect(createDraft(context, { draftId: "d1", name: "Import" }).ok).toBe(true);
+    const imported = importSweBenchRows(context, { draftId: "d1", rows: [GOLDEN_ROW] });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    if (!imported.ok) throw new Error("unreachable");
+
+    expect(imported.result.evaluationSpecSha256s).toHaveLength(1);
+
+    // The binding property: the bytes must be retrievable under exactly the digest the sealed Task
+    // points at, because that is the only key the venue's evaluation path ever looks up
+    // (run/drive.ts:358-374). A digest that resolves to nothing is what made SWE tasks ungradeable.
+    for (const taskSha256 of imported.result.taskSha256s) {
+      const taskDoc = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, taskSha256))) as {
+        evaluation?: { digest?: { sha256?: string } };
+      };
+      const specSha256 = taskDoc.evaluation?.digest?.sha256;
+      expect(specSha256).toMatch(/^[a-f0-9]{64}$/u);
+      const specBytes = getSealedBytes(workspaceDir, specSha256 as string);
+      expect(specBytes.byteLength).toBeGreaterThan(0);
+      expect(imported.result.evaluationSpecSha256s).toContain(specSha256);
+    }
+  });
+
+  test("the retained bytes parse as the EvaluationSpec the Task actually commits to", () => {
+    const clock = makeClock();
+    const draftId = setupDraft(clock, "Spec Shape");
+
+    const outcome = importSweBenchRows(contextFor(workspaceDir, clock), { draftId, rows: [GOLDEN_ROW] });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+
+    // Resolving to *some* bytes is not enough — they must be this row's spec. Storing the wrong
+    // spec under a resolvable digest would grade every attempt against the wrong transitions,
+    // and no digest check downstream would catch it.
+    const specBytes = getSealedBytes(workspaceDir, outcome.result.evaluationSpecSha256s[0] as string);
+    const spec = JSON.parse(new TextDecoder().decode(specBytes)) as {
+      family?: string;
+      familyBlock?: { transitions?: { failToPass?: string[] }; timeout?: number };
+    };
+    expect(spec.family).toBe("deterministic-process");
+    expect(spec.familyBlock?.transitions?.failToPass).toEqual(GOLDEN_ROW.transitions.failToPass);
+    expect(spec.familyBlock?.timeout).toBe(GOLDEN_ROW.timeout);
+  });
+
   test("a duplicate-row file refuses validation naming benchmark-item-distinctness, audited", () => {
     const clock = makeClock();
     const draftId = setupDraft(clock, "Dup Rows");
