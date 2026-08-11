@@ -100,7 +100,7 @@ export async function inspectRuntimeSelectAction(
   const draftId = field(formData, "draftId");
   const configuration = jsonField(formData, "configuration") as Omit<SelectInspectEvaluationInput, "draftId">;
   return executeOperation(
-    (context) => selectInspectEvaluation(context, { draftId, ...configuration }),
+    (context) => selectInspectEvaluation(context, { draftId, ...configuration } as SelectInspectEvaluationInput),
     { revalidate: ["/workspace", `/workspace/${draftId}`] },
   );
 }

@@ -27,6 +27,14 @@ describe("runtime adapter registry", () => {
     })).toBe("explicit-consent");
   });
 
+  test("keeps OCI isolation as a runtime-neutral sealed submission fact", () => {
+    expect(runtimeSubmissionBaseline({
+      adapterId: "inspect",
+      selectionManifestSha256: "a".repeat(64),
+      isolationPolicy: "oci-container",
+    })).toEqual({ isolationPolicy: "oci-container" });
+  });
+
   test("an unregistered adapter refuses explicitly rather than falling back to native", () => {
     expect(() => runtimeSubmissionBaseline({
       adapterId: "unknown-runtime",

@@ -20,6 +20,9 @@ The supported first slice is deliberately narrow:
 - local native `.eval` logs produced and accepted by Inspect's official
   `read_eval_log` API.
 
+The optional OCI host narrows this further to Python `3.11.9`, Inspect Evals
+`0.16.0`, OpenAI SDK `2.53.0`, `linux/amd64`, and one exact `sampleId`.
+
 The adapter is implemented against Inspect's official
 [Python/CLI reference](https://inspect.aisi.org.uk/reference/),
 [task reference documentation](https://inspect.aisi.org.uk/tasks.html),
@@ -80,9 +83,45 @@ benchmark-product runtime inspect select \
 The web product exposes the same `selectInspectEvaluation` operation as a raw
 selection form. It does not provide a task, solver, scorer, or sandbox editor.
 
-Selection calls Inspect's public programmatic `eval` interface with
-`run_samples=False`, resolves the official task metadata, and seals a public-safe
-manifest. The manifest binds the adapter and worker, exact Inspect version,
+To run task code in the product-owned OCI boundary, first build the local
+worker image for the supported platform, prefetch any selected dataset into a
+dedicated cache, and select the immutable local image ID rather than its tag:
+
+```bash
+docker build --platform linux/amd64 \
+  --tag jinn-inspect-worker:0.3.255-local \
+  packages/benchmark-product/core/src/runtime/inspect
+docker image inspect --format '{{.Id}}' jinn-inspect-worker:0.3.255-local
+```
+
+```json
+{
+  "execution": "oci",
+  "dockerPath": "/absolute/path/to/docker",
+  "imageDigest": "sha256:<local-image-id>",
+  "projectDir": "/absolute/path/to/existing-inspect-project",
+  "datasetCacheDir": "/absolute/path/to/prefetched-read-only-cache",
+  "taskReference": "evals/hermetic.py@hermetic",
+  "arms": [
+    { "armId": "control", "model": "mockllm/model" },
+    { "armId": "candidate", "model": "mockllm/model" }
+  ],
+  "scorer": { "name": "match", "passValue": "C" },
+  "runOptions": { "sampleId": "alpha", "maxSamples": 1 }
+}
+```
+
+Selection binds the image ID, platform, exact Python and package versions,
+worker source, Docker executable and engine/API versions, project/task/scorer
+identity, selected-sample digest, complete dataset-cache tree digest, mounts,
+network policy, and resource limits. Later probes use `--pull=never`; missing
+or changed inputs fail as method drift rather than falling back to host Python.
+
+Selection calls Inspect's public programmatic `eval` interface. The local path
+can resolve metadata without running samples; the OCI path runs its locked
+exact sample with Inspect's mock provider so it can bind the ordered sample
+bytes without external model access. It then seals a public-safe manifest. The
+manifest binds the adapter and worker, exact Inspect version,
 installed Inspect distribution content, Python executable and installed-package
 environment, task reference and arguments, source file, local project tree or
 installed distribution, dataset metadata, arm model configuration, scorer, and
@@ -104,9 +143,11 @@ expose resolvable distribution metadata.
 
 ## Supported run semantics
 
-The material option allowlist is `maxSamples`, `maxSubprocesses`,
+The material option allowlist is `sampleId`, `maxSamples`, `maxSubprocesses`,
 `maxSandboxes`, `retryOnError`, `failOnError`, `messageLimit`, `tokenLimit`,
-and `timeLimit`. Inspect owns the behavior of those options. Task-defined and
+and `timeLimit`. `sampleId` selects one exact dataset row. `maxSamples` is
+Inspect's concurrent-sample limit and never selects or truncates the dataset.
+Inspect owns the behavior of those options. Task-defined and
 run-option sandboxes are refused in this slice because a provider name or
 mutable image tag is not strong enough for the lock guarantee. Custom sandbox
 providers require a follow-up that binds the provider, complete configuration,
@@ -147,21 +188,25 @@ same execution.
 ## Execution and credential boundary
 
 Task imports, tools, solvers, model providers, sandboxes, and scorers run in a
-supervised Python child process, never in the Next.js request process. The
-product process owns cancellation, the private workspace binding, attempt
-journaling, resource orchestration, and artifact collection. Inspect and a
-selected sandbox provider own evaluation mechanics inside that worker.
+supervised runtime host, never in the Next.js request process. The original
+local-Python host remains available for trusted, credential-free compatibility
+runs. The OCI host runs task code with a read-only root, no Linux capabilities,
+no new privileges, no network, bounded CPU/memory/process/scratch resources,
+an ephemeral home, and only the selected project/cache plus current attempt
+directories mounted. It never mounts the host home, keyring, repository root,
+Docker socket, or credential files.
 
 The worker receives a minimal environment and no ambient credential variables.
 The first slice therefore supports network-free or otherwise no-secret
 evaluations. It accepts neither ChatGPT/Codex subscription state nor provider
 API keys. Credential forwarding for external providers requires a future
 explicit, allowlisted secret port and credentialed smoke suite; it must not be
-implemented by inheriting the web server environment. Process separation is
-not a container or hostile-code sandbox and does not restrict filesystem reads:
-task code can read any host file the product OS user can read. Users running
-untrusted or secret-bearing evaluations must place the entire worker in a
-customer-controlled container or isolated worker host.
+implemented by inheriting the web server environment. Local-Python process
+separation is not a hostile-code sandbox and does not restrict filesystem
+reads: task code can read any host file the product OS user can read. Choose
+the OCI host for untrusted task code. The OCI host in this slice is
+credential-free and network-disabled; provider credentials require the
+separate broker boundary rather than a worker environment variable.
 
 ## Native logs, publication, and Inspect View
 

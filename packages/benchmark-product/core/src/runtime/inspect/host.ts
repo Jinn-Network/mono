@@ -14,19 +14,28 @@ import {
   type InspectRunOptions,
   type InspectSelectionManifest,
 } from "./manifest.js";
+import {
+  InspectOciHostBindingSchema,
+  assertInspectOciHostUndrifted,
+  probeInspectOciSelection,
+} from "./oci.js";
 
 const WorkerEnvelopeSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), value: z.unknown() }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 
-export const InspectHostBindingSchema = z.object({
+export const InspectLocalHostBindingSchema = z.object({
+  kind: z.literal("local-python").optional(),
   pythonPath: z.string().min(1),
   projectDir: z.string().min(1),
-});
+}).strict();
+export const InspectHostBindingSchema = z.union([InspectLocalHostBindingSchema, InspectOciHostBindingSchema]);
 export type InspectHostBinding = z.infer<typeof InspectHostBindingSchema>;
 
-export interface ProbeInspectSelectionInput extends InspectHostBinding {
+export interface ProbeInspectSelectionInput {
+  readonly pythonPath: string;
+  readonly projectDir: string;
   readonly taskReference: string;
   readonly taskArgs?: Readonly<Record<string, unknown>>;
   readonly arms: readonly InspectArmConfiguration[];
@@ -164,14 +173,28 @@ export async function assertInspectSelectionUndrifted(
 ): Promise<void> {
   const expected = readInspectSelectionManifest(workspaceDir, selectionManifestSha256);
   const host = readInspectHostBinding(workspaceDir, selectionManifestSha256);
-  const actual = await probeInspectSelection({
-    ...host,
-    taskReference: expected.task.reference,
-    taskArgs: expected.task.args as Readonly<Record<string, unknown>>,
-    arms: expected.arms,
-    scorer: expected.scorer,
-    runOptions: expected.runOptions,
-  });
+  const actual = host.kind === "oci"
+    ? (await probeInspectOciSelection({
+      dockerPath: host.dockerPath,
+      imageDigest: host.imageDigest,
+      projectDir: host.projectDir,
+      datasetCacheDir: host.datasetCacheDir,
+      taskReference: expected.task.reference,
+      taskArgs: expected.task.args as Readonly<Record<string, unknown>>,
+      arms: expected.arms,
+      scorer: expected.scorer,
+      runOptions: expected.runOptions as InspectRunOptions & { sampleId: string | number },
+    })).manifest
+    : await probeInspectSelection({
+      pythonPath: host.pythonPath,
+      projectDir: host.projectDir,
+      taskReference: expected.task.reference,
+      taskArgs: expected.task.args as Readonly<Record<string, unknown>>,
+      arms: expected.arms,
+      scorer: expected.scorer,
+      runOptions: expected.runOptions,
+    });
+  if (host.kind === "oci") await assertInspectOciHostUndrifted(host, expected);
   if (sha256Hex(canonicalJsonBytes(actual as never)) !== selectionManifestSha256) {
     refuse("conflict", "inspect.selection", "Inspect task, source, Python, runtime, or material configuration drifted after selection/lock");
   }

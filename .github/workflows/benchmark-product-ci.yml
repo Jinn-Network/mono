@@ -111,6 +111,15 @@ jobs:
           yarn build
           yarn check:parity
           yarn pack:smoke
+      - name: Verify the real credential-free OCI Inspect boundary
+        working-directory: packages/benchmark-product/core
+        run: |
+          docker build --platform linux/amd64 --tag jinn-inspect-worker:0.3.255-ci src/runtime/inspect
+          mkdir -p "$RUNNER_TEMP/inspect-dataset-cache"
+          JINN_INSPECT_OCI_IMAGE="$(docker image inspect --format '{{.Id}}' jinn-inspect-worker:0.3.255-ci)" \
+          JINN_INSPECT_OCI_DATASET_CACHE="$RUNNER_TEMP/inspect-dataset-cache" \
+          JINN_DOCKER_PATH="$(command -v docker)" \
+          yarn vitest run src/runtime/inspect/oci.integration.test.ts
       - name: Upload Benchmark Product runtime distributions
         uses: actions/upload-artifact@v4
         with:

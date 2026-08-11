@@ -464,7 +464,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   );
   const inspectLauncher = inspectSelection === undefined || inspectHost === undefined
     ? undefined
-    : makeInspectLauncher({ pythonPath: inspectHost.pythonPath, manifest: inspectSelection });
+    : makeInspectLauncher({ host: inspectHost, manifest: inspectSelection });
 
   // One prediction registration per evaluator identity, id-matched with the generated deployment
   // module (the spawned harness selects by exact registration id). The factory hardcodes the
@@ -582,19 +582,22 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   };
   if (inspectLauncher !== undefined && inspectSelection !== undefined && inspectHost !== undefined) {
     const selectionManifestSha256 = options.evaluationRuntime!.selectionManifestSha256;
-    launcherDeployments[inspectLauncher.id] = {
-      executable: {
+    const executable = inspectHost.kind === "oci"
+      ? {
+        path: process.execPath,
+        digest: inspectSelection.runtime.execution!.runtimeHostSourceSha256,
+      }
+      : {
         path: inspectHost.pythonPath,
         digest: inspectSelection.runtime.pythonExecutableSha256,
-      },
+      };
+    launcherDeployments[inspectLauncher.id] = {
+      executable,
       async probe() {
         await assertInspectSelectionUndrifted(runtimeBindingWorkspaceDir, selectionManifestSha256);
         return {
           ready: true,
-          executable: {
-            path: inspectHost.pythonPath,
-            digest: inspectSelection.runtime.pythonExecutableSha256,
-          },
+          executable,
           harnessVersions: [inspectSelection.runtime.inspectVersion],
           models: inspectSelection.arms.map((arm) => arm.model),
         };
@@ -615,7 +618,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       "application/vnd.in-toto+json",
       ...(inspectProfile === undefined ? [] : [INSPECT_NATIVE_LOG_MEDIA_TYPE, INSPECT_SUMMARY_MEDIA_TYPE]),
     ],
-    isolation: ["process"],
+    isolation: ["process", ...(inspectHost?.kind === "oci" ? ["oci-container"] : [])],
   };
 
   const backend = makeLocalTaskExecutionBackend({

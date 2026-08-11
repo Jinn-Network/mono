@@ -9,10 +9,14 @@
  */
 
 import { runCli } from "./main.js";
+import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
+
+const runtimeHost = createDefaultBenchmarkRuntimeHost();
 
 const result = await runCli(process.argv.slice(2), {
   cwd: process.cwd(),
   clock: () => new Date().toISOString(),
+  runtimeHost,
   // stderr, never stdout: --json mode's stdout must stay a single machine-parseable envelope,
   // and even in human mode stdout is reserved for the verb's final rendered result.
   progress: (line) => process.stderr.write(`${line}\n`),

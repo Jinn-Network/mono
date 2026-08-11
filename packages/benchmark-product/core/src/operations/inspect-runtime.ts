@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import { isDraftMutable, transition, type LifecycleState } from "../domain/lifecycle.js";
 import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
 import { refuse } from "../errors.js";
@@ -7,11 +6,13 @@ import {
   INSPECT_ADAPTER_ID,
   INSPECT_ARM_REQUIREMENT_KEY,
   assertNoSecretLikeConfiguration,
-  type InspectArmConfiguration,
-  type InspectRunOptions,
 } from "../runtime/inspect/manifest.js";
 import { buildInspectSelectionArtifacts } from "../runtime/inspect/artifacts.js";
-import { probeInspectSelection, writeInspectHostBinding } from "../runtime/inspect/host.js";
+import { writeInspectHostBinding } from "../runtime/inspect/host.js";
+import {
+  createDefaultBenchmarkRuntimeHost,
+  type InspectRuntimeSelectionRequest,
+} from "../runtime/host-port.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
@@ -19,16 +20,11 @@ import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 
-export interface SelectInspectEvaluationInput {
+interface SelectInspectEvaluationBaseInput {
   readonly draftId: string;
-  readonly pythonPath: string;
-  readonly projectDir: string;
-  readonly taskReference: string;
-  readonly taskArgs?: Readonly<Record<string, unknown>>;
-  readonly arms: readonly InspectArmConfiguration[];
-  readonly scorer: { readonly name: string; readonly passValue: string | number | boolean | null };
-  readonly runOptions?: InspectRunOptions;
 }
+
+export type SelectInspectEvaluationInput = SelectInspectEvaluationBaseInput & InspectRuntimeSelectionRequest;
 
 export interface SelectInspectEvaluationResult {
   readonly draft: DraftDocument;
@@ -65,8 +61,9 @@ export function selectInspectEvaluation(
       } catch (cause) {
         refuse("validation", "inspect.selection", cause instanceof Error ? cause.message : String(cause));
       }
-      const host = { pythonPath: resolve(input.pythonPath), projectDir: resolve(input.projectDir) };
-      const manifest = await probeInspectSelection({ ...input, ...host });
+      const runtimeHost = context.runtimeHost ?? createDefaultBenchmarkRuntimeHost();
+      const resolution = await runtimeHost.resolveInspectSelection(input);
+      const { manifest } = resolution;
       const artifacts = buildInspectSelectionArtifacts(manifest);
       for (const [label, bytes, expected] of [
         ["selection manifest", artifacts.manifestBytes, artifacts.manifestSha256],
@@ -78,7 +75,7 @@ export function selectInspectEvaluation(
         if (stored !== expected) refuse("record-integrity", "inspect.selection", `${label} digest changed while storing`);
       }
       writeInspectHostBinding(clockedContext.workspaceDir, artifacts.manifestSha256, {
-        ...host,
+        ...resolution.binding,
       });
       let nextState: LifecycleState = current.state;
       if (current.state === "quoted") {
@@ -99,6 +96,7 @@ export function selectInspectEvaluation(
         evaluationRuntime: {
           adapterId: INSPECT_ADAPTER_ID,
           selectionManifestSha256: artifacts.manifestSha256,
+          isolationPolicy: input.execution === "oci" ? "oci-container" : "unrestricted",
         },
       });
       const draft: DraftDocument = { ...current, state: nextState, updatedAt: at, spec };

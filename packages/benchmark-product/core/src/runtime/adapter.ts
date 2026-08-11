@@ -9,11 +9,11 @@
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import { refuse } from "../errors.js";
 import {
-  createLocalVenue,
   VENUE_ISOLATION_POLICY,
   type LocalVenue,
   type LocalVenueOptions,
 } from "../venue/venue.js";
+import { createDefaultBenchmarkRuntimeHost, type BenchmarkRuntimeHost } from "./host-port.js";
 import { INSPECT_ADAPTER_ID } from "./inspect/manifest.js";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
@@ -39,7 +39,7 @@ const nativeAdapter: EvaluationRuntimeAdapter = {
     selectionRequired: false,
   },
   nativeArtifactPublication: "not-applicable",
-  submissionBaseline: () => ({ isolationPolicy: VENUE_ISOLATION_POLICY }),
+  submissionBaseline: (binding) => ({ isolationPolicy: binding?.isolationPolicy ?? VENUE_ISOLATION_POLICY }),
 };
 
 const inspectAdapter: EvaluationRuntimeAdapter = {
@@ -51,8 +51,9 @@ const inspectAdapter: EvaluationRuntimeAdapter = {
   },
   nativeArtifactPublication: "explicit-consent",
   // Runtime identity is already transitively sealed by Benchmark -> Task -> selection manifest.
-  // The venue still discloses the same process-isolation policy as the compatibility runtime.
-  submissionBaseline: () => ({ isolationPolicy: VENUE_ISOLATION_POLICY }),
+  // Isolation is still a visible submission fact: local Python is unrestricted while the OCI
+  // host is container-isolated. Neither posture is allowed to disappear behind the adapter id.
+  submissionBaseline: (binding) => ({ isolationPolicy: binding?.isolationPolicy ?? VENUE_ISOLATION_POLICY }),
 };
 
 const ADAPTERS = new Map<string, EvaluationRuntimeAdapter>([
@@ -89,8 +90,9 @@ export function runtimeNativeArtifactPublicationPolicy(
 export function createRuntimeVenue(
   binding: EvaluationRuntimeBinding | undefined,
   options: Omit<LocalVenueOptions, "evaluationRuntime">,
+  runtimeHost: BenchmarkRuntimeHost = createDefaultBenchmarkRuntimeHost(),
 ): LocalVenue {
   // Resolve first so unknown adapters fail at the shared operation boundary.
   adapterFor(binding);
-  return createLocalVenue({ ...options, ...(binding === undefined ? {} : { evaluationRuntime: binding }) });
+  return runtimeHost.createVenue(binding, options);
 }

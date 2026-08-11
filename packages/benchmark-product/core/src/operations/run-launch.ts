@@ -200,7 +200,7 @@ export function runLaunch(
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
       const createVenue: typeof createLocalVenue = deps.createVenue
-        ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options));
+        ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 
       const transitioned = transition("locked", "launch");
       if (!transitioned.ok) {
@@ -319,7 +319,7 @@ export function runResume(
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "running");
       const createVenue: typeof createLocalVenue = deps.createVenue
-        ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options));
+        ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 
       // BP-22: a pending cancellation is finalized by re-running `cancel`, never by `resume` —
       // an interrupted cancel left the run mid-drain, and `cancel` is the only operation that

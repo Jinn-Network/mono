@@ -60,6 +60,66 @@ describe("InspectSelectionManifestSchema", () => {
     }).success).toBe(false);
   });
 
+  test("pins one exact sample separately from maxSamples concurrency", () => {
+    expect(InspectSelectionManifestSchema.parse({
+      ...manifest,
+      task: {
+        ...manifest.task,
+        dataset: {
+          ...manifest.task.dataset,
+          selectedSampleId: "Mercury_417466",
+          orderedSampleSha256: "1".repeat(64),
+        },
+      },
+      runOptions: { sampleId: "Mercury_417466", maxSamples: 1 },
+    }).runOptions).toEqual({ sampleId: "Mercury_417466", maxSamples: 1 });
+  });
+
+  test("pins the complete OCI worker and isolation identity", () => {
+    const result = InspectSelectionManifestSchema.safeParse({
+      ...manifest,
+      runtime: {
+        ...manifest.runtime,
+        pythonVersion: "3.11.9",
+        execution: {
+          kind: "oci",
+          imageDigest: `sha256:${"2".repeat(64)}`,
+          platform: "linux/amd64",
+          inspectEvalsVersion: "0.16.0",
+          openaiSdkVersion: "2.53.0",
+          workerSourceSha256: manifest.runtime.workerSha256,
+          runtimeHostSourceSha256: "6".repeat(64),
+          dockerExecutableSha256: "5".repeat(64),
+          dockerEngineVersion: "28.5.1",
+          dockerApiVersion: "1.51",
+          datasetCacheSha256: "3".repeat(64),
+          isolation: {
+            readOnlyRoot: true,
+            network: "none",
+            capabilities: [],
+            noNewPrivileges: true,
+            cpuCount: 1,
+            memoryBytes: 1_073_741_824,
+            pidsLimit: 64,
+            scratchBytes: 536_870_912,
+            user: "501:20",
+            mounts: ["project:ro", "dataset-cache:ro", "attempt-input:ro", "attempt-output:rw"],
+          },
+        },
+      },
+      task: {
+        ...manifest.task,
+        dataset: {
+          ...manifest.task.dataset,
+          selectedSampleId: "Mercury_417466",
+          orderedSampleSha256: "4".repeat(64),
+        },
+      },
+      runOptions: { sampleId: "Mercury_417466", maxSamples: 1 },
+    });
+    expect(result.success).toBe(true);
+  });
+
   test("secret-like configuration is refused before sealing", () => {
     expect(() => assertNoSecretLikeConfiguration({ modelArgs: { api_key: "never-seal-me" } }))
       .toThrow(/credential-bearing/u);

@@ -281,8 +281,8 @@ function inspectProvisionerContract(
         throw new Error("Inspect Task selection digest does not match the venue's sealed manifest");
       }
       const workerInput = {
-        projectDir: options.host.projectDir,
-        outputDir: paths.out,
+        projectDir: options.host.kind === "oci" ? "/jinn/project" : options.host.projectDir,
+        outputDir: options.host.kind === "oci" ? "/jinn/output" : paths.out,
         manifest: options.manifest,
         arm,
         selectionManifestSha256: options.selectionManifestSha256,
