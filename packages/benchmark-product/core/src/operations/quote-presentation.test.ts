@@ -299,6 +299,47 @@ describe("runQuote — presentation.coverage (spec §4.6)", () => {
     expect(outcome.result.presentation.coverage.refusals).toEqual([]);
     expect(outcome.result.quote.ok).toBe(true);
   });
+
+  test("a repository-work arm on the real venue produces no coverage refusal, and an unknown harness still does", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    const draftResult = createDraft(contextFor(clock), { draftId: "draft-rw", name: "Repository Work" });
+    expect(draftResult.ok).toBe(true);
+    await sampleInit(contextFor(clock), { draftId: "draft-rw" });
+    // isolationPolicy is deliberately NOT pinned here: `compileDraft` always injects it into
+    // `policy.submissionBaseline` (`../run/compile.ts`, `VENUE_ISOLATION_POLICY`), and the
+    // platform's RunRecord schema refuses any arm whose pinning duplicates a submissionBaseline
+    // key regardless of value (§7.79) -- the same reason `setUpTwoArmDraft` above pins only
+    // `harness`. The baseline already supplies isolationPolicy to the coverage/quote walk via
+    // `mergeArmRequirements`.
+    armAdd(contextFor(clock), {
+      draftId: "draft-rw",
+      armId: "repository-work",
+      pinning: { harness: { id: "sample-repository-work", version: "0.1.0" } },
+    });
+    armAdd(contextFor(clock), {
+      draftId: "draft-rw",
+      armId: "unknown-harness",
+      pinning: { harness: { id: "not-a-launcher", version: "0.1.0" } },
+    });
+
+    // The REAL venue, not the stub: the point is that registering a launcher widens the
+    // inventory both the product-side coverage walk and the platform-side quote walk read.
+    const outcome = await runQuote(contextFor(clock), { draftId: "draft-rw" });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+
+    const { presentation, quote } = outcome.result;
+    const refusedArms = presentation.coverage.refusals.map((refusal) => refusal.armId);
+    expect(refusedArms).not.toContain("repository-work");
+    expect(refusedArms).toContain("unknown-harness");
+
+    // The cross-check the program requires stay in sync: every product-side refusal has a
+    // matching platform-side quote error naming the same arm.
+    for (const refusal of presentation.coverage.refusals) {
+      expect(quote.errors.some((error) => error.detail?.includes(refusal.armId))).toBe(true);
+    }
+  });
 });
 
 describe("runQuote — presentation.hardCap (spec §4.6)", () => {
