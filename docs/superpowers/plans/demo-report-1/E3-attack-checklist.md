@@ -1,11 +1,11 @@
 # E3 — Red-Team Attack Checklist (pre-lock)
 
-**Version:** 0.1 (weapons prepared; no verdicts issued)
-**Date:** 2026-08-11
+**Version:** 0.2 (weapons prepared; operator-ratified mitigations folded in; no verdicts issued)
+**Date:** 2026-08-12
 **Author:** E3 method-stream agent
 **Program:** `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` (Stage 2, packet E3)
 **Object under attack:** `docs/superpowers/plans/demo-report-1/E1-comparison-frame.md` v0.2
-**Status:** All items `open`. This document is the attack surface enumeration and the executable check for each attack. It does not yet pass or fail the method.
+**Status:** All items `open`. This document is the attack surface enumeration and the executable check for each attack. It does not yet pass or fail the method. Eleven items carry an operator-ratified mitigation, which changes what the check tests but does not close the item — a ratified plan is not a verified one.
 
 ---
 
@@ -21,7 +21,9 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 `noted` is not a disposition. An item that is merely acknowledged is still `open`.
 
-**Lock gate.** No item may be `open` at lock. This is the program's verification gate 3 ("E3 red-team register closed"). The closed register ships in the report bundle, so the dispositions are public.
+**One interim status.** `open — mitigation ratified, verification pending` marks an item where the operator has ratified a design decision that answers the attack, but the check has not yet been run against the built system. It is a form of `open`, not a disposition: a ratified mitigation is a plan, and a plan that is never verified is exactly the failure mode this register exists to prevent. These items still block lock.
+
+**Lock gate.** No item may be `open` at lock, in either form. This is the program's verification gate 3 ("E3 red-team register closed"). The closed register ships in the report bundle, so the dispositions are public.
 
 **Severity markers.** Most items are ordinary. Three markers exist:
 
@@ -48,8 +50,9 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Attack:** the report presents a per-task contamination filter that does not exist. `importSweBench` stamps **one** `provenanceTimestamp` onto every task in the slate (`packages/benchmarking/interop/src/import/swebench.ts:120-121`, default `"2026-07-29T00:00:00Z"`), and `SweRebenchRow` (`packages/task-execution/profiles/src/documents/swe-rebench.ts:13-24`) carries **no** `created_at` field at all. `filterByCutoff` therefore compares every task against the same caller-supplied instant: the filter is all-or-nothing for the whole slate, and its value is chosen by the run owner. On a self-run venue this is a contamination-claim forgery surface, not merely a coarse filter.
 - **Check:** (1) `node -e` over the sealed Task bytes for the slate: extract `payload.provenance.timestamp` for every task and assert the number of distinct values. (2) Inspect whether the demo's import path supplies per-row dates or the default. (3) If `clean-subset@1` appears anywhere in the report's method chain, trace the timestamp each task contributes.
 - **Pass:** either (a) the importer is extended pre-lock so each task carries its own upstream `created_at`, and distinct-timestamp count > 1 with each value matching the upstream row; or (b) `clean-subset@1` is **not used**, and the report states plainly that the slate's provenance timestamps are a single slate-level attestation set by the run owner, with the value and its justification published.
+- **Ratified mitigation:** the P0-interop packet threads the real per-task `created_at` through the importer — branch (a). The declared fallback, if threading proves infeasible, is branch (b): drop `clean-subset@1` and publish the slate-level attestation, with that choice and its reason recorded in the P0-interop PR rather than settled silently.
 - **Stage:** pre-lock
-- **Status:** open · **Origin:** novel
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
 ### A3 — Dataset license grants no affirmative right to publish per-task results
 - **Attack:** the report publishes per-task outcomes for a CC-BY-4.0 dataset whose terms grant no affirmative permission for that specific use, on rows whose upstream repository licenses are unresolved.
@@ -115,15 +118,17 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Attack:** arm B's `AGENTS.md` goes at repository root; arm A's skill goes in a skills directory. Both are extra files in or near the graded tree, at different paths, written by `materializeAt` at mode `0o400` (`packages/task-execution/backend-local/workspace/src/materialize.ts:39`). Three distinct failure modes: (i) if the grader extracts the candidate patch with `git add -A`/`git diff HEAD`, an untracked root-level `AGENTS.md` enters arm B's patch and not arm A's; (ii) a read-only file inside the tree can break `git clean`, `git checkout`, or a container step running as a different UID; (iii) `materializeLoadout` writes at `join(inputDir, pin.name)` — if the repository is checked out into a subdirectory of the work dir, arm B's `AGENTS.md` is **not** at repository root and may never be loaded at all, silently nulling arm B.
 - **Check:** (1) on a preview cell in each arm, diff the extracted candidate patch against a control run with no loadout; assert byte-identical. (2) Print the absolute materialized path and the absolute repository root; assert the parent-directory relationship the agent's loader actually requires. (3) Run one cell per arm with the container's non-root user configuration the official run will use and assert the file is readable.
 - **Pass:** patches byte-identical to the no-loadout control in both arms; `AGENTS.md` provably at the repository root the agent loads from; no permission or cleanup failure in either arm.
+- **Ratified mitigation:** the byte-identity condition is now a **P2 acceptance criterion** — the harvested patch must be byte-identical to the no-loadout control in both arms — so the engineering packet cannot land without it. That moves the check from a red-team inspection to a gate on the arm-wiring work itself; E3 still verifies it independently against the built system rather than accepting P2's own green as the answer.
 - **Stage:** pre-lock
-- **Status:** open · **Origin:** novel
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
 ### B5 — Arm C's "empty loadout" is a file, not nothing `blocker-candidate`
 - **Attack:** E1 §2.4 pins arm C as a digest over a zero-byte file so all three arms reach `match` on the loadout axis. But `materializeLoadout` writes a file at `pin.name`. So arm C is not "no instruction file" — it is "an empty file named *something*". If that name is `SKILL.md`, arm C ships a malformed skill (no frontmatter, no description) whose loader behavior is undefined; if it is `AGENTS.md`, arm C ships an empty always-on context file. Either way the baseline is not the baseline the report describes, and the pursuit of `unverifiableAxisCounts.loadout = 0` has bought a cosmetic disclosure number at the cost of the control arm's meaning.
 - **Check:** determine the exact `pin.name` arm C materializes and inspect the agent's startup behavior with that file present: does the loader warn, error, or index a nameless skill? Compare against a genuinely unpinned control on the preview slate — same tasks, no file — and test whether arm-C outcomes differ.
 - **Pass:** either arm C's materialized artifact is demonstrably behaviorally identical to no file at all (preview evidence, not argument), or arm C runs unpinned and the report publishes `unverifiableAxisCounts.loadout = 1` with the reason. A cosmetically stronger disclosure number that misdescribes the control arm fails.
+- **Ratified mitigation:** the arm-C baseline is an **empirical pre-lock decision, not a design preference** — E2's preview evidence chooses between the two branches. If the preview shows behavioral identity between the materialized empty file and no file at all, arm C keeps the pin; if it does not, arm C runs unpinned and the disclosed `unverifiableAxisCounts.loadout` count carries the reason. The pass criterion is therefore the preview evidence standard: a stated sample size and outcome comparison sufficient to distinguish the two, declared before the previews run. Neither branch may be selected by argument.
 - **Stage:** pre-lock
-- **Status:** open · **Origin:** novel
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
 ### B6 — The launcher wrapper changes more than one thing
 - **Attack:** E1 §2.4 has arm B's launcher drop `--plugin-dir`. That flag does not only remove one skill — it can disable a whole discovery path, so arm A may carry other skills, plugins, or defaults that arm B lacks. The measured delta then includes "plugins on vs plugins off."
@@ -198,17 +203,19 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### D1 — Per-instance grader images are built by the venue operator
 - **Attack:** the venue operator both runs the arms and controls the grading environment. Nobody audits the bake. A grader image can differ from the upstream reference in ways that change which patches pass.
-- **Check:** for every image used, record who built it, from what Dockerfile or upstream reference, and when. Prefer upstream-published images unmodified. Where the venue bakes, publish the build recipe and the resulting digest.
-- **Pass:** image provenance published per task; any venue-baked image accompanied by its build inputs; the report states plainly that grading environments were produced by the run owner where that is true (§7.1 self-run posture extended to the grader).
-- **Stage:** pre-lock
-- **Status:** open · **Origin:** novel
+- **Check:** for every image used, record who built it, from what Dockerfile or upstream reference, and when. Prefer upstream-published images unmodified. Where the venue bakes, publish the build recipe and the resulting digest. **Additionally, per the ratified ruling:** assert the locked method document contains the frozen grader program's digest, and assert every official verdict carries that same digest value — a single distinct grader digest across all judged cells, equal to the one published at lock.
+- **Pass:** image provenance published per task; any venue-baked image accompanied by its build inputs; the grader digest present in the locked method document and identical on every official verdict; the report states plainly that grading environments were produced by the run owner where that is true (§7.1 self-run posture extended to the grader).
+- **Ratified mitigation:** C2's ruling freezes the grader program itself and publishes its digest **at lock, in the method document**. That converts "trust the venue's bake" into a pre-committed value a reader can compare against every verdict — the grader can no longer be changed mid-run or after results are seen without the digest mismatch being visible in the published records.
+- **Stage:** pre-lock, then post-run `standing-guard`
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
 ### D2 — Image descriptors need not carry a digest `blocker-candidate`
 - **Attack:** the grader image is a `ResourceDescriptorLike`, and the schema requires only *one* of `uri`/`digest`/`content` (`packages/task-execution/profiles/src/resource-descriptor.ts:48-50`). A uri-only, tag-addressed image is mutable: the same sealed Task can grade differently next week, and two cells in the same run can pull different bytes.
-- **Check:** for every task in the locked slate, assert `familyBlock.image.digest.sha256` is present in the sealed EvaluationSpec, and assert the container runtime is invoked with the `image@sha256:` form. Re-pull one image after the run and confirm the digest is unchanged.
-- **Pass:** 100% of slate tasks carry an image digest; runtime invocation is digest-addressed; post-run re-pull matches.
+- **Check:** for every task in the locked slate, assert `familyBlock.image.digest.sha256` is present in the sealed EvaluationSpec, and assert the container runtime is invoked with the `image@sha256:` form **and with `--pull never`**. Confirm the `--pull never` flag reaches the actual docker invocation, not just the config — a missing flag degrades silently to a registry pull. Re-pull one image after the run and confirm the digest is unchanged.
+- **Pass:** 100% of slate tasks carry an image digest; runtime invocation is digest-addressed and carries `--pull never`; images pre-staged locally so the run cannot reach a registry mid-flight; post-run re-pull matches.
+- **Ratified mitigation:** C2's ruling — task images are digest-pinned **and** run with `--pull never`. The digest pin makes the bytes nameable; `--pull never` makes a registry substitution mid-run impossible rather than merely detectable, and turns a missing image into a loud failure instead of a silent fetch of whatever the tag points at today.
 - **Stage:** pre-lock `standing-guard`
-- **Status:** open · **Origin:** novel
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
 ### D3 — Fail-to-pass / pass-to-pass transitions are inherited, not verified
 - **Attack:** the verdict rests on `transitions.failToPass` and `passToPass` from the upstream row. If a listed test is flaky, already passing at base commit, or absent, the grader's `passed` bit is not measuring what the report says.
@@ -242,12 +249,13 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ## Surface E — Denominator games and attrition
 
-### E1 — Asymmetric infra retries between arms
-- **Attack:** one arm got more attempts. Retries are not visible in a pass rate.
-- **Check:** log retry count per cell with its trigger; publish totals per arm; assert the retry policy text was frozen pre-lock and applied identically.
-- **Pass:** per-arm retry counts published; policy identical and pre-declared; a material asymmetry disclosed and discussed rather than netted out.
+### E1 — Asymmetric infra retries and timeouts between arms
+- **Attack:** one arm got more attempts, or one arm hit the wall clock more often. Neither is visible in a pass rate. Timeouts are the sharper version: if a timeout is silently retried, the slower arm gets extra attempts; if it is silently dropped, the slower arm gets a smaller denominator. Either way the arm that the mechanism makes slower is scored on different terms.
+- **Check:** log retry count per cell with its trigger, and timeout count per cell, separately. Publish both totals per arm. Assert the retry policy text and the timeout scoring rule were frozen pre-lock and applied identically. Assert no timed-out cell was retried or excluded.
+- **Pass:** per-arm retry counts **and** per-arm timeout counts both published as disclosures; policies identical and pre-declared; a material asymmetry in either disclosed and discussed rather than netted out.
+- **Ratified mitigation:** **timeout = FAIL, declared pre-lock.** A timed-out cell scores as a failure; it is not retried and not excluded. This removes the discretion that made the timeout path a denominator game, and makes the slower arm's slowness show up in the result rather than in the accounting. Per-arm timeout counts join per-arm retry counts as required published disclosures, so a reader can see how much of any effect is timeout-driven.
 - **Stage:** pre-lock (policy), post-run (counts)
-- **Status:** open · **Origin:** seeded
+- **Status:** open — mitigation ratified, verification pending · **Origin:** seeded
 
 ### E2 — Selective attrition via the both-arms-judged rule
 - **Attack:** a paired analysis needs both arms judged for a task to contribute. If a task drops out because *one* arm failed to produce a judged cell, and dropout is correlated with difficulty, the surviving pairs are a biased subsample — and the bias runs against whichever arm fails more often. The pairing rule that makes the statistics clean is the same rule that creates the selection.
@@ -350,7 +358,8 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Check:** after the interop fix, assert over the sealed slate that `clusterCount < taskCount` and that cluster membership matches repository identity. The e2e gate carries the standing regression guard `draws === resamples × clusterCount` — `clusteredPairedRateDiffBca` increments `draws` once per cluster draw per replicate (`stats/noninferiority.ts:174-181`), so the identity is exact and a silent regression to singletons breaks it.
 - **Pass:** clusterCount equals the distinct-repository count on the locked slate; the e2e assertion is present and green; the cluster manifest (keys and members) appears in the report's method disclosures.
 - **Stage:** pre-lock `standing-guard`
-- **Status:** open (fix in flight, interop packet) · **Origin:** seeded
+- **Ratified mitigation:** the clustering-key fix lands in the interop packet pre-lock, and the `draws === resamples × clusterCount` assertion becomes a standing e2e guard so a regression to singleton clusters cannot pass CI silently.
+- **Status:** open — mitigation ratified, verification pending · **Origin:** seeded
 
 ### H2 — Design effect and paired ICC assumed rather than measured
 - **Attack:** the cluster-weighted multiplier Σm²/Σm ≈ 2.08 on the naive standard error at measured concentration is a *marginal* design effect. The paired delta likely has a much smaller ICC because repository difficulty cancels in the difference. Assuming either direction is a choice that moves the interval.
@@ -361,10 +370,11 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### H3 — The bootstrap seed is an unregistered researcher degree of freedom `hard-pre-lock`
 - **Attack:** `seed` is an ordinary method parameter, an integer in `[1, 4294967295]` (`packages/benchmarking/aggregate/src/registry.ts:234`), and the report author chooses it. Nothing stops trying seeds until the interval excludes zero. With 10,000 resamples the seed-to-seed wobble is small but not zero, and near a boundary it decides the verdict. A hostile reader will ask how the seed was chosen and there is currently no answer.
-- **Check:** derive the seed deterministically from a value fixed before any result is visible — the sealed Run record digest is the natural choice — by a committed, published function. Then demonstrate stability: recompute the primary interval across at least 20 seeds and publish the min/max endpoints and the resulting verdict for each.
-- **Pass:** seed derivation committed pre-lock and published; the seed-sensitivity table published; the verdict is invariant across all tested seeds, or the instability is the headline finding rather than a footnote.
-- **Stage:** pre-lock
-- **Status:** open · **Origin:** novel
+- **Check:** assert the seed is bound in the locked method document before any official cell executes, and assert the seed sealed in the Run record equals the pre-registered value exactly. Then demonstrate stability: recompute the primary interval across at least 20 seeds and publish the min/max endpoints and the resulting verdict for each.
+- **Pass:** the pre-registered seed and the sealed Run seed are equal, both published; the seed-sensitivity table published; the verdict is invariant across all tested seeds, or the instability is the headline finding rather than a footnote.
+- **Ratified mitigation:** the seed is **bound pre-lock in the method document**. It is no longer a report-time choice, so "which seed did you use" has a pre-committed answer a reader can check against the sealed Run record. The equality check is the whole mitigation: a seed published at lock that does not match the seed the run actually used is the same defect wearing a disclosure.
+- **Stage:** pre-lock, then post-run
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
 ### H4 — Two-sided interval built from two one-sided calls
 - **Attack:** `clusteredPairedRateDiffBca` returns a `lowerBound` only. A two-sided interval assembled by calling it at α and at 1−α is a legitimate BCa construction, but three details make it auditable rather than obvious: both endpoints use `Math.floor(adjustedQuantile * resamples)` (`stats/noninferiority.ts:198`), so the upper endpoint is taken from the floor-indexed order statistic where convention takes the ceiling — the two endpoints are not constructed symmetrically; both calls must use the same seed and the same resample set or the endpoints come from different bootstrap distributions; and the returned field is named `lowerBound` in both calls, so a mislabeled endpoint is an easy and invisible bug.
@@ -468,6 +478,14 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Stage:** post-run `standing-guard`
 - **Status:** open · **Origin:** novel
 
+### I6 — Public pre-registration silently skipped or post-dated
+- **Attack:** E4's public pre-registration is the strongest thing this program has against I3's local-clock weakness, and it is also the easiest step to quietly drop when the schedule tightens. Two failure shapes: it never happens and the report still describes itself as pre-registered; or it happens *after* cells have run and is presented as if it preceded them. On a self-run venue the run owner controls both timestamps, so "we pre-registered" is unfalsifiable without an external witness.
+- **Check:** assert the public pre-registration's publication timestamp — on a surface whose timestamp the run owner does not control — precedes the first official cell's dispatch timestamp. Compare the published Run record digest against the sealed Run record byte-for-byte: the pre-registration must commit to the same record the run executed, not a summary of it.
+- **Pass:** external publication timestamp strictly precedes first-cell dispatch; published digest equals the sealed Run digest; both timestamps and the digest printed in the report. If the operator declines E4, the report drops every "pre-registered" claim and states that ordering rests on local append order alone (I3's second branch).
+- **Ratified mitigation:** E4 public pre-registration is **committed, conditional on the e2e gate being green**. The conditionality is the honest part — the program will not publicly commit to a run it cannot yet execute — but it also means the trigger must be checked rather than assumed, and the fallback wording must exist before it is needed.
+- **Stage:** pre-lock, then post-run
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
+
 ---
 
 ## Surface J — Publication-surface honesty
@@ -521,6 +539,20 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Stage:** post-run
 - **Status:** open · **Origin:** novel
 
+### J8 — Third-party recomputability is claimed but never exercised
+- **Attack:** the report says a reader can verify the numbers independently, and nobody has ever tried. The failure modes are mundane and fatal: the verifier is not actually published, the bundle omits an input the recompute needs, the method package is unreleased or version-drifted, a fixture is referenced but not shipped, or the recompute needs a credential only the run owner has. "Verifiable in principle" published as "verifiable" is the same overclaim §8.1 forbids everywhere else, and it is the one a hostile reader will test first because it is the cheapest to test.
+- **Check:** a clean-environment rehearsal, performed by someone who did not build the run. Fetch only the published artifacts, install only published package versions, run the published verifier, and recompute every number the report states. Compare byte-for-byte against the published report values. Record anything the recompute needed that was not in the published bundle.
+- **Pass:** clean-environment recompute reproduces every published number byte-for-byte, from published artifacts alone, with no private input and no credential. Any gap is closed before publication or the recomputability claim is removed from the report — not softened, removed.
+- **Stage:** post-run
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
+
+### J9 — No conflict-of-interest statement
+- **Attack:** the report is produced by a party that built the venue, wrote the estimator, chose the slate, selected the content artifact, ran both arms, graded the results, and stands to benefit from the benchmark product gaining credibility. Each of those facts is disclosed somewhere in the bundle; none of them is collected in one place where a reader meets them before the numbers. A reviewer who assembles that list themselves will present it as something we concealed, and the diffuse disclosure will not read as a defense.
+- **Check:** the limitations section contains an explicit conflict-of-interest statement naming, at minimum: the venue is self-run by the report's author; the estimator was built by the same program that publishes the result (H11); the grading environment was produced by the run owner (D1); and the report's purpose includes demonstrating the product it runs on. Confirm it appears in the report and in any derived asset long enough to carry it.
+- **Pass:** the statement is present, in one place, stated plainly rather than distributed across footnotes, and positioned so a reader encounters it with the result rather than after it.
+- **Stage:** post-run
+- **Status:** open — mitigation ratified, verification pending · **Origin:** novel
+
 ---
 
 ## Surface K — Process integrity of the red team itself
@@ -560,13 +592,31 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 | F — Stopping rules, exclusions, Goodharting | 5 | 1 | 4 |
 | G — Prompt injection and task content | 3 | 1 | 2 |
 | H — Statistics | 12 | 5 | 7 |
-| I — Venue self-trust and integrity tiers | 5 | 2 | 3 |
-| J — Publication-surface honesty | 7 | 4 | 3 |
+| I — Venue self-trust and integrity tiers | 6 | 2 | 4 |
+| J — Publication-surface honesty | 9 | 4 | 5 |
 | K — Red-team process integrity | 3 | 0 | 3 |
-| **Total** | **67** | **21** | **46** |
+| **Total** | **70** | **21** | **49** |
 
-**Markers:** 5 `blocker-candidate` (A2, B3, B4, B5, D2) — each one, if it fails, confounds the primary contrast itself and cannot be discharged by a limitation line. 2 `hard-pre-lock` (H3, J4). 6 `standing-guard` (B2, C3, C5, D2, H1, I5) — checks that become permanent automated assertions rather than one-time inspections.
+**Markers:** 5 `blocker-candidate` (A2, B3, B4, B5, D2) — each one, if it fails, confounds the primary contrast itself and cannot be discharged by a limitation line. 2 `hard-pre-lock` (H3, J4). 7 `standing-guard` (B2, C3, C5, D1, D2, H1, I5) — checks that become permanent automated assertions rather than one-time inspections.
 
-**By stage:** design 5, pre-lock 40, post-run 22 (several items are checked at two stages and are counted at the earlier one).
+**By stage:** design 5, pre-lock 41, post-run 24 (several items are checked at two stages and are counted at the earlier one).
 
-**Status:** 67 open, 0 closed. This is the pre-attack state.
+**Status:** 70 open, 0 closed — 59 plain `open`, 11 `open — mitigation ratified, verification pending`. This is still the pre-attack state; no check in this file has been executed.
+
+**Ratified mitigations folded in (v0.2), by the item they answer:**
+
+| Item | Ratified decision |
+|---|---|
+| A2 | P0-interop threads real per-task `created_at`; declared fallback is dropping `clean-subset@1` for a slate-level attestation, recorded in that PR |
+| B4 | Byte-identity of the harvested patch against a no-loadout control becomes a P2 acceptance criterion |
+| B5 | Arm-C baseline decided empirically from E2 preview evidence, not by design preference |
+| D1 | Grader program frozen; its digest published at lock in the method document and asserted equal on every official verdict |
+| D2 | Task images digest-pinned and run with `--pull never` |
+| E1 | Timeout = FAIL declared pre-lock; per-arm timeout counts join per-arm retry counts as published disclosures |
+| H1 | Clustering-key fix lands pre-lock; `draws === resamples × clusterCount` becomes a standing e2e guard |
+| H3 | Bootstrap seed bound pre-lock in the method document; sealed Run seed must equal it |
+| I6 | E4 public pre-registration committed, conditional on the e2e gate |
+| J8 | Clean-environment third-party recompute from published artifacts alone |
+| J9 | Conflict-of-interest statement required in the limitations |
+
+None of these closes an item. Each one changes what the pre-lock check tests, and every one of them still has to pass.
