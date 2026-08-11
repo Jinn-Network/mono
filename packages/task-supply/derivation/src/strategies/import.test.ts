@@ -50,6 +50,7 @@ describe("import strategy (design §7.2, v1's only member)", () => {
     expect(candidate!.statement).toBe("  leading and trailing  \n\n");
     expect(candidate!.provenance).toEqual({
       kind: "mined",
+      timestamp: row.created_at,
       upstream: {
         dataset: "nebius/SWE-rebench",
         revision: "refs/convert/parquet-2026-05-01",
@@ -115,6 +116,22 @@ describe("import strategy (design §7.2, v1's only member)", () => {
       "acme__widget-f:gold-missing",
       "acme__widget-g:no-fail-to-pass",
       "acme__widget-h:test-material-missing",
+    ]);
+  });
+
+  it("requires an honest immutable upstream timestamp and never substitutes host time", async () => {
+    const skipped: string[] = [];
+    const rows = [
+      buildFixtureRow({ instance_id: "acme__widget-time-missing", created_at: "" }),
+      buildFixtureRow({ instance_id: "acme__widget-time-invalid", created_at: "2026-02-30T00:00:00Z" }),
+      buildFixtureRow({ instance_id: "acme__widget-time-valid", created_at: "2024-02-29T12:30:00.123Z" }),
+    ];
+    const kept = await collect(inputs(rows), skipped);
+    expect(kept.map((candidate) => candidate.provenance.timestamp))
+      .toEqual(["2024-02-29T12:30:00.123Z"]);
+    expect(skipped).toEqual([
+      "acme__widget-time-missing:invalid-provenance-timestamp",
+      "acme__widget-time-invalid:invalid-provenance-timestamp",
     ]);
   });
 

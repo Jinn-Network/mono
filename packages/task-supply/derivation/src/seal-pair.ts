@@ -141,6 +141,7 @@ export function buildSealedTask(
       provenance: {
         kind: candidate.provenance.kind,
         sourceCommitment: computeSourceCommitment(candidate.provenance.upstream, candidate.statement),
+        timestamp: candidate.provenance.timestamp,
       },
       rights: { sourceLicense: candidate.rights.sourceLicense },
     },

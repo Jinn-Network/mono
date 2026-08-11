@@ -329,9 +329,10 @@ export async function admitCandidate(request: AdmissionRequest): Promise<Admissi
   const payload = classifyPayload(entries, String(loadout["kind"] ?? ""));
   const approved = new Set(request.consent?.approvedPayloadClasses ?? []);
   const unapproved = payload.hostile.filter((entry) => !approved.has(entry));
-  if (crossOperator && unapproved.length > 0) {
+  if ((crossOperator || request.consent?.requireExecutableChangeConsent === true)
+    && unapproved.length > 0) {
     return reject("payload-consent",
-      "a cross-operator candidate carries payload classes the owner has not approved", [
+      "the candidate carries executable payload classes the owner has not approved", [
         issue("payload-consent-required", "policy.loadout",
           `admitting this candidate runs its payload with the owner's privileges (§7.4); `
           + `unapproved class(es) ${unapproved.join(", ")} at ${payload.hostilePaths.join(", ")}`),
@@ -339,10 +340,12 @@ export async function admitCandidate(request: AdmissionRequest): Promise<Admissi
   }
   report.pass("payload-consent", crossOperator
     ? `cross-operator candidate; highest class ${payload.highest} is approved`
-    : `same-operator candidate; highest class ${payload.highest}`
-      + (payload.hostile.length > 0
-        ? " runs with the owner's privileges (§7.4 — isolation is vacuous)"
-        : ""));
+    : request.consent?.requireExecutableChangeConsent === true
+      ? `live local candidate; executable classes through ${payload.highest} are explicitly approved`
+      : `same-operator candidate; highest class ${payload.highest}`
+        + (payload.hostile.length > 0
+          ? " runs with the owner's privileges (§7.4 — isolation is vacuous)"
+          : ""));
 
   // --- 10. the optional smoke canary (§7.3) -----------------------------------------------------
   if (request.smokeCanary === undefined) {

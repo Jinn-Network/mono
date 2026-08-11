@@ -28,6 +28,8 @@ export interface CandidateTestMaterial {
 export interface CandidateProvenance {
   readonly kind: ProvenanceKind;
   readonly upstream: UpstreamIdentity;
+  /** Immutable time carried by the upstream row; never the derivation host's wall clock. */
+  readonly timestamp: string;
 }
 
 /**
@@ -100,4 +102,29 @@ export function assertCandidate(candidate: Candidate): void {
     );
   }
   if (encoder.encode(candidate.statement).byteLength === 0) fail("statement must encode to bytes.");
+  if (!isUpstreamRfc3339(candidate.provenance.timestamp)) {
+    fail("provenance.timestamp must be a calendar-valid RFC 3339 UTC timestamp from upstream.");
+  }
+}
+
+const UPSTREAM_RFC3339 =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/u;
+
+/** The upstream import accepts the UTC subset of RFC 3339 and validates calendar fields itself. */
+export function isUpstreamRfc3339(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = UPSTREAM_RFC3339.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (year < 1 || month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) {
+    return false;
+  }
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = month === 2 ? (leap ? 29 : 28) : [4, 6, 9, 11].includes(month) ? 30 : 31;
+  return day >= 1 && day <= days;
 }

@@ -802,6 +802,11 @@
       {
         "from": "@jinn-network/policy-optimization",
         "kind": "runtime",
+        "to": "@jinn-network/attestation-issuer"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
         "to": "@jinn-network/benchmarking-aggregate"
       },
       {
@@ -822,6 +827,11 @@
       {
         "from": "@jinn-network/policy-optimization",
         "kind": "runtime",
+        "to": "@jinn-network/evidence-protocol"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
         "to": "@jinn-network/policy-identity"
       },
       {
@@ -833,6 +843,51 @@
         "from": "@jinn-network/policy-optimization",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-backend"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-backend-local"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluation-harness"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluator-adapters"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-launchers"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-supervisor"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-workspace"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
       },
       {
         "from": "@jinn-network/policy-outcomes",
@@ -1676,13 +1731,13 @@
       "authorityDocuments": 28,
       "boundaryPolicies": 23,
       "catalogManifests": 84,
-      "catalogPublicSurfaces": 1249,
+      "catalogPublicSurfaces": 1252,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2954,
-      "generatedOutputSources": 1305,
+      "discoveredFirstPartySurfaces": 2957,
+      "generatedOutputSources": 1308,
       "generatorSources": 613,
       "marketplaceControl": 2,
       "requiredGates": 22,
@@ -21196,6 +21251,42 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-conformance.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-method-spec.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmarking/testing/fixtures/methods/subject-isolation.json"
       },
       {
@@ -40076,7 +40167,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4"
       },
       {
         "categories": [
@@ -40088,7 +40179,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/entry.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/entry.json"
       },
       {
         "categories": [
@@ -40100,7 +40191,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/evaluation-spec.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/evaluation-spec.sealed.json"
       },
       {
         "categories": [
@@ -40112,7 +40203,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/task.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/task.sealed.json"
       },
       {
         "categories": [
@@ -40124,7 +40215,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2"
       },
       {
         "categories": [
@@ -40136,7 +40227,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/entry.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/entry.json"
       },
       {
         "categories": [
@@ -40148,7 +40239,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/evaluation-spec.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/evaluation-spec.sealed.json"
       },
       {
         "categories": [
@@ -40160,7 +40251,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/task.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/task.sealed.json"
       },
       {
         "categories": [
@@ -44062,13 +44153,24 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/attestation-issuer",
           "@jinn-network/benchmarking-aggregate",
           "@jinn-network/benchmarking-local",
           "@jinn-network/benchmarking-records",
           "@jinn-network/benchmarking-run",
+          "@jinn-network/evidence-protocol",
           "@jinn-network/policy-identity",
           "@jinn-network/policy-outcomes",
           "@jinn-network/task-execution-backend",
+          "@jinn-network/task-execution-backend-local",
+          "@jinn-network/task-execution-evaluation-harness",
+          "@jinn-network/task-execution-evaluator-adapters",
+          "@jinn-network/task-execution-launchers",
+          "@jinn-network/task-execution-profiles",
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/task-execution-supervisor",
+          "@jinn-network/task-execution-workspace",
+          "@jinn-network/trust-core",
           "zod"
         ]
       },
@@ -45919,6 +46021,33 @@
         "packedTargets": [],
         "path": "packages/benchmarking/testing/fixtures/methods/pass-at-k.json",
         "relativeSource": "fixtures/methods/pass-at-k.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-conformance.json",
+        "relativeSource": "fixtures/methods/provenance-cluster-sign-conformance.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-method-spec.json",
+        "relativeSource": "fixtures/methods/provenance-cluster-sign-method-spec.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign.json",
+        "relativeSource": "fixtures/methods/provenance-cluster-sign.json"
       },
       {
         "claim": null,
@@ -52626,8 +52755,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/entry.json",
-        "relativeSource": "fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/entry.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/entry.json",
+        "relativeSource": "fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/entry.json"
       },
       {
         "claim": null,
@@ -52635,8 +52764,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/evaluation-spec.sealed.json",
-        "relativeSource": "fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/evaluation-spec.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/evaluation-spec.sealed.json",
+        "relativeSource": "fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/evaluation-spec.sealed.json"
       },
       {
         "claim": null,
@@ -52644,8 +52773,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/task.sealed.json",
-        "relativeSource": "fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/task.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/task.sealed.json",
+        "relativeSource": "fixtures/golden/entries/09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4/task.sealed.json"
       },
       {
         "claim": null,
@@ -52653,8 +52782,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/entry.json",
-        "relativeSource": "fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/entry.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/entry.json",
+        "relativeSource": "fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/entry.json"
       },
       {
         "claim": null,
@@ -52662,8 +52791,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/evaluation-spec.sealed.json",
-        "relativeSource": "fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/evaluation-spec.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/evaluation-spec.sealed.json",
+        "relativeSource": "fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/evaluation-spec.sealed.json"
       },
       {
         "claim": null,
@@ -52671,8 +52800,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/task.sealed.json",
-        "relativeSource": "fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/task.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/task.sealed.json",
+        "relativeSource": "fixtures/golden/entries/e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2/task.sealed.json"
       },
       {
         "claim": null,

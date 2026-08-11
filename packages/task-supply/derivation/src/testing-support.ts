@@ -93,6 +93,7 @@ export function buildFixtureCandidate(overrides: Partial<Candidate> = {}): Candi
     goldPatch: GOLD_BYTES,
     provenance: {
       kind: "mined",
+      timestamp: "2026-05-01T00:00:00Z",
       upstream: {
         dataset: "nebius/SWE-rebench",
         revision: "refs/convert/parquet-2026-05-01",
@@ -114,6 +115,7 @@ export function buildFixtureRow(
     base_commit: "3".repeat(40),
     problem_statement: "Widget.resize() raises on zero width.\n",
     language: "python",
+    created_at: "2026-05-01T00:00:00Z",
     patch: "--- a/widget.py\n+++ b/widget.py\n@@\n-raise\n+return 0\n",
     test_patch: "--- a/tests/test_widget.py\n+++ b/tests/test_widget.py\n@@\n+def test_zero(): ...\n",
     FAIL_TO_PASS: ["tests/test_widget.py::test_zero"],

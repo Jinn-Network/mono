@@ -84,6 +84,7 @@ jobs:
         run: |
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/environments/record && yarn install --immutable && yarn build)
       - name: Verify Task Admission
         working-directory: packages/task-supply/admission

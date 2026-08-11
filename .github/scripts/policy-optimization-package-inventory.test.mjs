@@ -48,13 +48,24 @@ const PRODUCT_PACKAGES = [
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['.', {
     dependencies: [
+      '@jinn-network/attestation-issuer',
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-local',
       '@jinn-network/benchmarking-records',
       '@jinn-network/benchmarking-run',
+      '@jinn-network/evidence-protocol',
       '@jinn-network/policy-identity',
       '@jinn-network/policy-outcomes',
       '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-evaluation-harness',
+      '@jinn-network/task-execution-evaluator-adapters',
+      '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-workspace',
+      '@jinn-network/trust-core',
     ],
     devDependencies: ['@jinn-network/task-execution-testing'],
     optionalDependencies: [], peerDependencies: [],
@@ -69,21 +80,14 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     // product's install graph. `benchmarking-run` takes the same medicine for the same reason.
     portalResolutions: [
       '@jinn-network/evidence-discovery',
-      '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
-      '@jinn-network/task-execution-backend-local',
-      '@jinn-network/task-execution-launchers',
-      '@jinn-network/task-execution-profiles',
-      '@jinn-network/task-execution-protocol',
-      '@jinn-network/task-execution-supervisor',
-      '@jinn-network/task-execution-workspace',
-      '@jinn-network/trust-core',
     ],
   }],
 ]);
 
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
   ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
   ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
@@ -96,6 +100,8 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/policy-outcomes', join(root, 'packages', 'policy', 'outcomes')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
+  ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
+  ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
   ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],

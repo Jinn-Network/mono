@@ -36,6 +36,7 @@ export const BENCHMARKING_METHOD_IDS = {
   avgAtK: "jinn.benchmarking.method/avg-at-k",
   passAtK: "jinn.benchmarking.method/pass-at-k",
   pairedMcnemar: "jinn.benchmarking.method/paired-mcnemar",
+  provenanceClusterSign: "jinn.benchmarking.method/provenance-cluster-sign",
   noninferiorityIut: "jinn.benchmarking.method/noninferiority-iut",
   cleanSubset: "jinn.benchmarking.method/clean-subset",
   bradleyTerry: "jinn.benchmarking.method/bradley-terry",
