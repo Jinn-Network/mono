@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { canonicalJsonBytes, sha256Hex } from "./canonical.js";
+import { graderProgramDigest } from "./grader-program.js";
 import {
   exactSweRebenchTestCommands,
   pinnedSweRebenchImage,
@@ -143,6 +144,27 @@ describe("sweRebenchOciGraderReportSource", () => {
     const call = runner.mock.calls[0]![0] as { inputs: { targetName: string }[] };
     expect(call.inputs.map((entry) => entry.targetName).sort())
       .toEqual(["config.json", "grader.py", "patch.diff", "test-patch.diff"]);
+  });
+
+  it("mounts the grader program bytes that hash to exactly the published digest", async () => {
+    // The source is deleted in a `finally` once `read()` returns, so the mounted file can only be
+    // inspected from inside the injected runner — verifying after `read()` resolves would read a
+    // path that no longer exists.
+    const { work, request: input } = request();
+    let mountedProgramDigest: string | undefined;
+    const runner = vi.fn(async (invocation: { inputs: { targetName: string; source: string }[] }) => {
+      const program = invocation.inputs.find((entry) => entry.targetName === "grader.py");
+      if (program === undefined) throw new Error("grader.py was not mounted");
+      mountedProgramDigest = `sha256:${sha256Hex(new Uint8Array(readFileSync(program.source)))}`;
+      return canonicalJsonBytes({ log: "", report: {} });
+    });
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work, runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await source.read(input);
+
+    expect(mountedProgramDigest).toBe(graderProgramDigest());
   });
 
   it("refuses row material whose bytes do not match its declared digest", async () => {

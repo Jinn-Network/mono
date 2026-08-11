@@ -14,7 +14,7 @@ import type {
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes, sha256Hex } from "./canonical.js";
 import { refuse, refuseSubjectDigest } from "./errors.js";
-import { SWE_REBENCH_OCI_GRADER_PROGRAM } from "./grader-program.js";
+import { SWE_REBENCH_OCI_GRADER_PROGRAM_BYTES } from "./grader-program.js";
 import { PINNED_IMAGE_BODY, type PinnedOciGraderInput } from "./invocation.js";
 import { runPinnedOciGrader, type PinnedOciRunnerOptions } from "./runner.js";
 
@@ -215,9 +215,7 @@ export function sweRebenchOciGraderReportSource(
             logParser: row.install_config.log_parser,
           }),
         }), { mode: 0o600, flag: "wx" });
-        writeFileSync(programPath, SWE_REBENCH_OCI_GRADER_PROGRAM, {
-          encoding: "utf8", mode: 0o500, flag: "wx",
-        });
+        writeFileSync(programPath, SWE_REBENCH_OCI_GRADER_PROGRAM_BYTES, { mode: 0o500, flag: "wx" });
         const run = options.runPinnedOciGraderForTesting
           ?? ((input: PinnedOciGraderInput) => runPinnedOciGrader(input, options.runner));
         const emitted = await run({
