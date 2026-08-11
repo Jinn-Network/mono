@@ -1,0 +1,94 @@
+[
+  {
+    "instance_id": "gerlero__foamlib-329",
+    "repo": "gerlero/foamlib",
+    "base_commit": "9627c7272f1ce4e23e12578a683bbb56f309c7d3",
+    "problem_statement": "div((nuEff*dev2(T(grad(U))))) parsing\nHi again, so I think I have found another issue with the parsing in the `fvSchemes` file for the `divSchemes` when trying to parse the following line `div((nuEff*dev2(T(grad(U)))))`. I think this is a valid keyword?\n\n```py\nfrom pathlib import Path\nfrom foamlib import FoamFile\n\nPath(\"./system\").mkdir(exist_ok=True)\nfile = open('./system/fvSchemes', 'w')\nfile.close()\nfv_schemes = {\n    'divSchemes': {\n        'default': 'none',\n        'div((nuEff*dev2(T(grad(U)))))': 'Gauss linear',\n        'div(phi,U)': 'bounded Gauss upwind'\n    },\n}\nfile = FoamFile(path='./system/fvSchemes')\nfile.update(fv_schemes)\n```\n\n```sh\nTraceback (most recent call last):\n  File \".../test.py\", line 15, in <module>\n    file.update(fv_schemes)\n  File \".../.venv/lib/python3.12/site-packages/foamlib/_files/_files.py\", line 359, in update\n    super().update(*args, **kwargs)\n  File \"<frozen _collections_abc>\", line 982, in update\n  File \".../.venv/lib/python3.12/site-packages/foamlib/_files/_files.py\", line 307, in __setitem__\n    self[(*keywords, k)] = v\n    ~~~~^^^^^^^^^^^^^^^^\n  File \".../.venv/lib/python3.12/site-packages/foamlib/_files/_files.py\", line 200, in __setitem__\n    raise ValueError(msg)\nValueError: Invalid keyword: div((nuEff*dev2(T(grad(U)))))\n~``",
+    "language": "python",
+    "image": {
+      "name": "swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781",
+      "digest": {
+        "sha256": "1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781"
+      }
+    },
+    "testMaterial": [],
+    "parser": {
+      "id": "network.jinn.parser.swe-rebench-v2",
+      "version": "1.0.0",
+      "digest": "sha256:5b859d500777a1370bdadcee098ce9449f92772b7c9572709b502d9ee3be9e7a"
+    },
+    "transitions": {
+      "failToPass": [
+        "tests/test_files/test_parsing.py::test_parse_value"
+      ],
+      "passToPass": [
+        "tests/test_files/test_parsing.py::test_parse_directive"
+      ]
+    },
+    "timeout": 1800
+  },
+  {
+    "instance_id": "qBraid__pyqasm-120",
+    "repo": "qBraid/pyqasm",
+    "base_commit": "3405be900238678687aac7a2a2decc449358f431",
+    "problem_statement": "[BUG] Measurement in declaration `bit[4] = measure q;` fails\n### Environment\n\n- **PyQASM version**: 0.1.0\r\n- **Python version**: 3.11.6\r\n- **Operating system**: macOS 15.1.1\r\n\n\n### What happened?\n\nUnrolling the following program raises error - \r\n\r\n```python\r\nIn [1]: import pyqasm\r\n\r\nIn [2]: s = \"\"\"\r\n   ...: OPENQASM 3;\r\n   ...: qubit q;\r\n   ...: bit b = measure q;\r\n   ...: \"\"\"\r\n\r\nIn [3]: mod = pyqasm.loads(s)\r\n\r\nIn [4]: mod.unroll()\r\nERROR:root:Error at line 4, column 8 in QASM file\r\n------------------------------------------\r\nValidationErrorTraceback (most recent call last)\r\nCell In[4], line 1\r\n----> 1 mod.unroll()\r\n\r\nFile ~/Desktop/qBraid/envs/pyqasm/lib/python3.11/site-packages/pyqasm/modules/base.py:526, in QasmModule.unroll(self, **kwargs)\r\n    524 self.num_qubits, self.num_clbits = -1, -1\r\n    525 self._unrolled_ast = Program(statements=[], version=self.original_program.version)\r\n--> 526 raise err\r\n\r\nFile ~/Desktop/qBraid/envs/pyqasm/lib/python3.11/site-packages/pyqasm/modules/base.py:521, in QasmModule.unroll(self, **kwargs)\r\n    519     self.num_qubits, self.num_clbits = 0, 0\r\n    520     visitor = QasmVisitor(module=self, **kwargs)\r\n--> 521     self.accept(visitor)\r\n    522 except (ValidationError, UnrollError) as err:\r\n    523     # reset the unrolled ast and qasm\r\n    524     self.num_qubits, self.num_clbits = -1, -1\r\n\r\nFile ~/Desktop/qBraid/envs/pyqasm/lib/python3.11/site-packages/pyqasm/modules/qasm3.py:47, in Qasm3Module.accept(self, visitor)\r\n     41 def accept(self, visitor):\r\n     42     \"\"\"Accept a visitor for the module\r\n     43 \r\n     44     Args:\r\n     45         visitor (QasmVisitor): The visitor to accept\r\n     46     \"\"\"\r\n---> 47     unrolled_stmt_list = visitor.visit_basic_block(self._statements)\r\n     48     final_stmt_list = visitor.finalize(unrolled_stmt_list)\r\n     50     self._unrolled_ast.statements = final_stmt_list\r\n\r\nFile ~/Desktop/qBraid/envs/pyqasm/lib/python3.11/site-packages/pyqasm/visitor.py:1828, in QasmVisitor.visit_basic_block(self, stmt_list)\r\n   1826 result = []\r\n   1827 for stmt in stmt_list:\r\n-> 1828     result.extend(self.visit_statement(stmt))\r\n   1829 return result\r\n\r\nFile ~/Desktop/qBraid/envs/pyqasm/lib/python3.11/site-packages/pyqasm/visitor.py:1810, in QasmVisitor.visit_statement(self, statement)\r\n   1808         result.extend(ret_stmts)\r\n   1809     else:\r\n-> 1810         result.extend(visitor_function(statement))  # type: ignore[operator]\r\n   1811 else:\r\n   1812     raise_qasm3_error(\r\n   1813         f\"Unsupported statement of type {type(statement)}\", span=statement.span\r\n   1814     )\r\n\r\nFile ~/Desktop/qBraid/envs/pyqasm/lib/python3.11/site-packages/pyqasm/visitor.py:1143, in QasmVisitor._visit_classical_declaration(self, statement)\r\n   1139         init_value = self._evaluate_array_initialization(\r\n   1140             statement.init_expression, final_dimensions, base_type\r\n   1141         )\r\n   1142     else:\r\n-> 1143         init_value, stmts = Qasm3ExprEvaluator.evaluate_expression(\r\n   1144             statement.init_expression\r\n   1145         )\r\n   1146         statements.extend(stmts)\r\n   1148 variable = Variable(\r\n   1149     var_name,\r\n   1150     base_type,\r\n   (...)\r\n   1154     is_register=isinstance(base_type, qasm3_ast.BitType),\r\n   1155 )\r\n\r\nFile ~/Desktop/qBraid/envs/pyqasm/lib/python3.11/site-packages/pyqasm/expressions.py:303, in Qasm3ExprEvaluator.evaluate_expression(cls, expression, const_expr, reqd_type, validate_only)\r\n    300     statements.extend(ret_stmts)\r\n    301     return _check_and_return_value(ret_value)\r\n--> 303 raise_qasm3_error(\r\n    304     f\"Unsupported expression type {type(expression)}\", ValidationError, expression.span\r\n    305 )\r\n\r\nFile ~/Desktop/qBraid/envs/pyqasm/lib/python3.11/site-packages/pyqasm/exceptions.py:64, in raise_qasm3_error(message, err_type, span, raised_from)\r\n     62 if raised_from:\r\n     63     raise err_type(message) from raised_from\r\n---> 64 raise err_type(message)\r\n\r\nValidationError: Unsupported expression type <class 'openqasm3.ast.QuantumMeasurement'>\r\n```\n\n### Suggestions (Optional)\n\nThe [`ClassicalDeclaration` handler](https://github.com/qBraid/pyqasm/blob/07ac98b6f894154e68039f58eef782745c29f592/src/pyqasm/visitor.py#L1056) should be updated to also account for measurements in initialization",
+    "language": "python",
+    "image": {
+      "name": "swerebench/sweb.eval.x86_64.qbraid_1776_pyqasm-120@sha256:ef37b17fad833433dcf6a5e2fbc2aab10579120f13eca0edaf43296430d29d56",
+      "digest": {
+        "sha256": "ef37b17fad833433dcf6a5e2fbc2aab10579120f13eca0edaf43296430d29d56"
+      }
+    },
+    "testMaterial": [],
+    "parser": {
+      "id": "network.jinn.parser.swe-rebench-v2",
+      "version": "1.0.0",
+      "digest": "sha256:5b859d500777a1370bdadcee098ce9449f92772b7c9572709b502d9ee3be9e7a"
+    },
+    "transitions": {
+      "failToPass": [
+        "tests/qasm3/test_measurement.py::test_init_measure"
+      ],
+      "passToPass": [
+        "tests/qasm3/test_measurement.py::test_measure",
+        "tests/qasm3/test_measurement.py::test_has_measurements",
+        "tests/qasm3/test_measurement.py::test_remove_measurement",
+        "tests/qasm3/test_measurement.py::test_incorrect_measure"
+      ]
+    },
+    "timeout": 1800
+  },
+  {
+    "instance_id": "python-wheel-build__fromager-626",
+    "repo": "python-wheel-build/fromager",
+    "base_commit": "0a696b967862bfc81b423bd3e0d0fac393d6652c",
+    "problem_statement": "Use hatchling instead of setuptools\n`Hatchling` offers several advantages over `setuptools`, especially for modern Python projects:\n\n1.  **Modern Standard (`pyproject.toml`):** Fully embraces PEP 621, making `pyproject.toml` the clear, single source for all project metadata, unlike `setuptools`'s reliance on `setup.py`.\n2.  **Better Defaults:** More intuitive file inclusion (respects `.gitignore`) and safer defaults for wheel packaging, reducing errors and package size.\n3.  **Simpler Configuration:** Often eliminates the need for `setup.py` and `MANIFEST.in`, simplifying project setup.\n4.  **Integrated Project Management:** As part of the `Hatch` ecosystem, it provides tools for environment management, script running, and versioning directly from `pyproject.toml`.\n5.  **Predictable & Reproducible Builds:** Aims for consistent and reliable build outputs.",
+    "language": "python",
+    "image": {
+      "name": "swerebench/sweb.eval.x86_64.python-wheel-build_1776_fromager-626@sha256:1b9202875beb639a86f59c20764ba9ac8e2418d88d0703d6a68116f5f8268f25",
+      "digest": {
+        "sha256": "1b9202875beb639a86f59c20764ba9ac8e2418d88d0703d6a68116f5f8268f25"
+      }
+    },
+    "testMaterial": [],
+    "parser": {
+      "id": "network.jinn.parser.swe-rebench-v2",
+      "version": "1.0.0",
+      "digest": "sha256:5b859d500777a1370bdadcee098ce9449f92772b7c9572709b502d9ee3be9e7a"
+    },
+    "transitions": {
+      "failToPass": [
+        "tests/test_dependencies.py::test_get_build_system_dependencies"
+      ],
+      "passToPass": [
+        "tests/test_dependencies.py::test_get_build_backend[build_system0-expected_results0]",
+        "tests/test_dependencies.py::test_get_build_backend[build_system1-expected_results1]",
+        "tests/test_dependencies.py::test_get_build_backend[build_system2-expected_results2]",
+        "tests/test_dependencies.py::test_get_build_system_dependencies_cached",
+        "tests/test_dependencies.py::test_get_build_backend_dependencies_cached",
+        "tests/test_dependencies.py::test_get_build_sdist_dependencies_cached"
+      ]
+    },
+    "timeout": 1800
+  }
+]

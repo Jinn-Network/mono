@@ -1,0 +1,42 @@
+{
+  "status": "PROVISIONAL — re-mint required after the P0-interop cluster-key fix lands",
+  "dataset": "nebius/SWE-rebench-leaderboard",
+  "config": "default",
+  "split": "test",
+  "mintedAt": "2026-08-11T17:25:31.226Z",
+  "timeoutSeconds": 1800,
+  "exclusionRules": {
+    "maxFailToPass": 10,
+    "maxPassToPass": 100,
+    "minDistinctRepos": 2
+  },
+  "rows": [
+    {
+      "instance_id": "gerlero__foamlib-329",
+      "repo": "gerlero/foamlib",
+      "base_commit": "9627c7272f1ce4e23e12578a683bbb56f309c7d3",
+      "createdAt": "2025-03-09 16:35:28",
+      "sourceUrl": "https://huggingface.co/datasets/nebius/SWE-rebench-leaderboard",
+      "imageName": "swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329:latest",
+      "imageDigest": "sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781"
+    },
+    {
+      "instance_id": "qBraid__pyqasm-120",
+      "repo": "qBraid/pyqasm",
+      "base_commit": "3405be900238678687aac7a2a2decc449358f431",
+      "createdAt": "2025-01-09 01:15:29",
+      "sourceUrl": "https://huggingface.co/datasets/nebius/SWE-rebench-leaderboard",
+      "imageName": "swerebench/sweb.eval.x86_64.qbraid_1776_pyqasm-120:latest",
+      "imageDigest": "sha256:ef37b17fad833433dcf6a5e2fbc2aab10579120f13eca0edaf43296430d29d56"
+    },
+    {
+      "instance_id": "python-wheel-build__fromager-626",
+      "repo": "python-wheel-build/fromager",
+      "base_commit": "0a696b967862bfc81b423bd3e0d0fac393d6652c",
+      "createdAt": "2025-06-03 19:16:37",
+      "sourceUrl": "https://huggingface.co/datasets/nebius/SWE-rebench-leaderboard",
+      "imageName": "swerebench/sweb.eval.x86_64.python-wheel-build_1776_fromager-626:latest",
+      "imageDigest": "sha256:1b9202875beb639a86f59c20764ba9ac8e2418d88d0703d6a68116f5f8268f25"
+    }
+  ]
+}
