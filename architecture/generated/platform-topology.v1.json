@@ -32,6 +32,11 @@
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
+        "to": "@jinn-network/attestation-issuer"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
         "to": "@jinn-network/benchmarking-aggregate"
       },
       {
@@ -1736,7 +1741,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2957,
+      "discoveredFirstPartySurfaces": 2961,
       "generatedOutputSources": 1308,
       "generatorSources": 613,
       "marketplaceControl": 2,
@@ -19817,6 +19822,46 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures/inspect-project"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures/inspect-project/hermetic_eval.py"
+      },
+      {
+        "categories": [
           "authorityDocuments"
         ],
         "owners": [
@@ -20987,7 +21032,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/benchmarking/testing/fixtures/exports/eval-log.json"
+        "path": "packages/benchmarking/testing/fixtures/exports/matrix-projection.json"
       },
       {
         "categories": [
@@ -41858,6 +41903,7 @@
           "@fontsource-variable/newsreader",
           "@fontsource-variable/public-sans",
           "@fontsource/ibm-plex-mono",
+          "@jinn-network/attestation-issuer",
           "@jinn-network/benchmarking-aggregate",
           "@jinn-network/benchmarking-interop",
           "@jinn-network/benchmarking-local",
@@ -45839,8 +45885,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/benchmarking-testing",
         "packedTargets": [],
-        "path": "packages/benchmarking/testing/fixtures/exports/eval-log.json",
-        "relativeSource": "fixtures/exports/eval-log.json"
+        "path": "packages/benchmarking/testing/fixtures/exports/matrix-projection.json",
+        "relativeSource": "fixtures/exports/matrix-projection.json"
       },
       {
         "claim": null,
