@@ -281,9 +281,12 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     mkdirSync(viewerOutputRoot, { mode: 0o777 });
     chmodSync(viewerOutputRoot, 0o777);
     const viewerDir = join(viewerOutputRoot, "inspect-view-bundle");
+    const viewerUid = process.getuid?.();
+    const viewerGid = process.getgid?.();
+    if (viewerUid === undefined || viewerGid === undefined) throw new Error("Inspect View OCI validation requires a POSIX host");
     execFileSync(dockerPath, [
       "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
-      "--user", `${process.getuid()}:${process.getgid()}`,
+      "--user", `${viewerUid}:${viewerGid}`,
       "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
       "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864", "--env=HOME=/tmp/home",
       "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
