@@ -444,6 +444,12 @@ export class NativeSolutionCoordinator {
       }));
       this.input.state.recordPublicationPublished(publication.publicationKey, receipt);
     }
+    // A second engagement whose byte-identical solution content a prior engagement already
+    // announced owns no `intent` outbox rows, so the loop above drained nothing and
+    // `recordPublicationPublished` never fired the `solution-published` transition. Its records
+    // are nonetheless served (content-addressed dedupe in `recordSolutionReady`), so promote it
+    // explicitly. Idempotent and a no-op for the ordinary engagement that just published its own.
+    this.input.state.promoteSolutionPublishedIfComplete(engagementId);
   }
 
   /**
