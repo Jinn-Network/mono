@@ -4,7 +4,7 @@ import {
   type MatrixRecord,
 } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
-import { exportEvalLog } from "./evallog.js";
+import { exportMatrixProjection } from "./matrix-projection.js";
 
 const CELL_KEY = `${"a".repeat(64)}/armA/1`;
 
@@ -58,23 +58,24 @@ function oneCellMatrix(): MatrixRecord {
   } as unknown as MatrixRecord;
 }
 
-describe("exportEvalLog evidence resolver", () => {
+describe("exportMatrixProjection evidence resolver", () => {
   test("pins distinctive injected transcript/evidence refs (non-vacuous port use)", async () => {
-    const log = await exportEvalLog(oneCellMatrix(), {
+    const projection = await exportMatrixProjection(oneCellMatrix(), {
       transcriptFor: (cellKey) => `transcript:injected:${cellKey}`,
       evidenceRefFor: (cellKey) => `evidence:injected:${cellKey}`,
     });
-    expect(log.samples).toHaveLength(1);
-    expect(log.samples[0]!.evidence.transcriptRef).toBe(`transcript:injected:${CELL_KEY}`);
-    expect(log.samples[0]!.evidence.evidenceRef).toBe(`evidence:injected:${CELL_KEY}`);
+    expect(projection.schema).toBe("jinn.network/benchmark-matrix-projection/1");
+    expect(projection.samples).toHaveLength(1);
+    expect(projection.samples[0]!.evidence.transcriptRef).toBe(`transcript:injected:${CELL_KEY}`);
+    expect(projection.samples[0]!.evidence.evidenceRef).toBe(`evidence:injected:${CELL_KEY}`);
   });
 
   test("empty resolver falls back to deterministic digests (separate from injected path)", async () => {
-    const log = await exportEvalLog(oneCellMatrix(), {});
-    expect(log.samples[0]!.evidence.transcriptRef).toBe(
+    const projection = await exportMatrixProjection(oneCellMatrix(), {});
+    expect(projection.samples[0]!.evidence.transcriptRef).toBe(
       documentDigest(new TextEncoder().encode(`transcript:${CELL_KEY}`)),
     );
-    expect(log.samples[0]!.evidence.evidenceRef).toBe(
+    expect(projection.samples[0]!.evidence.evidenceRef).toBe(
       documentDigest(new TextEncoder().encode(`evidence:${CELL_KEY}`)),
     );
   });

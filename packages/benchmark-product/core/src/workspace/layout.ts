@@ -17,6 +17,7 @@ export const JOURNAL_FILENAME = "journal.jsonl";
 export const AUTHORITY_FILENAME = "authority.json";
 export const RUNS_DIRNAME = "runs";
 export const PREVIEWS_DIRNAME = "previews";
+export const RUNTIME_HOSTS_DIRNAME = "runtime-hosts";
 
 export function workspaceMetadataPath(workspaceDir: string): string {
   return join(workspaceDir, WORKSPACE_METADATA_FILENAME);
@@ -149,4 +150,13 @@ export function previewJournalPath(workspaceDir: string, draftId: string, previe
  * rehearses against; never the official venue root under the workspace directly. */
 export function previewScratchDir(workspaceDir: string, draftId: string, previewId: string): string {
   return join(previewDir(workspaceDir, draftId, previewId), "scratch");
+}
+
+/** Private connection state for optional runtime workers. Never part of sealed records/bundles. */
+export function runtimeHostsDir(workspaceDir: string): string {
+  return join(workspaceDir, RUNTIME_HOSTS_DIRNAME);
+}
+
+export function runtimeHostPath(workspaceDir: string, selectionManifestSha256: string): string {
+  return join(runtimeHostsDir(workspaceDir), `${selectionManifestSha256}.json`);
 }

@@ -54,6 +54,8 @@ import {
   type BundleVerdictCatalog,
 } from "./schema.js";
 import { EVALUATOR_REQUIREMENT_KEY } from "../venue/venue.js";
+import { INSPECT_EMBEDDED_EVALUATOR_ID } from "../runtime/inspect/artifacts.js";
+import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 
 export const PUBLIC_BUNDLE_FILES = [
   "static-bundle.json",
@@ -167,6 +169,8 @@ function recordClosure(input: MaterializeBundleInput): {
   const run = parseRun(runBytes);
   const matrix = parseMatrix(matrixBytes);
   const report = parseReport(reportBytes);
+  const draft = parseDraftDocument(JSON.parse(readFileSync(draftPath(workspaceDir, draftId), "utf8")));
+  const embeddedInspect = draft.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID;
 
   const claimBytes = new Uint8Array(readFileSync(claimPackageArtifactPath(workspaceDir, draftId)));
   const claim = exactJson(claimBytes, ClaimPackageSchema, "claim-package.json");
@@ -209,10 +213,11 @@ function recordClosure(input: MaterializeBundleInput): {
     evaluations: [],
   };
   const evaluationEvidenceByVerdict = new Map<string, {
-    evalTaskSha256: string;
-    evalSubmissionSha256: string;
-    evalDeliverySha256: string;
-    evalAttempt: string;
+    relationship?: "same-execution-scorer";
+    evalTaskSha256?: string;
+    evalSubmissionSha256?: string;
+    evalDeliverySha256?: string;
+    evalAttempt?: string;
     evalIndex: number;
   }>();
   for (const entry of journal) {
@@ -251,7 +256,14 @@ function recordClosure(input: MaterializeBundleInput): {
       }
     } else if (entry.kind === "delivery") {
       addRole(evidenceRecords, entry.deliverySha256, "solve-delivery");
-      for (const output of entry.outputs) addRole(evidenceRecords, output.sha256, "solve-output");
+      for (const output of entry.outputs) {
+        addRole(evidenceRecords, output.sha256, "solve-output");
+        if (embeddedInspect && output.name === "inspect-log") {
+          // Duplicate the authenticated record bytes under Inspect's native extension so the
+          // copied bundle opens directly in the pinned Inspect reader and Inspect View.
+          files.set(`native/inspect/${output.sha256}.eval`, getSealedBytes(workspaceDir, output.sha256));
+        }
+      }
       graph.solveDeliveries.push({
         cellKey: entry.cellKey,
         dispatch: entry.dispatch,
@@ -264,15 +276,21 @@ function recordClosure(input: MaterializeBundleInput): {
       const submission = [...graph.evaluationSubmissions].reverse().find(
         (candidate) => candidate.cellKey === entry.cellKey && candidate.evalIndex === evalIndex,
       );
-      if (
-        entry.verdictSha256 !== undefined
-        && (entry.evalTaskSha256 === undefined || entry.evalDeliverySha256 === undefined
-          || entry.evalAttempt === undefined || submission === undefined)
-      ) {
+      const hasSeparateLineage = entry.evalTaskSha256 !== undefined
+        && entry.evalDeliverySha256 !== undefined
+        && entry.evalAttempt !== undefined
+        && submission !== undefined;
+      const hasEmbeddedLineage = embeddedInspect
+        && entry.evaluator === INSPECT_EMBEDDED_EVALUATOR_ID
+        && entry.evalTaskSha256 === undefined
+        && entry.evalDeliverySha256 === undefined
+        && entry.evalAttempt === undefined
+        && submission === undefined;
+      if (entry.verdictSha256 !== undefined && !hasSeparateLineage && !hasEmbeddedLineage) {
         refuse(
           "conflict",
           `runs.${draftId}.evidence-closure`,
-          `pre-BP-40 evaluation evidence for ${entry.cellKey} is incomplete — exact evaluation Task, Submission, attempt, and Delivery bytes are required`,
+          `evaluation evidence for ${entry.cellKey} is neither a complete separate-evaluator lineage nor an Inspect same-execution scorer lineage`,
         );
       }
       if (submission !== undefined && entry.evalTaskSha256 !== undefined && submission.evalTaskSha256 !== entry.evalTaskSha256) {
@@ -284,6 +302,7 @@ function recordClosure(input: MaterializeBundleInput): {
       graph.evaluations.push({
         cellKey: entry.cellKey,
         evalIndex,
+        ...(hasEmbeddedLineage ? { relationship: "same-execution-scorer" as const } : {}),
         ...(entry.evaluator !== undefined ? { evaluator: entry.evaluator } : {}),
         ...(entry.evalTaskSha256 !== undefined ? { evalTaskSha256: entry.evalTaskSha256 } : {}),
         ...(submission !== undefined ? { evalSubmissionSha256: submission.sha256 } : {}),
@@ -292,17 +311,19 @@ function recordClosure(input: MaterializeBundleInput): {
         ...(entry.verdictSha256 !== undefined ? { verdictSha256: entry.verdictSha256 } : {}),
         ...(entry.evaluationTerminal !== undefined ? { evaluationTerminal: entry.evaluationTerminal } : {}),
       });
-      if (
-        entry.verdictSha256 !== undefined && entry.evalTaskSha256 !== undefined
-        && entry.evalDeliverySha256 !== undefined && entry.evalAttempt !== undefined && submission !== undefined
-      ) {
-        evaluationEvidenceByVerdict.set(`${entry.cellKey}\0${entry.verdictSha256}\0${evalIndex}`, {
-          evalTaskSha256: entry.evalTaskSha256,
-          evalSubmissionSha256: submission.sha256,
-          evalDeliverySha256: entry.evalDeliverySha256,
-          evalAttempt: entry.evalAttempt,
-          evalIndex,
-        });
+      if (entry.verdictSha256 !== undefined) {
+        evaluationEvidenceByVerdict.set(
+          `${entry.cellKey}\0${entry.verdictSha256}\0${evalIndex}`,
+          hasEmbeddedLineage
+            ? { relationship: "same-execution-scorer", evalIndex }
+            : {
+              evalTaskSha256: entry.evalTaskSha256!,
+              evalSubmissionSha256: submission!.sha256,
+              evalDeliverySha256: entry.evalDeliverySha256!,
+              evalAttempt: entry.evalAttempt!,
+              evalIndex,
+            },
+        );
       }
     }
   }
@@ -366,7 +387,6 @@ function recordClosure(input: MaterializeBundleInput): {
     });
   });
   const cancelMarker = readCancelMarker(workspaceDir, draftId);
-  const draft = parseDraftDocument(JSON.parse(readFileSync(draftPath(workspaceDir, draftId), "utf8")));
   const previewLog = readPreviewLog(workspaceDir, draftId);
   const header = BundleAssemblyHeaderSchema.parse({
     format: BUNDLE_ASSEMBLY_FORMAT,

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,3 +20,7 @@ await new Promise((resolve, reject) => {
     else reject(new Error(`TypeScript build exited with ${code}`));
   });
 });
+
+const runtimeAssetDir = join(dist, "runtime", "inspect");
+await mkdir(runtimeAssetDir, { recursive: true });
+await copyFile(join(packageRoot, "src", "runtime", "inspect", "worker.py"), join(runtimeAssetDir, "worker.py"));

@@ -44,9 +44,9 @@ import {
   type RunArm,
 } from "@jinn-network/benchmarking-records";
 import { planRun, type PlannedRun } from "@jinn-network/benchmarking-run";
-import { VENUE_ISOLATION_POLICY } from "../venue/venue.js";
 import { resolveAssurance, type DraftDocument, type DraftSpec } from "../domain/draft.js";
 import { refuse, refuseWithIssues } from "../errors.js";
+import { runtimeSubmissionBaseline } from "../runtime/adapter.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 
 export interface CompileDraftInput {
@@ -102,7 +102,7 @@ function planFromSpec(spec: DraftSpec, benchmarkDigestHex: string, owner: string
           minVerdicts: resolvedAssurance.minVerdicts,
           distinctEvaluator: resolvedAssurance.distinctEvaluator,
         },
-        submissionBaseline: { isolationPolicy: VENUE_ISOLATION_POLICY },
+        submissionBaseline: runtimeSubmissionBaseline(spec.evaluationRuntime),
       },
       analysisPlan: [
         {

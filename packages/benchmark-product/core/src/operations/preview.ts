@@ -41,6 +41,7 @@ import {
 } from "../run/preview-log.js";
 import { deriveRunOwner } from "../run/state.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
+import { createRuntimeVenue } from "../runtime/adapter.js";
 import { draftPreviewsDir, previewArtifactPath, previewDir, previewJournalPath, previewScratchDir } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
@@ -149,8 +150,6 @@ export function runPreview(
 ): Promise<OperationResult<RunPreviewResult>> {
   const at = context.clock();
   const clockedContext: OperationContext = { ...context, clock: () => at };
-  const createVenue = deps.createVenue ?? createLocalVenue;
-
   return operateAsync({
     context: clockedContext,
     action: "preview",
@@ -158,6 +157,8 @@ export function runPreview(
     inputs: input,
     run: async () => {
       const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+      const createVenue: typeof createLocalVenue = deps.createVenue
+        ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options));
 
       const transitioned = transition(document.state, "preview");
       if (!transitioned.ok) {
@@ -196,6 +197,7 @@ export function runPreview(
       try {
         venue = createVenue({
           workspaceDir: previewScratchDir(clockedContext.workspaceDir, input.draftId, previewId),
+          runtimeBindingWorkspaceDir: clockedContext.workspaceDir,
           now: context.clock,
         });
       } catch (cause) {

@@ -127,6 +127,7 @@ if (packageJson.bin?.colophon !== "./dist/cli/bin.js" || packageJson.bin?.["benc
 }
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = [
+  "@jinn-network/attestation-issuer",
   "@jinn-network/benchmarking-aggregate",
   "@jinn-network/benchmarking-interop",
   "@jinn-network/benchmarking-local",

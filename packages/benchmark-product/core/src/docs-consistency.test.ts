@@ -16,6 +16,7 @@ const productReadmePath = resolve(productRoot, "README.md");
 const coreReadmePath = resolve(coreRoot, "README.md");
 const webReadmePath = resolve(productRoot, "web/README.md");
 const bundleReadmePath = resolve(productRoot, "PUBLIC-BUNDLE.md");
+const inspectRuntimePath = resolve(productRoot, "INSPECT-RUNTIME.md");
 const securityPath = resolve(productRoot, "SECURITY.md");
 const extractionPath = resolve(
   repoRoot,
@@ -36,6 +37,7 @@ const requiredDocs = [
   coreReadmePath,
   webReadmePath,
   bundleReadmePath,
+  inspectRuntimePath,
   securityPath,
   extractionPath,
   issueDraftsPath,
@@ -74,7 +76,7 @@ describe("product documentation consistency", () => {
     };
     const coreReadme = read(coreReadmePath);
 
-    expect(parity.entries).toHaveLength(27);
+    expect(parity.entries).toHaveLength(28);
     for (const entry of parity.entries) {
       expect(coreReadme, entry.operation).toContain(`\`${entry.operation}\``);
       expect(coreReadme, entry.cliVerb).toContain(`\`${PRODUCT_BRANDING.commandName} ${entry.cliVerb}`);
@@ -84,7 +86,7 @@ describe("product documentation consistency", () => {
 
     for (const operation of GATED_OPERATIONS) expect(coreReadme).toContain(`\`${operation}\``);
     for (const code of PRODUCT_ERROR_CODES) expect(coreReadme).toContain(`\`${code}\``);
-    expect(coreReadme).toContain("27 generated operations");
+    expect(coreReadme).toContain("28 generated operations");
     expect(coreReadme).toContain("five gated operations");
     expect(coreReadme).toContain("11 typed error codes");
     expect(coreReadme).toContain("`{\"ok\":true,\"result\":...}`");
@@ -94,6 +96,18 @@ describe("product documentation consistency", () => {
     expect(coreReadme).toMatch(/requested.*terminal.*cancelled/is);
     expect(coreReadme).toMatch(/collect.*contention/is);
     expect(coreReadme).toMatch(/local immutable emission.*no upload.*no hosting.*no deployment/is);
+  });
+
+  it("documents the pinned optional Inspect boundary without independence or EvalLog overclaiming", () => {
+    const guide = read(inspectRuntimePath);
+    expect(guide).toContain("`inspect-ai==0.3.255`");
+    expect(guide).toContain("`read_eval_log`");
+    expect(guide).toContain("inspect view --log-dir");
+    expect(guide).toContain("same-execution-scorer");
+    expect(guide).toMatch(/not called independent/i);
+    expect(guide).toMatch(/summary.*not an EvalLog/is);
+    expect(guide).toMatch(/no ambient credential variables/i);
+    expect(guide).toMatch(/not .*hostile-code sandbox/i);
   });
 
   it("pins the public-bundle guide to the frozen format, file roles, and six checks", () => {

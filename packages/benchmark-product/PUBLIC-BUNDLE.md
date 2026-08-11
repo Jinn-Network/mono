@@ -1,6 +1,6 @@
 # Public benchmark bundle
 
-The frozen format is `benchmark-product-public-bundle/1`. It is an immutable,
+The frozen format is `benchmark-product-public-bundle/2`. It is an immutable,
 digest-addressed directory containing a Report, the exact evidence needed to
 check it, public trust material, and five deterministic presentation assets.
 Its evidence remains verifiable after the originating product workspace and
@@ -39,9 +39,19 @@ The fixed files are:
 
 The manifest also includes one exact `records/<sha256>.bin` member for every
 record in the authenticated evidence graph. A cancelled run additionally has
-the optional `verification/cancel-requested.json`. No other role is permitted
-in `benchmark-product-public-bundle/1`; an incompatible closure requires a new
+the optional `verification/cancel-requested.json`. When publication explicitly
+authorizes native Inspect content, each delivered native log is duplicated
+byte-for-byte as `native/inspect/<sha256>.eval`. The verifier requires that set
+to exactly match the Inspect log outputs in the authenticated delivery graph;
+the `.eval` extension makes the artifact directly usable by the pinned Inspect
+reader and Inspect View. No other role is permitted in
+`benchmark-product-public-bundle/2`; an incompatible closure requires a new
 format version.
+
+Version 2 is the first format that permits runtime-native artifacts and
+same-execution scorer relationships. Version 1 remains a historical native-only
+format; this implementation emits and verifies version 2 rather than changing
+version 1's closed schema in place.
 
 ## Portable verification
 
@@ -104,6 +114,11 @@ environment data, absolute workspace paths, credentials, and private PEM keys
 are excluded, but authenticated Task, Delivery, verdict, Report, and claim
 content is public. This is not a generic PII scanner, malware scanner, or
 arbitrary-content sanitizer.
+
+Inspect-backed drafts fail publication unless the caller explicitly approves
+including native artifacts. That approval includes complete Inspect logs and
+transcripts; it is never inferred from locking, launching, reporting, or an
+earlier preview.
 
 Filesystem and semantic integrity checks do not protect against a privileged
 actor rewriting the running process, memory, or storage after verification.

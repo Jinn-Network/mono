@@ -16,7 +16,7 @@ running the relevant injected driver against the fixtures shipped here.
   reproduction of the kit-owned expected Matrix for the 3-task × 2-arm × 2-replicate miniature
   corpus. The corpus includes all six outcomes, replacement lineage, multiple verdicts, and an
   asymmetry flag.
-- **`describeExportConformance(exporters)`** injects EvalLog, Croissant, and static-bundle
+- **`describeExportConformance(exporters)`** injects Jinn Matrix-projection, Croissant, and static-bundle
   exporters and compares each projection with a canonical byte-exact oracle.
 - **`describeOrderingConformance(legs?)`** always checks structural Run commitment and the
   kit-owned positive, violation, and non-decision-grade local-order transcript oracles. Future

@@ -195,12 +195,12 @@ evaluator organizations.
 |---|---|---|---|
 | Repo-task item schema | SWE-bench instance fields (`instance_id`, `base_commit`, `FAIL_TO_PASS`, `PASS_TO_PASS`) + SWE-rebench `install_config` / quality labels — already the profiles design's `repository-work/1.0` lineage | SWE-bench Verified annotation rubric as quality metadata | — |
 | Benchmark manifest metadata | — (Croissant is JSON-LD; poor fit for sealed bytes) | Croissant's SemVer discipline and per-file sha256 posture | the sealed Benchmark record (§6); deterministic Croissant **export** (§6.5) |
-| Per-cell result semantics | SWE-bench outcome taxonomy (resolved / unresolved / error / empty-patch) as profile-level verdict vocabulary; Inspect EvalLog semantics (epoch-as-repetition, scorer/metric split) as the export target | HELM's artifact split (spec / instances / raw trace / per-instance / aggregate) — realized as Task / Run / evidence / Matrix / Report | Matrix record (§8) |
+| Per-cell result semantics | SWE-bench outcome taxonomy (resolved / unresolved / error / empty-patch) as profile-level verdict vocabulary; Inspect EvalLog semantics retained as runtime-native source evidence | HELM's artifact split (spec / instances / raw trace / per-instance / aggregate) — realized as Task / Run / evidence / Matrix / Report | Matrix record (§8) |
 | Signing | DSSE + in-toto Statements (already the stack's foundation); in-toto `test-result` predicate as a compatibility view | SLSA VSA shape for verified aggregates | Report record (§9.1) |
 | Statistics | Miller 2024 (clustered SEs, paired differences, avg@k, power analysis); Chen 2021 unbiased pass@k; Wilson intervals (already implemented in-repo) | Bradley-Terry + bootstrap (Chatbot Arena) as an optional module | named method registry (§9.2) |
 | Contamination | canary GUID convention; per-item provenance timestamps (LiveCodeBench pattern — already in the profiles `provenance` block) | TRUCE / Attestable Audits commit-reveal shape | committed Benchmark with scheduled reveal (§6.4) — the one genuinely novel piece, and it reduces to a publishing schedule over existing content addressing |
 | Runner journey | — | Inspect's journey shape (declarative spec → one command → live view → bundleable logs); Braintrust's two-arm diff loop; sb-cli's quote-before-run | the six operations (§10.1) |
-| Viewer / authoring | Inspect (`inspect view`) via export | — | **non-goal**: no viewer, no task-authoring framework (§19) |
+| Viewer / authoring | Inspect (`inspect view`) over native Inspect logs | — | **non-goal**: no viewer, no task-authoring framework (§19) |
 
 Product-survey conclusions binding on this design (§10.3): comparison must not
 be an afterthought; one declarative spec, no backend sprawl; per-cell price
@@ -820,8 +820,8 @@ planning.
    diff with per-task regression/improvement highlighting, rates with error
    bars by default (replicates + clustered SEs; single-replicate point
    estimates are labeled as such), per-cell drill-down to transcripts via the
-   evidence records; exports: Inspect-compatible EvalLog (so `inspect view`
-   renders our runs), a self-contained static bundle (private by default),
+   evidence records; exports: native evaluation-runtime artifacts when present,
+   a Jinn-owned Matrix projection, and a self-contained static bundle (private by default),
    and optionally a sealed Report record when the consumer wants to publish
    the interpretation.
 6. **Verify** — the skeptic's command: `bench verify <matrix>` re-derives the
@@ -838,9 +838,10 @@ it). Posture: complementary, never competitive — Inspect standardizes how one
 party runs an eval; this application standardizes how strangers believe each
 other's evals. Three seams:
 
-1. **Import from it** — Inspect Evals tasks that are data-expressible
-   (dataset + declarative scoring) convert to sealed Tasks + Benchmark
-   records.
+1. **Select from it** — a Tier 4 runtime adapter resolves an official Inspect
+   task reference, records its exact task/package/environment identity, and
+   creates Jinn Tasks that bind the resolved samples without translating the
+   task, solver, or scorer into a Jinn-native implementation.
 2. **Execute with it** — an Inspect executor launcher in the local backend
    (one more launcher beside claude-code/codex/hermes/cursor): the operator's
    machine runs Inspect under supervision; our layer wraps the evidence,
@@ -848,8 +849,10 @@ other's evals. Three seams:
    arbitrary Python solvers/scorers cannot be sealed as verifiable data —
    such tasks pin "Inspect task X at version/digest Y" and carry
    `attested-only` integrity unless admission evidence shows re-derivability.
-3. **Export to it** — §10.1 op 5's EvalLog export; we inherit the ecosystem's
-   viewer instead of building one.
+3. **Retain its native output** — Inspect itself produces the EvalLog. Jinn
+   retains those exact bytes as Delivery/evidence artifacts and opens them with
+   Inspect View instead of synthesizing a log or building a viewer. The
+   `benchmarking-interop` Matrix projection is explicitly not an EvalLog.
 
 ### 10.3 Anti-patterns honored (from the product survey)
 
@@ -1020,8 +1023,8 @@ implementation planning, one naming pass):
 8. The benchmarking facts profiles for the four new kinds, and the companion
    amendment's namespaced fields on the Submission/Delivery facts profiles
    (§11).
-9. The Inspect EvalLog export and Croissant export as fixture-pinned
-   projections (§10.2, §6.5).
+9. The Jinn Matrix and Croissant exports as fixture-pinned projections;
+   Inspect EvalLogs are validated native runtime artifacts (§10.2, §6.5).
 10. The backend-profile table's normative rows (§13): pinning posture,
     pre-registration strength, close-boundary anchor requirement, cost
     source semantics, evaluation-dispatch conditionality.
@@ -1035,8 +1038,9 @@ implementation planning, one naming pass):
 - `benchmarking/aggregate` — the method registry + reference implementations
   + Report production/verification (consumes matrices; never imports the run
   orchestrator).
-- `benchmarking/interop` — importers (SWE-bench, Inspect Evals) and exporters
-  (EvalLog, Croissant, static bundle).
+- `benchmarking/interop` — data importers such as SWE-bench and Jinn-owned
+  projections such as Matrix JSON, Croissant, and static bundles. Real Inspect
+  task selection/execution and native EvalLogs stay in a Tier 4 runtime adapter.
 - `discovery/facts/benchmarking` — the facts-profile leaf for the four new
   kinds (the designed home for kind↔discovery edges), plus the companion-
   amendment fields delivered into the task-execution facts profiles per §11.
@@ -1066,7 +1070,8 @@ Golden fixtures, authored before implementation:
   exclusion, `verdictRule` conflict, and clustering cases; a
   `benchmark-comparability` violation fixture (marginal method over
   cross-version matrices).
-- Export fixtures: EvalLog and Croissant projections of the miniature run.
+- Export fixtures: Jinn Matrix and Croissant projections of the miniature run;
+  a real runtime adapter separately validates native Inspect logs with Inspect.
 - Ordering fixture: an announcement-chain + anchor transcript exercising
   all three legs of `preregistration-precedes-dispatch` (anchored positive,
   anchored violation, and the local append-order-only case labeled as such).
@@ -1200,8 +1205,9 @@ Documents and issues only; nothing changes in code or on GitHub this session.
    no aggregates ever; missing reported missing.
 6. **Report as a fourth record kind** — signed, attributable, recomputable;
    the only always-DSSE-signed record here.
-7. **Inspect posture** — use, never compete: import / execute-with / export
-   seams; no viewer, no authoring framework.
+7. **Inspect posture** — use, never compete: select existing tasks, execute
+   through Inspect, retain its native logs, and use its viewer; no synthetic
+   EvalLog, viewer, or authoring framework.
 8. **#2038 disposition** — (revised in v0.3) let #2044/PR #2219 finish;
    close #2040/#2041/#2043/#2045 as re-homed into the stack designs;
    supersede the SDK shapes; re-derive #2047–#2054 from this spec.

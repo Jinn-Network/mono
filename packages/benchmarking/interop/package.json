@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/benchmarking-interop",
   "version": "0.1.0",
-  "description": "Importers and fixture-pinned exporters for the Jinn benchmarking application (SWE-bench, Inspect Evals, Croissant, EvalLog, static bundle).",
+  "description": "Importers and fixture-pinned exporters for the Jinn benchmarking application (SWE-bench, Croissant, Jinn Matrix projection, static bundle).",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {

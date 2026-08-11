@@ -50,7 +50,22 @@ import {
 } from "@jinn-network/task-execution-evaluator-adapters";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
+import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import { refuse } from "../errors.js";
+import {
+  buildInspectTaskProfile,
+  INSPECT_EMBEDDED_EVALUATOR_ID,
+  INSPECT_NATIVE_LOG_MEDIA_TYPE,
+  INSPECT_SUMMARY_MEDIA_TYPE,
+  INSPECT_TASK_PROFILE_URI,
+} from "../runtime/inspect/artifacts.js";
+import {
+  assertInspectSelectionUndrifted,
+  readInspectHostBinding,
+  readInspectSelectionManifest,
+} from "../runtime/inspect/host.js";
+import { makeInspectLauncher } from "../runtime/inspect/launcher.js";
+import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
   createEvaluationCellRegistry,
@@ -68,7 +83,13 @@ export { EVALUATOR_REQUIREMENT_KEY } from "./provisioner.js";
 
 export interface LocalVenueOptions {
   readonly workspaceDir: string;
+  /** Workspace containing the immutable runtime selection and its private host binding. This
+   * differs from `workspaceDir` only for rehearsals, whose venue state and keys live in an
+   * isolated scratch root while the selected runtime remains anchored in the product workspace. */
+  readonly runtimeBindingWorkspaceDir?: string;
   readonly now: () => string;
+  /** Selected evaluation runtime. Absent and `jinn-native` both preserve the original venue. */
+  readonly evaluationRuntime?: EvaluationRuntimeBinding;
   /** How many venue evaluator identities to mint (integer >= 1, default 1). See
    * `LocalVenue.evaluators` for the honesty posture of what N identities do and do not prove. */
   readonly evaluatorCount?: number;
@@ -115,6 +136,14 @@ export interface LocalVenue {
    * all on a self-run venue; this is never third-party or party-independent verification.
    */
   readonly evaluators: readonly { readonly id: string; readonly keyId: string }[];
+  /** A native run dispatches separate evaluation Tasks. Inspect produces an attributable score
+   * in the solve execution, which must never be represented as independent evaluation. */
+  readonly evaluationMode?: "separate" | "embedded";
+  readonly interpretEmbeddedEvaluation?: (
+    artifacts: readonly { readonly name: string; readonly bytes: Uint8Array }[],
+  ) =>
+    | { readonly kind: "verdict"; readonly evaluatorId: string; readonly verdictBytes: Uint8Array }
+    | { readonly kind: "could-not-grade"; readonly detail: string };
   prepareEvaluationCell(input: EvaluationCellInput): PreparedEvaluationCell;
   shutdown(): Promise<void>;
 }
@@ -134,6 +163,7 @@ interface LauncherReadiness {
   readonly detail?: string;
   readonly executable: VerifiedExecutable;
   readonly harnessVersions?: readonly string[];
+  readonly models?: readonly string[];
 }
 interface LocalLauncherDeployment {
   readonly executable: VerifiedExecutable;
@@ -330,10 +360,12 @@ export const evaluationHarnessDeployment = Object.freeze({
 function resolveTaskProfileFor(
   predictionProfile: TaskProfileDocument,
   evaluationProfile: TaskProfileDocument,
+  inspectProfile?: TaskProfileDocument,
 ): (descriptor: TaskSpecification["profile"]) => TaskProfileDocument {
   return (descriptor) => {
     if (descriptor.uri === PREDICTION_FORECAST_PROFILE_URI) return predictionProfile;
     if (descriptor.uri === EVALUATION_TASK_PROFILE_URI) return evaluationProfile;
+    if (descriptor.uri === INSPECT_TASK_PROFILE_URI && inspectProfile !== undefined) return inspectProfile;
     return refuse(
       "execution",
       "task.profile.uri",
@@ -344,6 +376,17 @@ function resolveTaskProfileFor(
 
 export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const { workspaceDir } = options;
+  const runtimeBindingWorkspaceDir = options.runtimeBindingWorkspaceDir ?? workspaceDir;
+  const runtimeId = options.evaluationRuntime?.adapterId ?? "jinn-native";
+  if (runtimeId !== "jinn-native" && runtimeId !== INSPECT_ADAPTER_ID) {
+    refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
+  }
+  const inspectSelection = runtimeId === INSPECT_ADAPTER_ID
+    ? readInspectSelectionManifest(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    : undefined;
+  const inspectHost = runtimeId === INSPECT_ADAPTER_ID
+    ? readInspectHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    : undefined;
 
   if (
     options.solveStartDelayMsForTesting !== undefined
@@ -362,9 +405,19 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   if (!Number.isSafeInteger(evaluatorCount) || evaluatorCount < 1) {
     refuse("validation", "evaluatorCount", "evaluatorCount must be an integer >= 1");
   }
+  if (inspectSelection !== undefined && evaluatorCount !== 1) {
+    refuse(
+      "validation",
+      "evaluatorCount",
+      "the Inspect adapter exposes one same-execution scorer identity and cannot satisfy a distinct-evaluator quorum",
+    );
+  }
+  const evaluatorIdentities = inspectSelection === undefined
+    ? Array.from({ length: evaluatorCount }, (_, i) => ({ id: evaluatorIri(i + 1) }))
+    : [{ id: INSPECT_EMBEDDED_EVALUATOR_ID }];
   const signingKeys = loadOrCreateEvaluatorSigningKeys(
     workspaceDir,
-    Array.from({ length: evaluatorCount }, (_, i) => ({ id: evaluatorIri(i + 1) })),
+    evaluatorIdentities,
   );
   const evaluators = signingKeys.map(({ id, key }, index) => ({
     id,
@@ -379,10 +432,21 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     ...(options.evaluationContextVariationForTesting === undefined
       ? {}
       : { evaluationContextVariationForTesting: options.evaluationContextVariationForTesting }),
+    ...(inspectSelection === undefined || inspectHost === undefined
+      ? {}
+      : {
+        inspect: {
+          selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
+          manifest: inspectSelection,
+          host: inspectHost,
+          evaluator: evaluators[0]!,
+        },
+      }),
   });
 
   const predictionProfile = buildPredictionForecastProfile();
   const evaluationProfile = buildEvaluationTaskProfile();
+  const inspectProfile = inspectSelection === undefined ? undefined : buildInspectTaskProfile();
   const sealedEvaluationProfile = sealTaskProfile(evaluationProfile);
   const profileStore: ProfileStore = {
     get(digest) {
@@ -398,6 +462,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     makeSampleUniformLauncher(),
     options.solveStartDelayMsForTesting,
   );
+  const inspectLauncher = inspectSelection === undefined || inspectHost === undefined
+    ? undefined
+    : makeInspectLauncher({ pythonPath: inspectHost.pythonPath, manifest: inspectSelection });
 
   // One prediction registration per evaluator identity, id-matched with the generated deployment
   // module (the spawned harness selects by exact registration id). The factory hardcodes the
@@ -481,7 +548,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     extractInlineRunnerSource(sampleLauncher, SAMPLE_UNIFORM_LAUNCHER_ID, predictionProfile),
   ));
 
-  const launcherDeployments: Readonly<Record<string, LocalLauncherDeployment>> = {
+  const launcherDeployments: Record<string, LocalLauncherDeployment> = {
     [baselineLauncher.id]: {
       executable: { path: process.execPath, digest: baselineDigest },
       async probe() {
@@ -513,12 +580,41 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       },
     },
   };
+  if (inspectLauncher !== undefined && inspectSelection !== undefined && inspectHost !== undefined) {
+    const selectionManifestSha256 = options.evaluationRuntime!.selectionManifestSha256;
+    launcherDeployments[inspectLauncher.id] = {
+      executable: {
+        path: inspectHost.pythonPath,
+        digest: inspectSelection.runtime.pythonExecutableSha256,
+      },
+      async probe() {
+        await assertInspectSelectionUndrifted(runtimeBindingWorkspaceDir, selectionManifestSha256);
+        return {
+          ready: true,
+          executable: {
+            path: inspectHost.pythonPath,
+            digest: inspectSelection.runtime.pythonExecutableSha256,
+          },
+          harnessVersions: [inspectSelection.runtime.inspectVersion],
+          models: inspectSelection.arms.map((arm) => arm.model),
+        };
+      },
+    };
+  }
 
   const provisionerCapabilities: ProvisionerCapabilities = {
-    taskProfiles: [PREDICTION_FORECAST_PROFILE_URI, EVALUATION_TASK_PROFILE_URI],
+    taskProfiles: [
+      PREDICTION_FORECAST_PROFILE_URI,
+      EVALUATION_TASK_PROFILE_URI,
+      ...(inspectProfile === undefined ? [] : [INSPECT_TASK_PROFILE_URI]),
+    ],
     workspaceKinds: ["dir"],
     inputMediaTypes: ["application/json", "text/plain"],
-    outputMediaTypes: ["application/json", "application/vnd.in-toto+json"],
+    outputMediaTypes: [
+      "application/json",
+      "application/vnd.in-toto+json",
+      ...(inspectProfile === undefined ? [] : [INSPECT_NATIVE_LOG_MEDIA_TYPE, INSPECT_SUMMARY_MEDIA_TYPE]),
+    ],
     isolation: ["process"],
   };
 
@@ -527,8 +623,13 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     source: "urn:jinn:benchmark-product:local-venue",
     executor: "urn:jinn:benchmark-product:local-venue:executor",
     profileStore,
-    resolveTaskProfile: resolveTaskProfileFor(predictionProfile, evaluationProfile),
-    launchers: [baselineLauncher, sampleLauncher, evaluationLauncher],
+    resolveTaskProfile: resolveTaskProfileFor(predictionProfile, evaluationProfile, inspectProfile),
+    launchers: [
+      baselineLauncher,
+      sampleLauncher,
+      evaluationLauncher,
+      ...(inspectLauncher === undefined ? [] : [inspectLauncher]),
+    ],
     launcherDeployments,
     provisioner,
     provisionerCapabilities,
@@ -596,6 +697,45 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     },
     verdictKeyId: evaluators[0]!.keyId,
     evaluators: evaluators.map(({ id, keyId }) => ({ id, keyId })),
+    evaluationMode: inspectSelection === undefined ? "separate" : "embedded",
+    ...(inspectSelection === undefined
+      ? {}
+      : {
+        interpretEmbeddedEvaluation(
+          artifacts: readonly { readonly name: string; readonly bytes: Uint8Array }[],
+        ) {
+          const summaryArtifact = artifacts.find((artifact) => artifact.name === "inspect-summary");
+          if (summaryArtifact === undefined) {
+            return { kind: "could-not-grade" as const, detail: "Inspect summary artifact is absent" };
+          }
+          let summary: { terminal?: unknown; inspectStatus?: unknown };
+          try {
+            summary = JSON.parse(
+              new TextDecoder("utf8", { fatal: true }).decode(summaryArtifact.bytes),
+            ) as typeof summary;
+          } catch {
+            return { kind: "could-not-grade" as const, detail: "Inspect summary artifact is invalid" };
+          }
+          if (summary.terminal !== "scored") {
+            return {
+              kind: "could-not-grade" as const,
+              detail: `Inspect execution was unscorable (${String(summary.inspectStatus ?? "unknown")})`,
+            };
+          }
+          const verdict = artifacts.find((artifact) => artifact.name === "verdict");
+          if (verdict === undefined) {
+            return {
+              kind: "could-not-grade" as const,
+              detail: "Inspect scored execution has no attributable verdict",
+            };
+          }
+          return {
+            kind: "verdict" as const,
+            evaluatorId: INSPECT_EMBEDDED_EVALUATOR_ID,
+            verdictBytes: verdict.bytes,
+          };
+        },
+      }),
     prepareEvaluationCell,
     async shutdown() {
       await backend.shutdown();

@@ -1,0 +1,102 @@
+{
+  "format": "jinn.inspect-runtime-proof/1",
+  "date": "2026-08-10",
+  "source": {
+    "branch": "codex/inspect-runtime-adapter",
+    "baseCommit": "37de4ba33513eb6e728c591a3bf14651c08477f6",
+    "workingTree": "uncommitted implementation snapshot",
+    "trackedDiffSha256": "64c93e7dc63028b7957df4e4ff368f4addfb238343e62f2646162ee1cfeef5c1",
+    "untrackedFileManifestSha256": "0d22b1d2e44a731df7d023bfd730f2f4956df26fe5039535b82870705c01d67e"
+  },
+  "runtime": {
+    "node": "22.23.1",
+    "python": "3.11.0",
+    "inspectAi": "0.3.255"
+  },
+  "experiment": {
+    "execution": "manual built CLI lifecycle",
+    "taskReference": "packages/benchmark-product/core/test/fixtures/inspect-project/hermetic_eval.py@hermetic_eval",
+    "model": "mockllm/model",
+    "scorer": "match",
+    "arms": [
+      "control",
+      "candidate"
+    ],
+    "repetitionsPerArm": 2,
+    "expectedCells": 4,
+    "judgedCells": 4,
+    "samplesReadByInspect": 8,
+    "network": "not required",
+    "credentials": "none"
+  },
+  "records": {
+    "selectionManifestSha256": "9d1a3bd19efb1e48f58570da8f2a30f6913b4a1a522e04fea23b389967273bda",
+    "benchmarkSha256": "a540b8edda5d455e94a10db824033046af38f253b0d6e48255811e17329ee114",
+    "taskSha256": "41c22d2112b4e7b8862faa34683516a9c82730e717c694ee338ac5e2ac3abefa",
+    "evaluationSpecSha256": "088e64ec3bfb61b4a77fe2deda3bb536d517e96299a144d53fb6843a4cffa4bc",
+    "runSha256": "f9b2ab22825e384e8dabeffd920f3885586510a39bade16859f1dba805625511",
+    "matrixSha256": "81075baacb6b69f2ddb727de38fba004d6adc622a1ed560729eeec812ee5fc86",
+    "reportSha256": "a2ad26617832d49b576207f1d0865b822864e5e29a3b4993f1351181c4b2a136",
+    "reportEnvelopeSha256": "977569c2b341f1ae3dacdf6390c11e5ec3f4457e6e836000457d0c1e28d97761",
+    "bundleManifestSha256": "d5851073580eecd5c05e1fcdd3887aa88dad61c51335a55fc5195629fe8d7365"
+  },
+  "nativeLogs": [
+    {
+      "sha256": "3d433258716de2b0e963fbb6b8c25351839266a3300a296bee2fa2d031600109",
+      "bytes": 7006
+    },
+    {
+      "sha256": "6f6b3dba458ce50a1d48559f875055a5a6284e92ae1379b50da09b475b873941",
+      "bytes": 7002
+    },
+    {
+      "sha256": "dac91de0a98f10bd568effe08bd27d11f60f62439efed5e87b387a2ba6a383c8",
+      "bytes": 7000
+    },
+    {
+      "sha256": "edafd27d52a1d99ac2f3e92be6235134a8ff745830d7ceb3f354ce1fd81c30dc",
+      "bytes": 6998
+    }
+  ],
+  "verification": {
+    "manualLifecycle": "pass",
+    "previewExcludedFromOfficialResults": "pass",
+    "bundleVerifyAfterOriginPathRemoval": {
+      "status": "pass",
+      "checks": [
+        "manifest",
+        "evidence-closure",
+        "trust",
+        "matrix-rederivation",
+        "report-verification",
+        "claim-consistency"
+      ]
+    },
+    "officialInspectReadEvalLog": {
+      "status": "pass",
+      "logs": 4,
+      "samples": 8
+    },
+    "officialInspectViewBundle": {
+      "status": "pass",
+      "generatedFiles": 22,
+      "retained": false
+    },
+    "secretAndPathScan": {
+      "status": "pass",
+      "filesScanned": 43,
+      "findings": 0
+    },
+    "nativeLogByteTamper": {
+      "status": "pass",
+      "expectedResult": "portable verifier rejected the digest mismatch"
+    }
+  },
+  "limitations": [
+    "The model is Inspect's credential-free mock provider, not an external model.",
+    "The run does not exercise ChatGPT or Codex subscription authentication.",
+    "Inspect scoring occurred in the same execution and is not independent evaluation.",
+    "The self-run venue does not prove independence from the operator.",
+    "The source snapshot was uncommitted; the portable evidence is content-addressed, but the source-state fingerprints are informational rather than a signed source attestation."
+  ]
+}

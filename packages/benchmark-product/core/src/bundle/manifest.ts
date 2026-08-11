@@ -14,7 +14,7 @@ import { z } from "zod";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 
-export const BUNDLE_FORMAT = "benchmark-product-public-bundle/1" as const;
+export const BUNDLE_FORMAT = "benchmark-product-public-bundle/2" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
