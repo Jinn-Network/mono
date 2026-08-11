@@ -1,18 +1,29 @@
 # E1 — Comparison Frame and Citation Map
 
-**Version:** 0.2 (draft for operator decision; folds in C1's pinning recon)
-**Date:** 2026-08-11
+**Version:** 0.3 (operator-approved frame; folds in C1's pinning recon and the ratified credibility upgrades)
+**Date:** 2026-08-12
 **Author:** E1 method-stream agent
 **Program:** `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` (Stage 2, packet E1)
-**Status:** Draft. Part 2 is a recommendation, not a decision. The operator (Ritsu) chooses the frame; nothing here is locked.
+**Status:** **Frame approved by the operator (Ritsu).** Nothing is locked — the lock happens at the sealed Run record, after E2's power numbers and E3's red-team register close. One open operator question remains (§2.8).
 
 ---
 
 ## 0. What this document is for
 
-Demo Report #1 is the product's first published benchmark. Its motivation section has to be real: there must be a live public argument the report speaks into, and the report has to close a gap that is actually open. Part 1 establishes both with verified sources. Part 2 proposes the comparison design that closes the gap at the lowest blast radius, and records the alternative honestly.
+Demo Report #1 is the product's first published benchmark. Its motivation section has to be real: there must be a live public argument the report speaks into, and the report has to close a gap that is actually open. Part 1 establishes both with verified sources. Part 2 records the approved comparison design, and keeps the rejected alternatives on the page so the choice stays auditable.
 
 Two things this document does not do. It does not design engineering (that is R1–R5 and P1–P5). It does not choose statistics (that is C3/R4 — every number in the report comes from a named `BENCHMARKING_METHOD_REGISTRY` method, and this document proposes no estimator).
+
+### 0.1 Operator decisions (approved)
+
+| Question | Decision |
+|---|---|
+| **Frame** | **Mechanism vs mechanism** — same agent, same bytes, delivery varied. The higher-pull public-skill on/off alternative is declined for this report and stays available as a second report (§2.6). |
+| **Arm count** | **Three arms.** Arm C is the manipulation check (§2.2). The two-arm fallback is not taken. |
+| **Content artifact** | **`anthropics/skills`** (Apache-2.0 verified; the four source-available document skills excluded). The SWE-Skills-Bench upgrade path stays blocked on independent verification (§2.3). |
+| **Public pre-registration (E4)** | **Committed**, conditional on the P5 e2e gate being green (§2.10). |
+
+Still open: publication framing (§2.8). Decided empirically before lock, not by fiat: arm C's pinning mechanics (§2.4).
 
 ---
 
@@ -56,6 +67,7 @@ The mechanism difference that matters for this A/B is one sentence, and it is do
 | [When Skills Don't Help: A Negative Result on Procedural Knowledge for Tool-Grounded Agents in Offensive Cybersecurity](https://arxiv.org/abs/2605.20023) — Chacko, Hugglestone, Islam, Liu; 19 May 2026 (v2 24 May) | Four documentation richness conditions (591–36,001 tokens) on a CTF agent. | Margin between no-skill and richest-skill was **8.9 pp, p = 0.71**. Proposes "environment-feedback bandwidth" as the explanation. |
 | [Harness Engineering for Agentic AI Coding Tools: An Exploratory Study](https://arxiv.org/abs/2602.14690) — Galster, Mohsenimofidi, Lulla, Abubakar, Treude, Baltes; 16 Feb 2026 (v5 30 Jun 2026) | Adoption study across 2,853 GitHub repositories; eight configuration mechanisms. | **Context files dominate** and are often the sole mechanism, with **AGENTS.md emerging as the interoperable standard**; **few repositories adopt Skills**, and adopted skills mostly carry static instructions rather than executable scripts. |
 | [From Anatomy to Smells: An Empirical Study of SKILL.md in Agent Skills](https://arxiv.org/abs/2607.01456) — Hong, Imani, Ahmed; 1 Jul 2026 | 238 real-world skills; taxonomy of 13 higher-level and 44 lower-level components; "skill smells" from a 29-source multivocal review. | **Over 99% of SKILL.md files contain at least one skill smell**, and smells rarely disappear as skills evolve. |
+| [Claw-SWE-Bench: A Benchmark for Evaluating OpenClaw-style Agent Harnesses on Coding Tasks](https://arxiv.org/abs/2606.12344) — Zheng, Han, Li, Xu, Tian, He et al.; 10 Jun 2026 | 350 issue-resolution instances, 8 languages, 43 repos; sweeps of model × harness under a fixed prompt, runtime budget, workspace contract, patch extraction, and evaluator. | **Harness choice alone moves Pass@1 by 27.4 pp at fixed model** (model choice moves it 29.4 pp). More starkly: the same GLM 5.1 backbone scores **19.1% with a minimal adapter and 73.4% with the full adapter**. Not about skills — cited as the magnitude context for why harness must be held byte-constant across arms (§2.5). |
 
 Note the shape of the literature. Every controlled study varies **whether instruction content is present**. None varies **how the same content is delivered**. The two AGENTS.md papers disagree with each other on whether context files help at all, and the skill studies range from +27pp (Tessl, one task) to +1.2% average (SWE-Skills-Bench, 565 instances). The adoption paper shows the mechanism practitioners actually use is the one with the weakest published support.
 
@@ -95,7 +107,7 @@ Sources seen in search results but **not fetched, and therefore not cited**: HAN
 
 # Part 2 — Comparison-design draft (for operator approval)
 
-## 2.1 Recommended frame: mechanism versus mechanism
+## 2.1 Approved frame: mechanism versus mechanism
 
 **Same agent. Same model. Same effort. Same tasks. Same instruction bytes. Only the delivery mechanism differs.**
 
@@ -103,25 +115,36 @@ Sources seen in search results but **not fetched, and therefore not cited**: HAN
 |---|---|---|
 | **A — skill** | `SKILL.md` in the skills directory, loaded through the standard progressive-disclosure path | Name + description always in context; body enters context only on model-initiated activation |
 | **B — flat** | `AGENTS.md` at repository root | Body always in context, in full, every turn |
-| **C — neither** | No instruction file, but an **explicit empty loadout** is pinned — a digest over a zero-byte file — so the arm is pinned rather than unpinned (§2.4) | Nothing |
+| **C — neither** | No instruction content. Whether the arm is pinned as an explicit empty loadout or left unpinned is an **empirical pre-lock decision** (§2.4), because an empty loadout still materializes a file | Nothing |
 
 The measured quantity is the effect of the *delivery mechanism*, with content held byte-identical. This is exactly the contrast the public argument needs and exactly the one no published work supplies.
 
-## 2.2 Arms: recommend three, not two
+## 2.2 Arms: three, approved
 
-**Recommendation: 3 arms.** Arm C is not optional insurance; it is the load-bearing control.
+**Three arms.** Arm C is not optional insurance; it is the load-bearing control.
 
 Without C, an A-versus-B null is uninterpretable. "No difference between packagings" is equally consistent with *packaging does not matter* and with *this particular content does nothing, so of course its packaging does not matter*. The literature makes the second reading the **more likely prior**, not a remote one: SWE-Skills-Bench found 39 of 49 skills produced zero improvement, and the ETH Zurich AGENTS.md study found context files did not generally help. Publishing an A-versus-B null without a manipulation check would be publishing an uninterpretable number, and a hostile reader would say so immediately.
 
-**Cost.** Cells scale as `arms × tasks × replicates`. Three arms is 1.5× the cells of two — with a 30-task slate at 5 replicates, 450 container-graded cells instead of 300. That is real compute on the highest-variance seam in the program (P3, container grading). The operator should price this against the alternative, which is a report whose headline cannot be defended.
+**Cost, accepted.** Cells scale as `arms × tasks × replicates`. Three arms is 1.5× the cells of two — with a 30-task slate at 5 replicates, 450 container-graded cells instead of 300. That is real compute on the highest-variance seam in the program (P3, container grading). The operator has accepted it; the two-arm fallback (a pre-run content-efficacy screen on a disposable preview slate) is **not** taken and is recorded here only so the rejected option stays visible.
 
-**Proposed contrast structure, to be pre-registered before lock:**
+**Contrast structure, to be pre-registered before lock:**
 
 - **Primary contrast: A vs B**, paired by task. This is the report's headline. E2 powers this one and declares its MDE.
 - **Secondary contrast (manipulation check): (A ∪ B) vs C.** Establishes that the content has any detectable effect at all.
 - **Pre-declared decision rule:** if the manipulation check fails — the content shows no detectable effect over C — then the A-vs-B result is reported as *uninformative about the mechanism, because the content had no detectable effect to deliver*. This rule is declared before the run, not chosen after seeing results. It is the difference between an honest null and a denominator game.
 
-**If the operator declines the third arm on cost:** the fallback is 2 arms plus a *pre-run* content-efficacy screen on a small disposable preview slate (disclosed as a rehearsal per §7.2), used only to decide whether the content qualifies for the official run. This is weaker — the screen is not part of the sealed run and cannot appear as a result — but it preserves interpretability at lower official-cell cost. Recorded as the fallback, not the recommendation.
+### 2.2.1 MDE anchoring: the null must be informative against the claims in circulation
+
+E2 computes the numbers; this document fixes the **principle** they are computed against.
+
+**The pre-declared minimum detectable effect is anchored to the effect sizes the live public debate actually claims** — roughly **20–26 percentage points**, taken from the numbers already in circulation: Vercel's skill-with-explicit-instructions arm at 79% against its AGENTS.md arm at 100% (21 pp), and its default-skill arm at 53% against the same (47 pp, with the 20–26 pp band the conservative read across their configurations). The Presentation Granularity study's skill-availability effects of 18–36 pp sit in the same range.
+
+Why anchor there rather than at whatever the compute budget happens to buy: **a null is only worth publishing if it rules something out.** If the design is powered to detect 25 pp and finds nothing, the report can say — precisely, and in the debate's own units — *the mechanism does not produce effects of the size being claimed for it*. That is a real contribution. If the design were powered only to 5 pp, a null would say almost nothing, and if it were powered to 60 pp, a null would be vacuous against every claim on the table.
+
+Two disciplines follow, both pre-registered:
+
+- **The MDE is printed in the report**, and an underpowered null is stated as "we cannot detect effects smaller than X" — never quietly reframed as "no effect" (program E2 constraint).
+- **The anchor is declared before the run and not moved afterward.** If E2's variance estimates show the accepted cell budget cannot reach the anchored MDE, that is surfaced as a design problem to solve before lock — by adding replicates or narrowing the slate — not resolved by lowering the bar after the fact.
 
 ## 2.3 Instruction content: candidates, with license verification
 
@@ -139,7 +162,7 @@ Requirements the content must satisfy:
 | **C1 (preferred upgrade, blocked) — a skill from the 49-skill SWE-Skills-Bench set** | **Unverified. Artifact repository returned 404 (§1.7).** | Strongest option on the merits: third-party authored, domain-matched, and already measured on/off in published work — so the "does this content do anything" prior is partly known, and we could deliberately select from the seven skills the paper reports as producing meaningful gains, which are the only ones where a mechanism contrast is measurable at all. **Blocked until availability and license verify.** Do not adopt on the strength of the paper alone. |
 | **C3 (not recommended) — content derived from the target repositories' own public docs** | Per-repository OSS licenses; heterogeneous. | Highest ecological validity — this is what real AGENTS.md files contain — but the worst risk profile. Leakage risk is highest (a repo's own docs may touch the very issue under test), licensing is per-repo rather than uniform, and if we generate or summarize the content ourselves we inherit exactly the confound the ETH Zurich study identified with LLM-generated context files, while losing "public and licensed." |
 
-**Recommendation: C2 as the default, with C1 as a documented upgrade if and only if its availability and license verify independently.** Whichever is chosen, the specific artifact, its upstream URL, its commit or version, its license, and its sha256 go into the Benchmark record before lock.
+**Approved: C2** — a skill from `anthropics/skills`, Apache-2.0, with the four source-available document skills excluded. C1 remains a documented upgrade path **if and only if** its availability and license verify independently (the artifact repo returned 404 at verification, §1.7); it is not adopted on the strength of the paper alone. The specific artifact, its upstream URL, its commit or version, its license, and its sha256 go into the Benchmark record before lock.
 
 ## 2.4 Content identity: how it is guaranteed and how a reader audits it
 
@@ -161,9 +184,22 @@ The draft of this document flagged an open risk: that arm A's skill could pin `e
 
 - **Arms A and B pin on the same axis, with the same verification.** Arm B's flat `AGENTS.md` fits the `jinn.skill.v1` loadout kind's single-file shape exactly, so both arms materialize through the identical digest-verified path — `materializeLoadout` at `packages/task-execution/backend-local/workspace/src/materialize.ts:112-124`, which for the `jinn.skill.v1` branch writes a single file at the pin's `name` via `materializeAt`, and `materializeAt` refuses on a sha256 mismatch (`ContentCorruptionError`, same file line 37). Both arms therefore reach `enforced` / `match` on one loadout axis, differing only in digest. The pin shape itself is `{kind, name, digest}` — `packages/task-execution/backend-local/workspace/src/loadout.ts` (`LOADOUT_KINDS`, `canonicalLoadoutPin`).
 - **Two product-side mechanics make it work**, both on existing precedent and requiring no platform change: placement into the work directory rather than the sealed input directory, and a venue launcher wrapper that drops the `--plugin-dir` argument for the flat-file arm so arm B is not silently handed the skill-loading path.
-- **Arm C pins an explicit empty loadout** — a digest over a zero-byte file — rather than running unpinned. An unpinned arm locks fine, but publishes `unverifiable` on the loadout axis in the report's honesty block. Pinning empty instead makes **all three arms reach `match` on the loadout axis, with `unverifiableAxisCounts.loadout` = 0**. That is a strictly stronger claim surface for the same run, and it is why arm C's row in §2.1 says "explicit empty loadout" rather than "no pin."
+**Arm C is the one mechanic that is decided empirically, not by fiat.**
 
-**Rejected alternative, recorded:** running the comparison with disclosed asymmetric pinning — arm A enforced, arm B attested, arm C unpinned — and naming the asymmetry in the limitations. This was the fallback while the seam was open. It is now rejected on the merits: symmetric enforcement is achievable with existing precedent, so accepting a disclosed wart would be choosing a weaker report for no saving.
+The tempting move is to pin arm C as an explicit empty loadout — a digest over a zero-byte file — so that all three arms reach `match` and the report can publish `unverifiableAxisCounts.loadout` = 0. That is a stronger *claim surface*.
+
+**The red team found the catch: an empty loadout still materializes a file.** Arm C would then not be "no instructions" — it would be "a zero-byte file present in the work directory." That is a different condition from the true no-file baseline the manipulation check needs, and the difference is exactly the kind a hostile reader would find. Buying a cleaner pinning number at the cost of baseline validity would be a bad trade, and making the choice by fiat here would be asserting behavioral equivalence we have not measured.
+
+**So the decision is deferred to evidence, and taken before lock:**
+
+- **E2's previews measure whether the empty-loadout arm is behaviorally identical to a true no-file run.** Previews are disclosed rehearsals either way (§7.2).
+- **If identity holds:** pin the explicit empty loadout. All three arms reach `match`; `unverifiableAxisCounts.loadout` = 0.
+- **If it does not:** run arm C unpinned and publish the `unverifiable` loadout count honestly in the report's disclosures.
+- **Either outcome is disclosed** — including the evidence that drove it. The report states which arm-C mechanic was used and why, rather than presenting the favorable one as though it were the only option.
+
+This keeps the pinning claim subordinate to the baseline's validity, which is the correct ordering: arm C exists to make the A-vs-B result interpretable (§2.2), and a compromised baseline defeats that purpose no matter how clean its pin looks.
+
+**Rejected alternative, recorded:** running the comparison with disclosed asymmetric pinning — arm A enforced, arm B attested — and naming the asymmetry in the limitations. This was the fallback while the arm-A/arm-B seam was open. It is now rejected on the merits for arms A and B: symmetric enforcement is achievable on existing precedent, so accepting a disclosed wart there would be choosing a weaker report for no saving. Note this is a separate question from arm C's mechanics above, which remains genuinely open pending evidence.
 
 Verification note: the path C1 reported omitted the `backend-local` segment; the file is at `packages/task-execution/backend-local/workspace/src/materialize.ts`, and the cited line range and digest-refusal behavior were confirmed there directly.
 
@@ -184,7 +220,9 @@ The report's claim is then bounded honestly: *we measure the skill mechanism as 
 
 Agent (claude-code launcher), model, **effort (held constant, disclosed as attested-not-graded per the program's global constraints)**, harness version, task slate, container grader, retry and exclusion policy, replicate count. Enforced pins wherever the local venue can enforce; per-axis pinning status published in the report's disclosures rather than assumed (design §7.1, §7.3).
 
-**The loadout axis is the one the A/B varies, and per C1's recon it reaches `match` on all three arms** — arm A's skill digest, arm B's `AGENTS.md` digest, arm C's zero-byte digest — so the report can publish `unverifiableAxisCounts.loadout` = 0 (§2.4). Every other axis above is held rather than varied.
+**The loadout axis is the one the A/B varies.** Per C1's recon, arms A and B both reach `enforced` / `match` on it — arm A's skill digest, arm B's `AGENTS.md` digest. Whether arm C also reaches `match` (explicit empty loadout) or publishes an `unverifiable` count depends on the pre-lock evidence in §2.4. Every other axis above is held rather than varied.
+
+**Harness is held byte-constant across arms, and this is load-bearing rather than housekeeping.** Claw-SWE-Bench measured harness choice alone moving Pass@1 by 27.4 pp at fixed model, and adapter design alone moving it from 19.1% to 73.4% on the same backbone (§1.4). Those swings dwarf any plausible packaging effect, so any harness drift between arms would not merely add noise — it would dominate the result. Harness version pins `enforced`; drift between arms is a lock-invalidating condition, not a limitation to disclose after the fact.
 
 Exclusion and infra-failure retry rules are proposed by R5 **before anyone sees per-task results** and are part of the lock.
 
@@ -219,21 +257,35 @@ Every line below is a limitation the report carries, not a caveat to be trimmed 
 - **Not** generalizable below the declared MDE. An underpowered null is reported as "we cannot detect effects smaller than X" and never quietly reframed as "no effect" (E2).
 - **Not** rehearsal-free. Every preview is logged, counted, and disclosed in the limitations (§7.2).
 - **Not** re-derivable at the Matrix integrity tier. SWE-shaped tasks mint no admission receipt today, so the Matrix integrity tier on those tasks is **`attested-only`, never `re-derivable`** (C1 recon). Engineering will **disclose this for demo 1, not fix it** — so the report states it as a limitation rather than implying a stronger integrity tier than the run has.
+- **Not** disinterested. **Conflict-of-interest statement, printed plainly in the limitations:** the contributors who designed and ran this benchmark operate the venue it ran on, and the agent under test is made by the same vendor whose skill mechanism is one of the two arms. We hold no position that a particular arm should win, and the design's content-identity construction (§2.4) is what makes that claim checkable rather than a promise. Attribution is role-only per the repo's external-communication rules; no named contributors.
+- **Not** a multi-harness result. **Single-harness scope:** every cell runs the claude-code harness. Generalization to other harnesses is **unknown, not assumed** — and Claw-SWE-Bench's 27.4 pp harness-choice swing (§1.4) is the reason that line is a real limitation rather than boilerplate.
+- **Not** silent about non-completions. **Per-arm timeout counts and per-arm retry counts are published**, not just aggregate pass rates. **Timeouts count as FAIL**, declared before the run — not dropped, not treated as missing data, not reclassified after seeing which arm they landed in.
+- **Not** seed-shopped. The **bootstrap seed is bound at lock** and published with the report, so the interval is reproducible rather than one draw among many.
 - **Not** a novelty claim that survives the SkillJuror verification item (§1.5). If E3 finds SkillJuror's flat baseline is an always-on context file, this report is a replication and says so.
 
-## 2.8 Open questions only the operator can answer
+## 2.8 Open question
 
-Four remain. A fifth — whether a disclosed asymmetric-pinning run would be acceptable — is **withdrawn**: C1's recon showed symmetric enforcement is achievable for all three arms on existing precedent, so §2.4 now carries a recommendation rather than a question.
+One remains. Frame, arm count, and content artifact are decided (§0.1). The pinning-asymmetry question is withdrawn — C1's recon showed symmetric enforcement is achievable for arms A and B, so §2.4 carries a finding there rather than a question; arm C's mechanics are now settled by evidence before lock rather than by the operator.
 
-1. **Frame.** Approve mechanism-versus-mechanism as recommended, or take the higher-pull public-skill on/off alternative (§2.6)?
-2. **Arm count.** Three arms at 1.5× cells, or two arms plus a disposable pre-run content screen (§2.2)? This is a compute-budget call against headline defensibility.
-3. **Content artifact.** Accept C2 (Anthropic public skills, Apache-2.0, verified) as the default, and authorize C1 (SWE-Skills-Bench set) as an upgrade conditional on independent license and availability verification (§2.3)?
-4. **Publication framing.** Name the Vercel post and the Hacker News objection in the report's motivation, or motivate the gap generically (§2.6)? Deferrable to E5.
+1. **Publication framing.** Name the Vercel post and the Hacker News objection directly in the report's motivation, or motivate the gap generically (§2.6)? Deferrable to E5.
+
+   Note this question has **narrowed** since v0.1. The MDE anchoring in §2.2.1 takes its 20–26 pp band from Vercel's published numbers, so the method section cites them regardless. What remains is a question of *prominence and tone* — whether the report leads with "the controlled version of the comparison Vercel ran," or cites the numbers in the method and motivates the gap generically — not whether Vercel is named at all.
 
 ## 2.9 Handoffs
 
-- **To E2 (power):** primary contrast is A vs B paired by task; secondary is (A ∪ B) vs C. Size both. Declare the A-vs-B MDE before the official run and print it in the report.
-- **To E3 (red team):** two verification items are already open. (a) Resolve SkillJuror's "normalized flat baseline" definition (§1.5) — the novelty claim depends on it. (b) Verify the SWE-Skills-Bench artifact availability and license if C1 is pursued (§1.7, §2.3). E3 additionally owns leakage in the chosen content and description-wording freedom (§2.4). The pinning asymmetry is **closed** (§2.4) and no longer an E3 item; the `attested-only` Matrix integrity tier on SWE-shaped tasks (§2.7) is a disclosure item, not a defect to attack.
-- **To P2 (launcher arm wiring):** the acceptance criterion is now specific rather than open — all three arms pin `enforced` on one `jinn.skill.v1` loadout axis (arm A skill, arm B flat `AGENTS.md`, arm C zero-byte), with `unverifiableAxisCounts.loadout` = 0. The two product-side mechanics C1 identified — work-dir placement, and a venue launcher wrapper dropping `--plugin-dir` for the flat-file arm — are implementation items on existing precedent, no platform change (§2.4).
+- **To E2 (power):** primary contrast is A vs B paired by task; secondary is (A ∪ B) vs C. Size both. **Anchor the MDE to the 20–26 pp band per §2.2.1** and print it in the report; if the accepted cell budget cannot reach it, surface that before lock rather than lowering the anchor. E2 additionally owns one new empirical item: **measure whether an explicit empty loadout is behaviorally identical to a true no-file run**, which decides arm C's pinning mechanic (§2.4). Bind and publish the bootstrap seed at lock (§2.7).
+- **To E3 (red team):** two verification items are already open. (a) Resolve SkillJuror's "normalized flat baseline" definition (§1.5) — the novelty claim depends on it. (b) Verify the SWE-Skills-Bench artifact availability and license if C1 is pursued (§1.7, §2.3). E3 additionally owns leakage in the chosen content and description-wording freedom (§2.4). The arm-A/arm-B pinning asymmetry is **closed** (§2.4) and no longer an E3 item; the `attested-only` Matrix integrity tier (§2.7) is a disclosure item, not a defect to attack. **Credit where due:** the empty-loadout-materializes-a-file finding is E3's, and it is why §2.4's arm-C mechanic is evidence-driven rather than asserted.
+- **To P2 (launcher arm wiring):** the acceptance criterion is specific for arms A and B — both pin `enforced` on one `jinn.skill.v1` loadout axis (arm A skill, arm B flat `AGENTS.md`). The two product-side mechanics C1 identified — work-dir placement, and a venue launcher wrapper dropping `--plugin-dir` for the flat-file arm — are implementation items on existing precedent, no platform change. Arm C's pin depends on E2's evidence (§2.4), so build for both outcomes. **Harness version pins `enforced` and must not drift between arms** (§2.5).
 - **To R5:** the slate must be domain-compatible with the chosen content artifact, or the manipulation check fails by construction (§2.3).
-- **To C3/R4:** no estimator is proposed here. Every number comes from a named registry method.
+- **To C3/R4:** no estimator is proposed here. Every number comes from a named registry method. The registry method must support the recomputability commitment in §2.10.
+- **To E5 (publication):** the claim package ships the one-command recomputation recipe (§2.10), the COI statement, the single-harness scope line, per-arm timeout and retry counts, and the bootstrap seed (§2.7).
+
+## 2.10 Published commitments
+
+Two commitments that raise the report above a self-published number. Both are approved; neither is optional at publication.
+
+**Public pre-registration (E4) — committed, conditional on the P5 e2e gate being green.** Before the official run, we publish: the **locked method summary**, the **Run record digest**, and the **frozen grader program digest**. The grader digest matters as much as the method: pre-registering the method while leaving the grader mutable would leave the outcome definition adjustable after the fact, which is the loophole a careful reader checks for. Publishing all three before any official cell executes is what converts the local venue's structurally weak pre-registration (§7.1 — leg (a) structural and leg (c) append-order only, **no guarantee against the run owner**) into something a third party can actually hold us to. The conditionality is deliberate and is itself disclosed: we do not pre-register a run the pipeline cannot yet complete. If infrastructure trouble hits after pre-registration anyway, it is accounted for honestly in `runOutcome` rather than quietly re-run.
+
+**Third-party recomputability — a headline deliverable, not a footnote.** Every number in the report must be recomputable from the published bundle using the published verifier, by someone who does not trust us and does not run our product. The claim package ships the **one-command recipe**. This is the concrete form of the design's "evidence that outlives the product" posture (§8.2) and the honest answer to the venue limitation: we cannot prove owner-honesty by running the venue ourselves (§7.1), so instead we make every published number independently checkable and say plainly that checkability — not our good faith — is what the reader should rely on.
+
+Note what recomputability does and does not cover. It covers the path from the sealed bundle to the reported numbers. It does **not** make the run itself re-derivable — SWE-shaped tasks mint no admission receipt today, so the Matrix integrity tier stays `attested-only` (§2.7). Both statements appear together in the report; the strong one must not be allowed to imply the weak one.
