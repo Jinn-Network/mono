@@ -81,6 +81,24 @@ export interface NativeBaseSepoliaTargetReadClient {
 
 const DEFAULT_RECORD_LIMIT_BYTES = 64 * 1024 * 1024;
 const MAX_PUBLIC_REQUEST_BYTES = 1024 * 1024;
+
+// #30: every public-record fetch is bounded so an unpinned CID's kubo `block/get` DHT lookup (which
+// never returns) cannot hang the single-threaded solver work loop for minutes. The IPFS bound is
+// short — a locally-pinned block resolves in milliseconds, and an unpinned CID must be abandoned FAST
+// so the eval-spec resolver's #2559 HTTP-locator fallback engages on the timeout the same way it does
+// on a clean miss. The HTTP bound is larger because a legitimately large record served over HTTP can
+// take longer. Both are WELL below the fleet worker lease TTL (30s) so a bounded fetch cannot lapse
+// the lease. `0` disables a bound (unbounded); an unset/invalid env value falls back to the default.
+const DEFAULT_IPFS_FETCH_TIMEOUT_MS = 8_000;
+const DEFAULT_HTTP_FETCH_TIMEOUT_MS = 20_000;
+
+function resolveFetchTimeoutMs(explicit: number | undefined, envName: string, fallback: number): number {
+  if (explicit !== undefined) return explicit;
+  const raw = process.env[envName];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
 const SELECTORS = {
   claimTask: toFunctionSelector('claimTask(uint256,address)'),
   claimEvaluation: toFunctionSelector('claimEvaluation(uint256,uint32,address,bytes32)'),
@@ -177,17 +195,44 @@ export function createBaseSepoliaRecordTransport(input: {
   readonly ipfsApiUrl: string;
   readonly fetchImpl: (request: string | URL, init?: RequestInit) => Promise<Response>;
   readonly maxBytes?: number;
+  readonly ipfsFetchTimeoutMs?: number;
+  readonly httpFetchTimeoutMs?: number;
 }): NativePublicRecordTransport {
   const maxBytes = input.maxBytes ?? DEFAULT_RECORD_LIMIT_BYTES;
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new RangeError('native public record size limit must be a positive safe integer');
   }
+  const ipfsTimeoutMs = resolveFetchTimeoutMs(
+    input.ipfsFetchTimeoutMs, 'JINN_NATIVE_IPFS_FETCH_TIMEOUT_MS', DEFAULT_IPFS_FETCH_TIMEOUT_MS);
+  const httpTimeoutMs = resolveFetchTimeoutMs(
+    input.httpFetchTimeoutMs, 'JINN_NATIVE_HTTP_FETCH_TIMEOUT_MS', DEFAULT_HTTP_FETCH_TIMEOUT_MS);
 
-  const fetchBytes = async (url: URL, init?: RequestInit): Promise<Uint8Array> => {
+  // A hung fetch is abandoned via an AbortSignal AND an independent timeout race, so even a transport
+  // that ignores the signal cannot leave the caller waiting past the bound. A timeout REJECTS (it is
+  // a miss/error, never valid empty bytes), so the digest check below still guards every byte that
+  // does arrive — fail-closed is preserved.
+  const fetchWithTimeout = async (url: URL, timeoutMs: number, init?: RequestInit): Promise<Response> => {
+    if (timeoutMs <= 0) return input.fetchImpl(url, init);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(`native public record fetch timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([input.fetchImpl(url, { ...init, signal: controller.signal }), timeout]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
+
+  const fetchBytes = async (url: URL, timeoutMs: number, init?: RequestInit): Promise<Uint8Array> => {
     if (url.protocol !== 'https:' && url.protocol !== 'http:') {
       throw new Error('native public record locations must use HTTP(S)');
     }
-    const response = await input.fetchImpl(url, init);
+    const response = await fetchWithTimeout(url, timeoutMs, init);
     if (!response.ok) throw new Error(`native public record retrieval failed with status ${response.status}`);
     const length = response.headers.get('content-length');
     if (length !== null && Number(length) > maxBytes) {
@@ -204,11 +249,11 @@ export function createBaseSepoliaRecordTransport(input: {
     if (!/^[a-z0-9]+$/u.test(cid)) throw new Error('native raw CID contains invalid characters');
     const url = new URL('/api/v0/block/get', input.ipfsApiUrl);
     url.searchParams.set('arg', cid);
-    return fetchBytes(url, { method: 'POST' });
+    return fetchBytes(url, ipfsTimeoutMs, { method: 'POST' });
   };
 
   return {
-    byLocation: async (location) => fetchBytes(new URL(location)),
+    byLocation: async (location) => fetchBytes(new URL(location), httpTimeoutMs),
     byRawCid,
     async byDigest(digest) {
       const bytes = await byRawCid(rawCodecCidFromSha256Digest(digest));
