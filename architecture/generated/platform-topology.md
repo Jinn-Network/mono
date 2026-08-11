@@ -601,7 +601,9 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | schemas | @jinn-network/client | client/schemas/jinn-manifest-v1.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/manifest.sha256.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/expected.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/expected.v2.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/row.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/rows.multi-repo.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-marketplace | packages/benchmarking/marketplace/fixtures/manifest.sha256.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-marketplace | packages/benchmarking/marketplace/fixtures/projector/golden-events/revised-task-created.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-records | packages/benchmarking/records/fixtures/benchmark/invalid-bad-version.json | — | — | — |
@@ -669,6 +671,8 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/noninferiority-inconclusive.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/noninferiority-pass.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-contract.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-delta-withheld.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-delta.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-exclusion-r1.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-mcnemar.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/pass-at-k-incompatible.json | — | — | — |
@@ -1484,7 +1488,7 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3715 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3719 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1492,13 +1496,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 28 |
 | boundaryPolicies | 23 |
 | catalogManifests | 84 |
-| catalogPublicSurfaces | 1253 |
+| catalogPublicSurfaces | 1257 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 2962 |
-| generatedOutputSources | 1309 |
+| discoveredFirstPartySurfaces | 2966 |
+| generatedOutputSources | 1313 |
 | generatorSources | 613 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
