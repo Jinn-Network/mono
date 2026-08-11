@@ -243,7 +243,7 @@ const METHOD_METADATA = {
   }),
   pairedDelta: metadata({
     requiredInputs: ["matrix.cells", "referenced-verdicts", "task-provenance-source"],
-    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples", "alpha"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1, maximum: MAX_NONINFERIORITY_RESAMPLES_V1 }, alpha: { enum: [0.1, 0.05, 0.01] } }, additionalProperties: false },
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples", "alpha"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1, maximum: MAX_NONINFERIORITY_RESAMPLES_V1 }, alpha: { enum: ["0.10", "0.05", "0.01"] } }, additionalProperties: false },
     outputShape: "paired mean rate difference + two-sided clustered BCa interval + exclusions + conflicted cells",
     exclusionRule: "pair Task digests judged in both arms; per-Task rates average all judged replicates; report full remainder",
     clusteringRule: "task-provenance-source",
@@ -288,14 +288,6 @@ function requireIntegerParam(parameters: Readonly<Record<string, unknown>>, key:
   const value = parameters[key];
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw new Error(`method parameter "${key}" must be an integer`);
-  }
-  return value;
-}
-
-function requireNumberParam(parameters: Readonly<Record<string, unknown>>, key: string): number {
-  const value = parameters[key];
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`method parameter "${key}" must be a finite number`);
   }
   return value;
 }
@@ -1085,7 +1077,9 @@ const pairedDeltaMethod: SingleSubjectMethod = {
     const candidate = requireStringParam(input.parameters, "candidate");
     const seed = requireIntegerParam(input.parameters, "seed");
     const resamples = requireIntegerParam(input.parameters, "resamples");
-    const alpha = requireNumberParam(input.parameters, "alpha");
+    // Sealed records admit only integer numbers, so alpha crosses the boundary as an
+    // enum-restricted decimal string; Number() is exact for the three permitted values.
+    const alpha = Number(requireStringParam(input.parameters, "alpha"));
     if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
       throw new MethodInputError("method-incompatible-cost-unit", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
     }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseMatrix, sealMatrix } from "@jinn-network/benchmarking-records";
+import { parseMatrix, sealMatrix, serializeCanonicalJson } from "@jinn-network/benchmarking-records";
 import { BENCHMARKING_METHOD_REGISTRY } from "./index.js";
 import { createMethodRegistry } from "./registry.js";
 import type { MethodComputeInput } from "./method.js";
@@ -86,6 +86,15 @@ describe("createMethodRegistry", () => {
     ] as const) {
       expect(registry.get(id, version), `${id}@${version}`).toBeDefined();
     }
+  });
+
+  test("paired-delta@1 parameters survive canonical record sealing", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/paired-delta", "1")!;
+    const parameters = { verdictRule: "unanimous", baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" };
+    expect(method.validateParameters(parameters)).toEqual({ ok: true });
+    // Sealed records admit only exact I-JSON integers; a fractional number here would throw.
+    expect(() => serializeCanonicalJson(parameters as never)).not.toThrow();
+    expect(method.validateParameters({ ...parameters, alpha: 0.05 }).ok).toBe(false);
   });
 });
 
