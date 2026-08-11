@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn as nodeSpawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants, accessSync, realpathSync } from "node:fs";
 import { deadlineExceeded, refuse, unavailable } from "./errors.js";
 import { buildPinnedOciInvocation, PINNED_IMAGE, type PinnedOciGraderInput } from "./invocation.js";
@@ -126,7 +127,7 @@ export async function runPinnedOciGrader(
   await ensurePinnedOciImage(input, options);
   let ownedNetwork: string | undefined;
   if (input.profileRequiresNetwork && input.allowedNetwork === undefined) {
-    ownedNetwork = `jinn-oci-grader-network-${crypto.randomUUID()}`;
+    ownedNetwork = `jinn-oci-grader-network-${randomUUID()}`;
     const created = await boundedExit({
       runtime: input.runtime,
       args: ["network", "create", "--driver", "bridge", ownedNetwork],

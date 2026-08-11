@@ -59,15 +59,17 @@ function rowMaterial(specification: EvaluationSpec): EvaluationRowMaterial {
   const descriptor = block.testMaterial.find((entry) => entry.name === "swe-rebench-evaluation-row");
   if (descriptor?.content === undefined) refuse("EvaluationSpec carries no exact public row material");
   const bytes = decodeCanonicalBase64(descriptor.content);
-  if (`sha256:${sha256Hex(bytes)}` !== `sha256:${descriptor.digest?.sha256 ?? ""}`) {
+  if (sha256Hex(bytes) !== (descriptor.digest?.sha256 ?? "").toLowerCase()) {
     refuseSubjectDigest("public row material digest does not match its descriptor");
   }
   let value: unknown;
   try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
   catch { refuse("public row material is not UTF-8 JSON"); }
-  if (typeof value !== "object" || value === null || Array.isArray(value)
-    || !canonicalJsonBytes(value).every((byte, index) => byte === bytes[index])
-    || canonicalJsonBytes(value).length !== bytes.length) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    refuse("public row material is not exact canonical data");
+  }
+  const canonical = canonicalJsonBytes(value);
+  if (canonical.length !== bytes.length || canonical.some((byte, index) => byte !== bytes[index])) {
     refuse("public row material is not exact canonical data");
   }
   const row = value as Record<string, unknown>;
@@ -144,13 +146,19 @@ export function pinnedSweRebenchImage(specification: EvaluationSpec): {
   const uri = block.image.uri;
   const match = typeof uri === "string" ? PINNED_IMAGE_URI.exec(uri) : null;
   if (match === null) refuse("grader image is not an exact docker sha256 reference");
+  const image = match[1]!;
+  const embeddedDigest = image.slice(image.length - 64);
+  const declaredDigest = (block.image.digest?.sha256 ?? "").toLowerCase();
+  if (embeddedDigest !== declaredDigest) {
+    refuseSubjectDigest("grader image digest does not match its descriptor");
+  }
   if (block.platform !== "linux/amd64" && block.platform !== "linux/arm64") {
     refuse("grader platform is unsupported");
   }
   if (!Number.isSafeInteger(block.timeout) || block.timeout < 1 || block.timeout > 3600) {
     refuse("grader timeout is outside the bounded live-host range");
   }
-  return { image: match[1]!, platform: block.platform, timeoutMs: block.timeout * 1000 };
+  return { image, platform: block.platform, timeoutMs: block.timeout * 1000 };
 }
 
 function exactRawReport(bytes: Uint8Array): RawGraderReport {

@@ -78,6 +78,14 @@ describe("pinnedSweRebenchImage", () => {
     }))).toThrow(/exact docker sha256 reference/u);
   });
 
+  it("refuses when the declared image digest disagrees with the digest embedded in the URI", () => {
+    // The URI's digest must not silently win over a different declared descriptor digest — that
+    // would let a spec show one (benign) digest while a different image is actually pulled.
+    expect(() => pinnedSweRebenchImage(specification({
+      image: { uri: `docker://${IMAGE}`, digest: { sha256: "d".repeat(64) } },
+    }))).toThrow(/image digest does not match/u);
+  });
+
   it("refuses a docker-flag-shaped image URI, never admitting it as an image reference", () => {
     const hex = "a".repeat(64);
     const flagShaped = [
@@ -178,6 +186,21 @@ describe("sweRebenchOciGraderReportSource", () => {
     } as never);
 
     await expect(source.read(input)).rejects.toThrow(/row material digest/u);
+  });
+
+  it("matches a public row material digest case-insensitively", async () => {
+    const spec = specification();
+    (spec as never as { familyBlock: { testMaterial: { digest: { sha256: string } }[] } })
+      .familyBlock.testMaterial[0]!.digest.sha256 =
+      (spec as never as { familyBlock: { testMaterial: { digest: { sha256: string } }[] } })
+        .familyBlock.testMaterial[0]!.digest.sha256.toUpperCase();
+    const { work, request: input } = request(spec);
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: async () => canonicalJsonBytes({ log: "", report: {} }),
+    } as never);
+
+    await expect(source.read(input)).resolves.toBeDefined();
   });
 
   it("refuses a specification carrying no row material", async () => {
