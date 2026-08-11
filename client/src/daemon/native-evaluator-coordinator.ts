@@ -494,6 +494,12 @@ export class NativeEvaluatorCoordinator {
       const receipt = await this.input.publisher.publish({ publication, artifact });
       this.input.state.recordEvaluationPublicationPublished(publication.publicationKey, receipt);
     }
+    // A second evaluation whose byte-identical verdict graph a prior evaluation already announced
+    // owns no `intent` outbox rows (the content-addressed `INSERT OR IGNORE` in `recordVerdictReady`
+    // deduped them), so the loop above drained nothing and `recordEvaluationPublicationPublished`
+    // never fired the `verdict-published` transition. Its records are nonetheless served, so promote
+    // it explicitly. Idempotent and a no-op for the ordinary evaluation that just published its own.
+    this.input.state.promoteVerdictPublishedIfComplete(id);
   }
 
   private async ensureDecisionGrade(id: NativeOperationId, canonical?: CanonicalVerdictSettlement): Promise<VerdictCode> {
