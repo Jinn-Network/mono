@@ -9,7 +9,7 @@ const packages = join(root, 'packages', 'task-execution');
 const taskExecutionDirectories = [
   'protocol', 'backend', 'testing', 'profiles',
   'backend-local/supervisor', 'backend-local/workspace', 'backend-local/launchers', 'backend-local/assembly',
-  'evaluation-harness', 'evaluator-adapters',
+  'evaluation-harness', 'evaluator-adapters', 'oci-grader',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -295,6 +295,19 @@ const EVALUATOR_ADAPTERS_PRODUCTION_FORBIDDEN = [
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-workspace',
 ];
+// oci-grader is a leaf: it consumes the GraderReportSource port, the EvaluationSpec vocabulary,
+// and the harness's operational-error/exact-material types. It never reaches a backend, a
+// workspace, a launcher, or any evidence/trust/discovery package, and never touches the network
+// itself — only the container runtime it spawns does.
+const OCI_GRADER_PRODUCTION_FORBIDDEN = [
+  ...TASK_EXECUTION_FOREIGN_PACKAGES,
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-workspace',
+];
 // Its tests drive the real harness runtime end-to-end, so they may seal Task/Delivery
 // documents and place workspace paths — but still touch no evidence runtime.
 const EVALUATOR_ADAPTERS_TEST_FORBIDDEN = [
@@ -422,6 +435,22 @@ test('task-execution source boundaries remain one-way across the approved graph'
     forbiddenImportsInFiles(adaptersTests, EVALUATOR_ADAPTERS_TEST_FORBIDDEN),
     [],
     'evaluator-adapters tests may import only the approved harness-driving surface',
+  );
+
+  const ociGraderSrc = join(packages, 'oci-grader', 'src');
+  const ociGraderTests = files(ociGraderSrc)
+    .filter((file) => /\.test\.[cm]?[jt]sx?$/u.test(file));
+  const ociGraderProduction = files(ociGraderSrc)
+    .filter((file) => !ociGraderTests.includes(file));
+  assert.deepEqual(
+    forbiddenImportsInFiles(ociGraderProduction, OCI_GRADER_PRODUCTION_FORBIDDEN),
+    [],
+    'oci-grader production source crosses its approved contract boundary',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(ociGraderTests, OCI_GRADER_PRODUCTION_FORBIDDEN),
+    [],
+    'oci-grader tests may import only the approved contract surface',
   );
 });
 

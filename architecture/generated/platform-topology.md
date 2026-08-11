@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **84** entries: **51** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **19** other entries below `packages/**`, and **6** adjacent entries.
+The catalog contains **85** entries: **52** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **19** other entries below `packages/**`, and **6** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -80,6 +80,7 @@ The catalog contains **84** entries: **51** `platform-v1` packages, **8** disabl
 | @jinn-network/task-execution-workspace | packages/task-execution/backend-local/workspace | task-execution | 3 | platform | workspace preparation capability | candidate | platform-v1 | canary-only | @jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/task-execution-evaluation-harness | packages/task-execution/evaluation-harness | task-execution | 3 | platform | evaluation orchestration capability | candidate | platform-v1 | canary-only | @jinn-network/attestation-issuer<br>@jinn-network/evidence-protocol<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace | — | — |
 | @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters | task-execution | 3 | platform | evaluator adapters | candidate | platform-v1 | canary-only | @jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-supervisor | — | — |
+| @jinn-network/task-execution-oci-grader | packages/task-execution/oci-grader | task-execution | 3 | platform | host-owned OCI grader execution | candidate | platform-v1 | canary-only | @jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-profiles | — | — |
 | @jinn-network/task-execution-profiles | packages/task-execution/profiles | task-execution | 1 | platform | task profile family | candidate | platform-v1 | canary-only | @jinn-network/task-execution-protocol<br>@noble/hashes<br>ajv<br>safe-regex<br>zod | — | — |
 | @jinn-network/task-execution-protocol | packages/task-execution/protocol | task-execution | 1 | platform | task-execution protocol | candidate | platform-v1 | canary-only | @noble/hashes<br>zod | — | — |
 | @jinn-network/task-execution-testing | packages/task-execution/testing | task-execution | — | platform-support | task-execution conformance kit | candidate | platform-v1 | canary-only | @jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace | — | vitest |
@@ -335,6 +336,9 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/task-execution-launchers | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/task-execution-launchers | runtime | @jinn-network/task-execution-supervisor |
 | @jinn-network/task-execution-launchers | runtime | @jinn-network/task-execution-workspace |
+| @jinn-network/task-execution-oci-grader | runtime | @jinn-network/task-execution-evaluation-harness |
+| @jinn-network/task-execution-oci-grader | runtime | @jinn-network/task-execution-evaluator-adapters |
+| @jinn-network/task-execution-oci-grader | runtime | @jinn-network/task-execution-profiles |
 | @jinn-network/task-execution-profiles | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/task-execution-supervisor | runtime | @jinn-network/task-execution-backend |
 | @jinn-network/task-execution-supervisor | runtime | @jinn-network/task-execution-protocol |
@@ -361,7 +365,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 4. `@jinn-network/benchmarking-local`, `@jinn-network/evidence-catalog-sqlite`, `@jinn-network/evidence-contribution`, `@jinn-network/evidence-retrieval`, `@jinn-network/execution-recorder-bridge`, `@jinn-network/marketplace-projector`, `@jinn-network/record-discovery-facts-evidence`, `@jinn-network/record-discovery-source-evidence-journal`, `@jinn-network/record-discovery-transport-http`, `@jinn-network/task-execution-launchers`
 5. `@jinn-network/benchmarking-marketplace`, `@jinn-network/evidence-local-runtime`, `@jinn-network/marketplace-venue-base`, `@jinn-network/task-execution-backend-local`, `@jinn-network/task-execution-evaluation-harness`
 6. `@jinn-network/task-execution-evaluator-adapters`, `@jinn-network/task-execution-testing`
-7. `@jinn-network/marketplace-testing`
+7. `@jinn-network/marketplace-testing`, `@jinn-network/task-execution-oci-grader`
 
 ### `platform-v1` transitive closure
 
@@ -409,6 +413,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/task-execution-evaluation-harness | @jinn-network/attestation-issuer<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace |
 | @jinn-network/task-execution-evaluator-adapters | @jinn-network/attestation-issuer<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace |
 | @jinn-network/task-execution-launchers | @jinn-network/task-execution-backend<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace |
+| @jinn-network/task-execution-oci-grader | @jinn-network/attestation-issuer<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace |
 | @jinn-network/task-execution-profiles | @jinn-network/task-execution-protocol |
 | @jinn-network/task-execution-protocol | — |
 | @jinn-network/task-execution-supervisor | @jinn-network/task-execution-backend<br>@jinn-network/task-execution-protocol |
@@ -427,10 +432,10 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | experimental-policy | 2 | policy-ci | disabled | false | false | false |
 | experimental-task-supply | 5 | task-supply-ci | disabled | false | false | false |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
-| platform-v1 | 51 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
+| platform-v1 | 52 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
 | transitional-or-private | 12 | autopilot-ci<br>benchmark-product-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci<br>website-ci | private<br>never | false | false | false |
 
-The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 8 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 52-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 8 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
@@ -476,6 +481,7 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/task-execution-evaluation-harness | stack-npm-publish.yml | blank |
 | @jinn-network/task-execution-evaluator-adapters | stack-npm-publish.yml | blank |
 | @jinn-network/task-execution-launchers | stack-npm-publish.yml | blank |
+| @jinn-network/task-execution-oci-grader | stack-npm-publish.yml | blank |
 | @jinn-network/task-execution-profiles | stack-npm-publish.yml | blank |
 | @jinn-network/task-execution-protocol | stack-npm-publish.yml | blank |
 | @jinn-network/task-execution-supervisor | stack-npm-publish.yml | blank |
@@ -560,6 +566,7 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/task-execution-workspace | platform-v1 | — | — | — | — |
 | @jinn-network/task-execution-evaluation-harness | platform-v1 | — | — | — | — |
 | @jinn-network/task-execution-evaluator-adapters | platform-v1 | — | — | fixtures | — |
+| @jinn-network/task-execution-oci-grader | platform-v1 | — | — | — | — |
 | @jinn-network/task-execution-profiles | platform-v1 | — | profiles | fixtures | ./testing |
 | @jinn-network/task-execution-protocol | platform-v1 | schemas | profiles | fixtures | — |
 | @jinn-network/task-execution-testing | platform-v1 | — | — | fixtures | . |
@@ -1482,14 +1489,14 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3710 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3713 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
 | --- | ---: |
 | authorityDocuments | 28 |
 | boundaryPolicies | 23 |
-| catalogManifests | 84 |
+| catalogManifests | 85 |
 | catalogPublicSurfaces | 1252 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
@@ -1497,7 +1504,7 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | decisionRecords | 4 |
 | discoveredFirstPartySurfaces | 2957 |
 | generatedOutputSources | 1308 |
-| generatorSources | 613 |
+| generatorSources | 615 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
 | staticControl | 6 |
