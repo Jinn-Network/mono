@@ -22,13 +22,6 @@
       }
     },
     {
-      "methodId": "jinn.benchmarking.method/provenance-cluster-sign",
-      "parameters": {
-        "baseline": "armA",
-        "candidate": "armB"
-      }
-    },
-    {
       "methodId": "jinn.benchmarking.method/noninferiority-iut",
       "parameters": {
         "baseline": "armA",

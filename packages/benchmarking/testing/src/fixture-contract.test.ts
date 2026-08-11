@@ -86,7 +86,10 @@ describe("ordering and export fixture oracles", () => {
 
 describe("method fixture/spec completeness", () => {
   test("declares every reference method and Bradley–Terry's registered/unavailable status", async () => {
-    const specs = await fixtureJson("methods/method-specs.json");
+    const specs = [
+      ...await fixtureJson("methods/method-specs.json"),
+      await fixtureJson("methods/provenance-cluster-sign-method-spec.json"),
+    ];
     const byId = new Map(specs.map((spec: any) => [spec.id, spec]));
     expect([...byId.keys()].sort()).toEqual([
       "jinn.benchmarking.method/avg-at-k",
@@ -119,7 +122,6 @@ describe("method fixture/spec completeness", () => {
       "jinn.benchmarking.method/avg-at-k",
       "jinn.benchmarking.method/pass-at-k",
       "jinn.benchmarking.method/paired-mcnemar",
-      "jinn.benchmarking.method/provenance-cluster-sign",
       "jinn.benchmarking.method/noninferiority-iut",
       "jinn.benchmarking.method/clean-subset",
     ]));
@@ -130,7 +132,13 @@ describe("method fixture/spec completeness", () => {
       r1: "compute-exact",
       rGreaterThan1: "typed-incompatible-input",
     });
-    expect(cases.replicateBoundary.provenanceClusterSign).toEqual({
+    const provenanceClusterSign = await fixtureJson("methods/provenance-cluster-sign-conformance.json");
+    expect(provenanceClusterSign).toMatchObject({
+      conflicts: true,
+      methodId: "jinn.benchmarking.method/provenance-cluster-sign",
+      pinnedClustering: "task-provenance-source",
+    });
+    expect(provenanceClusterSign.replicateBoundary).toEqual({
       r1: "compute-exact",
       rGreaterThan1: "typed-incompatible-input",
     });

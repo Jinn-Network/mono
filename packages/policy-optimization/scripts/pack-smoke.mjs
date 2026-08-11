@@ -142,6 +142,7 @@ if (outcomes.observations.length !== 0) throw new Error("outcomes adapter smoke 
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expectedJinnDependencies = [
+  "@jinn-network/attestation-issuer",
   "@jinn-network/benchmarking-aggregate",
   "@jinn-network/benchmarking-local",
   "@jinn-network/benchmarking-records",

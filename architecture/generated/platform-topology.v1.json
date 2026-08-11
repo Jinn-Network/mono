@@ -1731,13 +1731,13 @@
       "authorityDocuments": 28,
       "boundaryPolicies": 23,
       "catalogManifests": 84,
-      "catalogPublicSurfaces": 1250,
+      "catalogPublicSurfaces": 1252,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2954,
-      "generatedOutputSources": 1306,
+      "discoveredFirstPartySurfaces": 2956,
+      "generatedOutputSources": 1308,
       "generatorSources": 613,
       "marketplaceControl": 2,
       "requiredGates": 22,
@@ -21230,6 +21230,30 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/testing/fixtures/methods/pass-at-k.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-conformance.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-method-spec.json"
       },
       {
         "categories": [
@@ -45987,6 +46011,24 @@
         "packedTargets": [],
         "path": "packages/benchmarking/testing/fixtures/methods/pass-at-k.json",
         "relativeSource": "fixtures/methods/pass-at-k.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-conformance.json",
+        "relativeSource": "fixtures/methods/provenance-cluster-sign-conformance.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-method-spec.json",
+        "relativeSource": "fixtures/methods/provenance-cluster-sign-method-spec.json"
       },
       {
         "claim": null,

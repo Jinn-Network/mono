@@ -671,6 +671,8 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-mcnemar.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/pass-at-k-incompatible.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/pass-at-k.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-conformance.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign-method-spec.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/provenance-cluster-sign.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/subject-isolation.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/wilson.json | — | — | — |
@@ -1480,7 +1482,7 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3707 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3709 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1488,13 +1490,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 28 |
 | boundaryPolicies | 23 |
 | catalogManifests | 84 |
-| catalogPublicSurfaces | 1250 |
+| catalogPublicSurfaces | 1252 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 2954 |
-| generatedOutputSources | 1306 |
+| discoveredFirstPartySurfaces | 2956 |
+| generatedOutputSources | 1308 |
 | generatorSources | 613 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |

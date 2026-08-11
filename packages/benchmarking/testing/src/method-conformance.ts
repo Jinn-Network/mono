@@ -1041,7 +1041,10 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
     });
 
     test("registry entries reproduce the declarative method-spec fixture", async () => {
-      const expected = await loadJson<MethodSpecFixture[]>("method-specs.json");
+      const expected = [
+        ...await loadJson<MethodSpecFixture[]>("method-specs.json"),
+        await loadJson<MethodSpecFixture>("provenance-cluster-sign-method-spec.json"),
+      ];
       for (const spec of expected) {
         const method = registry.get(spec.id, spec.version);
         expect(method, `${spec.id}@${spec.version}`).toBeDefined();
@@ -1063,7 +1066,11 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
         expectedConflicted: unknown;
         cases: Array<{ methodId: string; parameters: Record<string, unknown> }>;
       }>("conflict-cases.json");
-      for (const entry of fixture.cases) {
+      const provenanceClusterSign = await loadJson<{
+        methodId: string;
+        parameters: Record<string, unknown>;
+      }>("provenance-cluster-sign-conformance.json");
+      for (const entry of [...fixture.cases, provenanceClusterSign]) {
         const prepared = prepareFixture({
           methodId: entry.methodId,
           methodVersion: "1",

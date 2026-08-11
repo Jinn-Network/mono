@@ -27,11 +27,11 @@
     },
     {
       "id": "methods/conflict-cases.json",
-      "sha256": "3368caca267b70b867f66569ae872a8610466c05ad3ec046953c2515ef27fc70"
+      "sha256": "dcc20ded922689cddc5cc16c6e332ba0e3c7c5cbafde84dbbc08effa3eaa6d7e"
     },
     {
       "id": "methods/conformance-cases.json",
-      "sha256": "aa3c20742eeb177b4319aec28aea67234a7e9dee5c5b66a325479167793c13df"
+      "sha256": "4fdddbcdc1a688df97227e213d081118dd9dd2b2d5390ae1dc97af133429c8ed"
     },
     {
       "id": "methods/fully-attrited-avg-at-k.json",
@@ -47,7 +47,7 @@
     },
     {
       "id": "methods/method-specs.json",
-      "sha256": "e2c8767bfb1fd1e6b19daf06098ed0244c7dc248e192c0eaba5d91d0e2a0bc2f"
+      "sha256": "ce67ff1cfd4a545c8822e42eb0b1939f242df8d71ce4bc6a99a004d163983390"
     },
     {
       "id": "methods/noninferiority-cluster-bca.json",
@@ -84,6 +84,14 @@
     {
       "id": "methods/pass-at-k.json",
       "sha256": "272f6d5a5012754520aa3689e2773e498f600336f94b650dd916bdb3514b61c8"
+    },
+    {
+      "id": "methods/provenance-cluster-sign-conformance.json",
+      "sha256": "e12d346125b4caaae62c2d4a8589da39d6eedaf4799e30f22e9037bcbac69900"
+    },
+    {
+      "id": "methods/provenance-cluster-sign-method-spec.json",
+      "sha256": "6869c2cedbb3547753f04b514b96f2ddee267a61c8cfd95f6166a10ed0d8cc6b"
     },
     {
       "id": "methods/provenance-cluster-sign.json",

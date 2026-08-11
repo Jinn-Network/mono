@@ -662,6 +662,7 @@ describe("evaluationLauncher", () => {
       outputs: readonly {
         name: string;
         digest: { sha256: string };
+        mediaType: string;
       }[];
       evidenceRecords?: readonly unknown[];
       executionIds?: readonly string[];
@@ -669,6 +670,7 @@ describe("evaluationLauncher", () => {
     expect(delivery.outputs).toEqual([{
       name: "verdict",
       digest: { sha256: sha256(verdictBytes).slice("sha256:".length) },
+      mediaType: "application/vnd.in-toto+json",
     }]);
     expect(delivery.evidenceRecords).toHaveLength(1);
     expect(delivery.executionIds).toHaveLength(1);
@@ -725,11 +727,12 @@ describe("evaluationLauncher", () => {
       Buffer.from(await recovered.backend.fetchDelivery(refs[0]!)),
     ).toEqual(checkpoint);
     const delivery = JSON.parse(decoder.decode(checkpoint)) as {
-      outputs: readonly { name: string; digest: { sha256: string } }[];
+      outputs: readonly { name: string; digest: { sha256: string }; mediaType: string }[];
     };
     expect(delivery.outputs).toEqual([{
       name: "verdict",
       digest: { sha256: sha256(verdictBytes).slice("sha256:".length) },
+      mediaType: "application/vnd.in-toto+json",
     }]);
   });
 });

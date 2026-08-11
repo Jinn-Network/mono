@@ -8,7 +8,6 @@
     "jinn.benchmarking.method/avg-at-k",
     "jinn.benchmarking.method/pass-at-k",
     "jinn.benchmarking.method/paired-mcnemar",
-    "jinn.benchmarking.method/provenance-cluster-sign",
     "jinn.benchmarking.method/noninferiority-iut",
     "jinn.benchmarking.method/clean-subset"
   ],
@@ -17,10 +16,6 @@
   ,
   "replicateBoundary": {
     "pairedMcnemar": {
-      "r1": "compute-exact",
-      "rGreaterThan1": "typed-incompatible-input"
-    },
-    "provenanceClusterSign": {
       "r1": "compute-exact",
       "rGreaterThan1": "typed-incompatible-input"
     }
