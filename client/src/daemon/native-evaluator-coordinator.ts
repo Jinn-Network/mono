@@ -19,6 +19,7 @@ import {
 import { deriveNativeEvaluation } from "../evaluator/native-evaluation-derivation.js";
 import {
   verifyNativeSubjectAuthority,
+  NativeSubjectAuthorityError,
   type NativeSubjectAuthorityClaim,
   type NativeSubjectAuthorityDependencies,
 } from "../evaluator/native-subject-authority.js";
@@ -204,6 +205,20 @@ export class NativeEvaluatorCoordinator {
       this.input.state.resetEvaluationRetryOnAdvance(id);
       return result;
     } catch (cause) {
+      // A subject-authority refusal is DETERMINISTIC: the subject graph, its trust bindings, and the
+      // recorded ceremony / on-chain settlement authority do not change by retrying, so retrying to
+      // the 4h admission SLA never succeeds — it just buries the reason and emits no verdict. Fail
+      // fast and surface the exact cause (the specific `NativeSubjectAuthorityError` sub-reason plus
+      // its detail — which Safe/signer/binding was refused) as the terminal failure reason, instead
+      // of the opaque `evaluator-dependency-failed` bucket that forced CP6 detail to be recovered by
+      // DB spelunking (#33). This is a distinct type from the genuinely-transient retryable buckets
+      // (`EvaluatorCoordinatorFailure` with `retryable`, e.g. evidence-not-indexed), which are
+      // untouched below.
+      if (cause instanceof NativeSubjectAuthorityError) {
+        const reason = `native-subject-authority-refused: ${cause.message}`;
+        this.input.state.recordEvaluationFailed(id, reason);
+        return { kind: "failed", reason };
+      }
       const reason = cause instanceof EvaluatorCoordinatorFailure
         ? cause.reason
         : "evaluator-dependency-failed";
