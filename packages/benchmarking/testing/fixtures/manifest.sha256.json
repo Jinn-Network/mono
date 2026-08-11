@@ -70,6 +70,10 @@
       "sha256": "ea292e5dcb1bed1b4b35fca990e841326bd731bc70ffebb0ca48b8d15b05574f"
     },
     {
+      "id": "methods/paired-delta-withheld.json",
+      "sha256": "5ec8b616468fb223aefb5681295c9c71cd884505685e13428d660120941a0874"
+    },
+    {
       "id": "methods/paired-delta.json",
       "sha256": "ee87f4d240c373131edf81677209e4183c2032db7d015a1149cdcfcc2b5dc7fd"
     },

@@ -457,7 +457,65 @@ const pairedDeltaFixture = {
     conflicted: { count: 0, cellKeys: [] },
     bootstrap: {
       procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+      // 2000 = 2 x 1000 resamples: this method runs two bootstrap passes (alpha/2 and
+      // 1-alpha/2), and `sourceClusters` multiplies its second argument by the cluster count
+      // to derive `draws`.
       ...sourceClusters(pairedDeltaTasks, 2000),
+    },
+  },
+};
+
+// --- fixture 3d: paired-delta@1 with the interval withheld ----------------------------------
+// Four paired Tasks sharing ONE provenance source: below minN=5 AND below the two-cluster
+// floor, so both gates fire. Pins the typed no-interval contract — interval null, both reason
+// strings, and a delta that still survives (an underpowered run must still report its point
+// estimate). Task deltas are +1,+1,+1,0, so delta is exactly 0.75 by hand.
+const withheldLabels = Array.from({ length: 4 }, (_, index) => `paired-delta-withheld/t${index + 1}`);
+const WITHHELD_SOURCE = "fixture-source/paired-delta-withheld";
+const withheldCandidate = ["pass", "pass", "pass", "fail"];
+const withheldCells = withheldLabels.flatMap((label) => [
+  cell(label, "armA", 1, { outcome: "judged", verdicts: ["r1"], validVerdicts: ["r1"] }),
+  cell(label, "armB", 1, { outcome: "judged", verdicts: ["r1"], validVerdicts: ["r1"] }),
+]);
+const withheldVerdictOutcomes = {};
+const withheldTaskProvenance = {};
+withheldLabels.forEach((label, index) => {
+  withheldVerdictOutcomes[digest(`${label}/armA/verdict/r1`)] = verdictOutcome("fail");
+  withheldVerdictOutcomes[digest(`${label}/armB/verdict/r1`)] = verdictOutcome(withheldCandidate[index]);
+  withheldTaskProvenance[taskDigest(label)] = { source: WITHHELD_SOURCE };
+});
+const withheldTasks = withheldLabels.map((label) => taskDigest(label)).sort();
+const pairedDeltaWithheldFixture = {
+  methodId: "jinn.benchmarking.method/paired-delta",
+  methodVersion: "1",
+  parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" },
+  verdictRule: "unanimous",
+  matrices: [matrix(withheldCells)],
+  verdictOutcomes: withheldVerdictOutcomes,
+  taskProvenance: withheldTaskProvenance,
+  runReplicates: 1,
+  expectedResults: {
+    verdictRule: "unanimous",
+    baseline: "armA",
+    candidate: "armB",
+    pairs: 4,
+    delta: fixed4(0.75),
+    interval: null,
+    reasons: [
+      "fewer than minN=5 paired tasks (got 4)",
+      "fewer than two source clusters (got 1)",
+    ],
+    pairing: { taskDigests: withheldTasks },
+    clustering: { basis: "task-provenance-source", clusters: 1 },
+    excluded: { count: 0, cellKeys: [] },
+    conflicted: { count: 0, cellKeys: [] },
+    bootstrap: {
+      procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+      basis: "task-provenance-source-family",
+      count: 1,
+      unit: "source-cluster",
+      draws: 0,
+      clusters: [{ key: ["source", WITHHELD_SOURCE], members: withheldTasks }],
     },
   },
 };
@@ -662,6 +720,7 @@ const fixtures = {
   "paired-mcnemar": mcnemarFixture,
   "provenance-cluster-sign": clusterSignFixture,
   "paired-delta": pairedDeltaFixture,
+  "paired-delta-withheld": pairedDeltaWithheldFixture,
   "clean-subset": cleanSubsetFixture,
   "noninferiority-pass": noninferiorityPassFixture,
   "noninferiority-fail": noninferiorityFailFixture,

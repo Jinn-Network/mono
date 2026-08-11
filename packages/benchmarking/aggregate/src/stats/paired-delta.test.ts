@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { clusteredPairedDeltaInterval } from "./paired-delta.js";
-import type { ClusteredTaskRate } from "./noninferiority.js";
+import { clusteredPairedRateDiffBca, type ClusteredTaskRate } from "./noninferiority.js";
 
 function rate(task: string, cluster: string, pA: number, pB: number): ClusteredTaskRate {
   return { taskDigest: task, cluster: ["source", cluster] as const, pA, pB };
@@ -90,5 +90,22 @@ describe("clusteredPairedDeltaInterval", () => {
       expect(() => clusteredPairedDeltaInterval(mixed, { seed: 1, resamples: 100, alpha }))
         .toThrow(/alpha must be in \(0,1\)/);
     }
+  });
+
+  test("pins exact BCa endpoints at a fixed seed — guards against an un-halved alpha", () => {
+    // Every other assertion here is relational, and a uniformly narrower interval satisfies them
+    // all: the mutant passing `alpha`/`1-alpha` instead of `alpha/2`/`1-alpha/2` seals a 90%
+    // interval labelled "0.0500" and escapes the whole suite. Only an exact literal at a fixed
+    // seed separates them — the mutant yields -0.2500 / 0.5000 for these same inputs.
+    const result = clusteredPairedDeltaInterval(mixed, { seed: 123456789, resamples: 500, alpha: 0.05 });
+    expect([result.low.toFixed(4), result.delta.toFixed(4), result.high.toFixed(4)])
+      .toEqual(["-0.3333", "0.1667", "0.5833"]);
+  });
+
+  test("selects endpoints at exactly alpha/2 and 1-alpha/2 of one bootstrap distribution", () => {
+    const options = { seed: 123456789, resamples: 500 };
+    const result = clusteredPairedDeltaInterval(mixed, { ...options, alpha: 0.05 });
+    expect(result.low).toBe(clusteredPairedRateDiffBca(mixed, { ...options, alpha: 0.025 }).lowerBound);
+    expect(result.high).toBe(clusteredPairedRateDiffBca(mixed, { ...options, alpha: 0.975 }).lowerBound);
   });
 });
