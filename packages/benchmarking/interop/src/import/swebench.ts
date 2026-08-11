@@ -67,7 +67,12 @@ function sealRepositoryWorkTask(row: SweBenchRow, provenanceTimestamp: string): 
       // The profiles mapper emits `{ kind: "mined" }` only; interop completes the cluster.
       provenance: {
         kind: "mined",
-        source: `https://github.com/${row.repo}@${row.base_commit}`,
+        // Repo-level, deliberately WITHOUT `@${row.base_commit}`. This string is the clustering
+        // key (records/src/benchmark/checks.ts:65 uses it verbatim), so including the commit made
+        // every SWE instance its own singleton cluster and silently defeated the clustered
+        // bootstrap's between-repo correction. The base commit is not lost: it remains task
+        // identity via `inputs[0].annotations.ref` and `payload.instance_id`.
+        source: `https://github.com/${row.repo}`,
         timestamp: provenanceTimestamp,
       },
     },

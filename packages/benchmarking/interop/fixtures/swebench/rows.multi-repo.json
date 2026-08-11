@@ -1,0 +1,59 @@
+[
+  {
+    "instance_id": "swe-rebench-cluster-00001",
+    "repo": "astropy/astropy",
+    "base_commit": "1111111111111111111111111111111111111111",
+    "problem_statement": "First astropy instance.",
+    "language": "python",
+    "image": {
+      "uri": "https://example.org/images/swe-rebench-runner:cluster-00001",
+      "digest": { "sha256": "e8d6cfe4f52e87a1292f3897bf0bea28e4bde32703e6792bb9b1bc60d3024817" }
+    },
+    "testMaterial": [{ "uri": "https://example.org/tests/cluster-00001/test_one.py" }],
+    "parser": {
+      "id": "jinn.parser.pytest-json-report",
+      "version": "1.0.0",
+      "digest": "sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897"
+    },
+    "transitions": { "failToPass": ["test_one.py::test_a"], "passToPass": [] },
+    "timeout": 1800
+  },
+  {
+    "instance_id": "swe-rebench-cluster-00002",
+    "repo": "astropy/astropy",
+    "base_commit": "2222222222222222222222222222222222222222",
+    "problem_statement": "Second astropy instance, different commit.",
+    "language": "python",
+    "image": {
+      "uri": "https://example.org/images/swe-rebench-runner:cluster-00002",
+      "digest": { "sha256": "e8d6cfe4f52e87a1292f3897bf0bea28e4bde32703e6792bb9b1bc60d3024817" }
+    },
+    "testMaterial": [{ "uri": "https://example.org/tests/cluster-00002/test_two.py" }],
+    "parser": {
+      "id": "jinn.parser.pytest-json-report",
+      "version": "1.0.0",
+      "digest": "sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897"
+    },
+    "transitions": { "failToPass": ["test_two.py::test_b"], "passToPass": [] },
+    "timeout": 1800
+  },
+  {
+    "instance_id": "swe-rebench-cluster-00003",
+    "repo": "psf/requests",
+    "base_commit": "3333333333333333333333333333333333333333",
+    "problem_statement": "A requests instance.",
+    "language": "python",
+    "image": {
+      "uri": "https://example.org/images/swe-rebench-runner:cluster-00003",
+      "digest": { "sha256": "e8d6cfe4f52e87a1292f3897bf0bea28e4bde32703e6792bb9b1bc60d3024817" }
+    },
+    "testMaterial": [{ "uri": "https://example.org/tests/cluster-00003/test_three.py" }],
+    "parser": {
+      "id": "jinn.parser.pytest-json-report",
+      "version": "1.0.0",
+      "digest": "sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897"
+    },
+    "transitions": { "failToPass": ["test_three.py::test_c"], "passToPass": [] },
+    "timeout": 1800
+  }
+]
