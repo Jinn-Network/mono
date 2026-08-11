@@ -19,6 +19,7 @@
 - **Gates surface as typed no-interval outcomes**, never exceptions and never a fabricated number: fewer than 2 source clusters, or fewer than `MIN_PAIRED_TASKS = 5` paired tasks, yield `interval: null` plus a human-readable `reasons` entry.
 - **Clustering is pinned, never a parameter** (design §9.2, `docs/superpowers/specs/2026-07-28-benchmarking-application-design.md:741-746`). The cluster key comes from task provenance only.
 - **`seed` stays an honest sealed parameter.** It is already required and sealed into the Run's `analysisPlan`; the method must not default, derive, or hide it.
+- **Sealed records admit only exact I-JSON *integer* numbers.** `assertIJsonInteger` (`records/src/json.ts:93-95`) throws on any non-integer number anywhere in a sealed record, and method `parameters` are sealed into the Run's `analysisPlan`. Every inherently fractional parameter is therefore a **decimal string**, following the established `DecimalString` convention (`records/src/run/schema.ts:15-20`, used for `completenessFloor` and budget amounts). This binds `alpha`. It does **not** bind emitted results, which are already `fixed4` strings, nor the `parameterSchema` metadata, which is never sealed.
 - **American English** in identifiers and copy (repo Rule 5).
 - **Existing numerics are not modified.** `stats/noninferiority.ts` is read-only in this packet — its pinned BCa oracle (`fixtures/methods/noninferiority-cluster-bca.json`, asserted at `testing/src/method-conformance.ts:600-665`) must stay green untouched. Auditing those numerics is E3's job, not this packet's.
 
@@ -49,7 +50,7 @@
 
 1. **Method URI:** `jinn.benchmarking.method/paired-delta`, object key `pairedDelta`, version `"1"`.
 2. **Registry ordering:** immediately **after** `noninferiorityIut` in `BENCHMARKING_METHOD_IDS`, `METHOD_METADATA`, and `SINGLE_SUBJECT_METHODS`, grouping the two clustered-BCa methods adjacently. Apply the same position in `method-specs.json` and `conformance-cases.json`.
-3. **Parameters:** `verdictRule`, `baseline`, `candidate`, `seed`, `resamples`, `alpha`. `alpha` is enum-restricted to `[0.1, 0.05, 0.01]` — a closed set prevents post-hoc fishing while letting the eval design pre-register its confidence level, which is sealed into the Run's `analysisPlan` at lock.
+3. **Parameters:** `verdictRule`, `baseline`, `candidate`, `seed`, `resamples`, `alpha`. `alpha` is enum-restricted to the **decimal strings** `["0.10", "0.05", "0.01"]` — a closed set prevents post-hoc fishing while letting the eval design pre-register its confidence level, which is sealed into the Run's `analysisPlan` at lock. **AMENDED 2026-08-12:** `alpha` was originally specced as a raw JSON number; that is unsealable (see the I-JSON constraint in Global Constraints), and the conformance kit caught it exactly as kit-precedes-implementation intends. The numeric `alpha` survives only in the internal stats API (`clusteredPairedDeltaInterval`), which is never sealed.
 4. **`delta` is reported whenever at least one pair exists**, even when `interval` is null. An underpowered run must still be able to report its point estimate honestly rather than showing nothing.
 5. **`referenceSet: "v1-reference"`**, `deterministic: true`, `computeAvailability: "available"`.
 6. **Docs drift repair:** commit `10fe0ebf1` added `provenance-cluster-sign@1` without amending the two §9.2 doc lists, leaving them stale. Task 5 adds **both** that method and `paired-delta@1`. This is a 2-line repair of another commit's omission; it is called out in the PR body rather than done silently. Neither file is a canonical doc (`CLAUDE.md` §Canonical Docs), so no CODEOWNERS gate applies.
@@ -385,7 +386,7 @@ Add to `METHOD_METADATA`, immediately after the `noninferiorityIut` entry:
 ```ts
   pairedDelta: metadata({
     requiredInputs: ["matrix.cells", "referenced-verdicts", "task-provenance-source"],
-    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples", "alpha"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1, maximum: MAX_NONINFERIORITY_RESAMPLES_V1 }, alpha: { enum: [0.1, 0.05, 0.01] } }, additionalProperties: false },
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples", "alpha"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1, maximum: MAX_NONINFERIORITY_RESAMPLES_V1 }, alpha: { enum: ["0.10", "0.05", "0.01"] } }, additionalProperties: false },
     outputShape: "paired mean rate difference + two-sided clustered BCa interval + exclusions + conflicted cells",
     exclusionRule: "pair Task digests judged in both arms; per-Task rates average all judged replicates; report full remainder",
     clusteringRule: "task-provenance-source",
@@ -396,19 +397,9 @@ Add to `METHOD_METADATA`, immediately after the `noninferiorityIut` entry:
   }),
 ```
 
-- [ ] **Step 4: Add the numeric-parameter helper**
+- [ ] **Step 4: (removed by AMENDMENT 1)**
 
-After `requireIntegerParam` at `registry.ts:264-270`:
-
-```ts
-function requireNumberParam(parameters: Readonly<Record<string, unknown>>, key: string): number {
-  const value = parameters[key];
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`method parameter "${key}" must be a finite number`);
-  }
-  return value;
-}
-```
+No new parameter helper is needed. `alpha` arrives as an enum-restricted decimal string and is read with the existing `requireStringParam`, then converted with `Number(...)` — exact for all three permitted values. If a `requireNumberParam` helper was added by an earlier pass, **delete it**; an unused function will fail `noUnusedLocals` under `yarn typecheck`.
 
 - [ ] **Step 5: Add the compute section**
 
@@ -435,7 +426,9 @@ const pairedDeltaMethod: SingleSubjectMethod = {
     const candidate = requireStringParam(input.parameters, "candidate");
     const seed = requireIntegerParam(input.parameters, "seed");
     const resamples = requireIntegerParam(input.parameters, "resamples");
-    const alpha = requireNumberParam(input.parameters, "alpha");
+    // Sealed records admit only integer numbers, so alpha crosses the boundary as an
+    // enum-restricted decimal string; Number() is exact for the three permitted values.
+    const alpha = Number(requireStringParam(input.parameters, "alpha"));
     if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
       throw new MethodInputError("method-incompatible-cost-unit", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
     }
@@ -618,12 +611,13 @@ and the conflicts assertion at `:116-123` becomes (a `Set`, so order is irreleva
       "jinn.benchmarking.method/avg-at-k",
       "jinn.benchmarking.method/pass-at-k",
       "jinn.benchmarking.method/paired-mcnemar",
-      "jinn.benchmarking.method/provenance-cluster-sign",
       "jinn.benchmarking.method/noninferiority-iut",
       "jinn.benchmarking.method/paired-delta",
       "jinn.benchmarking.method/clean-subset",
     ]));
 ```
+
+**AMENDED 2026-08-12:** `provenance-cluster-sign` is deliberately absent from this inline roster. Commit `7a52b5c66` moved it to standalone `provenance-cluster-sign-conformance.json` / `-method-spec.json` fixtures, checked separately — it needs `replicates === 1`, which the shared inline conflict matrix does not provide. `paired-delta@1` accepts any replicate count, so it belongs in the inline roster with the other six. Do not re-add `provenance-cluster-sign` here.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -664,7 +658,7 @@ const pairedDeltaTasks = pairedDeltaLabels.map((label) => taskDigest(label)).sor
 const pairedDeltaFixture = {
   methodId: "jinn.benchmarking.method/paired-delta",
   methodVersion: "1",
-  parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: 0.05 },
+  parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" },
   verdictRule: "unanimous",
   matrices: [matrix(pairedDeltaCells)],
   verdictOutcomes: pairedDeltaVerdictOutcomes,
@@ -713,7 +707,7 @@ In `packages/benchmarking/testing/fixtures/methods/method-specs.json`, insert an
     "parameterSchema": {
       "additionalProperties": false,
       "properties": {
-        "alpha": { "enum": [0.1, 0.05, 0.01] },
+        "alpha": { "enum": ["0.10", "0.05", "0.01"] },
         "baseline": { "type": "string" },
         "candidate": { "type": "string" },
         "resamples": { "maximum": 100000, "minimum": 1, "type": "integer" },
@@ -744,7 +738,7 @@ In `conflict-cases.json`, add to the `cases` array after the `noninferiority-iut
         "candidate": "armB",
         "seed": 123456789,
         "resamples": 100,
-        "alpha": 0.05
+        "alpha": "0.05"
       }
     },
 ```
