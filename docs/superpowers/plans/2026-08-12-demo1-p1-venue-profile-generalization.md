@@ -1462,6 +1462,18 @@ Dispatch an independent Opus reviewer per `superpowers:requesting-code-review`. 
 
 ---
 
+## Implementation deviations (recorded after execution)
+
+Three deviations from this plan's literal code were made during implementation. All were defects in the plan's draft test code, caught by running the tests; none weakened an assertion. Recorded here so a later reader — and P2's implementer, who will reuse these patterns — is not misled by the drafts above.
+
+1. **Task 3, helper reuse.** `provisioner.test.ts` already defined `workspacePathsUnder(root)`, structurally identical to this plan's proposed `workspacePathsFor`. The existing helper was reused instead of adding a duplicate. `gitIn` and `makeUpstreamRepository` had no equivalents and were added as written.
+
+2. **Task 5, Submission construction (plan bug).** The draft hand-encoded a Submission object and imported `sealTask` from `task-execution-profiles`. Both are wrong: `sealTask`/`sealSubmission` are exported from `@jinn-network/task-execution-protocol` (`sealing.ts`), and `SubmissionRecordSchema` additionally requires `submission`, `requester`, `idempotencyKey` and `deadline` — `backend.submit()` validates against it and would have rejected with `invalid-document`. The landed test uses a `submissionFor` helper calling `sealSubmission`, mirroring `venue.integration.test.ts`. Two related corrections: `SubmissionAck` is a discriminated union, so `ack.submission` needs an `accepted` narrowing first; and `ObservationSnapshot` is `{descriptor, cursor, observations}` with no top-level `attempt`, so the draft's polling loop was replaced with `await venue.backend.drain()` then a single `observe()` asserting `snapshot.descriptor.derived`. **Reusable lesson: copy the submit/observe/deliver pattern from `venue.integration.test.ts` verbatim rather than reconstructing it.**
+
+3. **Task 6, arm pinning (plan bug).** The draft pinned `isolationPolicy: "unrestricted"` on the new arm. The `RunRecord` schema (`packages/benchmarking/records/src/run/schema.ts:98-107`) refuses any arm key that also appears in `policy.submissionBaseline` **regardless of value**, and `compileDraft` (`run/compile.ts:105`) unconditionally injects `submissionBaseline: { isolationPolicy: VENUE_ISOLATION_POLICY }` into every RunRecord. So pinning `isolationPolicy` on an arm always collides in this product — nothing to do with repository-work. The landed test pins only `harness`, matching the file's own `setUpTwoArmDraft` fixture. **Reusable lesson for P2: arms pin `harness`, `model` and `loadout`; they must not restate `isolationPolicy`.**
+
+Task 6 confirmed the plan's central claim that **no source change is required** at the quote seam: `coverageRefusals` and `unsupportedPinningErrors` both walk `capabilities.runPinning.keys` generically.
+
 ## Self-Review
 
 **Spec coverage** — every P1 acceptance criterion maps to a task:
