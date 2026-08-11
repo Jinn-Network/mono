@@ -15,9 +15,11 @@
  * functions below for the exact manifest shape each produces.
  */
 
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { parseCellKey } from "@jinn-network/benchmarking-records";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
@@ -33,8 +35,10 @@ import type { DsseSigner } from "@jinn-network/trust-core";
 import {
   EVALUATION_TASK_PROFILE_URI,
   PREDICTION_FORECAST_PROFILE_URI,
+  REPOSITORY_WORK_PROFILE_URI,
 } from "@jinn-network/task-execution-profiles";
 import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
+import type { ResourceDescriptor, TaskSpecification } from "@jinn-network/task-execution-protocol";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
   INSPECT_EMBEDDED_EVALUATOR_ID,
@@ -45,6 +49,7 @@ import {
 } from "../runtime/inspect/artifacts.js";
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
+import type { RepositoryMirrorPort } from "./repository-mirror.js";
 import { sealVerdictStatement } from "./signing.js";
 
 /**
@@ -239,6 +244,110 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
   };
 }
 
+// ── repository-work cells ────────────────────────────────────────────────────────────────────
+
+const execFileAsync = promisify(execFile);
+const REPOSITORY_OID_PATTERN = /^[0-9a-f]{40}$/u;
+
+/**
+ * Not a reuse of the platform's `makeWorktreeProvisioner`: reaching it would require the product
+ * to implement `WorkspaceRuntimePorts` (process-group gating, meta reserve) it has no business
+ * owning, and its inherited `makeDirProvisioner.setup` would materialize the `repository-state`
+ * descriptor as a junk FILE via `materializeInput`. Same reasoning as `./sample-uniform.ts`'s
+ * self-contained planning guards. The checkout constraints below are the platform's, verbatim:
+ * 40-hex oid, HEAD equals the requested oid, and the worktree is detached.
+ */
+async function git(args: readonly string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", [...args], {
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return stdout.trim();
+}
+
+interface RepositoryWorkProvisionerOptions {
+  readonly sealedTaskBytes: Uint8Array;
+  readonly dispatchContextBytes: Uint8Array;
+  readonly task: TaskSpecification;
+  readonly mirror: RepositoryMirrorPort | undefined;
+}
+
+/** The Task's declared repository descriptor (`repository-work/1.0` inputConventions). */
+function repositoryStateDescriptor(task: TaskSpecification): { uri: string; oid: string } {
+  const descriptor = (task.inputs ?? []).find(
+    (input: ResourceDescriptor) => input.name === "repository-state",
+  );
+  if (descriptor === undefined) {
+    throw new Error(
+      'benchmark-product local venue: repository-work Task declares no "repository-state" input',
+    );
+  }
+  const uri = descriptor.uri;
+  const oid = (descriptor.annotations as { ref?: unknown } | undefined)?.ref;
+  if (typeof uri !== "string" || uri.length === 0) {
+    throw new Error('benchmark-product local venue: "repository-state" input carries no uri');
+  }
+  if (typeof oid !== "string" || !REPOSITORY_OID_PATTERN.test(oid)) {
+    throw new Error(
+      'benchmark-product local venue: "repository-state" annotations.ref must be exactly 40 lowercase hex characters',
+    );
+  }
+  return { uri, oid };
+}
+
+function repositoryWorkProvisionerContract(
+  options: RepositoryWorkProvisionerOptions,
+): ProvisionerContract {
+  return {
+    workspaceKind: (): WorkspaceKind => "worktree",
+    async setup(_view, paths) {
+      const { uri, oid } = repositoryStateDescriptor(options.task);
+      if (options.mirror === undefined) {
+        throw new Error(
+          "benchmark-product local venue cannot provision a repository-work cell: no repository mirror is configured",
+        );
+      }
+      await ensureWorkspaceDirectories(paths);
+      await Promise.all([
+        writeFile(join(paths.input, STAGED_SEALED_TASK_FILENAME), options.sealedTaskBytes),
+        writeFile(join(paths.input, "dispatch-context.json"), options.dispatchContextBytes),
+      ]);
+      const mirrorDir = await options.mirror.ensure({ uri, oid });
+      // git refuses a worktree destination that already exists.
+      await rm(paths.work, { recursive: true, force: true });
+      await git(["-C", mirrorDir, "worktree", "add", "--detach", paths.work, oid]);
+      const actual = await git(["-C", paths.work, "rev-parse", "HEAD"]);
+      if (actual !== oid) throw new Error(`worktree resolved ${actual}, expected ${oid}`);
+      const branch = await git(["-C", paths.work, "symbolic-ref", "-q", "HEAD"]).catch(() => "");
+      if (branch !== "") throw new Error(`worktree is attached to ${branch}`);
+    },
+    executionEnv: ({ env }) => ({ ...env }),
+    async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
+      // Same normalization contract as the solve path above, for this profile's declared slots.
+      // Renames run BEFORE `workspaceHarvest` because harvest stamps each artifact's mediaType
+      // from the declared slot whose name equals its path -- an artifact still called
+      // "patch.diff" would be collected untyped.
+      const structuredOutputPath = join(paths.out, "structured-output.json");
+      if (existsSync(structuredOutputPath)) {
+        await rename(structuredOutputPath, join(paths.meta, "structured-output.json"));
+      }
+      for (const slot of declaredOutputs) {
+        for (const suffix of [".diff", ".patch", ".md", ".json", ".txt"]) {
+          const candidate = join(paths.out, `${slot.name}${suffix}`);
+          if (!existsSync(join(paths.out, slot.name)) && existsSync(candidate)) {
+            await rename(candidate, join(paths.out, slot.name));
+          }
+        }
+      }
+      const declared = new Set(declaredOutputs.map((slot) => slot.name));
+      const result = await workspaceHarvest(paths, declaredOutputs);
+      const manifest = result.manifest.filter((entry) => declared.has(entry.path));
+      await wipeScratch(paths);
+      return { manifest, omissions: result.omissions, integrityViolations: result.integrityViolations };
+    },
+  };
+}
+
 // ── unsupported profiles (defensive; venue.ts's resolveTaskProfile already refuses these
 // earlier in the submit pipeline, so this contract is expected to be unreachable) ─────────────
 
@@ -388,6 +497,10 @@ export interface CreateLocalProvisionerOptions {
    */
   readonly evaluationContextVariationForTesting?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
   readonly inspect?: InspectProvisionerOptions;
+  /** Resolves a repository-work Task's `repository-state` descriptor to a local bare mirror.
+   * Absent on venues that serve no repository-work cells; a repository-work cell then refuses
+   * typed at setup rather than silently provisioning an empty work tree. */
+  readonly repositoryMirror?: RepositoryMirrorPort;
 }
 
 export function createLocalProvisioner(
@@ -421,6 +534,17 @@ export function createLocalProvisioner(
       return {
         id: "benchmark-product-inspect-dir-v1",
         contract: inspectProvisionerContract(input, options.inspect),
+      };
+    }
+    if (profileUri === REPOSITORY_WORK_PROFILE_URI) {
+      return {
+        id: "benchmark-product-repository-work-worktree-v1",
+        contract: repositoryWorkProvisionerContract({
+          sealedTaskBytes: input.sealedTaskBytes,
+          dispatchContextBytes: input.dispatchContextBytes,
+          task: input.task,
+          mirror: options.repositoryMirror,
+        }),
       };
     }
     return {
