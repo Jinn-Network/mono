@@ -15,6 +15,9 @@ import {
   type NativeBaseSepoliaAnchorReadClient,
   type NativeBaseSepoliaTargetReadClient,
 } from '../../src/daemon/native-base-sepolia-infrastructure.js';
+import { documentDigest } from '@jinn-network/task-execution-protocol';
+import { recordPath } from '@jinn-network/record-discovery-protocol';
+import { buildNativeEvaluationSpecResolver } from '../../src/daemon/native-assembly.js';
 import type { NativeInfrastructureFactoryInput } from '../../src/daemon/native-infrastructure-bundle.js';
 import type { NativeEngagementRow, NativeOperationRow } from '../../src/daemon/native-operator-state.js';
 
@@ -243,6 +246,57 @@ describe('first-party Base Sepolia public record transport', () => {
     });
     await expect(transport.byLocation('file:///private/operator.db')).rejects.toThrow(/HTTP\(S\)/u);
     await expect(transport.byLocation('https://records.example.invalid/one')).rejects.toThrow(/size limit/u);
+  });
+
+  // #30: an unpinned eval-spec CID makes kubo `block/get` do a DHT lookup that never returns. With
+  // no AbortSignal the fetch hangs the single-threaded solver work loop for minutes (round-17 gate:
+  // `loop 'work' stale 325973ms`). The bounded IPFS timeout must abandon the hang FAST so the caller
+  // rejects instead of blocking forever. Mutation check: revert the timeout and this test hangs to
+  // the vitest timeout (RED) rather than rejecting quickly.
+  it('abandons a hanging IPFS block fetch after the bounded timeout instead of blocking forever', async () => {
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      ipfsFetchTimeoutMs: 20,
+      fetchImpl: () => new Promise<Response>(() => { /* DHT lookup that never returns */ }),
+    });
+    await expect(transport.byDigest(`sha256:${'00'.repeat(32)}`)).rejects.toThrow(/timed out/u);
+  });
+
+  it('abandons a hanging HTTP location fetch after the bounded timeout instead of blocking forever', async () => {
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      httpFetchTimeoutMs: 20,
+      fetchImpl: () => new Promise<Response>(() => { /* serving plane that never responds */ }),
+    });
+    await expect(transport.byLocation('https://records.example.invalid/slow')).rejects.toThrow(/timed out/u);
+  });
+
+  // #30 root fix, integrated: the eval-spec resolver's #2559 HTTP-locator fallback only fires on a
+  // clean IPFS *rejection*, never on a hang. Once `byDigest` is bounded, a DHT hang becomes a
+  // rejection with the SAME shape as a clean miss, so the resolver falls through to the HTTP serving
+  // plane and resolves — digest-verified — after the timeout, exactly as round-18's fresh task will.
+  it('bounded IPFS timeout lets the eval-spec resolver fall back to the HTTP serving plane on a DHT hang', async () => {
+    const specBytes = new TextEncoder().encode('{"kind":"evaluation-spec","for":"#30"}');
+    const specDigest = documentDigest(specBytes);
+    const servingBase = 'https://requester.example.test';
+    const fetchImpl = vi.fn(async (request: string | URL): Promise<Response> => {
+      const url = String(request);
+      if (url.includes('/api/v0/block/get')) {
+        return new Promise<Response>(() => { /* unpinned CID: DHT lookup hangs */ });
+      }
+      if (url === `${servingBase}${recordPath(specDigest)}`) return new Response(specBytes);
+      throw new Error(`unexpected fetch to ${url}`);
+    });
+    const transport = createBaseSepoliaRecordTransport({
+      ipfsApiUrl: 'https://ipfs.example.invalid',
+      ipfsFetchTimeoutMs: 20,
+      fetchImpl,
+    });
+    const resolve = buildNativeEvaluationSpecResolver(transport, [servingBase]);
+
+    await expect(resolve(specDigest)).resolves.toEqual(specBytes);
+    expect(fetchImpl.mock.calls.some(([request]) => String(request).includes('/api/v0/block/get'))).toBe(true);
+    expect(fetchImpl.mock.calls.some(([request]) => String(request) === `${servingBase}${recordPath(specDigest)}`)).toBe(true);
   });
 });
 

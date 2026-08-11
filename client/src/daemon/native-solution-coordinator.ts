@@ -20,6 +20,7 @@ import { DSSE_ENVELOPE_MEDIA_TYPE } from '@jinn-network/trust-core';
 import {
   NativeOperatorStateRepository,
   NativeOperatorStateConflictError,
+  NativeWorkerLeaseError,
   type NativeEngagementRow,
   type NativeOperationRow,
   type NativePublicationRow,
@@ -222,9 +223,16 @@ export class NativeSolutionCoordinator {
       }
       return await this.drive(engagementId);
     } catch (error) {
-      const reason = error instanceof NativeSolutionFailure ? error.reason : 'solution-internal-failed';
+      // #30 Part B: a lost worker lease is a LOCAL single-writer coordination loss (the lease lapsed
+      // while a bounded-but-non-trivial op ran), NOT a solution failure. It must be retried once the
+      // lease is held again, never converted to a terminal `failed` engagement that permanently kills
+      // on-chain-claimed work. Every other non-`NativeSolutionFailure` is a genuine internal fault.
+      const leaseLost = error instanceof NativeWorkerLeaseError;
+      const reason = error instanceof NativeSolutionFailure ? error.reason
+        : leaseLost ? 'worker-lease-lost' : 'solution-internal-failed';
       const detail = error instanceof Error ? error.message : String(error);
-      if (!(error instanceof NativeSolutionFailure) || !error.retryable) {
+      const retryable = leaseLost || (error instanceof NativeSolutionFailure && error.retryable);
+      if (!retryable) {
         this.input.state.recordSolutionFailed(engagementId, { reason, detail });
         return { kind: 'failed', reason };
       }
@@ -388,7 +396,15 @@ export class NativeSolutionCoordinator {
       outputs: artifactRows.filter(({ role }) => role === 'output'),
       evidence: artifactRows.filter(({ role }) => role === 'evidence'),
     }));
-    if (!verification.ok) throw new NativeSolutionFailure(verification.reason);
+    if (!verification.ok) {
+      // #30 Part B: `evaluation-spec-unavailable` means the EvaluationSpec could not be FETCHED (the
+      // resolver's IPFS plane missed/timed out and its HTTP-locator fallback did not yet resolve) —
+      // an availability failure that recovers, not proof the delivery is invalid. It must be
+      // retryable, matching the other availability failures above (evidence/output/delivery-envelope).
+      // Every other verification failure is deterministic invalidity and stays terminal (fail-closed).
+      const retryable = verification.reason === 'evaluation-spec-unavailable';
+      throw new NativeSolutionFailure(verification.reason, undefined, retryable);
+    }
     this.input.state.recordSolutionReady(engagementId, {
       sourceId: this.input.publisher.sourceId,
       artifacts,

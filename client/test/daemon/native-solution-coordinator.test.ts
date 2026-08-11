@@ -16,7 +16,7 @@ import {
 } from '@jinn-network/task-execution-protocol';
 import { archivePagePath } from '@jinn-network/record-discovery-protocol';
 import { Store } from '../../src/store/store.js';
-import { NativeOperatorStateRepository } from '../../src/daemon/native-operator-state.js';
+import { NativeOperatorStateRepository, NativeWorkerLeaseError } from '../../src/daemon/native-operator-state.js';
 import {
   NativeSolutionCoordinator,
   type NativeSolutionSettlementCanonicalFact,
@@ -106,9 +106,12 @@ function finalizedClaim(now: () => Date = () => new Date('2026-08-02T00:00:00Z')
 function setup(input: {
   readonly recover?: ReconciliationReport;
   readonly evidenceBytes?: Uint8Array | null;
-  readonly verification?: Awaited<ReturnType<NativeSolutionVerificationPort['verify']>>;
+  readonly verification?:
+    | Awaited<ReturnType<NativeSolutionVerificationPort['verify']>>
+    | (() => Awaited<ReturnType<NativeSolutionVerificationPort['verify']>>);
   readonly settlementFacts?: readonly NativeSolutionSettlementCanonicalFact[];
   readonly evidenceFailure?: () => Error | undefined;
+  readonly deliverySignatureFailure?: () => Error | undefined;
   readonly publicationFailure?: () => Error | undefined;
   readonly settlementFailure?: () => Error | undefined;
   readonly outputs?: ReadonlyArray<{ readonly name: string; readonly bytes: Uint8Array }>;
@@ -168,7 +171,8 @@ function setup(input: {
       return bytes;
     }),
   };
-  const verify = vi.fn(async () => input.verification ?? ({ ok: true as const }));
+  const verify = vi.fn(async () =>
+    (typeof input.verification === 'function' ? input.verification() : input.verification) ?? ({ ok: true as const }));
   const publish = vi.fn(async ({ publication }: Parameters<NonNullable<ConstructorParameters<typeof NativeSolutionCoordinator>[0]['publisher']['publish']>>[0]) => {
     const failure = input.publicationFailure?.();
     if (failure !== undefined) throw failure;
@@ -204,7 +208,13 @@ function setup(input: {
     state: subject.state,
     backend,
     documents: { resolve: async () => subject.documents },
-    deliverySignature: { get: () => envelopeBytes },
+    deliverySignature: {
+      get: () => {
+        const failure = input.deliverySignatureFailure?.();
+        if (failure !== undefined) throw failure;
+        return envelopeBytes;
+      },
+    },
     evidence: {
       awaitIndexed: async (reference) => ({ status: 'indexed' as const, reference }),
       getRecord: async () => {
@@ -330,6 +340,57 @@ describe('NativeSolutionCoordinator', () => {
     }));
     expect(subject.publish).not.toHaveBeenCalled();
     expect(subject.settlement.broadcast).not.toHaveBeenCalled();
+  });
+
+  // #30 Part B1: a hung/unpinned IPFS eval-spec fetch (now bounded by Part A) makes the fail-closed
+  // self-verify report `evaluation-spec-unavailable`. That is an AVAILABILITY failure, not a proof
+  // of invalidity, so it must PAUSE and retry — not terminally kill an on-chain-claimed engagement.
+  // Contrast `delivery-binding-revoked` above, which is genuine invalidity and stays terminal.
+  // Mutation check: make line-391 unconditionally non-retryable again and the first assertion
+  // reddens to `{ kind: 'failed', reason: 'evaluation-spec-unavailable' }`.
+  it('pauses and resumes on a transient evaluation-spec-unavailable self-verify outage', async () => {
+    let unavailable = true;
+    const subject = setup({
+      verification: () => (unavailable
+        ? { ok: false as const, reason: 'evaluation-spec-unavailable' }
+        : { ok: true as const }),
+    });
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toMatchObject({ kind: 'paused' });
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'paused' });
+    expect(subject.publish).not.toHaveBeenCalled();
+
+    unavailable = false;
+    subject.advanceRetry();
+    await expect(subject.coordinator.reconcileStartup())
+      .resolves.toEqual([expect.objectContaining({ kind: 'solution-settled' })]);
+  });
+
+  // #30 Part B2: a NativeWorkerLeaseError raised by a drive-path operation is a LOCAL coordination
+  // loss (the single-writer lease lapsed while a bounded-but-non-trivial op ran), never a solution
+  // failure. It must be RETRYABLE — re-driven once the lease is held again — not converted to a
+  // terminal `failed` engagement. Injected through the unwrapped delivery-signature lookup, the one
+  // synchronous drive-path access that is not already funneled through the retryable `dependency()`
+  // wrapper. Mutation check: drop the `NativeWorkerLeaseError` arm from the catch and the first
+  // assertion reddens to `{ kind: 'failed', reason: 'solution-internal-failed' }`.
+  it('treats a mid-solve worker-lease loss as retryable, not a terminal engagement failure', async () => {
+    let leaseLost = true;
+    const subject = setup({
+      deliverySignatureFailure: () => (leaseLost
+        ? new NativeWorkerLeaseError('native worker lease is expired or not owned by this worker')
+        : undefined),
+    });
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toMatchObject({ kind: 'paused' });
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'paused' });
+    expect(subject.publish).not.toHaveBeenCalled();
+
+    leaseLost = false;
+    subject.advanceRetry();
+    await expect(subject.coordinator.reconcileStartup())
+      .resolves.toEqual([expect.objectContaining({ kind: 'solution-settled' })]);
   });
 
   it('reopens an orphaned settlement with the same durable operation identity', async () => {
