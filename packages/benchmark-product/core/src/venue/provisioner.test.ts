@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,7 +10,7 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
 import type { TaskSpecification } from "@jinn-network/task-execution-protocol";
-import type { DeclaredOutputSlot, WorkspacePaths } from "@jinn-network/task-execution-workspace";
+import { ProvisioningRejectedError, type DeclaredOutputSlot, type WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
   createEvaluationCellRegistry,
@@ -260,20 +260,21 @@ describe("createLocalProvisioner — repository-work cells", () => {
     const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-"));
     const paths = workspacePathsUnder(root);
     const sealed = new TextEncoder().encode(JSON.stringify({ profile: { uri: REPOSITORY_WORK_PROFILE_URI } }));
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
 
     const selected = createLocalProvisioner({
       registry: createEvaluationCellRegistry(),
       evaluators: [],
       repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
     })({
-      task: repositoryWorkTask(upstream.uri, upstream.oid),
+      task,
       sealedTaskBytes: sealed,
       dispatchContextBytes: new TextEncoder().encode("{}"),
       submission: { requirements: {} },
       attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
     } as never);
 
-    await selected.contract.setup({} as never, paths, []);
+    await selected.contract.setup({ task } as never, paths, []);
 
     expect(readFileSync(join(paths.input, "task.sealed"))).toEqual(Buffer.from(sealed));
     expect(existsSync(join(paths.work, "README.md"))).toBe(true);
@@ -299,6 +300,47 @@ describe("createLocalProvisioner — repository-work cells", () => {
       .rejects.toThrow(/no "repository-state" input/u);
   });
 
+  it("throws ProvisioningRejectedError (neverExecuted) for a Task with no repository-state input", async () => {
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-missing-typed-"));
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: { ensure: async () => "/unused" },
+    })({
+      task: { profile: { uri: REPOSITORY_WORK_PROFILE_URI }, inputs: [], outputs: [] } as unknown as TaskSpecification,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    const rejection = await selected.contract.setup({} as never, workspacePathsUnder(root), [])
+      .catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ProvisioningRejectedError);
+    expect((rejection as InstanceType<typeof ProvisioningRejectedError>).neverExecuted).toBe(true);
+  });
+
+  it("throws ProvisioningRejectedError (neverExecuted) for a non-40-hex annotations.ref", async () => {
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-badref-"));
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: { ensure: async () => "/unused" },
+    })({
+      task: repositoryWorkTask("file:///upstream", "not-a-valid-oid"),
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    const rejection = await selected.contract.setup({} as never, workspacePathsUnder(root), [])
+      .catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ProvisioningRejectedError);
+    expect((rejection as InstanceType<typeof ProvisioningRejectedError>).neverExecuted).toBe(true);
+    expect((rejection as Error).message).toMatch(/40 lowercase hex/u);
+  });
+
   it("refuses when no repository mirror is configured", async () => {
     const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-nomirror-"));
     const selected = createLocalProvisioner({ registry: createEvaluationCellRegistry(), evaluators: [] })({
@@ -313,27 +355,45 @@ describe("createLocalProvisioner — repository-work cells", () => {
       .rejects.toThrow(/no repository mirror is configured/u);
   });
 
-  it("normalizes harvest to the declared slots and moves the structured envelope to meta/", async () => {
-    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-harvest-"));
-    const paths = workspacePathsUnder(root);
-    for (const dir of [paths.input, paths.work, paths.out, paths.logs, paths.meta, paths.tmp, paths.secrets]) {
-      mkdirSync(dir, { recursive: true });
-    }
-    writeFileSync(join(paths.out, "patch.diff"), "--- a/x\n+++ b/x\n");
-    writeFileSync(join(paths.out, "structured-output.json"), "{}");
-    writeFileSync(join(paths.out, "scratch.txt"), "noise");
-
-    const selected = createLocalProvisioner({
-      registry: createEvaluationCellRegistry(),
-      evaluators: [],
-      repositoryMirror: { ensure: async () => "/unused" },
-    })({
+  it("throws ProvisioningRejectedError (neverExecuted) when no repository mirror is configured", async () => {
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-nomirror-typed-"));
+    const selected = createLocalProvisioner({ registry: createEvaluationCellRegistry(), evaluators: [] })({
       task: repositoryWorkTask("file:///upstream", "a".repeat(40)),
       sealedTaskBytes: new TextEncoder().encode("{}"),
       dispatchContextBytes: new TextEncoder().encode("{}"),
       submission: { requirements: {} },
       attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
     } as never);
+
+    const rejection = await selected.contract.setup({} as never, workspacePathsUnder(root), [])
+      .catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ProvisioningRejectedError);
+    expect((rejection as InstanceType<typeof ProvisioningRejectedError>).neverExecuted).toBe(true);
+  });
+
+  it("normalizes harvest to the declared slots and moves the structured envelope to meta/", async () => {
+    const upstream = makeUpstreamRepository();
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-harvest-"));
+    const paths = workspacePathsUnder(root);
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
+    })({
+      task,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await selected.contract.setup({ task } as never, paths, []);
+
+    writeFileSync(join(paths.out, "patch.diff"), "--- a/x\n+++ b/x\n");
+    writeFileSync(join(paths.out, "structured-output.json"), "{}");
+    writeFileSync(join(paths.out, "scratch.txt"), "noise");
 
     const result = await selected.contract.harvest(paths, [
       { name: "patch", mediaType: "text/x-diff", required: true },
@@ -345,5 +405,38 @@ describe("createLocalProvisioner — repository-work cells", () => {
     expect(result.omissions).toEqual(["summary"]);
     expect(existsSync(join(paths.meta, "structured-output.json"))).toBe(true);
     expect(existsSync(join(paths.out, "structured-output.json"))).toBe(false);
+  });
+
+  it("removes the worktree registration after harvest tears it down", async () => {
+    const upstream = makeUpstreamRepository();
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-teardown-"));
+    const paths = workspacePathsUnder(root);
+    const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: mirror,
+    })({
+      task,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await selected.contract.setup({ task } as never, paths, []);
+    expect(existsSync(paths.work)).toBe(true);
+
+    await selected.contract.harvest(paths, [
+      { name: "patch", mediaType: "text/x-diff", required: false },
+    ] as never);
+
+    expect(existsSync(paths.work)).toBe(false);
+
+    const mirrorDir = await mirror.ensure({ uri: upstream.uri, oid: upstream.oid });
+    const worktreeList = gitIn(mirrorDir, "worktree", "list");
+    expect(worktreeList).not.toContain(paths.work);
   });
 });
