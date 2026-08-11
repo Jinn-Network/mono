@@ -55,6 +55,30 @@ function runPlan(root: string, sealedTask: unknown, workFiles: Record<string, st
 
 const REPOSITORY_WORK_TASK = { profile: { uri: REPOSITORY_WORK_PROFILE_URI }, payload: { instance_id: "demo__demo-1" } };
 
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  }).trim();
+}
+
+/**
+ * A real git repository whose sole tracked file is `f.txt` with exactly `fileContent` as its
+ * bytes (no implicit trailing newline is added). This is the repository the emitted patch must
+ * apply against.
+ */
+function makeGitFixture(fileContent: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "sample-repository-work-fixture-"));
+  git(dir, "init", "--quiet", "--initial-branch", "main");
+  git(dir, "config", "user.email", "test@example.invalid");
+  git(dir, "config", "user.name", "Test");
+  writeFileSync(join(dir, "f.txt"), fileContent);
+  git(dir, "add", "f.txt");
+  git(dir, "commit", "--quiet", "-m", "initial");
+  return dir;
+}
+
 describe("makeSampleRepositoryWorkLauncher", () => {
   it("has the expected id and static capabilities", () => {
     const launcher = makeSampleRepositoryWorkLauncher();
@@ -118,6 +142,46 @@ describe("makeSampleRepositoryWorkLauncher", () => {
   it("exits non-zero when the work tree was never materialized", () => {
     const root = mkdtempSync(join(tmpdir(), "sample-repository-work-empty-"));
     expect(() => runPlan(root, REPOSITORY_WORK_TASK, {})).toThrow();
+  });
+
+  it("describes what it actually found when the work tree holds no regular file", () => {
+    // A work tree whose root holds only a directory is genuinely materialized -- it is not
+    // "never materialized" -- so the error must say what was observed instead of misdiagnosing.
+    const root = mkdtempSync(join(tmpdir(), "sample-repository-work-dironly-"));
+    const p = paths(root);
+    for (const dir of [p.input, p.work, p.out, p.logs, p.meta, p.tmp]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(p.input, "task.sealed"), JSON.stringify(REPOSITORY_WORK_TASK));
+    mkdirSync(join(p.work, "subdir"), { recursive: true });
+
+    const plan = makeSampleRepositoryWorkLauncher().plan(view({}), p, ATTEMPT);
+    let stderr = "";
+    try {
+      execFileSync(plan.argv[0]!, plan.argv.slice(1), { cwd: plan.cwd, env: plan.env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      throw new Error("expected the runner to exit non-zero");
+    } catch (error) {
+      stderr = (error as { stderr?: string }).stderr ?? "";
+    }
+    expect(stderr).toContain("subdir");
+    expect(stderr).not.toContain("never materialized");
+  });
+
+  describe("emits a patch git apply --check accepts", () => {
+    const cases: Array<[name: string, fileContent: string]> = [
+      ["file with a trailing newline", "alpha\nbeta\n"],
+      ["file without a trailing newline", "alpha\nbeta"],
+      ["empty file", ""],
+      ["single line with a trailing newline", "solo\n"],
+      ["single line without a trailing newline", "solo"],
+    ];
+
+    it.each(cases)("%s", (_name, fileContent) => {
+      const fixtureDir = makeGitFixture(fileContent);
+      const root = mkdtempSync(join(tmpdir(), "sample-repository-work-apply-"));
+      const { paths: p } = runPlan(root, REPOSITORY_WORK_TASK, { "f.txt": fileContent });
+      const patchPath = join(p.out, "patch");
+
+      expect(() => git(fixtureDir, "apply", "--check", patchPath)).not.toThrow();
+    });
   });
 
   it("exits non-zero when the staged Task is not a repository-work Task", () => {

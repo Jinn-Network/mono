@@ -65,9 +65,11 @@ if (!doc || !doc.profile || doc.profile.uri !== PROFILE_URI) {
   console.error('sample-repository-work: input/' + TASK_FILE + ' is not a repository-work Task');
   process.exit(2);
 }
+let rawEntries;
 let entries;
 try {
-  entries = fs.readdirSync(work, { withFileTypes: true })
+  rawEntries = fs.readdirSync(work, { withFileTypes: true });
+  entries = rawEntries
     .filter((entry) => entry.isFile() && entry.name !== '.git')
     .map((entry) => entry.name)
     .sort();
@@ -77,20 +79,32 @@ try {
 }
 const target = entries[0];
 if (target === undefined) {
-  console.error('sample-repository-work: work tree contains no regular file -- the repository was never materialized');
+  const observed = rawEntries.length === 0
+    ? 'the work tree is empty'
+    : 'the work tree contains no regular file, only: ' + rawEntries.map((entry) => entry.name + (entry.isDirectory() ? '/' : '')).join(', ');
+  console.error('sample-repository-work: nothing to modify -- ' + observed);
   process.exit(2);
 }
 const before = fs.readFileSync(path.join(work, target), 'utf8');
-const beforeLines = before.length === 0 ? [] : before.replace(/\\n$/, '').split('\\n');
-const patch = [
+const hasTrailingNewline = before.endsWith('\\n');
+const beforeLines = before.length === 0
+  ? []
+  : (hasTrailingNewline ? before.slice(0, -1) : before).split('\\n');
+const patchLines = [
   'diff --git a/' + target + ' b/' + target,
   '--- a/' + target,
   '+++ b/' + target,
   '@@ -1,' + beforeLines.length + ' +1,' + (beforeLines.length + 1) + ' @@',
-  ...beforeLines.map((line) => ' ' + line),
-  '+' + APPENDED,
-  '',
-].join('\\n');
+];
+for (let i = 0; i < beforeLines.length; i++) {
+  patchLines.push(' ' + beforeLines[i]);
+  if (i === beforeLines.length - 1 && !hasTrailingNewline) {
+    patchLines.push('\\\\ No newline at end of file');
+  }
+}
+patchLines.push('+' + APPENDED);
+patchLines.push('');
+const patch = patchLines.join('\\n');
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'patch'), patch);
 fs.writeFileSync(path.join(out, 'structured-output.json'), JSON.stringify({
