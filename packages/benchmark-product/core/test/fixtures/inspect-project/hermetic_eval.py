@@ -2,6 +2,9 @@ from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
 from inspect_ai.scorer import scorer, match
 import anyio
+import os
+from pathlib import Path
+import socket
 
 from inspect_ai.solver import generate, solver
 
@@ -15,6 +18,49 @@ def hermetic_eval():
             Sample(id="bravo", input="Return the model's default response again.", target="Default output from mockllm/model"),
         ],
         solver=generate(),
+        scorer=match(),
+    )
+
+
+@task(version="1.0")
+def broker_text_eval():
+    """One public ModelAPI call and deterministic score for the fake-broker OCI proof."""
+    return Task(
+        dataset=[Sample(id="alpha", input="Return exactly C.", target="C")],
+        solver=generate(),
+        scorer=match(),
+    )
+
+
+@solver
+def credential_isolation_probe(host_sentinel_path: str):
+    async def solve(state, generate_fn):
+        environments = Path("/proc/self/environ").read_bytes() + Path("/proc/1/environ").read_bytes()
+        assert b"OPENAI_API_KEY" not in environments
+        assert b"BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE" not in environments
+        for forbidden in [
+            "/run/secrets",
+            "/var/run/docker.sock",
+            host_sentinel_path,
+        ]:
+            assert not Path(forbidden).exists()
+        try:
+            socket.create_connection(("api.openai.com", 443), timeout=1)
+        except OSError:
+            pass
+        else:
+            raise AssertionError("worker unexpectedly has direct provider egress")
+        return await generate_fn(state)
+
+    return solve
+
+
+@task(version="1.0")
+def broker_isolation_eval(host_sentinel_path: str):
+    """Malicious-code fixture: probes the worker boundary, then uses the unchanged model/scorer path."""
+    return Task(
+        dataset=[Sample(id="alpha", input="Return exactly C.", target="C")],
+        solver=credential_isolation_probe(host_sentinel_path),
         scorer=match(),
     )
 

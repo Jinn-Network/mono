@@ -38,13 +38,18 @@ The fixed files are:
 - `share.txt`
 
 The manifest also includes one exact `records/<sha256>.bin` member for every
-record in the authenticated evidence graph. A cancelled run additionally has
-the optional `verification/cancel-requested.json`. When publication explicitly
-authorizes native Inspect content, each delivered native log is duplicated
-byte-for-byte as `native/inspect/<sha256>.eval`. The verifier requires that set
-to exactly match the Inspect log outputs in the authenticated delivery graph;
-the `.eval` extension makes the artifact directly usable by the pinned Inspect
-reader and Inspect View. No other role is permitted in
+record in the authenticated evidence graph. For an Inspect-backed Task this
+closure includes the exact canonical Inspect selection manifest under the
+`runtime-selection` evidence role. The verifier checks that the Task, selected
+arm, provider evidence, and native log all agree with that sealed selection; a
+bundle is not portable if it retains the Task and log but omits the method that
+selected them. A cancelled run additionally has the optional
+`verification/cancel-requested.json`. When publication explicitly authorizes
+native Inspect content, each delivered native log is duplicated byte-for-byte
+as `native/inspect/<sha256>.eval`. The verifier requires that set to exactly
+match the Inspect log outputs in the authenticated delivery graph; the `.eval`
+extension makes the artifact directly usable by the pinned Inspect reader and
+Inspect View. No other role is permitted in
 `benchmark-product-public-bundle/2`; an incompatible closure requires a new
 format version.
 
