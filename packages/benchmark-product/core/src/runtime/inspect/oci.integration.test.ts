@@ -283,6 +283,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     const viewerDir = join(viewerOutputRoot, "inspect-view-bundle");
     execFileSync(dockerPath, [
       "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
+      "--user", `${process.getuid()}:${process.getgid()}`,
       "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
       "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864", "--env=HOME=/tmp/home",
       "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
