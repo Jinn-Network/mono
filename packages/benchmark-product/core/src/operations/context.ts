@@ -1,3 +1,5 @@
+import type { BenchmarkRuntimeHost } from "../runtime/host-port.js";
+
 /**
  * The injected environment every operation receives (spec §5.1).
  *
@@ -14,4 +16,6 @@ export interface OperationContext {
   readonly principal: string;
   /** Returns an RFC 3339 timestamp. Injected so outputs are functions of inputs. */
   readonly clock: () => string;
+  /** Process-owning runtime boundary. Optional preserves existing library callers. */
+  readonly runtimeHost?: BenchmarkRuntimeHost;
 }

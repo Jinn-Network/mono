@@ -1,7 +1,12 @@
 import "server-only";
 
 import { isAbsolute } from "node:path";
-import type { OperationContext } from "@jinn-network/benchmark-product-core";
+import {
+  createDefaultBenchmarkRuntimeHost,
+  type OperationContext,
+} from "@jinn-network/benchmark-product-core";
+
+const runtimeHost = createDefaultBenchmarkRuntimeHost();
 
 export const WORKSPACE_ENV = "BENCHMARK_PRODUCT_WORKSPACE_DIR";
 export const PRINCIPAL_ENV = "BENCHMARK_PRODUCT_PRINCIPAL";
@@ -58,5 +63,5 @@ export function createProductOperationContext(
   configuration = readProductServerConfiguration(),
   clock: () => string = () => new Date().toISOString(),
 ): OperationContext {
-  return { ...configuration, clock };
+  return { ...configuration, clock, runtimeHost };
 }

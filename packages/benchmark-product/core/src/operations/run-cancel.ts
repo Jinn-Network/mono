@@ -209,7 +209,7 @@ export function runCancel(
       try {
         const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
         const createVenue: typeof createLocalVenue = deps.createVenue
-          ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options));
+          ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
         const alreadyRequested = cancelRequested(clockedContext.workspaceDir, input.draftId);
 
       // Terminal idempotency: once THIS operation has closed the run, return its exact durable

@@ -59,6 +59,7 @@ describe("public surface", () => {
       "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertSweBenchRows",
       "runPreview", "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
       "runReport", "runVerify", "runPublish", "listRuntimeAdapters", "runtimeNativeArtifactPublicationPolicy", "createRuntimeVenue",
+      "createDefaultBenchmarkRuntimeHost",
     ] as const) {
       expect(typeof entry[name], name).toBe("function");
     }

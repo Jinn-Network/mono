@@ -250,7 +250,7 @@ export function runQuote(
     run: async () => {
       const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
       const createVenue: typeof createLocalVenue = deps.createVenue
-        ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options));
+        ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
       const nextState = ensureQuotable(document.state, input.draftId);
 
       const closeAt = computeCloseAt(at, document.spec.policy.closeAfterMs);

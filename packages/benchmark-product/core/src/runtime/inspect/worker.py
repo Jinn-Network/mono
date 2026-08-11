@@ -94,7 +94,7 @@ def require_runtime() -> dict[str, str]:
     if sys.version_info < (3, 11):
         raise ValueError(f"Python 3.11+ is required, found {sys.version.split()[0]}")
     inspect_distribution = importlib.metadata.distribution("inspect-ai")
-    return {
+    runtime = {
         "inspectVersion": inspect_ai.__version__,
         "inspectWheelSha256": SUPPORTED_INSPECT_WHEEL_SHA256,
         "pythonVersion": sys.version.split()[0],
@@ -102,6 +102,28 @@ def require_runtime() -> dict[str, str]:
         "pythonEnvironmentSha256": python_environment_sha256(),
         "inspectDistributionSha256": distribution_content_sha256(inspect_distribution),
     }
+    for distribution_name, field_name in (
+        ("inspect-evals", "inspectEvalsVersion"),
+        ("openai", "openaiSdkVersion"),
+    ):
+        try:
+            runtime[field_name] = importlib.metadata.version(distribution_name)
+        except importlib.metadata.PackageNotFoundError:
+            pass
+    return runtime
+
+
+def selected_samples_sha256(samples: list[Any]) -> str:
+    material = []
+    for sample in samples:
+        dumped = sample.model_dump(mode="json")
+        material.append({
+            key: dumped.get(key)
+            for key in ("id", "input", "target", "choices", "metadata", "setup")
+            if key in dumped
+        })
+    encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def distribution_for_reference(reference: str) -> importlib.metadata.Distribution | None:
@@ -166,6 +188,8 @@ def resolved_selection_components(
     task_args: dict[str, Any],
     spec: Any,
     scorer_name: str,
+    selected_sample_id: str | int | None = None,
+    samples: list[Any] | None = None,
 ) -> dict[str, Any]:
     if len(spec.scorers) != 1 or spec.scorers[0].name != scorer_name:
         resolved = [scorer.name for scorer in spec.scorers]
@@ -194,13 +218,21 @@ def resolved_selection_components(
                 "name": dataset.name,
                 "location": dataset.location,
                 "samples": dataset.samples,
+                **({
+                    "selectedSampleId": selected_sample_id,
+                    "orderedSampleSha256": selected_samples_sha256(samples),
+                } if selected_sample_id is not None and samples is not None else {}),
             },
         },
     }
 
 
 def probe(config: dict[str, Any]) -> dict[str, Any]:
-    runtime = require_runtime()
+    runtime = {
+        **require_runtime(),
+        "adapterVersion": "1",
+        "workerSha256": sha256_file(Path(__file__).resolve()),
+    }
     project_dir = Path(config["projectDir"]).resolve()
     if not project_dir.is_dir():
         raise ValueError("Inspect projectDir is not a directory")
@@ -210,28 +242,37 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
     try:
         os.chdir(project_dir)
         with tempfile.TemporaryDirectory(prefix="jinn-inspect-probe-") as log_dir:
+            selected_sample_id = config.get("runOptions", {}).get("sampleId")
             logs = inspect_eval(
                 reference,
                 task_args=task_args,
                 model="mockllm/jinn-probe",
-                run_samples=False,
+                run_samples=selected_sample_id is not None,
+                sample_id=selected_sample_id,
                 log_dir=log_dir,
                 log_format="eval",
                 display="none",
             )
+            if len(logs) != 1:
+                raise ValueError(f"one task reference must resolve to exactly one EvalLog, got {len(logs)}")
+            # Inspect may return a lazy EvalLog whose samples are read from the native log on
+            # first access. Resolve the official log and bind its selected sample bytes before
+            # the temporary probe directory is removed.
+            log = read_eval_log(local_path(logs[0].location))
+            components = resolved_selection_components(
+                project_dir,
+                reference,
+                task_args,
+                log.eval,
+                config["scorerName"],
+                selected_sample_id,
+                list(log.samples or []),
+            )
     finally:
         os.chdir(prior_cwd)
-    if len(logs) != 1:
-        raise ValueError(f"one task reference must resolve to exactly one EvalLog, got {len(logs)}")
     return {
         "runtime": runtime,
-        **resolved_selection_components(
-            project_dir,
-            reference,
-            task_args,
-            logs[0].eval,
-            config["scorerName"],
-        ),
+        **components,
     }
 
 
@@ -265,6 +306,7 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         },
     }
     option_names = {
+        "sampleId": "sample_id",
         "maxSamples": "max_samples",
         "maxSubprocesses": "max_subprocesses",
         "maxSandboxes": "max_sandboxes",
@@ -290,17 +332,36 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     source_log = local_path(logs[0].location)
     # Official reader acceptance is part of the runtime boundary, not deferred to publication.
     log = read_eval_log(source_log)
+    runtime_now = require_runtime()
     actual_runtime = {
-        **require_runtime(),
+        **{key: runtime_now[key] for key in (
+            "inspectVersion",
+            "inspectWheelSha256",
+            "pythonVersion",
+            "pythonExecutableSha256",
+            "pythonEnvironmentSha256",
+            "inspectDistributionSha256",
+        )},
         "adapterVersion": "1",
         "workerSha256": sha256_file(Path(__file__).resolve()),
     }
+    execution = manifest["runtime"].get("execution")
+    if execution is not None:
+        if runtime_now.get("inspectEvalsVersion") != execution["inspectEvalsVersion"]:
+            raise ValueError("Inspect Evals package drifted during OCI execution")
+        if runtime_now.get("openaiSdkVersion") != execution["openaiSdkVersion"]:
+            raise ValueError("OpenAI SDK package drifted during OCI execution")
+        if actual_runtime["workerSha256"] != execution["workerSourceSha256"]:
+            raise ValueError("OCI worker source drifted from the sealed runtime identity")
+        actual_runtime["execution"] = execution
     actual_components = resolved_selection_components(
         project_dir,
         manifest["task"]["reference"],
         manifest["task"]["args"],
         log.eval,
         manifest["scorer"]["name"],
+        manifest.get("runOptions", {}).get("sampleId"),
+        log.samples,
     )
     if actual_runtime != manifest["runtime"] or actual_components != {
         "task": manifest["task"],
@@ -313,7 +374,10 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     if reread.status != log.status:
         raise ValueError("copied native log changed status under the official Inspect reader")
 
-    expected = log.eval.dataset.samples
+    # Inspect preserves the source dataset cardinality in EvalSpec.dataset.samples even when
+    # sample_id selects a single row. The locked exact sample is the cell's expected work; using
+    # the source cardinality here would incorrectly mark every exact-sample run incomplete.
+    expected = 1 if options.get("sampleId") is not None else log.eval.dataset.samples
     samples = log.samples or []
     errors = sum(1 for sample in samples if sample.error is not None)
     scorer_name = manifest["scorer"]["name"]

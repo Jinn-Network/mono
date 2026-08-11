@@ -154,6 +154,7 @@ export const EvaluationRuntimeBindingSchema = z.object({
     /^[a-f0-9]{64}$/,
     "selectionManifestSha256 must be 64 lowercase hex digits",
   ),
+  isolationPolicy: z.enum(["unrestricted", "oci-container"]).optional(),
 });
 
 export type EvaluationRuntimeBinding = z.infer<typeof EvaluationRuntimeBindingSchema>;

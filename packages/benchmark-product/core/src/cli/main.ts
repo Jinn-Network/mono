@@ -179,7 +179,12 @@ function renderResult<T>(result: OperationResult<T>, jsonMode: boolean, humanSuc
 function buildOperationContext(args: ParsedArgs, context: CliContext): OperationContext {
   const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
   const principal = required(args, "principal");
-  return { workspaceDir, principal, clock: context.clock };
+  return {
+    workspaceDir,
+    principal,
+    clock: context.clock,
+    ...(context.runtimeHost === undefined ? {} : { runtimeHost: context.runtimeHost }),
+  };
 }
 
 /** Renders `warnings` (arm mutations, spec: duplicate-pinning is a surface, not a refusal) as human-mode lines. */
@@ -332,7 +337,7 @@ async function handleInspectRuntimeSelect(
     SelectInspectEvaluationInput,
     "draftId"
   >;
-  const result = await selectInspectEvaluation(opContext, { draftId, ...configuration });
+  const result = await selectInspectEvaluation(opContext, { draftId, ...configuration } as SelectInspectEvaluationInput);
   return renderResult(
     result,
     jsonMode,

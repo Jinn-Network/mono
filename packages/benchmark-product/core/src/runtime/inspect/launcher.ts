@@ -1,15 +1,17 @@
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { LauncherCapabilities, LauncherContract, LaunchPlan } from "@jinn-network/task-execution-launchers";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import { INSPECT_TASK_PROFILE_URI, INSPECT_NATIVE_LOG_MEDIA_TYPE, INSPECT_SUMMARY_MEDIA_TYPE } from "./artifacts.js";
 import { INSPECT_ARM_REQUIREMENT_KEY, type InspectSelectionManifest } from "./manifest.js";
-import { inspectWorkerPath } from "./host.js";
+import { inspectWorkerPath, type InspectHostBinding } from "./host.js";
+import { buildInspectOciRunArgs, inspectOciRunnerPath } from "./oci.js";
 
 export const INSPECT_LAUNCHER_ID = "inspect-ai";
 
 export interface InspectLauncherOptions {
-  readonly pythonPath: string;
+  readonly host: InspectHostBinding;
   readonly manifest: InspectSelectionManifest;
 }
 
@@ -47,15 +49,32 @@ export function makeInspectLauncher(options: InspectLauncherOptions): LauncherCo
           { key: "harness", inventory: [INSPECT_LAUNCHER_ID], posture: "enforced" },
           { key: "model", inventory: options.manifest.arms.map((arm) => arm.model), posture: "enforced" },
           { key: INSPECT_ARM_REQUIREMENT_KEY, inventory: options.manifest.arms.map((arm) => arm.armId), posture: "enforced" },
-          { key: "isolationPolicy", inventory: ["unrestricted"], posture: "enforced" },
+          { key: "isolationPolicy", inventory: [options.host.kind === "oci" ? "oci-container" : "unrestricted"], posture: "enforced" },
         ],
       },
     }),
     probe: async () => ({ ready: true }),
-    plan(view: TaskView, paths: WorkspacePaths, _attempt: AttemptIdentity): LaunchPlan {
+    plan(view: TaskView, paths: WorkspacePaths, attempt: AttemptIdentity): LaunchPlan {
       requirePinning(view, options.manifest);
+      if (options.host.kind === "oci") {
+        const suffix = createHash("sha256").update(attempt.attemptUri).digest("hex").slice(0, 24);
+        return {
+          argv: [process.execPath, inspectOciRunnerPath(), options.host.dockerPath, ...buildInspectOciRunArgs(options.host, {
+            name: `jinn-inspect-${suffix}`,
+            operation: "run",
+            inputDir: paths.input,
+            outputDir: paths.out,
+            network: "none",
+          })],
+          cwd: paths.work,
+          env: { LANG: "C.UTF-8" },
+          validExitCodes: [0],
+          resultContract: { envelopeFormat: "inspect-worker-v1" },
+          interruptionBehavior: "nonrepeatable",
+        };
+      }
       return {
-        argv: [options.pythonPath, inspectWorkerPath(), "run", join(paths.input, "inspect-run.json")],
+        argv: [options.host.pythonPath, inspectWorkerPath(), "run", join(paths.input, "inspect-run.json")],
         cwd: paths.work,
         env: {
           PYTHONDONTWRITEBYTECODE: "1",

@@ -68,6 +68,12 @@ export {
   runtimeNativeArtifactPublicationPolicy,
 } from "./runtime/adapter.js";
 export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary } from "./runtime/adapter.js";
+export { createDefaultBenchmarkRuntimeHost } from "./runtime/host-port.js";
+export type {
+  BenchmarkRuntimeHost,
+  InspectRuntimeSelectionRequest,
+  InspectRuntimeSelectionResolution,
+} from "./runtime/host-port.js";
 
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
 export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/workspace.js";
