@@ -134,6 +134,44 @@ describe("importSweBenchRows", () => {
     expect(spec.familyBlock?.timeout).toBe(GOLDEN_ROW.timeout);
   });
 
+  test("a multi-row import associates each Task with its own spec, not merely with some spec", () => {
+    const clock = makeClock();
+    const draftId = setupDraft(clock, "Multi Row");
+
+    // A single-row import cannot catch a dropped or mis-associated spec: `toContain` is trivially
+    // satisfied when there is one of everything. Two rows with DIFFERENT transitions make the
+    // association observable.
+    const second = {
+      ...GOLDEN_ROW,
+      instance_id: "swe-rebench-2024-00043",
+      transitions: { failToPass: ["test_pool.py::test_second_only"], passToPass: [] },
+    };
+    const outcome = importSweBenchRows(contextFor(workspaceDir, clock), {
+      draftId,
+      rows: [GOLDEN_ROW, second],
+    });
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+
+    expect(outcome.result.evaluationSpecSha256s).toHaveLength(2);
+    expect(new Set(outcome.result.evaluationSpecSha256s).size).toBe(2);
+
+    const transitionsFor = (taskSha256: string): string[] => {
+      const taskDoc = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, taskSha256))) as {
+        evaluation?: { digest?: { sha256?: string } };
+      };
+      const specBytes = getSealedBytes(workspaceDir, taskDoc.evaluation!.digest!.sha256!);
+      const spec = JSON.parse(new TextDecoder().decode(specBytes)) as {
+        familyBlock?: { transitions?: { failToPass?: string[] } };
+      };
+      return spec.familyBlock?.transitions?.failToPass ?? [];
+    };
+
+    const resolved = outcome.result.taskSha256s.map(transitionsFor);
+    expect(resolved).toContainEqual(GOLDEN_ROW.transitions.failToPass);
+    expect(resolved).toContainEqual(second.transitions.failToPass);
+  });
+
   test("a duplicate-row file refuses validation naming benchmark-item-distinctness, audited", () => {
     const clock = makeClock();
     const draftId = setupDraft(clock, "Dup Rows");

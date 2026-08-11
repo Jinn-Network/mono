@@ -17,6 +17,7 @@ import {
   sealTask,
   TASK_EXECUTION_PROTOCOL_URI,
 } from "@jinn-network/task-execution-protocol";
+import { toCalendarStrictRfc3339 } from "./rfc3339-from-source.js";
 
 export type SweBenchRow = SweRebenchRow;
 
@@ -135,9 +136,25 @@ export function importSweBench(
   opts: DefineBenchmarkOptions,
 ): ImportedBenchmark {
   const provenanceTimestamp = opts.provenanceTimestamp ?? "2026-07-29T00:00:00Z";
-  const tasks = rows.map((row) =>
-    sealRepositoryWorkTask(row, opts.provenanceTimestamps?.[row.instance_id] ?? provenanceTimestamp),
-  );
+  const overrides = opts.provenanceTimestamps;
+  const tasks = rows.map((row) => {
+    // `hasOwnProperty` rather than a plain index: a row whose instance_id collides with an
+    // Object.prototype member (`toString`) would otherwise resolve to a function, and `??` would
+    // not fall back.
+    const hasOverride = overrides !== undefined
+      && Object.prototype.hasOwnProperty.call(overrides, row.instance_id);
+    if (!hasOverride) return sealRepositoryWorkTask(row, provenanceTimestamp);
+    // Normalize and validate HERE, where the offending instance is still in hand. Left to
+    // checkJudgeability below, a malformed date surfaces as `invalid-provenance` against a task
+    // DIGEST, naming neither the instance nor the bad value — a digest-hunt on a large import.
+    const override = overrides[row.instance_id] as string;
+    try {
+      return sealRepositoryWorkTask(row, toCalendarStrictRfc3339(override));
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      throw new Error(`provenanceTimestamps["${row.instance_id}"]: ${detail}`);
+    }
+  });
   const benchmark = defineBenchmark(tasks, opts);
   const judgeability = checkJudgeability(
     benchmark.record,

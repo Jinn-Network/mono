@@ -118,16 +118,27 @@ export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRow
     ]);
   }
 
-  const evaluationSpecs = (parsedRows.data as unknown as readonly SweBenchRow[]).map((row) => {
-    const mapped = sweRebenchRowToTaskAndSpec(row);
-    const sealed = sealEvaluationSpec(mapped.evaluationSpec);
-    // Sealing is deterministic, so re-sealing reproduces the exact bytes the Task already commits
-    // to. Assert rather than assume — a drift here would persist bytes under a digest no Task
-    // references, which is silent and would only surface as an ungradeable cell mid-run.
-    if (sealed.digest !== mapped.evaluationSpecDigest) {
-      refuse("record-integrity", "rows", `re-sealed EvaluationSpec digest ${sealed.digest} does not match ${mapped.evaluationSpecDigest}`);
+  const rows = parsedRows.data as unknown as readonly SweBenchRow[];
+  const evaluationSpecs = rows.map((row, index) => {
+    const sealed = sealEvaluationSpec(sweRebenchRowToTaskAndSpec(row).evaluationSpec);
+    const digest = sealed.digest.slice("sha256:".length);
+    // The binding property is agreement with the digest the SEALED TASK actually references —
+    // comparing the re-seal against the mapper's own digest would only restate that
+    // `sealEvaluationSpec` is deterministic, which proves nothing about the Task. Reading the
+    // Task's own bytes is what catches persisting a spec under a digest no Task points at, which
+    // is silent at import and would surface only as an ungradeable cell mid-run.
+    const taskDoc = JSON.parse(new TextDecoder().decode(imported.tasks[index]!.bytes)) as {
+      evaluation?: { digest?: { sha256?: string } };
+    };
+    const referenced = taskDoc.evaluation?.digest?.sha256;
+    if (referenced !== digest) {
+      refuse(
+        "record-integrity",
+        `rows.${index}`,
+        `re-sealed EvaluationSpec digest ${digest} does not match the digest task ${row.instance_id} references (${String(referenced)})`,
+      );
     }
-    return { digest: sealed.digest.slice("sha256:".length), bytes: sealed.bytes };
+    return { digest, bytes: sealed.bytes };
   });
 
   return { imported, evaluationSpecs };

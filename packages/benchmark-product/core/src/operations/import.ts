@@ -14,7 +14,6 @@
  */
 
 import type { DraftDocument } from "../domain/draft.js";
-import { refuse } from "../errors.js";
 import { convertSweBenchRows } from "../intake/swebench.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import { attachBenchmarkToDraft } from "./attach.js";
@@ -88,8 +87,13 @@ export function importSweBenchRows(
 
       const evaluationSpecSha256s = converted.evaluationSpecs.map((spec) => {
         const stored = putSealedBytes(clockedContext.workspaceDir, spec.bytes);
+        // Bare throw, matching the two structurally identical assertions above: this is a
+        // platform/store invariant violation, not a caller error, and `operate()` audits it as
+        // `execution`. (`record-integrity` is documented as the read-side digest check.)
         if (stored !== spec.digest) {
-          refuse("record-integrity", "rows", `stored EvaluationSpec digest ${stored} does not match ${spec.digest}`);
+          throw new Error(
+            `sealed evaluation spec digest mismatch: intake reported ${spec.digest}, store computed ${stored}`,
+          );
         }
         return stored;
       });

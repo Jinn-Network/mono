@@ -90,3 +90,46 @@ describe("SWE-bench import — per-instance provenance timestamps", () => {
     expect(second.benchmark.digest).toBe(first.benchmark.digest);
   });
 });
+
+describe("SWE-bench import — per-instance timestamps are validated at the edge", () => {
+  test("repairs the timestamp shapes upstream datasets actually ship", () => {
+    const imported = importSweBench(ROWS, {
+      ...OPTS,
+      provenanceTimestamps: {
+        "swe-rebench-cluster-00001": "2026-01-03",
+        "swe-rebench-cluster-00002": "2026-02-14 09:30:00",
+      },
+    });
+    const byDigest = new Map(imported.tasks.map((task) => [task.digest, task.bytes]));
+    const timestamps = imported.tasks.map((task) => {
+      const resolved = resolveBenchmarkTaskProvenance(task.digest, (digest) =>
+        byDigest.get(digest as `sha256:${string}`));
+      if (!resolved.ok) throw new Error(`provenance did not resolve: ${resolved.reason}`);
+      return resolved.provenance.timestamp;
+    });
+    expect(timestamps).toContain("2026-01-03T00:00:00Z");
+    expect(timestamps).toContain("2026-02-14T09:30:00Z");
+  });
+
+  test("a malformed timestamp names the offending instance, not a task digest", () => {
+    // Left to checkJudgeability, this surfaces as `invalid-provenance` against a digest, naming
+    // neither the instance nor the bad value — a digest-hunt on a large import.
+    expect(() =>
+      importSweBench(ROWS, {
+        ...OPTS,
+        provenanceTimestamps: { "swe-rebench-cluster-00002": "2026-02-30" },
+      }),
+    ).toThrow(/provenanceTimestamps\["swe-rebench-cluster-00002"\].*cannot be converted/u);
+  });
+
+  test("an instance_id colliding with an Object.prototype member does not resolve a function", () => {
+    const rows = [{ ...ROWS[0]!, instance_id: "toString" }];
+    const imported = importSweBench(rows, { ...OPTS, provenanceTimestamps: {} });
+    const resolved = resolveBenchmarkTaskProvenance(
+      imported.tasks[0]!.digest,
+      () => imported.tasks[0]!.bytes,
+    );
+    if (!resolved.ok) throw new Error(`provenance did not resolve: ${resolved.reason}`);
+    expect(resolved.provenance.timestamp).toBe("2026-07-29T00:00:00Z");
+  });
+});
