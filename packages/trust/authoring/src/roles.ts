@@ -37,6 +37,17 @@ export type NativeRoleIdentityRole = (typeof NATIVE_ROLE_IDENTITY_ROLES)[number]
 const DISCOVERY_ANNOUNCEMENT_SCOPE = "jinn:discovery-announcements";
 
 /**
+ * The dedicated trust scope an admission agent's key must declare to issue admission receipts,
+ * duplicated here as a literal for the same reason as `DISCOVERY_ANNOUNCEMENT_SCOPE` above: this
+ * (trust authoring) tree must not take a build edge on `@jinn-network/marketplace-binding` (which
+ * depends on the whole task-execution + trust-resolve stack), so the constant is pinned here and
+ * `client/test/daemon/trust-authoring-round-trip.test.ts` imports both and asserts they match — a
+ * drift is a red test, not a silent divergence. Canonical definition:
+ * `ADMISSION_RECEIPT_TRUST_SCOPE` in `@jinn-network/marketplace-binding`.
+ */
+const ADMISSION_RECEIPT_TRUST_SCOPE = "https://spec.jinn.network/trust-scopes/admission-receipts/v1";
+
+/**
  * Trust-core record families each native key is permitted to sign.
  *
  * The three `*-discovery` roles carry TWO scopes, and the second one is not a record family at all:
@@ -62,10 +73,24 @@ const DISCOVERY_ANNOUNCEMENT_SCOPE = "jinn:discovery-announcements";
  * Widening a role's scope invalidates already-authored bindings: an existing catalog's discovery
  * bindings lack this scope, so `RoleIdentitySet.open` refuses them until the bindings are
  * re-authored. See `docs/runbooks/native-trust-reauthor.md`.
+ *
+ * `admission` carries `ADMISSION_RECEIPT_TRUST_SCOPE`, NOT `authorizations`. Every admission-receipt
+ * verifier — the fleet evaluator (`native-subject-authority.ts`), the canonical marketplace-binding
+ * consumer (`named-checks.ts`), and the native consumer (`native-consumer/verification.ts`) — checks
+ * the admission-agent key's binding under `family: ADMISSION_RECEIPT_TRUST_SCOPE`. The map originally
+ * mapped admission to `["authorizations"]`, so an authored admission binding could NEVER satisfy any
+ * of them: the first eval ever to reach CP6 (the live two-operator gate, round 19, task 1227) threw
+ * `admission-binding-failed: scope-violation` deterministically and retried to the 4h SLA with no
+ * verdict (#33). This mirrors the #2525 discovery-scope fix exactly and is likewise additive —
+ * nothing checked before is checked less; the key now DECLARES the receipt-issuing authority it was
+ * already being used to exercise. An existing catalog's admission binding lacks this scope and must
+ * be re-authored before its receipts admit (see `docs/runbooks/native-trust-reauthor.md`).
+ * `requester-submission` stays `["authorizations"]` — that is the family `authenticateRequester`
+ * verifies submissions under, and is correct.
  */
 export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdentityRole, readonly string[]>> = {
   "requester-submission": ["authorizations"],
-  admission: ["authorizations"],
+  admission: [ADMISSION_RECEIPT_TRUST_SCOPE],
   "requester-discovery": ["observations", DISCOVERY_ANNOUNCEMENT_SCOPE],
   "solver-delivery": ["deliveries"],
   "solver-settlement": ["settlements"],

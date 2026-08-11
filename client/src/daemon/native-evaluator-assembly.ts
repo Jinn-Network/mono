@@ -48,7 +48,7 @@ import { NativeEvaluatorStateRepository, type NativeEvaluationRow } from './nati
 import {
   buildNativeWorkspaceRuntime,
 } from './native-solver-backend.js';
-import type { NativeTrustAuthority } from './native-trust-catalog.js';
+import { NativeTrustCatalogReadError, type NativeTrustAuthority } from './native-trust-catalog.js';
 import type { RoleIdentitySet } from './role-identities.js';
 
 const DELIVERY_PAYLOAD_TYPE = 'application/vnd.jinn.marketplace.executor-binding.v1+json';
@@ -245,7 +245,10 @@ export function buildNativeEvaluatorSubjectAuthority(input: {
           });
           return { ok: true as const };
         } catch (cause) {
-          return { ok: false as const, reason: String(cause) };
+          // A transient chain-read failure (the `Safe.isOwner` RPC could not complete) is flagged
+          // so the evaluator retries it rather than terminalizing a passing subject; every other
+          // failure here is a deterministic refusal and stays terminal.
+          return { ok: false as const, reason: String(cause), transient: cause instanceof NativeTrustCatalogReadError };
         }
       },
     },
