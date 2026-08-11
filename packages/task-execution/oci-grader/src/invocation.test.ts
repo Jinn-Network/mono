@@ -122,6 +122,29 @@ describe("buildPinnedOciInvocation", () => {
     }))).toThrow(/symbolic link|credential or signer material/u);
   });
 
+  it("refuses an input mount source containing a mount-option separator", () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-oci-grader-mount-"));
+    const output = join(root, "output");
+    mkdirSync(output, { mode: 0o700 });
+    const commaDir = join(root, "evil,readonly=false");
+    mkdirSync(commaDir, { mode: 0o700 });
+    const source = join(commaDir, "config.json");
+    writeFileSync(source, "{}", { mode: 0o600 });
+
+    expect(() => buildPinnedOciInvocation(baseInput({
+      inputs: [{ source, targetName: "config.json" }],
+      outputDirectory: output,
+    }))).toThrow(/mount-option separator/u);
+  });
+
+  it("refuses an output directory containing a mount-option separator", () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-oci-grader-mount-out-"));
+    const output = join(root, "evil,dst=/etc");
+
+    expect(() => buildPinnedOciInvocation(baseInput({ outputDirectory: output })))
+      .toThrow(/mount-option separator/u);
+  });
+
   it("refuses host networking and an unbounded timeout", () => {
     expect(() => buildPinnedOciInvocation(baseInput({
       profileRequiresNetwork: true, allowedNetwork: "host",

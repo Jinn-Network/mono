@@ -21,6 +21,8 @@ export const PINNED_IMAGE_BODY =
 export const PINNED_IMAGE = new RegExp(`^${PINNED_IMAGE_BODY}$`, "u");
 const SAFE_TARGET = /^\/jinn\/(?:input\/[a-z0-9][a-z0-9._-]*|out)$/u;
 const SECRET_SEGMENT = /^(?:\.aws|\.config|\.docker|\.gnupg|\.ssh|credentials?|keys?|secrets?)$/iu;
+/** A `,`, `=`, NUL, or newline in a `--mount` value breaks out of its `key=value,...` CSV shape. */
+const MOUNT_OPTION_SEPARATOR = /[,=\0\r\n]/u;
 const MAX_TIMEOUT_MS = 3_600_000;
 
 export interface PinnedOciGraderInput {
@@ -78,6 +80,9 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
   }
   const output = ensurePrivateDirectory(input.outputDirectory);
   assertNoSymlinksOrSecrets(output);
+  if (MOUNT_OPTION_SEPARATOR.test(output)) {
+    refuse("grader mount source contains a mount-option separator");
+  }
   const mounts: string[] = [];
   const targets = new Set<string>();
   for (const item of input.inputs) {
@@ -87,6 +92,9 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
     }
     assertNoSymlinksOrSecrets(item.source);
     const source = realpathSync(item.source);
+    if (MOUNT_OPTION_SEPARATOR.test(source)) {
+      refuse("grader mount source contains a mount-option separator");
+    }
     targets.add(target);
     mounts.push("--mount", `type=bind,src=${source},dst=${target},readonly`);
   }
