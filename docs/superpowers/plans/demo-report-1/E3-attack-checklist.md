@@ -10,7 +10,7 @@ At the pinned digest, E1 §2.8 records the pinning-asymmetry question as **withd
 
 **Known in-flight delta at time of writing.** E1's independent review found the work-directory placement claim underlying that withdrawal unsupported at head, and §2.8's question is being restored in re-scoped form: not withdrawn, but *confirmed by P2's acceptance gate*. This checklist already treats placement as unsettled and attacks it directly (B4, B9), so the restore narrows the gap between the two documents rather than opening a new one. It is recorded here because it is exactly why the pin is a digest: when E1's head moves, K3 forces a re-read rather than letting a stale "withdrawn" propagate into the lock as if E3 had accepted it.
 
-**Status:** All items `open`. This document is the attack surface enumeration and the executable check for each attack. It does not yet pass or fail the method. Eleven items carry an operator-ratified mitigation, which changes what the check tests but does not close the item — a ratified plan is not a verified one.
+**Status:** All items `open`. This document is the attack surface enumeration and the executable check for each attack. It does not yet pass or fail the method. Thirteen items carry an operator-ratified mitigation, which changes what the check tests but does not close the item — a ratified plan is not a verified one.
 
 ---
 
@@ -657,13 +657,14 @@ All figures below are recounted programmatically from this file's own headings a
 
 **Status:** 76 open, 0 closed — 63 plain `open`, 13 `open — mitigation ratified, verification pending`. This is still the pre-attack state; no check in this file has been executed.
 
-**Ratified mitigations folded in (v0.2), by the item they answer:**
+**Ratified mitigations folded in (v0.2–v0.3), by the item they answer:**
 
 | Item | Ratified decision |
 |---|---|
 | A2 | P0-interop threads real per-task `created_at`; declared fallback is dropping `clean-subset@1` for a slate-level attestation, recorded in that PR |
 | B4 | Byte-identity of the harvested patch against a no-loadout control becomes a P2 acceptance criterion |
 | B5 | Arm-C baseline decided empirically from E2 preview evidence, not by design preference |
+| B9 | Zero instruction-file hunks in the extracted patch — a P2 acceptance criterion alongside B4 |
 | D1 | Grader program frozen; its digest published at lock in the method document and asserted equal on every official verdict |
 | D2 | Task images digest-pinned and run with `--pull never` |
 | E1 | Timeout = FAIL declared pre-lock; per-arm timeout counts join per-arm retry counts as published disclosures |
@@ -672,7 +673,6 @@ All figures below are recounted programmatically from this file's own headings a
 | I6 | E4 public pre-registration committed, conditional on the e2e gate |
 | J8 | Clean-environment third-party recompute from published artifacts alone |
 | J9 | Conflict-of-interest statement required in the limitations |
-| B9 | Zero instruction-file hunks in the extracted patch — a P2 acceptance criterion alongside B4 |
 | J10 | Post-publication data availability addressed explicitly; sealed Tasks stated to be self-contained |
 
 None of these closes an item. Each one changes what the pre-lock check tests, and every one of them still has to pass.
