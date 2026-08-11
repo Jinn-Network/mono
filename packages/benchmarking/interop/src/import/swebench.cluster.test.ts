@@ -122,6 +122,25 @@ describe("SWE-bench import — per-instance timestamps are validated at the edge
     ).toThrow(/provenanceTimestamps\["swe-rebench-cluster-00002"\].*cannot be converted/u);
   });
 
+  test("a malformed ROW is not mis-attributed to the timestamp map", () => {
+    // The try must wrap only the conversion. Wrapping the seal too would prefix any row-shape
+    // failure with `provenanceTimestamps[...]` — but only for rows carrying an override — pointing
+    // an operator at their timestamp file to debug a bad image descriptor. That is the same
+    // misdirection this validation exists to remove, inverted.
+    const badRow = { ...ROWS[1]!, image: {} };
+    const withOverride = () =>
+      importSweBench([ROWS[0]!, badRow], {
+        ...OPTS,
+        provenanceTimestamps: { [badRow.instance_id]: "2026-02-14T00:00:00Z" },
+      });
+    const withoutOverride = () => importSweBench([ROWS[0]!, badRow], OPTS);
+
+    expect(withOverride).toThrow();
+    expect(withoutOverride).toThrow();
+    // Both paths must report the SAME row-shape failure; the override path must not rename it.
+    expect(withOverride).not.toThrow(/provenanceTimestamps/u);
+  });
+
   test("an instance_id colliding with an Object.prototype member does not resolve a function", () => {
     const rows = [{ ...ROWS[0]!, instance_id: "toString" }];
     const imported = importSweBench(rows, { ...OPTS, provenanceTimestamps: {} });

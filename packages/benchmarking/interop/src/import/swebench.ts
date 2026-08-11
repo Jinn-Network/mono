@@ -147,13 +147,18 @@ export function importSweBench(
     // Normalize and validate HERE, where the offending instance is still in hand. Left to
     // checkJudgeability below, a malformed date surfaces as `invalid-provenance` against a task
     // DIGEST, naming neither the instance nor the bad value — a digest-hunt on a large import.
-    const override = overrides[row.instance_id] as string;
+    // The try wraps ONLY the conversion. Wrapping the seal too would prefix any row-shape failure
+    // (bad parser.digest, locator-less image, negative timeout) with `provenanceTimestamps[...]`,
+    // but only for rows carrying an override — pointing an operator at their timestamp file to
+    // debug a malformed row. That is the same misdirection this validation exists to remove.
+    let resolved: string;
     try {
-      return sealRepositoryWorkTask(row, toCalendarStrictRfc3339(override));
+      resolved = toCalendarStrictRfc3339(overrides[row.instance_id] as string);
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
       throw new Error(`provenanceTimestamps["${row.instance_id}"]: ${detail}`);
     }
+    return sealRepositoryWorkTask(row, resolved);
   });
   const benchmark = defineBenchmark(tasks, opts);
   const judgeability = checkJudgeability(
