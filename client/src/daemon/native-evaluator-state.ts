@@ -1092,6 +1092,51 @@ export class NativeEvaluatorStateRepository {
     })();
   }
 
+  /**
+   * Advance a `verdict-ready` evaluation to `verdict-published` when every verdict record it
+   * references is already served — the terminal path for a second evaluation whose byte-identical
+   * verdict graph a prior evaluation already announced. The publication outbox is content-addressed
+   * (`UNIQUE (source_id, role, record_digest)`, no evaluation id), so `recordVerdictReady`'s
+   * `INSERT OR IGNORE` deduped that evaluation's rows away: it owns no `intent` rows, its publish
+   * loop drains nothing, and `recordEvaluationPublicationPublished` never fires the transition. Its
+   * records are nonetheless served (the prior evaluation announced them), so promote it here. The
+   * referenced records are resolved by CONTENT — the outbox rows whose (role, record_digest) an
+   * artifact of this evaluation names — NOT by the outbox row's own `evaluation_id`, so a second
+   * evaluation sees the shared published rows. Idempotent and guarded on `verdict-ready`, so the
+   * ordinary per-record path that first reaches `verdict-published` wins and this is a no-op. Any
+   * record this evaluation genuinely owns and has not yet published (a distinct content key that did
+   * NOT dedupe) is still `intent`, so promotion refuses until it is served (fail-closed). Returns
+   * whether it promoted.
+   */
+  promoteVerdictPublishedIfComplete(evaluation: NativeOperationId): boolean {
+    const now = this.timestamp();
+    return this.store.db.transaction(() => {
+      const current = this.store.db.prepare(
+        "SELECT state FROM native_evaluations WHERE evaluation_id = ?",
+      ).get(evaluation) as { state: string } | undefined;
+      if (current === undefined || current.state !== "verdict-ready") return false;
+      const referenced = this.store.db.prepare(
+        `SELECT o.publication_key AS publicationKey, o.status AS status
+           FROM native_evaluation_publication_outbox o
+          WHERE EXISTS (
+            SELECT 1 FROM native_evaluation_artifacts a
+             WHERE a.evaluation_id = ?
+               AND a.role = o.role
+               AND a.record_digest = o.record_digest
+          )`,
+      ).all(evaluation) as Array<{ publicationKey: NativeOperationId; status: string }>;
+      if (referenced.length === 0) return false;
+      if (referenced.some(({ status }) => status !== "published")) return false;
+      this.store.db.prepare(
+        "UPDATE native_evaluations SET state = 'verdict-published', updated_at = ? WHERE evaluation_id = ? AND state = 'verdict-ready'",
+      ).run(now, evaluation);
+      this.audit(evaluation, "verdict-records-already-published", {
+        publicationKeys: referenced.map(({ publicationKey }) => publicationKey),
+      }, now);
+      return true;
+    })();
+  }
+
   beginEvaluationMarketplaceDelivery(evaluation: NativeOperationId): { readonly operationId: NativeOperationId } {
     const current = this.getEvaluation(evaluation);
     const delivery = this.listEvaluationArtifacts(evaluation).find(({ role }) => role === "evaluation-delivery");

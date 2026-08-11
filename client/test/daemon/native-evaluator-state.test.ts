@@ -437,4 +437,195 @@ describe("NativeEvaluatorStateRepository", () => {
     });
     expect(state.getEvaluation(admitted.evaluationId)).toMatchObject({ state: "complete" });
   });
+
+  // #32 — the evaluator analog of #31. `native_evaluation_publication_outbox` is content-addressed
+  // (`UNIQUE (source_id, role, record_digest)`, no evaluation id). `recordVerdictReady` uses
+  // `INSERT OR IGNORE`, so it does not crash — but a second evaluation whose verdict graph is
+  // byte-identical to an already-published one owns no `intent` rows (all deduped away). Its publish
+  // loop drains nothing and the evaluation-id-keyed promotion in `recordEvaluationPublicationPublished`
+  // never fires → it stalls at `verdict-ready`, CP6 never emits, CP7 is unreachable.
+  describe("verdict-publication outbox is idempotent for duplicate content (#32)", () => {
+    const evaluatorAgent = "urn:jinn:evaluator:golden";
+    const coordinator = `0x${"f".repeat(40)}` as const;
+    const sourceId = "urn:jinn:source:evaluator-records";
+
+    // A byte-identical verdict graph, shared verbatim across two distinct evaluations — the
+    // deterministic-golden shape where a second evaluation's records collide with a settled one.
+    const goldenTask = new TextEncoder().encode("golden-evaluation-task");
+    const goldenSubmission = sealSubmission({
+      protocol: TASK_EXECUTION_PROTOCOL_URI,
+      submission: "urn:uuid:90000000-0000-4000-8000-000000000009",
+      task: { digest: { sha256: digest(goldenTask).slice(7) } },
+      requester: evaluatorAgent,
+      idempotencyKey: "golden-eval",
+      nonce: "golden-eval-nonce",
+      deadline: "2026-08-03T00:00:00Z",
+    });
+    const goldenVerdict = artifact("verdict", "golden-verdict-envelope");
+    const goldenDelivery = artifact("evaluation-delivery", "golden-evaluation-delivery");
+    const goldenEnvelope = artifact("evaluation-delivery-envelope", "golden-evaluation-delivery-envelope");
+    const goldenArtifacts = () => [
+      { role: "evaluation-task", mediaType: "application/json", name: "evaluation-task", digest: digest(goldenTask), bytes: goldenTask },
+      { role: "evaluation-submission", mediaType: "application/json", name: "evaluation-submission", digest: digest(goldenSubmission), bytes: goldenSubmission },
+      { role: "verdict", mediaType: "application/vnd.in-toto+json", ...goldenVerdict },
+      { role: "evaluation-delivery", mediaType: "application/json", ...goldenDelivery },
+      { role: "evaluation-delivery-envelope", mediaType: "application/vnd.dsse.envelope.v1+json", ...goldenEnvelope },
+    ];
+
+    const admissionAuthority = () => ({
+      requester: { signerKey: "did:key:requester", sealingTime: "2026-08-01T00:00:00Z" },
+      admission: { signerKey: "did:key:admission", effectiveTime: "2026-08-01T00:00:00Z" },
+      executor: {
+        signerKey: "did:key:executor", agent: "urn:jinn:solver:one",
+        declarationKey: "did:key:solver-declaration", effectiveTime: "2026-08-02T00:00:00Z",
+        address: opportunity.operatorAddress,
+      },
+      evaluator: {
+        signerKey: "did:key:evaluator", agent: evaluatorAgent,
+        declarationKey: "did:key:evaluator-declaration", address: `0x${"6".repeat(40)}`,
+      },
+      verificationDigest: `sha256:${"7".repeat(64)}`,
+    });
+
+    // Drive a DISTINCT evaluation to `evaluating` (a distinct subject Delivery → distinct
+    // evaluationId, and a distinct request id → distinct derived Attempt), ready to record a verdict.
+    // `hex` (a single hex char) seeds every per-evaluation identity so two calls never collide.
+    const driveToEvaluating = (state: NativeEvaluatorStateRepository, hex: string, seq: number) => {
+      const c = (suffix: string) => `0x${(hex + suffix).repeat(64).slice(0, 64)}` as `0x${string}`;
+      const subjectDelivery = artifact("delivery", `subject-delivery-${hex}`);
+      const admitted = state.admitOpportunity({
+        opportunity: {
+          ...opportunity,
+          advertisedDeliveryDigest: subjectDelivery.digest,
+          sourceSequence: String(seq).padStart(16, "0"),
+          sourceEntryDigest: `sha256:${hex.repeat(64)}`,
+          blockHash: c("d"),
+          transactionHash: c("e"),
+          logIndex: Number.parseInt(hex, 16),
+          canonicalEventIdentity: `84532:${c("d")}:${Number.parseInt(hex, 16)}`,
+        },
+        evaluatorAgent,
+        coordinator,
+        material: { ...material, delivery: subjectDelivery },
+      });
+      const id = admitted.evaluationId;
+      const taskBytes = new TextEncoder().encode(`evaluation-task-${hex}`);
+      const attemptUri = `urn:uuid:${hex}0000000-0000-4000-8000-000000000003` as const;
+      const submissionBytes = sealSubmission({
+        protocol: TASK_EXECUTION_PROTOCOL_URI,
+        submission: attemptUri,
+        task: { digest: { sha256: digest(taskBytes).slice(7) } },
+        requester: evaluatorAgent,
+        idempotencyKey: `eval-${hex}`,
+        nonce: `eval-nonce-${hex}`,
+        deadline: "2026-08-03T00:00:00Z",
+      });
+      state.recordDerivedEvaluation(id, {
+        taskBytes, taskDigest: digest(taskBytes),
+        submissionBytes, submissionDigest: digest(submissionBytes), submissionUri: attemptUri,
+      });
+      state.recordAdmissionVerified(id, admissionAuthority());
+      const claim = state.beginEvaluationClaim(id, c("1"));
+      state.recordOperationBroadcast(claim.operationId, c("2"));
+      state.recordEvaluationClaimFinalized(claim.operationId, {
+        txHash: c("2"), blockHash: c("3"), blockNumber: 100n,
+        requestId: c("5"), verdictIndex: 0, evaluatorAddress: `0x${"6".repeat(40)}`,
+      });
+      const finalizedAttempt = state.getDerivedEvaluation(id)!.attemptUri!;
+      state.recordEvaluationDispatchContext(id, serializeCanonicalJson({
+        taskDigest: digest(taskBytes),
+        submission: attemptUri,
+        nonce: `eval-nonce-${hex}`,
+        attempt: finalizedAttempt,
+      }));
+      const backend = state.beginEvaluationExecution(id);
+      state.recordEvaluationBackendAccepted(backend.operationId);
+      return id;
+    };
+
+    const publishOwnPending = (state: NativeEvaluatorStateRepository, id: string) => {
+      for (const publication of state.listPendingEvaluationPublications().filter((p) => p.evaluationId === id)) {
+        state.recordEvaluationPublicationPublished(publication.publicationKey, {
+          sequence: "1",
+          location: `https://evaluator.example/records/${publication.recordDigest.slice("sha256:".length)}`,
+        });
+      }
+    };
+
+    it("promotes a second evaluation whose byte-identical verdict graph a prior one already published", () => {
+      const store = new Store(":memory:");
+      const state = new NativeEvaluatorStateRepository(store);
+
+      // First evaluation records + publishes its 5 verdict records — the serving plane now holds them.
+      const a = driveToEvaluating(state, "a", 42);
+      state.recordVerdictReady(a, { sourceId, verdictCode: 1, artifacts: goldenArtifacts() });
+      expect(state.listPendingEvaluationPublications().filter((p) => p.evaluationId === a)).toHaveLength(5);
+      publishOwnPending(state, a);
+      expect(state.getEvaluation(a)).toMatchObject({ state: "verdict-published" });
+
+      // Second, DISTINCT evaluation whose verdict graph is byte-identical.
+      const b = driveToEvaluating(state, "b", 43);
+      expect(b).not.toBe(a);
+      // INSERT OR IGNORE never crashes...
+      expect(() => state.recordVerdictReady(b, { sourceId, verdictCode: 1, artifacts: goldenArtifacts() })).not.toThrow();
+      // ...B stores its OWN 5 artifact rows (keyed by evaluation id) but owns ZERO pending
+      // publications — the content-addressed rows already belong to A. Its publish loop drains
+      // nothing and the id-keyed promotion never fires: B stalls at verdict-ready (the CP6 stall).
+      expect(state.listEvaluationArtifacts(b)).toHaveLength(5);
+      expect(state.listPendingEvaluationPublications().filter((p) => p.evaluationId === b)).toEqual([]);
+      publishOwnPending(state, b); // the coordinator's publish loop — drains nothing for B
+      expect(state.getEvaluation(b)).toMatchObject({ state: "verdict-ready" });
+
+      // The fix: resolve B's verdict records by CONTENT — every one is already served — and promote.
+      expect(state.promoteVerdictPublishedIfComplete(b)).toBe(true);
+      expect(state.getEvaluation(b)).toMatchObject({ state: "verdict-published" });
+
+      // CP6 verdict emission proceeds under B's OWN distinct Attempt — a genuinely separate on-chain
+      // verdict per (evaluation/attempt), reusing the shared verdict content record, not a collision.
+      expect(state.getEvaluation(b)!.evaluationAttemptUri).not.toBe(state.getEvaluation(a)!.evaluationAttemptUri);
+      const deliver = state.beginEvaluationMarketplaceDelivery(b);
+      state.recordOperationBroadcast(deliver.operationId, `0x${"8".repeat(64)}`);
+      state.recordEvaluationMarketplaceDeliveryFinalized(deliver.operationId, {
+        txHash: `0x${"8".repeat(64)}`, blockHash: `0x${"9".repeat(64)}`, blockNumber: 101n,
+      });
+      state.beginVerdictSettlement(b);
+      expect(state.getEvaluation(b)).toMatchObject({ state: "verdict-settlement-pending" });
+      store.close();
+    });
+
+    it("does not promote a second evaluation whose verdict content genuinely differs (fail-closed)", () => {
+      const store = new Store(":memory:");
+      const state = new NativeEvaluatorStateRepository(store);
+
+      const a = driveToEvaluating(state, "a", 42);
+      state.recordVerdictReady(a, { sourceId, verdictCode: 1, artifacts: goldenArtifacts() });
+      publishOwnPending(state, a);
+      expect(state.getEvaluation(a)).toMatchObject({ state: "verdict-published" });
+
+      const b = driveToEvaluating(state, "b", 43);
+      // Same graph EXCEPT a genuinely different evaluation-delivery → a distinct content key that
+      // does NOT dedupe (the real per-attempt shape: B's Delivery embeds B's own Attempt).
+      const differentDelivery = artifact("evaluation-delivery", "DIFFERENT-evaluation-delivery");
+      state.recordVerdictReady(b, {
+        sourceId, verdictCode: 1,
+        artifacts: [
+          ...goldenArtifacts().filter((x) => x.role !== "evaluation-delivery"),
+          { role: "evaluation-delivery", mediaType: "application/json", ...differentDelivery },
+        ],
+      });
+      // B owns exactly the one genuinely-new record as a pending intent it must still publish.
+      const pending = state.listPendingEvaluationPublications().filter((p) => p.evaluationId === b);
+      expect(pending.map((p) => p.role)).toEqual(["evaluation-delivery"]);
+      expect(pending[0]!.recordDigest).toBe(differentDelivery.digest);
+      // Promotion refuses while that record is unpublished — no false promotion.
+      expect(state.promoteVerdictPublishedIfComplete(b)).toBe(false);
+      expect(state.getEvaluation(b)).toMatchObject({ state: "verdict-ready" });
+      // Once B's own record is served, the ordinary per-record path promotes it; promoteVerdict is a
+      // guarded no-op thereafter.
+      publishOwnPending(state, b);
+      expect(state.getEvaluation(b)).toMatchObject({ state: "verdict-published" });
+      expect(state.promoteVerdictPublishedIfComplete(b)).toBe(false);
+      store.close();
+    });
+  });
 });
