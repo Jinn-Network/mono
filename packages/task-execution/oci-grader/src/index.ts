@@ -24,3 +24,11 @@ export {
   SWE_REBENCH_OCI_GRADER_PROGRAM,
   SWE_REBENCH_OCI_GRADER_PROGRAM_BYTES,
 } from "./grader-program.js";
+
+export {
+  exactSweRebenchTestCommands,
+  pinnedSweRebenchImage,
+  SWE_REBENCH_PUBLIC_NETWORK_EXTENSION,
+  sweRebenchOciGraderReportSource,
+  type SweRebenchOciGraderSourceOptions,
+} from "./swe-rebench-source.js";
