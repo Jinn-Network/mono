@@ -1,6 +1,6 @@
 # E1 — Comparison Frame and Citation Map
 
-**Version:** 0.1 (draft for operator decision)
+**Version:** 0.2 (draft for operator decision; folds in C1's pinning recon)
 **Date:** 2026-08-11
 **Author:** E1 method-stream agent
 **Program:** `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` (Stage 2, packet E1)
@@ -103,7 +103,7 @@ Sources seen in search results but **not fetched, and therefore not cited**: HAN
 |---|---|---|
 | **A — skill** | `SKILL.md` in the skills directory, loaded through the standard progressive-disclosure path | Name + description always in context; body enters context only on model-initiated activation |
 | **B — flat** | `AGENTS.md` at repository root | Body always in context, in full, every turn |
-| **C — neither** | No instruction file | Nothing |
+| **C — neither** | No instruction file, but an **explicit empty loadout** is pinned — a digest over a zero-byte file — so the arm is pinned rather than unpinned (§2.4) | Nothing |
 
 The measured quantity is the effect of the *delivery mechanism*, with content held byte-identical. This is exactly the contrast the public argument needs and exactly the one no published work supplies.
 
@@ -155,9 +155,17 @@ This is the mechanic the whole frame rests on. If a reader cannot verify content
 
 **Audit path published in the report:** `sha256(source.md)`, `sha256(SKILL.md)`, `sha256(AGENTS.md)`, the frontmatter block reproduced verbatim, the transform, and the upstream artifact URL and version. A reader reconstructs both arms from the source and checks the three digests. The claim "identical content" becomes checkable rather than asserted.
 
-**Pinning.** Arm A's skill pins as a `jinn.skill.v1` loadout pin carrying `{kind, name, digest}` with a sha256 digest — see `packages/task-execution/backend-local/workspace/src/loadout.ts` (`LOADOUT_KINDS`, `canonicalLoadoutPin`). On the local venue, per-axis `enforced` / `match` is reachable (design §7.1).
+**Pinning — symmetric enforcement across all three arms (resolved by C1's engineering recon).**
 
-> **Design risk, flagged to R2/P2, not settled here.** Arm B's `AGENTS.md` needs an *equivalent* enforced, digest-verified pin. If the workspace can pin a skill loadout with digest verification but can only *attest* a plain repository file, the two arms carry **different pinning strength** — arm A enforced, arm B attested. That asymmetry is a genuine methodological wart, not a cosmetic one, and if it cannot be closed it must be disclosed per §7.1 rather than smoothed over. **R2/P2 should carry "both arms pin `enforced` on the instruction-content axis" as an acceptance criterion.**
+The draft of this document flagged an open risk: that arm A's skill could pin `enforced` while arm B's plain `AGENTS.md` could only be *attested*, leaving the two arms with different pinning strength. **C1's recon closes it, and the answer is better than the risk-mitigated case.**
+
+- **Arms A and B pin on the same axis, with the same verification.** Arm B's flat `AGENTS.md` fits the `jinn.skill.v1` loadout kind's single-file shape exactly, so both arms materialize through the identical digest-verified path — `materializeLoadout` at `packages/task-execution/backend-local/workspace/src/materialize.ts:112-124`, which for the `jinn.skill.v1` branch writes a single file at the pin's `name` via `materializeAt`, and `materializeAt` refuses on a sha256 mismatch (`ContentCorruptionError`, same file line 37). Both arms therefore reach `enforced` / `match` on one loadout axis, differing only in digest. The pin shape itself is `{kind, name, digest}` — `packages/task-execution/backend-local/workspace/src/loadout.ts` (`LOADOUT_KINDS`, `canonicalLoadoutPin`).
+- **Two product-side mechanics make it work**, both on existing precedent and requiring no platform change: placement into the work directory rather than the sealed input directory, and a venue launcher wrapper that drops the `--plugin-dir` argument for the flat-file arm so arm B is not silently handed the skill-loading path.
+- **Arm C pins an explicit empty loadout** — a digest over a zero-byte file — rather than running unpinned. An unpinned arm locks fine, but publishes `unverifiable` on the loadout axis in the report's honesty block. Pinning empty instead makes **all three arms reach `match` on the loadout axis, with `unverifiableAxisCounts.loadout` = 0**. That is a strictly stronger claim surface for the same run, and it is why arm C's row in §2.1 says "explicit empty loadout" rather than "no pin."
+
+**Rejected alternative, recorded:** running the comparison with disclosed asymmetric pinning — arm A enforced, arm B attested, arm C unpinned — and naming the asymmetry in the limitations. This was the fallback while the seam was open. It is now rejected on the merits: symmetric enforcement is achievable with existing precedent, so accepting a disclosed wart would be choosing a weaker report for no saving.
+
+Verification note: the path C1 reported omitted the `backend-local` segment; the file is at `packages/task-execution/backend-local/workspace/src/materialize.ts`, and the cited line range and digest-refusal behavior were confirmed there directly.
 
 **The residual asymmetry that cannot be removed — and must be stated, not hidden.**
 
@@ -175,6 +183,8 @@ The report's claim is then bounded honestly: *we measure the skill mechanism as 
 ## 2.5 Held constant across arms
 
 Agent (claude-code launcher), model, **effort (held constant, disclosed as attested-not-graded per the program's global constraints)**, harness version, task slate, container grader, retry and exclusion policy, replicate count. Enforced pins wherever the local venue can enforce; per-axis pinning status published in the report's disclosures rather than assumed (design §7.1, §7.3).
+
+**The loadout axis is the one the A/B varies, and per C1's recon it reaches `match` on all three arms** — arm A's skill digest, arm B's `AGENTS.md` digest, arm C's zero-byte digest — so the report can publish `unverifiableAxisCounts.loadout` = 0 (§2.4). Every other axis above is held rather than varied.
 
 Exclusion and infra-failure retry rules are proposed by R5 **before anyone sees per-task results** and are part of the lock.
 
@@ -208,20 +218,22 @@ Every line below is a limitation the report carries, not a caveat to be trimmed 
 - **Not** a claim that every configured runtime property was independently enforced (§8.1). Effort is held constant and **attested, not graded**; per-axis pinning status — including any `attested` or `unverifiable` axis — is published, not hidden (§7.3).
 - **Not** generalizable below the declared MDE. An underpowered null is reported as "we cannot detect effects smaller than X" and never quietly reframed as "no effect" (E2).
 - **Not** rehearsal-free. Every preview is logged, counted, and disclosed in the limitations (§7.2).
+- **Not** re-derivable at the Matrix integrity tier. SWE-shaped tasks mint no admission receipt today, so the Matrix integrity tier on those tasks is **`attested-only`, never `re-derivable`** (C1 recon). Engineering will **disclose this for demo 1, not fix it** — so the report states it as a limitation rather than implying a stronger integrity tier than the run has.
 - **Not** a novelty claim that survives the SkillJuror verification item (§1.5). If E3 finds SkillJuror's flat baseline is an always-on context file, this report is a replication and says so.
 
 ## 2.8 Open questions only the operator can answer
+
+Four remain. A fifth — whether a disclosed asymmetric-pinning run would be acceptable — is **withdrawn**: C1's recon showed symmetric enforcement is achievable for all three arms on existing precedent, so §2.4 now carries a recommendation rather than a question.
 
 1. **Frame.** Approve mechanism-versus-mechanism as recommended, or take the higher-pull public-skill on/off alternative (§2.6)?
 2. **Arm count.** Three arms at 1.5× cells, or two arms plus a disposable pre-run content screen (§2.2)? This is a compute-budget call against headline defensibility.
 3. **Content artifact.** Accept C2 (Anthropic public skills, Apache-2.0, verified) as the default, and authorize C1 (SWE-Skills-Bench set) as an upgrade conditional on independent license and availability verification (§2.3)?
 4. **Publication framing.** Name the Vercel post and the Hacker News objection in the report's motivation, or motivate the gap generically (§2.6)? Deferrable to E5.
-5. **Pinning asymmetry.** If R2/P2 report that arm B's `AGENTS.md` cannot be pinned `enforced`, is a disclosed asymmetric-pinning run acceptable, or does that block the lock (§2.4)?
 
 ## 2.9 Handoffs
 
 - **To E2 (power):** primary contrast is A vs B paired by task; secondary is (A ∪ B) vs C. Size both. Declare the A-vs-B MDE before the official run and print it in the report.
-- **To E3 (red team):** two verification items are already open. (a) Resolve SkillJuror's "normalized flat baseline" definition (§1.5) — the novelty claim depends on it. (b) Verify the SWE-Skills-Bench artifact availability and license if C1 is pursued (§1.7, §2.3). E3 additionally owns leakage in the chosen content, description-wording freedom (§2.4), and the pinning asymmetry (§2.4).
-- **To R2/P2:** carry "both arms pin `enforced` on the instruction-content axis" as an acceptance criterion (§2.4).
+- **To E3 (red team):** two verification items are already open. (a) Resolve SkillJuror's "normalized flat baseline" definition (§1.5) — the novelty claim depends on it. (b) Verify the SWE-Skills-Bench artifact availability and license if C1 is pursued (§1.7, §2.3). E3 additionally owns leakage in the chosen content and description-wording freedom (§2.4). The pinning asymmetry is **closed** (§2.4) and no longer an E3 item; the `attested-only` Matrix integrity tier on SWE-shaped tasks (§2.7) is a disclosure item, not a defect to attack.
+- **To P2 (launcher arm wiring):** the acceptance criterion is now specific rather than open — all three arms pin `enforced` on one `jinn.skill.v1` loadout axis (arm A skill, arm B flat `AGENTS.md`, arm C zero-byte), with `unverifiableAxisCounts.loadout` = 0. The two product-side mechanics C1 identified — work-dir placement, and a venue launcher wrapper dropping `--plugin-dir` for the flat-file arm — are implementation items on existing precedent, no platform change (§2.4).
 - **To R5:** the slate must be domain-compatible with the chosen content artifact, or the manipulation check fails by construction (§2.3).
 - **To C3/R4:** no estimator is proposed here. Every number comes from a named registry method.
