@@ -27,11 +27,11 @@
     },
     {
       "id": "methods/conflict-cases.json",
-      "sha256": "dcc20ded922689cddc5cc16c6e332ba0e3c7c5cbafde84dbbc08effa3eaa6d7e"
+      "sha256": "0784e581136c8ac3f9dfddcbc9d19e0d52931e239acd0ef062e91e07f6a5233c"
     },
     {
       "id": "methods/conformance-cases.json",
-      "sha256": "4fdddbcdc1a688df97227e213d081118dd9dd2b2d5390ae1dc97af133429c8ed"
+      "sha256": "3abf59001e4b53895bda5520e8af132275729a59e144bf9da773a2f87cd253b7"
     },
     {
       "id": "methods/fully-attrited-avg-at-k.json",
@@ -47,7 +47,7 @@
     },
     {
       "id": "methods/method-specs.json",
-      "sha256": "ce67ff1cfd4a545c8822e42eb0b1939f242df8d71ce4bc6a99a004d163983390"
+      "sha256": "78903ad241416a0b59f636c6c8077d219bb7e0cd0d8bc9dda4aa18f317bafe1a"
     },
     {
       "id": "methods/noninferiority-cluster-bca.json",
@@ -68,6 +68,10 @@
     {
       "id": "methods/paired-contract.json",
       "sha256": "ea292e5dcb1bed1b4b35fca990e841326bd731bc70ffebb0ca48b8d15b05574f"
+    },
+    {
+      "id": "methods/paired-delta.json",
+      "sha256": "ee87f4d240c373131edf81677209e4183c2032db7d015a1149cdcfcc2b5dc7fd"
     },
     {
       "id": "methods/paired-exclusion-r1.json",

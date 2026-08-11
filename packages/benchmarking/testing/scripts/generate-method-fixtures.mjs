@@ -411,6 +411,57 @@ const clusterSignFixture = {
   },
 };
 
+// --- fixture 3c: paired-delta@1 -------------------------------------------------------------
+// Six single-Task clusters at R=2. Both replicates agree within each arm, so every per-Task
+// delta is exactly +1 and the bootstrap is degenerate: observed == low == high == 1, with no
+// need to re-implement BCa here. Endpoint distinctness is unit-tested in `aggregate`.
+
+const pairedDeltaLabels = Array.from({ length: 6 }, (_, index) => `paired-delta/t${index + 1}`);
+const pairedDeltaCells = pairedDeltaLabels.flatMap((label) => [
+  cell(label, "armA", 1, { outcome: "judged", verdicts: ["r1"], validVerdicts: ["r1"] }),
+  cell(label, "armA", 2, { outcome: "judged", verdicts: ["r2"], validVerdicts: ["r2"] }),
+  cell(label, "armB", 1, { outcome: "judged", verdicts: ["r1"], validVerdicts: ["r1"] }),
+  cell(label, "armB", 2, { outcome: "judged", verdicts: ["r2"], validVerdicts: ["r2"] }),
+]);
+const pairedDeltaVerdictOutcomes = {};
+const pairedDeltaTaskProvenance = {};
+for (const label of pairedDeltaLabels) {
+  const task = taskDigest(label);
+  for (const replicate of ["r1", "r2"]) {
+    pairedDeltaVerdictOutcomes[digest(`${label}/armA/verdict/${replicate}`)] = verdictOutcome("fail");
+    pairedDeltaVerdictOutcomes[digest(`${label}/armB/verdict/${replicate}`)] = verdictOutcome("pass");
+  }
+  pairedDeltaTaskProvenance[task] = { source: `fixture-source/${task}` };
+}
+const pairedDeltaTasks = pairedDeltaLabels.map((label) => taskDigest(label)).sort();
+const pairedDeltaFixture = {
+  methodId: "jinn.benchmarking.method/paired-delta",
+  methodVersion: "1",
+  parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" },
+  verdictRule: "unanimous",
+  matrices: [matrix(pairedDeltaCells)],
+  verdictOutcomes: pairedDeltaVerdictOutcomes,
+  taskProvenance: pairedDeltaTaskProvenance,
+  runReplicates: 2,
+  expectedResults: {
+    verdictRule: "unanimous",
+    baseline: "armA",
+    candidate: "armB",
+    pairs: 6,
+    delta: fixed4(1),
+    interval: { alpha: fixed4(0.05), low: fixed4(1), high: fixed4(1) },
+    reasons: [],
+    pairing: { taskDigests: pairedDeltaTasks },
+    clustering: { basis: "task-provenance-source", clusters: 6 },
+    excluded: { count: 0, cellKeys: [] },
+    conflicted: { count: 0, cellKeys: [] },
+    bootstrap: {
+      procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+      ...sourceClusters(pairedDeltaTasks, 2000),
+    },
+  },
+};
+
 // --- fixture 4: clean-subset@1 (delegates to wilson) -----------------------------------------
 
 // Contamination-filtering direction (design §9.2): "clean" means the item postdates a model's
@@ -610,6 +661,7 @@ const fixtures = {
   "avg-at-k": avgAtKFixture,
   "paired-mcnemar": mcnemarFixture,
   "provenance-cluster-sign": clusterSignFixture,
+  "paired-delta": pairedDeltaFixture,
   "clean-subset": cleanSubsetFixture,
   "noninferiority-pass": noninferiorityPassFixture,
   "noninferiority-fail": noninferiorityFailFixture,
