@@ -45,3 +45,9 @@ evidence or trust packages, verdict signing (the caller seals verdicts).
 - `docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md` (ratified)
 - `docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md` (approved)
 - `log/decisions/2026-07-30-platform-boundary-and-topology.md` (ratified)
+
+## Published grader program digest
+
+    sha256:8194eb47ad010d8e1ce2f5f4a5becd3354102f80c138aad836cfd3b0e8b2ab11
+
+Frozen at method lock. `src/grader-program.test.ts` fails if these bytes move.

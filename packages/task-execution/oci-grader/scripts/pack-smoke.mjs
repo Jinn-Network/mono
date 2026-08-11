@@ -124,9 +124,24 @@ try {
   await writeFile(
     join(consumerRoot, "packed-types.ts"),
     `
-import { PACKAGE_VERSION } from "@jinn-network/task-execution-oci-grader";
-declare let version: string;
-void (version = PACKAGE_VERSION);
+import {
+  buildPinnedOciInvocation,
+  graderProgramDigest,
+  runPinnedOciGrader,
+  sweRebenchOciGraderReportSource,
+  type PinnedOciGraderInput,
+  type PinnedOciInvocation,
+} from "@jinn-network/task-execution-oci-grader";
+
+declare const input: PinnedOciGraderInput;
+declare const invocation: PinnedOciInvocation;
+const digest: \`sha256:\${string}\` = graderProgramDigest();
+void input;
+void invocation;
+void digest;
+void buildPinnedOciInvocation;
+void runPinnedOciGrader;
+void sweRebenchOciGraderReportSource;
 `,
   );
   await writeFile(
@@ -164,7 +179,11 @@ void (version = PACKAGE_VERSION);
     `
 import { readFile, readdir } from "node:fs/promises";
 const pkg = await import("@jinn-network/task-execution-oci-grader");
-if (typeof pkg.PACKAGE_VERSION !== "string") {
+if (
+  typeof pkg.buildPinnedOciInvocation !== "function" ||
+  typeof pkg.sweRebenchOciGraderReportSource !== "function" ||
+  !/^sha256:[a-f0-9]{64}$/.test(pkg.graderProgramDigest())
+) {
   throw new Error("root runtime exports are incomplete");
 }
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
