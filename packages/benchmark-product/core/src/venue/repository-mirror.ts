@@ -15,7 +15,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -57,12 +57,48 @@ async function containsCommit(mirrorDir: string, oid: string): Promise<boolean> 
   }
 }
 
+/**
+ * A directory only counts as a usable mirror if it is actually a bare git repository. A clone
+ * interrupted mid-way (process killed, disk full) leaves a directory that exists but has no valid
+ * object store and possibly no `origin` remote — `existsSync` alone can't tell the difference.
+ */
+async function isValidBareMirror(mirrorDir: string): Promise<boolean> {
+  if (!existsSync(mirrorDir)) return false;
+  try {
+    return (await git(["-C", mirrorDir, "rev-parse", "--is-bare-repository"])) === "true";
+  } catch {
+    return false;
+  }
+}
+
 export function createGitRepositoryMirror(rootDir: string): RepositoryMirrorPort {
-  const inFlight = new Map<string, Promise<string>>();
+  // Per-URI promise chain: every `resolve` call for a given URI — clone AND fetch — runs strictly
+  // after the previous one settles, regardless of whether it succeeded or failed. This is what
+  // keeps concurrent `ensure` calls for different oids on the same repository from running two
+  // `git fetch` processes against one bare repo at once (they'd otherwise contend on
+  // `packed-refs.lock`), while making sure one caller's failure (e.g. a bad oid) never poisons a
+  // later caller asking for a different, valid oid on the same URI.
+  const queues = new Map<string, Promise<unknown>>();
+  function serialized<T>(uri: string, fn: () => Promise<T>): Promise<T> {
+    const previous = queues.get(uri) ?? Promise.resolve();
+    const next = previous.then(fn, fn); // run regardless of the previous outcome
+    queues.set(
+      uri,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return next;
+  }
 
   async function resolve(uri: string, oid: string): Promise<string> {
     const mirrorDir = join(rootDir, `${mirrorSlug(uri)}.git`);
-    if (!existsSync(mirrorDir)) {
+    if (!(await isValidBareMirror(mirrorDir))) {
+      if (existsSync(mirrorDir)) {
+        // Not a valid bare repo (interrupted clone, stray directory): self-heal by re-cloning.
+        await rm(mirrorDir, { recursive: true, force: true });
+      }
       await mkdir(rootDir, { recursive: true });
       await git(["clone", "--bare", "--quiet", uri, mirrorDir]);
     }
@@ -84,20 +120,7 @@ export function createGitRepositoryMirror(rootDir: string): RepositoryMirrorPort
       if (!SUPPORTED_SCHEMES.some((scheme) => uri.startsWith(scheme))) {
         throw new Error(`unsupported repository uri scheme: "${uri}"`);
       }
-      // One clone per URI even when several attempts race for the same repository.
-      const pending = inFlight.get(uri);
-      if (pending !== undefined) {
-        const path = await pending;
-        return (await containsCommit(path, oid)) ? path : resolve(uri, oid);
-      }
-      const started = resolve(uri, oid);
-      inFlight.set(uri, started);
-      try {
-        return await started;
-      } catch (error) {
-        inFlight.delete(uri);
-        throw error;
-      }
+      return serialized(uri, () => resolve(uri, oid));
     },
   };
 }
