@@ -6,6 +6,10 @@
       "sha256": "07513ba1240a90b7d16ab132be1cf531db4be350ade0570e5b86f807975b5362"
     },
     {
+      "id": "exports/eval-log.json",
+      "sha256": "3143c16c647b6f03063a5c58c699273270f501ad29aa97156f95f176a695cb4c"
+    },
+    {
       "id": "exports/matrix-projection.json",
       "sha256": "903a83d0de3aeca1abd854bced8d9fc13306c36dc0b457b3aaba006c5b2c2653"
     },
@@ -166,5 +170,12 @@
       "sha256": "7e9c75881166982f6de603023320c9f20551244e88c2b4207cbe5876e518e009"
     }
   ],
-  "errata": []
+  "errata": [
+    {
+      "id": "exports/eval-log.json",
+      "supersededBy": "exports/matrix-projection.json",
+      "date": "2026-08-12",
+      "reason": "This historical Jinn projection is not an Inspect EvalLog. Use the Jinn-owned Matrix projection fixture; genuine Inspect logs are produced by Inspect itself."
+    }
+  ]
 }

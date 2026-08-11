@@ -651,6 +651,7 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/report.schema.json | — | — | — |
 | schemas | @jinn-network/benchmarking-records | packages/benchmarking/records/schemas/run.schema.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/exports/croissant.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/exports/eval-log.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/exports/matrix-projection.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/exports/static-bundle.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/manifest.sha256.json | — | — | — |
@@ -1483,7 +1484,7 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3714 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3715 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1491,13 +1492,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 28 |
 | boundaryPolicies | 23 |
 | catalogManifests | 84 |
-| catalogPublicSurfaces | 1252 |
+| catalogPublicSurfaces | 1253 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 2961 |
-| generatedOutputSources | 1308 |
+| discoveredFirstPartySurfaces | 2962 |
+| generatedOutputSources | 1309 |
 | generatorSources | 613 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
