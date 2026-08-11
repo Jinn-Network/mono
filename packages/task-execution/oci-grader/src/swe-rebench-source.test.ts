@@ -223,6 +223,37 @@ describe("sweRebenchOciGraderReportSource", () => {
     await expect(source.read(input)).rejects.toThrow(/public-network extension is not true/u);
   });
 
+  it("refuses the public-network extension when the host has not opted in", async () => {
+    const { work, request: input } = request(
+      specification({ [SWE_REBENCH_PUBLIC_NETWORK_EXTENSION]: true }),
+    );
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: async () => canonicalJsonBytes({ log: "", report: {} }),
+      // allowPublicNetwork omitted: defaults to false, so a specification alone cannot turn on
+      // network access.
+    } as never);
+
+    await expect(source.read(input)).rejects.toThrow(/host to opt in via allowPublicNetwork/u);
+  });
+
+  it("grants the profile network when the host opts in with allowPublicNetwork: true", async () => {
+    const { work, request: input } = request(
+      specification({ [SWE_REBENCH_PUBLIC_NETWORK_EXTENSION]: true }),
+    );
+    const runner = vi.fn(async (_input: unknown) => canonicalJsonBytes({ log: "", report: {} }));
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      allowPublicNetwork: true,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await source.read(input);
+
+    const call = runner.mock.calls[0]![0] as unknown as { profileRequiresNetwork: boolean };
+    expect(call.profileRequiresNetwork).toBe(true);
+  });
+
   it("refuses with a typed cancellation when the deadline has already elapsed before grading starts", async () => {
     const controller = new AbortController();
     controller.abort();

@@ -113,11 +113,17 @@ export function exactSweRebenchTestCommands(input: {
   return [...input.commands];
 }
 
-function profileRequiresPublicNetwork(specification: EvaluationSpec): boolean {
+function profileRequiresPublicNetwork(
+  specification: EvaluationSpec,
+  allowPublicNetwork: boolean,
+): boolean {
   if (specification.family !== "deterministic-process") refuse("EvaluationSpec is not deterministic-process");
   const block = specification.familyBlock as DeterministicProcessBlock & Record<string, unknown>;
   const value = block[SWE_REBENCH_PUBLIC_NETWORK_EXTENSION];
   if (value !== undefined && value !== true) refuse("public-network extension is not true");
+  if (value === true && !allowPublicNetwork) {
+    refuse("public-network extension requires the host to opt in via allowPublicNetwork");
+  }
   return value === true;
 }
 
@@ -168,6 +174,12 @@ export interface SweRebenchOciGraderSourceOptions {
   readonly runtime?: "docker" | "podman";
   readonly attemptWorkRoot?: () => string;
   readonly runner?: PinnedOciRunnerOptions;
+  /**
+   * Host-side opt-in for `SWE_REBENCH_PUBLIC_NETWORK_EXTENSION`. Default `false`: a specification
+   * declaring the extension is refused unless the operator running this source has explicitly
+   * granted it — the specification alone must never be able to turn on network access.
+   */
+  readonly allowPublicNetwork?: boolean;
   /**
    * Test seam: replaces the real pinned-OCI runner entirely, so this source is testable on a
    * machine with no container runtime installed. Defaults to the real `runPinnedOciGrader`,
@@ -234,7 +246,8 @@ export function sweRebenchOciGraderReportSource(
             "/jinn/input/grader.py",
           ],
           timeoutMs: image.timeoutMs,
-          profileRequiresNetwork: profileRequiresPublicNetwork(request.specification),
+          profileRequiresNetwork:
+            profileRequiresPublicNetwork(request.specification, options.allowPublicNetwork ?? false),
         });
         // No post-run deadline check: the container already completed and produced a report by
         // this point, so a deadline that elapsed while it ran must not discard real, finished

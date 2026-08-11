@@ -36,7 +36,7 @@ export interface PinnedOciGraderInput {
   readonly entrypoint?: string;
   readonly timeoutMs: number;
   readonly profileRequiresNetwork: boolean;
-  /** Must be an explicit isolated runtime network, never `host`. */
+  /** Must be an explicit non-host runtime network, never `host`. */
   readonly allowedNetwork?: string;
 }
 
@@ -76,7 +76,7 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
   }
   const network = input.profileRequiresNetwork ? input.allowedNetwork : "none";
   if (network === undefined || network === "" || network === "host") {
-    refuse("network is disabled unless the profile explicitly requires an isolated network");
+    refuse("network is disabled unless the profile explicitly requires a non-host network");
   }
   const output = ensurePrivateDirectory(input.outputDirectory);
   assertNoSymlinksOrSecrets(output);
