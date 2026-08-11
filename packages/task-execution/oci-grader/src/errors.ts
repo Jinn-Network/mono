@@ -47,3 +47,14 @@ export function refuseSubjectDigest(detail: string): never {
     safeDetail: `oci grader subject refusal: ${detail}`,
   });
 }
+
+/** The attempt's own deadline signal aborted before grading could run. A fresh attempt may work. */
+export function cancelled(detail: string, cause?: unknown): never {
+  throw new EvaluationOperationalError({
+    canonicalCode: "CANCELLED",
+    reason: "provider-unavailable",
+    recoveryAdvice: "resume-attempt",
+    safeDetail: `oci grader cancelled: ${detail}`,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}

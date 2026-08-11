@@ -13,7 +13,7 @@ import type {
   EvaluationSpec,
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes, sha256Hex } from "./canonical.js";
-import { refuse, refuseSubjectDigest } from "./errors.js";
+import { cancelled, refuse, refuseSubjectDigest } from "./errors.js";
 import { SWE_REBENCH_OCI_GRADER_PROGRAM_BYTES } from "./grader-program.js";
 import { PINNED_IMAGE_BODY, type PinnedOciGraderInput } from "./invocation.js";
 import { runPinnedOciGrader, type PinnedOciRunnerOptions } from "./runner.js";
@@ -184,7 +184,7 @@ export function sweRebenchOciGraderReportSource(
 ): GraderReportSource {
   return {
     async read(request: GraderReportRequest): Promise<RawGraderReport> {
-      request.deadlineSignal.throwIfAborted();
+      if (request.deadlineSignal.aborted) cancelled("attempt deadline elapsed before grading started");
       const row = rowMaterial(request.specification);
       const image = pinnedSweRebenchImage(request.specification);
       const result = patchResult(request.results);
@@ -236,7 +236,9 @@ export function sweRebenchOciGraderReportSource(
           timeoutMs: image.timeoutMs,
           profileRequiresNetwork: profileRequiresPublicNetwork(request.specification),
         });
-        request.deadlineSignal.throwIfAborted();
+        // No post-run deadline check: the container already completed and produced a report by
+        // this point, so a deadline that elapsed while it ran must not discard real, finished
+        // grading work — the pre-run check above is the only point that refuses on the signal.
         return exactRawReport(emitted);
       } finally {
         rmSync(root, { recursive: true, force: true });

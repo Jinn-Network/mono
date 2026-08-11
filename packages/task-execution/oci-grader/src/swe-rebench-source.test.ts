@@ -48,7 +48,7 @@ function specification(overrides: Record<string, unknown> = {}) {
   } as never;
 }
 
-function request(spec = specification()) {
+function request(spec = specification(), deadlineSignal: AbortSignal = new AbortController().signal) {
   const work = mkdtempSync(join(tmpdir(), "jinn-oci-src-"));
   return {
     work,
@@ -60,7 +60,7 @@ function request(spec = specification()) {
         descriptor: { name: "result.patch", digest: { sha256: "e".repeat(64) } },
       }],
       attempt: { attemptUri: "urn:jinn:attempt:1", attemptNumber: 1 },
-      deadlineSignal: new AbortController().signal,
+      deadlineSignal,
     } as never,
   };
 }
@@ -221,5 +221,40 @@ describe("sweRebenchOciGraderReportSource", () => {
     } as never);
 
     await expect(source.read(input)).rejects.toThrow(/public-network extension is not true/u);
+  });
+
+  it("refuses with a typed cancellation when the deadline has already elapsed before grading starts", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const { work, request: input } = request(specification(), controller.signal);
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: async () => canonicalJsonBytes({ log: "", report: {} }),
+    } as never);
+
+    const rejection = source.read(input);
+    await expect(rejection).rejects.toThrow(/deadline elapsed/u);
+    await expect(rejection).rejects.toMatchObject({ name: "EvaluationOperationalError" });
+  });
+
+  it("returns a report the container already produced even if the deadline aborts while it ran", async () => {
+    // The deadline signal firing mid-run must not discard finished grading work: the container
+    // already completed, so its report is the correct outcome even if the signal aborted a
+    // moment later, concurrently with (not before) that completion.
+    const controller = new AbortController();
+    const { work, request: input } = request(specification(), controller.signal);
+    const runner = vi.fn(async () => {
+      controller.abort(); // the attempt deadline elapses while the container is finishing up
+      return canonicalJsonBytes({ log: "1 passed", report: { instance_id: "acme__widget-1" } });
+    });
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    const report = await source.read(input);
+
+    expect(report.log).toBe("1 passed");
+    expect(report.report).toEqual({ instance_id: "acme__widget-1" });
   });
 });
