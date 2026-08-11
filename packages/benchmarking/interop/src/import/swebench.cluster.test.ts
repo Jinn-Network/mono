@@ -56,3 +56,37 @@ describe("SWE-bench import — provenance clusters group by source repo", () => 
     expect(imported.benchmark.record.items).toHaveLength(3);
   });
 });
+
+describe("SWE-bench import — per-instance provenance timestamps", () => {
+  test("stamps each instance with its own timestamp when supplied", () => {
+    const imported = importSweBench(ROWS, {
+      ...OPTS,
+      provenanceTimestamps: {
+        "swe-rebench-cluster-00001": "2026-01-03T00:00:00Z",
+        "swe-rebench-cluster-00002": "2026-02-14T00:00:00Z",
+      },
+    });
+    const byDigest = new Map(imported.tasks.map((task) => [task.digest, task.bytes]));
+    const timestamps = imported.tasks.map((task) => {
+      const resolved = resolveBenchmarkTaskProvenance(task.digest, (digest) =>
+        byDigest.get(digest as `sha256:${string}`));
+      if (!resolved.ok) throw new Error(`provenance did not resolve: ${resolved.reason}`);
+      return resolved.provenance.timestamp;
+    });
+    // Two overridden, the third falling back to the batch value. Without this, clean-subset@1's
+    // per-task contamination predicate collapses to one importer-chosen global boolean — whoever
+    // runs the import can pick a date late enough to retain 100% of any slate as "clean".
+    expect(new Set(timestamps).size).toBe(3);
+    expect(timestamps).toContain("2026-01-03T00:00:00Z");
+    expect(timestamps).toContain("2026-02-14T00:00:00Z");
+    expect(timestamps).toContain("2026-07-29T00:00:00Z");
+  });
+
+  test("omitting the map leaves the default path byte-identical", () => {
+    // intake/swebench.test.ts's determinism assertions depend on this.
+    const first = importSweBench(ROWS, OPTS);
+    const second = importSweBench(ROWS, OPTS);
+    expect(second.tasks.map((task) => task.digest)).toEqual(first.tasks.map((task) => task.digest));
+    expect(second.benchmark.digest).toBe(first.benchmark.digest);
+  });
+});

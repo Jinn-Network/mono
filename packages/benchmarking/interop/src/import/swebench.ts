@@ -35,6 +35,18 @@ export type DefineBenchmarkOptions = {
   citation?: string;
   /** RFC 3339 timestamp sealed into each Task's mined provenance (required for judgeability). */
   provenanceTimestamp?: string;
+  /**
+   * Per-instance RFC 3339 provenance timestamps, keyed by `instance_id`, falling back to
+   * `provenanceTimestamp` and then the batch default.
+   *
+   * A single timestamp across every row collapses `clean-subset@1`'s per-task contamination
+   * predicate to one importer-chosen global boolean, with no per-instance ground truth an auditor
+   * could check. Real per-row dates restore that signal.
+   *
+   * Keyed rather than positional so a reordered row list can never silently mis-associate a date
+   * with an instance.
+   */
+  provenanceTimestamps?: Readonly<Record<string, string>>;
 };
 
 export type ImportedBenchmark = {
@@ -123,7 +135,9 @@ export function importSweBench(
   opts: DefineBenchmarkOptions,
 ): ImportedBenchmark {
   const provenanceTimestamp = opts.provenanceTimestamp ?? "2026-07-29T00:00:00Z";
-  const tasks = rows.map((row) => sealRepositoryWorkTask(row, provenanceTimestamp));
+  const tasks = rows.map((row) =>
+    sealRepositoryWorkTask(row, opts.provenanceTimestamps?.[row.instance_id] ?? provenanceTimestamp),
+  );
   const benchmark = defineBenchmark(tasks, opts);
   const judgeability = checkJudgeability(
     benchmark.record,

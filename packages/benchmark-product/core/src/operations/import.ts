@@ -31,6 +31,8 @@ export interface ImportSweBenchRowsInput {
   readonly description?: string;
   readonly version?: string;
   readonly provenanceTimestamp?: string;
+  /** Per-instance RFC 3339 timestamps keyed by `instance_id` (see `ConvertSweBenchRowsOptions`). */
+  readonly provenanceTimestamps?: Readonly<Record<string, string>>;
 }
 
 export interface ImportSweBenchRowsResult {
@@ -67,6 +69,7 @@ export function importSweBenchRows(
         description: input.description ?? document.spec.description ?? "",
         version: input.version ?? "1.0.0",
         ...(input.provenanceTimestamp !== undefined ? { provenanceTimestamp: input.provenanceTimestamp } : {}),
+        ...(input.provenanceTimestamps !== undefined ? { provenanceTimestamps: input.provenanceTimestamps } : {}),
       });
       const imported = converted.imported;
 

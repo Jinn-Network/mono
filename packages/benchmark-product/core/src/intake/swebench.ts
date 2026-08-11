@@ -59,6 +59,10 @@ export interface ConvertSweBenchRowsOptions {
   readonly version: string;
   /** Omitted keeps the platform importer's own deterministic default (see `importSweBench`). */
   readonly provenanceTimestamp?: string;
+  /** Per-instance RFC 3339 timestamps keyed by `instance_id`; each falls back to
+   *  `provenanceTimestamp`, then the importer's default. Omitting the map preserves today's
+   *  behavior exactly, so the default path stays byte-deterministic. */
+  readonly provenanceTimestamps?: Readonly<Record<string, string>>;
 }
 
 export interface ConvertedSweBenchRows {
