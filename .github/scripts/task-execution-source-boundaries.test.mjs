@@ -305,6 +305,7 @@ const OCI_GRADER_PRODUCTION_FORBIDDEN = [
   '@jinn-network/task-execution-backend-local',
   '@jinn-network/task-execution-launchers',
   '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-supervisor',
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-workspace',
 ];
