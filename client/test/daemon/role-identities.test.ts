@@ -39,12 +39,14 @@ function resolvedBinding(input: {
 /**
  * Every scope a native role can require — the "this binding grants everything" fixture. It carries
  * the Record Discovery announce-plane scope alongside the trust-core families because the three
- * `*-discovery` roles require both (issue #2525); a binding without it is not a fully authorized
- * binding for any native deployment.
+ * `*-discovery` roles require both (issue #2525), and the dedicated admission-receipt scope every
+ * admission-receipt verifier checks under because the `admission` role requires it (#33); a binding
+ * without either is not a fully authorized binding for any native deployment.
  */
 const ALL_NATIVE_SCOPES = [
   'authorizations', 'observations', 'deliveries', 'verdicts', 'settlements',
   'jinn:discovery-announcements',
+  'https://spec.jinn.network/trust-scopes/admission-receipts/v1',
 ] as const;
 
 function openAt(root: string, bindingResolver: BindingResolver) {

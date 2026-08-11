@@ -205,23 +205,29 @@ export class NativeEvaluatorCoordinator {
       this.input.state.resetEvaluationRetryOnAdvance(id);
       return result;
     } catch (cause) {
-      // A subject-authority refusal is DETERMINISTIC: the subject graph, its trust bindings, and the
+      // A subject-authority REFUSAL is DETERMINISTIC: the subject graph, its trust bindings, and the
       // recorded ceremony / on-chain settlement authority do not change by retrying, so retrying to
       // the 4h admission SLA never succeeds — it just buries the reason and emits no verdict. Fail
       // fast and surface the exact cause (the specific `NativeSubjectAuthorityError` sub-reason plus
       // its detail — which Safe/signer/binding was refused) as the terminal failure reason, instead
       // of the opaque `evaluator-dependency-failed` bucket that forced CP6 detail to be recovered by
-      // DB spelunking (#33). This is a distinct type from the genuinely-transient retryable buckets
-      // (`EvaluatorCoordinatorFailure` with `retryable`, e.g. evidence-not-indexed), which are
-      // untouched below.
-      if (cause instanceof NativeSubjectAuthorityError) {
+      // DB spelunking (#33).
+      //
+      // A subject-authority read failure that is TRANSIENT (`cause.transient` — a `Safe.isOwner`
+      // RPC/network read that could not COMPLETE the check) is the opposite: the subject may be
+      // valid and a retry may establish it, so terminalizing it would bury a passing subject behind
+      // a network blip. It flows into the same retry path as the other transient dependency failures
+      // below — but with its exact reason surfaced instead of the opaque bucket.
+      if (cause instanceof NativeSubjectAuthorityError && !cause.transient) {
         const reason = `native-subject-authority-refused: ${cause.message}`;
         this.input.state.recordEvaluationFailed(id, reason);
         return { kind: "failed", reason };
       }
-      const reason = cause instanceof EvaluatorCoordinatorFailure
-        ? cause.reason
-        : "evaluator-dependency-failed";
+      const reason = cause instanceof NativeSubjectAuthorityError
+        ? `native-subject-authority-unavailable: ${cause.message}`
+        : cause instanceof EvaluatorCoordinatorFailure
+          ? cause.reason
+          : "evaluator-dependency-failed";
       if ((cause instanceof EvaluatorCoordinatorFailure && !cause.retryable)
         || cause instanceof NativeEvaluatorStateConflictError
         || cause instanceof TypeError) {

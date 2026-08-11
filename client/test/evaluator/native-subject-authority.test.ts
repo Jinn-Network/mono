@@ -137,6 +137,10 @@ function fixture(): { material: SubjectMaterial; claim: NativeSubjectAuthorityCl
 function dependencies(input: {
   readonly missingKey?: string;
   readonly evaluatorFailure?: string;
+  /** Make the solver-settlement resolve fail as a transient chain-read (retryable), not a refusal. */
+  readonly executorSettlementTransient?: boolean;
+  /** Make the evaluator-settlement resolve fail as a transient chain-read (retryable). */
+  readonly evaluatorTransient?: boolean;
 } = {}): NativeSubjectAuthorityDependencies {
   return {
     bindingResolver: {
@@ -172,12 +176,18 @@ function dependencies(input: {
     evaluatorAuthority: {
       resolve: async (authority) => {
         if (authority.purpose === "native:solver-settlement") {
+          if (input.executorSettlementTransient === true) {
+            return { ok: false, reason: "Safe-ownership read failed: HTTP 503", transient: true };
+          }
           return authority.signerKey === EXECUTOR_KEY
             && authority.declarationKey === EXECUTOR_KEY
             && authority.agent === EXECUTOR
             && authority.address === "0x1111111111111111111111111111111111111111"
             ? { ok: true }
             : { ok: false, reason: "wrong-key" };
+        }
+        if (input.evaluatorTransient === true) {
+          return { ok: false, reason: "Safe-ownership read failed: HTTP 503", transient: true };
         }
         return input.evaluatorFailure === undefined
           && authority.signerKey === EVALUATOR_KEY
@@ -240,7 +250,27 @@ describe("verifyNativeSubjectAuthority", () => {
       await expect(verifyNativeSubjectAuthority({
         ...value,
         dependencies: dependencies({ evaluatorFailure }),
-      })).rejects.toMatchObject({ reason: "evaluator-binding-failed" });
+      })).rejects.toMatchObject({ reason: "evaluator-binding-failed", transient: false });
     },
   );
+
+  it("marks a genuine refusal non-transient so the evaluator terminalizes it", async () => {
+    const value = fixture();
+    // A deterministic wrong-key refusal (no `transient` on the resolve outcome) must stay terminal.
+    await expect(verifyNativeSubjectAuthority({ ...value, dependencies: dependencies({ evaluatorFailure: "wrong-key" }) }))
+      .rejects.toMatchObject({ name: "NativeSubjectAuthorityError", transient: false });
+  });
+
+  it("propagates the transient flag from a solver-settlement chain-read failure", async () => {
+    const value = fixture();
+    // A `Safe.isOwner` read that could not COMPLETE must surface as transient so the evaluator retries.
+    await expect(verifyNativeSubjectAuthority({ ...value, dependencies: dependencies({ executorSettlementTransient: true }) }))
+      .rejects.toMatchObject({ reason: "executor-settlement-binding-failed", transient: true });
+  });
+
+  it("propagates the transient flag from an evaluator-settlement chain-read failure", async () => {
+    const value = fixture();
+    await expect(verifyNativeSubjectAuthority({ ...value, dependencies: dependencies({ evaluatorTransient: true }) }))
+      .rejects.toMatchObject({ reason: "evaluator-binding-failed", transient: true });
+  });
 });

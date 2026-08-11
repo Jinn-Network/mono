@@ -65,7 +65,11 @@ describe("NATIVE_ROLE_IDENTITY_REQUIREMENTS", () => {
 
   it("leaves every non-discovery role's scope untouched", () => {
     expect(NATIVE_ROLE_IDENTITY_REQUIREMENTS["requester-submission"]).toEqual(["authorizations"]);
-    expect(NATIVE_ROLE_IDENTITY_REQUIREMENTS.admission).toEqual(["authorizations"]);
+    // The admission agent's key must declare the dedicated admission-receipt scope every verifier
+    // checks (#33), NOT the generic `authorizations` family — see the map's doc comment.
+    expect(NATIVE_ROLE_IDENTITY_REQUIREMENTS.admission).toEqual([
+      "https://spec.jinn.network/trust-scopes/admission-receipts/v1",
+    ]);
     expect(NATIVE_ROLE_IDENTITY_REQUIREMENTS["solver-delivery"]).toEqual(["deliveries"]);
     expect(NATIVE_ROLE_IDENTITY_REQUIREMENTS["solver-settlement"]).toEqual(["settlements"]);
     expect(NATIVE_ROLE_IDENTITY_REQUIREMENTS["evaluator-verdict"]).toEqual(["verdicts", "deliveries"]);
