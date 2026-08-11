@@ -28,6 +28,15 @@
  * posture, and of why `sealSignedRecord`'s particular byte-equality assertion cannot be reused
  * here.
  *
+ * STATUS OF THAT REFERENCE (#35): the divergence above was a live bug there, not a deliberate
+ * choice — it threw on every genuine harness run one step past the subject-authority check.
+ * `native-evaluator-composition.ts` now pins the harness file to `canonicalAttestationJsonBytes`
+ * and DSSE-signs those exact bytes via `sealSignedPayload`, so its signed payload is the graded
+ * file itself. The two products therefore still seal different (both exact, both deterministic)
+ * spellings — native the attestation one, this module the compact trust-core one — which is
+ * ratified rather than accidental: `@jinn-network/benchmarking-aggregate`'s `resolved-inputs.ts`
+ * accepts `[canonicalJsonBytes, canonicalAttestationJsonBytes]` precisely because both are exact.
+ *
  * BP-13 CORRECTION (F1): it is not, however, sufficient. The aggregation boundary this module's
  * output feeds — `@jinn-network/benchmarking-aggregate`'s `resolveVerdictOutcome`
  * (`resolved-inputs.ts`'s `parseCanonicalJson`) — requires every referenced verdict's DSSE

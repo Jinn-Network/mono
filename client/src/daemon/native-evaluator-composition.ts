@@ -38,7 +38,8 @@ import {
   SubmissionRecordSchema,
   documentDigest,
 } from "@jinn-network/task-execution-protocol";
-import { sealSignedRecord } from "@jinn-network/trust-core";
+import { sealSignedPayload } from "@jinn-network/trust-core";
+import { canonicalAttestationJsonBytes } from "@jinn-network/attestation-issuer";
 import {
   makeDirProvisioner,
   type TaskView,
@@ -591,14 +592,22 @@ function stateBackedProvisioner(input: {
             throw new NativeEvaluatorCompositionError("unsigned evaluator statement is outside its exact Attempt authority");
           }
           const identity = input.roles.get("evaluator-verdict");
-          const sealed = await sealSignedRecord({
-            record: statement,
+          // What was graded is what gets signed, byte for byte. The harness writes `out/verdict`
+          // with the attestation family's exact deterministic spelling (sorted keys, two-space
+          // indent, trailing LF) via `buildResultEvaluationPayload`; pinning the file to that
+          // spelling still refuses any hand-rolled or tampered serialization, and the DSSE payload
+          // is then the graded file itself rather than a re-encoding of it (#35). Re-serializing
+          // through `sealSignedRecord`'s COMPACT trust-core canonical form and byte-comparing that
+          // against the file could never agree for a real harness run, so this threw on every live
+          // evaluation one step past the subject-authority check.
+          if (!Buffer.from(canonicalAttestationJsonBytes(statement)).equals(Buffer.from(payloadBytes))) {
+            throw new NativeEvaluatorCompositionError("unsigned evaluator statement is not canonical exact bytes");
+          }
+          const sealed = await sealSignedPayload({
+            payloadBytes,
             payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
             signer: async ({ preAuthEncoding }) => [{ keyid: identity.keyId, signature: identity.sign(preAuthEncoding) }],
           });
-          if (!Buffer.from(sealed.payloadBytes).equals(Buffer.from(payloadBytes))) {
-            throw new NativeEvaluatorCompositionError("unsigned evaluator statement is not canonical exact bytes");
-          }
           const temporary = `${verdictPath}.sealed`;
           await writeFile(temporary, sealed.envelopeBytes, { mode: 0o600, flag: "wx" });
           await rename(temporary, verdictPath);
