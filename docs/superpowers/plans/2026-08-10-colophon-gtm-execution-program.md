@@ -56,19 +56,36 @@ Pursued outcomes — not gates, because prospects control them:
 
 ## 2. Lane A — readiness close-out
 
-**Merge train (days 1–3).** #2541 merges to `integration/evidence-v1`; the
-colophon design-system branch (local `codex/colophon-design-system`) is
-pushed, PR'd, and merged on top; #2551 ratifies alongside. Anything blocking
-#2541 is the program's first fire. Campaign *setup* may start on a branch
-build; official campaign runs happen on merged code.
+**Merge train (days 1–3) — CLOSED 2026-08-11.** #2541 merged
+(`8bfa4f7f4`); the colophon design system merged (#2555, `14f8d7ad6`);
+#2551 carries this program and ratifies alongside. Campaign *setup* may
+start on a branch build; official campaign runs happen on merged code.
 
 **Public surface (days 1–5).** Colophon gets its own origin — separate
 branding per product design §9 means not a jinn.network path. Minimum
 viable: one page carrying the category descriptor, promise, the demo
 reports, the quickstart, and a contact/interest route; plus hosted report
 bundles (the static-bundle export exists — hosting is "where static files
-live under the Colophon domain," not new product work). Domain choice is
-Ritsu's; the build is agent work inside the landed design system.
+live under the Colophon domain," not new product work). The build is agent
+work inside the landed design system.
+
+> **Amendment 2026-08-11 — naming closed, domains registered.** The product
+> name is **Colophon** (operator ruling after a full naming spike; the
+> shortlist and its SERP/DNS evidence are operator-private). Registered:
+> **`colophon.claims`** — canonical origin, site and published report URLs;
+> **`trycolophon.com`** — cold-send domain only, plus a redirect to the
+> canonical. The roles never swap: outbound reputation risk stays on the
+> send domain so the domain hosting the evidence never carries it.
+>
+> **Relationship line (operator ruling).** Where a surface states
+> Colophon's relationship to Jinn, the wording is **"Built on Jinn, by Jinn
+> contributors."** This supersedes the design system's approved
+> infrastructure paragraph, which claimed Colophon "is an independent
+> product" — an assertion of organizational independence the project does
+> not have, and the exact class of claim product design §8.1 forbids
+> (the brand package's own word policy already restricts "independent" to
+> solver-separation). Fixed at source in the same change as this
+> amendment.
 
 **Demo-topic spike (days 1–2, `spike` shape).** Agents generate ~10
 candidate comparisons and score them on five criteria:
@@ -137,6 +154,26 @@ plan §8.1 — about their claim, never about our category. The ask is a
 (operator-private, gitignored — the mono is public; prospect data never
 enters it, and never enters any corpus).
 
+> **Amendment 2026-08-11 — contribution wins over outreach where they
+> collide (operator ruling).** Where a prospect is also a venue the persona
+> contributes to, **the contribution channel replaces the DM channel
+> entirely** — no scheduled pitch, no "wait fourteen days then send." The
+> firewall between contributing and pitching is a floor, not a plan; any
+> commercial conversation emerges from having been useful, or not at all.
+> Interest is disclosed plainly in-venue when it comes up, so nothing later
+> reads as bait-and-switch.
+>
+> This removes the independent benchmark and evaluation providers (GTM plan
+> §6 pool 5) from the cold-send sequence as a class. They are peers who
+> assess a newcomer by whether they understand the work; a pitch is the
+> wrong instrument, and the outreach plan had simply mis-channeled them.
+> Named organizations and the renumbered send order live in the
+> operator-private wave-one file.
+>
+> Consequence for the §1 gates: pool-coverage breadth is still required,
+> but conversations from that pool now arrive through contribution rather
+> than sends, and the §3 corrective applies to the remaining pools.
+
 ## 4. Lane C — campaigns (Track 2)
 
 - **Proposal-qualified** = a prospect with a live claim or decision and a
@@ -153,6 +190,35 @@ enters it, and never enters any corpus).
   control from GTM plan §13).
 - **Domain capability builds only on commitment** (DR decision 3), and land
   as platform packages under tier discipline, never in the product tree.
+
+> **Amendment 2026-08-11 — contested-cluster publication rule (operator
+> ruling, ADOPTED PROVISIONAL).** Prospecting surfaced clusters where
+> several vendors are publicly disputing each other's benchmark numbers.
+> These are commercially attractive and strategically dangerous: publishing
+> a report for one party in a live fight converts the product from referee
+> to combatant, permanently, and that conversion happens at **publication**,
+> not at first contact.
+>
+> The rule: **before publishing any report in a contested claim-space, the
+> same terms must have been offered to every other party named in it, and
+> the report states that the offer was made and stands.** Named party means
+> parties named in the report or in the specific disputed claim being
+> tested — not the wider industry. No rival holds a veto: declining is
+> recorded, never blocking. Because the offer *stands*, a declining party
+> can enter the same locked-method arena later, which turns a one-shot
+> verdict into standing infrastructure others can join.
+>
+> Binds customer campaigns inside clusters and our own reproductions of
+> disputed claims. Does **not** bind demo report #1, which compares
+> mechanisms and names no vendor.
+>
+> **PROVISIONAL — reassess before the first cluster send or publication, in
+> a dedicated session.** The operator's reasoning for holding it open: the
+> contested arena looks like the sharpest available wedge, and how hard to
+> lean into it — sequencing, whether the standing offer becomes a product
+> surface rather than a policy — deserves its own design session rather
+> than being settled as a side-effect of an outreach decision. Until that
+> session rules, this is the binding safety default.
 
 ## 5. Lane D — instrumentation (split by what the instrument can honestly measure)
 
