@@ -26,6 +26,8 @@
 // `evidence-*` family, `environment-record`) is scope for a later packet and stays refused here
 // until a packet adds it. Marketplace, every other product, and the client are denied outright,
 // same as the policy-optimization precedent.
+// The optional Inspect adapter additionally admits `attestation-issuer` solely to construct the
+// canonical same-execution Result Evaluation payload; this avoids product-owned evidence schema.
 //
 // **No deep imports (product design §3, "no deep imports — public package entries only").** A
 // specifier that reaches past a Jinn package's public root -- `@jinn-network/<name>/src/...` or
@@ -65,6 +67,7 @@ function sourceRoots() {
 }
 
 const CORE_ALLOWED_JINN_PACKAGES = [
+  '@jinn-network/attestation-issuer',
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local',

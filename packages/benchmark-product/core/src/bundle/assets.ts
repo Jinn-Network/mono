@@ -440,7 +440,7 @@ function buildShareText(input: PublicAssetInput, reportFacts: WilsonFacts): stri
   return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}. ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}. Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
 }
 
-/** Fixed, deterministic public-bundle/1 presentation bytes. The builder only projects already
+/** Fixed, deterministic public-bundle/2 presentation bytes. The builder only projects already
  * verified stored facts; it never computes a statistic, selects a winner, or reconciles records. */
 export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<string, Uint8Array>> {
   const reportFacts = requireWilsonFacts(input.report.results, "sealed Report");

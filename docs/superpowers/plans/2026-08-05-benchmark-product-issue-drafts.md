@@ -1,5 +1,11 @@
 # Standalone Benchmarking Product — Draft Issue Bodies (M0–M5)
 
+> **Interop correction (2026-08-10):** historical issue text naming
+> `importInspectEvals` or `exportEvalLog` is superseded. Those functions did not
+> use official Inspect APIs. Current authority is the optional Tier 4 Inspect
+> runtime adapter, native Inspect-produced logs, and the deliberately Jinn-owned
+> `exportMatrixProjection` convenience export.
+
 Companion to `2026-08-05-standalone-benchmarking-product-program.md` §7. This
 session has no issue-mutation authority; these drafts are triage-complete so an
 authorized session can file them verbatim. One draft per work packet. Issue

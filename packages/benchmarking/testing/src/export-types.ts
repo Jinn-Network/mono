@@ -20,11 +20,11 @@ export type EvidenceResolver = {
 /**
  * Kit-owned richer exporter contracts (plan M5 + coordinator ruling):
  * - Croissant: Benchmark + revealed Task bytes
- * - EvalLog: Matrix + evidence resolver
+ * - Jinn Matrix projection: Matrix + evidence resolver
  * - static bundle: Matrix + optional Reports
  */
 export interface Exporters {
-  evalLog(
+  matrixProjection(
     matrix: MatrixRecord,
     evidence: EvidenceResolver,
   ): unknown | Promise<unknown>;
@@ -44,6 +44,10 @@ async function loadFixtureBytes(relative: string): Promise<Uint8Array> {
   ));
 }
 
+function withoutTextFileFinalLf(bytes: Uint8Array): Uint8Array {
+  return bytes.at(-1) === 0x0a ? bytes.slice(0, -1) : bytes;
+}
+
 /** Build real exporter inputs from kit fixtures — no adapter closures over fixture bytes. */
 export async function buildMiniatureExportInputs(): Promise<{
   bench: BenchmarkRecord;
@@ -51,16 +55,16 @@ export async function buildMiniatureExportInputs(): Promise<{
   revealed: Map<string, Uint8Array>;
   evidence: EvidenceResolver;
   expected: {
-    evalLog: Uint8Array;
+    matrixProjection: Uint8Array;
     croissant: Uint8Array;
     staticBundle: Uint8Array;
   };
 }> {
-  const [benchmarkBytes, matrixBytes, tasksBytes, evalLog, croissant, staticBundle] = await Promise.all([
+  const [benchmarkBytes, matrixBytes, tasksBytes, matrixProjection, croissant, staticBundle] = await Promise.all([
     loadFixtureBytes("miniature-run/benchmark.json"),
     loadFixtureBytes("miniature-run/expected-matrix.json"),
     loadFixtureBytes("miniature-run/tasks.json"),
-    loadFixtureBytes("exports/eval-log.json"),
+    loadFixtureBytes("exports/matrix-projection.json"),
     loadFixtureBytes("exports/croissant.json"),
     loadFixtureBytes("exports/static-bundle.json"),
   ]);
@@ -96,7 +100,11 @@ export async function buildMiniatureExportInputs(): Promise<{
         return `evidence:miniature:${cellKey}`;
       },
     },
-    expected: { evalLog, croissant, staticBundle },
+    expected: {
+      matrixProjection: withoutTextFileFinalLf(matrixProjection),
+      croissant,
+      staticBundle,
+    },
   };
 }
 
@@ -106,13 +114,13 @@ export async function buildMiniatureExportInputs(): Promise<{
  */
 export function describeExportConformance(exporters: Exporters): void {
   describe("benchmarking export conformance (design §10.2/§14.9/§16)", () => {
-    test("evalLog matches its byte-exact M2 oracle via injected Matrix + evidence", async () => {
+    test("matrixProjection matches its byte-exact oracle via injected Matrix + evidence", async () => {
       const { matrix, evidence, expected } = await buildMiniatureExportInputs();
-      const actual = await exporters.evalLog(matrix, evidence);
+      const actual = await exporters.matrixProjection(matrix, evidence);
       const actualBytes = actual instanceof Uint8Array
         ? actual
         : serializeCanonicalJson(actual as never);
-      expect(actualBytes).toEqual(expected.evalLog);
+      expect(actualBytes).toEqual(expected.matrixProjection);
     });
 
     test("croissant matches its byte-exact M2 oracle via injected Benchmark + revealed", async () => {

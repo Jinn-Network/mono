@@ -10,7 +10,8 @@ internal compatibility alias while packages keep their established names.
 
 Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
 Start at the [product overview](../README.md); see the
-[public-bundle guide](../PUBLIC-BUNDLE.md) and [threat model](../SECURITY.md).
+[public-bundle guide](../PUBLIC-BUNDLE.md), [Inspect runtime guide](../INSPECT-RUNTIME.md),
+and [threat model](../SECURITY.md).
 
 This package is `private: true`, unpublished, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
@@ -33,7 +34,7 @@ and proves copied-bundle verification after source-workspace deletion.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **27 generated operations**, all shipped through the library, CLI, and
+contains **28 generated operations**, all shipped through the library, CLI, and
 GUI:
 
 | Library operation | CLI command | Purpose |
@@ -64,6 +65,7 @@ GUI:
 | `runStatus` | `colophon status` | Read durable per-cell and driver status. |
 | `runVerify` | `colophon verify` | Re-derive Matrix, Report, and claim consistency. |
 | `sampleInit` | `colophon sample init` | Attach the bundled three-task benchmark. |
+| `selectInspectEvaluation` | `colophon runtime inspect select` | Select and bind a real Inspect evaluation. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI

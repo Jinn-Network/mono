@@ -12,9 +12,13 @@ import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { verifyRunWorkspace } from "./verify.js";
+import { runtimeNativeArtifactPublicationPolicy } from "../runtime/adapter.js";
 
 export interface RunPublishInput {
   readonly draftId: string;
+  /** Explicit consent to copy complete native runtime artifacts (including Inspect transcripts)
+   * into the non-confidential public bundle. Required for runtime-backed drafts. */
+  readonly includeNativeArtifacts?: boolean;
 }
 
 export interface RunPublishDeps extends MaterializeBundleDeps {
@@ -80,6 +84,16 @@ export function runPublish(
       }
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
+      }
+      if (
+        runtimeNativeArtifactPublicationPolicy(document.spec.evaluationRuntime) === "explicit-consent"
+        && input.includeNativeArtifacts !== true
+      ) {
+        refuse(
+          "validation",
+          "includeNativeArtifacts",
+          "runtime-backed publication requires explicit approval to include complete native logs and transcripts in the non-confidential bundle",
+        );
       }
 
       // Exactly the workspace skeptic's three checks, before a staging directory exists.

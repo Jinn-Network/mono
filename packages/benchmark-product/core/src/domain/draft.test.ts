@@ -51,6 +51,28 @@ describe("DraftSpecSchema — a full valid spec", () => {
     expect(parsed.arms[1]?.notes).toBe("control arm");
     expect(parsed.venue).toBe("self-run");
   });
+
+  test("accepts an opaque runtime selection binding without interpreting its manifest", () => {
+    const parsed = parseDraftSpec({
+      ...VALID_SPEC,
+      evaluationRuntime: {
+        adapterId: "inspect",
+        selectionManifestSha256: "b".repeat(64),
+      },
+    });
+
+    expect(parsed.evaluationRuntime).toEqual({
+      adapterId: "inspect",
+      selectionManifestSha256: "b".repeat(64),
+    });
+  });
+
+  test("rejects malformed runtime adapter ids and manifest digests", () => {
+    expect(() => parseDraftSpec({
+      ...VALID_SPEC,
+      evaluationRuntime: { adapterId: "Inspect Runtime", selectionManifestSha256: "not-a-digest" },
+    })).toThrow(BenchmarkProductError);
+  });
 });
 
 describe("DraftSpecSchema — taskSet", () => {

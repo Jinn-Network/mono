@@ -1,5 +1,13 @@
 # Standalone Benchmarking Product — Implementation Program
 
+> **Interop correction (2026-08-10):** the implemented `importInspectEvals` and
+> `exportEvalLog` seams did not call official Inspect APIs and did not produce a
+> valid Inspect EvalLog. They are superseded by `exportMatrixProjection` plus a
+> real Tier 4 evaluation-runtime adapter. Historical packet descriptions below
+> record the original program; they are not current interoperability authority.
+> The adapter's runtime-native closure uses `public-bundle/2`; frozen
+> `public-bundle/1` is not amended in place.
+
 | | |
 |---|---|
 | **Version** | 0.1 |
@@ -46,7 +54,7 @@ The product imports public exports only (no deep imports, no copied platform cod
 - `@jinn-network/benchmarking-run` — `planRun`, `quoteRun`, `launchAndWatch`/`resumeRun`, `assembleMatrix`, `verifyMatrix`, named checks. The product implements no orchestration of its own.
 - `@jinn-network/benchmarking-aggregate` — method registry, `produceReport`, `verifyReport`, `deriveDisclosures`, stats. The product implements no statistic (the policy-optimization R3 ruling adopted verbatim).
 - `@jinn-network/benchmarking-local` — local venue ports (`localAssemblyPorts`, pinning bridge, admission, scope). The strongest currently implemented backend; M1 runs on it.
-- `@jinn-network/benchmarking-interop` — `importSweBench`, `defineBenchmark`, `importInspectEvals`, `exportEvalLog`, `exportCroissant`, `exportStaticBundle`.
+- `@jinn-network/benchmarking-interop` — `importSweBench`, `defineBenchmark`, `exportMatrixProjection`, `exportCroissant`, `exportStaticBundle`; native Inspect integration is product-owned.
 - `@jinn-network/task-execution-{protocol,profiles,backend}` + `backend-local/*` + `evaluation-harness`/`evaluator-adapters` — Tasks, EvaluationSpecs, `evaluateVerdictRule` (where success is defined), the local execution backend and launchers.
 - `@jinn-network/trust-core` — DSSE signing for Reports, envelope binding verification.
 - `@jinn-network/benchmarking-marketplace` — consumed only behind the venue seam (§4.6); no marketplace machinery re-implemented.
@@ -86,7 +94,7 @@ Local venue: real execution, reproducibility + discipline, NO pre-registration g
 
 ### 4.8 Standards decisions beyond REUSE
 
-- **COMPOSE:** Inspect for deep transcript inspection via the existing `exportEvalLog` (`inspect view` renders runs); Croissant + static-bundle exports as shipped. No viewer, no authoring studio built.
+- **COMPOSE:** Inspect owns evaluation execution, native EvalLogs, and deep transcript inspection. The product retains exact native artifacts and uses Inspect View; it does not synthesize EvalLogs, a viewer, or an authoring studio.
 - **BUILD (the irreducible product gap):** draft/workspace model; lock ceremony; assurance presets; preview mode; quote presentation; live accounting surface; claim package format; report presentation; CLI; GUI; audit/authority model. Each is product policy or presentation — precisely what the platform declined to own.
 - **DEFER:** billing/funding/fiat; confidential modes; challenger-run mechanics beyond clone/rerun; leaderboards; MCP surface; HTTP API; marketplace-venue GUI depth.
 - **REJECT:** anything that would fork record semantics, add aggregates to matrices, or present preset names as protocol.

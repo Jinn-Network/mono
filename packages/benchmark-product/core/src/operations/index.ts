@@ -41,6 +41,12 @@ export { sampleInit, type SampleInitInput, type SampleInitResult, type SampleIni
 export { importSweBenchRows, type ImportSweBenchRowsInput, type ImportSweBenchRowsResult } from "./import.js";
 
 export {
+  selectInspectEvaluation,
+  type SelectInspectEvaluationInput,
+  type SelectInspectEvaluationResult,
+} from "./inspect-runtime.js";
+
+export {
   armAdd,
   armList,
   armRemove,

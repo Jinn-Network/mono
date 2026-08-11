@@ -300,6 +300,8 @@ const MeasurementValueSchema = z.union([z.string(), z.number(), z.boolean()]);
 const VerdictStatementSchema = z.looseObject({
   predicateType: z.string().min(1),
   predicate: z.looseObject({
+    // Evidence protocol Agent extensions are flattened namespaced properties alongside `id`;
+    // there is deliberately no nested `extensions` wire field.
     evaluator: z.looseObject({ id: z.string().min(1) }),
     verdict: z.enum(["pass", "fail", "inconclusive"]),
     evaluationSpecification: z.looseObject({
@@ -307,6 +309,7 @@ const VerdictStatementSchema = z.looseObject({
     }),
     measurements: z.array(z.looseObject({ name: z.string().min(1), value: MeasurementValueSchema })).optional(),
     evaluatedAt: z.string().min(1),
+    limitations: z.array(z.string()).optional(),
   }),
 });
 
@@ -316,6 +319,8 @@ export interface VerdictStatementView {
   readonly evaluationSpecificationSha256: string;
   readonly measurements: Record<string, boolean | number | string>;
   readonly evaluatedAt: string;
+  readonly evaluatorExtensions?: Readonly<Record<string, unknown>>;
+  readonly limitations?: readonly string[];
 }
 
 function decodeUtf8Json(bytes: Uint8Array, label: string): unknown {
@@ -344,12 +349,15 @@ function parseVerdictStatementJson(json: unknown, label: string): VerdictStateme
   const { predicate } = parsed.data;
   const measurements: Record<string, boolean | number | string> = {};
   for (const measurement of predicate.measurements ?? []) measurements[measurement.name] = measurement.value;
+  const { id: _evaluatorId, ...evaluatorExtensions } = predicate.evaluator;
   return {
     evaluatorId: predicate.evaluator.id,
     verdict: predicate.verdict,
     evaluationSpecificationSha256: predicate.evaluationSpecification.digest.sha256,
     measurements,
     evaluatedAt: predicate.evaluatedAt,
+    ...(Object.keys(evaluatorExtensions).length === 0 ? {} : { evaluatorExtensions }),
+    ...(predicate.limitations === undefined ? {} : { limitations: predicate.limitations }),
   };
 }
 

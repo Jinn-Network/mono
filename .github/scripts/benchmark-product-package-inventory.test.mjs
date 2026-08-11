@@ -42,12 +42,15 @@ const PRODUCT_PACKAGES = [
 // verification) added `benchmarking-aggregate` for `produceReport`/`verifyReport` and the §9.2
 // method registry. BP-30 registered the second family member, `web`; BP-31 adds its sole direct
 // production Jinn edge, `@jinn-network/benchmark-product-core`. The matching portal resolutions
+// Inspect runtime integration adds `attestation-issuer` so the same-execution scorer can produce
+// the canonical attributable Result Evaluation payload without reimplementing evidence semantics.
 // are core's full private runtime closure so an isolated immutable web install can resolve the
 // public core entry. New edges are added deliberately, in this map and in the source-boundary
 // guard's per-member allow-list together.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', {
     dependencies: [
+      '@jinn-network/attestation-issuer',
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-interop',
       '@jinn-network/benchmarking-local',
@@ -67,12 +70,11 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     devDependencies: [],
     optionalDependencies: [], peerDependencies: [],
-    // Portals whose own edges must resolve inside this project: none of these six is imported here
-    // -- the source-boundary guard denies each by name -- but the declared dependencies above
+    // Portals whose own edges must resolve inside this project. `attestation-issuer` is now a
+    // direct approved edge; the other five remain transitive-only. The declared dependencies above
     // depend on them, and none is published to a registry, so their portal resolutions have to be
     // declared too or `install` sends them to versions that do not exist.
     portalResolutions: [
-      '@jinn-network/attestation-issuer',
       '@jinn-network/environment-record',
       '@jinn-network/evidence-discovery',
       '@jinn-network/evidence-protocol',
