@@ -21,6 +21,8 @@
  */
 import { join } from 'node:path';
 import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
+import { recordPath } from '@jinn-network/record-discovery-protocol';
+import { documentDigest } from '@jinn-network/task-execution-protocol';
 // The LOCAL declaration, deliberately (M3 review note 7). The marketplace pipeline package exports
 // a structurally identical `AnnouncedSubmissionCard`, but that package is confined to a frozen
 // legacy-client inventory by `.github/scripts/phase-d-transition-deletion.test.mjs` — a plain
@@ -72,6 +74,31 @@ import {
 
 export class NativeFleetAssemblyError extends Error {
   override readonly name = 'NativeFleetAssemblyError';
+}
+
+/**
+ * HTTP-first delivery-content resolver for the projector's today-mode delivery correspondence.
+ * Native deliveries are HTTP-served and may never land on the projector's IPFS gateway, so the
+ * enrich path must try the configured record-source serving planes (`byLocation`) first. Mirrors
+ * `native-evaluator-opportunity-source.ts`'s `recordFetcher`, and stays untrusted: bytes are
+ * returned only when they re-derive to the requested digest. Undefined on any miss so composition
+ * can layer the IPFS gateway after it.
+ */
+export function buildFleetDeliveryBytesResolver(
+  byLocation: (url: string) => Promise<Uint8Array>,
+  servingBaseUrls: readonly string[],
+): (digest: `sha256:${string}`) => Promise<Uint8Array | undefined> {
+  const locations = [...new Set(servingBaseUrls.map((base) => base.replace(/\/+$/u, '')))];
+  return async (digest) => {
+    for (const base of locations) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- alternate content-addressed serving planes.
+        const bytes = await byLocation(`${base}${recordPath(digest)}`);
+        if (documentDigest(bytes) === digest) return bytes;
+      } catch { /* serving-plane miss/failure — try the next configured origin, then IPFS */ }
+    }
+    return undefined;
+  };
 }
 
 /**
@@ -400,6 +427,10 @@ export async function buildFleetNativeRuntime(
       }),
     ),
     verifyVerdictObservation: lateBoundVerdict.port,
+    resolveDeliveryBytes: buildFleetDeliveryBytesResolver(
+      (url) => records.byLocation(url),
+      (config.recordSources ?? []).map(({ baseUrl }) => baseUrl),
+    ),
   };
 
   const discovery = await buildFleetNativeDiscovery({

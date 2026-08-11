@@ -361,6 +361,81 @@ describe('createProjectorEnrich', () => {
     expect(enriched).toBeUndefined();
   });
 
+  it('resolves a native today-mode Deliver whose content is HTTP-served but absent from the IPFS gateway', async () => {
+    const store = buildFixtureStore();
+    const task = content({ instructions: 'restore service health' });
+    const delivery = content({ result: 'service restored', evidence: ['probe-1'] });
+    const requestId = `0x${'a'.repeat(64)}` as Hex;
+    const onChainKeccak = keccakEvidenceHash(delivery.bytes);
+
+    store.ipfs.set(task.digest, task.bytes);
+    store.submissionsByTask.set(TASK_ID.toString(), submissionRecordBytes(task.digest.slice('sha256:'.length)));
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+    store.todayDeliveryFacts.set(requestId.toLowerCase(), { taskId: TASK_ID, attemptIndex: 0, onChainKeccak });
+    // Delivery bytes live ONLY behind the HTTP record source, never on the IPFS gateway.
+    const httpRecords = new Map<string, Uint8Array>([[delivery.digest, delivery.bytes]]);
+
+    const enrich = createProjectorEnrich(buildPorts(store, {
+      fetchDeliveryBytes: async (digest) => httpRecords.get(digest),
+    }));
+    const deliverEvent: MarketplaceEvent = {
+      event: 'Deliver',
+      facts: {
+        mech: '0x6666666666666666666666666666666666666666' as Address,
+        mechServiceMultisig: '0x7777777777777777777777777777777777777777' as Address,
+        requestId,
+        deliveryRate: 10n,
+        data: `0x${delivery.digest.slice('sha256:'.length)}` as Hex,
+      },
+      derivation: derivation({ event: 'Deliver' }),
+    } as MarketplaceEvent;
+
+    const enriched = await enrich(deliverEvent);
+
+    expect(enriched?.projection.deliveryCorrespondence).toEqual({
+      sha256Digest: delivery.digest,
+      keccakEvidenceHash: onChainKeccak,
+      onChainSha256CidDigest: delivery.digest,
+      onChainKeccak,
+    });
+  });
+
+  it('rejects forged HTTP-served Deliver bytes that do not hash to the on-chain anchor', async () => {
+    const store = buildFixtureStore();
+    const task = content({ instructions: 'restore service health' });
+    const delivery = content({ result: 'service restored', evidence: ['probe-1'] });
+    const forged = content({ result: 'tampered', evidence: ['forged'] });
+    const requestId = `0x${'a'.repeat(64)}` as Hex;
+
+    store.ipfs.set(task.digest, task.bytes);
+    store.submissionsByTask.set(TASK_ID.toString(), submissionRecordBytes(task.digest.slice('sha256:'.length)));
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+    store.todayDeliveryFacts.set(requestId.toLowerCase(), {
+      taskId: TASK_ID,
+      attemptIndex: 0,
+      onChainKeccak: keccakEvidenceHash(delivery.bytes),
+    });
+
+    const enrich = createProjectorEnrich(buildPorts(store, {
+      // The HTTP source returns bytes that do not hash to the on-chain sha256 anchor.
+      fetchDeliveryBytes: async () => forged.bytes,
+    }));
+    const deliverEvent: MarketplaceEvent = {
+      event: 'Deliver',
+      facts: {
+        mech: '0x6666666666666666666666666666666666666666' as Address,
+        mechServiceMultisig: '0x7777777777777777777777777777777777777777' as Address,
+        requestId,
+        deliveryRate: 10n,
+        data: `0x${delivery.digest.slice('sha256:'.length)}` as Hex,
+      },
+      derivation: derivation({ event: 'Deliver' }),
+    } as MarketplaceEvent;
+
+    // Fail closed: forged bytes are dropped, not admitted with a bogus correspondence.
+    expect(await enrich(deliverEvent)).toBeUndefined();
+  });
+
   // Bridge synthesis path (finding E32 / ruling E32): the legacy `CreatorLoop` posts a
   // `SignedTaskV1` document directly, with no sealed TEP Submission. A previously-strict
   // `SubmissionRecordSchema`-only validation dropped every one of these events; the ruling

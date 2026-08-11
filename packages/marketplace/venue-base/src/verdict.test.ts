@@ -284,6 +284,35 @@ describe("verdict ports", () => {
     expect(d.publicClient.simulateContract).toHaveBeenCalledOnce();
   });
 
+  test("canOpenVerdictAttempt reports a recognized on-chain revert as a terminal refusal", async () => {
+    // A genuine contract revert carries a known selector -- `TCTaskNotOpen(uint256 taskId)` with
+    // taskId 7. `formatKnownRevertDetail` decodes it, so this is a real refusal, not a blip.
+    const d = deps({
+      publicClient: {
+        ...deps().publicClient,
+        simulateContract: vi.fn().mockRejectedValue({
+          data: `0x6880f100${"7".padStart(64, "0")}` as Hex,
+        }),
+      } as never,
+    });
+    await expect(createVerdictPorts(d).canOpenVerdictAttempt({ taskId: 7n, attemptIndex: 2 }))
+      .resolves.toMatchObject({ ok: false, revertName: "TCTaskNotOpen" });
+  });
+
+  test("canOpenVerdictAttempt rethrows a transport blip instead of failing the evaluation terminally", async () => {
+    // A 5xx/429/network error carries no revert data. Returning `{ ok: false }` here would make a
+    // single RPC hiccup permanently fail a fresh CP6 claim; the coordinator only retries a THROWN
+    // error. Mirrors `claimVerdictDelivery`'s `detail === null` rethrow.
+    const d = deps({
+      publicClient: {
+        ...deps().publicClient,
+        simulateContract: vi.fn().mockRejectedValue(new Error("HTTP request failed. Status: 503")),
+      } as never,
+    });
+    await expect(createVerdictPorts(d).canOpenVerdictAttempt({ taskId: 7n, attemptIndex: 2 }))
+      .rejects.toThrow(/503/u);
+  });
+
   test("preserves the exact Delivery digest from marketplace delivery through the router verdict claim", async () => {
     const d = deps();
     const ports = createVerdictPorts(d);
