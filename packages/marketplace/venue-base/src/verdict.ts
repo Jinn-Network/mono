@@ -20,7 +20,6 @@ import {
   type Log,
   type PublicClient,
 } from "viem";
-import { flattenError } from "./broadcast/classify.js";
 import type { BaseVenueSafeBroadcaster, SafeBroadcastReceipt } from "./broadcast/safe-broadcaster.js";
 
 const ALREADY_SETTLED_INNER = new Set(["RouterAlreadyClaimed", "TCVerdictAlreadyDelivered"]);
@@ -457,10 +456,15 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
         return { ok: true } as const;
       } catch (error) {
         const detail = formatKnownRevertDetail(error);
+        // Only a recognized on-chain revert is a genuine refusal (terminal). A transport blip
+        // (429/5xx/network) carries no decodable revert data -- rethrowing it lets the coordinator
+        // retry until the admission deadline rather than permanently failing a fresh CP6 claim on
+        // the first RPC hiccup. Mirrors `classifyVerdictClaimRevert`'s `detail === null` split.
+        if (detail === null) throw error;
         return {
           ok: false as const,
-          reason: detail?.reason ?? flattenError(error),
-          revertName: detail?.name ?? null,
+          reason: detail.reason,
+          revertName: detail.name,
         };
       }
     },

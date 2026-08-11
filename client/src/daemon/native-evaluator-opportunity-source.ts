@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EVALUATOR_RESPONSE_SLA_MS,
   decodeRawCodecCidDigestHex,
   deriveMarketplaceAttemptUri,
 } from '@jinn-network/marketplace-binding';
@@ -509,6 +510,14 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
       if (row === undefined) throw new Error(`no signed settlement declaration for ${deliveryDigest}`);
       return row.declaration_key;
     },
+    // issue #27: this used to compute `admittedAt + association.responseTimeoutSeconds * 1_000` --
+    // the marketplace's per-claim delivery window, forwarded to `JinnRouterV3.createTask` and
+    // capped on-chain at 300s (`MechMarketplace.maxResponseTimeout()`, see
+    // `posting-defaults.test.ts`). That is the wrong clock: it is the SOLVER's claim-to-delivery
+    // window, not the EVALUATOR's own retry/grading SLA, and the deployed ceiling made this
+    // deadline unusably short (round 15 of the live G-loop gate: an evaluation admitted in one run
+    // and graded in a later run SLA-expired and terminal-failed). `DEFAULT_EVALUATOR_RESPONSE_SLA_MS`
+    // is the decoupled, purpose-built budget -- see its doc comment for the full reasoning.
     deadline(posting, admittedAt) {
       const association = associationForPosting(input.store, posting);
       if (association === undefined) {
@@ -518,7 +527,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
       }
       const base = Date.parse(admittedAt);
       if (!Number.isFinite(base)) throw new Error('evaluation admission time is invalid');
-      const deadline = base + Number(association.responseTimeoutSeconds) * 1_000;
+      const deadline = base + DEFAULT_EVALUATOR_RESPONSE_SLA_MS;
       if (!Number.isSafeInteger(deadline)) throw new Error('evaluation deadline exceeds JavaScript time bounds');
       return new Date(deadline).toISOString();
     },
@@ -647,6 +656,9 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
               requestId: facts.requestId,
               operator: facts.operator,
               advertisedDeliveryDigest: deliveryCard.card.record.digest,
+              // Native records live only on the solver's HTTP serving plane (never IPFS), so hand
+              // the reader the delivery card's advertised locations for its digest-verified re-fetch.
+              deliveryPublicLocations: cardLocations(deliveryCard),
             });
             if (fact !== null) canonical.push({ event, fact });
           }

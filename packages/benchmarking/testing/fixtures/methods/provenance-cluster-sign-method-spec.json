@@ -1,0 +1,40 @@
+{
+  "clusteringRule": "task-provenance-source",
+  "computeAvailability": "available",
+  "deterministic": true,
+  "exclusionRule": "pair shared task digests judged in both arms; aggregate one sign vote per provenance cluster; report full remainder",
+  "id": "jinn.benchmarking.method/provenance-cluster-sign",
+  "outputShape": "exact whole-provenance-cluster sign test + votes + excluded cells",
+  "parameterSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "baseline": {
+        "type": "string"
+      },
+      "candidate": {
+        "type": "string"
+      },
+      "verdictRule": {
+        "enum": [
+          "sole",
+          "unanimous",
+          "any-pass",
+          "majority"
+        ]
+      }
+    },
+    "required": [
+      "verdictRule",
+      "baseline",
+      "candidate"
+    ],
+    "type": "object"
+  },
+  "referenceSet": "v1-reference",
+  "requiredInputs": [
+    "matrix.cells",
+    "referenced-verdicts",
+    "task-provenance-source"
+  ],
+  "version": "1"
+}

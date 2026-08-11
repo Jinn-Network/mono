@@ -38,6 +38,9 @@
     "prepack": "yarn build"
   },
   "dependencies": {
+    "@fontsource-variable/newsreader": "5.3.0",
+    "@fontsource-variable/public-sans": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
     "@jinn-network/benchmarking-aggregate": "0.1.0",
     "@jinn-network/benchmarking-interop": "0.1.0",
     "@jinn-network/benchmarking-local": "0.1.0",
@@ -86,6 +89,7 @@
     "vitest": "^4.1.8"
   },
   "bin": {
-    "benchmark-product": "./dist/cli/bin.js"
+    "benchmark-product": "./dist/cli/bin.js",
+    "colophon": "./dist/cli/bin.js"
   }
 }

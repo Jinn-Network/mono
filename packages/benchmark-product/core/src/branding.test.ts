@@ -1,15 +1,29 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { PRODUCT_BRANDING } from "./branding.js";
 
 const BANNED_LEXICON = ["vessel", "vow", "summon", "seer", "smoke", "wane"];
 
 describe("PRODUCT_BRANDING", () => {
-  test("displayName is machine-checkably a placeholder", () => {
-    expect(PRODUCT_BRANDING.displayName.toLowerCase()).toContain("placeholder");
+  test("publishes the exact Colophon identity from one authority", () => {
+    expect(PRODUCT_BRANDING).toEqual({
+      displayName: "Colophon",
+      categoryDescriptor: "Benchmark publishing for agent configurations",
+      tagline: "Compare agents on the same work.",
+      promise: "Publish benchmark claims people can check.",
+      attribution: "Built on Jinn.",
+      commandName: "colophon",
+    });
   });
 
-  test("attribution states independent verifiability", () => {
-    expect(PRODUCT_BRANDING.attribution).toContain("independently verifiable");
+  test("ships the preferred CLI name and the compatibility alias", () => {
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      readonly bin?: Readonly<Record<string, string>>;
+    };
+    expect(packageJson.bin).toEqual({
+      colophon: "./dist/cli/bin.js",
+      "benchmark-product": "./dist/cli/bin.js",
+    });
   });
 
   test("no Jinn lexicon term appears in any branding value", () => {
@@ -22,7 +36,14 @@ describe("PRODUCT_BRANDING", () => {
     }
   });
 
-  test("ProductBranding is exactly the three string fields", () => {
-    expect(Object.keys(PRODUCT_BRANDING).sort()).toEqual(["attribution", "displayName", "tagline"]);
+  test("ProductBranding is exactly the six approved string fields", () => {
+    expect(Object.keys(PRODUCT_BRANDING).sort()).toEqual([
+      "attribution",
+      "categoryDescriptor",
+      "commandName",
+      "displayName",
+      "promise",
+      "tagline",
+    ]);
   });
 });

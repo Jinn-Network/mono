@@ -242,6 +242,174 @@ describe('native solution state', () => {
     });
   });
 
+  // A finalized claim for a distinct task in an ALREADY-open store/state, so two engagements can
+  // coexist in one operator database — the shape a real operator hits when the gate's deterministic
+  // golden makes a second task's solution byte-identical to a settled one.
+  function finalizeClaimFor(
+    store: Store,
+    state: NativeOperatorStateRepository,
+    opts: { taskId: bigint; cardId: number; sequence: string; announcementId: string; attemptIndex: number },
+  ) {
+    const entryDigest = `sha256:${String(opts.cardId).padStart(64, '0')}` as const;
+    store.db.prepare(
+      `INSERT INTO native_discovery_cards
+         (id, source_agent, source_name, sequence, entry_digest, announcement_id, card_json, accepted_at)
+       VALUES (?, ?, ?, ?, ?, ?, '{}', ?)`,
+    ).run(
+      opts.cardId, SOURCE.agent, SOURCE.name, opts.sequence, entryDigest, opts.announcementId,
+      '2026-08-02T00:00:00.000Z',
+    );
+    const submissionUri = `urn:uuid:${String(opts.cardId).padStart(8, '0')}-3333-4333-8333-333333333333` as const;
+    const admitted = state.recordDecision({
+      ...CHAIN,
+      taskId: opts.taskId,
+      taskDigest,
+      submissionUri,
+      submissionDigest,
+      source: { ...SOURCE, cardId: opts.cardId, sequence: opts.sequence, entryDigest, announcementId: opts.announcementId },
+      decision: { ok: true, capability: { ok: true }, policy: { ok: true } },
+    });
+    if (admitted.kind !== 'admitted') throw new Error('expected admission');
+    const claimTx = `0x${String(opts.cardId).padStart(64, '0')}` as const;
+    state.recordClaimBroadcast(admitted.claimOperationId, claimTx);
+    state.recordClaimFinalized(admitted.claimOperationId, {
+      txHash: claimTx,
+      blockHash: `0x${String(opts.cardId + 100).padStart(64, '0')}`,
+      blockNumber: BigInt(100 + opts.cardId),
+      attemptIndex: opts.attemptIndex,
+      requestId: `0x${String(opts.cardId + 200).padStart(64, '0')}`,
+    });
+    return state.getEngagement(admitted.engagementId)!;
+  }
+
+  // Deterministic-golden solution content: byte-identical across tasks, so both engagements name
+  // the SAME content-addressed records.
+  const goldenOutput = new TextEncoder().encode('{"probability":0.62}');
+  const goldenEvidence = new TextEncoder().encode('{"protocol":"execution-evidence"}');
+  const goldenDelivery = new TextEncoder().encode('{"protocol":"delivery"}');
+  const goldenEnvelope = new TextEncoder().encode('{"payloadType":"delivery"}');
+  const GOLDEN_SOURCE_ID = 'urn:jinn:source:solver-records';
+  function goldenArtifacts() {
+    return [
+      { role: 'output' as const, family: 'task-output', mediaType: 'application/json', name: 'prediction', digest: documentDigest(goldenOutput), bytes: goldenOutput },
+      { role: 'evidence' as const, family: 'execution-evidence', mediaType: EXECUTION_EVIDENCE_MEDIA_TYPE, digest: documentDigest(goldenEvidence), bytes: goldenEvidence },
+      { role: 'delivery' as const, family: 'delivery', mediaType: DELIVERY_MEDIA_TYPE, digest: documentDigest(goldenDelivery), bytes: goldenDelivery },
+      { role: 'delivery-envelope' as const, family: 'delivery-envelope', mediaType: DSSE_ENVELOPE_MEDIA_TYPE, digest: documentDigest(goldenEnvelope), bytes: goldenEnvelope },
+    ];
+  }
+  function dispatchFor(engagement: { submissionUri: string | null; attemptUri: string | null }) {
+    return serializeCanonicalJson({
+      taskDigest,
+      submission: engagement.submissionUri,
+      nonce: 'native-nonce',
+      attempt: engagement.attemptUri,
+    });
+  }
+  function readyAndPublish(state: NativeOperatorStateRepository, engagement: { engagementId: NativeOperationId; submissionUri: string | null; attemptUri: string | null }) {
+    const execution = state.beginSolutionExecution(engagement.engagementId, {
+      taskBytes, submissionBytes, dispatchContextBytes: dispatchFor(engagement),
+    });
+    state.recordBackendSubmissionAccepted(execution.operationId);
+    state.recordSolutionReady(engagement.engagementId, { sourceId: GOLDEN_SOURCE_ID, artifacts: goldenArtifacts() });
+    for (const publication of state.listPendingPublications().filter((p) => p.engagementId === engagement.engagementId)) {
+      state.recordPublicationPublished(publication.publicationKey, {
+        location: `https://operator.example/records/${publication.recordDigest.slice('sha256:'.length)}`,
+        sequence: '0000000000000001',
+        entryDigest: `sha256:${'5'.repeat(64)}`,
+      });
+    }
+  }
+
+  it('reuses already-published content-addressed records when a second task has byte-identical golden content', () => {
+    const first = finalizedClaim();
+    // First engagement solves, publishes its 4 records — the serving plane now holds them.
+    readyAndPublish(first.state, first.engagement);
+    expect(first.state.getEngagement(first.engagement.engagementId)).toMatchObject({ state: 'solution-published' });
+
+    // Second engagement: a DISTINCT task whose deterministic-golden solution is byte-identical.
+    const second = finalizeClaimFor(first.store, first.state, {
+      taskId: 8n, cardId: 2, sequence: '0000000000000002', announcementId: 'announcement-2', attemptIndex: 3,
+    });
+    const secondId = second.engagementId;
+    const execution = first.state.beginSolutionExecution(secondId, {
+      taskBytes, submissionBytes, dispatchContextBytes: dispatchFor(second),
+    });
+    first.state.recordBackendSubmissionAccepted(execution.operationId);
+
+    // Before the fix this threw `UNIQUE constraint failed: native_publication_outbox...`, rolling
+    // back the whole transaction and leaving zero artifact rows → terminal failure.
+    expect(() => first.state.recordSolutionReady(secondId, {
+      sourceId: GOLDEN_SOURCE_ID,
+      artifacts: goldenArtifacts(),
+    })).not.toThrow();
+
+    // The second engagement stores its OWN exact artifact bytes (per-engagement) ...
+    expect(first.state.listSolutionArtifacts(secondId)).toHaveLength(4);
+    // ... but owns no NEW pending publications — the shared records are already served.
+    expect(first.state.listPendingPublications().filter((p) => p.engagementId === secondId)).toEqual([]);
+    expect(first.state.getEngagement(secondId)).toMatchObject({ state: 'solution-ready' });
+
+    // Downstream deliver leg PROCEEDS: the engagement promotes to solution-published by reusing the
+    // shared served records, and resolves its Delivery to the already-advertised public location.
+    expect(first.state.promoteSolutionPublishedIfComplete(secondId)).toBe(true);
+    expect(first.state.getEngagement(secondId)).toMatchObject({ state: 'solution-published' });
+
+    const publications = first.state.listSolutionPublications(secondId);
+    expect(publications).toHaveLength(4);
+    expect(publications.every((p) => p.status === 'published')).toBe(true);
+    const deliveryLocation = publications.find((p) => p.role === 'delivery')?.detail as { location?: string } | null;
+    expect(deliveryLocation?.location).toBe(
+      `https://operator.example/records/${documentDigest(goldenDelivery).slice('sha256:'.length)}`,
+    );
+
+    // On-chain deliver is per-(attempt) — the shared delivery digest settles under the SECOND
+    // engagement's distinct Attempt, so it is a genuinely separate settlement, not a collision.
+    const settlement = first.state.beginSolutionSettlement(secondId);
+    expect(settlement).toEqual({
+      kind: 'created',
+      operationId: solutionSettlementId({
+        attempt: second.attemptUri!,
+        deliveryDigest: documentDigest(goldenDelivery),
+      }),
+    });
+    expect(second.attemptUri).not.toBe(first.engagement.attemptUri);
+    expect(first.state.getEngagement(secondId)).toMatchObject({ state: 'solution-settlement-pending' });
+    first.store.close();
+  });
+
+  it('does not promote or dedupe a second engagement whose content genuinely differs (fail-closed)', () => {
+    const first = finalizedClaim();
+    readyAndPublish(first.state, first.engagement);
+
+    const second = finalizeClaimFor(first.store, first.state, {
+      taskId: 8n, cardId: 2, sequence: '0000000000000002', announcementId: 'announcement-2', attemptIndex: 3,
+    });
+    const secondId = second.engagementId;
+    const execution = first.state.beginSolutionExecution(secondId, {
+      taskBytes, submissionBytes, dispatchContextBytes: dispatchFor(second),
+    });
+    first.state.recordBackendSubmissionAccepted(execution.operationId);
+
+    // Same three records, but a DIFFERENT delivery payload → a different content key.
+    const differentDelivery = new TextEncoder().encode('{"protocol":"delivery","v":2}');
+    first.state.recordSolutionReady(secondId, {
+      sourceId: GOLDEN_SOURCE_ID,
+      artifacts: [
+        ...goldenArtifacts().filter((a) => a.role !== 'delivery'),
+        { role: 'delivery', family: 'delivery', mediaType: DELIVERY_MEDIA_TYPE, digest: documentDigest(differentDelivery), bytes: differentDelivery },
+      ],
+    });
+
+    // The genuinely-new delivery record is NOT masked — it is inserted as its own pending intent
+    // that this engagement still owns and must publish. Promotion refuses while it is unpublished.
+    const pending = first.state.listPendingPublications().filter((p) => p.engagementId === secondId);
+    expect(pending.map((p) => p.role)).toEqual(['delivery']);
+    expect(pending[0]!.recordDigest).toBe(documentDigest(differentDelivery));
+    expect(first.state.promoteSolutionPublishedIfComplete(secondId)).toBe(false);
+    expect(first.state.getEngagement(secondId)).toMatchObject({ state: 'solution-ready' });
+    first.store.close();
+  });
+
   it('refuses an artifact whose advertised digest does not name its exact bytes', () => {
     const subject = finalizedClaim();
     const execution = subject.state.beginSolutionExecution(subject.engagement.engagementId, {

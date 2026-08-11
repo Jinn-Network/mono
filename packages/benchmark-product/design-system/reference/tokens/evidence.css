@@ -1,0 +1,14 @@
+:root{
+/* Evidence texture. Fill = how a result was obtained, not how good it is.
+   solid = observed by the platform | hatch = attested by a party | dot = missing/not run */
+--texture-observed:none; /* @kind other */
+--texture-attested:repeating-linear-gradient(45deg,transparent,transparent 3px,currentColor 3px,currentColor 4px); /* @kind other */
+--texture-missing:radial-gradient(currentColor .8px,transparent .9px); /* @kind other */
+--texture-missing-size:5px 5px; /* @kind other */
+--texture-conflicted:repeating-linear-gradient(90deg,transparent,transparent 3px,currentColor 3px,currentColor 4px); /* @kind other */
+--texture-opacity:.28; /* @kind other */
+/* accounting bar */
+--bar-height:10px; /* @kind spacing */
+--bar-height-lg:16px; /* @kind spacing */
+--bar-radius:var(--radius-xs); /* @kind radius */
+}

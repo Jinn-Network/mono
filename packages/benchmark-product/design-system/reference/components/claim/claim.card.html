@@ -1,0 +1,18 @@
+<!-- @dsCard group="Components" viewport="700x400" name="Claim assets" subtitle="ClaimBadge, ReportCard, CiteBlock, MethodLock" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css"><style>html,body{margin:0}#root{padding:20px 24px}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.lbl{font:var(--type-label);letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--text-faint);margin-bottom:8px}.grp{margin-bottom:18px}</style><script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script></head><body><div id="root"></div>
+<script type="text/babel">
+const { Button, IconButton, Input, Select, Checkbox, Switch, Tag, Card, SectionHead, Footnote, Callout, Imprint, VerdictChip, AssuranceMeter, CompletenessBar, DisagreementStrip, ClaimBadge, ReportCard, CiteBlock, MethodLock } = window.ColophonDesignSystem_55942c;
+const Ico=({d,s=15})=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
+function Demo(){return <div style={{display:'flex',flexDirection:'column',gap:18}}>
+<div><div className="lbl">Badges — every one resolves to the full report</div><div className="row">
+<ClaimBadge value="62.4% · 500 tasks" status="observed"/><ClaimBadge value="71.1% · 500 tasks" status="attested"/><ClaimBadge value="88 conflicted" status="conflicted"/><ClaimBadge value="92 not returned" status="incomplete"/></div></div>
+<MethodLock state="locked" digest="sha256:9f3c…a71b" timestamp="2026-08-02T14:20:11Z" detailHref="#"/>
+<div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:18,alignItems:'start'}}>
+<ReportCard width={330} title="Three loadouts, same 500 tasks" suite="SWE-bench Verified" date="2026-08-04" status="conflicted" entrants={[{name:'loadout-c',score:71.1,display:'71.1%'},{name:'loadout-a',score:62.4,display:'62.4%'},{name:'baseline',score:58.0,display:'58.0%'}]}/>
+<CiteBlock tabs={[{id:'md',label:'Markdown',value:'[![colophon 62.4% · 500 tasks](https://colophon.press/b/hb-2026-08.svg)](https://colophon.press/r/hb-2026-08)'},{id:'cli',label:'CLI',value:'colophon rerun hb-2026-08 --entrant loadout-c'},{id:'json',label:'Claim JSON',value:'GET https://colophon.press/r/hb-2026-08/claim.json'}]}/>
+</div></div>;}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script></body></html>

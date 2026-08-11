@@ -19,6 +19,7 @@ import {
 import { deriveNativeEvaluation } from "../evaluator/native-evaluation-derivation.js";
 import {
   verifyNativeSubjectAuthority,
+  NativeSubjectAuthorityError,
   type NativeSubjectAuthorityClaim,
   type NativeSubjectAuthorityDependencies,
 } from "../evaluator/native-subject-authority.js";
@@ -164,6 +165,17 @@ export class NativeEvaluatorCoordinator {
     readonly retry?: {
       readonly now?: () => Date;
       readonly delayMs?: number;
+      /**
+       * Upper bound on the exponential backoff between retries. Absent keeps the flat `delayMs`
+       * cadence (the historical behavior); present enables `delayMs * 2^attempt` capped here, so a
+       * sustained dependency outage stops hammering RPC while still retrying to the deadline.
+       */
+      readonly maxDelayMs?: number;
+      /**
+       * Per-phase attempt ceiling. Absent means unbounded — the 4h admission deadline is the sole
+       * cap (retry-until-deadline). The counter resets on every successful phase advance, so this
+       * never has to absorb a whole lifecycle's cumulative transient lag.
+       */
       readonly maxAttempts?: number;
     };
   }) {}
@@ -186,11 +198,36 @@ export class NativeEvaluatorCoordinator {
         if (resumed === "waiting") return { kind: "paused", reason: "retry-not-due" };
         if (resumed === "failed") return { kind: "failed", reason: "evaluator-retry-deadline" };
       }
-      return await this.drive(id);
+      const result = await this.drive(id);
+      // A non-throwing drive means the phase either held or advanced. If it advanced past the phase
+      // an earlier pause was retrying, clear that schedule so cumulative transient lag across the
+      // 25+ minute lifecycle never exhausts a per-phase budget.
+      this.input.state.resetEvaluationRetryOnAdvance(id);
+      return result;
     } catch (cause) {
-      const reason = cause instanceof EvaluatorCoordinatorFailure
-        ? cause.reason
-        : "evaluator-dependency-failed";
+      // A subject-authority REFUSAL is DETERMINISTIC: the subject graph, its trust bindings, and the
+      // recorded ceremony / on-chain settlement authority do not change by retrying, so retrying to
+      // the 4h admission SLA never succeeds — it just buries the reason and emits no verdict. Fail
+      // fast and surface the exact cause (the specific `NativeSubjectAuthorityError` sub-reason plus
+      // its detail — which Safe/signer/binding was refused) as the terminal failure reason, instead
+      // of the opaque `evaluator-dependency-failed` bucket that forced CP6 detail to be recovered by
+      // DB spelunking (#33).
+      //
+      // A subject-authority read failure that is TRANSIENT (`cause.transient` — a `Safe.isOwner`
+      // RPC/network read that could not COMPLETE the check) is the opposite: the subject may be
+      // valid and a retry may establish it, so terminalizing it would bury a passing subject behind
+      // a network blip. It flows into the same retry path as the other transient dependency failures
+      // below — but with its exact reason surfaced instead of the opaque bucket.
+      if (cause instanceof NativeSubjectAuthorityError && !cause.transient) {
+        const reason = `native-subject-authority-refused: ${cause.message}`;
+        this.input.state.recordEvaluationFailed(id, reason);
+        return { kind: "failed", reason };
+      }
+      const reason = cause instanceof NativeSubjectAuthorityError
+        ? `native-subject-authority-unavailable: ${cause.message}`
+        : cause instanceof EvaluatorCoordinatorFailure
+          ? cause.reason
+          : "evaluator-dependency-failed";
       if ((cause instanceof EvaluatorCoordinatorFailure && !cause.retryable)
         || cause instanceof NativeEvaluatorStateConflictError
         || cause instanceof TypeError) {
@@ -202,14 +239,23 @@ export class NativeEvaluatorCoordinator {
       const now = this.input.retry?.now?.() ?? new Date();
       const scheduled = this.input.state.recordEvaluationPaused(id, {
         reason,
-        nextAttemptAt: new Date(now.getTime() + (this.input.retry?.delayMs ?? 1_000)).toISOString(),
+        nextAttemptAt: new Date(now.getTime() + this.backoffMs(id)).toISOString(),
         deadline: this.input.deadline(evaluation),
-        maxAttempts: this.input.retry?.maxAttempts ?? 5,
+        ...(this.input.retry?.maxAttempts === undefined ? {} : { maxAttempts: this.input.retry.maxAttempts }),
       });
       return scheduled === "paused"
         ? { kind: "paused", reason }
         : { kind: "failed", reason: "evaluator-retry-exhausted" };
     }
+  }
+
+  /** Delay before the next retry: flat `delayMs` by default, exponential (capped) once `maxDelayMs` is set. */
+  private backoffMs(id: NativeOperationId): number {
+    const base = this.input.retry?.delayMs ?? 1_000;
+    const cap = this.input.retry?.maxDelayMs;
+    if (cap === undefined) return base;
+    const attempt = Math.min(this.input.state.getEvaluationRetryCount(id), 30);
+    return Math.min(cap, base * 2 ** attempt);
   }
 
   private evaluation(id: NativeOperationId): NativeEvaluationRow {
@@ -469,6 +515,12 @@ export class NativeEvaluatorCoordinator {
       const receipt = await this.input.publisher.publish({ publication, artifact });
       this.input.state.recordEvaluationPublicationPublished(publication.publicationKey, receipt);
     }
+    // A second evaluation whose byte-identical verdict graph a prior evaluation already announced
+    // owns no `intent` outbox rows (the content-addressed `INSERT OR IGNORE` in `recordVerdictReady`
+    // deduped them), so the loop above drained nothing and `recordEvaluationPublicationPublished`
+    // never fired the `verdict-published` transition. Its records are nonetheless served, so promote
+    // it explicitly. Idempotent and a no-op for the ordinary evaluation that just published its own.
+    this.input.state.promoteVerdictPublishedIfComplete(id);
   }
 
   private async ensureDecisionGrade(id: NativeOperationId, canonical?: CanonicalVerdictSettlement): Promise<VerdictCode> {

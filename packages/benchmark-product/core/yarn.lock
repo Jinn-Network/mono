@@ -5,6 +5,27 @@ __metadata:
   version: 8
   cacheKey: 10c0
 
+"@fontsource-variable/newsreader@npm:5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource-variable/newsreader@npm:5.3.0"
+  checksum: 10c0/e0e7131141e8de6ddd82d45b401af22f9a4c737bd3f633eab150430751d99d8b00a37bf1cb319fabdc4acada311e3f7d76a7ce44a6910fb0828a17c37f9187de
+  languageName: node
+  linkType: hard
+
+"@fontsource-variable/public-sans@npm:5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource-variable/public-sans@npm:5.3.0"
+  checksum: 10c0/51c95e6f31d9ca2a11931d2c3ef5300ef303f107cef18c6cac0a0f364d9adfe81e2e4aa6e26f81206953bfe914cc06f27e839c420c965c97be4d062e0f2f01e6
+  languageName: node
+  linkType: hard
+
+"@fontsource/ibm-plex-mono@npm:5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/ibm-plex-mono@npm:5.3.0"
+  checksum: 10c0/4aaf5a3c9efc7c32de4fa46ff3187ac63720904beab825f331ac01800038899761da23270f09d3fb5cff22f7cdc366904834854e2107229ad60833bba71c223d
+  languageName: node
+  linkType: hard
+
 "@isaacs/fs-minipass@npm:^4.0.0":
   version: 4.0.1
   resolution: "@isaacs/fs-minipass@npm:4.0.1"
@@ -32,6 +53,9 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/benchmark-product-core@workspace:."
   dependencies:
+    "@fontsource-variable/newsreader": "npm:5.3.0"
+    "@fontsource-variable/public-sans": "npm:5.3.0"
+    "@fontsource/ibm-plex-mono": "npm:5.3.0"
     "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
     "@jinn-network/benchmarking-interop": "npm:0.1.0"
     "@jinn-network/benchmarking-local": "npm:0.1.0"
@@ -54,6 +78,7 @@ __metadata:
     zod: "npm:4.4.3"
   bin:
     benchmark-product: ./dist/cli/bin.js
+    colophon: ./dist/cli/bin.js
   languageName: unknown
   linkType: soft
 

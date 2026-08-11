@@ -163,8 +163,11 @@ batch-API state models. What is taken, from where:
 | Executor Launcher | LaunchPlan (argv/env/cwd/validExitCodes/result contract), harness capability declaration, result-envelope decoding | spawning, retry, secrets beyond declared forwards, state |
 | Backend assembly | TEP verbs, observation projection, Delivery assembly, `capabilities()`, the evidence join | scheduling, queues, settlement, application authority |
 
-One backend instance per hosting product, with a private state root and attempt namespace.
-**Exactly one instance may own a state root at a time**: on startup the assembly takes an
+One or more backend instances per hosting product, each scoped to one execution role and carrying
+its own private state root, attempt namespace, executor identity, and purpose-scoped keys. A host
+that composes solver and evaluator roles therefore creates two instances with disjoint roots and
+keys; it does not multiplex roles through one root or widen the backend API. **Exactly one
+instance may own any one state root at a time**: on startup the assembly takes an
 exclusive advisory lock on `meta/backend.lock` (flock, held for process lifetime) and holds it
 across all `submit`/`recover` work; a second instance finding the lock held MUST fail
 `submit`/`recover` with `backend-unavailable` (capacity detail: "state root locked by a live

@@ -123,6 +123,7 @@ export type { PostingPorts, PostingTerms, PreparedPostingCommand, SafeBroadcastP
 
 // --- requester on-ramp defaults (supply design §8 D7; finding F2) ---
 export {
+  DEFAULT_EVALUATOR_RESPONSE_SLA_MS,
   DEFAULT_POSTING_TERMS,
   DEFAULT_SUBMISSION_DEADLINE_LEAD_MS,
   assertMaxClaimsAgreement,

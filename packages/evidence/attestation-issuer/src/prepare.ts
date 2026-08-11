@@ -237,6 +237,11 @@ export function buildResultEvaluationPayload(
   return deterministicJsonBytes(buildResultEvaluationStatement(input));
 }
 
+/** Exact byte convention used by attestation payload producers and host-side verifiers. */
+export function canonicalAttestationJsonBytes(value: unknown): Uint8Array {
+  return deterministicJsonBytes(value);
+}
+
 export async function prepareExecutionVerification(
   input: PrepareExecutionVerificationInput,
   signer: DsseSigner,

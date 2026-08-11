@@ -48,7 +48,7 @@ format version.
 Use the shipped built CLI, without the source workspace:
 
 ```bash
-benchmark-product bundle verify --bundle <bundle-dir> --json
+colophon bundle verify --bundle <bundle-dir> --json
 ```
 
 Success returns the bundle identity, record digests, and exactly **six checks**

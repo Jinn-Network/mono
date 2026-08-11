@@ -84,7 +84,22 @@ const ED25519_MULTICODEC = Uint8Array.of(0xed, 0x01);
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
 export class NativeTrustCatalogError extends Error {
-  override readonly name = 'NativeTrustCatalogError';
+  // `string`, not the literal, so `NativeTrustCatalogReadError` below can narrow it to its own name.
+  override readonly name: string = 'NativeTrustCatalogError';
+}
+
+/**
+ * A `verifyOnchainAuthority` failure that could NOT complete because a live chain read (the
+ * `Safe.isOwner` step) failed — an RPC/network/transport error, distinct from a `false` ownership
+ * verdict. Fail-closed for THIS attempt exactly like its parent (the caller never trusts a subject
+ * whose authority could not be established), but a distinct type so the evaluator can classify it as
+ * RETRYABLE — a transient read that never ran does not become truer by being retried to the 4h SLA,
+ * and terminalizing it (as the settlement-authority checks did) buries a passing subject behind a
+ * network blip. A genuine refusal (`!owns`, or any deterministic ceremony/scope/consent failure)
+ * stays the plain `NativeTrustCatalogError` and remains terminal.
+ */
+export class NativeTrustCatalogReadError extends NativeTrustCatalogError {
+  override readonly name = 'NativeTrustCatalogReadError';
 }
 
 function decodeEd25519DidKey(keyId: string): KeyObject {
@@ -544,7 +559,9 @@ export async function openNativeTrustCatalog(input: {
       try {
         owns = await input.settlementOwnershipClient.isOwner(value.address, signer);
       } catch (cause) {
-        throw new NativeTrustCatalogError(
+        // The read could not COMPLETE (RPC/network/transport). Fail closed, but as the RETRYABLE
+        // read-error subtype so the evaluator does not terminalize a transient blip to the SLA.
+        throw new NativeTrustCatalogReadError(
           `settlement authority ${value.key} Safe-ownership read for ${value.address} failed: ${String(cause)}`,
         );
       }

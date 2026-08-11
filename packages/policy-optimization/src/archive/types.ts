@@ -183,6 +183,12 @@ export interface AdoptionRecord {
    * consented to rather than inferring it from what the candidate turned out to contain.
    */
   readonly payloadClassesApproved: readonly AdoptionComponentClass[];
+  /** Evidence label at consent time. Added for the guided host; absent on replay-era records. */
+  readonly recommendationStatus?: "proven" | "promising" | "inconclusive";
+  /** Present only for the advanced non-proven override path (`--override-inconclusive`). */
+  readonly overrideReason?: string;
+  /** Exact configuration revision the prepared change and rollback target. */
+  readonly baseConfigurationRevision?: string;
 }
 
 /** The adoption log: one campaign's (or one operator's) ordered adoption decisions. */

@@ -1,0 +1,31 @@
+<!-- @dsCard group="Components" viewport="700x300" name="Core controls" subtitle="Button, IconButton, Input, Select, Checkbox, Switch, Tag" -->
+<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css"><style>html,body{margin:0}#root{padding:20px 24px}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.lbl{font:var(--type-label);letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--text-faint);margin-bottom:8px}.grp{margin-bottom:18px}</style><script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script></head><body><div id="root"></div>
+<script type="text/babel">
+const { Button, IconButton, Input, Select, Checkbox, Switch, Tag, Card, SectionHead, Footnote, Callout, Imprint, VerdictChip, AssuranceMeter, CompletenessBar, DisagreementStrip, ClaimBadge, ReportCard, CiteBlock, MethodLock } = window.ColophonDesignSystem_55942c;
+const Ico=({d,s=15})=><svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{d}</svg>;
+function Demo(){const [on,setOn]=React.useState(true);return <div>
+<div class="grp"><div className="lbl">Button</div><div className="row">
+<Button variant="primary">Launch run</Button>
+<Button variant="accent">Publish report</Button>
+<Button variant="secondary">Preview</Button>
+<Button variant="ghost">Cancel</Button>
+<Button variant="danger">Cancel run</Button>
+<Button variant="secondary" size="sm">Small</Button>
+<Button variant="secondary" disabled>Disabled</Button>
+<IconButton label="Copy" variant="outline" icon={<Ico d={<><rect x="9" y="9" width="11" height="11" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></>}/>}/>
+</div></div>
+<div class="grp" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,alignItems:'start'}}>
+<Input label="Benchmark slug" mono defaultValue="harness-ab-2026-08"/>
+<Select label="Execution mode" options={[{value:'n',label:'Network operators'},{value:'l',label:'Local runner'}]} hint="Local runs are self-reported."/>
+<Input label="Task count" mono defaultValue="500" suffix="tasks" hint="Below the suite minimum." invalid/>
+</div>
+<div className="row" style={{gap:28}}>
+<Checkbox defaultChecked label="Retain disagreement" description="Conflicted tasks stay conflicted."/>
+<Switch label="Show incomplete" checked={on} onChange={setOn}/>
+<Tag tone="indigo">SWE-bench Verified</Tag><Tag mono>v2.4.1</Tag><Tag tone="ink">Locked</Tag><Tag tone="outline">draft</Tag>
+</div></div>;}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script></body></html>

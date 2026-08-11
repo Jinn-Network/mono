@@ -1,0 +1,44 @@
+:root{
+/* --- base: ink & paper --- */
+--ink-900:#14120e;--ink-800:#2a2621;--ink-700:#403a33;--ink-600:#5c554c;--ink-500:#7c746a;
+--ink-400:#a39b90;--ink-300:#c6bfb4;--ink-200:#e0d9cd;--ink-100:#efeae0;--ink-50:#f4f1e9;
+--paper:#f7f4ed;--paper-raised:#fffdf8;--white:#ffffff;
+/* --- base: printer's inks --- */
+--vermilion-700:#8c2916;--vermilion-600:#a8331f;--vermilion-500:#c7402a;--vermilion-300:#dc6a55;--vermilion-100:#f6dfd9;
+--indigo-700:#1c3053;--indigo-600:#27406b;--indigo-500:#37567f;--indigo-300:#7d93b4;--indigo-100:#dce3ee;
+--moss-600:#2e6144;--moss-500:#3d7a57;--moss-300:#82a892;--moss-100:#dde9e1;
+--ochre-600:#8a6113;--ochre-500:#a9741a;--ochre-300:#cfa963;--ochre-100:#f2e6cc;
+/* --- semantic: text --- */
+--text-primary:var(--ink-900);--text-secondary:var(--ink-600);--text-muted:var(--ink-500);
+--text-faint:var(--ink-400);--text-inverse:var(--paper);--text-accent:var(--vermilion-600);
+--link:var(--indigo-600);--link-hover:var(--vermilion-600);--link-visited:var(--indigo-700);
+/* --- semantic: surface --- */
+--surface-page:var(--paper);--surface-card:var(--paper-raised);--surface-sunken:var(--ink-100);
+--surface-inset:var(--ink-50);--surface-inverse:var(--ink-900);--surface-accent:var(--vermilion-100);
+/* --- semantic: rules & edges --- */
+--rule:var(--ink-200);--rule-strong:var(--ink-300);--rule-heavy:var(--ink-900);--rule-accent:var(--vermilion-500);
+--focus-ring:var(--indigo-500);
+/* --- semantic: verdict states (never a lone green tick) --- */
+--verdict-met:var(--moss-600);--verdict-met-bg:var(--moss-100);
+--verdict-unmet:var(--vermilion-600);--verdict-unmet-bg:var(--vermilion-100);
+--verdict-conflicted:var(--ochre-600);--verdict-conflicted-bg:var(--ochre-100);
+--verdict-attested:var(--indigo-600);--verdict-attested-bg:var(--indigo-100);
+--verdict-incomplete:var(--ink-600);--verdict-incomplete-bg:var(--ink-100);
+--verdict-unverifiable:var(--ink-500);--verdict-unverifiable-bg:var(--ink-50);
+}
+[data-theme="dark"]{
+--paper:#14120e;--paper-raised:#1c1915;
+--text-primary:#f2eee4;--text-secondary:#bdb5a8;--text-muted:#9b9387;--text-faint:#7c746a;
+--text-inverse:#14120e;--text-accent:#e2755d;
+--link:#9fb6d8;--link-hover:#e2755d;--link-visited:#8ea6cb;
+--surface-page:#14120e;--surface-card:#1c1915;--surface-sunken:#221e19;--surface-inset:#1a1713;
+--surface-inverse:#f2eee4;--surface-accent:#3a1b14;
+--rule:#332e27;--rule-strong:#453e35;--rule-heavy:#f2eee4;--rule-accent:#c7402a;
+--focus-ring:#9fb6d8;
+--verdict-met:#7cbf9a;--verdict-met-bg:#1b2c22;
+--verdict-unmet:#e2755d;--verdict-unmet-bg:#33170f;
+--verdict-conflicted:#d5a75a;--verdict-conflicted-bg:#2e2410;
+--verdict-attested:#9fb6d8;--verdict-attested-bg:#182233;
+--verdict-incomplete:#a39b90;--verdict-incomplete-bg:#221e19;
+--verdict-unverifiable:#8b8378;--verdict-unverifiable-bg:#1a1713;
+}

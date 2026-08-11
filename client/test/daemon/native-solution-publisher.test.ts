@@ -131,6 +131,26 @@ describe('native solution public source', () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(firstBytes);
   });
 
+  it('refuses a distinct announcement whose timestamp does not advance the signed head', async () => {
+    // The strict-advance guard is a legitimate anti-replay / ordering invariant on the append-only
+    // source; the CP5 fix advances producer timestamps rather than weakening this check. Two DISTINCT
+    // records (different digests, so different announcements) sharing one timestamp must still be
+    // rejected on the second append.
+    const stateRoot = await root();
+    const publisher = await openNativeSolutionPublisher({
+      rootDir: stateRoot,
+      publicBaseUrl: 'https://operator.example/native',
+      source: { agent: 'urn:jinn:operator:solver-a', name: 'solver-records' },
+      signer: signer(),
+    });
+    closers.push(() => publisher.close());
+    // `artifact(bytes, 1)` stamps both publications with the same createdAt (sequence 1).
+    await expect(publisher.publish(artifact(new TextEncoder().encode('{"delivery":1}'), 1)))
+      .resolves.toMatchObject({ sequence: '0000000000000001' });
+    await expect(publisher.publish(artifact(new TextEncoder().encode('{"delivery":2}'), 1)))
+      .rejects.toThrow(/strictly advance the signed source head/u);
+  });
+
   it('appends a signed reorg withdrawal without rewriting the available announcement', async () => {
     const stateRoot = await root();
     const publisher = await openNativeSolutionPublisher({

@@ -8,6 +8,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Cross-tree portal dependencies: pack every dependency this package resolves via a portal
 // locally too, so the consumer graph resolves end-to-end without reaching the npm registry.
 const environmentRecordRoot = join(packageRoot, "..", "..", "environments", "record");
+const taskExecutionProfilesRoot = join(packageRoot, "..", "..", "task-execution", "profiles");
 const taskExecutionProtocolRoot = join(packageRoot, "..", "..", "task-execution", "protocol");
 const trustCoreRoot = join(packageRoot, "..", "..", "trust", "core");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-task-admission-"));
@@ -38,6 +39,10 @@ try {
     taskExecutionProtocolRoot,
     "task-execution-protocol.tgz",
   );
+  const taskExecutionProfilesArchive = await packOne(
+    taskExecutionProfilesRoot,
+    "task-execution-profiles.tgz",
+  );
   const environmentRecordArchive = await packOne(environmentRecordRoot, "environment-record.tgz");
   const admissionArchive = await packOne(packageRoot, "task-admission.tgz");
 
@@ -50,6 +55,7 @@ try {
       dependencies: {
         "@jinn-network/trust-core": `file:${trustCoreArchive}`,
         "@jinn-network/environment-record": `file:${environmentRecordArchive}`,
+        "@jinn-network/task-execution-profiles": `file:${taskExecutionProfilesArchive}`,
         "@jinn-network/task-execution-protocol": `file:${taskExecutionProtocolArchive}`,
         "@jinn-network/task-admission": `file:${admissionArchive}`,
       },
@@ -78,6 +84,7 @@ const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoo
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expectedJinnDependencies = [
   "@jinn-network/environment-record",
+  "@jinn-network/task-execution-profiles",
   "@jinn-network/task-execution-protocol",
   "@jinn-network/trust-core",
 ];

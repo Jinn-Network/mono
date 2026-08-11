@@ -95,9 +95,10 @@ function binding(key: string): ResolvedBinding {
     binding: {
       key: { didKey: key, keyid: key },
       // Every scope a native role can require, including the announce-plane scope the three
-      // `*-discovery` roles gained in issue #2525.
+      // `*-discovery` roles gained in issue #2525 and the admission-receipt scope the `admission`
+      // role gained in #33.
       scope: ["authorizations", "observations", "deliveries", "verdicts", "settlements",
-        "jinn:discovery-announcements"],
+        "jinn:discovery-announcements", "https://spec.jinn.network/trust-scopes/admission-receipts/v1"],
       validFrom: "2026-08-01T00:00:00.000Z",
     },
     effectiveStart: "2026-08-01T00:00:00.000Z",

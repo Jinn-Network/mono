@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { chmod } from "node:fs/promises";
 import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,3 +21,5 @@ await new Promise((resolve, reject) => {
     else reject(new Error(`TypeScript build exited with ${code}`));
   });
 });
+
+await chmod(join(dist, "cli", "bin.js"), 0o755);

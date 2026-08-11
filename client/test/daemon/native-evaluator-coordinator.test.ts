@@ -8,6 +8,7 @@ import {
 import { Store } from "../../src/store/store.js";
 import { NativeEvaluatorStateRepository } from "../../src/daemon/native-evaluator-state.js";
 import { NativeEvaluatorCoordinator } from "../../src/daemon/native-evaluator-coordinator.js";
+import { NativeSubjectAuthorityError } from "../../src/evaluator/native-subject-authority.js";
 
 const artifact = (name: string, value: string) => {
   const bytes = new TextEncoder().encode(value);
@@ -287,6 +288,167 @@ describe("NativeEvaluatorCoordinator", () => {
     expect(authority).toHaveBeenCalledTimes(3);
     expect(state.getEvaluation(id)).toMatchObject({ state: "failed" });
     expect(opened).not.toHaveBeenCalled();
+  });
+
+  it("retries transient evaluator-dependency lag to the deadline rather than a fixed cumulative budget", async () => {
+    const { store, state, id } = setup();
+    store.db.prepare("DELETE FROM native_evaluation_authority WHERE evaluation_id = ?").run(id);
+    const authority = vi.fn(async () => { throw new Error("trusted authority unavailable"); });
+    let nowMs = Date.parse("2026-08-02T12:00:00Z");
+    const coordinator = new NativeEvaluatorCoordinator({
+      state,
+      backend: {} as never,
+      authority: { claim: authority, dependencies: {} as never },
+      deadline: () => "2026-08-03T00:00:00Z",
+      evaluatorAddress,
+      verdictPorts: {} as never,
+      chain: {} as never,
+      deliverySignature: {} as never,
+      evidence: {} as never,
+      publisher: {} as never,
+      verification: {} as never,
+      // Composition default: no `maxAttempts`, so the deadline is the sole cap. The old `?? 5`
+      // terminal-failed on the 6th cumulative lag even though nothing about the evaluation failed.
+      retry: { now: () => new Date(nowMs), delayMs: 1_000 },
+    });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
+      kind: "paused",
+      reason: "evaluator-dependency-failed",
+    });
+    for (let attempt = 2; attempt <= 8; attempt++) {
+      nowMs += 1_001;
+      await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
+        kind: "paused",
+        reason: "evaluator-dependency-failed",
+      });
+    }
+    expect(state.getEvaluation(id)).toMatchObject({ state: "paused" });
+    expect(state.getEvaluationRetryCount(id)).toBe(8);
+  });
+
+  it("resets the retry counter when a paused evaluation advances to a later phase", async () => {
+    const { store, state, id } = setup();
+    // Two lags recorded against the claim phase.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      state.recordEvaluationPaused(id, {
+        reason: "evaluation-evidence-not-indexed",
+        nextAttemptAt: "2026-08-02T12:00:05Z",
+        deadline: "2026-08-03T00:00:00Z",
+      });
+    }
+    expect(state.getEvaluationRetryCount(id)).toBe(2);
+
+    // A successful drive that leaves the evaluation in a new phase clears the schedule.
+    store.db.prepare("UPDATE native_evaluations SET state = 'evaluating' WHERE evaluation_id = ?").run(id);
+    expect(state.resetEvaluationRetryOnAdvance(id)).toBe(true);
+    expect(state.getEvaluationRetryCount(id)).toBe(0);
+
+    // A fresh lag in the new phase starts its own budget from one, not from three.
+    state.recordEvaluationPaused(id, {
+      reason: "evaluation-delivery-envelope-missing",
+      nextAttemptAt: "2026-08-02T12:00:05Z",
+      deadline: "2026-08-03T00:00:00Z",
+    });
+    expect(state.getEvaluationRetryCount(id)).toBe(1);
+  });
+
+  it("fails fast and surfaces the reason on a deterministic subject-authority refusal instead of retrying to the SLA", async () => {
+    const { store, state, id } = setup();
+    store.db.prepare("DELETE FROM native_evaluation_authority WHERE evaluation_id = ?").run(id);
+    const opened = vi.fn();
+    // The cross-operator settlement-authority refusal shape from the live two-operator gate (#33):
+    // a `NativeSubjectAuthorityError` propagating out of the prepareClaim authority step.
+    const authority = vi.fn(async () => {
+      throw new NativeSubjectAuthorityError(
+        "executor-settlement-binding-failed",
+        "settlement authority did:key:solver Safe 0xc679 does not own ceremony signer 0xB35f",
+      );
+    });
+    const coordinator = new NativeEvaluatorCoordinator({
+      state,
+      backend: {} as never,
+      authority: { claim: authority, dependencies: {} as never },
+      deadline: () => "2026-08-03T00:00:00Z",
+      evaluatorAddress,
+      verdictPorts: { openVerdictAttempt: opened } as never,
+      chain: {} as never,
+      deliverySignature: {} as never,
+      evidence: {} as never,
+      publisher: {} as never,
+      verification: {} as never,
+      // A retry schedule identical to production's: if the refusal were (wrongly) treated as a
+      // transient dependency it would pause-and-retry here, not fail.
+      retry: { now: () => new Date("2026-08-02T12:00:00Z"), delayMs: 5_000, maxDelayMs: 300_000 },
+    });
+
+    // Terminal on the FIRST attempt — never paused, never retried to the deadline.
+    const result = await coordinator.reconcileEvaluation(id);
+    expect(result.kind).toBe("failed");
+    // The real cause is surfaced (specific sub-reason + detail), not the opaque dependency bucket.
+    expect(result).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("executor-settlement-binding-failed"),
+    });
+    expect((result as { reason: string }).reason).toContain("does not own ceremony signer");
+    expect((result as { reason: string }).reason).not.toBe("evaluator-dependency-failed");
+    expect(authority).toHaveBeenCalledOnce();
+    expect(state.getEvaluation(id)).toMatchObject({ state: "failed" });
+    expect(opened).not.toHaveBeenCalled();
+    // The durable terminal-failure audit carries the exact reason, so no DB spelunking is needed.
+    const audit = store.db
+      .prepare(
+        "SELECT detail_json FROM native_evaluation_audit WHERE evaluation_id = ? AND kind = 'evaluation-failed-terminal'",
+      )
+      .get(id) as { detail_json: string } | undefined;
+    expect(audit?.detail_json ?? "").toContain("executor-settlement-binding-failed");
+  });
+
+  it("retries (never terminalizes) a TRANSIENT subject-authority read failure, surfacing its reason", async () => {
+    const { store, state, id } = setup();
+    store.db.prepare("DELETE FROM native_evaluation_authority WHERE evaluation_id = ?").run(id);
+    const opened = vi.fn();
+    // A `Safe.isOwner` chain read that could not COMPLETE surfaces as a `NativeSubjectAuthorityError`
+    // with `transient: true`. Unlike a refusal it may succeed on retry, so it must NOT be terminalized
+    // to the SLA — it flows into the ordinary retry path, but with its exact reason (not the opaque
+    // `evaluator-dependency-failed` bucket).
+    const authority = vi.fn(async () => {
+      throw new NativeSubjectAuthorityError(
+        "executor-settlement-binding-failed",
+        "settlement authority did:key:solver Safe-ownership read for 0xc679 failed: HTTP 503",
+        { transient: true },
+      );
+    });
+    const coordinator = new NativeEvaluatorCoordinator({
+      state,
+      backend: {} as never,
+      authority: { claim: authority, dependencies: {} as never },
+      deadline: () => "2026-08-03T00:00:00Z",
+      evaluatorAddress,
+      verdictPorts: { openVerdictAttempt: opened } as never,
+      chain: {} as never,
+      deliverySignature: {} as never,
+      evidence: {} as never,
+      publisher: {} as never,
+      verification: {} as never,
+      retry: { now: () => new Date("2026-08-02T12:00:00Z"), delayMs: 5_000, maxDelayMs: 300_000 },
+    });
+
+    const result = await coordinator.reconcileEvaluation(id);
+    // Paused (retryable) — NOT terminal-failed. A transient read never buries a maybe-valid subject.
+    expect(result.kind).toBe("paused");
+    expect((result as { reason: string }).reason).toContain("native-subject-authority-unavailable");
+    expect((result as { reason: string }).reason).toContain("Safe-ownership read");
+    // Never the opaque bucket — the reason is recoverable without DB spelunking.
+    expect((result as { reason: string }).reason).not.toBe("evaluator-dependency-failed");
+    expect(state.getEvaluation(id)).toMatchObject({ state: "paused" });
+    expect(opened).not.toHaveBeenCalled();
+    // The durable retry/pause audit carries the exact transient reason.
+    const audit = store.db
+      .prepare(
+        "SELECT detail_json FROM native_evaluation_audit WHERE evaluation_id = ? AND kind = 'evaluation-paused'",
+      )
+      .get(id) as { detail_json: string } | undefined;
+    expect(audit?.detail_json ?? "").toContain("native-subject-authority-unavailable");
   });
 
   it("never opens an evaluation claim without persisted verified subject authority", async () => {

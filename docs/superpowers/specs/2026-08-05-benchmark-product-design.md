@@ -1241,6 +1241,63 @@ release, or deployment semantics reopened):**
   only. Documentation supplies no hosted URL, remote write, npm release, confidentiality
   promise, or protection from the local process owner.
 
+**Addendum — 2026-08-10, Colophon design-system adoption (production identity and
+presentation only; no lifecycle, operation, record, method, publication, extraction,
+release, or deployment semantics reopened):**
+
+- **Production identity.** The standalone product is named **Colophon**, described as
+  “benchmark publishing for agent configurations,” with the five-second read “Compare
+  agents on the same work.” and the deeper promise “Publish benchmark claims people can
+  check.” The only approved Jinn attribution is “Built on Jinn.” and it remains confined
+  to report imprint, about, documentation, and verification contexts. It never enters the
+  product name, primary navigation, result headline, or category explanation.
+- **One brand authority, compatibility-preserving command.** The public product-branding
+  value owns the display name, category descriptor, five-second read, deeper promise,
+  attribution, and preferred command name. The built CLI adds `colophon` as the preferred
+  executable while retaining `benchmark-product` as a compatibility alias for one release
+  cycle. Operation ids, command subverbs, JSON envelopes, errors, audit strings, and the
+  generated 27-operation parity matrix do not change.
+- **Reference source versus runtime adapters.** The supplied Colophon archive is retained
+  product-locally as an attributed, checksummed design reference. Generated demo runtime,
+  remote bootstrap, and CDN-only material are not production dependencies. The web portal
+  and deterministic public-asset builder own separate reviewed adapters for the same
+  paper/ink palette, type roles, rules, spacing, evidence states, real SVG marks, and
+  locally hosted or embedded OFL fonts. Production imports no executable prototype code
+  and makes no remote font, script, style, image, or icon request.
+- **Truthful workflow adaptation.** Colophon's editorial application shell presents the
+  actual product lifecycle — draft, preview, quoted, locked, running, closed, reported,
+  and published-bundle — and the actual `workspace.*`, `draft.*`, `intake.*`, `arm.*`,
+  `authority.*`, and `run.*` operation identifiers. Human copy may explain an Arm as an
+  entrant configuration, but canonical ids remain visible and unchanged. The reference
+  kit's invented snake-case verbs and compressed workflow never become API or audit law.
+- **Future hosted surfaces are labelled previews.** Reports, Task sets, Entrants,
+  Evaluators, Runs, Agents, Billing, Docs, and Pricing may be shown as realistic read-only
+  previews so the eventual hosted product can be evaluated before deployment exists. Every
+  such surface carries a persistent “Preview — future hosted service” disclosure and can
+  only navigate among allowlisted preview states. It has no server action, core operation,
+  checkout, account mutation, external request, hosted-availability claim, or success
+  receipt. The available local workspace and public bundle remain clearly distinct.
+- **Neutral publication remains law.** The visual source's causal and ranked sample copy is
+  reference data only. `wilson@1` still has no registered comparative winner; production
+  HTML, SVG, Markdown, UI, and marketing examples cannot choose, imply, certify, or rank a
+  winner. Percentages retain denominators, method lock precedes results, and incompleteness,
+  disagreement, asymmetric attrition, rehearsal, trust boundaries, and limitations remain
+  body-sized and prominent.
+- **Frozen public closure, redesigned bytes.** Colophon restyles only the five frozen
+  `public-bundle/1` presentation paths through the existing pure deterministic builder.
+  No file role, schema, active content, network dependency, or verifier path is added. The
+  same builder remains byte-rederived after source deletion and retains all authenticated
+  Matrix, Report, Claim, dissent, CAS-link, portable-command, accessibility, hostile-input,
+  print, and 390-pixel containment requirements.
+- **Acceptance and deployment truth.** Reference and implementation captures are compared
+  at matching desktop and 390-pixel viewports; all material P0–P2 visual differences are
+  closed in a checked-in design-QA report. Existing optimized-browser complete and
+  cancelled real-venue journeys, zero-waiver accessibility, keyboard, reflow, reduced
+  motion, confidentiality, CSP, copied-bundle, standalone verification, and adversarial
+  tamper gates remain mandatory. Deployment status remains **none** and this addendum
+  grants no hosting, pricing, billing, account, release, extraction, or external-domain
+  authority.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

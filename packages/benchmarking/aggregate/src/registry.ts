@@ -22,6 +22,7 @@ import {
 } from "./resolved-inputs.js";
 import { clusteredPairedRateDiffBca, MAX_NONINFERIORITY_RESAMPLES_V1, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type ExactCostDifference, type NonInferiorityOptions } from "./stats/noninferiority.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
+import { provenanceClusterSign } from "./stats/provenance-cluster-sign.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
 import { wilsonInterval } from "./stats/wilson.js";
 import { reduceValidVerdicts, type VerdictReduction } from "./verdict-rule.js";
@@ -213,6 +214,16 @@ const METHOD_METADATA = {
     parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" } }, additionalProperties: false },
     outputShape: "paired exact McNemar + provenance-cluster correction + excluded cells",
     exclusionRule: "pair shared task digests judged in both arms; report full remainder",
+    clusteringRule: "task-provenance-source",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    computeAvailability: "available",
+  }),
+  provenanceClusterSign: metadata({
+    requiredInputs: ["matrix.cells", "referenced-verdicts", "task-provenance-source"],
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" } }, additionalProperties: false },
+    outputShape: "exact whole-provenance-cluster sign test + votes + excluded cells",
+    exclusionRule: "pair shared task digests judged in both arms; aggregate one sign vote per provenance cluster; report full remainder",
     clusteringRule: "task-provenance-source",
     referenceSet: "v1-reference",
     deterministic: true,
@@ -562,6 +573,130 @@ const pairedMcnemarMethod: SingleSubjectMethod = {
       clustering: result.clustering,
       ...(result.clusteredPValue === undefined ? {} : { clusteredPValue: fixed4(result.clusteredPValue) }),
       ...(result.designEffect === undefined ? {} : { designEffect: fixed4(result.designEffect) }),
+      conflicted: { count: conflictedCellKeys.length, cellKeys: conflictedCellKeys },
+    };
+  },
+};
+
+// --- provenance-cluster-sign@1 ---------------------------------------------------------------
+
+const provenanceClusterSignMethod: SingleSubjectMethod = {
+  ...METHOD_METADATA.provenanceClusterSign,
+  id: BENCHMARKING_METHOD_IDS.provenanceClusterSign,
+  version: BENCHMARKING_METHOD_VERSION,
+  versionRobust: true,
+  compute(input) {
+    const baseline = requireStringParam(input.parameters, "baseline");
+    const candidate = requireStringParam(input.parameters, "candidate");
+    for (const matrix of input.matrices) {
+      const runDigest = matrixRunDigest(matrix);
+      const run = resolveRun(runDigest, input);
+      if (run.replicates !== 1) {
+        throw new MethodInputError(
+          "incompatible-run-replicates",
+          runDigest,
+          `provenance-cluster-sign@1 requires Run.replicates === 1; got ${run.replicates}`,
+        );
+      }
+    }
+
+    type RelevantCell = {
+      readonly cellKey: string;
+      readonly taskDigest: string;
+      readonly armId: string;
+      readonly value?: "pass" | "fail";
+    };
+    const relevant: RelevantCell[] = [];
+    const conflictedCellKeys: string[] = [];
+    for (const matrix of input.matrices) {
+      for (const cell of matrix.cells) {
+        if (cell.armId !== baseline && cell.armId !== candidate) continue;
+        if (cell.outcome !== "judged") {
+          relevant.push({ cellKey: cell.cellKey, taskDigest: cell.taskDigest, armId: cell.armId });
+          continue;
+        }
+        const reduction = reduceValidVerdicts(
+          cell.validVerdicts.map((digest) => resolveVerdictOutcome(digest, input)),
+          input.verdictRule,
+        );
+        if ("conflicted" in reduction) {
+          conflictedCellKeys.push(cell.cellKey);
+          relevant.push({ cellKey: cell.cellKey, taskDigest: cell.taskDigest, armId: cell.armId });
+        } else {
+          relevant.push({
+            cellKey: cell.cellKey,
+            taskDigest: cell.taskDigest,
+            armId: cell.armId,
+            value: reduction.value,
+          });
+        }
+      }
+    }
+
+    const byTask = new Map<string, RelevantCell[]>();
+    for (const cell of relevant) {
+      const cells = byTask.get(cell.taskDigest) ?? [];
+      cells.push(cell);
+      byTask.set(cell.taskDigest, cells);
+    }
+    const outcomes: {
+      readonly taskDigest: string;
+      readonly baseline: "pass" | "fail";
+      readonly candidate: "pass" | "fail";
+      readonly clusterKey: string;
+    }[] = [];
+    const excludedCellKeys: string[] = [];
+    for (const taskDigest of [...byTask.keys()].sort(compareCodeUnitStrings)) {
+      const cells = byTask.get(taskDigest)!;
+      const baselineCells = cells.filter((cell) => cell.armId === baseline && cell.value !== undefined);
+      const candidateCells = cells.filter((cell) => cell.armId === candidate && cell.value !== undefined);
+      if (baselineCells.length === 1 && candidateCells.length === 1) {
+        const provenance = resolveTaskProvenance(taskDigest, input);
+        outcomes.push({
+          taskDigest,
+          baseline: baselineCells[0]!.value!,
+          candidate: candidateCells[0]!.value!,
+          clusterKey: JSON.stringify([provenance.cluster.tag, provenance.cluster.value]),
+        });
+      } else {
+        excludedCellKeys.push(...cells.map((cell) => cell.cellKey));
+      }
+      for (const cell of cells) {
+        if (cell.value === undefined && !excludedCellKeys.includes(cell.cellKey)) {
+          excludedCellKeys.push(cell.cellKey);
+        }
+      }
+    }
+    excludedCellKeys.sort(compareCodeUnitStrings);
+    conflictedCellKeys.sort(compareCodeUnitStrings);
+
+    const result = provenanceClusterSign(outcomes.map((outcome) => ({
+      clusterKey: outcome.clusterKey,
+      delta: outcome.baseline === "fail" && outcome.candidate === "pass"
+        ? 1 as const
+        : outcome.baseline === "pass" && outcome.candidate === "fail"
+          ? -1 as const
+          : 0 as const,
+    })));
+    return {
+      verdictRule: input.verdictRule,
+      baseline,
+      candidate,
+      pairing: { taskDigests: outcomes.map((outcome) => outcome.taskDigest) },
+      clustering: { basis: "task-provenance-source", clusters: result.clusters },
+      favorable: result.favorable,
+      unfavorable: result.unfavorable,
+      tied: result.tied,
+      nonTied: result.nonTied,
+      // Unlike paired-mcnemar's replay-compatible four-decimal projection, this method is new
+      // and preserves the exact unanimous six-cluster boundary ("0.03125").
+      pValue: String(result.pValue),
+      votes: result.votes.map((vote) => ({
+        cluster: JSON.parse(vote.clusterKey) as ["source" | "sourceCommitment", string],
+        taskDelta: vote.taskDelta,
+        vote: vote.vote,
+      })),
+      excluded: { count: excludedCellKeys.length, cellKeys: excludedCellKeys },
       conflicted: { count: conflictedCellKeys.length, cellKeys: conflictedCellKeys },
     };
   },
@@ -924,6 +1059,7 @@ const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
   avgAtKMethod,
   passAtKMethod,
   pairedMcnemarMethod,
+  provenanceClusterSignMethod,
   nonInferiorityIutMethod,
   cleanSubsetMethod,
   bradleyTerryMethod,
@@ -972,8 +1108,8 @@ function subjectScopedMethod(method: SingleSubjectMethod): Method {
 
 const METHODS: readonly Method[] = SINGLE_SUBJECT_METHODS.map(subjectScopedMethod);
 
-/** The §9.2 method registry: URI + version identification over the seven registered methods
- * (six in the v1 reference set; `bradley-terry@1` registered but not part of it, §9.2). */
+/** The method registry: URI + version identification over eight registered methods
+ * (seven in the v1 reference set; `bradley-terry@1` registered but not part of it). */
 export function createMethodRegistry(): MethodRegistry {
   const byKey = new Map(METHODS.map((method) => [`${method.id}@${method.version}`, method]));
   return {

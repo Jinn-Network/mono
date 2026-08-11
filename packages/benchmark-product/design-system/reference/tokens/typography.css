@@ -1,0 +1,33 @@
+:root{
+--font-display:"Newsreader",Georgia,"Times New Roman",serif;
+--font-ui:"Public Sans",-apple-system,"Segoe UI",Helvetica,sans-serif;
+--font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+/* editorial scale, 1.26 ratio, 15px body */
+--text-2xs:11px;--text-xs:12px;--text-sm:13px;--text-base:15px;--text-md:17px;--text-lg:20px;
+--text-xl:25px;--text-2xl:31px;--text-3xl:39px;--text-4xl:49px;--text-5xl:62px;--text-6xl:78px;
+--leading-tight:1.08; /* @kind font */
+--leading-snug:1.2; /* @kind font */
+--leading-normal:1.5; /* @kind font */
+--leading-relaxed:1.62; /* @kind font */
+--leading-loose:1.8; /* @kind font */
+--weight-light:300; /* @kind font */
+--weight-regular:400; /* @kind font */
+--weight-medium:500; /* @kind font */
+--weight-semibold:600; /* @kind font */
+--weight-bold:700; /* @kind font */
+--tracking-tight:-0.02em;--tracking-snug:-0.01em;--tracking-normal:0;--tracking-wide:0.02em;
+--tracking-caps:0.08em;--tracking-mono-caps:0.06em;
+--measure-short:34ch; /* @kind spacing */
+--measure:66ch; /* @kind spacing */
+--measure-long:78ch; /* @kind spacing */
+/* named roles */
+--type-hero:var(--weight-regular) var(--text-5xl)/var(--leading-tight) var(--font-display);
+--type-title:var(--weight-regular) var(--text-3xl)/var(--leading-snug) var(--font-display);
+--type-section:var(--weight-regular) var(--text-xl)/var(--leading-snug) var(--font-display);
+--type-body:var(--weight-regular) var(--text-md)/var(--leading-relaxed) var(--font-display);
+--type-ui:var(--weight-regular) var(--text-base)/var(--leading-normal) var(--font-ui);
+--type-ui-strong:var(--weight-semibold) var(--text-sm)/var(--leading-normal) var(--font-ui);
+--type-label:var(--weight-semibold) var(--text-2xs)/1.4 var(--font-ui);
+--type-data:var(--weight-regular) var(--text-sm)/var(--leading-normal) var(--font-mono);
+--type-code:var(--weight-regular) var(--text-sm)/var(--leading-relaxed) var(--font-mono);
+}

@@ -7,9 +7,12 @@
  * "Run wiring" note that assembly composes `localAssemblyPorts` over host-supplied facts.
  *
  * Refuses `"conflict"` unless the close boundary has genuinely been reached: either every
- * expected cell is already terminal-accounted (nothing left to wait for), or the Run's
- * pre-registered `closeAt` has passed. `assembleMatrix` → `verifyMatrix` re-derives the exact
- * same bytes from the exact same (pure, journal/store-sourced) ports and MUST agree —
+ * expected solve cell is terminal-accounted AND every required evaluation leg has reached a
+ * durable terminal (nothing left that can still change Matrix inputs), or the Run's
+ * pre-registered `closeAt` has passed. A solve-side delivery alone is not enough: the driver
+ * journals its evaluation verdict after that delivery, and sealing in between those writes would
+ * let a later `run.verify` observe different durable facts. `assembleMatrix` → `verifyMatrix`
+ * re-derives the exact same bytes from the exact same (pure, journal/store-sourced) ports and MUST agree —
  * `verifyMatrix` failing here would mean this module's own port construction is not
  * self-consistent, not a genuine third-party integrity concern, but it is refused exactly the
  * same as any other `"record-integrity"` failure (spec §4.3): silently sealing a Matrix this
@@ -35,7 +38,13 @@ import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receip
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
 import { cancelRequested } from "../run/cancel-marker.js";
 import { acquireRunFinalizationLock } from "../run/finalization-lock.js";
-import { appendRunJournalEntry, foldRunJournal, outstandingCells, readRunJournalEntries } from "../run/journal.js";
+import {
+  appendRunJournalEntry,
+  evaluationGaps,
+  foldRunJournal,
+  outstandingCells,
+  readRunJournalEntries,
+} from "../run/journal.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
@@ -107,13 +116,14 @@ export function runCollect(
       const expected = expectedCellSet(benchRecord, runRecord);
       const fold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
 
-      const allTerminalAccounted = outstandingCells(expected, fold).length === 0;
+      const allTerminalAccounted = outstandingCells(expected, fold).length === 0
+        && evaluationGaps(fold, runRecord.policy.evaluation?.minVerdicts ?? 1).length === 0;
       const closeBoundaryReached = Date.parse(at) >= Date.parse(runState.closeAt);
       if (!allTerminalAccounted && !closeBoundaryReached) {
         refuse(
           "conflict",
           `runs.${input.draftId}`,
-          "not every expected cell is terminal-accounted yet, and the run's closeAt has not passed — resume the run or wait for the close boundary",
+          "not every expected solve cell and evaluation leg is terminal-accounted yet, and the run's closeAt has not passed — resume the run or wait for the close boundary",
         );
       }
 

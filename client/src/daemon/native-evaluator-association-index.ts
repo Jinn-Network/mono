@@ -24,6 +24,7 @@
  */
 import type { Store } from '../store/store.js';
 import type { NativeAuthorityTimeAnchor } from '../native-requester/requester.js';
+import { canonicalAddress } from './native-evm-address.js';
 
 /**
  * What actually identifies a requester association: the on-chain posting. Every field is proved
@@ -56,9 +57,17 @@ export interface NativeAssociationProvenance {
   readonly entryDigest: string;
 }
 
-/** The posting identity as its exact three SQL bind parameters, in primary-key order. */
+/**
+ * The posting identity as its exact three SQL bind parameters, in primary-key order.
+ *
+ * The coordinator is lowercase-canonicalized (#26). The requester signs its association with a
+ * checksummed coordinator, while `native_evaluations.coordinator` — the value `deadline()` looks a
+ * posting up by — is written lowercase. Keying the write and the read through the same
+ * `canonicalAddress` makes both sides agree on the lowercase form, so a checksummed-signed
+ * association still resolves under a lowercase lookup (and vice versa).
+ */
 function postingKey(posting: NativePostingIdentity): [string, string, string] {
-  return [posting.chainId.toString(10), posting.coordinator, posting.taskId.toString(10)];
+  return [posting.chainId.toString(10), canonicalAddress(posting.coordinator), posting.taskId.toString(10)];
 }
 
 /** The canonical stored encoding. `bigint` has no JSON form, so both are decimal strings. */
@@ -122,6 +131,39 @@ function migrateToPostingKey(store: Store): void {
 }
 
 /**
+ * One-time, idempotent re-key of stored coordinator keys to lowercase (#26). Rows written before
+ * the `postingKey` canonicalization stored the coordinator column checksummed (verbatim from the
+ * signed association), so a lowercase lookup misses them. The signed source resumes from a durable
+ * cursor on reboot and does not replay already-committed associations, so an existing row is
+ * persisted-once and never self-heals — it must be re-keyed here. `lower()` over ASCII hex is
+ * exact; the guard makes an already-lowercase table a no-op, and one row per posting means the
+ * update cannot collide on the primary key.
+ *
+ * The `coordinator` COLUMN is only the lookup key; the coordinator ALSO lives inside the stored
+ * `association_json` body (`encodeAssociation` serializes the whole association, coordinator
+ * included, at the top-level `$.coordinator` path). `upsertRequesterAssociation` canonicalizes to
+ * lowercase before encoding (#26), so a row whose body is still checksummed byte-mismatches a
+ * freshly-encoded re-upsert of the SAME posting and trips the "changed signed facts" refusal on
+ * out-of-band replay (checkpoint reset, source re-key, a second requester source re-serving the
+ * posting) — a fast-follow to #2562, which lowercased the column but left the body untouched. Both
+ * parts are rewritten together so a migrated row is byte-identical to what a fresh upsert would
+ * produce. The `OR` guard (rather than just the column check) is what makes this self-healing for
+ * a store that already ran the column-only migration: the column half is already lowercase there,
+ * so only the body-mismatch arm of the guard fires.
+ */
+function canonicalizeStoredCoordinatorKeys(store: Store): void {
+  store.db.exec(`
+    UPDATE native_evaluator_requester_associations
+       SET coordinator = lower(coordinator),
+           association_json = json_set(
+             association_json, '$.coordinator', lower(json_extract(association_json, '$.coordinator'))
+           )
+     WHERE coordinator <> lower(coordinator)
+        OR json_extract(association_json, '$.coordinator') <> lower(json_extract(association_json, '$.coordinator'));
+  `);
+}
+
+/**
  * Create the association table (posting-keyed) and migrate any table still on the old shape.
  * `task_digest` stays as an indexed lookup column, because the solver-side read only ever learns
  * a Delivery's Task digest and disambiguates the candidates by attempt URI.
@@ -143,6 +185,7 @@ export function installAssociationSchema(store: Store): void {
     CREATE INDEX IF NOT EXISTS idx_native_evaluator_associations_task_digest
       ON native_evaluator_requester_associations (task_digest);
   `);
+  canonicalizeStoredCoordinatorKeys(store);
 }
 
 /**
@@ -156,7 +199,14 @@ export function upsertRequesterAssociation(input: {
   readonly association: IndexedNativeRequesterAssociation;
   readonly provenance: NativeAssociationProvenance;
 }): void {
-  const { store, association, provenance } = input;
+  const { store, provenance } = input;
+  // Store the coordinator lowercase-canonical in BOTH the key and the encoded body (#26), so the
+  // stored bytes are stable regardless of the casing the signed facts arrived in and the
+  // idempotency equality is not tripped by a checksum-vs-lowercase difference alone.
+  const association: IndexedNativeRequesterAssociation = {
+    ...input.association,
+    coordinator: canonicalAddress(input.association.coordinator) as `0x${string}`,
+  };
   const encoded = encodeAssociation(association);
   const key = postingKey(association);
   const existing = store.db.prepare(

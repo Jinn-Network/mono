@@ -35,6 +35,7 @@ import { dssePreAuthEncoding, recordDigest } from '@jinn-network/trust-core';
 import { createTrustAdapter } from '@jinn-network/record-discovery-client';
 import { MEDIA_HEAD, sealJson } from '@jinn-network/record-discovery-protocol';
 import { DISCOVERY_SIGNING_SCOPE } from '@jinn-network/record-discovery-protocol';
+import { ADMISSION_RECEIPT_TRUST_SCOPE } from '@jinn-network/marketplace-binding';
 import { privateKeyToAccount } from 'viem/accounts';
 import { describe, expect, it } from 'vitest';
 import {
@@ -673,5 +674,33 @@ describe('cross-operator discovery key resolution over a real catalog (#2525)', 
     const { trust, now } = await twoOperatorCatalog();
     await expect(consumerAdapter(trust, 'requester').keys.resolve('urn:uuid:00000000-0000-4000-8000-000000000000', now))
       .resolves.toEqual([]);
+  });
+});
+
+/**
+ * The admission-agent key's binding must declare the dedicated admission-receipt scope that every
+ * admission-receipt verifier checks under (`native-subject-authority.ts`, `named-checks.ts`,
+ * `native-consumer/verification.ts`, all `family: ADMISSION_RECEIPT_TRUST_SCOPE`). The authoring map
+ * originally minted `["authorizations"]` for the admission role, so an authored admission binding
+ * could never satisfy any of them — the first eval ever to reach CP6 (live gate round 19, task 1227)
+ * threw `admission-binding-failed: scope-violation` deterministically and retried to the SLA with no
+ * verdict (#33). This is the authoring counterpart of the #2525 announce-plane fix above.
+ */
+describe('admission binding carries the receipt-issuing scope every verifier checks (#33)', () => {
+  it('pins the roles-table admission scope to the canonical cross-tree constant', () => {
+    // The literal in `@jinn-network/trust-authoring`'s roles table is duplicated from
+    // `@jinn-network/marketplace-binding` to avoid a build edge; a drift is a red test here.
+    expect(NATIVE_ROLE_IDENTITY_REQUIREMENTS.admission).toEqual([ADMISSION_RECEIPT_TRUST_SCOPE]);
+  });
+
+  it('mints the admission-receipt scope on the authored admission binding', async () => {
+    const genesis = await genesisForOperatorA();
+    const admissionBindings = genesis.bindings.filter(({ role }) => role === 'admission');
+    expect(admissionBindings.length).toBe(1);
+    // The verifier checks the BINDING's scope, so the authored bytes — not just the requirements
+    // table — have to carry it. Before the #33 fix this scope was `["authorizations"]`.
+    const scope = decodeBindingScope(admissionBindings[0]!.envelopeBytes);
+    expect(scope).toContain(ADMISSION_RECEIPT_TRUST_SCOPE);
+    expect(scope).not.toContain('authorizations');
   });
 });

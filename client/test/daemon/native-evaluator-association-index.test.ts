@@ -238,4 +238,144 @@ describe('native evaluator requester-association index', () => {
 
     expect(associationsForTaskDigest(store, SHARED_TASK_DIGEST)).toHaveLength(1);
   });
+
+  // #26 — the CP6 verdict blocker proved live on the two-operator gate (round 14, task 1223).
+  // The requester's signed association carries a CHECKSUMMED coordinator, so the index stored the
+  // row keyed checksummed; but `native_evaluations.coordinator` is written lowercase-canonical, so
+  // `deadline(evaluation)` looked the association up with a LOWERCASE coordinator. SQLite's
+  // `WHERE coordinator = ?` is case-sensitive, so the lookup missed and the evaluator logged
+  // "no signed requester deadline authority for task 1223" 130x, never emitting a verdict.
+  describe('resolves a posting regardless of coordinator address case (#26)', () => {
+    // One address, two casings that differ only in case — the exact live divergence.
+    const CHECKSUMMED = `0x8A34${'0'.repeat(32)}AD98` as const;
+    const LOWERCASE = `0x8a34${'0'.repeat(32)}ad98` as const;
+
+    it('finds an association stored checksummed when looked up lowercase', () => {
+      // Written as the requester signs it: coordinator verbatim (checksummed).
+      upsertRequesterAssociation({
+        store,
+        association: association({ coordinator: CHECKSUMMED, taskId: 1223n }),
+        provenance: provenanceAt('1'),
+      });
+
+      // Read as `deadline(evaluation)` does it: the lowercase coordinator off the evaluation row.
+      const found = associationForPosting(store, { chainId: 84532, coordinator: LOWERCASE, taskId: 1223n });
+      expect(found?.responseTimeoutSeconds).toBe(3_600n);
+    });
+
+    it('finds an association stored lowercase when looked up checksummed', () => {
+      upsertRequesterAssociation({
+        store,
+        association: association({ coordinator: LOWERCASE, taskId: 1223n }),
+        provenance: provenanceAt('1'),
+      });
+
+      const found = associationForPosting(store, { chainId: 84532, coordinator: CHECKSUMMED, taskId: 1223n });
+      expect(found?.responseTimeoutSeconds).toBe(3_600n);
+    });
+
+    it('treats the two casings as one posting, not two rows', () => {
+      upsertRequesterAssociation({
+        store,
+        association: association({ coordinator: CHECKSUMMED, taskId: 1223n }),
+        provenance: provenanceAt('1'),
+      });
+      // The lowercase re-index is the SAME posting with the SAME signed facts — idempotent, not a
+      // second row and not a "changed signed facts" refusal.
+      expect(() => upsertRequesterAssociation({
+        store,
+        association: association({ coordinator: LOWERCASE, taskId: 1223n }),
+        provenance: provenanceAt('1'),
+      })).not.toThrow();
+      expect(associationsForTaskDigest(store, SHARED_TASK_DIGEST)).toHaveLength(1);
+    });
+  });
+
+  // The live 1223 association row is already stored CHECKSUMMED on the preserved DB. After the fix
+  // the lookup keys lowercase, so the existing row would still miss unless it is re-keyed. The
+  // one-time idempotent migration in `installAssociationSchema` lowercases stored coordinator keys.
+  it('migrates a pre-existing checksummed coordinator row to lowercase (#26)', () => {
+    const CHECKSUMMED = `0x8A34${'0'.repeat(32)}AD98` as const;
+    const LOWERCASE = `0x8a34${'0'.repeat(32)}ad98` as const;
+    const stored = association({ coordinator: CHECKSUMMED, taskId: 1223n });
+
+    // Simulate a row written BEFORE the fix: coordinator column stored checksummed, verbatim.
+    store.db.prepare(
+      `INSERT INTO native_evaluator_requester_associations
+        (chain_id, coordinator, task_id, task_digest, association_json, source_id, source_sequence, entry_digest)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      '84532',
+      CHECKSUMMED,
+      '1223',
+      stored.taskDigest,
+      encodeAssociation(stored),
+      'did:jinn:requester-a/postings',
+      '1',
+      `sha256:${'1'.padStart(64, '0')}`,
+    );
+
+    // Before the migration the lowercase lookup misses — the live failure.
+    expect(associationForPosting(store, { chainId: 84532, coordinator: LOWERCASE, taskId: 1223n }))
+      .toBeUndefined();
+
+    // Running the schema install (as the daemon does on boot) re-keys the stored row.
+    installAssociationSchema(store);
+
+    const found = associationForPosting(store, { chainId: 84532, coordinator: LOWERCASE, taskId: 1223n });
+    expect(found?.responseTimeoutSeconds).toBe(3_600n);
+
+    // Idempotent: a second install does not disturb the already-lowercased row.
+    installAssociationSchema(store);
+    expect(associationsForTaskDigest(store, SHARED_TASK_DIGEST)).toHaveLength(1);
+  });
+
+  // Fast-follow to #2562: the column migration above re-keys `coordinator` on the ROW but leaves
+  // the coordinator embedded inside the stored `association_json` body checksummed. A later
+  // out-of-band replay of the SAME posting (checkpoint reset, source re-key, or a second requester
+  // source re-serving the posting) calls `upsertRequesterAssociation`, which always
+  // lowercase-canonicalizes the coordinator before encoding — so it compares its freshly-encoded
+  // LOWERCASE body against the stored CHECKSUMMED body and throws "changed signed facts" for a
+  // posting whose signed facts never actually changed. Part of #2461.
+  it('migrates the coordinator inside association_json too, so a replayed posting is a clean no-op (#2461)', () => {
+    const CHECKSUMMED = `0x8A34${'0'.repeat(32)}AD98` as const;
+    const LOWERCASE = `0x8a34${'0'.repeat(32)}ad98` as const;
+    const stored = association({ coordinator: CHECKSUMMED, taskId: 1223n });
+
+    // Simulate a row written BEFORE the fix: coordinator checksummed in BOTH the column and the
+    // encoded JSON body — exactly what a requester's signed association looks like on disk before
+    // any canonicalization ran.
+    store.db.prepare(
+      `INSERT INTO native_evaluator_requester_associations
+        (chain_id, coordinator, task_id, task_digest, association_json, source_id, source_sequence, entry_digest)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      '84532',
+      CHECKSUMMED,
+      '1223',
+      stored.taskDigest,
+      encodeAssociation(stored),
+      'did:jinn:requester-a/postings',
+      '1',
+      `sha256:${'1'.padStart(64, '0')}`,
+    );
+
+    installAssociationSchema(store);
+
+    // Replay the identical posting, exactly as the signed source would re-serve it under
+    // out-of-band replay — this must be a clean no-op, not a "changed signed facts" refusal.
+    expect(() => upsertRequesterAssociation({
+      store,
+      association: stored,
+      provenance: provenanceAt('1'),
+    })).not.toThrow();
+    expect(associationsForTaskDigest(store, SHARED_TASK_DIGEST)).toHaveLength(1);
+
+    // The migrated body is now byte-identical to what a fresh upsert of this posting would encode.
+    const row = store.db.prepare(
+      `SELECT association_json FROM native_evaluator_requester_associations
+        WHERE chain_id = ? AND coordinator = ? AND task_id = ?`,
+    ).get('84532', LOWERCASE, '1223') as { association_json: string };
+    expect(row.association_json).toBe(encodeAssociation({ ...stored, coordinator: LOWERCASE }));
+  });
 });

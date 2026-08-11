@@ -192,7 +192,7 @@ import {
   type NativeClaimCanonicalReader,
 } from './native-claim-coordinator.js';
 import type { NativeEngagementRow, NativeOperatorStateRepository } from './native-operator-state.js';
-import { NativeSolutionCoordinator } from './native-solution-coordinator.js';
+import { NativeSolutionCoordinator, type NativeSolutionSettlementPort } from './native-solution-coordinator.js';
 import {
   openNativeSolutionPublisher,
   type NativeSolutionPublisher,
@@ -300,6 +300,15 @@ export interface NativeClaimRuntimeInput {
     readonly exactDocuments: (engagement: NativeEngagementRow) => Promise<SealedDocuments>;
     /** Resolves the Task's advertised public EvaluationSpec by exact digest. */
     readonly resolveEvaluationSpec: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+    /**
+     * Chain-direct canonical settlement reader (the `createSolverReads` primitive, with the #2565
+     * HTTP-locator payload re-fetch). The single-host solver (`native-solver-production.ts`) wires
+     * the equivalent `input.infrastructure.solver.solutionSettlementCanonical` as the settlement
+     * port's `canonicalReader`; the fleet composition threads it here so a below-projector-window
+     * finalized delivery settles chain-direct instead of hanging on the projector observation
+     * stream forever (#29). Absent → the settlement port falls back to the projector-only reader.
+     */
+    readonly solutionSettlementCanonical: NativeSolutionSettlementPort['readCanonical'];
   };
 }
 
@@ -982,6 +991,14 @@ function buildProjector(input: {
       fetchIpfsBytes,
     });
   const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(input.engagementLedger);
+  // HTTP-first delivery resolution for native mode (the record-source serving plane), IPFS gateway
+  // after it. Native deliveries are HTTP-served and may never reach the gateway, so an IPFS-only
+  // resolver leaves the today-mode delivery correspondence CP7 adopt reads permanently null. Legacy
+  // mode has no record source, so it stays on the IPFS-only path.
+  const resolveDeliveryBytes = input.nativeProjectorPorts?.resolveDeliveryBytes;
+  const fetchDeliveryBytes: ProjectorEnrichPorts['fetchDeliveryBytes'] = resolveDeliveryBytes === undefined
+    ? undefined
+    : async (digest) => (await resolveDeliveryBytes(digest)) ?? fetchIpfsBytes(digest);
   const enrich = createProjectorEnrich({
     chain: input.chain,
     publicClient: input.publicClient,
@@ -990,6 +1007,7 @@ function buildProjector(input: {
     resolveDispatchContext,
     readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator),
     allowLegacySignedTaskV1: input.mode === 'legacy',
+    ...(fetchDeliveryBytes === undefined ? {} : { fetchDeliveryBytes }),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
@@ -1436,6 +1454,11 @@ export async function buildOperatorComposition(
           readObservations,
           readFinalizedBlockNumber,
           readCanonicalBlockHash,
+          // #29: mirror `native-solver-production.ts` so the fleet settlement port resolves finality
+          // chain-direct (projector as fallback). Without this a finalized delivery below this
+          // operator's clean-break projector window settles as `broadcast` forever, holds its
+          // `maxConcurrent` slot, and blocks every fresh claim with `capacity-policy`.
+          canonicalReader: input.nativeClaimRuntime!.solution.solutionSettlementCanonical,
         }),
       })
     : undefined;

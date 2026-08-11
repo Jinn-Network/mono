@@ -7,6 +7,7 @@ on:
       - ".github/scripts/policy-optimization-*.test.mjs"
       - ".github/workflows/policy-optimization-ci.yml"
       - "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md"
+      - "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md"
       - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
   push:
     branches: [next]
@@ -15,6 +16,7 @@ on:
       - ".github/scripts/policy-optimization-*.test.mjs"
       - ".github/workflows/policy-optimization-ci.yml"
       - "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md"
+      - "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md"
       - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
 
 concurrency:
@@ -63,19 +65,21 @@ jobs:
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
           (cd packages/policy/identity && yarn install --immutable && yarn build)
           (cd packages/policy/outcomes && yarn install --immutable && yarn build)
-      # Test-only. The wave engine's tests dispatch against the TEP conformance kit's in-memory
-      # fake, and that kit carries the local backend's conformance slice as runtime dependencies
-      # (FINDING F-C7b-4) — so consuming `createInMemoryBackend` means building this whole tail.
-      # None of it is a dependency of the product, and none of it is packed.
-      - name: Build the TEP conformance kit (test-only)
+      # The private live host composes the local backend and evaluator stack. Tests additionally
+      # consume the TEP conformance kit's in-memory fake, so this whole tail must be built before
+      # the product can resolve its concrete host dependencies from their portal distributions.
+      - name: Build the local host and TEP conformance dependencies
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
           (cd packages/task-execution/testing && yarn install --immutable && yarn build)
       - name: Verify Policy Optimization
@@ -130,6 +134,17 @@ jobs:
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
           (cd packages/benchmarking/run && yarn install --immutable && yarn build)

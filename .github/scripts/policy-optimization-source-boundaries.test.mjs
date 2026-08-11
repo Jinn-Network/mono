@@ -7,13 +7,11 @@
 //
 // 1. **The dependency allow-list.** `policy-identity`, `policy-outcomes`, `benchmarking-records`,
 //    `benchmarking-run`, `benchmarking-aggregate`, `benchmarking-local`, plus the
-//    `task-execution-backend` **contract** (the injected backend's type — the product names the
-//    contract and never a binding) and `task-execution-testing` (dev-only: the TEP conformance
-//    kit's in-memory fake, which the wave engine's tests dispatch against). Marketplace packages,
-//    every other product, and the client are denied outright: v0 executes on the local venue and
-//    consumes the marketplace read-only through the §8.2 adapters' injected ports (design §11).
-//    `task-execution-backend-local` stays denied: naming a concrete backend is exactly what the
-//    injected-port posture exists to prevent.
+//    `task-execution-backend` contract and `task-execution-testing` (dev-only: the TEP conformance
+//    kit's in-memory fake). Marketplace packages, every other product, and the client are denied.
+//    The one path-scoped exception is `host-local/` plus the process wrapper: that private host may
+//    compose concrete local backends, evaluator adapters, profiles, launchers, workspaces, evidence,
+//    and trust. Those edges remain forbidden from the neutral engine and from the public index.
 // 2. **`evidence-retrieval` is mirrors-only.** Its envelope shapes (`QuerySnapshotReceipt` and
 //    friends) are mirrored where needed, never imported — the substrate §2 rule this product
 //    inherits along with the manifest's `evidenceProvenance` block.
@@ -31,6 +29,8 @@ import { test } from 'node:test';
 const root = resolve(import.meta.dirname, '../..');
 const packageRoot = join(root, 'packages', 'policy-optimization');
 const sourceRoot = join(packageRoot, 'src');
+const hostLocalRoot = join(sourceRoot, 'host-local');
+const processWrapper = join(sourceRoot, 'cli', 'bin.ts');
 
 const ALLOWED_JINN_PACKAGES = [
   '@jinn-network/benchmarking-aggregate',
@@ -41,6 +41,27 @@ const ALLOWED_JINN_PACKAGES = [
   '@jinn-network/policy-outcomes',
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-testing',
+];
+
+// Concrete composition is confined to the private live host and its process wrapper. Neutral
+// engine modules retain the smaller list above and therefore remain reusable without acquiring
+// host authority or local-machine capabilities.
+const HOST_LOCAL_ALLOWED_JINN_PACKAGES = [
+  ...ALLOWED_JINN_PACKAGES,
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/evidence-repository',
+  '@jinn-network/execution-recorder',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
+  '@jinn-network/task-execution-evaluator-adapters',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/trust-core',
 ];
 
 // Named so the denial is a positive assertion rather than a consequence of the allow-list, and so
@@ -282,11 +303,26 @@ test('the allow-list admits its members and refuses everything else, wildcard fa
 
 test('policy-optimization source imports only its approved Jinn dependencies', () => {
   if (!existsSync(sourceRoot)) return;
+  const all = files(sourceRoot);
+  const hostFiles = all.filter((file) => inside(file, hostLocalRoot) || file === processWrapper);
+  const neutralFiles = all.filter((file) => !hostFiles.includes(file));
   assert.deepEqual(
-    unapprovedImports(files(sourceRoot), ALLOWED_JINN_PACKAGES, FORBIDDEN_ROOTS),
+    unapprovedImports(neutralFiles, ALLOWED_JINN_PACKAGES, FORBIDDEN_ROOTS),
     [],
-    'the product crosses its declared dependency boundary',
+    'the neutral engine crosses its declared dependency boundary',
   );
+  assert.deepEqual(
+    unapprovedImports(hostFiles, HOST_LOCAL_ALLOWED_JINN_PACKAGES, FORBIDDEN_ROOTS),
+    [],
+    'the private host crosses its declared dependency boundary',
+  );
+});
+
+test('the public barrel never re-exports private host composition', () => {
+  const barrel = join(sourceRoot, 'index.ts');
+  const imports = specifiers(readFileSync(barrel, 'utf8'));
+  assert.equal(imports.some((specifier) => specifier.includes('host-local')), false,
+    'src/index.ts must not expose private host-local modules');
 });
 
 test('policy-optimization actually imports the dependencies it declares (positive control)', () => {
@@ -304,6 +340,8 @@ test('policy-optimization actually imports the dependencies it declares (positiv
   ]) {
     assert.ok(imported.has(name), `expected at least one import of ${name}`);
   }
+  assert.ok(imported.has('@jinn-network/task-execution-backend-local'),
+    'the private live host must positively import the concrete local backend');
 });
 
 test('policy-optimization implements no private statistics (program ruling R3)', () => {

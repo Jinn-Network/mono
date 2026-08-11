@@ -118,10 +118,13 @@ if (!/^[a-f0-9]{64}$/.test(sample.benchmark.sha256)) throw new Error("sample ben
 if (BENCHMARKING_PROTOCOL !== "https://spec.jinn.network/protocols/benchmarking/v1") {
   throw new Error("platform seam import failed");
 }
-if (!PRODUCT_BRANDING.attribution.includes("independently verifiable")) {
+if (PRODUCT_BRANDING.attribution !== "Built on Jinn." || PRODUCT_BRANDING.commandName !== "colophon") {
   throw new Error("attribution copy drifted");
 }
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
+if (packageJson.bin?.colophon !== "./dist/cli/bin.js" || packageJson.bin?.["benchmark-product"] !== "./dist/cli/bin.js") {
+  throw new Error("preferred and compatibility CLI aliases are not both packed");
+}
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = [
   "@jinn-network/benchmarking-aggregate",

@@ -6,12 +6,9 @@
  */
 
 /**
- * The product's name, tagline, and attribution — the single source consumed
+ * The product's identity and attribution — the single source consumed
  * everywhere a product name or attribution appears (CLI banner, GUI chrome,
  * report presentation, claim assets).
- *
- * `displayName` is plainly a placeholder: a later branding engagement
- * replaces it by editing this one module, with no architectural change.
  *
  * `attribution` is factual, and appears only in about/verification contexts
  * — never in the product name, primary navigation, category explanation, or
@@ -19,12 +16,18 @@
  */
 export interface ProductBranding {
   readonly displayName: string;
+  readonly categoryDescriptor: string;
   readonly tagline: string;
+  readonly promise: string;
   readonly attribution: string;
+  readonly commandName: string;
 }
 
 export const PRODUCT_BRANDING: ProductBranding = {
-  displayName: "Benchmark Product (placeholder name)",
-  tagline: "Define a benchmark, run it, and hand every number to a verifier.",
-  attribution: "Runs on Jinn benchmarking records — independently verifiable",
+  displayName: "Colophon",
+  categoryDescriptor: "Benchmark publishing for agent configurations",
+  tagline: "Compare agents on the same work.",
+  promise: "Publish benchmark claims people can check.",
+  attribution: "Built on Jinn.",
+  commandName: "colophon",
 };

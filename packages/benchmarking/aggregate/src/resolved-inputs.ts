@@ -62,6 +62,25 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }
 
+/** Frozen evidence-issuer JSON spelling: sorted keys, two-space indentation, trailing LF. */
+function canonicalAttestationJsonBytes(value: unknown): Uint8Array {
+  const stringify = (candidate: unknown, depth = 0): string => {
+    if (candidate === null || typeof candidate !== "object") return JSON.stringify(candidate);
+    const outerIndent = "  ".repeat(depth);
+    const innerIndent = "  ".repeat(depth + 1);
+    if (Array.isArray(candidate)) {
+      if (candidate.length === 0) return "[]";
+      return `[\n${candidate.map((item) => `${innerIndent}${stringify(item, depth + 1)}`).join(",\n")}\n${outerIndent}]`;
+    }
+    const object = candidate as Record<string, unknown>;
+    const keys = Object.keys(object).sort();
+    if (keys.length === 0) return "{}";
+    return `{\n${keys.map((key) =>
+      `${innerIndent}${JSON.stringify(key)}: ${stringify(object[key], depth + 1)}`).join(",\n")}\n${outerIndent}}`;
+  };
+  return new TextEncoder().encode(`${stringify(value)}\n`);
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -97,6 +116,7 @@ function parseCanonicalJson(
   bytes: Uint8Array,
   code: MethodInputErrorCode,
   digest: string,
+  acceptedCanonicalizers: readonly ((value: unknown) => Uint8Array)[] = [canonicalJsonBytes],
 ): Record<string, unknown> {
   let value: unknown;
   try {
@@ -108,13 +128,13 @@ function parseCanonicalJson(
     throw new MethodInputError(code, digest, "canonical payload must be a JSON object");
   }
   assertUnicodeScalars(value, digest, code);
-  let canonical: Uint8Array;
+  let canonicals: Uint8Array[];
   try {
-    canonical = canonicalJsonBytes(value);
+    canonicals = acceptedCanonicalizers.map((canonicalize) => canonicalize(value));
   } catch (cause) {
     throw new MethodInputError(code, digest, `payload is outside canonical I-JSON: ${String(cause)}`);
   }
-  if (!bytesEqual(bytes, canonical)) {
+  if (!canonicals.some((canonical) => bytesEqual(bytes, canonical))) {
     throw new MethodInputError(code, digest, "payload bytes are not the exact canonical encoding");
   }
   return value;
@@ -177,6 +197,10 @@ export function resolveVerdictOutcome(
     envelope.payloadBytes,
     "verdict-record-malformed",
     digest,
+    // Historical trust-core producers emitted compact RFC-8785 JSON. The evidence issuer's
+    // frozen attestation family emits sorted, indented JSON with a trailing LF. Both are exact,
+    // deterministic spellings; accepting only one makes valid replay or live evidence unusable.
+    [canonicalJsonBytes, canonicalAttestationJsonBytes],
   );
   if (statement["_type"] !== IN_TOTO_STATEMENT_TYPE) {
     throw new MethodInputError("verdict-record-malformed", digest, "invalid Statement _type");
