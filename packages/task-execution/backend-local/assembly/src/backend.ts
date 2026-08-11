@@ -753,11 +753,33 @@ function dssePreAuthEncoding(payloadType: string, payloadBytes: Uint8Array): Uin
 }
 
 /**
- * Signs the Delivery's own already-sealed bytes and wraps the result in a structurally-valid DSSE
- * envelope (a JSON object `{payloadType, payload, signatures}`, matching
- * `@jinn-network/trust-core`'s `DsseEnvelope` shape exactly, byte-for-byte JSON-compatible with
- * `parseDsseEnvelope`). `deliveryBytes` is passed through untouched as the envelope's `payload` --
- * seal-once: it is never re-encoded, re-ordered, or re-canonicalized here.
+ * Signs the Delivery's own already-sealed bytes and wraps the result in a DSSE envelope (a JSON
+ * object `{payload, payloadType, signatures}`, matching `@jinn-network/trust-core`'s
+ * `DsseEnvelope` shape exactly). `deliveryBytes` is passed through untouched as the envelope's
+ * `payload` -- seal-once: it is never re-encoded, re-ordered, or re-canonicalized here.
+ *
+ * The ENVELOPE's own encoding is RFC 8785 JCS (sorted keys, compact separators) via
+ * `serializeCanonicalJson` -- the same sealer every other canonical byte production in this
+ * file already uses -- byte-identical to what trust-core's `sealDsseEnvelope` emits. That is
+ * load-bearing, not cosmetic (defect #34): the authority-bearing consumer of
+ * these bytes is `parseExactDsseEnvelope` (reached via the client's `verifyNativeDsse` ->
+ * `client/src/evaluator/native-subject-authority.ts`), which accepts ONLY the sole producer
+ * encoding and rejects every alternate spelling by reconstructing through `sealDsseEnvelope`
+ * and comparing bytes. This previously emitted plain `JSON.stringify` in `payloadType, payload,
+ * signatures` insertion order -- structurally fine under the LOOSE `parseDsseEnvelope` the
+ * settlement-grade checker uses (so the producing operator's own side passed), but refused by
+ * the strict cross-operator parse, surfacing as `envelope-signature-invalid` even though the
+ * Ed25519 signature was perfectly valid. Loosening the strict parser would be the wrong repair;
+ * its fail-closed strictness is the design.
+ *
+ * `serializeCanonicalJson` is the protocol package's own JCS re-implementation (Global
+ * Constraints -- never a shared runtime dep with trust-core), the same
+ * cross-boundary-duplication precedent `dssePreAuthEncoding` above already follows. Both sort
+ * keys with an identical `compareCodeUnitStrings` and emit compact separators, so for this
+ * envelope's flat all-string shape the two serializers agree byte-for-byte;
+ * `backend.evidence.test.ts` pins the exact bytes against an independently hand-sorted
+ * expectation, and `client/test/daemon/settlement-grade.test.ts` round-trips these production
+ * bytes through the real `parseExactDsseEnvelope`/`verifyNativeDsse` path.
  */
 function sealExecutorBindingEnvelope(
   deliveryBytes: Uint8Array,
@@ -770,7 +792,7 @@ function sealExecutorBindingEnvelope(
     payload: Buffer.from(deliveryBytes).toString("base64"),
     signatures: [{ keyid: key.keyId, sig: Buffer.from(signature).toString("base64") }],
   };
-  return new TextEncoder().encode(JSON.stringify(envelope));
+  return serializeCanonicalJson(envelope as unknown as JsonValue);
 }
 
 /**
