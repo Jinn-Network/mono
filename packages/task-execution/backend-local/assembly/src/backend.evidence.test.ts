@@ -552,6 +552,48 @@ describe("executor delivery signing (finding E31)", () => {
     expect(Object.keys(parsed).some((key) => key.includes("executor-binding"))).toBe(false);
   });
 
+  // ── Defect #34: the envelope's own ENCODING, not just its parsed shape ──────────────────────
+  //
+  // The consumer that matters is an authority-bearing one: `@jinn-network/trust-core`'s
+  // `parseExactDsseEnvelope` (via the client's `verifyNativeDsse`) accepts ONLY the sole producer
+  // encoding -- `sealDsseEnvelope`'s RFC 8785 JCS bytes -- and rejects every alternate spelling of
+  // the same envelope (its own suite asserts a "reordered" representation throws). A `JSON.stringify`
+  // envelope in `payloadType, payload, signatures` insertion order parses fine under the LOOSE
+  // `parseDsseEnvelope` the settlement-grade checker uses, and is refused by the strict one -- which
+  // surfaces as `envelope-signature-invalid` even though the Ed25519 signature is perfectly valid.
+  // The expected string below is reconstructed independently here (sorted keys spelled out by hand),
+  // so this does not assert the production code against its own serializer.
+  test("getDeliverySignature emits the canonical (JCS sorted-key) envelope encoding the strict DSSE parser accepts", async () => {
+    const keyPair = generateKeyPairSync("ed25519");
+    const instance = signingBackend(await stateRoot(), {
+      deliverySigningKey: {
+        keyId: "test-executor-key",
+        sign: (payload) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+      },
+    });
+    const { task, submission } = documents();
+    const ack = await instance.submit(task, submission);
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+    const snapshot = await terminalSnapshot(instance, ack.submission);
+    const [ref] = await instance.deliveries(snapshot.descriptor.attempt);
+    const deliveryBytes = await instance.fetchDelivery(ref!);
+
+    const envelopeBytes = instance.getDeliverySignature(documentDigest(deliveryBytes));
+    expect(envelopeBytes).toBeDefined();
+    const text = new TextDecoder().decode(envelopeBytes!);
+    const envelope = JSON.parse(text) as {
+      payloadType: string;
+      payload: string;
+      signatures: readonly { keyid: string; sig: string }[];
+    };
+    const expected = `{"payload":${JSON.stringify(envelope.payload)},`
+      + `"payloadType":${JSON.stringify(envelope.payloadType)},`
+      + `"signatures":[{"keyid":${JSON.stringify(envelope.signatures[0]!.keyid)},`
+      + `"sig":${JSON.stringify(envelope.signatures[0]!.sig)}}]}`;
+    expect(text).toBe(expected);
+  });
+
   test("getDeliverySignature keys by digest -- an unknown digest returns undefined", async () => {
     const keyPair = generateKeyPairSync("ed25519");
     const instance = signingBackend(await stateRoot(), {
