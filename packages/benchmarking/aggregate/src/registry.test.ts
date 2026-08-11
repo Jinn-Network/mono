@@ -62,6 +62,7 @@ describe("createMethodRegistry", () => {
     expect(registry.get("jinn.benchmarking.method/paired-mcnemar", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/provenance-cluster-sign", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/noninferiority-iut", "1")?.versionRobust).toBe(true);
+    expect(registry.get("jinn.benchmarking.method/paired-delta", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/wilson", "1")?.versionRobust).toBe(false);
   });
   test("returns undefined for an unregistered id/version", () => {
@@ -70,7 +71,7 @@ describe("createMethodRegistry", () => {
     expect(registry.get("jinn.benchmarking.method/does-not-exist", "1")).toBeUndefined();
   });
 
-  test("registers all eight methods", () => {
+  test("registers all nine methods", () => {
     const registry = createMethodRegistry();
     for (const [id, version] of [
       ["jinn.benchmarking.method/wilson", "1"],
@@ -79,6 +80,7 @@ describe("createMethodRegistry", () => {
       ["jinn.benchmarking.method/paired-mcnemar", "1"],
       ["jinn.benchmarking.method/provenance-cluster-sign", "1"],
       ["jinn.benchmarking.method/noninferiority-iut", "1"],
+      ["jinn.benchmarking.method/paired-delta", "1"],
       ["jinn.benchmarking.method/clean-subset", "1"],
       ["jinn.benchmarking.method/bradley-terry", "1"],
     ] as const) {

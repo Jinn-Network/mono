@@ -21,6 +21,7 @@ import {
   resolveVerdictOutcome,
 } from "./resolved-inputs.js";
 import { clusteredPairedRateDiffBca, MAX_NONINFERIORITY_RESAMPLES_V1, nonInferiorityIut, nonInferiorityVerdict, pairedCostVerdict, type ExactCostDifference, type NonInferiorityOptions } from "./stats/noninferiority.js";
+import { clusteredPairedDeltaInterval } from "./stats/paired-delta.js";
 import { pairedMcnemar } from "./stats/paired-mcnemar.js";
 import { provenanceClusterSign } from "./stats/provenance-cluster-sign.js";
 import { avgAtOne, passAtK } from "./stats/pass-at-k.js";
@@ -240,6 +241,17 @@ const METHOD_METADATA = {
     resamplingProcedure: "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration",
     computeAvailability: "available",
   }),
+  pairedDelta: metadata({
+    requiredInputs: ["matrix.cells", "referenced-verdicts", "task-provenance-source"],
+    parameterSchema: { type: "object", required: ["verdictRule", "baseline", "candidate", "seed", "resamples", "alpha"], properties: { verdictRule: VERDICT_RULE_PROPERTY, baseline: { type: "string" }, candidate: { type: "string" }, seed: { type: "integer", minimum: 1, maximum: 4_294_967_295 }, resamples: { type: "integer", minimum: 1, maximum: MAX_NONINFERIORITY_RESAMPLES_V1 }, alpha: { enum: [0.1, 0.05, 0.01] } }, additionalProperties: false },
+    outputShape: "paired mean rate difference + two-sided clustered BCa interval + exclusions + conflicted cells",
+    exclusionRule: "pair Task digests judged in both arms; per-Task rates average all judged replicates; report full remainder",
+    clusteringRule: "task-provenance-source",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    resamplingProcedure: "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration; two passes at alpha/2 and 1-alpha/2 over one seed",
+    computeAvailability: "available",
+  }),
   cleanSubset: metadata({
     requiredInputs: ["matrix.cells", "referenced-verdicts", "exact-task-bytes-or-anchored-benchmark-announcement"],
     parameterSchema: { type: "object", required: ["verdictRule", "basis", "cutoff", "delegate"], properties: { verdictRule: VERDICT_RULE_PROPERTY, basis: { enum: ["self-declared", "announcement-anchored"] }, cutoff: { type: "string", format: "date-time" }, delegate: { type: "object" } }, additionalProperties: false },
@@ -276,6 +288,14 @@ function requireIntegerParam(parameters: Readonly<Record<string, unknown>>, key:
   const value = parameters[key];
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw new Error(`method parameter "${key}" must be an integer`);
+  }
+  return value;
+}
+
+function requireNumberParam(parameters: Readonly<Record<string, unknown>>, key: string): number {
+  const value = parameters[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`method parameter "${key}" must be a finite number`);
   }
   return value;
 }
@@ -1045,6 +1065,139 @@ const nonInferiorityIutMethod: SingleSubjectMethod = {
   },
 };
 
+// --- paired-delta@1 ---------------------------------------------------------------------------
+// The A/B read: the paired mean difference in pass rate with a two-sided clustered BCa interval.
+// Pairing, replicate averaging, and exclusion discipline mirror noninferiority-iut@1's quality
+// leg; the cost leg and the intersection-union verdict are deliberately absent — this method
+// estimates an effect, it does not gate one.
+
+/** Below this many paired Tasks the interval is withheld rather than manufactured (design §9.3:
+ * a method never manufactures confidence from too little data). Matches the seed library's minN. */
+const MIN_PAIRED_DELTA_TASKS = 5;
+
+const pairedDeltaMethod: SingleSubjectMethod = {
+  ...METHOD_METADATA.pairedDelta,
+  id: BENCHMARKING_METHOD_IDS.pairedDelta,
+  version: BENCHMARKING_METHOD_VERSION,
+  versionRobust: true,
+  compute(input) {
+    const baseline = requireStringParam(input.parameters, "baseline");
+    const candidate = requireStringParam(input.parameters, "candidate");
+    const seed = requireIntegerParam(input.parameters, "seed");
+    const resamples = requireIntegerParam(input.parameters, "resamples");
+    const alpha = requireNumberParam(input.parameters, "alpha");
+    if (resamples <= 0 || resamples > MAX_NONINFERIORITY_RESAMPLES_V1) {
+      throw new MethodInputError("method-incompatible-cost-unit", "resamples", `resamples must be in 1..${MAX_NONINFERIORITY_RESAMPLES_V1}`);
+    }
+
+    type RelevantCell = {
+      readonly cellKey: string;
+      readonly taskDigest: string;
+      readonly armId: string;
+      readonly value?: "pass" | "fail";
+    };
+    const relevant: RelevantCell[] = [];
+    const conflictedCellKeys: string[] = [];
+    for (const matrix of input.matrices) {
+      for (const cell of matrix.cells) {
+        if (cell.armId !== baseline && cell.armId !== candidate) continue;
+        let value: "pass" | "fail" | undefined;
+        if (cell.outcome === "judged") {
+          const reduction = reduceValidVerdicts(
+            cell.validVerdicts.map((digest) => resolveVerdictOutcome(digest, input)),
+            input.verdictRule,
+          );
+          if ("conflicted" in reduction) conflictedCellKeys.push(cell.cellKey);
+          else value = reduction.value;
+        }
+        relevant.push({
+          cellKey: cell.cellKey,
+          taskDigest: cell.taskDigest,
+          armId: cell.armId,
+          ...(value === undefined ? {} : { value }),
+        });
+      }
+    }
+
+    const byTask = new Map<string, RelevantCell[]>();
+    for (const cell of relevant) {
+      const cells = byTask.get(cell.taskDigest) ?? [];
+      cells.push(cell);
+      byTask.set(cell.taskDigest, cells);
+    }
+    const clusteredRates: {
+      pA: number;
+      pB: number;
+      taskDigest: string;
+      cluster: readonly ["source" | "sourceCommitment", string];
+    }[] = [];
+    const pairedTaskDigests: string[] = [];
+    const includedCellKeys = new Set<string>();
+    for (const taskDigest of [...byTask.keys()].sort(compareCodeUnitStrings)) {
+      const cells = byTask.get(taskDigest)!;
+      const baselineCells = cells.filter((cell) => cell.armId === baseline && cell.value !== undefined);
+      const candidateCells = cells.filter((cell) => cell.armId === candidate && cell.value !== undefined);
+      if (baselineCells.length === 0 || candidateCells.length === 0) continue;
+      const provenance = resolveTaskProvenance(taskDigest, input);
+      clusteredRates.push({
+        pA: baselineCells.filter((cell) => cell.value === "pass").length / baselineCells.length,
+        pB: candidateCells.filter((cell) => cell.value === "pass").length / candidateCells.length,
+        taskDigest,
+        cluster: [provenance.cluster.tag, provenance.cluster.value] as const,
+      });
+      pairedTaskDigests.push(taskDigest);
+      for (const cell of [...baselineCells, ...candidateCells]) includedCellKeys.add(cell.cellKey);
+    }
+    const excludedCellKeys = relevant
+      .filter((cell) => !includedCellKeys.has(cell.cellKey))
+      .map((cell) => cell.cellKey)
+      .sort(compareCodeUnitStrings);
+
+    const clusterCount = new Set(clusteredRates.map((rate) => JSON.stringify(rate.cluster))).size;
+    const clusterManifest = sourceClusterManifest(clusteredRates);
+    const reasons: string[] = [];
+    if (clusteredRates.length < MIN_PAIRED_DELTA_TASKS) {
+      reasons.push(`fewer than minN=${MIN_PAIRED_DELTA_TASKS} paired tasks (got ${clusteredRates.length})`);
+    }
+    if (clusterCount < 2) {
+      reasons.push(`fewer than two source clusters (got ${clusterCount})`);
+    }
+    const estimate = reasons.length === 0
+      ? clusteredPairedDeltaInterval(clusteredRates, { seed, resamples, alpha })
+      : undefined;
+    // One source for the point estimate. When the bootstrap ran, its own `observed` IS the mean
+    // (same values, same task-sorted order, so the same float) — reusing it removes any chance of
+    // the reported delta and the interval it sits inside disagreeing in a last bit.
+    const delta = estimate !== undefined
+      ? estimate.delta
+      : clusteredRates.length === 0
+        ? null
+        : clusteredRates.reduce((sum, rate) => sum + (rate.pB - rate.pA), 0) / clusteredRates.length;
+
+    return {
+      verdictRule: input.verdictRule,
+      baseline,
+      candidate,
+      pairs: clusteredRates.length,
+      delta: delta === null ? null : fixed4(delta),
+      interval: estimate === undefined
+        ? null
+        : { alpha: fixed4(alpha), low: fixed4(estimate.low), high: fixed4(estimate.high) },
+      reasons,
+      pairing: { taskDigests: pairedTaskDigests },
+      clustering: { basis: "task-provenance-source", clusters: clusterCount },
+      excluded: { count: excludedCellKeys.length, cellKeys: excludedCellKeys },
+      conflicted: { count: conflictedCellKeys.length, cellKeys: conflictedCellKeys.sort(compareCodeUnitStrings) },
+      bootstrap: {
+        procedure: "xorshift32-v1", seed, resamples, basis: "task-provenance-source-family",
+        count: clusterManifest.length, unit: "source-cluster",
+        draws: estimate === undefined ? 0 : estimate.draws,
+        clusters: clusterManifest,
+      },
+    };
+  },
+};
+
 const bradleyTerryMethod: SingleSubjectMethod = {
   ...METHOD_METADATA.bradleyTerry,
   id: BENCHMARKING_METHOD_IDS.bradleyTerry,
@@ -1061,6 +1214,7 @@ const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
   pairedMcnemarMethod,
   provenanceClusterSignMethod,
   nonInferiorityIutMethod,
+  pairedDeltaMethod,
   cleanSubsetMethod,
   bradleyTerryMethod,
 ];
@@ -1108,8 +1262,8 @@ function subjectScopedMethod(method: SingleSubjectMethod): Method {
 
 const METHODS: readonly Method[] = SINGLE_SUBJECT_METHODS.map(subjectScopedMethod);
 
-/** The method registry: URI + version identification over eight registered methods
- * (seven in the v1 reference set; `bradley-terry@1` registered but not part of it). */
+/** The method registry: URI + version identification over nine registered methods
+ * (eight in the v1 reference set; `bradley-terry@1` registered but not part of it). */
 export function createMethodRegistry(): MethodRegistry {
   const byKey = new Map(METHODS.map((method) => [`${method.id}@${method.version}`, method]));
   return {
