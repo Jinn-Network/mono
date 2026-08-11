@@ -56,6 +56,7 @@ __metadata:
     "@fontsource-variable/newsreader": "npm:5.3.0"
     "@fontsource-variable/public-sans": "npm:5.3.0"
     "@fontsource/ibm-plex-mono": "npm:5.3.0"
+    "@jinn-network/attestation-issuer": "npm:0.1.0"
     "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
     "@jinn-network/benchmarking-interop": "npm:0.1.0"
     "@jinn-network/benchmarking-local": "npm:0.1.0"

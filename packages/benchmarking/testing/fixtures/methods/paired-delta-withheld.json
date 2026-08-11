@@ -1,0 +1,343 @@
+{
+  "methodId": "jinn.benchmarking.method/paired-delta",
+  "methodVersion": "1",
+  "parameters": {
+    "baseline": "armA",
+    "candidate": "armB",
+    "seed": 123456789,
+    "resamples": 1000,
+    "alpha": "0.05"
+  },
+  "verdictRule": "unanimous",
+  "matrices": [
+    {
+      "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+      "run": {
+        "digest": {
+          "sha256": "c53f5227cce173f08860a1b60a002d746abf03a6c55cc96dfb2bd716241b259b"
+        }
+      },
+      "closeBoundary": {
+        "at": "2026-08-04T00:00:00Z"
+      },
+      "cells": [
+        {
+          "cellKey": "1276322bf0b99ed861e9f7d7e589da876d327253fe75bc10ffc041bf50dc8350/armA/1",
+          "taskDigest": "1276322bf0b99ed861e9f7d7e589da876d327253fe75bc10ffc041bf50dc8350",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:10bf59576908ce0f026a3debec109d78c537331ac134e6b328b05d685900b935"
+          ],
+          "validVerdicts": [
+            "sha256:10bf59576908ce0f026a3debec109d78c537331ac134e6b328b05d685900b935"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "1276322bf0b99ed861e9f7d7e589da876d327253fe75bc10ffc041bf50dc8350/armB/1",
+          "taskDigest": "1276322bf0b99ed861e9f7d7e589da876d327253fe75bc10ffc041bf50dc8350",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:8ce5ff5b78031831b347a9d19e0cdf4199bcb04353b3cb79134ffcb2c95fc70f"
+          ],
+          "validVerdicts": [
+            "sha256:8ce5ff5b78031831b347a9d19e0cdf4199bcb04353b3cb79134ffcb2c95fc70f"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "bad02039cf315fbc13539ed044c8d71742c8d671017c5e96b9f4a749a45fc847/armA/1",
+          "taskDigest": "bad02039cf315fbc13539ed044c8d71742c8d671017c5e96b9f4a749a45fc847",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:56aa8ede830f971a1dc204e550f2e1d17d11518b1a31d418abb3588b02802566"
+          ],
+          "validVerdicts": [
+            "sha256:56aa8ede830f971a1dc204e550f2e1d17d11518b1a31d418abb3588b02802566"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "bad02039cf315fbc13539ed044c8d71742c8d671017c5e96b9f4a749a45fc847/armB/1",
+          "taskDigest": "bad02039cf315fbc13539ed044c8d71742c8d671017c5e96b9f4a749a45fc847",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:81b8c16ffc461ec8ad20d160a40cf2ea25a5d56c10c22b8278b89916113ac3f0"
+          ],
+          "validVerdicts": [
+            "sha256:81b8c16ffc461ec8ad20d160a40cf2ea25a5d56c10c22b8278b89916113ac3f0"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "9b1f53de5f4da626003bdb9840fb979dbb5e038398a12fbb3842fb5563aaa46c/armA/1",
+          "taskDigest": "9b1f53de5f4da626003bdb9840fb979dbb5e038398a12fbb3842fb5563aaa46c",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:0b36c0d83a08a5303606c370a0e93f68b171eaad51830ee4498ad5a6a592c0ee"
+          ],
+          "validVerdicts": [
+            "sha256:0b36c0d83a08a5303606c370a0e93f68b171eaad51830ee4498ad5a6a592c0ee"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "9b1f53de5f4da626003bdb9840fb979dbb5e038398a12fbb3842fb5563aaa46c/armB/1",
+          "taskDigest": "9b1f53de5f4da626003bdb9840fb979dbb5e038398a12fbb3842fb5563aaa46c",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:6c39568cca0ddc52e55357e4de865f0fe35c88b5f55b0448df7a151c6af16e62"
+          ],
+          "validVerdicts": [
+            "sha256:6c39568cca0ddc52e55357e4de865f0fe35c88b5f55b0448df7a151c6af16e62"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "0c8f38e17fa6ffcbeff068af75f7b627d06d94099832729b11f87b8490b6fe5b/armA/1",
+          "taskDigest": "0c8f38e17fa6ffcbeff068af75f7b627d06d94099832729b11f87b8490b6fe5b",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:8ff5c373cacfaca21f05d0e31aa0831ec22d0ad836ea2b8c724e479f56b6318a"
+          ],
+          "validVerdicts": [
+            "sha256:8ff5c373cacfaca21f05d0e31aa0831ec22d0ad836ea2b8c724e479f56b6318a"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "0c8f38e17fa6ffcbeff068af75f7b627d06d94099832729b11f87b8490b6fe5b/armB/1",
+          "taskDigest": "0c8f38e17fa6ffcbeff068af75f7b627d06d94099832729b11f87b8490b6fe5b",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:78318cf3b9e47d07ccd8f392557ace764f71b1693b7ae2138b2111edfcf776cb"
+          ],
+          "validVerdicts": [
+            "sha256:78318cf3b9e47d07ccd8f392557ace764f71b1693b7ae2138b2111edfcf776cb"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        }
+      ],
+      "exclusions": [],
+      "attrition": {
+        "perArm": {
+          "armA": {
+            "expected": 4,
+            "judged": 4,
+            "unjudged": 0,
+            "unscorable": 0,
+            "expired": 0,
+            "invalidated": 0,
+            "excluded": 0,
+            "replacements": 0
+          },
+          "armB": {
+            "expected": 4,
+            "judged": 4,
+            "unjudged": 0,
+            "unscorable": 0,
+            "expired": 0,
+            "invalidated": 0,
+            "excluded": 0,
+            "replacements": 0
+          }
+        },
+        "asymmetryFlags": []
+      },
+      "completeness": {
+        "expected": 8,
+        "judged": 8,
+        "floor": "0.5",
+        "runOutcome": "complete"
+      },
+      "assembly": {
+        "procedure": "jinn.benchmarking.assembly",
+        "version": "1.0"
+      }
+    }
+  ],
+  "verdictOutcomes": {
+    "sha256:10bf59576908ce0f026a3debec109d78c537331ac134e6b328b05d685900b935": {
+      "verdict": "fail"
+    },
+    "sha256:8ce5ff5b78031831b347a9d19e0cdf4199bcb04353b3cb79134ffcb2c95fc70f": {
+      "verdict": "pass"
+    },
+    "sha256:56aa8ede830f971a1dc204e550f2e1d17d11518b1a31d418abb3588b02802566": {
+      "verdict": "fail"
+    },
+    "sha256:81b8c16ffc461ec8ad20d160a40cf2ea25a5d56c10c22b8278b89916113ac3f0": {
+      "verdict": "pass"
+    },
+    "sha256:0b36c0d83a08a5303606c370a0e93f68b171eaad51830ee4498ad5a6a592c0ee": {
+      "verdict": "fail"
+    },
+    "sha256:6c39568cca0ddc52e55357e4de865f0fe35c88b5f55b0448df7a151c6af16e62": {
+      "verdict": "pass"
+    },
+    "sha256:8ff5c373cacfaca21f05d0e31aa0831ec22d0ad836ea2b8c724e479f56b6318a": {
+      "verdict": "fail"
+    },
+    "sha256:78318cf3b9e47d07ccd8f392557ace764f71b1693b7ae2138b2111edfcf776cb": {
+      "verdict": "fail"
+    }
+  },
+  "taskProvenance": {
+    "1276322bf0b99ed861e9f7d7e589da876d327253fe75bc10ffc041bf50dc8350": {
+      "source": "fixture-source/paired-delta-withheld"
+    },
+    "bad02039cf315fbc13539ed044c8d71742c8d671017c5e96b9f4a749a45fc847": {
+      "source": "fixture-source/paired-delta-withheld"
+    },
+    "9b1f53de5f4da626003bdb9840fb979dbb5e038398a12fbb3842fb5563aaa46c": {
+      "source": "fixture-source/paired-delta-withheld"
+    },
+    "0c8f38e17fa6ffcbeff068af75f7b627d06d94099832729b11f87b8490b6fe5b": {
+      "source": "fixture-source/paired-delta-withheld"
+    }
+  },
+  "runReplicates": 1,
+  "expectedResults": {
+    "verdictRule": "unanimous",
+    "baseline": "armA",
+    "candidate": "armB",
+    "pairs": 4,
+    "delta": "0.7500",
+    "interval": null,
+    "reasons": [
+      "fewer than minN=5 paired tasks (got 4)",
+      "fewer than two source clusters (got 1)"
+    ],
+    "pairing": {
+      "taskDigests": [
+        "0c8f38e17fa6ffcbeff068af75f7b627d06d94099832729b11f87b8490b6fe5b",
+        "1276322bf0b99ed861e9f7d7e589da876d327253fe75bc10ffc041bf50dc8350",
+        "9b1f53de5f4da626003bdb9840fb979dbb5e038398a12fbb3842fb5563aaa46c",
+        "bad02039cf315fbc13539ed044c8d71742c8d671017c5e96b9f4a749a45fc847"
+      ]
+    },
+    "clustering": {
+      "basis": "task-provenance-source",
+      "clusters": 1
+    },
+    "excluded": {
+      "count": 0,
+      "cellKeys": []
+    },
+    "conflicted": {
+      "count": 0,
+      "cellKeys": []
+    },
+    "bootstrap": {
+      "procedure": "xorshift32-v1",
+      "seed": 123456789,
+      "resamples": 1000,
+      "basis": "task-provenance-source-family",
+      "count": 1,
+      "unit": "source-cluster",
+      "draws": 0,
+      "clusters": [
+        {
+          "key": [
+            "source",
+            "fixture-source/paired-delta-withheld"
+          ],
+          "members": [
+            "0c8f38e17fa6ffcbeff068af75f7b627d06d94099832729b11f87b8490b6fe5b",
+            "1276322bf0b99ed861e9f7d7e589da876d327253fe75bc10ffc041bf50dc8350",
+            "9b1f53de5f4da626003bdb9840fb979dbb5e038398a12fbb3842fb5563aaa46c",
+            "bad02039cf315fbc13539ed044c8d71742c8d671017c5e96b9f4a749a45fc847"
+          ]
+        }
+      ]
+    }
+  }
+}

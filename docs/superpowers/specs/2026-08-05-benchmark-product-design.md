@@ -10,6 +10,14 @@
 | **Depends on** | [`2026-07-28-benchmarking-application-design.md`](./2026-07-28-benchmarking-application-design.md) (the records and capabilities this product composes), [`2026-07-30-jinn-platform-architecture.md`](./2026-07-30-jinn-platform-architecture.md) (tier law, inclusion test, extraction gate), [`../plans/2026-08-05-standalone-benchmarking-product-program.md`](../plans/2026-08-05-standalone-benchmarking-product-program.md) (the program plan whose §3–§4 decisions this spec formalizes), and the product charter `2026-08-05-standalone-benchmarking-product-charter-v0.2.md` (v0.2, session-attached, not in-repo — product intent authority) |
 | **Does not amend** | Jinn protocol or record semantics (tiers 1–3): no TEP, evidence, trust, discovery, or profiles change; no benchmarking record kind, named check, or frozen interface change; no new record kind; no facts-profile amendment. No canonical-doc change (`PRINCIPLES.md`, `SPEC.md`, `GLOSSARY.md`, `BRAND.md`, `GROWTH.md`, `THESIS.md`, `CLAUDE.md`). No marketplace, operator-product, or catalog-procedure change |
 
+> **Runtime-integration addendum (2026-08-10):** real Inspect integration is an
+> optional Tier 4 runtime adapter over this product lifecycle. Inspect produces
+> and owns its native EvalLogs; the product does not synthesize them. Because
+> frozen `public-bundle/1` had a closed native-only evidence shape, bundles with
+> runtime-native artifacts and same-execution scorer relationships use the new
+> `benchmark-product-public-bundle/2` product format. No Tier 1–3 record or
+> protocol schema changes.
+
 This document is the **catalog authority document** for the
 `packages/benchmark-product` tree (program plan §4.1). It formalizes the
 program plan's fixed product decisions (§3) and architecture decisions (§4);
@@ -105,7 +113,7 @@ public entry, 2026-08-05):
 | `@jinn-network/benchmarking-run` | `planRun`, `quoteRun`, `launchAndWatch`, `resumeRun`, `assembleMatrix`, `verifyMatrix` | The run procedure. The product implements **no orchestration of its own** |
 | `@jinn-network/benchmarking-aggregate` | `produceReport`, `verifyReport`, `deriveDisclosures`, `BENCHMARKING_METHOD_REGISTRY` | Method registry, Report production/verification, statistics. The product implements **no statistic** (the policy-optimization R3 ruling, adopted verbatim) |
 | `@jinn-network/benchmarking-local` | `localAssemblyPorts`, `localPinningObservation`, `localInputScope`, `localCloseBoundary`, `integrityTierFromReceipt` | Local venue ports (assembly ports, pinning bridge, admission, scope) — the strongest currently implemented backend; M1 runs on it |
-| `@jinn-network/benchmarking-interop` | `importSweBench`, `defineBenchmark`, `importInspectEvals`, `exportEvalLog`, `exportCroissant`, `exportStaticBundle` | Import/export seams (SWE-bench, Inspect, Croissant, static bundle) |
+| `@jinn-network/benchmarking-interop` | `importSweBench`, `defineBenchmark`, `exportMatrixProjection`, `exportCroissant`, `exportStaticBundle` | Data import and Jinn-owned export projections. Real Inspect selection/execution/native logs belong to a Tier 4 runtime adapter. |
 | `@jinn-network/task-execution-protocol` | `sealTask`, `sealSubmission`, `sealDelivery`, `deriveAttemptUri`, `foldObservations` | Task/Submission/Delivery sealing, attempt identity, observation fold |
 | `@jinn-network/task-execution-profiles` | `evaluateVerdictRule`, `sealEvaluationSpec`, `parseEvaluationSpec`, `EvaluationSpecSchema`, `VerdictRuleSchema` | EvaluationSpecs and verdict-rule reduction — where "what counts as success" is defined |
 | `@jinn-network/task-execution-backend` | `TaskExecutionBackend`, `BackendCapabilities`, `verifyPreclaim`, `TaskExecutionError` | The frozen backend contract the venues implement |
@@ -113,6 +121,7 @@ public entry, 2026-08-05):
 | `@jinn-network/task-execution-launchers` | `claudeCodeLauncher`, `codexLauncher`, `hermesLauncher`, `cursorLauncher`, `LauncherContract` | Harness launchers for local execution |
 | `@jinn-network/task-execution-evaluation-harness` | `runEvaluationHarness`, `evaluationLauncher`, `EvaluatorAdapter`, `defineEvaluatorRegistration` | Evaluation dispatch on the local venue |
 | `@jinn-network/task-execution-evaluator-adapters` | `createEvaluatorDeployment`, `createSweRebenchEvaluatorAdapter`, `parseSweRebenchReport`, `createSweRebenchEvaluatorRegistration`, `createPredictionEvaluatorRegistration` | Shipped evaluator adapters |
+| `@jinn-network/attestation-issuer` | `buildResultEvaluationPayload` | Canonical Result Evaluation payload for an attributable same-execution runtime score; the product does not define an alternate evidence claim |
 | `@jinn-network/trust-core` | `sealSignedRecord`, `sealDsseEnvelope`, `parseDsseEnvelope`, `verifyEnvelopeBinding`, `DsseSigner` | DSSE signing for Reports; envelope binding verification |
 | `@jinn-network/benchmarking-marketplace` | `runOnMarketplace`, `marketplaceAssemblyPorts`, `marketplaceCloseBoundary`, `enforceAnchoredOrderingGate` — consumed **only behind the venue seam** (§7) | Marketplace venue; **no marketplace machinery re-implemented** |
 
@@ -260,7 +269,7 @@ naming is implementation detail (A4).
 | **Benchmark draft** | lifecycle state (`draft`/`quoted`); validation status; selected task set (digests); arms with pinning; assurance preset (§6); policy (replicates, `closeAt`, replacement, budget); venue choice | per-field validation messages, each mapping to the `edit` that resolves it; "quote invalidated by edit" (A2) | items (task digests); arms; preview artifacts; prior quotes | `edit`, `preview`, `quote`, `lock` (gated) |
 | **Quote** | expected cell count; per-cell and total price (paid venues) or time/disk estimates (local); hard-cap check; coverage facts; venue guarantee summary (§7.1) | "venue unavailable / degraded" (§7.3), mapping to venue re-selection | line items per arm × items × replicates | none of its own — a quote is a read; `lock` acts on the draft |
 | **Official run** | lifecycle state (`locked`/`running`/`closed`); Run record digest; per-cell live status (dispatched/claimed/delivered/judged); spend against cap | infra failures shown as infra (`unscorable` ≠ fail); cap-approach warning → `cancel`; stall notice → `resume` | cells (with dispatch lineage); live events | `launch` (gated), `watch`, `resume`, `cancel` (gated) |
-| **Results (Matrix)** | Matrix record digest; `runOutcome`; completeness `{expected, judged, floor}`; attrition per arm; asymmetry flags; per-axis verification states | asymmetry flag raised (informational — a validity threat surfaced, never absorbed) | cells with the six-value outcome, verdicts, dissent, cost, latency; exclusions | `inspect`, `verify`, `report` (gated), exports (EvalLog, Croissant, static bundle) |
+| **Results (Matrix)** | Matrix record digest; `runOutcome`; completeness `{expected, judged, floor}`; attrition per arm; asymmetry flags; per-axis verification states | asymmetry flag raised (informational — a validity threat surfaced, never absorbed) | cells with the six-value outcome, verdicts, dissent, cost, latency; exclusions | `inspect`, `verify`, `report` (gated), Jinn-owned projections and static bundle; runtime-native logs remain owned by their runtime |
 | **Report** | Report record digest; method id/version/parameters; `preregistered` flag; disclosures block; signature status | "recompute divergence" from `verify` (fail-loud) | subject matrices; conflicted-cell list; limitations | `inspect`, `verify`, `publish` (gated) |
 | **Claim package** | bundle version; digest links to report/matrix/run/benchmark; scope statement | none — informational asset | derived assets (headline, snippet, machine-readable claim) | `publish` produces it; `inspect` |
 | **Audit journal** | entry count; last entry | none | attributed entries (§4.4), newest last, append-only | none — read-only; appends happen only as a side effect of operations |
@@ -461,8 +470,8 @@ plan's REJECT list (§4.8). The product is not, and does not build:
 
 - an official **leaderboard** or benchmark authority (no ranking record
   beyond the Report);
-- a log/transcript **viewer** (Inspect's territory — `exportEvalLog` and
-  `inspect view` are the seam);
+- a log/transcript **viewer** (Inspect owns native logs and `inspect view`; the
+  product retains exact native artifacts rather than synthesizing them);
 - a task-**authoring studio** or universal evaluation development
   environment (simple native task setup only; compose Inspect for advanced
   authoring);
@@ -1200,7 +1209,9 @@ release, or deployment semantics reopened):**
   is the honest product entry point; `core/README.md` documents the complete
   library and agent surface; `web/README.md` documents the private local human
   surface; and `PUBLIC-BUNDLE.md` documents the frozen
-  `benchmark-product-public-bundle/1` distribution and verification contract.
+  historical `benchmark-product-public-bundle/1` distribution and verification
+  contract. The 2026-08-10 runtime-integration addendum defines its version 2
+  successor rather than amending version 1 in place.
   These documents describe the shipped
   implementation and link to this authority; they do not create an API, record,
   bundle role, hosting service, release channel, or deployment authorization.

@@ -140,6 +140,25 @@ export const TaskSetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("pendingSample") }),
 ]);
 
+/**
+ * Opaque, digest-bound selection of an evaluation runtime. Product lifecycle code owns only
+ * this stable adapter reference; the adapter owns the sealed manifest's runtime-specific shape.
+ * Absence means the backwards-compatible built-in runtime.
+ */
+export const EvaluationRuntimeBindingSchema = z.object({
+  adapterId: z.string().regex(
+    /^[a-z0-9][a-z0-9._-]{0,63}$/,
+    "adapterId must be lowercase alphanumeric with dots, underscores, or hyphens, at most 64 characters",
+  ),
+  selectionManifestSha256: z.string().regex(
+    /^[a-f0-9]{64}$/,
+    "selectionManifestSha256 must be 64 lowercase hex digits",
+  ),
+  isolationPolicy: z.enum(["unrestricted", "oci-container"]).optional(),
+});
+
+export type EvaluationRuntimeBinding = z.infer<typeof EvaluationRuntimeBindingSchema>;
+
 /** Fixed for M1 — the only supported venue is local self-run. */
 export const VenueSchema = z.literal("self-run");
 
@@ -154,6 +173,7 @@ export const DraftSpecSchema = z.object({
   policy: DraftPolicySchema,
   budget: BudgetSchema.optional(),
   venue: VenueSchema,
+  evaluationRuntime: EvaluationRuntimeBindingSchema.optional(),
 });
 
 export type DraftSpec = z.infer<typeof DraftSpecSchema>;

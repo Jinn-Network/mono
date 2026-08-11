@@ -1,27 +1,29 @@
 import { documentDigest, type MatrixRecord } from "@jinn-network/benchmarking-records";
 
-/** Injected evidence port for EvalLog export — contracts only, no concrete binding. */
+/** Injected evidence port for the Jinn-owned Matrix projection. */
 export type EvidenceResolver = {
   transcriptFor?(cellKey: string): Promise<unknown> | unknown;
   evidenceRefFor?(cellKey: string): Promise<unknown> | unknown;
 };
 
-export type EvalLogSample = {
+export type MatrixProjectionSample = {
   id: string;
-  epoch: number;
-  target: string;
+  repetition: number;
+  armId: string;
   outcome: string;
-  /** Deterministic evidence references resolved through the injected port. */
   evidence: {
     transcriptRef: string;
     evidenceRef: string;
   };
 };
 
-export type EvalLog = {
-  schema: "inspect-ai/eval-log/1";
-  status: "success";
-  samples: EvalLogSample[];
+/**
+ * A deliberately Jinn-owned convenience projection. It is not an Inspect EvalLog and must not
+ * be passed to Inspect log readers or Inspect View.
+ */
+export type MatrixProjection = {
+  schema: "jinn.network/benchmark-matrix-projection/1";
+  samples: MatrixProjectionSample[];
 };
 
 function deterministicRef(kind: "transcript" | "evidence", cellKey: string, resolved: unknown): string {
@@ -32,23 +34,19 @@ function deterministicRef(kind: "transcript" | "evidence", cellKey: string, reso
   return documentDigest(new TextEncoder().encode(`${kind}:${cellKey}`));
 }
 
-/**
- * Matrix → Inspect-compatible EvalLog (§10.1 op 5 / §10.2 seam 3).
- * Epoch-as-repetition; samples follow the Matrix's sealed cell order.
- * Always consumes the injected EvidenceResolver for deterministic transcript/evidence refs.
- */
-export async function exportEvalLog(
+/** Matrix -> honest Jinn projection; samples follow the Matrix's sealed cell order. */
+export async function exportMatrixProjection(
   matrix: MatrixRecord,
   evidence: EvidenceResolver,
-): Promise<EvalLog> {
-  const samples: EvalLogSample[] = [];
+): Promise<MatrixProjection> {
+  const samples: MatrixProjectionSample[] = [];
   for (const cell of matrix.cells) {
     const transcript = await evidence.transcriptFor?.(cell.cellKey);
     const evidenceRef = await evidence.evidenceRefFor?.(cell.cellKey);
     samples.push({
       id: cell.cellKey,
-      epoch: cell.replicate,
-      target: cell.armId,
+      repetition: cell.replicate,
+      armId: cell.armId,
       outcome: cell.outcome,
       evidence: {
         transcriptRef: deterministicRef("transcript", cell.cellKey, transcript),
@@ -57,8 +55,7 @@ export async function exportEvalLog(
     });
   }
   return {
-    schema: "inspect-ai/eval-log/1",
-    status: "success",
+    schema: "jinn.network/benchmark-matrix-projection/1",
     samples,
   };
 }

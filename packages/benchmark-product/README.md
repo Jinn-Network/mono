@@ -58,8 +58,10 @@ does not use the in-memory kit backend.
 - [Private web app](./web/README.md) — the server-only human client, local
   configuration, routes, and production browser gate.
 - [Public bundle](./PUBLIC-BUNDLE.md) — frozen
-  `benchmark-product-public-bundle/1` layout, citation, trust, privacy,
+  `benchmark-product-public-bundle/2` layout, citation, trust, privacy,
   limitations, and portable verification.
+- [Inspect runtime](./INSPECT-RUNTIME.md) — optional real Inspect selection,
+  execution, scorer attribution, native logs, and security limitations.
 - [Security and threat model](./SECURITY.md) — protected assets, boundaries,
   hardening evidence, residuals, and deployment truth.
 - [Colophon design system](./design-system/ADAPTATION.md) — the curated source,

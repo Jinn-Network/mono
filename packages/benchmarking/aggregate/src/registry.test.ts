@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseMatrix, sealMatrix } from "@jinn-network/benchmarking-records";
+import { parseMatrix, sealMatrix, serializeCanonicalJson } from "@jinn-network/benchmarking-records";
 import { BENCHMARKING_METHOD_REGISTRY } from "./index.js";
 import { createMethodRegistry } from "./registry.js";
 import type { MethodComputeInput } from "./method.js";
@@ -62,6 +62,7 @@ describe("createMethodRegistry", () => {
     expect(registry.get("jinn.benchmarking.method/paired-mcnemar", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/provenance-cluster-sign", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/noninferiority-iut", "1")?.versionRobust).toBe(true);
+    expect(registry.get("jinn.benchmarking.method/paired-delta", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/wilson", "1")?.versionRobust).toBe(false);
   });
   test("returns undefined for an unregistered id/version", () => {
@@ -70,7 +71,7 @@ describe("createMethodRegistry", () => {
     expect(registry.get("jinn.benchmarking.method/does-not-exist", "1")).toBeUndefined();
   });
 
-  test("registers all eight methods", () => {
+  test("registers all nine methods", () => {
     const registry = createMethodRegistry();
     for (const [id, version] of [
       ["jinn.benchmarking.method/wilson", "1"],
@@ -79,11 +80,21 @@ describe("createMethodRegistry", () => {
       ["jinn.benchmarking.method/paired-mcnemar", "1"],
       ["jinn.benchmarking.method/provenance-cluster-sign", "1"],
       ["jinn.benchmarking.method/noninferiority-iut", "1"],
+      ["jinn.benchmarking.method/paired-delta", "1"],
       ["jinn.benchmarking.method/clean-subset", "1"],
       ["jinn.benchmarking.method/bradley-terry", "1"],
     ] as const) {
       expect(registry.get(id, version), `${id}@${version}`).toBeDefined();
     }
+  });
+
+  test("paired-delta@1 parameters survive canonical record sealing", () => {
+    const method = createMethodRegistry().get("jinn.benchmarking.method/paired-delta", "1")!;
+    const parameters = { verdictRule: "unanimous", baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" };
+    expect(method.validateParameters(parameters)).toEqual({ ok: true });
+    // Sealed records admit only exact I-JSON integers; a fractional number here would throw.
+    expect(() => serializeCanonicalJson(parameters as never)).not.toThrow();
+    expect(method.validateParameters({ ...parameters, alpha: 0.05 }).ok).toBe(false);
   });
 });
 

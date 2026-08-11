@@ -355,6 +355,39 @@ async function prepareAndDispatchEvaluation(
   resultArtifacts: readonly { readonly name: string; readonly bytes: Uint8Array }[],
   evalIndexes: readonly number[],
 ): Promise<void> {
+  if (deps.venue.evaluationMode === "embedded") {
+    if (evalIndexes.some((index) => index !== 1) || deps.minVerdicts !== 1) {
+      refuse(
+        "execution",
+        "minVerdicts",
+        "an embedded same-execution scorer can account for exactly one evaluator leg",
+      );
+    }
+    const interpreted = deps.venue.interpretEmbeddedEvaluation?.(resultArtifacts);
+    if (interpreted === undefined) {
+      journalCouldNotGrade(deps, cellKey, "embedded runtime has no evaluation interpreter", { evalIndex: 1 });
+      return;
+    }
+    if (interpreted.kind === "could-not-grade") {
+      journalCouldNotGrade(deps, cellKey, interpreted.detail, {
+        evaluator: deps.venue.evaluators[0]?.id,
+        evalIndex: 1,
+      });
+      return;
+    }
+    const verdictSha256 = putSealedBytes(deps.workspaceDir, interpreted.verdictBytes);
+    appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+      kind: "evaluation",
+      at: deps.liveClock(),
+      cellKey,
+      verdictSha256,
+      evaluator: interpreted.evaluatorId,
+      evalIndex: 1,
+    });
+    emitProgress(deps, `${cellKey} judged`);
+    return;
+  }
+
   const taskDigestHex = parseCellKey(cellKey).taskDigest;
   const subjectTaskBytes = getSealedBytes(deps.workspaceDir, taskDigestHex);
   const subjectTaskDoc = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(subjectTaskBytes)) as {

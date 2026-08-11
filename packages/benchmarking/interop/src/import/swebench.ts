@@ -17,6 +17,7 @@ import {
   sealTask,
   TASK_EXECUTION_PROTOCOL_URI,
 } from "@jinn-network/task-execution-protocol";
+import { toCalendarStrictRfc3339 } from "./rfc3339-from-source.js";
 
 export type SweBenchRow = SweRebenchRow;
 
@@ -35,6 +36,18 @@ export type DefineBenchmarkOptions = {
   citation?: string;
   /** RFC 3339 timestamp sealed into each Task's mined provenance (required for judgeability). */
   provenanceTimestamp?: string;
+  /**
+   * Per-instance RFC 3339 provenance timestamps, keyed by `instance_id`, falling back to
+   * `provenanceTimestamp` and then the batch default.
+   *
+   * A single timestamp across every row collapses `clean-subset@1`'s per-task contamination
+   * predicate to one importer-chosen global boolean, with no per-instance ground truth an auditor
+   * could check. Real per-row dates restore that signal.
+   *
+   * Keyed rather than positional so a reordered row list can never silently mis-associate a date
+   * with an instance.
+   */
+  provenanceTimestamps?: Readonly<Record<string, string>>;
 };
 
 export type ImportedBenchmark = {
@@ -67,7 +80,12 @@ function sealRepositoryWorkTask(row: SweBenchRow, provenanceTimestamp: string): 
       // The profiles mapper emits `{ kind: "mined" }` only; interop completes the cluster.
       provenance: {
         kind: "mined",
-        source: `https://github.com/${row.repo}@${row.base_commit}`,
+        // Repo-level, deliberately WITHOUT `@${row.base_commit}`. This string is the clustering
+        // key (records/src/benchmark/checks.ts:65 uses it verbatim), so including the commit made
+        // every SWE instance its own singleton cluster and silently defeated the clustered
+        // bootstrap's between-repo correction. The base commit is not lost: it remains task
+        // identity via `inputs[0].annotations.ref` and `payload.instance_id`.
+        source: `https://github.com/${row.repo}`,
         timestamp: provenanceTimestamp,
       },
     },
@@ -118,7 +136,30 @@ export function importSweBench(
   opts: DefineBenchmarkOptions,
 ): ImportedBenchmark {
   const provenanceTimestamp = opts.provenanceTimestamp ?? "2026-07-29T00:00:00Z";
-  const tasks = rows.map((row) => sealRepositoryWorkTask(row, provenanceTimestamp));
+  const overrides = opts.provenanceTimestamps;
+  const tasks = rows.map((row) => {
+    // `hasOwnProperty` rather than a plain index: a row whose instance_id collides with an
+    // Object.prototype member (`toString`) would otherwise resolve to a function, and `??` would
+    // not fall back.
+    const hasOverride = overrides !== undefined
+      && Object.prototype.hasOwnProperty.call(overrides, row.instance_id);
+    if (!hasOverride) return sealRepositoryWorkTask(row, provenanceTimestamp);
+    // Normalize and validate HERE, where the offending instance is still in hand. Left to
+    // checkJudgeability below, a malformed date surfaces as `invalid-provenance` against a task
+    // DIGEST, naming neither the instance nor the bad value — a digest-hunt on a large import.
+    // The try wraps ONLY the conversion. Wrapping the seal too would prefix any row-shape failure
+    // (bad parser.digest, locator-less image, negative timeout) with `provenanceTimestamps[...]`,
+    // but only for rows carrying an override — pointing an operator at their timestamp file to
+    // debug a malformed row. That is the same misdirection this validation exists to remove.
+    let resolved: string;
+    try {
+      resolved = toCalendarStrictRfc3339(overrides[row.instance_id] as string);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      throw new Error(`provenanceTimestamps["${row.instance_id}"]: ${detail}`);
+    }
+    return sealRepositoryWorkTask(row, resolved);
+  });
   const benchmark = defineBenchmark(tasks, opts);
   const judgeability = checkJudgeability(
     benchmark.record,

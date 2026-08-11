@@ -96,6 +96,7 @@ describe("method fixture/spec completeness", () => {
       "jinn.benchmarking.method/bradley-terry",
       "jinn.benchmarking.method/clean-subset",
       "jinn.benchmarking.method/noninferiority-iut",
+      "jinn.benchmarking.method/paired-delta",
       "jinn.benchmarking.method/paired-mcnemar",
       "jinn.benchmarking.method/pass-at-k",
       "jinn.benchmarking.method/provenance-cluster-sign",
@@ -123,6 +124,7 @@ describe("method fixture/spec completeness", () => {
       "jinn.benchmarking.method/pass-at-k",
       "jinn.benchmarking.method/paired-mcnemar",
       "jinn.benchmarking.method/noninferiority-iut",
+      "jinn.benchmarking.method/paired-delta",
       "jinn.benchmarking.method/clean-subset",
     ]));
     expect(cases.pairedExclusions).toBe(true);

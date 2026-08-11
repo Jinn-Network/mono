@@ -55,10 +55,11 @@ describe("public surface", () => {
       "initWorkspace", "createDraft", "updateDraft", "getDraft", "listDrafts", "inspectDraft",
       "transition", "isDraftMutable", "resolveAssurance", "parseDraftSpec", "draftIdFromName",
       "putSealedBytes", "getSealedBytes", "readAuditEntries", "toErrorEnvelope", "runCli",
-      "sampleInit", "importSweBenchRows", "armAdd", "armUpdate", "armRemove", "armList",
+      "sampleInit", "importSweBenchRows", "selectInspectEvaluation", "armAdd", "armUpdate", "armRemove", "armList",
       "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertSweBenchRows",
       "runPreview", "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
-      "runReport", "runVerify",
+      "runReport", "runVerify", "runPublish", "listRuntimeAdapters", "runtimeNativeArtifactPublicationPolicy", "createRuntimeVenue",
+      "createDefaultBenchmarkRuntimeHost",
     ] as const) {
       expect(typeof entry[name], name).toBe("function");
     }

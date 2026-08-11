@@ -27,7 +27,9 @@ import {
   runResults,
   runVerify,
   sampleInit,
+  selectInspectEvaluation,
   updateDraft,
+  type SelectInspectEvaluationInput,
 } from "@jinn-network/benchmark-product-core";
 import type { GuiActionState } from "@/lib/action-state";
 import {
@@ -89,6 +91,18 @@ export async function intakeSweBenchAction(_previous: GuiActionState, formData: 
     draftId,
     rows: jsonField(formData, "rows", []),
   }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
+}
+
+export async function inspectRuntimeSelectAction(
+  _previous: GuiActionState,
+  formData: FormData,
+): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  const configuration = jsonField(formData, "configuration") as Omit<SelectInspectEvaluationInput, "draftId">;
+  return executeOperation(
+    (context) => selectInspectEvaluation(context, { draftId, ...configuration } as SelectInspectEvaluationInput),
+    { revalidate: ["/workspace", `/workspace/${draftId}`] },
+  );
 }
 
 export async function armAddAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
@@ -282,7 +296,10 @@ export async function runVerifyAction(_previous: GuiActionState, formData: FormD
 export async function runPublishAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
   return executeOperation(async (context) => {
-    const outcome = await runPublish(context, { draftId });
+    const outcome = await runPublish(context, {
+      draftId,
+      ...(formData.get("includeNativeArtifacts") === "on" ? { includeNativeArtifacts: true } : {}),
+    });
     if (!outcome.ok) return { ...outcome, error: projectPublishErrorForGui(outcome.error) };
     return {
       ok: true as const,
