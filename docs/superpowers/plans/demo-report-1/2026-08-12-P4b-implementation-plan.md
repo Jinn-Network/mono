@@ -520,18 +520,20 @@ git commit -m "test(benchmark-product): pin wilson claim and bundle asset bytes 
 
 ---
 
-### Tasks 5–8 — step detail written after PR A lands
+### Tasks 5–8 — acceptance criteria
 
-Tasks 5 through 8 modify files that PR A changes (`claim.ts` consumes the Report that Task 3 reshapes; `assets.ts` consumes the claim that Task 5 reshapes). Writing verbatim step-level code for them now would pin line numbers and shapes that PR A is about to move, and this plan does not fake precision it does not have.
+Task 5 shipped in PR A. Tasks 6–8 are PR B; their step-level detail follows the table, appended once PR A merged (`e9db60afa`) so it is written against real line numbers rather than predicted ones.
 
-Their **acceptance criteria are fixed and binding** — they are the contract PR B is reviewed against. Step-level detail is appended to this document when PR A merges, before Task 5 is dispatched.
+Their **acceptance criteria are fixed and binding** — they are the contract PR B is reviewed against.
 
 | # | Task | Est. | Acceptance criteria |
 |---|---|---|---|
 | **5** | Method-dispatching claim package. `claim.ts:49-54,129` (`headline` optional + sibling `comparison`), `:192-215` (`wilsonSubjectResults` becomes one branch of a dispatch on `reportRecord.method.id`), `:262` and `verification/claim-consistency.ts:67` (select the plan entry matching the produced method rather than `[0]`). | **2.0–3.0** | A paired Report builds a claim carrying `comparison`; **the wilson golden from Task 4 still passes byte-identically**; `assertClaimConsistency` round-trips both shapes; `CLAIM_PACKAGE_SCHEMA_ID` unchanged at `/1`; a claim missing both `headline` and `comparison` is refused. |
 | **6** | Method-dispatching bundle assets. `assets.ts:118-156` (`requireWilsonFacts` becomes a dispatch), `:446-447` (both call sites). All neutral copy **unchanged** — see the seven-surface list below. | **2.0** | A paired bundle materializes and `bundle verify` passes on it; **every wilson golden from Task 4 still passes byte-identically**; no directional language appears on any publish-facing surface. |
 | **7** | Web renders both claim shapes. `web/.../results/page.tsx:27,124` — the unguarded `headline.wilsonInterval.low` dereference must become shape-aware. `inspect` surfaces the selected method (`operations/inspect.ts`). Also `core/scripts/m1-walkthrough.mjs:222`, which emits `armHeadline: report.claimPackage.headline` and yields a silent `undefined` on the paired branch under §5.2's optional-headline shape. | **1.0** | RTL renders a paired claim and a wilson claim; no unguarded dereference; the existing stored-Report `role="alert"` degradation path preserved; the walkthrough transcript never emits `undefined` for either branch. |
-| **8** | End-to-end and docs. Extend `run-path.integration.test.ts`; update the documentation surfaces in the seven-surface list. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → `bundle verify` with zero manual intervention. Docs describe method selection accurately without asserting a comparative winner. All three render states pinned per surface (below). **As of the P4b-T3 fix pass, the paired report path is exercised end-to-end only at the zero-pairs state; the interval-present and interval-withheld states are not yet covered anywhere in-tree — their tests are Task 8's to write, not assumed already present.** |
+| **8a** | **Sample-benchmark provenance fix.** `core/src/intake/sample.ts:154` overwrites `payload` wholesale, destroying `payload.provenance`, which `resolveBenchmarkTaskProvenance` requires. No clustered paired method can run on the sample path until this lands, so it is a **prerequisite for 8b**, not a tidy-up. | **1.0** | A sample-benchmark task retains `payload.provenance`; a paired method runs on the sample path without a typed provenance refusal. Sample-benchmark digest changes — every fixture pinned to it updated deliberately, each called out in the PR body. |
+| **8b** | **Paired end-to-end coverage.** Extend `run-path.integration.test.ts` across all three render states. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → `bundle verify` with zero manual intervention. **All three states covered: interval-present, interval-withheld (both reason strings surfaced), and zero-pairs.** As of PR A only zero-pairs is exercised anywhere in-tree — the other two are 8b's to write, not assumed present. |
+| **8c** | **Copy surfaces — OPERATOR-GATED, LANDS LAST.** The seven neutrality surfaces plus `PUBLIC-BUNDLE.md` and `ADAPTATION.md`. | **0.5** | Blocked on the operator's §5.3 pick. Structured as the final commit of PR B so 6, 7, 8a and 8b can be reviewed and merged without it. **Nothing in 6–8b may pre-empt the wording.** |
 
 #### The neutrality promise ships on SEVEN surfaces, not three
 
@@ -570,6 +572,73 @@ The interval-withheld branch and the below-MDE branch are **different failures**
 ### PR B test blast radius
 
 Enumerated in scoping §9. The assertions that pin **exact literal strings** and will need deliberate updates: `bundle/assets.test.ts:219-222,232,236-238`; `web/.../results/page.test.tsx:97,103,115-116,161,171`; `report/claim.test.ts:294` (asserts `claim.headline` deep-equals the wilson `arms`). Every such change is called out in the PR body with rationale, per the program's blast-radius rule.
+
+---
+
+## PR B — step-level detail
+
+Written against `e9db60afa` (PR A merged). Branch `claude/demo1-p4b-prb`; one worktree per task chained off the previous tip, as in PR A.
+
+**Commit order is load-bearing.** `8c` is the copy commit and must be the last commit on the branch, so that 6 → 7 → 8a → 8b can be reviewed, and if necessary merged, while the operator's §5.3 decision is still outstanding. Nothing in 6–8b may pre-empt the wording: the paired branch renders **structure with no directional sentence**, and the sentence is added in 8c or not at all.
+
+### Task 6 — bundle assets dispatch
+
+**Files:** `core/src/bundle/assets.ts` · `core/src/bundle/assets.test.ts`
+
+`requireWilsonFacts` (`assets.ts:118-156`) currently throws for any results lacking wilson's `arms` shape, and is called twice at `:446-447` — once on `input.report.results`, once on `input.claim.results`. Both call sites must dispatch on the produced method instead.
+
+1. **Failing test first.** A paired claim + paired Report must produce assets without throwing, and the rendered HTML must contain the paired facts (pairs, delta, and — when present — the interval). Assert on *structure*, never on a directional sentence.
+2. Turn `requireWilsonFacts` into a dispatch keyed on `reportRecord.method.id`, mirroring `claim.ts`'s `methodProjection`. Reuse the same shape names so the two dispatches read as one pattern.
+3. **The three render states each get an assertion here**, not only in 8b: interval-present, interval-withheld (both reason strings visible), zero-pairs (no delta). Compact assets route through `boundedVisual` with roughly a 90-character budget — the withheld state is the one that silently truncates to nothing, so assert its rendered output is non-empty.
+4. **The Task 4 goldens must still pass byte-identically.** A wilson bundle is unchanged. If a golden fails, fix the code — never the golden.
+5. Neutral copy at `:249`, `:278`, `:288`, `:318`, `:440` **unchanged**.
+
+**Gate:** paired bundle materializes; `bundle verify` passes on it; all six goldens byte-identical; `git diff -- '*wilson-golden*'` empty.
+
+### Task 7 — web and walkthrough render both shapes
+
+**Files:** `web/src/app/workspace/[draftId]/results/page.tsx` · its test · `core/src/operations/inspect.ts` · `core/scripts/m1-walkthrough.mjs`
+
+PR A left `page.tsx:124` behind a minimal `claim.headline ? … : null` guard, so **a paired claim currently renders nothing at all**. That is correct under the deferral and wrong to ship.
+
+1. **Failing test first**, and note the acceptance is *"a paired claim renders something"* — not merely "no unguarded dereference". A test asserting absence would pass against the current stub.
+2. Render the `comparison` block: pairs, delta, interval or the withheld reasons. Structure only; no directional sentence.
+3. `m1-walkthrough.mjs:222` emits `armHeadline: report.claimPackage.headline`, which is a silent `undefined` on the paired branch. Branch it so the transcript never prints `undefined`.
+4. `inspect` surfaces the selected method.
+
+**Gate:** RTL renders paired and wilson claims; the wilson branch is visually unchanged; the stored-Report `role="alert"` degradation path preserved; walkthrough prints no `undefined` on either branch; `web` **`yarn typecheck` exit 0** — the leg PR A added after it caught a break `vitest` structurally could not.
+
+### Task 8a — sample-benchmark provenance
+
+**Files:** `core/src/intake/sample.ts` · fixtures pinned to the sample benchmark digest
+
+`sample.ts:154` does `candidateTask.payload = { forecast: {...} }`, discarding `payload.provenance`. Preserve provenance by merging rather than replacing.
+
+**This changes the sample benchmark's digest**, so every fixture pinned to it moves. That is deliberate, not incidental: enumerate them, update them in this commit, and call each out in the PR body. If the count is larger than a handful, stop and report before proceeding.
+
+**Gate:** a sample task retains `payload.provenance`; a paired method runs on the sample path without a typed provenance refusal; full suite green with the new digest.
+
+### Task 8b — paired end-to-end coverage
+
+**Files:** `core/src/run/run-path.integration.test.ts`
+
+One paired draft, full lifecycle, **three states**:
+
+| State | Setup | Assert |
+|---|---|---|
+| interval-present | ≥5 paired tasks across ≥2 provenance clusters | `interval` non-null; delta and bounds render |
+| interval-withheld | <5 paired tasks, or 1 cluster | `interval: null`; **both reason strings surfaced**; delta still present |
+| zero-pairs | no task judged in both arms | no delta, no interval; no crash |
+
+Interval-withheld is the state the slate/e2e lane's gate asserts against, and the one most likely to be dropped, since it looks like a degenerate case rather than a supported outcome.
+
+**Gate:** all three run create → … → `bundle verify` with zero manual intervention.
+
+### Task 8c — copy surfaces (OPERATOR-GATED, LAST COMMIT)
+
+**Do not start until the operator's §5.3 decision lands.** All seven surfaces move together or none — a bundle whose badge contradicts its HTML is worse than one that says nothing. Wilson-branch strings stay byte-identical on all seven, which the Task 4 goldens enforce for the five in-code ones; the two documentation surfaces are not test-guarded and need manual care.
+
+Also in this commit: the distinct limitations entry (*"this method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered"*), kept separate from the MDE line, because an interval-withheld run and a below-MDE run are different failures and must not read as one caveat.
 
 ---
 
