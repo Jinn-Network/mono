@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { canonicalJsonBytes } from "./bytes.js";
-import type { DsseEnvelope } from "./admission-receipt.js";
 import { IN_TOTO_STATEMENT_TYPE, RESULT_EVALUATION_PREDICATE_TYPE, VERDICT_DSSE_PAYLOAD_TYPE } from "./identifiers.js";
 
 /**
@@ -80,15 +79,22 @@ export type ResultEvaluationStatement = z.infer<typeof ResultEvaluationStatement
  * §9.2) — no separate claim-issuance step. `payload` is the base64 encoding of the statement's
  * canonical JSON bytes (this package's own sealer, per Global Constraints: sealing is
  * re-implemented locally).
+ *
+ * Returns the envelope's exact canonical JCS BYTES, not an envelope object (defect-#34 class):
+ * the authority-bearing consumer of a verdict envelope is trust-core's `parseExactDsseEnvelope`,
+ * which accepts only the sole producer encoding (code-unit-sorted keys, compact, no trailing
+ * newline) and refuses every alternate spelling — a caller serializing an envelope object with
+ * `JSON.stringify` would emit insertion-ordered bytes that fail that strict parse even under a
+ * valid signature. Sealing to bytes here makes the encoding impossible to get wrong per caller.
  */
 export function buildVerdictEnvelope(
   statement: ResultEvaluationStatement,
   signatures: { keyid?: string; sig: string }[],
-): DsseEnvelope {
+): Uint8Array {
   const bytes = canonicalJsonBytes(statement);
-  return {
+  return canonicalJsonBytes({
     payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
     payload: Buffer.from(bytes).toString("base64"),
-    signatures,
-  };
+    signatures: signatures.map(({ keyid, sig }) => (keyid === undefined ? { sig } : { keyid, sig })),
+  });
 }

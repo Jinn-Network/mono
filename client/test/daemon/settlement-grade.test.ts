@@ -282,6 +282,39 @@ describe('buildVerifySettlementGrade: executorBinding', () => {
     });
     expect(result.executorBinding).toEqual({ status: 'verified' });
   });
+
+  // Defect #34 follow-up: the self-check must be as strict as the remote evaluator's
+  // authority-bearing parse. A validly-signed envelope in a NON-canonical spelling (plain
+  // `JSON.stringify`, insertion-ordered keys -- exactly what the pre-fix producer emitted) was
+  // accepted by the loose `parseDsseEnvelope` here while the remote `parseExactDsseEnvelope`
+  // refused it, so a producing operator could never detect its own encoding drift before a
+  // remote evaluator rejected the round. Fail-fast: the operator's own settlement grade must
+  // refuse the alternate spelling too.
+  test('invalid when the envelope is validly signed but not the exact canonical producer encoding', async () => {
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    const signature = signPreAuth(executorKeyPair.privateKey, EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE, delivery);
+    const nonCanonical = new TextEncoder().encode(JSON.stringify({
+      payloadType: EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE,
+      payload: Buffer.from(delivery).toString('base64'),
+      signatures: [{ keyid: EXECUTOR_KEY_ID, sig: Buffer.from(signature).toString('base64') }],
+    }));
+    // Sanity: the strict parser genuinely refuses this spelling -- the premise of the test.
+    expect(() => parseExactDsseEnvelope(nonCanonical)).toThrow();
+
+    const verify = buildVerifySettlementGrade(buildInput({ getDeliverySignature: getDeliverySignatureFor(digest, nonCanonical) }));
+    const result = await verify({
+      attempt: REVISED_ATTEMPT,
+      delivery: JSON.parse(new TextDecoder().decode(delivery)),
+      deliveryBytes: delivery,
+      deliveryDigest: digest,
+      config: BASE_SEPOLIA_TODAY,
+    });
+    expect(result.executorBinding).toEqual({
+      status: 'invalid',
+      detail: expect.stringContaining('DSSE parsing') as unknown as string,
+    });
+  });
 });
 
 describe('buildVerifySettlementGrade: dispatchBinding', () => {
