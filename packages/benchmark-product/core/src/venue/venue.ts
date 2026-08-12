@@ -121,10 +121,11 @@ export interface LocalVenueOptions {
    * `LocalVenue.evaluators` for the honesty posture of what N identities do and do not prove. */
   readonly evaluatorCount?: number;
   /** Product-owned binding for the real SWE-rebench OCI grader. Images are always addressed by
-   * digest and pre-staged before evaluation dispatch; the child runner itself uses `--pull
-   * never`. Public networking remains disabled unless both the sealed EvaluationSpec and this
-   * host option explicitly opt in. `dockerPath` is an injection seam for a host-managed runtime
-   * executable (and for tests that must not contact a real daemon). */
+   * digest and pre-staged before evaluation dispatch; the child may only inspect that local
+   * digest and runs with `--pull never`. If the image disappears after pre-stage, the child fails
+   * the grader attempt without registry access. Public networking remains disabled unless both
+   * the sealed EvaluationSpec and this host option explicitly opt in. `dockerPath` is an injection
+   * seam for a host-managed runtime executable (and for tests that must not contact a real daemon). */
   readonly sweRebenchGrader?: {
     readonly runtime?: "docker" | "podman";
     readonly dockerPath?: string;
@@ -397,9 +398,12 @@ const SWE_REBENCH_GRADER = ${JSON.stringify(grader)};
 const sweRebenchGraderReportSource = sweRebenchOciGraderReportSource({
   runtime: SWE_REBENCH_GRADER.runtime,
   allowPublicNetwork: SWE_REBENCH_GRADER.allowPublicNetwork,
-  ...(SWE_REBENCH_GRADER.dockerPath === undefined
-    ? {}
-    : { runner: { dockerPath: SWE_REBENCH_GRADER.dockerPath } }),
+  runner: {
+    imagePullPolicy: "never",
+    ...(SWE_REBENCH_GRADER.dockerPath === undefined
+      ? {}
+      : { dockerPath: SWE_REBENCH_GRADER.dockerPath }),
+  },
 });
 
 export const evaluationHarnessDeployment = Object.freeze({
@@ -607,9 +611,12 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           graderReportSource: sweRebenchOciGraderReportSource({
             runtime: sweRebenchGrader.runtime,
             allowPublicNetwork: sweRebenchGrader.allowPublicNetwork,
-            ...(sweRebenchGrader.dockerPath === undefined
-              ? {}
-              : { runner: { dockerPath: sweRebenchGrader.dockerPath } }),
+            runner: {
+              imagePullPolicy: "never",
+              ...(sweRebenchGrader.dockerPath === undefined
+                ? {}
+                : { dockerPath: sweRebenchGrader.dockerPath }),
+            },
           }),
         }),
         registrationId: evaluator.sweRebenchRegistrationId,
