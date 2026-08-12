@@ -678,6 +678,13 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
+      - name: Upload Task Execution OCI Grader distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-oci-grader-dist
+          path: packages/task-execution/oci-grader/dist
+          if-no-files-found: error
+          retention-days: 1
 
   verify:
     needs: [architecture, foundation, backend, testing, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness, evaluator-adapters, oci-grader]
@@ -731,7 +738,10 @@ jobs:
           path: .task-execution-dist
       - name: Place package distributions
         run: |
-          for package in protocol backend testing profiles evaluation-harness evaluator-adapters; do
+          # Every package the packed-types guard packs needs its dist staged here: `npm pack
+          # --ignore-scripts` skips `prepack`, so a package with no dist/ packs an empty tarball
+          # and the consumer fails with TS2307 instead of a missing-build error.
+          for package in protocol backend testing profiles evaluation-harness evaluator-adapters oci-grader; do
             mkdir -p "packages/task-execution/${package}/dist"
             cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/${package}/dist/"
           done
