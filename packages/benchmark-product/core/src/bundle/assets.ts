@@ -41,6 +41,9 @@ interface WilsonFacts {
  */
 interface ComparisonFacts {
   readonly kind: "comparison";
+  readonly baseline: string;
+  readonly candidate: string;
+  readonly alpha: string;
   readonly pairs: number;
   readonly delta: string | null;
   readonly interval: { readonly alpha: string; readonly low: string; readonly high: string } | null;
@@ -189,13 +192,22 @@ function wilsonProjection(subjectResults: unknown, label: string): WilsonFacts {
  * narrow, local-shape-check posture: a mismatch here means the sealed Report was not produced by
  * paired-delta@1. Mirrors `report/claim.ts`'s `comparisonProjection`, narrowed to only the fields
  * a public bundle asset presents. */
-function comparisonProjection(subjectResults: unknown, label: string): ComparisonFacts {
+function comparisonProjection(
+  subjectResults: unknown,
+  parameters: unknown,
+  label: string,
+): ComparisonFacts {
   const shape = subjectResults as {
     readonly pairs?: unknown;
     readonly delta?: unknown;
     readonly interval?: { readonly alpha?: unknown; readonly low?: unknown; readonly high?: unknown } | null;
     readonly reasons?: unknown;
     readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
+  } | undefined;
+  const parameterShape = parameters as {
+    readonly baseline?: unknown;
+    readonly candidate?: unknown;
+    readonly alpha?: unknown;
   } | undefined;
   if (
     typeof shape?.pairs !== "number"
@@ -211,11 +223,18 @@ function comparisonProjection(subjectResults: unknown, label: string): Compariso
         && typeof shape.interval.high === "string"
       )
     )
+    || typeof parameterShape?.baseline !== "string"
+    || typeof parameterShape.candidate !== "string"
+    || typeof parameterShape.alpha !== "string"
+    || !["0.10", "0.05", "0.01"].includes(parameterShape.alpha)
   ) {
     throw new Error(`${label}: expected paired-delta@1's pairs/delta/interval/reasons/conflicted shape`);
   }
   return {
     kind: "comparison",
+    baseline: parameterShape.baseline,
+    candidate: parameterShape.candidate,
+    alpha: Number(parameterShape.alpha).toFixed(4),
     pairs: shape.pairs,
     delta: shape.delta,
     interval: shape.interval === null ? null : { alpha: shape.interval.alpha as string, low: shape.interval.low as string, high: shape.interval.high as string },
@@ -230,15 +249,19 @@ function comparisonProjection(subjectResults: unknown, label: string): Compariso
 /** Dispatches on the produced method (P4b Task 6) -- mirrors `report/claim.ts`'s
  * `methodProjection`, so the two dispatches read as one pattern. Any method this product has not
  * wired an asset projection for throws rather than silently rendering incomplete facts. */
-function methodProjection(value: unknown, methodId: string, label: string): MethodFacts {
+function methodProjection(
+  value: unknown,
+  method: { readonly id: string; readonly parameters: unknown },
+  label: string,
+): MethodFacts {
   const subjectResults = singleSubjectResults(value, label);
-  switch (methodId) {
+  switch (method.id) {
     case BENCHMARKING_METHOD_IDS.wilson:
       return wilsonProjection(subjectResults, label);
     case BENCHMARKING_METHOD_IDS.pairedDelta:
-      return comparisonProjection(subjectResults, label);
+      return comparisonProjection(subjectResults, method.parameters, label);
     default:
-      throw new Error(`${label}: method "${methodId}" has no bundle-asset projection`);
+      throw new Error(`${label}: method "${method.id}" has no bundle-asset projection`);
   }
 }
 
@@ -280,15 +303,14 @@ function armResultTable(facts: WilsonFacts, caption: string): string {
   return `<div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(caption)}"><table><caption>${escapeMarkup(caption)}</caption><thead><tr><th scope="col">Arm</th><th scope="col">n</th><th scope="col">Pass rate</th><th scope="col">Interval low</th><th scope="col">Interval high</th></tr></thead><tbody>${armRows(facts)}</tbody></table></div>`;
 }
 
-/** paired-delta@1's structural facts, rendered without a directional sentence (P4b Task 6; the
- * ratified copy for this branch is an operator decision that lands separately -- see the plan's
- * Task 8c). A one-line summary shared by the full-report and compact surfaces below. */
-function pairedSummaryLine(facts: ComparisonFacts): string {
-  const deltaText = facts.delta === null ? "no delta" : `delta ${facts.delta}`;
-  const intervalText = facts.interval === null
-    ? facts.reasons.length > 0 ? `interval withheld: ${facts.reasons.join("; ")}` : "interval withheld"
-    : `interval ${facts.interval.low}..${facts.interval.high} (alpha ${facts.interval.alpha})`;
-  return `Pairs ${facts.pairs} · ${deltaText} · ${intervalText}`;
+/** Operator-approved P4b copy. The order is part of the public reading contract: direction,
+ * estimate, interval status, exact alpha, then the number of paired Tasks. */
+function pairedEstimateLine(facts: ComparisonFacts): string {
+  const estimate = facts.delta === null ? "unavailable" : facts.delta;
+  const interval = facts.interval === null
+    ? "withheld"
+    : `${facts.interval.low} to ${facts.interval.high}`;
+  return `Candidate minus baseline estimate (${facts.candidate} minus ${facts.baseline}): ${estimate}. Interval: ${interval}. Alpha: ${facts.alpha}. Paired task count: ${facts.pairs}.`;
 }
 
 /** Full-report (unbounded) rendering of paired-delta@1 facts: pairs, delta, and either the
@@ -297,8 +319,8 @@ function pairedSummaryLine(facts: ComparisonFacts): string {
 function comparisonFactsHtml(facts: ComparisonFacts): string {
   const intervalHtml = facts.interval === null
     ? `<p>Interval withheld.</p>${list(facts.reasons, "No withheld reason recorded.")}`
-    : `<dl class="facts"><div><dt>Interval low</dt><dd>${escapeMarkup(facts.interval.low)}</dd></div><div><dt>Interval high</dt><dd>${escapeMarkup(facts.interval.high)}</dd></div><div><dt>Alpha</dt><dd>${escapeMarkup(facts.interval.alpha)}</dd></div></dl>`;
-  return `<dl class="facts"><div><dt>Pairs</dt><dd>${facts.pairs}</dd></div><div><dt>Delta</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${intervalHtml}`;
+    : `<dl class="facts"><div><dt>Interval low</dt><dd>${escapeMarkup(facts.interval.low)}</dd></div><div><dt>Interval high</dt><dd>${escapeMarkup(facts.interval.high)}</dd></div><div><dt>Alpha</dt><dd>${escapeMarkup(facts.alpha)}</dd></div></dl>`;
+  return `<p class="paired-estimate">${escapeMarkup(pairedEstimateLine(facts))}</p><dl class="facts"><div><dt>Paired task count</dt><dd>${facts.pairs}</dd></div><div><dt>Candidate minus baseline estimate</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${intervalHtml}`;
 }
 
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6). The wilson branch is
@@ -360,14 +382,14 @@ ${embeddedFontCss()}
 <p class="status" data-run-outcome="${outcome}">${escapeMarkup(status)}</p>
 <h1>Colophon report</h1>
 <p class="lede">${escapeMarkup(scopeLine(input))}</p>
-<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>
+${reportFacts.kind === "wilson" ? '<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>' : `<p class="neutral">${escapeMarkup(pairedEstimateLine(reportFacts))}</p>`}
 </header>
 <main>
 <section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>
 <section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>
 <section aria-labelledby="matrix-heading"><h2 id="matrix-heading">Sealed Matrix accounting</h2><p class="source-label">Source: authenticated <a href="matrix.json">matrix.json</a>; values below are copied without reconciliation.</p><pre>${escapeMarkup(canonicalText({ completeness: input.matrix.completeness, attrition: input.matrix.attrition }))}</pre><h3>Completeness and attrition</h3><dl class="facts"><div><dt>Matrix run outcome</dt><dd>${escapeMarkup(outcome)}</dd></div><div><dt>Matrix expected</dt><dd>${input.matrix.completeness.expected}</dd></div><div><dt>Matrix judged</dt><dd>${input.matrix.completeness.judged}</dd></div><div><dt>Matrix floor</dt><dd>${escapeMarkup(input.matrix.completeness.floor)}</dd></div></dl><div class="table-scroll" tabindex="0" role="region" aria-label="Per-arm Matrix attrition"><table><caption>Exact per-arm attrition stored in the Matrix</caption><thead><tr><th scope="col">Arm</th><th scope="col">Expected</th><th scope="col">Judged</th><th scope="col">Unjudged</th><th scope="col">Unscorable</th><th scope="col">Expired</th><th scope="col">Invalidated</th><th scope="col">Excluded</th><th scope="col">Replacements</th></tr></thead><tbody>${attritionRows(input)}</tbody></table></div><h3>Matrix asymmetry flags</h3>${list(input.matrix.attrition.asymmetryFlags, "None recorded in the Matrix.")}</section>
-<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>Sealed Report arm results</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
-<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>Stored claim mirror</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
+<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>${reportFacts.kind === "wilson" ? "Sealed Report arm results" : "Sealed Report paired comparison"}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
+<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>${claimFacts.kind === "wilson" ? "Stored claim mirror" : "Stored paired claim mirror"}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
 <section aria-labelledby="dissent-heading"><h2 id="dissent-heading">Verification assembly dissent</h2><p class="source-label">Source: authenticated <a href="verification/assembly.jsonl">verification assembly</a>.</p><dl class="facts"><div><dt>Dissenting cells</dt><dd>${input.dissentCellKeys.length}</dd></div></dl>${list(input.dissentCellKeys, "None recorded in the verification assembly.")}</section>
 <section id="limitations" aria-labelledby="limitations-heading"><h2 id="limitations-heading">Limitations by stored source</h2><h3>Sealed Report limitations</h3>${list(input.report.limitations ?? [], "None recorded in the sealed Report.")}<h3>Stored Claim limitations</h3>${list(input.claim.limitations, "None recorded in the stored Claim.")}<h3>Local self-run trust boundary stored in the Claim</h3><pre>${escapeMarkup(canonicalText(input.claim.venueHonesty))}</pre></section>
 <section aria-labelledby="records-heading"><h2 id="records-heading">Records and exact identities</h2><dl class="facts"><div><dt>Report SHA-256</dt><dd class="digest">${input.reportSha256}</dd></div><div><dt>Matrix SHA-256</dt><dd class="digest">${input.matrixSha256}</dd></div><div><dt>Run SHA-256</dt><dd class="digest">${input.claim.records.runSha256}</dd></div><div><dt>Report envelope SHA-256</dt><dd class="digest">${input.claim.records.reportEnvelopeSha256}</dd></div></dl><h3>Top-level records and catalogs</h3><ul class="compact-list">${topLevelFiles.map(([path, label]) => `<li><a href="${path}">${escapeMarkup(label)} <span class="digest">(${path})</span></a></li>`).join("")}</ul><h3>Every manifest-listed content-addressed record</h3><ul class="compact-list">${casFiles.map((path) => `<li><a href="${path}">CAS record <span class="digest">(${path})</span></a></li>`).join("")}</ul></section>
@@ -382,14 +404,13 @@ function compactStatus(input: PublicAssetInput, reportFacts: MethodFacts): strin
   return `${outcomeLabel(input.matrix.completeness.runOutcome)} · Report conflicts ${reportFacts.conflicted.count} · Claim conflicts ${input.claim.conflicted.count} · assembly dissent ${input.dissentCellKeys.length} · Matrix asymmetry ${input.matrix.attrition.asymmetryFlags.length} · Report limitations ${(input.report.limitations ?? []).length} · Claim limitations ${input.claim.limitations.length}`;
 }
 
-/** Compact-surface (badge/social-card/share.txt) fragment for paired-delta@1 facts (P4b Task 6),
- * bounded to a fixed code-point budget so it can never silently balloon a fixed-viewBox SVG --
- * but MUST still render non-empty on the interval-withheld state, the one most likely to
- * truncate to nothing if this budget were mishandled. Empty for wilson (nothing to add: wilson's
- * per-arm facts already have their own table on the full report, and compact surfaces never
- * carried them either). */
+/** Compact paired surfaces deliberately carry no estimate, interval bound, alpha, or pair count.
+ * They disclose the interval state and point to the relative full-report path instead. */
 function pairedCompactFragment(facts: MethodFacts): string {
-  return facts.kind === "wilson" ? "" : boundedVisual(pairedSummaryLine(facts), 90);
+  if (facts.kind === "wilson") return "";
+  if (facts.delta === null) return "Paired estimate unavailable · read full report at index.html";
+  if (facts.interval === null) return "Paired estimate reported; interval withheld · index.html";
+  return "Paired estimate and interval in full report · index.html";
 }
 
 function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
@@ -405,7 +426,7 @@ function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const height = pairedFragment === "" ? 150 : 176;
   const pairedRow = pairedFragment === ""
     ? ""
-    : `<text data-field="paired-status" x="20" y="160" fill="#d8d1c5" font-family="Public Sans,sans-serif" font-size="12">${escapeMarkup(pairedFragment)}</text>`;
+    : `<a href="index.html"><text data-field="paired-status" x="20" y="160" fill="#d8d1c5" font-family="Public Sans,sans-serif" font-size="12">${escapeMarkup(pairedFragment)}</text></a>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 920 ${height}" width="920" height="${height}" style="max-width:100%;height:auto"><title id="title">Colophon · ${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))}; no comparative winner stated</title><desc id="desc">${escapeMarkup(`${scope}. Exact configuration arm IDs: ${exactArms}. ${status}. Full Report SHA-256 ${input.reportSha256}. Read index.html limitations and verification.`)}</desc><metadata>${escapeMarkup(`Report SHA-256: ${input.reportSha256}; exact arm IDs: ${exactArms}`)}</metadata><style>${embeddedFontCss()}</style><rect width="920" height="${height}" fill="#14120e"/><rect x="18" y="18" width="12" height="12" transform="rotate(45 24 24)" fill="#c7402a"/><text x="44" y="30" fill="#f7f4ed" font-family="Newsreader,serif" font-size="21" font-weight="650">Colophon</text><line x1="20" x2="900" y1="42" y2="42" stroke="#6b675f"/><text data-field="neutral-status" x="20" y="66" fill="#f7f4ed" font-family="Public Sans,sans-serif" font-size="16" font-weight="700">${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))} · no comparative winner stated</text><text data-field="adverse-status" x="20" y="90" fill="#f07a62" font-family="Public Sans,sans-serif" font-size="12">${escapeMarkup(visualStatus)}</text><text data-field="config-summary" x="20" y="112" fill="#d8d1c5" font-family="Public Sans,sans-serif" font-size="13">${escapeMarkup(visualConfig)}</text><a href="index.html#limitations"><text x="20" y="136" fill="#9eb9ef" font-family="IBM Plex Mono,monospace" font-size="11">Report ${digest} · index.html#limitations · index.html#verification</text></a>${pairedRow}</svg>\n`;
 }
 
@@ -421,7 +442,7 @@ function buildSocialCard(input: PublicAssetInput, reportFacts: MethodFacts): str
   const pairedFragment = pairedCompactFragment(reportFacts);
   const pairedRow = pairedFragment === ""
     ? ""
-    : `<text data-field="paired-status" x="78" y="605" fill="#6b675f" font-family="Public Sans,sans-serif" font-size="16">${escapeMarkup(pairedFragment)}</text>`;
+    : `<a href="index.html"><text data-field="paired-status" x="78" y="605" fill="#6b675f" font-family="Public Sans,sans-serif" font-size="16">${escapeMarkup(pairedFragment)}</text></a>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 630" width="1200" height="630" style="max-width:100%;height:auto"><title id="title">Colophon · ${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))}; neutral benchmark report</title><desc id="desc">${escapeMarkup(`${scope}. Exact configuration arm IDs: ${armIds}. ${status}. Full Report SHA-256 ${input.reportSha256}. Read index.html limitations and verification.`)}</desc><metadata>${escapeMarkup(`Report SHA-256: ${input.reportSha256}; exact arm IDs: ${armIds}`)}</metadata><style>${embeddedFontCss()}</style><rect width="1200" height="630" fill="#f7f4ed"/><line x1="72" x2="1128" y1="72" y2="72" stroke="#14120e" stroke-width="2"/><rect x="78" y="93" width="18" height="18" transform="rotate(45 87 102)" fill="#c7402a"/><text x="118" y="112" fill="#14120e" font-family="Newsreader,serif" font-size="32" font-weight="650">Colophon</text><text data-field="neutral-status" x="78" y="180" fill="#c7402a" font-family="Public Sans,sans-serif" font-size="20" font-weight="700" letter-spacing="1">${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))} · NO COMPARATIVE WINNER STATED</text><text x="78" y="290" fill="#14120e" font-family="Newsreader,serif" font-size="76" font-weight="500">Benchmark report</text><text data-field="adverse-status" x="78" y="350" fill="#c7402a" font-family="Public Sans,sans-serif" font-size="22">${escapeMarkup(visualStatus)}</text><text data-field="config-summary" x="78" y="405" fill="#14120e" font-family="Public Sans,sans-serif" font-size="23">${escapeMarkup(visualConfig)}</text><text x="78" y="452" fill="#14120e" font-family="Public Sans,sans-serif" font-size="22">${escapeMarkup(scope)}</text><line x1="78" x2="1122" y1="492" y2="492" stroke="#cfc8bb"/><a href="index.html#verification"><text x="78" y="540" fill="#27406b" font-family="IBM Plex Mono,monospace" font-size="16">Report ${digest} · index.html#limitations · index.html#verification</text></a><text x="78" y="580" fill="#6b675f" font-family="Public Sans,sans-serif" font-size="16">${escapeMarkup(PRODUCT_BRANDING.attribution)}</text>${pairedRow}</svg>\n`;
 }
 
@@ -442,9 +463,15 @@ function comparisonFactsMarkdown(facts: ComparisonFacts): string {
     : [
         `- Interval low: ${escapeMarkdown(facts.interval.low)}`,
         `- Interval high: ${escapeMarkdown(facts.interval.high)}`,
-        `- Alpha: ${escapeMarkdown(facts.interval.alpha)}`,
+        `- Alpha: ${escapeMarkdown(facts.alpha)}`,
       ];
-  return [`- Pairs: ${facts.pairs}`, `- Delta: ${delta}`, ...intervalLines].join("\n");
+  return [
+    escapeMarkdown(pairedEstimateLine(facts)),
+    "",
+    `- Paired task count: ${facts.pairs}`,
+    `- Candidate minus baseline estimate: ${delta}`,
+    ...intervalLines,
+  ].join("\n");
 }
 
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6), markdown counterpart
@@ -500,7 +527,7 @@ Source: authenticated [\`matrix.json\`](matrix.json). These stored values are no
 
 Source: authenticated [\`report.json\`](report.json). These stored values are not reconciled with another source.
 
-### Sealed Report arm results
+### ${reportFacts.kind === "wilson" ? "Sealed Report arm results" : "Sealed Report paired comparison"}
 
 ${armResultsMarkdown(reportFacts)}
 
@@ -526,7 +553,7 @@ ${reportLimitations}
 
 Source: authenticated [\`claim-package.json\`](claim-package.json). These stored values are not reconciled with another source.
 
-### Stored claim mirror
+### ${claimFacts.kind === "wilson" ? "Stored claim mirror" : "Stored paired claim mirror"}
 
 ${armResultsMarkdown(claimFacts)}
 
@@ -604,8 +631,8 @@ function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): stri
 /** Fixed, deterministic public-bundle/2 presentation bytes. The builder only projects already
  * verified stored facts; it never computes a statistic, selects a winner, or reconciles records. */
 export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<string, Uint8Array>> {
-  const reportFacts = methodProjection(input.report.results, input.report.method.id, "sealed Report");
-  const claimFacts = methodProjection(input.claim.results, input.claim.method.id, "stored claim package");
+  const reportFacts = methodProjection(input.report.results, input.report.method, "sealed Report");
+  const claimFacts = methodProjection(input.claim.results, input.claim.method, "stored claim package");
   return {
     "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts)),
     "badge.svg": encoder.encode(buildBadge(input, reportFacts)),

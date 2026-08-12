@@ -200,7 +200,8 @@ describe("paired claim rendering (P4b Task 7)", () => {
     const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
 
     expect(markup).toContain("Paired comparison");
-    expect(markup).toContain('<dt class="font-medium">Pairs</dt><dd>5</dd>');
+    expect(markup).toContain("Candidate minus baseline estimate (candidate minus baseline): 0.1200. Interval: 0.0200 to 0.2200. Alpha: 0.0500. Paired task count: 5.");
+    expect(markup).toContain('<dt class="font-medium">Paired task count</dt><dd>5</dd>');
     expect(markup).toContain("0.1200");
     expect(markup).toContain("0.0200");
     expect(markup).toContain("0.2200");
@@ -223,7 +224,8 @@ describe("paired claim rendering (P4b Task 7)", () => {
     const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
 
     expect(markup).toContain("Paired comparison");
-    expect(markup).toContain('<dt class="font-medium">Pairs</dt><dd>3</dd>');
+    expect(markup).toContain("Candidate minus baseline estimate (candidate minus baseline): 0.1000. Interval: withheld. Alpha: 0.0500. Paired task count: 3.");
+    expect(markup).toContain('<dt class="font-medium">Paired task count</dt><dd>3</dd>');
     expect(markup).toContain("0.1000");
     expect(markup).toContain("Interval withheld");
     expect(markup).toContain("fewer than five paired tasks");
@@ -241,7 +243,8 @@ describe("paired claim rendering (P4b Task 7)", () => {
     const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
 
     expect(markup).toContain("Paired comparison");
-    expect(markup).toContain('<dt class="font-medium">Pairs</dt><dd>0</dd>');
+    expect(markup).toContain("Candidate minus baseline estimate (candidate minus baseline): unavailable. Interval: withheld. Alpha: 0.0500. Paired task count: 0.");
+    expect(markup).toContain('<dt class="font-medium">Paired task count</dt><dd>0</dd>');
     expect(markup).toContain("Interval withheld");
     expect(markup).toContain("No withheld reasons recorded.");
     expect(markup).not.toContain("Interval low");

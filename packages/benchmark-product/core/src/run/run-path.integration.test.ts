@@ -660,8 +660,17 @@ describe("paired-delta public lifecycle — P4b Task 8b", () => {
       expect(outcome.comparison.interval).toMatchObject({ alpha: "0.0500" });
       expect(outcome.comparison.reasons).toEqual([]);
       const html = readFileSync(join(outcome.bundleDir, "index.html"), "utf8");
+      expect(html).toContain("Candidate minus baseline estimate (candidate minus baseline): 0.3333.");
+      expect(html).toContain("Alpha: 0.0500. Paired task count: 6.");
       expect(html).toContain(outcome.comparison.interval!.low);
       expect(html).toContain(outcome.comparison.interval!.high);
+      for (const path of ["badge.svg", "social-card.svg", "share.txt"] as const) {
+        const compact = readFileSync(join(outcome.bundleDir, path), "utf8");
+        expect(compact, path).toContain("index.html");
+        for (const resultNumber of ["0.3333", outcome.comparison.interval!.low, outcome.comparison.interval!.high, "0.0500"]) {
+          expect(compact, `${path} leaked result number ${resultNumber}`).not.toContain(resultNumber);
+        }
+      }
     },
     60_000,
   );
@@ -684,6 +693,8 @@ describe("paired-delta public lifecycle — P4b Task 8b", () => {
         "fewer than two source clusters (got 1)",
       ]);
       const html = readFileSync(join(outcome.bundleDir, "index.html"), "utf8");
+      expect(html).toContain("Candidate minus baseline estimate (candidate minus baseline): 1.0000.");
+      expect(html).toContain("Interval: withheld. Alpha: 0.0500. Paired task count: 2.");
       for (const reason of outcome.comparison.reasons) expect(html).toContain(reason);
     },
     60_000,
@@ -703,6 +714,8 @@ describe("paired-delta public lifecycle — P4b Task 8b", () => {
       expect(outcome.comparison.delta).toBeNull();
       expect(outcome.comparison.interval).toBeNull();
       const html = readFileSync(join(outcome.bundleDir, "index.html"), "utf8");
+      expect(html).toContain("Candidate minus baseline estimate (candidate minus baseline): unavailable.");
+      expect(html).toContain("Interval: withheld. Alpha: 0.0500. Paired task count: 0.");
       expect(html).toContain("Interval withheld");
       expect(html).toContain("fewer than minN=5 paired tasks (got 0)");
     },

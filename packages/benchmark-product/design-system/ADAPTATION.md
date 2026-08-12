@@ -16,7 +16,10 @@ prototype bundle, CDN stylesheet, or demo data.
 Where the reference kit differs from the product, the implementation keeps the product
 truth. In particular, the canonical 27 operation ids replace the kit's illustrative
 snake-case verbs, and `wilson@1` never gains a winner, ranking, certification, or causal
-claim from the sample report copy.
+claim from the sample report copy. A `paired-delta@1` full report explicitly labels its
+candidate-minus-baseline estimate, interval state, exact alpha, and paired Task count;
+the badge, social card, and share text remain number-free and link relatively to the full
+report instead of becoming detachable result claims.
 
 ## Imported source
 

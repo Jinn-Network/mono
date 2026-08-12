@@ -415,6 +415,9 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
         baseline: "baseline",
         candidate: "sample",
       });
+      expect(reportRecord.limitations).toContain(
+        "This method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered.",
+      );
       // The whole point: the produced tuple must be exactly-JSON-equal to a sealed plan entry.
       expect(reportRecord.preregistered).toBe(true);
     },

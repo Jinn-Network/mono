@@ -424,9 +424,8 @@ describe("Task 4 golden guard: wilson bundle asset byte-equality", () => {
  * P4b Task 6 (`docs/superpowers/plans/demo-report-1/2026-08-12-P4b-implementation-plan.md`):
  * `buildPublicAssets` must dispatch on the produced method instead of hard-requiring wilson@1's
  * `arms` shape, so a paired-delta@1 bundle materializes too. Structure only -- pairs, delta,
- * interval or the withheld reasons -- with NO directional sentence; the five neutral-copy strings
- * stay byte-identical regardless of which branch produced the facts (proven by the Task 4 golden
- * guard above, which must keep passing unmodified once this dispatch lands).
+ * interval or the withheld reasons. Task 8c adds the operator-approved direction only on the
+ * paired branch; the Wilson branch stays byte-identical under the Task 4 golden guard above.
  *
  * `pairedFixture` swaps only `report.method`/`report.results`/`claim.method`/`claim.results` onto
  * the wilson fixture's scaffolding (matrix, claim scope, disclosures, assurance, etc. are
@@ -468,7 +467,11 @@ function pairedFixture(comparison: ComparisonInput): PublicAssetInput {
     },
     claim: {
       ...base.claim,
-      method: { ...base.claim.method, id: "jinn.benchmarking.method/paired-delta" },
+      method: {
+        ...base.claim.method,
+        id: "jinn.benchmarking.method/paired-delta",
+        parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" },
+      },
       results: wrapped,
     },
   } as unknown as PublicAssetInput;
@@ -511,7 +514,7 @@ function markdownEscaped(value: string): string {
 }
 
 describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
-  test("interval-present: renders pairs, delta, and interval bounds without throwing, with no directional sentence", () => {
+  test("interval-present: renders the approved direction, estimate, interval, exact alpha, and paired task count", () => {
     const assets = buildPublicAssets(pairedFixture(INTERVAL_PRESENT));
     const html = text(assets["index.html"]);
     const readme = text(assets["README.md"]);
@@ -519,11 +522,12 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
       expect(surface).toContain("0.1667");
       expect(surface).toContain("0.0100");
       expect(surface).toContain("0.3200");
+      expect(surface).toContain("Alpha: 0.0500");
+      expect(surface).toContain("Paired task count: 6");
       expect(surface).not.toMatch(/candidate (wins|beats|is best)/iu);
     }
-    // The five neutral-copy strings are unconditional literals -- still present on the paired
-    // branch, per the ratified "no publish-facing surface goes directional" constraint.
-    expect(html).toContain("No comparative winner is stated");
+    expect(html).toContain("Candidate minus baseline estimate (armB minus armA)");
+    expect(readme).toContain("Candidate minus baseline estimate \\(armB minus armA\\)");
   });
 
   test("interval-withheld: both reason strings surface on the full report and delta still renders", () => {
@@ -540,18 +544,26 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
     }
   });
 
-  test("interval-withheld: compact surfaces (badge, social-card, share.txt) render non-empty paired facts, not silently truncated to nothing", () => {
+  test("interval-withheld: compact surfaces stay non-empty and number-free, with a relative full-report link", () => {
     const assets = buildPublicAssets(pairedFixture(INTERVAL_WITHHELD));
     for (const path of ["badge.svg", "social-card.svg"] as const) {
       const svg = text(assets[path]);
       const match = /data-field="paired-status"[^>]*>([^<]+)</u.exec(svg);
       expect(match, path).not.toBeNull();
       expect(match![1]!.trim().length, path).toBeGreaterThan(0);
-      expect(match![1]).toContain("Pairs 2");
+      expect(match![1]).toContain("interval withheld");
+      expect(svg).toContain('href="index.html"');
     }
     const share = text(assets["share.txt"]);
-    expect(share).toMatch(/Pairs 2/u);
+    expect(share).toContain("interval withheld");
+    expect(share).toContain("Full report: index.html");
     expect(share.length).toBeGreaterThan(0);
+    for (const path of ["badge.svg", "social-card.svg", "share.txt"] as const) {
+      const body = text(assets[path]);
+      for (const resultNumber of ["0.0000", "0.0500", "Pairs 2", "Paired task count: 2"]) {
+        expect(body, `${path} leaked result number ${resultNumber}`).not.toContain(resultNumber);
+      }
+    }
   });
 
   test("zero-pairs: no delta, no interval, and no crash", () => {
@@ -559,7 +571,7 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
     const html = text(assets["index.html"]);
     const readme = text(assets["README.md"]);
     for (const surface of [html, readme]) {
-      expect(surface).toContain("Pairs");
+      expect(surface).toContain("Paired task count");
       expect(surface).not.toContain("0.1667");
     }
     for (const reason of ZERO_PAIRS.reasons) {
@@ -568,6 +580,21 @@ describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
     }
     for (const path of ["badge.svg", "social-card.svg", "share.txt"] as const) {
       expect(() => text(assets[path])).not.toThrow();
+    }
+  });
+
+  test.each([
+    ["interval present", INTERVAL_PRESENT, ["0.1667", "0.0100", "0.3200", "0.0500", "Pairs 6"]],
+    ["interval withheld", INTERVAL_WITHHELD, ["0.0000", "0.0500", "Pairs 2"]],
+    ["zero pairs", ZERO_PAIRS, ["Pairs 0", "Paired task count: 0"]],
+  ] as const)("%s: every compact paired surface omits result numbers and links relatively", (_label, comparison, forbidden) => {
+    const assets = buildPublicAssets(pairedFixture(comparison));
+    for (const path of ["badge.svg", "social-card.svg", "share.txt"] as const) {
+      const body = text(assets[path]);
+      expect(body, path).toContain("index.html");
+      for (const resultNumber of forbidden) {
+        expect(body, `${path} leaked result number ${resultNumber}`).not.toContain(resultNumber);
+      }
     }
   });
 });

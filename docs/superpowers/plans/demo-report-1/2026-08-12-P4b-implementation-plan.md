@@ -16,7 +16,7 @@
 
 - **Wilson output is byte-frozen.** Every wilson-path artifact — claim package JSON and every published bundle asset — must serialize byte-identically to today. `bundle/verify.ts:637-651` recomputes assets and byte-compares, so any drift, even whitespace, invalidates every previously published bundle. Golden tests enforce this and land before any mutation (Task 4).
 - **Claim schema id stays `benchmark-product.claim-package/1`** (`report/claim.ts:38,106`). New fields are additive and optional only. Ratified §5.2.
-- **No publish-facing surface goes directional.** Build the entire paired path behind the product's existing neutral copy. `bundle/assets.ts:249` (HTML) and `:318` (Markdown) both carry "No comparative winner is stated" — neither changes in this packet. Ratified §5.3; a method-stream copy agent drafts replacements for operator sign-off, triggered when Task 5 begins.
+- **Editorial posture is ratified.** The full paired report states the candidate-minus-baseline estimate, interval or withheld state, exact alpha `0.0500`, and paired Task count. Compact badge/social/share surfaces contain no result number and link relatively to `index.html`. Wilson output remains byte-frozen. Ratified §5.3 on 2026-08-12; Task 8c lands this copy last.
 - **No product-implemented statistics.** Every number comes from a `BENCHMARKING_METHOD_REGISTRY` method. The product selects and presents; it never computes.
 - **Fractional method parameters are decimal strings.** Sealed records admit only exact I-JSON integers (`benchmarking/records/src/json.ts:93-95`). `paired-delta@1`'s `alpha` is the string `"0.05"`. A raw number crashes `sealRun`.
 - **Provenance is required and fails closed** (ratified §5.4). `paired-delta@1` calls `resolveTaskProvenance`. The bundled sample benchmark destroys provenance at `core/src/intake/sample.ts:154`, so no paired run works on the sample path — out of scope here, tracked in scoping §6.1.
@@ -653,7 +653,7 @@ Interval-withheld is the state the slate/e2e lane's gate asserts against, and th
 
 ### Task 8c — copy surfaces (OPERATOR-GATED, LAST COMMIT)
 
-**Do not start until the operator's §5.3 decision lands.** All seven surfaces move together or none — a bundle whose badge contradicts its HTML is worse than one that says nothing. Wilson-branch strings stay byte-identical on all seven, which the Task 4 goldens enforce for the five in-code ones; the two documentation surfaces are not test-guarded and need manual care.
+**Operator decision landed 2026-08-12.** The full report spells out the candidate-minus-baseline estimate, interval or withheld state, exact alpha `0.0500`, and paired Task count. Compact badge, social-card, and share surfaces carry no result number and point relatively to `index.html`. Wilson-branch strings stay byte-identical on all seven, which the Task 4 goldens enforce for the five in-code ones; the two documentation surfaces are not test-guarded and need manual care.
 
 Also in this commit: the distinct limitations entry (*"this method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered"*), kept separate from the MDE line, because an interval-withheld run and a below-MDE run are different failures and must not read as one caveat.
 

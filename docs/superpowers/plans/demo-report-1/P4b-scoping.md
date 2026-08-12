@@ -17,13 +17,11 @@
 
 - **Budget ratified** at the scoped ~9–10.5 agent-days across the seven tasks in §8.
 - **Decisions §5.1, §5.2, §5.4 ratified** exactly as written.
-- **Decision §5.3 (editorial posture) remains RESERVED.** Build the entire
-  paired path behind the product's existing neutral copy. When implementation is
-  ~1 day from the point where copy becomes the blocker (the claim-package text
-  surfaces), the program coordinator dispatches a method-stream copy agent
-  grounded in `BRAND.md`, §8.1, and `PUBLIC-BUNDLE.md` to draft candidates for
-  operator sign-off. **No publish-facing surface goes directional before that
-  sign-off.**
+- **Decision §5.3 (editorial posture) RATIFIED 2026-08-12.** The full paired
+  report states the candidate-minus-baseline estimate, interval or withheld
+  state, exact alpha `0.0500`, and paired Task count. Compact badge, social-card,
+  and share surfaces contain no result number and link relatively to the full
+  report. Wilson output remains byte-frozen.
 - **Sequencing:** the *official run* gates on P4b. **P5 does not** — it proves
   pipes on the existing plumbing and proceeds in parallel.
 
@@ -277,10 +275,13 @@ method-independent — every method is wrapped by `subjectScopedMethod`
 (`registry.ts:1068-1107`) — so the existing `perSubject.length !== 1` guards
 (`claim.ts:195`, `assets.ts:132`) are correct as-is and should stay.
 
-### 5.3 Editorial posture for a directional result — **RESERVED FOR THE OPERATOR**
+### 5.3 Editorial posture for a directional result — **RATIFIED 2026-08-12**
 
-This is an open question and is deliberately **not** given a recommended
-answer here.
+The operator approved a method-specific posture: the paired full report names
+the direction explicitly as candidate minus baseline and keeps the estimate,
+interval status, exact alpha `0.0500`, and paired Task count together. Compact
+badge/social/share artifacts contain no result number and link relatively to
+the full report.
 
 `bundle/assets.ts:249` states: *"No comparative winner is stated; wilson@1
 reports neutral per-arm facts only."* `PUBLIC-BUNDLE.md:91` repeats the
@@ -293,13 +294,10 @@ question of whether the posture is being narrowed, restated, or genuinely
 changed — needs someone with brand authority. An implementer must not invent
 it, and neither should this lane.
 
-**Ratified process (2026-08-12).** Build the entire paired path behind the
-product's existing neutral copy. When implementation reaches ~1 day from the
-point where copy becomes the blocker — i.e. the claim-package text surfaces in
-Task 4 — the lane notifies the program coordinator, who dispatches a
-method-stream copy agent grounded in `BRAND.md`, §8.1, and `PUBLIC-BUNDLE.md` to
-draft candidate copy for operator sign-off. **No publish-facing surface goes
-directional before that sign-off.**
+The full report does not promote the estimate into a winner, verdict, threshold,
+or selection. It includes a separate limitation stating that this method
+estimates an effect and does not gate one. Interval-withheld and power/MDE
+limitations stay distinct.
 
 Both copy sites are in scope: `assets.ts:249` (HTML) and `assets.ts:318`
 (Markdown), plus `PUBLIC-BUNDLE.md:91` and `design-system/ADAPTATION.md:18`.
@@ -425,7 +423,7 @@ an implementer holding this report.
 | **2** | `planFromSpec` builds `analysisPlan` from the spec (both entries per §4), with compile-time refusals for an unregistered method and for a paired method whose `baseline`/`candidate` do not name two existing arms. Files: `run/compile.ts:81-123`. | **1.0** | The sealed Run carries both entries with exact parameters (`alpha` as a decimal string); both refusals fire with typed errors; quote, lock, and preview all inherit the behavior through the shared tail. |
 | **3** | `report.ts` selects the method from the sealed plan and passes matching parameters. Files: `operations/report.ts:140` + header. | **1.0** | A paired-selected draft produces a Report with `method.id === "…/paired-delta"` **and `preregistered === true`** — the exact-JSON tuple equality is the whole point and is easy to get subtly wrong. |
 | **4** | Claim schema and builder become method-dispatching. Files: `report/claim.ts:49-54,129,184-215,262,277,305,308`; `verification/claim-consistency.ts:67`. | **2.0–3.0** | A paired Report builds a claim; **a wilson Report builds a byte-identical claim to today** (golden regression); `assertClaimConsistency` round-trips both; schema id stays `/1`. |
-| **5** | Bundle assets become method-dispatching. Files: `bundle/assets.ts:118-156,193,249,255,293,446-447`. | **2.0** | A paired bundle materializes and verifies; **wilson bundle bytes are unchanged** (golden byte assertion). Gated on §5.3 for any public paired copy. |
+| **5** | Bundle assets become method-dispatching. Files: `bundle/assets.ts:118-156,193,249,255,293,446-447`. | **2.0** | A paired bundle materializes and verifies; **wilson bundle bytes are unchanged** (golden byte assertion); ratified §5.3 copy applies only to the paired branch. |
 | **6** | Web renders both shapes; `inspect` shows the selected method. Files: `web/.../results/page.tsx:24-28,124`; `operations/inspect.ts:128`. | **1.0** | RTL renders a paired claim and a wilson claim; no unguarded dereference of `wilsonInterval`. |
 | **7** | End-to-end integration + docs. Extend `run-path.integration.test.ts`; update `PUBLIC-BUNDLE.md:91`, `ADAPTATION.md:18`, `m1-walkthrough.mjs:222`. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → bundle verify with no manual intervention. |
 
@@ -485,5 +483,6 @@ full scope. The remaining items from that recommendation resolve as:
    must precede any paired rehearsal on the sample benchmark.
 4. §6.2 — still worth filing as a separate platform-side issue; not in this
    packet's scope.
-5. §5.3 — **remains reserved**, with the copy-agent process in §0 governing when
-   it must be resolved.
+5. §5.3 — **ratified 2026-08-12**: the full report carries the directional
+   estimate, interval state, exact alpha, and paired Task count; compact result
+   surfaces are result-number-free and link to the full report.
