@@ -831,6 +831,18 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private readonly shutdownDrainFailures: Error[] = [];
 
   constructor(private readonly config: LocalTaskExecutionBackendConfig) {
+    // #36. When capture is on, `createEvidenceJoin` puts `executor` and `source` (as the
+    // recording's `producer`) into the evidence graph as two SEPARATE `agent`-kind identities
+    // under two differently-named descriptors, and the execution recorder correctly refuses one
+    // identity claiming both roles. A composition that passes one IRI twice can therefore never
+    // record an attempt -- which stayed latent until the first live run, where it surfaced as an
+    // opaque `dependency-unavailable` terminal after the attempt had already been claimed.
+    // Refuse the composition instead of every attempt it would go on to start.
+    if ((config.recorderAvailability ?? "none") !== "none" && config.source === config.executor) {
+      throw new Error(
+        "local backend source and executor must be distinct graph identities when evidence capture is enabled",
+      );
+    }
     this.writer = acquireStateRootWriter(config.stateRoot);
     this.capacity = new CapacityGate(config.maxConcurrentAttempts ?? 4);
     this.rebuildIndexes();
