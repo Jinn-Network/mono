@@ -120,6 +120,7 @@ import {
   type RecorderAvailability,
   type TrustKeyConfig,
 } from "./capabilities.js";
+import { deliveryOutputsFromHarvest } from "./delivery-outputs.js";
 import { projectObservations } from "./observation.js";
 import {
   createEvidenceJoin,
@@ -1925,7 +1926,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     // Reserved keys win: `extensions` spreads first so no extension can shadow a canonical
     // Delivery field below.
-    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://spec.jinn.network/profiles/task-execution/v1", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
+    // #39: the Delivery declares the Task's declared outputs, never the raw harvest manifest --
+    // see `deliveryOutputsFromHarvest` for why the manifest is deliberately wider.
+    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://spec.jinn.network/profiles/task-execution/v1", attempt, task: documentDigest(input.taskBytes), outputs: deliveryOutputsFromHarvest(harvest.manifest, input.task.outputs), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
     // Finding E31: sign the Delivery's own already-sealed bytes exactly once, never re-seal --
     // see the module-level comment above `sealExecutorBindingEnvelope`. Additive: with no
     // delivery-signing key configured, `deliveryBytes` above is computed identically to before

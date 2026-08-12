@@ -680,6 +680,39 @@ async function deploymentFromEnvironment(): Promise<EvaluationHarnessDeployment>
   return deployment;
 }
 
+/** Never let a pathological message flood the captured stderr log. */
+const MAX_REFUSAL_DETAIL_CHARS = 512;
+
+/**
+ * Emits one line naming why this Attempt produced no verdict (#39b).
+ *
+ * The live gate's first harness run refused its subject and exited 65 in 413ms with BOTH captured
+ * harness logs at 0 bytes: the reason existed, was exact, and was thrown away at the catch. A
+ * fully-diagnosed refusal that reports only a number costs the operator the whole diagnosis.
+ *
+ * Stderr is the channel because the backend already captures it into the attempt's harness-stderr
+ * log AND already tails that into the terminal detail it records, so one write carries the reason
+ * to the operator's audit row without any new plumbing.
+ *
+ * The bin.ts posture holds: exact inputs, provider diagnostics, and secrets never reach log
+ * output. Only two message sources are echoed, both safe by construction -- this package's own
+ * `EvaluationHarnessInputError`/`ProfilesError` structural messages (which name document and
+ * output NAMES from the already-public signed Task and Delivery, never their bytes) and
+ * `EvaluationOperationalError.safeDetail` (whose whole contract is to be safe). Anything else --
+ * an adapter throwing a raw `Error`, a provider SDK, a module-load failure -- contributes its
+ * classification only, never its message.
+ */
+function reportRefusal(reasonCode: string, safeDetail?: string): void {
+  const detail = safeDetail === undefined || safeDetail.length === 0
+    ? ""
+    : `: ${safeDetail.replaceAll(/\s+/gu, " ").slice(0, MAX_REFUSAL_DETAIL_CHARS)}`;
+  try {
+    process.stderr.write(`evaluation-harness: refused (${reasonCode})${detail}\n`);
+  } catch {
+    // A closed or broken stderr must never turn a classified refusal into an unclassified crash.
+  }
+}
+
 /**
  * Executes one evaluation Attempt. A deployment may be injected in-process for embedding/tests;
  * the spawned one-argument form loads only the host-selected deployment module from environment.
@@ -807,8 +840,13 @@ export async function runEvaluationHarness(
       cause instanceof EvaluationHarnessInputError ||
       cause instanceof ProfilesError
     ) {
+      reportRefusal("invalid-evaluation-input", cause.message);
       return EVALUATION_HARNESS_EXIT_INVALID_INPUT;
     }
+    reportRefusal(
+      "evaluation-operational-failure",
+      cause instanceof EvaluationOperationalError ? cause.safeDetail : undefined,
+    );
     return EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE;
   }
 }
