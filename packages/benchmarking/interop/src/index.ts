@@ -12,6 +12,8 @@ export type {
   SweBenchRow,
 } from "./import/swebench.js";
 
+export { toCalendarStrictRfc3339 } from "./import/rfc3339-from-source.js";
+
 export { exportCroissant } from "./export/croissant.js";
 export type { CroissantDocument, CroissantFileObject } from "./export/croissant.js";
 

@@ -34,6 +34,7 @@
  * is reused for a rehearsal without ever letting the rehearsal's own subset Benchmark become one.
  */
 
+import { BENCHMARKING_METHOD_REGISTRY } from "@jinn-network/benchmarking-aggregate";
 import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
@@ -42,12 +43,109 @@ import {
   sealBenchmark,
   type BenchmarkRecord,
   type RunArm,
+  type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { planRun, type PlannedRun } from "@jinn-network/benchmarking-run";
-import { resolveAssurance, type DraftDocument, type DraftSpec } from "../domain/draft.js";
+import { resolveAssurance, type DraftDocument, type DraftSpec, type ResolvedAssurance } from "../domain/draft.js";
 import { refuse, refuseWithIssues } from "../errors.js";
 import { runtimeSubmissionBaseline } from "../runtime/adapter.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+
+/** The sealed Run record's own analysisPlan entry shape — reused rather than invented so this
+ * module can never drift from what `planRun`/`sealRun` actually accept. */
+type RunAnalysisPlanEntry = NonNullable<RunRecord["analysisPlan"]>[number];
+
+/** `analysis.parameters` keys `buildAnalysisPlan` always derives itself — from the draft's
+ * resolved `verdictRule` and the validated `analysis.baseline`/`analysis.candidate` — never from
+ * caller-supplied `parameters`. A caller setting one of these is expressing a misunderstanding of
+ * how the plan is assembled and must be told, not silently overridden or silently stripped. */
+const RESERVED_ANALYSIS_PARAMETER_KEYS = ["verdictRule", "baseline", "candidate"] as const;
+
+/**
+ * The sealed analysis plan. `wilson@1` is always present — it is the product's baseline read and
+ * every existing consumer expects it — and a selected non-wilson method is appended, so the plan
+ * honestly pre-registers both analyses at lock.
+ *
+ * Refusals happen HERE, at compile time, deliberately. Neither `planRun` nor the records schema
+ * validates method ids (`benchmarking/run/src/plan.ts`, `records/src/run/schema.ts`'s
+ * `AnalysisPlanEntrySchema` accept free strings), so an unregistered id or a malformed parameter
+ * would otherwise seal into an immutable Run and only fail at `report` time — after the run has
+ * been executed and paid for.
+ */
+function buildAnalysisPlan(spec: DraftSpec, verdictRule: ResolvedAssurance["verdictRule"]): RunAnalysisPlanEntry[] {
+  const wilson: RunAnalysisPlanEntry = {
+    method: BENCHMARKING_METHOD_IDS.wilson,
+    version: BENCHMARKING_METHOD_VERSION,
+    parameters: { verdictRule },
+  };
+  const analysis = spec.analysis;
+  if (analysis === undefined) return [wilson];
+
+  if (analysis.method === BENCHMARKING_METHOD_IDS.wilson) {
+    // An explicit wilson selection must refuse loudly on anything it can't honor, same as every
+    // other malformed input in this function — it must not be the one silent exception.
+    if (analysis.version !== BENCHMARKING_METHOD_VERSION) {
+      refuse(
+        "validation",
+        "spec.analysis.version",
+        `analysis.version "${analysis.version}" does not match the registered wilson method's version "${BENCHMARKING_METHOD_VERSION}"`,
+      );
+    }
+    if (analysis.parameters !== undefined && Object.keys(analysis.parameters).length > 0) {
+      refuse(
+        "validation",
+        "spec.analysis.parameters",
+        `analysis.parameters must be empty for an explicit wilson selection — its verdictRule parameter is always derived from the draft's resolved assurance, never caller-supplied`,
+      );
+    }
+    return [wilson];
+  }
+
+  const method = BENCHMARKING_METHOD_REGISTRY.get(analysis.method, analysis.version);
+  if (method === undefined) {
+    refuse("validation", "spec.analysis", `analysis.method "${analysis.method}@${analysis.version}" is not a registered method`);
+  }
+  if (method.computeAvailability !== "available") {
+    refuse("validation", "spec.analysis", `analysis.method "${analysis.method}@${analysis.version}" is registered but its compute is unavailable`);
+  }
+
+  const suppliedParameters = analysis.parameters ?? {};
+  const reservedKeysPresent = RESERVED_ANALYSIS_PARAMETER_KEYS.filter((key) => key in suppliedParameters);
+  if (reservedKeysPresent.length > 0) {
+    refuse(
+      "validation",
+      "spec.analysis.parameters",
+      `analysis.parameters may not set reserved key(s) ${reservedKeysPresent.join(", ")} — these are derived from analysis.baseline/analysis.candidate and the draft's resolved verdictRule, not caller-supplied`,
+    );
+  }
+
+  const armIds = new Set(spec.arms.map((arm) => arm.armId));
+  const needsPair = method.parameterSchema.required.includes("baseline")
+    || method.parameterSchema.required.includes("candidate");
+  if (needsPair) {
+    for (const role of ["baseline", "candidate"] as const) {
+      const armId = analysis[role];
+      if (armId === undefined) {
+        refuse("validation", "spec.analysis", `analysis.${role} is required by ${analysis.method} but is absent`);
+      }
+      if (!armIds.has(armId)) {
+        refuse("validation", "spec.analysis", `analysis.${role} "${armId}" does not name an arm of this draft`);
+      }
+    }
+  }
+
+  const parameters: Record<string, unknown> = {
+    verdictRule,
+    ...(analysis.baseline === undefined ? {} : { baseline: analysis.baseline }),
+    ...(analysis.candidate === undefined ? {} : { candidate: analysis.candidate }),
+    ...suppliedParameters,
+  };
+  const validated = method.validateParameters(parameters);
+  if (!validated.ok) {
+    refuse("validation", "spec.analysis.parameters", `analysis.parameters rejected by ${analysis.method}: ${validated.issues.join("; ")}`);
+  }
+  return [wilson, { method: analysis.method, version: analysis.version, parameters }];
+}
 
 export interface CompileDraftInput {
   readonly workspaceDir: string;
@@ -104,13 +202,7 @@ function planFromSpec(spec: DraftSpec, benchmarkDigestHex: string, owner: string
         },
         submissionBaseline: runtimeSubmissionBaseline(spec.evaluationRuntime),
       },
-      analysisPlan: [
-        {
-          method: BENCHMARKING_METHOD_IDS.wilson,
-          version: BENCHMARKING_METHOD_VERSION,
-          parameters: { verdictRule: resolvedAssurance.verdictRule },
-        },
-      ],
+      analysisPlan: buildAnalysisPlan(spec, resolvedAssurance.verdictRule),
       ...(spec.budget !== undefined ? { budget: spec.budget } : {}),
       venue: { kind: "self-run" },
       closeAt,

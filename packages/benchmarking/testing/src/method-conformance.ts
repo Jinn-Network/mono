@@ -170,7 +170,7 @@ function verdictEnvelopeBytes(labelDigest: string, outcome: VerdictOutcome): Uin
         : { limitations: [`inconclusiveClass:${outcome.inconclusiveClass}`] }),
     },
   };
-  return canonicalJsonBytes(buildVerdictEnvelope(statement, [{ keyid: "did:key:zFixture", sig: "AA==" }]));
+  return buildVerdictEnvelope(statement, [{ keyid: "did:key:zFixture", sig: "AA==" }]);
 }
 
 interface MutableFixtureCell {

@@ -55,7 +55,7 @@ import {
 } from "./schema.js";
 import { EVALUATOR_REQUIREMENT_KEY } from "../venue/venue.js";
 import { INSPECT_EMBEDDED_EVALUATOR_ID } from "../runtime/inspect/artifacts.js";
-import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
+import { INSPECT_ADAPTER_ID, InspectSelectionManifestSchema } from "../runtime/inspect/manifest.js";
 
 export const PUBLIC_BUNDLE_FILES = [
   "static-bundle.json",
@@ -78,6 +78,7 @@ export const PUBLIC_BUNDLE_FILES = [
 
 const ROLE_ORDER: readonly BundleEvidenceCatalog["records"][number]["roles"][number][] = [
   "task",
+  "runtime-selection",
   "evaluation-spec",
   "admission-receipt",
   "solve-submission",
@@ -171,6 +172,16 @@ function recordClosure(input: MaterializeBundleInput): {
   const report = parseReport(reportBytes);
   const draft = parseDraftDocument(JSON.parse(readFileSync(draftPath(workspaceDir, draftId), "utf8")));
   const embeddedInspect = draft.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID;
+  const inspectSelectionSha256 = embeddedInspect
+    ? draft.spec.evaluationRuntime?.selectionManifestSha256
+    : undefined;
+  if (embeddedInspect) {
+    if (inspectSelectionSha256 === undefined) {
+      refuse("record-integrity", "evidence-closure", "Inspect draft has no sealed runtime selection identity");
+    }
+    const selectionBytes = getSealedBytes(workspaceDir, inspectSelectionSha256);
+    exactJson(selectionBytes, InspectSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+  }
 
   const claimBytes = new Uint8Array(readFileSync(claimPackageArtifactPath(workspaceDir, draftId)));
   const claim = exactJson(claimBytes, ClaimPackageSchema, "claim-package.json");
@@ -192,7 +203,14 @@ function recordClosure(input: MaterializeBundleInput): {
     addRole(evidenceRecords, taskSha256, "task");
     const task = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(getSealedBytes(workspaceDir, taskSha256))) as {
       evaluation?: { digest?: { sha256?: string } };
+      payload?: { selectionManifestSha256?: unknown };
     };
+    if (embeddedInspect) {
+      if (task.payload?.selectionManifestSha256 !== inspectSelectionSha256) {
+        refuse("record-integrity", "evidence-closure", `Inspect Task ${taskSha256} does not bind the draft's sealed runtime selection`);
+      }
+      addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
+    }
     const evaluationSpecSha256 = task.evaluation?.digest?.sha256;
     if (evaluationSpecSha256 !== undefined) addRole(evidenceRecords, evaluationSpecSha256, "evaluation-spec");
     const receipt = receipts.get(taskSha256);

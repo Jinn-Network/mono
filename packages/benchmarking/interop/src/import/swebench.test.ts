@@ -14,7 +14,7 @@ async function loadFixture(name: string): Promise<string> {
 describe("importSweBench (§10.1 op 1)", () => {
   test("maps a golden SWE-bench row to a stable Task digest + judgeable Benchmark", async () => {
     const row = JSON.parse(await loadFixture("row.json")) as SweBenchRow;
-    const expected = JSON.parse(await loadFixture("expected.json")) as {
+    const expected = JSON.parse(await loadFixture("expected.v2.json")) as {
       taskDigest: `sha256:${string}`;
       evaluationSpecDigest: `sha256:${string}`;
     };

@@ -64,7 +64,12 @@ export function assertClaimConsistency(input: {
   if (identities.reportSha256 === undefined) {
     refuse("record-integrity", "claim-consistency", "verified Report identity is absent");
   }
-  const verdictRule = (runRecord.analysisPlan?.[0]?.parameters as { verdictRule?: unknown } | undefined)?.verdictRule;
+  // The sealed plan may carry more than one entry (one per candidate method, P4b Task 5) — select
+  // the entry matching the produced Report's method, not a fixed index.
+  const matchingPlanEntry = runRecord.analysisPlan?.find(
+    (entry) => entry.method === reportRecord.method.id && entry.version === reportRecord.method.version,
+  );
+  const verdictRule = (matchingPlanEntry?.parameters as { verdictRule?: unknown } | undefined)?.verdictRule;
   if (verdictRule !== "sole" && verdictRule !== "majority" && verdictRule !== "unanimous") {
     refuse("record-integrity", "claim-consistency", "sealed Run carries no supported verdictRule");
   }

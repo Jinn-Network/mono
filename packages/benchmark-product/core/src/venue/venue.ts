@@ -60,6 +60,7 @@ import {
   INSPECT_NATIVE_LOG_MEDIA_TYPE,
   INSPECT_SUMMARY_MEDIA_TYPE,
   INSPECT_TASK_PROFILE_URI,
+  InspectCellSummarySchema,
 } from "../runtime/inspect/artifacts.js";
 import {
   assertInspectSelectionUndrifted,
@@ -68,6 +69,7 @@ import {
 } from "../runtime/inspect/host.js";
 import { makeInspectLauncher } from "../runtime/inspect/launcher.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
+import { assertInspectOciBrokerReady } from "../runtime/inspect/oci.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
   createEvaluationCellRegistry,
@@ -95,6 +97,8 @@ export interface LocalVenueOptions {
    * differs from `workspaceDir` only for rehearsals, whose venue state and keys live in an
    * isolated scratch root while the selected runtime remains anchored in the product workspace. */
   readonly runtimeBindingWorkspaceDir?: string;
+  /** Opaque, host-owned connection descriptor outside product state/workspaces. */
+  readonly inspectHostConnectionDescriptor?: string;
   readonly now: () => string;
   /** Selected evaluation runtime. Absent and `jinn-native` both preserve the original venue. */
   readonly evaluationRuntime?: EvaluationRuntimeBinding;
@@ -481,7 +485,11 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   );
   const inspectLauncher = inspectSelection === undefined || inspectHost === undefined
     ? undefined
-    : makeInspectLauncher({ host: inspectHost, manifest: inspectSelection });
+    : makeInspectLauncher({
+      host: inspectHost,
+      manifest: inspectSelection,
+      hostConnectionDescriptor: options.inspectHostConnectionDescriptor,
+    });
 
   // One prediction registration per evaluator identity, id-matched with the generated deployment
   // module (the spawned harness selects by exact registration id). The factory hardcodes the
@@ -625,6 +633,13 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       executable,
       async probe() {
         await assertInspectSelectionUndrifted(runtimeBindingWorkspaceDir, selectionManifestSha256);
+        if (inspectHost.kind === "oci") {
+          await assertInspectOciBrokerReady(
+            inspectHost,
+            inspectSelection,
+            options.inspectHostConnectionDescriptor,
+          );
+        }
         return {
           ready: true,
           executable,
@@ -750,18 +765,26 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           if (summaryArtifact === undefined) {
             return { kind: "could-not-grade" as const, detail: "Inspect summary artifact is absent" };
           }
-          let summary: { terminal?: unknown; inspectStatus?: unknown };
+          let rawSummary: unknown;
           try {
-            summary = JSON.parse(
+            rawSummary = JSON.parse(
               new TextDecoder("utf8", { fatal: true }).decode(summaryArtifact.bytes),
-            ) as typeof summary;
+            );
           } catch {
             return { kind: "could-not-grade" as const, detail: "Inspect summary artifact is invalid" };
           }
+          const parsedSummary = InspectCellSummarySchema.safeParse(rawSummary);
+          if (!parsedSummary.success) {
+            return { kind: "could-not-grade" as const, detail: "Inspect summary artifact is invalid" };
+          }
+          const summary = parsedSummary.data;
           if (summary.terminal !== "scored") {
+            const providerDetail = summary.provider?.terminalStatus !== undefined
+              ? `; provider ${summary.provider.terminalStatus}`
+              : "";
             return {
               kind: "could-not-grade" as const,
-              detail: `Inspect execution was unscorable (${String(summary.inspectStatus ?? "unknown")})`,
+              detail: `Inspect execution was unscorable (${String(summary.inspectStatus ?? "unknown")}${providerDetail})`,
             };
           }
           const verdict = artifacts.find((artifact) => artifact.name === "verdict");

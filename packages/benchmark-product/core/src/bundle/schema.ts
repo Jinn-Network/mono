@@ -36,6 +36,7 @@ export const BundleEvidenceCatalogSchema = z.object({
     sha256: Sha256HexSchema,
     roles: z.array(z.enum([
       "task",
+      "runtime-selection",
       "evaluation-spec",
       "admission-receipt",
       "solve-submission",

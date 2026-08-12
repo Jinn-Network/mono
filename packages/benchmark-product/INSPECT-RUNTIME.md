@@ -70,6 +70,83 @@ Create a JSON file such as:
 }
 ```
 
+For the optional credential-isolated Luna path, configure the host with a
+fresh capped key in an owner-only file outside both the repository and product
+workspace. The key is never accepted in selection JSON, CLI arguments, or the
+web form:
+
+```bash
+chmod 600 /absolute/private/path/openai-api-key
+export BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE=/absolute/private/path/openai-api-key
+```
+
+Use the sealed provider profile on each arm:
+
+```json
+{
+  "execution": "oci",
+  "dockerPath": "/absolute/path/to/docker",
+  "imageDigest": "sha256:<local-image-id>",
+  "projectDir": "/absolute/path/to/project-or-empty-directory",
+  "datasetCacheDir": "/absolute/path/to/prefetched-cache",
+  "taskReference": "inspect_evals/arc_easy",
+  "arms": [
+    {
+      "armId": "luna-none",
+      "model": "jinn-openai/gpt-5.6-luna",
+      "provider": {
+        "surface": "openai-responses",
+        "upstreamModel": "gpt-5.6-luna",
+        "reasoningEffort": "none",
+        "maxOutputTokens": 128,
+        "store": false,
+        "background": false,
+        "stream": false,
+        "serviceTier": "default",
+        "tools": [],
+        "fallbackModels": [],
+        "retries": 0,
+        "persistedConversation": false,
+        "metadata": null,
+        "promptCacheIdentifier": null
+      }
+    },
+    {
+      "armId": "luna-low",
+      "model": "jinn-openai/gpt-5.6-luna",
+      "provider": {
+        "surface": "openai-responses",
+        "upstreamModel": "gpt-5.6-luna",
+        "reasoningEffort": "low",
+        "maxOutputTokens": 128,
+        "store": false,
+        "background": false,
+        "stream": false,
+        "serviceTier": "default",
+        "tools": [],
+        "fallbackModels": [],
+        "retries": 0,
+        "persistedConversation": false,
+        "metadata": null,
+        "promptCacheIdentifier": null
+      }
+    }
+  ],
+  "scorer": { "name": "choice", "passValue": "C" },
+  "runOptions": {
+    "sampleId": "Mercury_417466",
+    "maxSamples": 1,
+    "retryOnError": 0
+  }
+}
+```
+
+`sampleId` is the exact selected row. `maxSamples` is only Inspect's
+sample-concurrency limit; it never selects or truncates the dataset. Quote
+preflight validates Docker, the digest-pinned image, dataset bytes, runtime
+identity, broker health, and credential-file metadata without making a model
+request. Preview and official launch make real calls.
+
 Then select it on a mutable draft:
 
 ```bash
@@ -135,6 +212,11 @@ and source/environment fingerprints after Inspect returns but before artifacts
 are accepted. Drift therefore fails the attempt instead of silently entering a
 Matrix or Report.
 
+Some installed registry tasks, including `inspect_evals/arc_easy`, expose no
+individual `task_file` through Inspect's public EvalSpec or registry metadata.
+For those tasks the source identity is the complete installed distribution
+tree and digest; the adapter does not invent a module filename.
+
 The local project-tree digest excludes only runtime-generated or environment
 directories: `.git`, `.inspect_ai`, `.mypy_cache`, `.pytest_cache`, `.venv`,
 `__pycache__`, and `.pyc` files. Code or data intentionally loaded from an
@@ -191,22 +273,53 @@ Task imports, tools, solvers, model providers, sandboxes, and scorers run in a
 supervised runtime host, never in the Next.js request process. The original
 local-Python host remains available for trusted, credential-free compatibility
 runs. The OCI host runs task code with a read-only root, no Linux capabilities,
-no new privileges, no network, bounded CPU/memory/process/scratch resources,
+no new privileges, no direct external network, bounded CPU/memory/process/scratch resources,
 an ephemeral home, and only the selected project/cache plus current attempt
 directories mounted. It never mounts the host home, keyring, repository root,
 Docker socket, or credential files.
 
 The worker receives a minimal environment and no ambient credential variables.
-The first slice therefore supports network-free or otherwise no-secret
-evaluations. It accepts neither ChatGPT/Codex subscription state nor provider
-API keys. Credential forwarding for external providers requires a future
-explicit, allowlisted secret port and credentialed smoke suite; it must not be
-implemented by inheriting the web server environment. Local-Python process
-separation is not a hostile-code sandbox and does not restrict filesystem
-reads: task code can read any host file the product OS user can read. Choose
-the OCI host for untrusted task code. The OCI host in this slice is
-credential-free and network-disabled; provider credentials require the
-separate broker boundary rather than a worker environment variable.
+Hugging Face's processed dataset bytes remain on the digest-locked read-only
+cache mount. Because the `datasets` library creates lock files even for cached
+offline reads, the worker builds only a temporary symlink index and lock root
+inside its bounded scratch filesystem; writes cannot reach the mounted dataset
+bytes.
+For `jinn-openai/gpt-5.6-luna`, the runtime host creates one trusted broker
+sidecar and one private internal network per execution attempt. The worker sees
+only a random, per-attempt capability. The API key is copied through the
+trusted host process into a separate ephemeral Docker volume, mounted read-only
+only in the broker. Its bytes and host path do not appear in worker mounts,
+Docker command arguments, product state, sealed records, or native logs. The
+broker has the only external network path and its trusted implementation can
+issue only the locked synchronous request to `api.openai.com`; arbitrary task
+code cannot choose an endpoint. Every attempt removes its worker, broker,
+private network, capability volume, and credential volume, including on
+cancellation.
+
+The broker accepts only ordered developer/user text and the sealed Luna
+configuration. It refuses tools, images, audio, assistant/tool history,
+structured output, multiple choices, background or streaming responses,
+fallbacks, persisted conversation, metadata, and prompt-cache identifiers. It
+allows one concurrent call and one total call per cell, caps output at 128
+tokens and input at 32 KiB, times out at 120 seconds, and disables both OpenAI
+SDK and Inspect retries. A Jinn resume is a distinct execution attempt.
+
+The broker uses Inspect's public `ModelAPI` extension and returns Inspect's
+public `(ModelOutput, ModelCall)` form. The genuine `.eval` transcript therefore
+contains the upstream request and sanitized Responses body, never a synthesized
+log. Local-Python process separation is not a hostile-code sandbox; it remains
+a trusted compatibility path, and provider-backed arms are refused there.
+
+ChatGPT/Codex subscription authentication remains unsupported. Inspect SWE's
+Codex bridge does not reuse a local ChatGPT subscription, and mounting Codex
+state into task code is outside this security contract.
+
+Luna currently exposes only the mutable alias `gpt-5.6-luna`, not a dated
+snapshot. Jinn locks that identifier and rejects a different returned model,
+but cannot prove that OpenAI did not update weights behind an unchanged alias.
+See the official [Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna),
+[latest-model guidance](https://developers.openai.com/api/docs/guides/latest-model),
+and [synchronous cancellation/background behavior](https://developers.openai.com/api/docs/guides/background).
 
 ## Native logs, publication, and Inspect View
 

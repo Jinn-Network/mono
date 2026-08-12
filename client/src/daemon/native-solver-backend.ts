@@ -22,6 +22,7 @@ import {
   makeDirProvisioner,
   type WorkspaceRuntimePorts,
 } from '@jinn-network/task-execution-workspace';
+import { buildInfo } from '../build-info.js';
 import type { NativeLauncherCapabilityPort } from './native-claim-policy.js';
 import type { RoleIdentitySet } from './role-identities.js';
 
@@ -136,8 +137,12 @@ export async function buildNativeSolverBackend(input: NativeSolverBackendInput):
   const launcher = predictionV1BaselineLauncher;
   const config: LocalTaskExecutionBackendConfig = {
     stateRoot: input.stateRoot,
+    // `source` and `executor` must be distinct graph identities when evidence capture is
+    // enabled (#36) -- `composition-root.ts` and `native-evaluator-assembly.ts` follow the same
+    // convention: `executor` is the runtime that ran the attempt, `source` is the persistent
+    // operator/agent identity it ran as.
     source: input.roles.agent,
-    executor: input.roles.agent,
+    executor: `urn:jinn:operator-runtime:${buildInfo.implVersion}`,
     profileStore: profileStore(),
     launchers: [launcher],
     launcherDeployments: { [launcher.id]: deployment },

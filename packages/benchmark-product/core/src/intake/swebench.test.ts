@@ -42,12 +42,12 @@ function catchError(fn: () => unknown): BenchmarkProductError {
 describe("convertSweBenchRows", () => {
   test("the golden row converts to a sealed benchmark with one item, deterministically", () => {
     const first = convertSweBenchRows([GOLDEN_ROW], OPTS);
-    expect(first.tasks).toHaveLength(1);
-    expect(first.benchmark.record.items).toHaveLength(1);
+    expect(first.imported.tasks).toHaveLength(1);
+    expect(first.imported.benchmark.record.items).toHaveLength(1);
 
     const second = convertSweBenchRows([GOLDEN_ROW], OPTS);
-    expect(second.benchmark.digest).toBe(first.benchmark.digest);
-    expect(second.tasks[0]?.digest).toBe(first.tasks[0]?.digest);
+    expect(second.imported.benchmark.digest).toBe(first.imported.benchmark.digest);
+    expect(second.imported.tasks[0]?.digest).toBe(first.imported.tasks[0]?.digest);
   });
 
   test("the same row twice in one file refuses validation naming benchmark-item-distinctness", () => {

@@ -226,7 +226,9 @@ function makeStatement(
   return statement as unknown as Record<string, unknown>;
 }
 
-function makeFixture(): {
+function makeFixture(
+  options: { readonly respellReceipt?: (bytes: Uint8Array) => Uint8Array } = {},
+): {
   input: VerdictObservationGateInput;
   statement: Record<string, unknown>;
 } {
@@ -281,10 +283,16 @@ function makeFixture(): {
     predicateType: "https://spec.jinn.network/attestations/admission-receipt/v1",
     predicate: { issuer: ADMISSION_AGENT },
   };
-  const receiptEnvelopeBytes = signedEnvelope(
+  const canonicalReceiptEnvelopeBytes = signedEnvelope(
     canonicalJsonBytes(admissionStatement),
     ADMISSION_KEY,
   );
+  // Producer drift is SELF-CONSISTENT: the descriptor below binds whatever bytes come out of
+  // here, so a re-spelled receipt still satisfies the carried-digest check and still carries a
+  // valid signature. The encoding gate is then the only check that can catch it -- which is
+  // precisely the defect-#34 shape, and why a digest-only test would prove nothing here.
+  const receiptEnvelopeBytes =
+    options.respellReceipt?.(canonicalReceiptEnvelopeBytes) ?? canonicalReceiptEnvelopeBytes;
   const receiptDescriptor = {
     name: "admission-receipt",
     digest: { sha256: documentDigest(receiptEnvelopeBytes).slice("sha256:".length) },
@@ -382,6 +390,25 @@ function withStatement(
   };
 }
 
+/**
+ * Re-spells an envelope in the exact defect-#34 encoding: structurally identical, emitted by
+ * plain `JSON.stringify` in `payloadType, payload, signatures` insertion order instead of the
+ * sole producer's code-unit-sorted compact JCS bytes. Signatures stay valid; only the envelope's
+ * own byte encoding differs.
+ */
+function nonCanonicalSpelling(envelopeBytes: Uint8Array): Uint8Array {
+  const envelope = JSON.parse(new TextDecoder().decode(envelopeBytes)) as {
+    payloadType: string;
+    payload: string;
+    signatures: unknown[];
+  };
+  return new TextEncoder().encode(JSON.stringify({
+    payloadType: envelope.payloadType,
+    payload: envelope.payload,
+    signatures: envelope.signatures,
+  }));
+}
+
 describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
   test("maps only the conforming Result Evaluation vocabulary with no Invalid default (§7.41)", () => {
     expect(decisionGradeVerdictCode("pass")).toBe(VerdictCode.Pass);
@@ -432,11 +459,46 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     });
   });
 
+  // The last loose read on this gate (residual named in the previous PR). Unlike the two above,
+  // this one is not a `parseDsseEnvelope` swap -- it parsed via a Zod envelope SHAPE, which
+  // accepts any JSON spelling. The receipt here is fully self-consistent: carried digest matches,
+  // signature valid, only the encoding differs, so nothing but an encoding gate can refuse it.
+  test("refuses a self-consistent admission receipt that is not the exact producer encoding", async () => {
+    const fixture = makeFixture({ respellReceipt: nonCanonicalSpelling });
+    expect(await gateVerdictObservation(fixture.input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{
+        check: "admission-receipt",
+        detail: expect.stringContaining("exact producer encoding") as unknown as string,
+      }],
+    });
+  });
+
   test("fails an admission receipt whose signer has no admission-agent binding", async () => {
     const fixture = makeFixture();
     expect(await gateVerdictObservation(fixture.input, makePorts(ADMISSION_KEY))).toEqual({
       decisionGrade: false,
       failures: [{ check: "admission-receipt", detail: expect.any(String) }],
+    });
+  });
+
+  // Defect-#34 class. This gate's structural verdict parse was loose, so its ONLY encoding
+  // guarantee came from whichever `dsseVerifier` the composition happened to inject -- a gate
+  // that owns a fail-closed decision must not depend on a port for that. `makePorts`'s verifier
+  // is deliberately loose (it accepts any structurally-parseable envelope), so before this check
+  // the gate granted full decision-grade to bytes the real strict verifier refuses.
+  test("refuses a validly-signed verdict envelope that is not the exact producer encoding", async () => {
+    const fixture = makeFixture();
+    const input = {
+      ...fixture.input,
+      verdict: {
+        ...fixture.input.verdict,
+        envelopeBytes: nonCanonicalSpelling(fixture.input.verdict.envelopeBytes),
+      },
+    };
+    expect(await gateVerdictObservation(input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "verdict-envelope", detail: expect.any(String) }],
     });
   });
 
@@ -617,6 +679,24 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
           fixture.input.settlement.subjectSubmissionBytes,
           REQUESTER_KEY,
         ),
+      },
+    };
+    expect(await gateVerdictObservation(input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "requester-authentication", detail: expect.any(String) }],
+    });
+  });
+
+  // Same encoding floor as the verdict envelope above -- the requester Submission envelope is
+  // sealed by the sole canonical producer (`native-requester`'s `sealDsseEnvelope`), so an
+  // alternate spelling is never legitimate here either.
+  test("refuses a validly-signed requester envelope that is not the exact producer encoding", async () => {
+    const fixture = makeFixture();
+    const input = {
+      ...fixture.input,
+      requesterAuthentication: {
+        ...fixture.input.requesterAuthentication,
+        envelopeBytes: nonCanonicalSpelling(fixture.input.requesterAuthentication.envelopeBytes),
       },
     };
     expect(await gateVerdictObservation(input, makePorts())).toEqual({

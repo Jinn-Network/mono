@@ -16,7 +16,26 @@ const text = (value: string) => new TextEncoder().encode(value);
 const ATTEMPT = "urn:uuid:00000000-0000-4000-8000-000000000030" as const;
 const EVALUATOR = "https://agents.example/evaluator";
 
-function fixture() {
+/**
+ * Re-spells an envelope in the exact defect-#34 encoding: structurally identical, but emitted by
+ * plain `JSON.stringify` in `payloadType, payload, signatures` insertion order rather than the
+ * sole producer's code-unit-sorted compact JCS bytes. Every signature stays valid -- only the
+ * envelope's own byte encoding differs, which is the whole point.
+ */
+function nonCanonicalSpelling(envelopeBytes: Uint8Array): Uint8Array {
+  const envelope = JSON.parse(new TextDecoder().decode(envelopeBytes)) as {
+    payloadType: string;
+    payload: string;
+    signatures: unknown[];
+  };
+  return text(JSON.stringify({
+    payloadType: envelope.payloadType,
+    payload: envelope.payload,
+    signatures: envelope.signatures,
+  }));
+}
+
+function fixture(options: { readonly respellVerdict?: (bytes: Uint8Array) => Uint8Array } = {}) {
   const task = exact("task", text("exact-task"));
   const result = exact("prediction", text("exact-result"));
   const solutionEvidence = exact("solution-evidence", text("solution-evidence"));
@@ -40,7 +59,7 @@ function fixture() {
     results: [result],
     evaluationSpec: exact("evaluation-spec", text("evaluation-spec")),
   };
-  const verdictEnvelope = buildVerdictEnvelope({
+  const canonicalVerdictBytes = buildVerdictEnvelope({
     _type: IN_TOTO_STATEMENT_TYPE,
     subject: [
       { name: "task", digest: { sha256: task.digest.slice(7) } },
@@ -55,7 +74,9 @@ function fixture() {
       verdict: "pass",
     },
   }, [{ keyid: "did:key:evaluator", sig: "c2ln" }]);
-  const verdictBytes = text(JSON.stringify(verdictEnvelope));
+  // The Delivery below binds whatever bytes come out of here, so a re-spelled verdict stays
+  // digest-consistent with its own Delivery -- the ONLY thing that differs is the encoding.
+  const verdictBytes = options.respellVerdict?.(canonicalVerdictBytes) ?? canonicalVerdictBytes;
   const evaluationEvidence = exact("evaluation-evidence", text("evaluation-evidence"));
   const derivedTaskBytes = text("exact-derived-task");
   const derivedTaskDigest = documentDigest(derivedTaskBytes);
@@ -161,6 +182,20 @@ describe("buildNativeEvaluatorVerdictVerification", () => {
     row.bytes = pretty;
     row.digest = documentDigest(pretty);
     const deps = dependencies();
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(input))
+      .resolves.toEqual({ ok: false, reason: "evaluation-record-graph-invalid" });
+    expect(deps.gate).not.toHaveBeenCalled();
+  });
+
+  // Defect-#34 class: the verdict envelope's authority-bearing consumer is the STRICT
+  // `parseExactDsseEnvelope` (cross-operator, via `verifyNativeDsse`). Reading it here with the
+  // loose parser meant this operator's own pre-settlement path derived a verdict code from an
+  // encoding the strict verifier would refuse -- so the refusal surfaced only later, as an
+  // opaque `named-verdict-gate:settlement-join` signature failure, exactly the misleading symptom
+  // that cost defect #34 a live round of debugging. Refuse at the graph step, before any gate call.
+  it("rejects a validly-signed verdict envelope in a non-canonical encoding before any gate call", async () => {
+    const deps = dependencies();
+    const input = fixture({ respellVerdict: nonCanonicalSpelling });
     await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(input))
       .resolves.toEqual({ ok: false, reason: "evaluation-record-graph-invalid" });
     expect(deps.gate).not.toHaveBeenCalled();

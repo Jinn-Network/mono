@@ -278,6 +278,7 @@ export function runQuote(
       let quote: QuoteReport;
       let capabilities: BackendCapabilities;
       try {
+        await venue.preflightRun?.();
         capabilities = await venue.backend.capabilities();
         quote = quoteRun(compiled.benchmarkRecord, compiled.plannedRun.record, capabilities);
       } finally {

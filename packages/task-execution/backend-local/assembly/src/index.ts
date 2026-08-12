@@ -9,6 +9,8 @@ export type {
   LocalTaskExecutionBackendConfig,
   ProvisionerCapabilities,
 } from "./backend.js";
+export { deliveryOutputsFromHarvest } from "./delivery-outputs.js";
+export type { DeliveryOutput } from "./delivery-outputs.js";
 export { assembleCapabilities } from "./capabilities.js";
 export type {
   AssembleCapabilitiesInput,

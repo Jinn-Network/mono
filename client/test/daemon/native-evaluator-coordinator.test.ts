@@ -403,6 +403,78 @@ describe("NativeEvaluatorCoordinator", () => {
     expect(audit?.detail_json ?? "").toContain("executor-settlement-binding-failed");
   });
 
+  /**
+   * #36. The evaluator backend refused evidence capture deterministically and appended a terminal
+   * carrying blame/category/detail. The derived projection keeps only `state`, and the coordinator
+   * recorded only the failure CODE — so the sentence naming the actual refusal reached neither the
+   * audit row nor the daemon log, and had to be recovered from the attempt journal on disk.
+   */
+  it("surfaces a backend terminal's own blame, category, and detail into the failure reason (#36)", async () => {
+    const { store, state, id } = setup();
+    const claimTx = { hash: `0x${"3".repeat(64)}`, blockNumber: 101n, blockHash: `0x${"4".repeat(64)}` };
+    const detail = "evidence capture start failed: Graph identity urn:uuid:44cfb891 "
+      + "is reused for incompatible contextual roles.";
+    let attemptOpened = false;
+    const coordinator = new NativeEvaluatorCoordinator({
+      state,
+      backend: {
+        recover: async () => ({ classification: "absent" }),
+        submit: async () => ({ accepted: true }) as never,
+        observe: async () => ({
+          descriptor: { derived: { terminal: true, state: "failed" } },
+          observations: [{
+            type: "network.jinn.task-execution.attempt-terminal.v1",
+            sequence: "0000000000000002",
+            data: {
+              state: "failed",
+              blame: "infrastructure",
+              category: "dependency-unavailable",
+              detail,
+            },
+          }],
+        }) as never,
+      } as never,
+      authority: { claim: async () => { throw new Error("authority was already persisted"); }, dependencies: {} as never },
+      deadline: () => "2026-08-03T00:00:00Z",
+      evaluatorAddress,
+      verdictPorts: {
+        canOpenVerdictAttempt: async () => ({ ok: true }),
+        openVerdictAttempt: async ({ operationId }: { operationId: string }) => {
+          attemptOpened = true;
+          return { operationId, requestId, verdictIndex: 0, transaction: claimTx };
+        },
+        readCanonicalVerdictAttempt: async () => attemptOpened ? ({
+          taskId: 7n,
+          attemptIndex: 1,
+          verdictIndex: 0,
+          requestId,
+          evaluator: evaluatorAddress,
+          transaction: { ...claimTx, logIndex: 1 },
+        }) : undefined,
+      } as never,
+      chain: { isFinalized: async () => true, transactionStatus: async () => ({ kind: "canonical" }) },
+      deliverySignature: {} as never,
+      evidence: {} as never,
+      publisher: {} as never,
+      verification: {} as never,
+      retry: { now: () => new Date("2026-08-02T12:00:00Z"), delayMs: 5_000 },
+    });
+
+    const result = await coordinator.reconcileEvaluation(id);
+    const reason = (result as { reason: string }).reason;
+    expect(reason).toContain("evaluation-backend-terminal");
+    expect(reason).toContain("blame=infrastructure");
+    expect(reason).toContain("category=dependency-unavailable");
+    expect(reason).toContain("reused for incompatible contextual roles");
+    // The daemon's own log line (EvaluatorLoop) and the durable audit both read this one string.
+    const audit = store.db
+      .prepare(
+        "SELECT detail_json FROM native_evaluation_audit WHERE evaluation_id = ? AND kind IN ('evaluation-failed-terminal', 'evaluation-paused')",
+      )
+      .get(id) as { detail_json: string } | undefined;
+    expect(audit?.detail_json ?? "").toContain("reused for incompatible contextual roles");
+  });
+
   it("retries (never terminalizes) a TRANSIENT subject-authority read failure, surfacing its reason", async () => {
     const { store, state, id } = setup();
     store.db.prepare("DELETE FROM native_evaluation_authority WHERE evaluation_id = ?").run(id);

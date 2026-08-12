@@ -8,13 +8,18 @@ import type {
   VerdictPorts,
   VerdictTransactionIdentity,
 } from "@jinn-network/marketplace-venue-base";
-import type { TaskExecutionBackend, TwoPartyEngagement } from "@jinn-network/task-execution-backend";
+import type {
+  ObservationSnapshot,
+  TaskExecutionBackend,
+  TwoPartyEngagement,
+} from "@jinn-network/task-execution-backend";
 import {
   DeliveryRecordSchema,
   SubmissionRecordSchema,
   documentDigest,
   serializeCanonicalJson,
   type DeliveryRecord,
+  type ProtocolObservation,
 } from "@jinn-network/task-execution-protocol";
 import { deriveNativeEvaluation } from "../evaluator/native-evaluation-derivation.js";
 import {
@@ -91,6 +96,34 @@ function parseJson(bytes: Uint8Array, label: string): unknown {
   } catch (cause) {
     throw new EvaluatorCoordinatorFailure("invalid-exact-record", `${label}: ${String(cause)}`);
   }
+}
+
+/**
+ * The backend's OWN cause for a non-delivered terminal, read off the authoritative
+ * `attempt-terminal` observation. The derived projection keeps only `state` and `blame`, so the
+ * `category` and the `detail` — the actual sentence naming what refused — reach no consumer
+ * unless they are lifted here (#36). Without this, a deterministic backend refusal recorded a
+ * bare bucket in `native_evaluation_audit` and in the daemon log, and the real reason survived
+ * only in the attempt journal on the operator's disk.
+ */
+function backendTerminalDetail(snapshot: ObservationSnapshot): string {
+  const { state } = snapshot.descriptor.derived;
+  const terminal = [...snapshot.observations ?? []]
+    .filter((observation): observation is Extract<
+      ProtocolObservation,
+      { type: "network.jinn.task-execution.attempt-terminal.v1" }
+    > => observation.type === "network.jinn.task-execution.attempt-terminal.v1")
+    .filter(({ data }) => data.state === state)
+    // §10.4 rules 4/6 both resolve to the first terminal in sequence order for a diagnostic read.
+    .sort((left, right) => (left.sequence < right.sequence ? -1 : left.sequence > right.sequence ? 1 : 0))[0];
+  if (terminal === undefined) return state;
+  const { blame, category, detail } = terminal.data;
+  const head = [
+    state,
+    ...(blame === undefined ? [] : [`blame=${blame}`]),
+    ...(category === undefined ? [] : [`category=${category}`]),
+  ].join(" ");
+  return detail === undefined ? head : `${head}: ${detail}`;
 }
 
 /**
@@ -223,10 +256,14 @@ export class NativeEvaluatorCoordinator {
         this.input.state.recordEvaluationFailed(id, reason);
         return { kind: "failed", reason };
       }
+      // `.message`, not `.reason`: the code alone is the bucket that made #36's real cause
+      // ("evidence capture start failed: Graph identity ... is reused for incompatible
+      // contextual roles") reachable only by reading the attempt journal off disk. The message
+      // is the code when there is no detail, so codeless failures read exactly as before.
       const reason = cause instanceof NativeSubjectAuthorityError
         ? `native-subject-authority-unavailable: ${cause.message}`
         : cause instanceof EvaluatorCoordinatorFailure
-          ? cause.reason
+          ? cause.message
           : "evaluator-dependency-failed";
       if ((cause instanceof EvaluatorCoordinatorFailure && !cause.retryable)
         || cause instanceof NativeEvaluatorStateConflictError
@@ -406,7 +443,7 @@ export class NativeEvaluatorCoordinator {
     const snapshot = await this.input.backend.observe(derived.attemptUri);
     if (!snapshot.descriptor.derived.terminal) return { kind: "evaluating" };
     if (snapshot.descriptor.derived.state !== "delivered") {
-      throw new EvaluatorCoordinatorFailure("evaluation-backend-terminal", snapshot.descriptor.derived.state);
+      throw new EvaluatorCoordinatorFailure("evaluation-backend-terminal", backendTerminalDetail(snapshot));
     }
     await this.resolveVerdictGraph(evaluation.evaluationId);
     return { kind: "verdict-ready" };

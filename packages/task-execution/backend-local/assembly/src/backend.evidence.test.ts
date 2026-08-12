@@ -341,6 +341,48 @@ describe("backend evidence capture posture (C3)", () => {
     expect("workKind" in seen[0]!).toBe(false);
     expect("requestId" in seen[0]!).toBe(false);
   });
+
+  /**
+   * #36. A recording's `producer` descriptor is derived from `source` and its `executor`
+   * descriptor from `executor`, under two different names — so one identity in both roles makes
+   * the recorder refuse EVERY attempt this backend starts. Pre-guard that stayed latent until
+   * the first live attempt, where it surfaced as an opaque `dependency-unavailable` terminal
+   * 122ms in. Refuse at construction so the composition, not the grade, is what breaks.
+   */
+  test("refuses construction when source and executor are one identity and capture is on (#36)", async () => {
+    const reused = "urn:uuid:44cfb891-0000-4000-8000-0000000000ff";
+    const config = (
+      recorderAvailability: LocalTaskExecutionBackendConfig["recorderAvailability"],
+      executor: string,
+      root: string,
+    ): LocalTaskExecutionBackendConfig => ({
+      stateRoot: root,
+      source: reused,
+      executor,
+      profileStore,
+      launchers: [],
+      provisioner: () => { throw new Error("not used"); },
+      provisionerCapabilities: {
+        taskProfiles: [profile.profile],
+        workspaceKinds: ["dir"],
+        inputMediaTypes: ["application/json"],
+        outputMediaTypes: ["text/x-diff"],
+        isolation: ["process"],
+      },
+      recorderAvailability,
+    });
+
+    const always = config("always", reused, await stateRoot());
+    const available = config("available", reused, await stateRoot());
+    const distinct = config("always", "urn:jinn:operator-runtime:0.2.2", await stateRoot());
+    const captureOff = config("none", reused, await stateRoot());
+
+    expect(() => makeLocalTaskExecutionBackend(always)).toThrow(/source and executor must be distinct/);
+    expect(() => makeLocalTaskExecutionBackend(available)).toThrow(/source and executor must be distinct/);
+    // Distinct identities construct; so does a capture-free backend, which records no graph.
+    backends.push(makeLocalTaskExecutionBackend(distinct));
+    backends.push(makeLocalTaskExecutionBackend(captureOff));
+  });
 });
 
 // ── Finding E31: real executor delivery signing ──────────────────────────────────────────────

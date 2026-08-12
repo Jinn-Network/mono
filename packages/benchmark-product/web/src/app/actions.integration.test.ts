@@ -8,6 +8,7 @@ import {
   PRINCIPAL_ENV,
   readRunDriverTestingDeps,
   readProductServerConfiguration,
+  openAIConnectionReadiness,
   TEST_SOLVE_DELAY_MS_ENV,
   WORKSPACE_ENV,
 } from "@/lib/server/product-context";
@@ -134,6 +135,13 @@ describe.sequential("server action layer against a real workspace", () => {
     });
     expect(configuration).toEqual({ workspaceDir: workspace, principal: "sponsor-1" });
     expect(JSON.stringify(configuration)).not.toContain("PRIVATE KEY");
+  });
+
+  test("OpenAI readiness exposes only a configured bit", () => {
+    expect(openAIConnectionReadiness({})).toBe("not-configured");
+    expect(openAIConnectionReadiness({ BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE: "/private/path/key" })).toBe("configured");
+    expect(JSON.stringify(openAIConnectionReadiness({ BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE: "/private/path/key" })))
+      .not.toContain("/private/path/key");
   });
 
   test("the browser workspace view never exposes its absolute server path or ambient secret sentinel", () => {
