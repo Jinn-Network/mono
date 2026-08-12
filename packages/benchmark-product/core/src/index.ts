@@ -77,6 +77,29 @@ export type {
   InspectRuntimeSelectionResolution,
 } from "./runtime/host-port.js";
 
+// Demo-1's explicit real-Claude runtime and byte-preserving arm construction. The product does
+// not discover executables or source content ambiently; callers bind both before lock.
+export {
+  DEMO1_CLAUDE_EFFORT,
+  DEMO1_CLAUDE_HARNESS_ID,
+  DEMO1_CLAUDE_MODEL_ID,
+  DEMO1_CLAUDE_MD_PATH,
+  DEMO1_EXPERIMENT_PATHS,
+  DEMO1_SKILL_PATH,
+  createDemo1ClaudeRuntimeBinding,
+  demo1ClaudeArmRequirements,
+  generateDemo1InstructionArtifacts,
+} from "./venue/demo1-claude.js";
+export type {
+  Demo1ClaudeArm,
+  Demo1ClaudeCommand,
+  Demo1ClaudeReadiness,
+  Demo1ClaudeRuntimeBinding,
+  Demo1ClaudeRuntimeOptions,
+  Demo1InstructionArtifacts,
+  Demo1SkillFrontmatter,
+} from "./venue/demo1-claude.js";
+
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
 export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/workspace.js";
 export type { WorkspaceMetadata } from "./workspace/workspace.js";
