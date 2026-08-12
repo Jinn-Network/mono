@@ -66,6 +66,12 @@ type RunAnalysisPlanEntry = NonNullable<RunRecord["analysisPlan"]>[number];
  * would otherwise seal into an immutable Run and only fail at `report` time — after the run has
  * been executed and paid for.
  */
+/** `analysis.parameters` keys `buildAnalysisPlan` always derives itself — from the draft's
+ * resolved `verdictRule` and the validated `analysis.baseline`/`analysis.candidate` — never from
+ * caller-supplied `parameters`. A caller setting one of these is expressing a misunderstanding of
+ * how the plan is assembled and must be told, not silently overridden or silently stripped. */
+const RESERVED_ANALYSIS_PARAMETER_KEYS = ["verdictRule", "baseline", "candidate"] as const;
+
 function buildAnalysisPlan(spec: DraftSpec, verdictRule: ResolvedAssurance["verdictRule"]): RunAnalysisPlanEntry[] {
   const wilson: RunAnalysisPlanEntry = {
     method: BENCHMARKING_METHOD_IDS.wilson,
@@ -73,7 +79,27 @@ function buildAnalysisPlan(spec: DraftSpec, verdictRule: ResolvedAssurance["verd
     parameters: { verdictRule },
   };
   const analysis = spec.analysis;
-  if (analysis === undefined || analysis.method === BENCHMARKING_METHOD_IDS.wilson) return [wilson];
+  if (analysis === undefined) return [wilson];
+
+  if (analysis.method === BENCHMARKING_METHOD_IDS.wilson) {
+    // An explicit wilson selection must refuse loudly on anything it can't honor, same as every
+    // other malformed input in this function — it must not be the one silent exception.
+    if (analysis.version !== BENCHMARKING_METHOD_VERSION) {
+      refuse(
+        "validation",
+        "spec.analysis.version",
+        `analysis.version "${analysis.version}" does not match the registered wilson method's version "${BENCHMARKING_METHOD_VERSION}"`,
+      );
+    }
+    if (analysis.parameters !== undefined && Object.keys(analysis.parameters).length > 0) {
+      refuse(
+        "validation",
+        "spec.analysis.parameters",
+        `analysis.parameters must be empty for an explicit wilson selection — its verdictRule parameter is always derived from the draft's resolved assurance, never caller-supplied`,
+      );
+    }
+    return [wilson];
+  }
 
   const method = BENCHMARKING_METHOD_REGISTRY.get(analysis.method, analysis.version);
   if (method === undefined) {
@@ -81,6 +107,16 @@ function buildAnalysisPlan(spec: DraftSpec, verdictRule: ResolvedAssurance["verd
   }
   if (method.computeAvailability !== "available") {
     refuse("validation", "spec.analysis", `analysis.method "${analysis.method}@${analysis.version}" is registered but its compute is unavailable`);
+  }
+
+  const suppliedParameters = analysis.parameters ?? {};
+  const reservedKeysPresent = RESERVED_ANALYSIS_PARAMETER_KEYS.filter((key) => key in suppliedParameters);
+  if (reservedKeysPresent.length > 0) {
+    refuse(
+      "validation",
+      "spec.analysis.parameters",
+      `analysis.parameters may not set reserved key(s) ${reservedKeysPresent.join(", ")} — these are derived from analysis.baseline/analysis.candidate and the draft's resolved verdictRule, not caller-supplied`,
+    );
   }
 
   const armIds = new Set(spec.arms.map((arm) => arm.armId));
@@ -102,7 +138,7 @@ function buildAnalysisPlan(spec: DraftSpec, verdictRule: ResolvedAssurance["verd
     verdictRule,
     ...(analysis.baseline === undefined ? {} : { baseline: analysis.baseline }),
     ...(analysis.candidate === undefined ? {} : { candidate: analysis.candidate }),
-    ...(analysis.parameters ?? {}),
+    ...suppliedParameters,
   };
   const validated = method.validateParameters(parameters);
   if (!validated.ok) {

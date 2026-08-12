@@ -462,4 +462,131 @@ describe("compileDraft — analysis selection", () => {
       expect((cause as BenchmarkProductError).message).toMatch(/alpha/i);
     }
   });
+
+  test.each(["verdictRule", "baseline", "candidate"] as const)(
+    "refuses analysis.parameters carrying the reserved key %s (it would silently override a validated value)",
+    async (reservedKey) => {
+      const clock = makeClock();
+      const draftId = await setUpDraftWithSample(clock);
+      addTwoDistinctArms(clock, draftId);
+      const document = readDraftDocument(workspaceDir, draftId);
+      const analysis = {
+        method: "jinn.benchmarking.method/paired-delta",
+        version: "1",
+        baseline: "baseline",
+        candidate: "sample",
+        parameters: { seed: 1, resamples: 10, alpha: "0.05", [reservedKey]: "override-attempt" },
+      };
+
+      try {
+        compileDraft({
+          workspaceDir,
+          draft: { ...document, spec: { ...document.spec, analysis } },
+          owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+          closeAt: "2026-08-06T00:00:00Z",
+        });
+        expect.unreachable("expected a refusal");
+      } catch (cause) {
+        expect(cause).toBeInstanceOf(BenchmarkProductError);
+        const error = cause as BenchmarkProductError;
+        expect(error.code).toBe("validation");
+        // `buildAnalysisPlan` is invoked as an argument expression inside `planFromSpec`'s
+        // planRun try/catch (compile.ts), so its own `refuse(..., "spec.analysis.parameters", ...)`
+        // path is caught and re-wrapped under the generic "spec" path — the message is preserved
+        // verbatim, which is what every other buildAnalysisPlan-refusal test in this file already
+        // asserts on rather than the wrapped path.
+        expect(error.message).toContain(reservedKey);
+      }
+    },
+  );
+});
+
+describe("compileDraft — explicit wilson selection", () => {
+  test("an explicit wilson selection matching the registered version and carrying no parameters succeeds like the default", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    const analysis = { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION };
+
+    const compiled = compileDraft({
+      workspaceDir,
+      draft: { ...document, spec: { ...document.spec, analysis } },
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+    });
+
+    expect(compiled.plannedRun.record.analysisPlan).toEqual([
+      { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
+    ]);
+  });
+
+  test("refuses an explicit wilson selection whose version does not match the registry's current version", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    const analysis = { method: BENCHMARKING_METHOD_IDS.wilson, version: "99" };
+
+    try {
+      compileDraft({
+        workspaceDir,
+        draft: { ...document, spec: { ...document.spec, analysis } },
+        owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+        closeAt: "2026-08-06T00:00:00Z",
+      });
+      expect.unreachable("expected a refusal");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(BenchmarkProductError);
+      const error = cause as BenchmarkProductError;
+      expect(error.code).toBe("validation");
+      // See the reserved-key test above: buildAnalysisPlan's own path is wrapped to "spec" by
+      // planFromSpec's catch; the message is what carries the detail.
+      expect(error.message).toMatch(/version/i);
+    }
+  });
+
+  test("refuses an explicit wilson selection carrying a non-empty parameters object", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    const analysis = { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { seed: 1 } };
+
+    try {
+      compileDraft({
+        workspaceDir,
+        draft: { ...document, spec: { ...document.spec, analysis } },
+        owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+        closeAt: "2026-08-06T00:00:00Z",
+      });
+      expect.unreachable("expected a refusal");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(BenchmarkProductError);
+      const error = cause as BenchmarkProductError;
+      expect(error.code).toBe("validation");
+      // See the reserved-key test above: buildAnalysisPlan's own path is wrapped to "spec" by
+      // planFromSpec's catch; the message is what carries the detail.
+      expect(error.message).toMatch(/parameters/i);
+    }
+  });
+
+  test("a draft with no analysis block at all stays on the silent backward-compatible default", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    expect(document.spec.analysis).toBeUndefined();
+
+    const compiled = compileDraft({
+      workspaceDir,
+      draft: document,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+    });
+
+    expect(compiled.plannedRun.record.analysisPlan).toEqual([
+      { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
+    ]);
+  });
 });
