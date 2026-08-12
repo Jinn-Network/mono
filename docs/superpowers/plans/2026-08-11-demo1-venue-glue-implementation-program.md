@@ -27,9 +27,9 @@ The operator approved completion through the **publication boundary**, not netwo
 Additional locked constraints:
 
 - P2 binds `claude-haiku-4-5-20251001` at `high` effort through a real product-owned inventory. It must support a true no-file arm C without falsely earning loadout `match`.
-- P2 makes `SKILL.md` and `AGENTS.md` from one frozen source body, materializes both through the same digest-verifying path, proves the loader-visible placement, and symmetrically excludes experiment-created instruction files from harvested patches. If that requires a platform-semantics change, the packet stops for operator review.
-- P2b removes fabricated admission readiness; only real `verifyRunPinning` evidence may yield Matrix `match`.
-- P3 is split into P3a (the pinned OCI grader package) and P3b (the benchmark-product binding). P3b seals test material, image, parser, timeout, and grader-program identities and pre-stages images for `--pull never` grading.
+- P2 deterministically generates `SKILL.md` and `AGENTS.md` from one literal frozen `source.md`; their instruction bodies are byte-identical. It materializes both through the same digest-verifying path, proves loader-visible placement, symmetrically excludes experiment-created instruction files from harvested patches, and proves normalized extracted patches byte-identical to no-loadout controls. If that requires a platform-semantics change, the packet stops for operator review.
+- P2b removes fabricated admission readiness; only real `verifyRunPinning` evidence and its references may yield Matrix `match`. Missing proof remains `unverifiable`; contradictory proof remains `mismatch`.
+- P3 is split into P3a (the pinned OCI grader package) and P3b (the benchmark-product binding). P3b owns the product dependency, boundary, and build-order edge; seals test material, image, parser, timeout, and grader-program identities; pre-stages images for `--pull never` grading; keeps grader networking disabled unless declared; and re-mints the P5 fixture after the final material contract lands.
 - Before the first canary publication of `@jinn-network/task-execution-oci-grader`, verify the npm-side trusted-publisher binding for this repository's protected `npm-publish` workflow. Repository configuration alone is not proof of the npm-side binding; if it cannot be verified, stop for operator action. Stable publication is not required by this program.
 - P5 remains a 3-task × 2-arm × 2-replicate **plumbing** gate and starts only with at least 40 GiB free. It proves all twelve cells accounted, gold PASS / empty FAIL, three repository clusters, and `draws === resamples × clusterCount`; it does not estimate capability.
 - The subsequent three-arm official design has a hard ceiling of 600 cells. The engineering packets must not bake in a larger run or automatic post-lock top-ups.
@@ -181,12 +181,18 @@ Verified blockers this packet exists to clear:
    loadout digests; `verifyRunPinning` passes for a fully-pinned arm and
    **rejects** a wrong model id / wrong loadout digest (negative tests).
 3. Two byte-identical-except-loadout arms lock, dispatch, and the launcher
-   receives the materialized skill at `input/<canonical loadout path>`;
-   argv carries `--plugin-dir`.
+   receives deterministic `SKILL.md` and `AGENTS.md` artifacts generated
+   from one literal frozen `source.md`. Their instruction bodies are
+   byte-identical, both traverse the same digest-verifying materialization
+   path, and argv carries the loader-visible placement.
 4. Per-axis pinning verification reaches `match` on harness/model/loadout
    for both arms in a kit test (real `verifyRunPinning` result, not
    fabricated — see P2b).
-5. Platform pin-inventory tests untouched (`loadout-inventory.test.ts`,
+5. Experiment-created instruction files are excluded symmetrically from
+   patch extraction, and each normalized extracted patch is byte-identical
+   to its no-loadout control. A true no-file arm is supported without
+   claiming its loadout axis is verified.
+6. Platform pin-inventory tests untouched (`loadout-inventory.test.ts`,
    `real-launchers.test.ts:31-35` exact ordered key lists).
 
 ### P2b — Truthful admission evidence (`fix(benchmark-product)`)
@@ -203,12 +209,16 @@ binding field).
 **Acceptance:**
 1. The real `verifyRunPinning` result (with `checkedRequirementsDigest`
    over the merged pinning map) is captured at submit time and forwarded
-   through assembly ports; fabricated admission removed.
-2. A submit-rejected cell can no longer surface as `match` (regression
+   with its evidence references through assembly ports and Matrix
+   derivation; fabricated admission removed.
+2. Tests cover real match, missing evidence → `unverifiable`, contradictory
+   evidence → `mismatch`, submit rejection, and dispatched-without-proof →
+   never `match`.
+3. A submit-rejected cell can no longer surface as `match` (regression
    test reproducing the current false-positive first).
-3. The prediction sample still reaches `match` on its harness axis — via
+4. The prediction sample still reaches `match` on its harness axis — via
    real evidence now.
-4. Disclosed in the packet PR as a fix with user-visible effect on
+5. Disclosed in the packet PR as a fix with user-visible effect on
    venue-honesty surfaces (`run-results.ts:88-94, 208-228`).
 
 ### P3 — Container grading bridge (`feat(task-execution)` + `feat(benchmark-product)`)
@@ -223,7 +233,8 @@ small.
   task-execution guard triplet + the 8-step edge checklist (worked
   example: BP-31 commit `670124427`) for benchmark-product-core → new
   package.
-- **P3b:** extend the venue's generated deployment module
+- **P3b:** add the product dependency plus its architecture boundary and
+  build-order entries, then extend the venue's generated deployment module
   (`venue.ts:283-328`, prediction-only today) to also emit a swe-rebench
   registration: `containerGraderReportSource` +
   `createSweRebenchEvaluatorRegistration` (both already exported by
@@ -237,7 +248,12 @@ but design-rejected; client also ships no exports map). Timeout authority
 = EvaluationSpec `block.timeout` (legacy env knobs are not on this path).
 Grader image = `client/deployments/evaluator/swe-rebench-v2-grader/`
 (PR #2558), digest-pinned (mutable tags refused by
-`container-grader-source.ts:181-201`).
+`container-grader-source.ts:181-201`). The parent pre-stages that digest and
+the child grades with `--pull never`; grader networking remains disabled
+unless the sealed specification explicitly declares it. P3b seals canonical
+`testMaterial`, task-image digest, parser identity, timeout, and grader-program
+digest into the run artifacts, then re-mints P5's fixture after this final
+material contract lands.
 
 **Acceptance:**
 1. New package green with spawner-injected tests (no Docker in CI);
@@ -278,17 +294,28 @@ reference-only — different stability obligations, never unified.
 
 ### P5 — End-to-end gate (`test(benchmark-product)`)
 
-**Acceptance:** a 2-arm × N-replicate micro-benchmark (2–3 SWE-shaped
-tasks from R5's slate) runs
+**Acceptance:** with at least 40 GiB free, exactly 3 SWE-shaped tasks from
+three repository clusters × 2 arms × 2 replicates run
 draft→import→arms→quote→lock→launch→collect→report→verify on the local
-venue with container grading, zero manual intervention; every expected
-cell accounted in the Matrix; per-axis `match` on harness/model/loadout
-via real admission evidence; `verifyMatrix`+`verifyReport` green; runbook
-committed (pattern: `docs/runbooks/launch-swe-rebench-v2.md`) with a
-recorded evidence artifact. R5 (slate recon) additionally delivers: 2–3
+venue with container grading and immutable local bundle emission, zero
+manual intervention; all 12 cells accounted in the Matrix; real per-axis
+evidence; `verifyMatrix` + `verifyReport` + bundle verification green;
+`draws === resamples × clusterCount`; and every task's gold patch passes
+while its empty patch fails in the real grader. The undersized micro-slate
+emits no interval and explicitly proves plumbing, not capability. A runbook
+and recorded evidence artifact are committed. R5 (slate recon) additionally delivers: 2–3
 candidate slates with license, freshness/contamination notes, per-task
 container runtime estimates, and pre-declared exclusion rules — feeding
 the eval-design stream (the sibling program).
+
+### P4b — Method-aware presentation compatibility (`feat(benchmark-product)`)
+
+P4b is additive: end-to-end coverage spans interval-present,
+interval-withheld (every native reason), and zero-pair reports. Full paired
+reports state Skill candidate minus AGENTS.md baseline, the interval, exact
+alpha `0.0500`, and paired task count; compact cards, badges, and share copy
+remain number-free and link relatively to the full report. Existing Wilson
+public-bundle bytes remain exactly unchanged.
 
 ## Test blast radius (program-wide "must stay green or change deliberately")
 
@@ -325,7 +352,7 @@ pinned literal is called out in the PR body with rationale.
 
 1. This program doc lands on its own branch/PR, not the #2551 GTM train.
 2. The operator merges each packet PR after independent review + CI green
-   (≤6 PRs).
+   (the approved P3a/P3b and P4b A/B splits expand the original six-PR estimate).
 3. P2b (the integrity fix) is in scope and blocking for the demo —
    pristine requires it.
 4. The eval-method stream (power analysis, red-team, lock, publication)
