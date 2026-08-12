@@ -53,6 +53,32 @@ function stringArray(value: unknown, label: string): string[] {
   return [...value] as string[];
 }
 
+function transitionIdentities(value: unknown, label: string): string[] {
+  const identities = stringArray(value, label);
+  const seen = new Set<string>();
+  for (const identity of identities) {
+    if (identity.length === 0) refuse(`${label} contains an empty transition identity`);
+    if (seen.has(identity)) refuse(`${label} contains a duplicate transition identity`);
+    seen.add(identity);
+  }
+  return identities;
+}
+
+function assertDisjointTransitions(
+  failToPass: readonly string[],
+  passToPass: readonly string[],
+  label: string,
+): void {
+  const failSet = new Set(failToPass);
+  if (passToPass.some((identity) => failSet.has(identity))) {
+    refuse(`${label} FAIL_TO_PASS and PASS_TO_PASS identities overlap`);
+  }
+}
+
+function sameIdentities(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((identity, index) => identity === right[index]);
+}
+
 function rowMaterial(specification: EvaluationSpec): EvaluationRowMaterial {
   if (specification.family !== "deterministic-process") refuse("EvaluationSpec is not deterministic-process");
   const block = specification.familyBlock as DeterministicProcessBlock;
@@ -81,12 +107,28 @@ function rowMaterial(specification: EvaluationSpec): EvaluationRowMaterial {
   }
   const config = install as Record<string, unknown>;
   if (typeof config["log_parser"] !== "string") refuse("public row log parser is missing");
+  const failToPass = transitionIdentities(row["FAIL_TO_PASS"], "public row FAIL_TO_PASS");
+  const passToPass = transitionIdentities(row["PASS_TO_PASS"], "public row PASS_TO_PASS");
+  assertDisjointTransitions(failToPass, passToPass, "public row");
+  const sealedFailToPass = transitionIdentities(
+    block.transitions.failToPass,
+    "sealed transitions.failToPass",
+  );
+  const sealedPassToPass = transitionIdentities(
+    block.transitions.passToPass,
+    "sealed transitions.passToPass",
+  );
+  assertDisjointTransitions(sealedFailToPass, sealedPassToPass, "sealed transitions");
+  if (!sameIdentities(failToPass, sealedFailToPass)
+    || !sameIdentities(passToPass, sealedPassToPass)) {
+    refuse("public row transition identities do not exactly match the sealed transitions");
+  }
   return {
     instance_id: row["instance_id"],
     base_commit: row["base_commit"],
     test_patch: row["test_patch"],
-    FAIL_TO_PASS: stringArray(row["FAIL_TO_PASS"], "FAIL_TO_PASS"),
-    PASS_TO_PASS: stringArray(row["PASS_TO_PASS"], "PASS_TO_PASS"),
+    FAIL_TO_PASS: failToPass,
+    PASS_TO_PASS: passToPass,
     install_config: {
       install: stringArray(config["install"], "install_config.install"),
       test_cmd: stringArray(config["test_cmd"], "install_config.test_cmd"),

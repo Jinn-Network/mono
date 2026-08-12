@@ -4,7 +4,12 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants, accessSync, realpathSync } from "node:fs";
 import { deadlineExceeded, refuse, unavailable } from "./errors.js";
-import { buildPinnedOciInvocation, PINNED_IMAGE, type PinnedOciGraderInput } from "./invocation.js";
+import {
+  buildPinnedOciInvocation,
+  PINNED_IMAGE,
+  type HostNumericIdentity,
+  type PinnedOciGraderInput,
+} from "./invocation.js";
 import { secureRead } from "./private-fs.js";
 
 /** The minimal live-child surface this runner drives; `ChildProcess` satisfies it structurally. */
@@ -56,6 +61,13 @@ function defaultSpawn(command: string, args: readonly string[]): GraderChildProc
     stdio: "ignore",
     env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
   }) as GraderChildProcess;
+}
+
+function currentHostIdentity(): HostNumericIdentity {
+  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
+    unavailable("numeric host identity is unavailable for ownership-safe grading");
+  }
+  return { uid: process.getuid(), gid: process.getgid() };
 }
 
 async function boundedExit(input: {
@@ -145,10 +157,13 @@ export async function runPinnedOciGrader(
   let result: Uint8Array | undefined;
   let failure: unknown;
   try {
-    const invocation = buildPinnedOciInvocation({
-      ...input,
-      ...(ownedNetwork === undefined ? {} : { allowedNetwork: ownedNetwork }),
-    });
+    const invocation = buildPinnedOciInvocation(
+      {
+        ...input,
+        ...(ownedNetwork === undefined ? {} : { allowedNetwork: ownedNetwork }),
+      },
+      input.runtime === "docker" ? currentHostIdentity() : undefined,
+    );
     const exit = await boundedExit({
       runtime: invocation.command,
       args: invocation.args,

@@ -6,6 +6,7 @@ export const PACKAGE_VERSION = "0.1.0";
 export {
   buildPinnedOciInvocation,
   PINNED_IMAGE,
+  type HostNumericIdentity,
   type PinnedOciGraderInput,
   type PinnedOciInvocation,
 } from "./invocation.js";

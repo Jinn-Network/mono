@@ -865,7 +865,7 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
     refuse("grader command is empty");
   }
   if (input.entrypoint !== undefined
-    && (input.entrypoint.length === 0 || /[ \r\n]/u.test(input.entrypoint))) {
+    && (input.entrypoint.length === 0 || /[\0\r\n]/u.test(input.entrypoint))) {
     refuse("grader entrypoint is invalid");
   }
   const network = input.profileRequiresNetwork ? input.allowedNetwork : "none";

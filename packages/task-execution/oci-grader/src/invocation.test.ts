@@ -4,9 +4,17 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildPinnedOciInvocation, type PinnedOciGraderInput } from "./invocation.js";
+import {
+  buildPinnedOciInvocation as buildInvocation,
+  type PinnedOciGraderInput,
+} from "./invocation.js";
 
 const IMAGE = `example.registry/sweb.eval.x86_64.acme__widget-1@sha256:${"a".repeat(64)}`;
+const HOST_IDENTITY = { uid: 501, gid: 20 } as const;
+
+function buildPinnedOciInvocation(input: PinnedOciGraderInput) {
+  return buildInvocation(input, HOST_IDENTITY);
+}
 
 function scratch(): { root: string; inputFile: string; output: string } {
   const root = mkdtempSync(join(tmpdir(), "jinn-oci-grader-"));
@@ -46,6 +54,8 @@ describe("buildPinnedOciInvocation", () => {
     expect(invocation.args).toContain("no-new-privileges");
     expect(invocation.args.slice(invocation.args.indexOf("--network"))[1]).toBe("none");
     expect(invocation.args.slice(invocation.args.indexOf("--cap-drop"))[1]).toBe("ALL");
+    expect(invocation.args.slice(invocation.args.indexOf("--user"), invocation.args.indexOf("--user") + 2))
+      .toEqual(["--user", "501:20"]);
     expect(invocation.args.at(-1)).toBe("/jinn/input/grader.py");
     expect(invocation.args.at(-2)).toBe(IMAGE);
     expect(invocation.containerName).toMatch(/^jinn-oci-grader-[0-9a-f-]{36}$/u);
@@ -153,5 +163,20 @@ describe("buildPinnedOciInvocation", () => {
       .toThrow(/positive bounded duration/u);
     expect(() => buildPinnedOciInvocation(baseInput({ timeoutMs: 3_600_001 })))
       .toThrow(/positive bounded duration/u);
+  });
+
+  it("refuses invalid injected host numeric identities", () => {
+    expect(() => buildInvocation(baseInput()))
+      .toThrow(/Docker grading requires the host numeric identity/u);
+    expect(() => buildInvocation(baseInput(), { uid: -1, gid: 20 }))
+      .toThrow(/host uid is not a valid numeric identity/u);
+    expect(() => buildInvocation(baseInput(), { uid: 501, gid: Number.NaN }))
+      .toThrow(/host gid is not a valid numeric identity/u);
+  });
+
+  it("keeps Podman's separate user-namespace semantics unchanged", () => {
+    const invocation = buildInvocation(baseInput({ runtime: "podman" }));
+
+    expect(invocation.args).not.toContain("--user");
   });
 });

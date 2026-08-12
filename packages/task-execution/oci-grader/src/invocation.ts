@@ -47,6 +47,18 @@ export interface PinnedOciInvocation {
   readonly statementPath: string;
 }
 
+export interface HostNumericIdentity {
+  readonly uid: number;
+  readonly gid: number;
+}
+
+function numericIdentityComponent(value: number, label: "uid" | "gid"): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 4_294_967_294) {
+    refuse(`host ${label} is not a valid numeric identity`);
+  }
+  return value;
+}
+
 function assertNoSymlinksOrSecrets(path: string): void {
   const stat = lstatSync(path);
   if (stat.isSymbolicLink()) refuse("grader input contains a symbolic link");
@@ -58,7 +70,10 @@ function assertNoSymlinksOrSecrets(path: string): void {
 }
 
 /** Pure command builder so the security posture is reviewable and testable without a daemon. */
-export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOciInvocation {
+export function buildPinnedOciInvocation(
+  input: PinnedOciGraderInput,
+  hostIdentity?: HostNumericIdentity,
+): PinnedOciInvocation {
   if (input.image.startsWith("-")) refuse("grader image must not begin with a dash");
   if (!PINNED_IMAGE.test(input.image)) refuse("grader image must be pinned by sha256 digest");
   if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > MAX_TIMEOUT_MS) {
@@ -99,9 +114,22 @@ export function buildPinnedOciInvocation(input: PinnedOciGraderInput): PinnedOci
     mounts.push("--mount", `type=bind,src=${source},dst=${target},readonly`);
   }
   const containerName = `jinn-oci-grader-${randomUUID()}`;
+  if (input.runtime === "docker" && hostIdentity === undefined) {
+    refuse("Docker grading requires the host numeric identity");
+  }
+  const dockerUser = input.runtime === "docker"
+    ? [
+        "--user",
+        `${numericIdentityComponent(hostIdentity?.uid ?? -1, "uid")}:${numericIdentityComponent(hostIdentity?.gid ?? -1, "gid")}`,
+      ]
+    : [];
   const args = [
     "run", "--rm", "--pull", "never", "--name", containerName,
     "--platform", input.platform,
+    // A rootful Docker daemon otherwise writes bind-mounted output as root, leaving the
+    // host-owned attempt tree impossible for the non-root evaluator to remove after grading.
+    // Podman's user-namespace modes have different ownership semantics and remain unchanged.
+    ...dockerUser,
     "--network", network,
     "--read-only",
     "--cap-drop", "ALL",

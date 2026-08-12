@@ -134,7 +134,7 @@ describe("runPinnedOciGrader", () => {
     const input = scratchInput();
     const inspect = new FakeChild();
     const run = new FakeChild();
-    const { spawn } = recordingSpawner([inspect, run]);
+    const { spawn, calls } = recordingSpawner([inspect, run]);
     const promise = runPinnedOciGrader(input, { spawn });
     inspect.exit(0);
     await flushMicrotasks();
@@ -142,6 +142,12 @@ describe("runPinnedOciGrader", () => {
     run.exit(0);
 
     expect(new TextDecoder().decode(await promise)).toBe('{"log":"ok","report":{}}');
+    const runArgs = calls[1]!.args;
+    const getuid = process.getuid;
+    const getgid = process.getgid;
+    if (getuid === undefined || getgid === undefined) throw new Error("test requires a POSIX host");
+    expect(runArgs.slice(runArgs.indexOf("--user"), runArgs.indexOf("--user") + 2))
+      .toEqual(["--user", `${getuid()}:${getgid()}`]);
   });
 
   it("returns a completed grade even when removing the isolated network afterwards fails", async () => {

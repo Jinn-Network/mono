@@ -27,8 +27,11 @@ const ROW = {
   test_patch: "diff --git a/tests/test_a.py b/tests/test_a.py\n",
 };
 
-function specification(overrides: Record<string, unknown> = {}) {
-  const material = canonicalJsonBytes(ROW);
+function specification(
+  overrides: Record<string, unknown> = {},
+  row: typeof ROW = ROW,
+) {
+  const material = canonicalJsonBytes(row);
   return {
     family: "deterministic-process" as const,
     familyBlock: {
@@ -41,7 +44,7 @@ function specification(overrides: Record<string, unknown> = {}) {
         digest: { sha256: sha256Hex(material) },
         mediaType: "application/json",
       }],
-      transitions: { failToPass: ROW.FAIL_TO_PASS, passToPass: ROW.PASS_TO_PASS },
+      transitions: { failToPass: row.FAIL_TO_PASS, passToPass: row.PASS_TO_PASS },
       timeout: 1800,
       ...overrides,
     },
@@ -201,6 +204,55 @@ describe("sweRebenchOciGraderReportSource", () => {
     } as never);
 
     await expect(source.read(input)).resolves.toBeDefined();
+  });
+
+  it("refuses equal-length row transition lists with a different sealed identity before grading", async () => {
+    const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+    const { work, request: input } = request(specification({
+      transitions: {
+        failToPass: ["tests/test_other.py::test_other"],
+        passToPass: ROW.PASS_TO_PASS,
+      },
+    }));
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await expect(source.read(input)).rejects.toThrow(/do not exactly match the sealed transitions/u);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("refuses duplicate transition identities even when the row and sealed lists agree", async () => {
+    const duplicateRow = {
+      ...ROW,
+      FAIL_TO_PASS: [ROW.FAIL_TO_PASS[0]!, ROW.FAIL_TO_PASS[0]!],
+    };
+    const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+    const { work, request: input } = request(specification({}, duplicateRow));
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await expect(source.read(input)).rejects.toThrow(/duplicate transition identity/u);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("refuses an identity assigned to both transition families before grading", async () => {
+    const overlappingRow = {
+      ...ROW,
+      PASS_TO_PASS: [ROW.FAIL_TO_PASS[0]!],
+    };
+    const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+    const { work, request: input } = request(specification({}, overlappingRow));
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await expect(source.read(input)).rejects.toThrow(/FAIL_TO_PASS and PASS_TO_PASS identities overlap/u);
+    expect(runner).not.toHaveBeenCalled();
   });
 
   it("refuses a specification carrying no row material", async () => {
