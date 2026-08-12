@@ -2,14 +2,45 @@
 
 | | |
 |---|---|
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Date** | 2026-08-12 |
 | **Author** | C3 (Statistics) lane, Demo-1 Venue-Glue Implementation Program |
-| **Shape** | `design` — this document is a scoping report and budgeting basis, not an implementation plan |
-| **Status** | **Awaiting operator budgeting decision.** No implementation has started. |
-| **Recon base** | `packages/benchmark-product` @ `04f309de8`; verified read-only |
+| **Shape** | `design` — scoping report and budgeting basis; the task-level TDD plan is a separate document |
+| **Status** | **RATIFIED — Option A. P4b is demo-blocking, full scope, in progress.** |
+| **Recon base** | `packages/benchmark-product` @ `04f309de8`; **all citations re-verified against `9e8b39049`** (§0) |
 | **Parent program** | [`2026-08-11-demo1-venue-glue-implementation-program.md`](../2026-08-11-demo1-venue-glue-implementation-program.md) |
-| **Blocked by** | P4 (`paired-delta@1` registration) — in review at time of writing |
+| **Unblocked by** | P4 (`paired-delta@1` registration) — merged |
+
+## 0. Ratification and citation re-verification
+
+**Operator ruling (2026-08-12): Option A — P4b is demo-blocking, full scope, start now.**
+
+- **Budget ratified** at the scoped ~9–10.5 agent-days across the seven tasks in §8.
+- **Decisions §5.1, §5.2, §5.4 ratified** exactly as written.
+- **Decision §5.3 (editorial posture) remains RESERVED.** Build the entire
+  paired path behind the product's existing neutral copy. When implementation is
+  ~1 day from the point where copy becomes the blocker (the claim-package text
+  surfaces), the program coordinator dispatches a method-stream copy agent
+  grounded in `BRAND.md`, §8.1, and `PUBLIC-BUNDLE.md` to draft candidates for
+  operator sign-off. **No publish-facing surface goes directional before that
+  sign-off.**
+- **Sequencing:** the *official run* gates on P4b. **P5 does not** — it proves
+  pipes on the existing plumbing and proceeds in parallel.
+
+### Citations re-verified against `9e8b39049`
+
+The integration branch moved substantially after the recon base (#2578, #2580,
+#2585, P4, and the Inspect OCI-runtime series all landed). Every site in §3 was
+re-checked:
+
+- **All six wilson sites survive**, with only minor line drift:
+  `compile.ts:109` · `report.ts:140` (exact) · `claim.ts:192`
+  (`wilsonSubjectResults`, was `:184`) · `claim.ts:38,50,106,129,262,277` ·
+  `assets.ts:118,446-447` (exact) · `web/.../results/page.tsx:27,124` (exact).
+- **One additional copy site found:** `assets.ts:318` carries a second
+  "No comparative winner is stated" string in the Markdown variant, alongside
+  `:249`. Both are in scope for §5.3.
+- **§6.1 has changed and is now half-closed.** See that section.
 
 ## Why this document exists
 
@@ -210,9 +241,10 @@ larger packet.
 
 ## 5. Design decisions
 
-Three carry recommended answers for ratification. The fourth is reserved.
+Three were ratified by the operator on 2026-08-12 exactly as written. The
+fourth remains reserved.
 
-### 5.1 Where do `baseline` and `candidate` come from? — **RECOMMENDED**
+### 5.1 Where do `baseline` and `candidate` come from? — **RATIFIED**
 
 The draft's `arms` (`domain/draft.ts:152`) is unordered with no role concept;
 `operations/arms.ts` has no baseline/candidate notion.
@@ -225,7 +257,7 @@ silently reinterprets the comparison if arms are reordered; a `role` field on
 `ArmSchema` has a far wider blast radius, touching arm mapping and every arms
 test, to express something that belongs to the analysis rather than the arm.
 
-### 5.2 Claim `headline` shape for a paired method — **RECOMMENDED**
+### 5.2 Claim `headline` shape for a paired method — **RATIFIED**
 
 **Recommend: keep `CLAIM_PACKAGE_SCHEMA_ID` at `/1` and make the new fields
 purely additive** — `headline` becomes optional, and a sibling `comparison`
@@ -261,10 +293,18 @@ question of whether the posture is being narrowed, restated, or genuinely
 changed — needs someone with brand authority. An implementer must not invent
 it, and neither should this lane.
 
-Until it is settled, an implementer can build the paired path behind the
-existing neutral copy but cannot ship a public bundle for a paired report.
+**Ratified process (2026-08-12).** Build the entire paired path behind the
+product's existing neutral copy. When implementation reaches ~1 day from the
+point where copy becomes the blocker — i.e. the claim-package text surfaces in
+Task 4 — the lane notifies the program coordinator, who dispatches a
+method-stream copy agent grounded in `BRAND.md`, §8.1, and `PUBLIC-BUNDLE.md` to
+draft candidate copy for operator sign-off. **No publish-facing surface goes
+directional before that sign-off.**
 
-### 5.4 Does `paired-delta@1` need task provenance? — **RECOMMENDED (already decided in P4)**
+Both copy sites are in scope: `assets.ts:249` (HTML) and `assets.ts:318`
+(Markdown), plus `PUBLIC-BUNDLE.md:91` and `design-system/ADAPTATION.md:18`.
+
+### 5.4 Does `paired-delta@1` need task provenance? — **RATIFIED**
 
 **Yes, and it should stay that way: required, failing closed.**
 
@@ -287,7 +327,16 @@ rather than worked around.
 
 ## 6. Findings that reach beyond P4b
 
-### 6.1 The bundled sample benchmark destroys provenance
+### 6.1 The bundled sample benchmark destroys provenance — **half-closed**
+
+**UPDATE (re-verified at `9e8b39049`):** the *interop* half of this finding is
+**CLOSED**. PR #2585 changed the SWE-bench importer to a repo-level cluster key
+— `source: \`https://github.com/${row.repo}\`` at
+`benchmarking/interop/src/import/swebench.ts:88`, with the `@<base_commit>`
+suffix removed — so imported slates now cluster by repository as intended.
+
+**The product half below is UNCHANGED and still open**: `sample.ts:154` is
+byte-identical at the new head. It remains unowned.
 
 `core/src/intake/sample.ts:154` overwrites the payload wholesale
 (`candidateTask.payload = { forecast: {...} }`), removing `payload.provenance`,
@@ -302,11 +351,13 @@ is unaffected — but any rehearsal or preview on the sample benchmark is.
 Fixing it changes the sample benchmark's digest, which invalidates fixtures
 pinned to it — so it is a deliberate change, not a drive-by. Estimated ~1 day.
 
-**This compounds with the C4-lane finding** that the SWE-bench importer builds
-its cluster key as `https://github.com/<repo>@<base_commit>`, making every task
-its own singleton cluster. Both defects live in how provenance reaches a
-method, and both are invisible until a paired method actually runs.
-**Recommend scoping them together as one provenance-integrity packet.**
+This originally compounded with the C4-lane finding that the SWE-bench importer
+built its cluster key as `https://github.com/<repo>@<base_commit>`, making every
+task its own singleton cluster. **#2585 closed that half.** The remaining
+product-side half no longer needs a joint packet and can be absorbed as a small
+standalone fix — but it must land before any rehearsal or preview runs a paired
+method on the sample benchmark, or the method will fail closed with a typed
+provenance error rather than producing a result.
 
 ### 6.2 No seal-time validation of method ids
 
@@ -387,20 +438,25 @@ presentation layer with its byte-compatibility door, and the e2e/docs tail.
 
 ---
 
-## 10. Recommendation
+## 10. Recommendation — superseded by the §0 ruling
 
-Budget P4b as a **separate packet**, not an absorption into the current wave:
+The recommendation this report closed with was to budget P4b as a separate
+packet and to make one scoping choice explicitly: P4b is not on the critical
+path to the demo report's *statistics* (P4 delivers those), but it is on the
+critical path to the product *producing* the report through its own machinery
+rather than by hand. If the first report could be assembled outside the
+product, P4b could follow the demo instead of blocking it.
 
-1. Ratify §5.1, §5.2, and §5.4; settle §5.3 (operator, brand authority).
-2. Budget ~9–10.5 agent-days against the task table in §8.
-3. Scope the §6.1 sample-benchmark provenance fix together with the C4-lane
-   SWE-bench importer cluster-key defect as one provenance-integrity packet.
-4. Consider filing §6.2 (seal-time method-id validation) as a separate
-   platform-side issue.
+**The operator ruled Option A: it blocks.** The demo report will be produced
+through the product's own machinery, so P4b is demo-blocking and proceeds at
+full scope. The remaining items from that recommendation resolve as:
 
-Sequencing note: P4b is not on the critical path to the demo report's
-*statistics* — P4 delivers those — but it is on the critical path to the
-product *producing* the demo report through its own machinery rather than by
-hand. If the demo report may be assembled outside the product for its first
-run, P4b can follow the demo rather than block it. **That is a scoping choice
-worth making explicitly rather than by default.**
+1. §5.1, §5.2, §5.4 — **ratified** (§0).
+2. Budget — **ratified** at ~9–10.5 agent-days against §8.
+3. §6.1 — the joint provenance-integrity packet is **no longer needed**; #2585
+   closed the interop half. The product-side half is a small standalone fix that
+   must precede any paired rehearsal on the sample benchmark.
+4. §6.2 — still worth filing as a separate platform-side issue; not in this
+   packet's scope.
+5. §5.3 — **remains reserved**, with the copy-agent process in §0 governing when
+   it must be resolved.
