@@ -465,11 +465,12 @@ describe("Task 4 golden guard: wilson claim package byte-equality", () => {
 
 /**
  * P4b Task 5: a paired-delta@1 Report built DIRECTLY via `sealReport`, not through
- * `produceReport`/the method registry -- `operations/report.ts`'s method-selection wiring is a
- * separate task and deliberately absent right now (see the implementation plan's Testing
- * approach). This mirrors the real `pairedDeltaMethod.compute()` output shape
- * (`benchmarking/aggregate/src/registry.ts`) verbatim, wrapped in the standard
- * `{perSubject: [{subjectSha256, results}]}` envelope used by every method.
+ * `produceReport`/the method registry -- this keeps the unit test isolated from the report-
+ * production path (`operations/report.ts`'s method-selection wiring, landed in Task 3) so a claim-
+ * package regression here can never be masked or caused by a change on that separate path. This
+ * mirrors the real `pairedDeltaMethod.compute()` output shape (`benchmarking/aggregate/src/
+ * registry.ts`) verbatim, wrapped in the standard `{perSubject: [{subjectSha256, results}]}`
+ * envelope used by every method.
  *
  * The two sealed `analysisPlan` entries deliberately carry DIFFERENT `verdictRule` values
  * ("sole" for wilson, "majority" for paired-delta) -- in real compiled data the two entries agree
