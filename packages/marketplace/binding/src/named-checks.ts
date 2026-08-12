@@ -31,7 +31,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import {
   authenticateRequester,
-  parseDsseEnvelope,
+  parseExactDsseEnvelope,
   settlementJoinCheck,
   verifyEnvelopeBinding,
   type BindingResolver,
@@ -327,10 +327,20 @@ function parseSettlementContext(
   };
 }
 
+/**
+ * Reads the delivered verdict envelope with the STRICT `parseExactDsseEnvelope` (defect-#34
+ * follow-up). This gate owns a fail-closed decision, so it must not inherit its encoding floor
+ * from whichever `dsseVerifier` a composition happens to inject: under a loose structural parse
+ * a validly-signed envelope in an alternate JSON spelling reached full decision-grade whenever
+ * the injected verifier was itself loose. Every producer of these bytes seals canonically
+ * (`sealDsseEnvelope` / `sealSignedRecord` / task-execution-profiles' `buildVerdictEnvelope`),
+ * so an alternate spelling is never legitimate -- and refusing it here names the encoding as a
+ * `verdict-envelope` failure instead of surfacing it as an opaque `settlement-join` signature error.
+ */
 function parseVerdict(envelopeBytes: Uint8Array): ParsedVerdict {
   let parsedEnvelope;
   try {
-    parsedEnvelope = parseDsseEnvelope(envelopeBytes);
+    parsedEnvelope = parseExactDsseEnvelope(envelopeBytes);
   } catch (cause) {
     return { ok: false, check: "verdict-envelope", detail: String(cause) };
   }
@@ -511,9 +521,12 @@ async function requesterAuthenticationFailure(
   if (!Rfc3339.safeParse(input.requesterAuthentication.sealingTime).success) {
     return "requester Submission sealing time is not RFC 3339";
   }
+  // Strict for the same reason as `parseVerdict` above: the requester Submission envelope has a
+  // single canonical producer (`native-requester`'s `sealDsseEnvelope`), so this gate refuses
+  // alternate spellings on its own rather than depending on the injected `dsseVerifier`.
   let signedSubmission;
   try {
-    signedSubmission = parseDsseEnvelope(input.requesterAuthentication.envelopeBytes);
+    signedSubmission = parseExactDsseEnvelope(input.requesterAuthentication.envelopeBytes);
   } catch (cause) {
     return String(cause);
   }
