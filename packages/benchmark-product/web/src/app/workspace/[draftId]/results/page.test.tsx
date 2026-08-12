@@ -130,6 +130,127 @@ function reportedView() {
   };
 }
 
+interface ComparisonFixture {
+  readonly pairs: number;
+  readonly delta: string | null;
+  readonly interval: { readonly alpha: string; readonly low: string; readonly high: string } | null;
+  readonly reasons: readonly string[];
+}
+
+/** A paired-delta@1 view (P4b Task 7): swaps the claim package's wilson `headline` for its sibling
+ * `comparison`, and gives the stored Report's own `results` the comparison shape too (rather than
+ * wilson's `arms`) — the same non-wilson shape a real paired Report seals, which is exactly what
+ * exercises the existing "Stored Report results cannot be presented as the shipped wilson@1
+ * shape" degradation path in `page.tsx`. */
+function pairedComparisonView(comparison: ComparisonFixture) {
+  const base = reportedView();
+  const pairedMethod = { id: "jinn.benchmarking.method/paired-delta", version: "1", parameters: { verdictRule: "sole", baseline: "baseline", candidate: "candidate", alpha: "0.05" } };
+  return {
+    ...base,
+    results: {
+      ...base.results,
+      result: {
+        ...base.results.result,
+        report: {
+          ...base.results.result.report,
+          record: {
+            ...base.results.result.report.record,
+            method: pairedMethod,
+            results: {
+              perSubject: [{
+                subjectSha256: matrixSha256,
+                results: {
+                  pairs: comparison.pairs,
+                  delta: comparison.delta,
+                  interval: comparison.interval,
+                  reasons: comparison.reasons,
+                  pairing: { taskDigests: [] },
+                  clustering: { basis: "provenance", clusters: comparison.pairs > 0 ? 2 : 0 },
+                  excluded: { count: 0, cellKeys: [] },
+                  conflicted: { count: 0, cellKeys: [] },
+                  bootstrap: {},
+                },
+              }],
+            },
+          },
+          claimPackage: {
+            ...base.results.result.report.claimPackage,
+            method: { ...pairedMethod, preregistered: true },
+            headline: undefined,
+            comparison,
+          },
+        },
+      },
+    },
+  };
+}
+
+const STORED_REPORT_WILSON_SHAPE_ALERT = "Stored Report results cannot be presented as the shipped wilson@1 shape. Run verification.";
+
+describe("paired claim rendering (P4b Task 7)", () => {
+  beforeEach(() => loadResultsViewMock.mockReset());
+
+  test("renders a paired claim's comparison block with pairs, delta, and interval bounds when the interval is present", async () => {
+    loadResultsViewMock.mockReturnValue(pairedComparisonView({
+      pairs: 5,
+      delta: "0.1200",
+      interval: { alpha: "0.05", low: "0.0200", high: "0.2200" },
+      reasons: [],
+    }));
+    const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+
+    expect(markup).toContain("Paired comparison");
+    expect(markup).toContain('<dt class="font-medium">Pairs</dt><dd>5</dd>');
+    expect(markup).toContain("0.1200");
+    expect(markup).toContain("0.0200");
+    expect(markup).toContain("0.2200");
+    expect(markup).toContain("0.05");
+    expect(markup).not.toContain("Interval withheld");
+    // No directional sentence: which arm the delta favors, if any, is not stated on this branch.
+    expect(markup).not.toMatch(/wins|beats|outperform|superior|better arm/i);
+    // The existing stored-Report degradation path still fires for the paired shape.
+    expect(markup).toContain(STORED_REPORT_WILSON_SHAPE_ALERT);
+    expect(markup).not.toContain("Wilson interval");
+  });
+
+  test("renders a paired claim's withheld interval with both reason strings, and still shows the delta", async () => {
+    loadResultsViewMock.mockReturnValue(pairedComparisonView({
+      pairs: 3,
+      delta: "0.1000",
+      interval: null,
+      reasons: ["fewer than five paired tasks", "fewer than two provenance clusters"],
+    }));
+    const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+
+    expect(markup).toContain("Paired comparison");
+    expect(markup).toContain('<dt class="font-medium">Pairs</dt><dd>3</dd>');
+    expect(markup).toContain("0.1000");
+    expect(markup).toContain("Interval withheld");
+    expect(markup).toContain("fewer than five paired tasks");
+    expect(markup).toContain("fewer than two provenance clusters");
+    expect(markup).toContain(STORED_REPORT_WILSON_SHAPE_ALERT);
+  });
+
+  test("renders a paired claim's zero-pairs state with no delta value, no interval bounds, and no crash", async () => {
+    loadResultsViewMock.mockReturnValue(pairedComparisonView({
+      pairs: 0,
+      delta: null,
+      interval: null,
+      reasons: [],
+    }));
+    const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+
+    expect(markup).toContain("Paired comparison");
+    expect(markup).toContain('<dt class="font-medium">Pairs</dt><dd>0</dd>');
+    expect(markup).toContain("Interval withheld");
+    expect(markup).toContain("No withheld reasons recorded.");
+    expect(markup).not.toContain("Interval low");
+    expect(markup).not.toContain("0.1200");
+    expect(markup).not.toContain("0.1000");
+    expect(markup).toContain(STORED_REPORT_WILSON_SHAPE_ALERT);
+  });
+});
+
 describe("semantic results and report surface", () => {
   beforeEach(() => loadResultsViewMock.mockReset());
 

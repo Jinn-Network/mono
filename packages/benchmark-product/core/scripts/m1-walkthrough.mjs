@@ -219,7 +219,12 @@ async function main() {
       reportEnvelopeSha256: report.reportEnvelopeSha256,
     },
     preregistered: report.preregistered,
-    armHeadline: report.claimPackage.headline,
+    // P4b Task 7: the claim package carries EITHER `headline` (wilson@1) OR `comparison`
+    // (paired-delta@1), never both — branch on which one is present rather than reading
+    // `headline` unconditionally, which would silently summarize a paired run as `undefined`.
+    ...(report.claimPackage.headline !== undefined
+      ? { armHeadline: report.claimPackage.headline }
+      : { comparison: report.claimPackage.comparison }),
     cellOutcomeCounts: status.counts,
     verify: { ok: true, checks: verify.checks },
   };

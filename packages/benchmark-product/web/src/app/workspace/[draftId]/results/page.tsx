@@ -27,6 +27,22 @@ interface PresentedClaimHeadline {
   readonly wilsonInterval: { readonly low: string; readonly high: string };
 }
 
+interface PresentedComparisonInterval {
+  readonly alpha: string;
+  readonly low: string;
+  readonly high: string;
+}
+
+/** paired-delta@1's claim-package `comparison` block (P4b Task 7), sibling to
+ * `PresentedClaimHeadline`. Only the fields this page actually presents — see
+ * `core/src/report/claim.ts`'s `ComparisonSchema` for the full sealed shape. */
+interface PresentedComparison {
+  readonly pairs: number;
+  readonly delta: string | null;
+  readonly interval: PresentedComparisonInterval | null;
+  readonly reasons: readonly string[];
+}
+
 function formatFact(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
@@ -113,6 +129,19 @@ function Venue({ results }: { readonly results: RunResultsDocument }) {
   </CardContent></Card>;
 }
 
+/** paired-delta@1's `comparison` block, structure only (P4b Task 7): pairs, delta, and either the
+ * interval bounds or the withheld reasons. No directional sentence — which arm the delta favors,
+ * if any, is an unmade operator decision (plan's Task 8c) and is never invented here. */
+function ComparisonBlock({ comparison }: { readonly comparison: PresentedComparison }) {
+  return <div tabIndex={0} aria-label="Paired comparison facts" className="min-w-0 max-w-full space-y-3 overflow-x-auto">
+    <h3 className="font-semibold">Paired comparison</h3>
+    <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Pairs</dt><dd>{comparison.pairs}</dd></div><div><dt className="font-medium">Delta</dt><dd>{formatFact(comparison.delta)}</dd></div></dl>
+    {comparison.interval === null
+      ? <div><h4 className="font-medium">Interval withheld</h4>{comparison.reasons.length === 0 ? <p>No withheld reasons recorded.</p> : <ul className="list-disc pl-5">{comparison.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}</div>
+      : <dl className="grid min-w-0 gap-3 sm:grid-cols-3"><div><dt className="font-medium">Interval low</dt><dd>{comparison.interval.low}</dd></div><div><dt className="font-medium">Interval high</dt><dd>{comparison.interval.high}</dd></div><div><dt className="font-medium">Alpha</dt><dd>{comparison.interval.alpha}</dd></div></dl>}
+  </div>;
+}
+
 function Claim({ report }: { readonly report: RunResultsReport }) {
   const claim = report.claimPackage;
   return <section aria-labelledby="claim-heading" className="min-w-0 space-y-6">
@@ -121,7 +150,7 @@ function Claim({ report }: { readonly report: RunResultsReport }) {
       <p>{claim.assurance.disclosure}</p>
       <div tabIndex={0} aria-label="Claim scope arms and pinning table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim scope arms and pinning</caption><thead><tr><th scope="col">Arm</th><th scope="col">Stored pinning</th></tr></thead><tbody>{claim.scope.arms.map((arm: PresentedClaimArm) => <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{formatFact(arm.pinning)}</td></tr>)}</tbody></table></div>
       <div tabIndex={0} aria-label="Claim record links table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim record links</caption><tbody>{Object.entries(claim.records).map(([name, digest]) => <tr key={name} className="border-t"><th scope="row" className="py-2 pr-4">{name}</th><td><Digest>{String(digest)}</Digest></td></tr>)}</tbody></table></div>
-      {claim.headline ? <div tabIndex={0} aria-label="Headline results by arm table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Headline results by arm</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{Object.entries(claim.headline).map(([arm, headlineValue]) => { const headline = headlineValue as PresentedClaimHeadline; return <tr key={arm} className="border-t"><th scope="row" className="py-2 pr-4">{arm}</th><td>{headline.n}</td><td>{headline.passRate}</td><td>{headline.wilsonInterval.low} to {headline.wilsonInterval.high}</td></tr>; })}</tbody></table></div> : null}
+      {claim.headline ? <div tabIndex={0} aria-label="Headline results by arm table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Headline results by arm</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{Object.entries(claim.headline).map(([arm, headlineValue]) => { const headline = headlineValue as PresentedClaimHeadline; return <tr key={arm} className="border-t"><th scope="row" className="py-2 pr-4">{arm}</th><td>{headline.n}</td><td>{headline.passRate}</td><td>{headline.wilsonInterval.low} to {headline.wilsonInterval.high}</td></tr>; })}</tbody></table></div> : claim.comparison ? <ComparisonBlock comparison={claim.comparison} /> : null}
       <div><h3 className="font-semibold">Stored claim completeness</h3><p>{formatFact(claim.completeness)}</p></div>
       <div><h3 className="font-semibold">Stored claim attrition</h3><p>{formatFact(claim.attrition)}</p></div>
       <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Conflicted cells</dt><dd>{claim.conflicted.count}: {claim.conflicted.cellKeys.join(", ") || "none"}</dd></div><div><dt className="font-medium">Integrity tiers</dt><dd>{formatFact(claim.disclosures.integrityTierCounts)}</dd></div><div><dt className="font-medium">Pinning unverifiable counts</dt><dd>{formatFact(claim.disclosures.pinningUnverifiableCounts)}</dd></div><div><dt className="font-medium">Assurance primitives</dt><dd>{formatFact(claim.assurance.resolved)}</dd></div></dl>
