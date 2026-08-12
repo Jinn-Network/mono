@@ -167,6 +167,27 @@ function delivery(bytes: Uint8Array): DeliveryRecord {
   return parsed.data;
 }
 
+/**
+ * The self-diagnosing payload for the opaque `evaluator-dependency-failed` bucket: the throwing
+ * class and its message (which go into the failure reason, so the daemon's one-line
+ * `[evaluator] evaluation failed: …` warning names them), plus a bounded head of the stack (audit
+ * row only — enough to name the throw site without turning an audit row into a log dump).
+ */
+export function dependencyFailureDetail(cause: unknown): {
+  readonly cause: string;
+  readonly causeStack?: string;
+} {
+  if (!(cause instanceof Error)) return { cause: String(cause) };
+  const summary = `${cause.name}: ${cause.message}`;
+  const frames = (cause.stack ?? "").split("\n")
+    .slice(1, 4)
+    .map((frame) => frame.trim())
+    .filter((frame) => frame.length > 0)
+    .join(" | ")
+    .slice(0, 400);
+  return frames === "" ? { cause: summary } : { cause: summary, causeStack: frames };
+}
+
 function digestOfOutput(record: DeliveryRecord, name: string): `sha256:${string}` {
   const matches = record.outputs.filter((output) => output.name === name);
   const sha256 = matches[0]?.digest?.sha256;
@@ -260,15 +281,24 @@ export class NativeEvaluatorCoordinator {
       // ("evidence capture start failed: Graph identity ... is reused for incompatible
       // contextual roles") reachable only by reading the attempt journal off disk. The message
       // is the code when there is no detail, so codeless failures read exactly as before.
+      //
+      // Everything the coordinator does not recognise lands in `evaluator-dependency-failed`, and
+      // three separate defects (#33, #36, #43) have now been diagnosed by DB spelunking because
+      // that bucket carried no cause at all. #43's real cause — a
+      // `NativeEvaluatorStateConflictError: evaluation backend requires finalized claim and sealed
+      // pair` — was indistinguishable from an RPC outage in both the audit row and the daemon log.
+      // The bucket now always names the throwing class and its message (the same shape the
+      // subject-authority branches above use), so the code is never again the whole story.
+      const detail = dependencyFailureDetail(cause);
       const reason = cause instanceof NativeSubjectAuthorityError
         ? `native-subject-authority-unavailable: ${cause.message}`
         : cause instanceof EvaluatorCoordinatorFailure
           ? cause.message
-          : "evaluator-dependency-failed";
+          : `evaluator-dependency-failed: ${detail.cause}`;
       if ((cause instanceof EvaluatorCoordinatorFailure && !cause.retryable)
         || cause instanceof NativeEvaluatorStateConflictError
         || cause instanceof TypeError) {
-        this.input.state.recordEvaluationFailed(id, reason);
+        this.input.state.recordEvaluationFailed(id, reason, detail);
         return { kind: "failed", reason };
       }
       const evaluation = this.input.state.getEvaluation(id);

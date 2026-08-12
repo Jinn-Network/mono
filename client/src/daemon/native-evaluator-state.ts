@@ -956,10 +956,29 @@ export class NativeEvaluatorStateRepository {
     })();
   }
 
+  /**
+   * Opens — or idempotently re-opens — the backend submission operation for the finalized Attempt.
+   *
+   * `evaluating` is admitted alongside `evaluation-finalized` because the coordinator's phase
+   * machine routes BOTH states into `execute()`, which begins the submission on every tick until
+   * the backend Attempt terminalizes. `evaluating` is reachable only through
+   * `recordEvaluationBackendAccepted`, which itself requires this very operation to exist, so it is
+   * strictly downstream of `evaluation-finalized` and satisfies the same precondition — a finalized
+   * claim over a sealed pair — a fortiori; admitting it weakens nothing.
+   *
+   * Refusing it terminal-failed every evaluation whose harness needed longer than one ~5s tick:
+   * tick N submitted and moved the aggregate to `evaluating`, tick N+1 re-entered here and threw,
+   * and the coordinator bucketed the state conflict as the opaque, non-retryable
+   * `evaluator-dependency-failed` — discarding a verdict that was already graded, sealed, delivered
+   * and sitting on disk (defect #43, live gate round 26; no evaluation had ever reached
+   * `verdict-ready`). Re-entry stays fail-closed: the operation identity is keyed to the finalized
+   * Attempt, so `createOperation` still refuses a re-entry whose Attempt moved underneath it.
+   */
   beginEvaluationExecution(evaluation: NativeOperationId): { readonly operationId: NativeOperationId } {
     const current = this.getEvaluation(evaluation);
     const derived = this.getDerivedEvaluation(evaluation);
-    if (current?.state !== "evaluation-finalized" || derived === undefined || derived.attemptUri === null) {
+    if ((current?.state !== "evaluation-finalized" && current?.state !== "evaluating")
+      || derived === undefined || derived.attemptUri === null) {
       throw new NativeEvaluatorStateConflictError("evaluation backend requires finalized claim and sealed pair");
     }
     return this.createOperation(
@@ -1344,13 +1363,22 @@ export class NativeEvaluatorStateRepository {
     return true;
   }
 
-  recordEvaluationFailed(evaluation: NativeOperationId, reason: string): void {
+  /**
+   * `detail` carries the throwing class, its message and a bounded stack head for terminal
+   * failures the coordinator could not classify. Without it the `evaluation-failed-terminal` audit
+   * row said only `evaluator-dependency-failed`, and three defects (#33, #36, #43) had to be
+   * diagnosed by replaying preserved state offline.
+   */
+  recordEvaluationFailed(evaluation: NativeOperationId, reason: string, detail?: {
+    readonly cause?: string;
+    readonly causeStack?: string;
+  }): void {
     if (this.getEvaluation(evaluation) === undefined) throw new NativeEvaluatorStateConflictError("unknown evaluation aggregate");
     const now = this.timestamp();
     this.store.db.prepare(
       "UPDATE native_evaluations SET state = 'failed', updated_at = ? WHERE evaluation_id = ?",
     ).run(now, evaluation);
-    this.audit(evaluation, "evaluation-failed-terminal", { reason }, now);
+    this.audit(evaluation, "evaluation-failed-terminal", { reason, ...detail }, now);
   }
 
   private finalizeOperation(
