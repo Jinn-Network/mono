@@ -1,8 +1,10 @@
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BenchmarkProductError } from "../errors.js";
+import { SAMPLE_REPOSITORY_WORK_LAUNCHER_ID } from "./sample-repository-work.js";
 import { createLocalVenue, EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "./venue.js";
 
 const NOW = (): string => new Date().toISOString();
@@ -77,5 +79,40 @@ describe("createLocalVenue evaluators", () => {
     expect(source).toContain("createPredictionEvaluatorRegistration");
     expect(source).toContain("validateEvaluatorRegistrationSet");
     expect(source).toContain("evaluatorAdaptersParserAllowlist");
+  });
+});
+
+describe("createLocalVenue task-profile admission", () => {
+  it("advertises all three served profiles in backend capabilities", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "venue-profiles-"));
+    mkdirSync(join(workspaceDir, "venue"), { recursive: true });
+    const venue = createLocalVenue({ workspaceDir, now: NOW });
+    try {
+      const capabilities = await venue.backend.capabilities();
+      expect([...capabilities.taskProfiles].sort()).toEqual([
+        "https://spec.jinn.network/task-profiles/evaluation-task/1.0",
+        "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
+        "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      ]);
+      const harness = capabilities.runPinning.keys.find((key) => key.key === "harness");
+      expect(harness?.inventory).toContain(SAMPLE_REPOSITORY_WORK_LAUNCHER_ID);
+    } finally {
+      await venue.shutdown();
+    }
+  });
+
+  it("still refuses an unknown task profile, typed", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "venue-profiles-unknown-"));
+    mkdirSync(join(workspaceDir, "venue"), { recursive: true });
+    const venue = createLocalVenue({ workspaceDir, now: NOW });
+    try {
+      // The venue's `resolveTaskProfile` is the backend's sole profile resolver; an unserved URI
+      // must refuse rather than fall through to a default.
+      await expect(
+        venue.backend.preflight({ taskProfile: "https://spec.jinn.network/task-profiles/nope/1.0" }),
+      ).resolves.toMatchObject({ ready: false });
+    } finally {
+      await venue.shutdown();
+    }
   });
 });

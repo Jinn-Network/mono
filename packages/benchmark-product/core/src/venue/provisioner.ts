@@ -15,6 +15,7 @@
  * functions below for the exact manifest shape each produces.
  */
 
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -22,6 +23,8 @@ import { parseCellKey } from "@jinn-network/benchmarking-records";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
   harvest as workspaceHarvest,
+  makeWorktreeProvisioner,
+  ProvisioningRejectedError,
   STAGED_SEALED_TASK_FILENAME,
   type DeclaredOutputSlot,
   type HarvestResult,
@@ -29,12 +32,14 @@ import {
   type WorkspaceKind,
   type WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
-import type { DsseSigner } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, type DsseSigner } from "@jinn-network/trust-core";
 import {
   EVALUATION_TASK_PROFILE_URI,
   PREDICTION_FORECAST_PROFILE_URI,
+  REPOSITORY_WORK_PROFILE_URI,
 } from "@jinn-network/task-execution-profiles";
 import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
+import type { ResourceDescriptor, TaskSpecification } from "@jinn-network/task-execution-protocol";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
   INSPECT_EMBEDDED_EVALUATOR_ID,
@@ -45,6 +50,7 @@ import {
 } from "../runtime/inspect/artifacts.js";
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
+import type { RepositoryMirrorPort } from "./repository-mirror.js";
 import { sealVerdictStatement } from "./signing.js";
 
 /**
@@ -248,6 +254,165 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
   };
 }
 
+// ── repository-work cells ────────────────────────────────────────────────────────────────────
+
+const REPOSITORY_OID_PATTERN = /^[0-9a-f]{40}$/u;
+
+/**
+ * Per-slot suffixes an agent's stray `out/` write is renamed FROM before harvest, so the declared
+ * slot name is what harvest actually sees. Deliberately narrow and keyed per slot rather than
+ * tried against every declared slot: a Task declaring "patch" should only pick up a stray
+ * `patch.diff`/`patch.patch`, never let e.g. a log written to `out/patch.txt` get delivered as the
+ * patch. Unknown slot names get no rename at all.
+ */
+const OUTPUT_SLOT_RENAME_SUFFIXES: Readonly<Record<string, readonly string[]>> = {
+  patch: [".diff", ".patch"],
+  summary: [".md"],
+  evidence: [".json"],
+};
+
+/**
+ * Runs `git <args>` for its exit code only -- worktree teardown needs no stdout. Mirrors
+ * `packages/policy-optimization/src/host-local/live-swe-rebench-runner.ts`'s `processExit` shape;
+ * redeclared here (rather than imported) because this package must not depend on
+ * `packages/policy-optimization/`.
+ */
+async function runGit(args: readonly string[]): Promise<void> {
+  const child = spawn("git", [...args], {
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+    stdio: "ignore",
+  });
+  const code = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (value) => resolve(value ?? 70));
+  });
+  if (code !== 0) throw new Error(`git ${args[0] ?? ""} exited ${code}`);
+}
+
+interface RepositoryWorkProvisionerOptions {
+  readonly sealedTaskBytes: Uint8Array;
+  readonly dispatchContextBytes: Uint8Array;
+  readonly task: TaskSpecification;
+  readonly mirror: RepositoryMirrorPort | undefined;
+}
+
+/**
+ * The Task's declared repository descriptor (`repository-work/1.0` inputConventions). Product
+ * logic, not platform logic -- the platform's `ResourceDescriptor` carries no repository-specific
+ * shape, so extracting and validating the `uri` + `annotations.ref` convention this profile
+ * defines stays here even though the checkout itself now delegates to the platform below.
+ */
+function repositoryStateDescriptor(task: TaskSpecification): { uri: string; oid: string } {
+  const descriptor = (task.inputs ?? []).find(
+    (input: ResourceDescriptor) => input.name === "repository-state",
+  );
+  if (descriptor === undefined) {
+    throw new ProvisioningRejectedError(
+      'benchmark-product local venue: repository-work Task declares no "repository-state" input',
+    );
+  }
+  const uri = descriptor.uri;
+  const oid = (descriptor.annotations as { ref?: unknown } | undefined)?.ref;
+  if (typeof uri !== "string" || uri.length === 0) {
+    throw new ProvisioningRejectedError('benchmark-product local venue: "repository-state" input carries no uri');
+  }
+  if (typeof oid !== "string" || !REPOSITORY_OID_PATTERN.test(oid)) {
+    throw new ProvisioningRejectedError(
+      'benchmark-product local venue: "repository-state" annotations.ref must be exactly 40 lowercase hex characters',
+    );
+  }
+  return { uri, oid };
+}
+
+/**
+ * Delegates the checkout itself to the platform's `makeWorktreeProvisioner` (design-approved;
+ * see `packages/policy-optimization/src/host-local/live-swe-rebench-runner.ts`'s
+ * `solverProvisioner` for the shape this mirrors). `referenceRepository` is only known after
+ * `mirror.ensure(...)` resolves, so unlike that model the base provisioner is built INSIDE
+ * `setup`, once the mirror path is in hand, and retained in this closure for `harvest`'s teardown.
+ */
+function repositoryWorkProvisionerContract(
+  options: RepositoryWorkProvisionerOptions,
+): ProvisionerContract {
+  let resolved: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
+  return {
+    workspaceKind: (): WorkspaceKind => "worktree",
+    async setup(view, paths, grants) {
+      const { uri, oid } = repositoryStateDescriptor(options.task);
+      if (options.mirror === undefined) {
+        throw new ProvisioningRejectedError(
+          "benchmark-product local venue cannot provision a repository-work cell: no repository mirror is configured",
+        );
+      }
+      let mirrorDir: string;
+      try {
+        mirrorDir = await options.mirror.ensure({ uri, oid });
+      } catch (error) {
+        throw new ProvisioningRejectedError(
+          error instanceof Error ? error.message : "repository mirror resolution failed",
+          error,
+        );
+      }
+      const base = makeWorktreeProvisioner({
+        sealedTaskBytes: options.sealedTaskBytes,
+        dispatchContextBytes: options.dispatchContextBytes,
+        referenceRepository: mirrorDir,
+        oid,
+        runtime: { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined },
+        fetchInput: async (descriptor) => {
+          // The Task's "repository-state" input has no bytes of its own to materialize verbatim
+          // -- it is a pointer to the mirror-resolved checkout. The checkout itself lands at
+          // paths.work via the worktree the platform cuts below; this canonical JSON pointer is
+          // what lands under input/ for the descriptor.
+          if (descriptor.name === "repository-state") {
+            return canonicalJsonBytes({ oid, repository: mirrorDir });
+          }
+          throw new Error(
+            `benchmark-product local venue repository-work provisioner refused unknown input "${descriptor.name ?? descriptor.uri ?? "<unnamed>"}"`,
+          );
+        },
+      });
+      await base.setup(view, paths, grants);
+      resolved = { base, mirrorDir };
+    },
+    executionEnv: ({ env }) => ({ ...env }),
+    async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
+      if (resolved === undefined) {
+        throw new Error("benchmark-product local venue repository-work harvest ran before setup");
+      }
+      const { base, mirrorDir } = resolved;
+      try {
+        // Same normalization contract as the solve path above, for this profile's declared slots.
+        // Renames run BEFORE the delegated harvest because harvest stamps each artifact's
+        // mediaType from the declared slot whose name equals its path -- an artifact still called
+        // "patch.diff" would be collected untyped.
+        const structuredOutputPath = join(paths.out, "structured-output.json");
+        if (existsSync(structuredOutputPath)) {
+          await rename(structuredOutputPath, join(paths.meta, "structured-output.json"));
+        }
+        for (const slot of declaredOutputs) {
+          for (const suffix of OUTPUT_SLOT_RENAME_SUFFIXES[slot.name] ?? []) {
+            const candidate = join(paths.out, `${slot.name}${suffix}`);
+            if (!existsSync(join(paths.out, slot.name)) && existsSync(candidate)) {
+              await rename(candidate, join(paths.out, slot.name));
+            }
+          }
+        }
+        const declared = new Set(declaredOutputs.map((slot) => slot.name));
+        const result = await base.harvest(paths, declaredOutputs);
+        const manifest = result.manifest.filter((entry) => declared.has(entry.path));
+        return { manifest, omissions: result.omissions, integrityViolations: result.integrityViolations };
+      } finally {
+        // Copies `solverProvisioner`'s teardown in the model referenced above, verbatim in shape:
+        // deregister the worktree, falling back to a forced directory removal, then prune.
+        await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
+          .catch(() => rm(paths.work, { recursive: true, force: true }));
+        await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
+      }
+    },
+  };
+}
+
 // ── unsupported profiles (defensive; venue.ts's resolveTaskProfile already refuses these
 // earlier in the submit pipeline, so this contract is expected to be unreachable) ─────────────
 
@@ -397,6 +562,10 @@ export interface CreateLocalProvisionerOptions {
    */
   readonly evaluationContextVariationForTesting?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
   readonly inspect?: InspectProvisionerOptions;
+  /** Resolves a repository-work Task's `repository-state` descriptor to a local bare mirror.
+   * Absent on venues that serve no repository-work cells; a repository-work cell then refuses
+   * typed at setup rather than silently provisioning an empty work tree. */
+  readonly repositoryMirror?: RepositoryMirrorPort;
 }
 
 export function createLocalProvisioner(
@@ -430,6 +599,17 @@ export function createLocalProvisioner(
       return {
         id: "benchmark-product-inspect-dir-v1",
         contract: inspectProvisionerContract(input, options.inspect),
+      };
+    }
+    if (profileUri === REPOSITORY_WORK_PROFILE_URI) {
+      return {
+        id: "benchmark-product-repository-work-worktree-v1",
+        contract: repositoryWorkProvisionerContract({
+          sealedTaskBytes: input.sealedTaskBytes,
+          dispatchContextBytes: input.dispatchContextBytes,
+          task: input.task,
+          mirror: options.repositoryMirror,
+        }),
       };
     }
     return {

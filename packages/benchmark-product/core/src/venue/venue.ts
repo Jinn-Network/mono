@@ -35,9 +35,11 @@ import { predictionV1BaselineLauncher, type LauncherCapabilities, type LauncherC
 import {
   buildEvaluationTaskProfile,
   buildPredictionForecastProfile,
+  buildRepositoryWorkProfile,
   deriveEvaluationTask,
   EVALUATION_TASK_PROFILE_URI,
   PREDICTION_FORECAST_PROFILE_URI,
+  REPOSITORY_WORK_PROFILE_URI,
   sealTaskProfile,
   type ProfileStore,
   type TaskProfileDocument,
@@ -75,7 +77,13 @@ import {
   EVALUATOR_REQUIREMENT_KEY,
   type EvaluationCellMaterials,
 } from "./provisioner.js";
+import { createGitRepositoryMirror } from "./repository-mirror.js";
 import { deriveSampleResolution, isSampleForecastPayload } from "./resolution.js";
+import {
+  makeSampleRepositoryWorkLauncher,
+  SAMPLE_REPOSITORY_WORK_HARNESS_VERSION,
+  SAMPLE_REPOSITORY_WORK_LAUNCHER_ID,
+} from "./sample-repository-work.js";
 import { makeSampleUniformLauncher, SAMPLE_UNIFORM_HARNESS_VERSION, SAMPLE_UNIFORM_LAUNCHER_ID } from "./sample-uniform.js";
 import { createVerdictDsseSigner, loadOrCreateEvaluatorSigningKeys } from "./signing.js";
 
@@ -177,6 +185,7 @@ interface LocalLauncherDeployment {
 export const SOLVE_HARNESS_PINS = {
   "prediction-v1-baseline": { id: "prediction-v1-baseline", version: "1.0.0" },
   "sample-uniform": { id: SAMPLE_UNIFORM_LAUNCHER_ID, version: SAMPLE_UNIFORM_HARNESS_VERSION },
+  "sample-repository-work": { id: SAMPLE_REPOSITORY_WORK_LAUNCHER_ID, version: SAMPLE_REPOSITORY_WORK_HARNESS_VERSION },
 } as const;
 
 export const EVALUATION_HARNESS_PIN = { id: "evaluation-harness", version: "0.1.0" } as const;
@@ -364,11 +373,13 @@ export const evaluationHarnessDeployment = Object.freeze({
 function resolveTaskProfileFor(
   predictionProfile: TaskProfileDocument,
   evaluationProfile: TaskProfileDocument,
+  repositoryWorkProfile: TaskProfileDocument,
   inspectProfile?: TaskProfileDocument,
 ): (descriptor: TaskSpecification["profile"]) => TaskProfileDocument {
   return (descriptor) => {
     if (descriptor.uri === PREDICTION_FORECAST_PROFILE_URI) return predictionProfile;
     if (descriptor.uri === EVALUATION_TASK_PROFILE_URI) return evaluationProfile;
+    if (descriptor.uri === REPOSITORY_WORK_PROFILE_URI) return repositoryWorkProfile;
     if (descriptor.uri === INSPECT_TASK_PROFILE_URI && inspectProfile !== undefined) return inspectProfile;
     return refuse(
       "execution",
@@ -433,6 +444,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const provisioner = createLocalProvisioner({
     registry,
     evaluators: evaluators.map(({ id, signer }) => ({ id, signer })),
+    repositoryMirror: createGitRepositoryMirror(join(workspaceDir, "venue", "repositories")),
     ...(options.evaluationContextVariationForTesting === undefined
       ? {}
       : { evaluationContextVariationForTesting: options.evaluationContextVariationForTesting }),
@@ -450,6 +462,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
 
   const predictionProfile = buildPredictionForecastProfile();
   const evaluationProfile = buildEvaluationTaskProfile();
+  const repositoryWorkProfile = buildRepositoryWorkProfile();
   const inspectProfile = inspectSelection === undefined ? undefined : buildInspectTaskProfile();
   const sealedEvaluationProfile = sealTaskProfile(evaluationProfile);
   const profileStore: ProfileStore = {
@@ -464,6 +477,10 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   );
   const sampleLauncher = withSolveStartDelayForTesting(
     makeSampleUniformLauncher(),
+    options.solveStartDelayMsForTesting,
+  );
+  const repositoryWorkLauncher = withSolveStartDelayForTesting(
+    makeSampleRepositoryWorkLauncher(),
     options.solveStartDelayMsForTesting,
   );
   const inspectLauncher = inspectSelection === undefined || inspectHost === undefined
@@ -555,6 +572,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const sampleDigest = sha256Hex(new TextEncoder().encode(
     extractInlineRunnerSource(sampleLauncher, SAMPLE_UNIFORM_LAUNCHER_ID, predictionProfile),
   ));
+  const repositoryWorkDigest = sha256Hex(new TextEncoder().encode(
+    extractInlineRunnerSource(repositoryWorkLauncher, SAMPLE_REPOSITORY_WORK_LAUNCHER_ID, repositoryWorkProfile),
+  ));
 
   const launcherDeployments: Record<string, LocalLauncherDeployment> = {
     [baselineLauncher.id]: {
@@ -574,6 +594,16 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           ready: true,
           executable: { path: process.execPath, digest: sampleDigest },
           harnessVersions: [SOLVE_HARNESS_PINS["sample-uniform"].version],
+        };
+      },
+    },
+    [repositoryWorkLauncher.id]: {
+      executable: { path: process.execPath, digest: repositoryWorkDigest },
+      async probe() {
+        return {
+          ready: true,
+          executable: { path: process.execPath, digest: repositoryWorkDigest },
+          harnessVersions: [SOLVE_HARNESS_PINS["sample-repository-work"].version],
         };
       },
     },
@@ -624,13 +654,16 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     taskProfiles: [
       PREDICTION_FORECAST_PROFILE_URI,
       EVALUATION_TASK_PROFILE_URI,
+      REPOSITORY_WORK_PROFILE_URI,
       ...(inspectProfile === undefined ? [] : [INSPECT_TASK_PROFILE_URI]),
     ],
-    workspaceKinds: ["dir"],
+    workspaceKinds: ["dir", "worktree"],
     inputMediaTypes: ["application/json", "text/plain"],
     outputMediaTypes: [
       "application/json",
       "application/vnd.in-toto+json",
+      "text/x-diff",
+      "text/markdown",
       ...(inspectProfile === undefined ? [] : [INSPECT_NATIVE_LOG_MEDIA_TYPE, INSPECT_SUMMARY_MEDIA_TYPE]),
     ],
     isolation: ["process", ...(inspectHost?.kind === "oci" ? ["oci-container"] : [])],
@@ -641,10 +674,16 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     source: "urn:jinn:benchmark-product:local-venue",
     executor: "urn:jinn:benchmark-product:local-venue:executor",
     profileStore,
-    resolveTaskProfile: resolveTaskProfileFor(predictionProfile, evaluationProfile, inspectProfile),
+    resolveTaskProfile: resolveTaskProfileFor(
+      predictionProfile,
+      evaluationProfile,
+      repositoryWorkProfile,
+      inspectProfile,
+    ),
     launchers: [
       baselineLauncher,
       sampleLauncher,
+      repositoryWorkLauncher,
       evaluationLauncher,
       ...(inspectLauncher === undefined ? [] : [inspectLauncher]),
     ],
