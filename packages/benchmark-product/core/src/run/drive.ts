@@ -47,7 +47,12 @@ import type {
 } from "@jinn-network/task-execution-backend";
 import { sealSubmission, type ProtocolObservation, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { refuse } from "../errors.js";
-import { EVALUATION_HARNESS_PIN, EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
+import {
+  EVALUATION_HARNESS_PIN,
+  EVALUATOR_REQUIREMENT_KEY,
+  type LocalVenue,
+  type PreparedEvaluationCell,
+} from "../venue/venue.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { appendRunJournalEntry } from "./journal.js";
 import {
@@ -422,12 +427,23 @@ async function prepareAndDispatchEvaluation(
   }
   const evaluationSpecBytes = getSealedBytes(deps.workspaceDir, evaluationSpecSha256);
 
-  const prepared = deps.venue.prepareEvaluationCell({
-    subjectTaskBytes,
-    subjectDeliveryBytes,
-    resultArtifacts,
-    evaluationSpecBytes,
-  });
+  let prepared: PreparedEvaluationCell;
+  try {
+    prepared = await deps.venue.prepareEvaluationCell({
+      subjectTaskBytes,
+      subjectDeliveryBytes,
+      resultArtifacts,
+      evaluationSpecBytes,
+    });
+  } catch (cause) {
+    journalCouldNotGradeLegs(
+      deps,
+      cellKey,
+      cause instanceof Error ? cause.message : String(cause),
+      evalIndexes,
+    );
+    return;
+  }
   const storedTaskSha256 = putSealedBytes(deps.workspaceDir, prepared.taskBytes);
   if (storedTaskSha256 !== prepared.taskSha256) {
     refuse(

@@ -92,6 +92,11 @@
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
+        "to": "@jinn-network/task-execution-oci-grader"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
         "to": "@jinn-network/task-execution-profiles"
       },
       {
@@ -1771,7 +1776,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2970,
+      "discoveredFirstPartySurfaces": 2972,
       "generatedOutputSources": 1313,
       "generatorSources": 615,
       "marketplaceControl": 2,
@@ -19959,6 +19964,26 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/web/src/test"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/src/test/dynamic-response-audit.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/src/test/dynamic-response-audit.ts"
       },
       {
         "categories": [
@@ -42075,6 +42100,7 @@
           "@jinn-network/task-execution-evaluation-harness",
           "@jinn-network/task-execution-evaluator-adapters",
           "@jinn-network/task-execution-launchers",
+          "@jinn-network/task-execution-oci-grader",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
           "@jinn-network/task-execution-supervisor",

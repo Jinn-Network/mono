@@ -248,9 +248,11 @@ export interface SweRebenchOciGraderSourceOptions {
   /**
    * Test seam: replaces the real pinned-OCI runner entirely, so this source is testable on a
    * machine with no container runtime installed. Defaults to the real `runPinnedOciGrader`,
-   * called with `options.runner`. Deliberately takes only the grader input — a test double never
-   * needs the runtime-launch options (`spawn`, `dockerPath`) that `runPinnedOciGrader`'s own
-   * second parameter carries, because it replaces the runtime instead of configuring it.
+   * called with `options.runner`. Product children set `imagePullPolicy: "never"` after their
+   * parent pre-stages the digest, so a child inspect miss is an operational failure rather than
+   * registry authority. Deliberately takes only the grader input — a test double never needs the
+   * runtime-launch options that `runPinnedOciGrader`'s own second parameter carries, because it
+   * replaces the runtime instead of configuring it.
    */
   readonly runPinnedOciGraderForTesting?: (input: PinnedOciGraderInput) => Promise<Uint8Array>;
 }

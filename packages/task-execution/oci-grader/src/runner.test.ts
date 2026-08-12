@@ -130,6 +130,21 @@ describe("ensurePinnedOciImage", () => {
 });
 
 describe("runPinnedOciGrader", () => {
+  it("fails closed without pulling when a pre-staged image is no longer local", async () => {
+    const input = scratchInput();
+    const missing = new FakeChild();
+    const { spawn, calls } = recordingSpawner([missing]);
+    const promise = runPinnedOciGrader(input, { spawn, imagePullPolicy: "never" });
+    missing.exit(1);
+
+    await expect(promise).rejects.toThrow(/pre-staged pinned grader image is unavailable locally/u);
+    expect(calls).toEqual([{
+      command: "docker",
+      args: ["image", "inspect", IMAGE],
+    }]);
+    expect(calls.some((call) => call.args[0] === "pull")).toBe(false);
+  });
+
   it("returns the exact bytes the container left at the statement path", async () => {
     const input = scratchInput();
     const inspect = new FakeChild();
