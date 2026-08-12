@@ -75,6 +75,29 @@ describe("DraftSpecSchema — a full valid spec", () => {
   });
 });
 
+describe("DraftSpecSchema — analysis", () => {
+  test("accepts an optional analysis block naming a paired method and its two arms", () => {
+    const spec = DraftSpecSchema.parse({
+      ...VALID_SPEC,
+      analysis: {
+        method: "jinn.benchmarking.method/paired-delta",
+        version: "1",
+        baseline: "armA",
+        candidate: "armB",
+        parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+      },
+    });
+    expect(spec.analysis?.method).toBe("jinn.benchmarking.method/paired-delta");
+    expect(spec.analysis?.parameters?.["alpha"]).toBe("0.05");
+  });
+
+  test("keeps parsing a spec with no analysis block, and adds no default for it", () => {
+    const spec = DraftSpecSchema.parse(VALID_SPEC);
+    expect(spec.analysis).toBeUndefined();
+    expect(DRAFT_SPEC_DEFAULTS).not.toHaveProperty("analysis");
+  });
+});
+
 describe("DraftSpecSchema — taskSet", () => {
   test("a benchmark taskSet with a well-formed 64-hex digest parses", () => {
     const spec = { ...VALID_SPEC, taskSet: { kind: "benchmark", benchmarkSha256: "0".repeat(64) } };

@@ -140,11 +140,13 @@ describe("cancel mid-run on the real local venue (BP-22)", () => {
       // The platform aggregate is the denominator authority: only judged cells contribute to
       // the headline's n. Expired cancellation-drain cells remain in completeness/attrition but
       // never become implicit failures in a score denominator.
+      // P4b Task 5: `headline` is optional on ClaimPackage; this lifecycle is wilson-only.
+      expect(claim.headline).toBeDefined();
       for (const arm of Object.keys(matrix.attrition.perArm)) {
         const judgedForArm = matrix.cells.filter((cell) => cell.armId === arm && cell.outcome === "judged").length;
-        expect(claim.headline[arm]?.n, arm).toBe(judgedForArm);
+        expect(claim.headline?.[arm]?.n, arm).toBe(judgedForArm);
       }
-      expect(Object.values(claim.headline).reduce((sum, arm) => sum + arm.n, 0)).toBe(1);
+      expect(Object.values(claim.headline!).reduce((sum, arm) => sum + arm.n, 0)).toBe(1);
 
       const verified = await runVerify(contextFor(), { draftId });
       expect(verified.ok, JSON.stringify(verified)).toBe(true);
