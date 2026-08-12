@@ -1,14 +1,16 @@
 # E3 — Red-Team Attack Checklist (pre-lock)
 
-**Version:** 0.3 (weapons prepared; operator-ratified mitigations folded in; review findings applied; no verdicts issued)
-**Date:** 2026-08-12
+**Version:** 0.4 (native `CLAUDE.md` baseline amendment applied; no verdicts issued)
+**Date:** 2026-08-13
 **Author:** E3 method-stream agent
 **Program:** `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` (Stage 2, packet E3)
 **Object under attack:** `docs/superpowers/plans/demo-report-1/E1-comparison-frame.md`, pinned by content at blob `dd8a7244ec85ca6bfbac02145ef3f9ae49f055d0` (commit `6da31a636`, E1 v0.3, operator-approved frame). A version label is not a pin — E1 moved twice while this checklist was being written and will move again before lock. The digest names the object these attacks were actually written against; K3 asserts the frozen draft at lock is that object, or that the delta has been re-attacked.
 
-At the pinned digest, E1 §2.8 records the pinning-asymmetry question as **withdrawn** — arm-A/arm-B symmetric enforcement treated as a settled finding, arm C's mechanics settled by pre-lock evidence rather than operator fiat (B5 is the evidence gate for that). One operator question remains open there, publication framing, tracked here at J7.
+At the pinned digest, E1 §2.8 records the pinning-asymmetry question as **withdrawn** — arm-A/arm-B symmetric enforcement treated as a settled finding, with arm C's mechanics still awaiting pre-lock evidence. The 2026-08-13 amendment below supersedes that latter branch: C is now operator-fixed as true no-file and truthfully loadout-unverifiable (B5 remains its evidence gate). One operator question remains open there, publication framing, tracked here at J7.
 
 **Known in-flight delta at time of writing.** E1's independent review found the work-directory placement claim underlying that withdrawal unsupported at head, and §2.8's question is being restored in re-scoped form: not withdrawn, but *confirmed by P2's acceptance gate*. This checklist already treats placement as unsettled and attacks it directly (B4, B9), so the restore narrows the gap between the two documents rather than opening a new one. It is recorded here because it is exactly why the pin is a digest: when E1's head moves, K3 forces a re-read rather than letting a stale "withdrawn" propagate into the lock as if E3 had accepted it.
+
+**2026-08-13 operator amendment.** Baseline B is native root-level `CLAUDE.md`, not the motivating public benchmark's `AGENTS.md` compatibility shim. The amendment preserves the registered question—conditional skill delivery versus always-on native instruction delivery—while removing a loader-semantics ambiguity. Checks below use `CLAUDE.md`; references to `AGENTS.md` survive only when describing the motivating public result or a repository-content exclusion.
 
 **Status:** All items `open`. This document is the attack surface enumeration and the executable check for each attack. It does not yet pass or fail the method. Thirteen items carry an operator-ratified mitigation, which changes what the check tests but does not close the item — a ratified plan is not a verified one.
 
@@ -107,31 +109,31 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### B2 — Byte provenance from one source is asserted, not audited
 - **Attack:** the report claims both arms derive from one `source.md` via a deterministic transform. A reader has no way to check that the transform was actually run, or that it was run against the version that was sealed.
-- **Check:** the transform is a committed script with no inputs other than `source.md` and the frontmatter block. Re-run it from a clean checkout in CI and assert the three digests (`source.md`, `SKILL.md`, `AGENTS.md`) equal the digests sealed in the Benchmark record. Assert the published `AGENTS.md` digest equals `sha256(source.md)` exactly — arm B is supposed to be the source bytes unchanged, so this is a strict equality, not a re-derivation.
-- **Pass:** CI job green on a clean checkout; `sha256(AGENTS.md) === sha256(source.md)`; `SKILL.md` = frontmatter block ++ `source.md` byte-for-byte, provable by `tail -c` comparison.
+- **Check:** the transform is committed product code with no inputs other than literal `source.md` bytes and the frontmatter block. Re-run it from a clean checkout in CI and assert the three digests (`source.md`, `SKILL.md`, `CLAUDE.md`) equal the digests sealed in the Benchmark record. Assert the published `CLAUDE.md` digest equals `sha256(source.md)` exactly — arm B is the source bytes unchanged, so this is a strict equality, not a re-derivation.
+- **Pass:** CI job green on a clean checkout; `sha256(CLAUDE.md) === sha256(source.md)`; `SKILL.md` = frontmatter block ++ `source.md` byte-for-byte, provable by a byte-slice comparison.
 - **Stage:** pre-lock `standing-guard`
 - **Status:** open · **Origin:** novel
 
 ### B3 — Nobody verified the delivered text ever reached the model `blocker-candidate`
-- **Attack:** the experiment can silently degenerate into empty-versus-empty. Arm A's body enters context only on model-initiated activation — Vercel reports the skill was never invoked in 56% of default-behavior cases. Arm B's `AGENTS.md` is only always-on if it sits where the agent looks for it. A null result under either failure is a null about our plumbing, not about the mechanism.
+- **Attack:** the experiment can silently degenerate into empty-versus-empty. Arm A's body enters context only on model-initiated activation — Vercel reports the skill was never invoked in 56% of default-behavior cases. Arm B's native `CLAUDE.md` is only always-on if it sits at the repository root Claude Code loads. A null result under either failure is a null about our plumbing, not about the mechanism.
 - **Check:** per-cell telemetry, logged and published in aggregate: for arm A, whether the skill body was read (activation event or the body's presence in the transcript); for arm B, whether the file's bytes appear in the model-visible context. Assert on a preview slate before the official run; keep the counters for the official run.
 - **Pass:** arm B inclusion rate is 100% of judged cells. Arm A's activation rate is measured, published as a headline-adjacent number, and interpreted: the activation rate **is** part of the mechanism, so a low rate is a result, but an activation rate of 0% means the plumbing failed and the run is not informative.
 - **Stage:** pre-lock, then post-run
 - **Status:** open · **Origin:** novel
 
 ### B4 — File placement inside the graded working tree differs between arms `blocker-candidate`
-- **Attack:** arm B's `AGENTS.md` goes at repository root; arm A's skill goes in a skills directory. Both are extra files in or near the graded tree, at different paths, written by `materializeAt` at mode `0o400` (`packages/task-execution/backend-local/workspace/src/materialize.ts:39`). Three distinct failure modes: (i) if the grader extracts the candidate patch with `git add -A`/`git diff HEAD`, an untracked root-level `AGENTS.md` enters arm B's patch and not arm A's; (ii) a read-only file inside the tree can break `git clean`, `git checkout`, or a container step running as a different UID; (iii) `materializeLoadout` writes at `join(inputDir, pin.name)` — if the repository is checked out into a subdirectory of the work dir, arm B's `AGENTS.md` is **not** at repository root and may never be loaded at all, silently nulling arm B.
+- **Attack:** arm B's `CLAUDE.md` goes at repository root; arm A's skill goes in an isolated Claude Code plugin directory. Both are experiment-created files in or near the graded tree, at different paths. Three distinct failure modes: (i) if patch extraction sweeps untracked files, root `CLAUDE.md` enters arm B's patch and not arm A's; (ii) a read-only file can break cleanup or a container step running as a different UID; (iii) copying a digest-verified input to the wrong directory can leave `CLAUDE.md` outside the repository root Claude Code actually loads, silently nulling arm B.
 - **Check:** (1) on a preview cell in each arm, diff the extracted candidate patch against a control run with no loadout; assert byte-identical. (2) Print the absolute materialized path and the absolute repository root; assert the parent-directory relationship the agent's loader actually requires. (3) Run one cell per arm with the container's non-root user configuration the official run will use and assert the file is readable.
-- **Pass:** patches byte-identical to the no-loadout control in both arms; `AGENTS.md` provably at the repository root the agent loads from; no permission or cleanup failure in either arm.
+- **Pass:** normalized patches byte-identical to the true-no-file control in both arms; `CLAUDE.md` provably at the repository root the agent loads from; the skill provably in a valid isolated plugin layout; no permission or cleanup failure in either arm.
 - **Ratified mitigation:** the byte-identity condition is now a **P2 acceptance criterion** — the harvested patch must be byte-identical to the no-loadout control in both arms — so the engineering packet cannot land without it. That moves the check from a red-team inspection to a gate on the arm-wiring work itself; E3 still verifies it independently against the built system rather than accepting P2's own green as the answer.
 - **Stage:** pre-lock
 - **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
 ### B5 — Arm C's "empty loadout" is a file, not nothing `blocker-candidate`
-- **Attack:** E1 §2.4 pins arm C as a digest over a zero-byte file so all three arms reach `match` on the loadout axis. But `materializeLoadout` writes a file at `pin.name`. So arm C is not "no instruction file" — it is "an empty file named *something*". If that name is `SKILL.md`, arm C ships a malformed skill (no frontmatter, no description) whose loader behavior is undefined; if it is `AGENTS.md`, arm C ships an empty always-on context file. Either way the baseline is not the baseline the report describes, and the pursuit of `unverifiableAxisCounts.loadout = 0` has bought a cosmetic disclosure number at the cost of the control arm's meaning.
-- **Check:** determine the exact `pin.name` arm C materializes and inspect the agent's startup behavior with that file present: does the loader warn, error, or index a nameless skill? Compare against a genuinely unpinned control on the preview slate — same tasks, no file — and test whether arm-C outcomes differ.
-- **Pass:** either arm C's materialized artifact is demonstrably behaviorally identical to no file at all (preview evidence, not argument), or arm C runs unpinned and the report publishes `unverifiableAxisCounts.loadout = 1` with the reason. A cosmetically stronger disclosure number that misdescribes the control arm fails.
-- **Ratified mitigation:** the arm-C baseline is an **empirical pre-lock decision, not a design preference** — E2's preview evidence chooses between the two branches. If the preview shows behavioral identity between the materialized empty file and no file at all, arm C keeps the pin; if it does not, arm C runs unpinned and the disclosed `unverifiableAxisCounts.loadout` count carries the reason. The pass criterion is therefore the preview evidence standard: a stated sample size and outcome comparison sufficient to distinguish the two, declared before the previews run. Neither branch may be selected by argument.
+- **Attack:** a synthetic empty loadout would create a file and make arm C something other than the true no-file control the report describes. Pursuing a cosmetic pinning `match` must not change the control's meaning.
+- **Check:** inspect arm C's resolved requirements, launcher arguments, and prepared working tree. Assert there is no loadout requirement, no plugin flag, no experiment-created `CLAUDE.md`, and no experiment-created plugin path.
+- **Pass:** arm C is true no-file, and its loadout axis remains truthfully `unverifiable`; no assembly or report path upgrades it to `match` without evidence.
+- **Ratified mitigation:** the operator fixed arm C as the **true no-file control**. It carries no loadout pin, and the loadout axis remains unverifiable. An empty-file equivalence condition may be studied in E2, but it cannot silently replace C or rewrite its evidence state.
 - **Stage:** pre-lock
 - **Status:** open — mitigation ratified, verification pending · **Origin:** novel
 
@@ -151,14 +153,14 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 
 ### B8 — The frozen source drifted after cells executed
 - **Attack:** B1 freezes the `description`. Nothing yet freezes the **body**. If `source.md` is edited mid-program — a typo fix, a clarification, a "small improvement" after a disappointing preview — then cells executed before and after the edit ran different content, and the arms are no longer comparing packagings of one artifact. This is the most tempting edit in the whole program precisely because it feels harmless, and it is the one a digest makes impossible to hide.
-- **Check:** extend B1's no-touch assertion from the description to the entire frozen source. `git log --follow` on `source.md`, `SKILL.md` and `AGENTS.md`; compare every commit timestamp against the first preview cell's dispatch timestamp from the preview log. Independently, assert the digests sealed in the Benchmark record match the files at HEAD at publication.
-- **Pass:** **zero commits touching `source.md`, `SKILL.md`, or `AGENTS.md` at or after the first preview cell's dispatch** — official or preview, no exceptions for whitespace or typos. Sealed digests equal the published files. If an edit did occur, every cell executed before it is void and the run is a re-lock, disclosed as one.
+- **Check:** extend B1's no-touch assertion from the description to the entire frozen source. `git log --follow` on `source.md`, `SKILL.md` and `CLAUDE.md`; compare every commit timestamp against the first preview cell's dispatch timestamp from the preview log. Independently, assert the digests sealed in the Benchmark record match the files at HEAD at publication.
+- **Pass:** **zero commits touching `source.md`, `SKILL.md`, or `CLAUDE.md` at or after the first preview cell's dispatch** — official or preview, no exceptions for whitespace or typos. Sealed digests equal the published files. If an edit did occur, every cell executed before it is void and the run is a re-lock, disclosed as one.
 - **Stage:** pre-lock, then post-run `standing-guard`
 - **Status:** open · **Origin:** novel
 
 ### B9 — The instruction file leaks into the extracted patch
-- **Attack:** arm B's `AGENTS.md` is placed inside the task's git working tree on a SWE slate, so it is visible to `git status` and `git diff` and can be swept into the extracted candidate patch — contaminating the very artifact that gets graded, and doing so asymmetrically between arms because arm A's file sits at a different path. A patch carrying an unrelated root-level markdown file can also fail to apply cleanly in the grader, converting a contamination bug into an arm-correlated infrastructure failure. B4 tests this at the preview level against a no-loadout control; this item is the census across the official run, because a control that passed once does not prove every cell was clean.
-- **Check:** for **every judged cell in every arm**, parse the extracted candidate patch and assert zero hunks touch the instruction file path (`AGENTS.md`, the skill path, or arm C's materialized path). Publish the per-arm count of cells with any such hunk — expected zero, and published as zero rather than omitted. B4's byte-identity control covers the no-loadout comparison; this covers the population.
+- **Attack:** arm B's `CLAUDE.md` and arm A's plugin tree are visible to git status and can be swept into the extracted candidate patch — contaminating the artifact that gets graded asymmetrically. A patch carrying either instruction surface can also fail to apply cleanly in the grader, converting contamination into an arm-correlated infrastructure failure. B4 tests this at the preview level against a no-loadout control; this item is the census across the official run.
+- **Check:** for **every judged cell in every arm**, parse the extracted candidate patch and assert zero hunks touch root `CLAUDE.md` or the experiment-created plugin path. Publish the per-arm count of cells with any such hunk — expected zero, and published as zero rather than omitted. B4's byte-identity control covers the no-loadout comparison; this covers the population.
 - **Pass:** zero instruction-file hunks across all judged cells in all arms, asserted programmatically over the sealed records rather than sampled; the per-arm count published in the report's disclosures.
 - **Ratified mitigation:** this is now a **P2 acceptance criterion** alongside B4's byte-identity condition, so the arm-wiring packet cannot land while the leak is possible. E3 verifies independently against the built system rather than accepting P2's own green — same pattern as B4.
 - **Stage:** pre-lock (P2 acceptance), then post-run spot-verification
@@ -363,8 +365,8 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 ## Surface G — Prompt injection and task content
 
 ### G1 — Injection surface in `problem_statement`
-- **Attack:** slate problem statements are attacker-controlled text from public issue trackers. Text inside them can instruct the agent, and if any of it references skills, `AGENTS.md`, or context files, the injection interacts *differently* with the two arms — a differential injection sensitivity that is indistinguishable from a mechanism effect.
-- **Check:** grep every locked task's `problem_statement` and `instructions` for `AGENTS.md`, `SKILL.md`, `skill`, `system prompt`, `ignore previous`, `instruction`, and for imperative second-person directives addressed to a tool. Publish the hit list.
+- **Attack:** slate problem statements are attacker-controlled text from public issue trackers. Text inside them can instruct the agent, and if any of it references skills, `CLAUDE.md`, `AGENTS.md`, or context files, the injection interacts *differently* with the two arms — a differential injection sensitivity that is indistinguishable from a mechanism effect.
+- **Check:** grep every locked task's `problem_statement` and `instructions` for `CLAUDE.md`, `AGENTS.md`, `SKILL.md`, `skill`, `system prompt`, `ignore previous`, `instruction`, and for imperative second-person directives addressed to a tool. Publish the hit list.
 - **Pass:** hits reviewed individually; any task whose text addresses an agent or names either mechanism is excluded by a rule declared before results are seen; the hit list published.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** seeded (program E3 scope) — check newly specified
@@ -377,9 +379,9 @@ The program's pristine bar: *every criticism a hostile evals-community reader co
 - **Status:** open · **Origin:** novel
 
 ### G3 — Repository content can carry its own instructions
-- **Attack:** the checked-out repository may already contain an `AGENTS.md`, a `CLAUDE.md`, a `.cursorrules`, or a skills directory. Arm B then writes over or alongside a pre-existing file; arm C is not actually instruction-free; arm A competes with a native context file.
+- **Attack:** the checked-out repository may already contain an `AGENTS.md`, a `CLAUDE.md`, a `.cursorrules`, or a skills directory. Arm B would then overwrite or coexist with a native instruction file; arm C would not actually be instruction-free; arm A could compete with repository instructions.
 - **Check:** for every locked task at its base commit, enumerate agent-instruction files in the tree. Publish the inventory.
-- **Pass:** inventory empty, or a pre-declared, uniform handling rule (remove for all arms, or keep for all arms) applied identically and disclosed. Arm B overwriting a pre-existing `AGENTS.md` in some tasks and not others is a disqualifying inconsistency.
+- **Pass:** inventory empty, or a pre-declared, uniform handling rule applied identically and disclosed. P2 must fail closed rather than overwrite an existing root `CLAUDE.md` or its reserved experiment plugin path; task eligibility must exclude any other pre-existing instruction surface that would violate the true-no-file control.
 - **Stage:** pre-lock
 - **Status:** open · **Origin:** novel
 
