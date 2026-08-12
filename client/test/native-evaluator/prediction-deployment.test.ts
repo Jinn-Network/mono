@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { BindingResolver, ResolvedBinding } from "@jinn-network/trust-core";
+import { parseDsseEnvelope, type BindingResolver, type ResolvedBinding } from "@jinn-network/trust-core";
 import { ResultEvaluationStatementSchema } from "@jinn-network/evidence-protocol";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
@@ -808,7 +808,7 @@ describe("production prediction-market deployment module — harvest-time identi
     }
   });
 
-  it("gets past the identity-authority guard to a later, different check when evaluator.id equals roles.agent", async () => {
+  it("harvests and seals the verdict when evaluator.id equals roles.agent", async () => {
     const value = await fixture();
     const composition = await buildNativeEvaluatorComposition(value.config);
     try {
@@ -827,20 +827,24 @@ describe("production prediction-market deployment module — harvest-time identi
       });
       await writeFile(join(outDir, "verdict"), genuinePayload);
 
+      // `secrets` and `tmp` are swept by the dir provisioner's harvest, so they get their own
+      // directories -- aliasing them onto `out` would delete the harvested verdict.
+      const secretsDir = join(outDir, "..", "secrets");
+      const tmpDir = join(outDir, "..", "tmp");
+      await mkdir(secretsDir, { recursive: true });
+      await mkdir(tmpDir, { recursive: true });
       const paths = {
         root: outDir, input: outDir, work: outDir, out: outDir, logs: outDir,
-        harnessState: outDir, secrets: outDir, tmp: outDir, meta: outDir,
+        harnessState: outDir, secrets: secretsDir, tmp: tmpDir, meta: outDir,
       } as unknown as WorkspacePaths;
-      // Identical statement construction to the previous test, with only `evaluator.id`
-      // changed to match `roles.agent`. It still doesn't harvest cleanly (this hand-built
-      // statement doesn't survive `sealSignedRecord`'s canonical re-encoding byte-for-byte
-      // -- a fixture-fidelity limit, not a real production path), but it now fails at the
-      // *next* check in sequence ("not canonical exact bytes", composition.ts:344) rather
-      // than the identity-authority guard (composition.ts:335). Reaching a check that only
-      // runs after the identity `if` block completes false is proof the identity guard
-      // specifically is what `evaluator.id` flips -- not a false positive tripped by some
-      // unrelated field this fixture also carries.
-      await expect(contract.harvest(paths, [])).rejects.toThrow(/not canonical exact bytes/);
+      // Identical statement construction to the previous test, with only `evaluator.id` changed
+      // to match `roles.agent`. That is the sole difference, so a clean harvest here is proof the
+      // identity guard specifically is what `evaluator.id` flips -- not a false positive tripped
+      // by some unrelated field this fixture also carries. The sealed envelope carries the
+      // attempt's exact statement bytes, never a re-serialization of them.
+      await expect(contract.harvest(paths, [])).resolves.toBeDefined();
+      const envelope = parseDsseEnvelope(new Uint8Array(await readFile(join(outDir, "verdict"))));
+      expect(Buffer.from(envelope.payloadBytes).equals(Buffer.from(genuinePayload))).toBe(true);
     } finally {
       await composition.close();
       value.store.close();

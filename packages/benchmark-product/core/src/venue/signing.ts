@@ -13,35 +13,32 @@
  * `ResultEvaluationStatementSchema`.
  *
  * DIVERGENCE FROM `native-evaluator-composition.ts`'s PATTERN (recorded here, reported at
- * delivery): that reference wraps via `sealSignedRecord({record: JSON.parse(bytes), ...})` and
- * then asserts `sealed.payloadBytes` byte-equals the original file bytes. Against a REAL spawned
- * evaluation harness this assertion cannot succeed: the harness writes `out/verdict` via
- * `@jinn-network/attestation-issuer`'s `buildResultEvaluationPayload` →
+ * delivery): that reference used to wrap via `sealSignedRecord({record: JSON.parse(bytes), ...})`
+ * and then assert `sealed.payloadBytes` byte-equals the original file bytes. Against a REAL
+ * spawned evaluation harness that assertion could never succeed: the harness writes `out/verdict`
+ * via `@jinn-network/attestation-issuer`'s `buildResultEvaluationPayload` →
  * `deterministicJsonBytes`, which pretty-prints (2-space indent, trailing newline, `Object.keys(
  * ).sort()` key order); `sealSignedRecord` re-canonicalizes via `@jinn-network/trust-core`'s
  * `canonicalJsonBytes`, which is COMPACT (no whitespace, `compareCodeUnitStrings` key order).
- * The two canonicalizers never produce the same bytes for any non-trivial object, so the
- * byte-equality assertion `sealSignedRecord` performs is unsatisfiable for genuine harness
- * output (confirmed empirically by this module's own integration test against the real, compiled
- * evaluation-harness binary — see `./venue.integration.test.ts`). That earlier "wrap verbatim"
- * reasoning stands as far as it goes: it is a correct read of *this module's own* seal-once
- * posture, and of why `sealSignedRecord`'s particular byte-equality assertion cannot be reused
- * here.
+ * The two canonicalizers never produce the same bytes for any non-trivial object (confirmed
+ * empirically by this module's own integration test against the real, compiled
+ * evaluation-harness binary — see `./venue.integration.test.ts`). That reference has since been
+ * repaired: it checks the harness bytes against `canonicalAttestationJsonBytes` and signs those
+ * exact bytes via `sealSignedPayload`, so the two modules now differ only in WHICH exact spelling
+ * they seal — both seal once, and neither re-derives the platform's judgment of the content.
  *
- * BP-13 CORRECTION (F1): it is not, however, sufficient. The aggregation boundary this module's
- * output feeds — `@jinn-network/benchmarking-aggregate`'s `resolveVerdictOutcome`
- * (`resolved-inputs.ts`'s `parseCanonicalJson`) — requires every referenced verdict's DSSE
- * payload bytes to be the EXACT trust-core canonical (compact, code-unit-sorted) encoding of the
- * statement; `bytesEqual(bytes, canonicalJsonBytes(value))` is asserted at wilson-recompute time,
- * not just at seal time. Wrapping the harness's pretty-printed bytes verbatim therefore sealed a
- * verdict that would fail `verifyReport`/`produceReport`'s own recompute for every real evaluation
- * — the earlier fix satisfied this module's local tests but not the boundary one packet later
- * actually reads through. The correction: after the evaluator-id and spec-digest validations
+ * WHY THIS MODULE STILL RE-ENCODES (supersedes the earlier "BP-13 CORRECTION (F1)" note): the
+ * aggregation boundary this module's output feeds — `@jinn-network/benchmarking-aggregate`'s
+ * `resolveVerdictOutcome` (`resolved-inputs.ts`'s `parseCanonicalJson`) — re-derives every
+ * referenced verdict's DSSE payload bytes at wilson-recompute time, not just at seal time. That
+ * note claimed the boundary requires the trust-core compact spelling specifically; it does not.
+ * `parseCanonicalJson` is handed `[canonicalJsonBytes, canonicalAttestationJsonBytes]` and accepts
+ * a match against EITHER, so compact re-encoding here is this module's own choice rather than a
+ * boundary requirement. The choice stands: after the evaluator-id and spec-digest validations
  * below, this module re-encodes the PARSED statement with trust-core's `canonicalJsonBytes` and
  * DSSE-wraps and signs THOSE bytes — a semantic-content-preserving re-encoding of the harness's
  * own statement (same fields, same values, canonical byte order/whitespace), signed once at seal
- * time. This is still "seal once, never re-derive the platform's judgment of the statement's
- * content" in spirit: no field is added, dropped, or recomputed, only re-serialized.
+ * time. No field is added, dropped, or recomputed, only re-serialized.
  *
  * One consequence, deliberately fail-loud rather than silently reshaping data:
  * `canonicalJsonBytes` refuses any JSON number that is not an exact safe integer (program ruling

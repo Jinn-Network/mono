@@ -1,12 +1,13 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { BindingResolver, ResolvedBinding } from "@jinn-network/trust-core";
+import { parseDsseEnvelope, type BindingResolver, type ResolvedBinding } from "@jinn-network/trust-core";
 import {
   EVALUATION_SPEC_FORMAT_URI,
   EVALUATION_TASK_PROFILE_URI,
   EVAL_SEMANTICS_VERSION,
+  VERDICT_DSSE_PAYLOAD_TYPE,
   buildEvaluationTaskProfile,
   sealEvaluationSpec,
   sealTaskProfile,
@@ -800,13 +801,21 @@ async function harvestContractFor(
   const workRoot = await mkdtemp(join(tmpdir(), "jinn-native-evaluator-method-guard-"));
   roots.push(workRoot);
   const outDir = join(workRoot, "out");
-  await mkdir(outDir, { recursive: true });
+  // `secrets` and `tmp` are swept by the dir provisioner's harvest, so they get their own
+  // directories -- aliasing them onto `out` would delete the harvested verdict.
+  const secretsDir = join(workRoot, "secrets");
+  const tmpDir = join(workRoot, "tmp");
+  const metaDir = join(workRoot, "meta");
+  const logsDir = join(workRoot, "logs");
+  for (const dir of [outDir, secretsDir, tmpDir, metaDir, logsDir]) {
+    await mkdir(dir, { recursive: true });
+  }
   return {
     contract: selected.contract,
     outDir,
     paths: {
-      root: outDir, input: outDir, work: outDir, out: outDir, logs: outDir,
-      harnessState: outDir, secrets: outDir, tmp: outDir, meta: outDir,
+      root: workRoot, input: outDir, work: outDir, out: outDir, logs: logsDir,
+      harnessState: outDir, secrets: secretsDir, tmp: tmpDir, meta: metaDir,
     } as unknown as WorkspacePaths,
   };
 }
@@ -860,16 +869,37 @@ describe("native evaluator multi-registration harvest method-digest guard", () =
     }
   });
 
-  it("gets past the method-digest guard to a later check when the verdict names the serving method", async () => {
+  it("seals the attempt's exact verdict bytes when the verdict names the serving method", async () => {
     const { value, composition, harvestable, verdict } = await twoMethodFixture();
     try {
-      await writeFile(join(harvestable.outDir, "verdict"), verdict(`sha256:${SWE_METHOD_SHA256}`));
       // Identical statement, only the method digest changed to the one the durable swe-rebench
-      // spec selects. It still doesn't harvest cleanly (this hand-built statement doesn't
-      // survive `sealSignedRecord`'s canonical re-encoding byte-for-byte -- a fixture-fidelity
-      // limit, not a production path), but it now fails at the *next* check in sequence rather
-      // than the authority guard. Reaching a check that only runs after the authority `if`
-      // completes false is what proves the method-digest term is the one the digest flips.
+      // spec selects. `verdict()` produces bytes through the same `buildResultEvaluationPayload`
+      // the real evaluation harness writes `out/verdict` with, so this is the production shape.
+      const unsigned = verdict(`sha256:${SWE_METHOD_SHA256}`);
+      await writeFile(join(harvestable.outDir, "verdict"), unsigned);
+      await expect(harvestable.contract.harvest(harvestable.paths, [])).resolves.toBeDefined();
+
+      const envelope = parseDsseEnvelope(new Uint8Array(await readFile(join(harvestable.outDir, "verdict"))));
+      expect(envelope.payloadType).toBe(VERDICT_DSSE_PAYLOAD_TYPE);
+      // The signed payload is the attempt's own bytes, never a re-serialization of them.
+      expect(Buffer.from(envelope.payloadBytes).equals(Buffer.from(unsigned))).toBe(true);
+      expect(envelope.signatures.map(({ keyid }) => keyid))
+        .toEqual([value.roles.get("evaluator-verdict").keyId]);
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+
+  it("refuses a verdict statement written in a spelling the attestation family never emits", async () => {
+    const { value, composition, harvestable, verdict } = await twoMethodFixture();
+    try {
+      // Same statement, re-spelled compactly. Semantically identical, so every authority term
+      // still holds -- only the exact-bytes guard can reject it.
+      const respelled = JSON.stringify(JSON.parse(
+        new TextDecoder().decode(verdict(`sha256:${SWE_METHOD_SHA256}`)),
+      ));
+      await writeFile(join(harvestable.outDir, "verdict"), respelled);
       await expect(harvestable.contract.harvest(harvestable.paths, []))
         .rejects.toThrow(/not canonical exact bytes/);
     } finally {

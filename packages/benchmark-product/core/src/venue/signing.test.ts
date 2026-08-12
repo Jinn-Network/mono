@@ -265,8 +265,9 @@ describe("sealVerdictStatement + readVerdictEnvelope", () => {
     // The real evaluation harness writes pretty-printed, non-compact JSON (2-space indent,
     // trailing newline, `Object.keys().sort()` order) via `@jinn-network/attestation-issuer`'s
     // `deterministicJsonBytes` -- NOT `@jinn-network/trust-core`'s compact `canonicalJsonBytes`.
-    // The aggregation boundary (`resolveVerdictOutcome`) requires the exact canonical encoding,
-    // so sealVerdictStatement re-encodes the parsed statement and seals/signs THOSE bytes.
+    // The aggregation boundary (`resolveVerdictOutcome`) accepts either exact spelling; this
+    // module's choice is to re-encode the parsed statement and seal/sign THOSE bytes, and this
+    // test pins that choice.
     const key = loadOrCreateVerdictSigningKey(workspaceDir);
     const signer = createVerdictDsseSigner(key);
     const rawStatement = {
