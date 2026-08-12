@@ -665,7 +665,7 @@ All figures below are recounted programmatically from this file's own headings a
 |---|---|
 | A2 | P0-interop threads real per-task `created_at`; declared fallback is dropping `clean-subset@1` for a slate-level attestation, recorded in that PR |
 | B4 | Byte-identity of the harvested patch against a no-loadout control becomes a P2 acceptance criterion |
-| B5 | Arm-C baseline decided empirically from E2 preview evidence, not by design preference |
+| B5 | 2026-08-13 operator decision fixes arm C as true no-file with its loadout axis truthfully `unverifiable`; E2's empty-loadout condition remains diagnostic only and cannot replace C |
 | B9 | Zero instruction-file hunks in the extracted patch — a P2 acceptance criterion alongside B4 |
 | D1 | Grader program frozen; its digest published at lock in the method document and asserted equal on every official verdict |
 | D2 | Task images digest-pinned and run with `--pull never` |

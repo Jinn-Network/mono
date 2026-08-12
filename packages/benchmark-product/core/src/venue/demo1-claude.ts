@@ -31,6 +31,8 @@ export const DEMO1_EXPERIMENT_PATHS = [
 ] as const;
 
 const execFileAsync = promisify(execFile);
+const CLAUDE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/u;
+const CLAUDE_VERSION_OUTPUT = /^([0-9]+\.[0-9]+\.[0-9]+) \(Claude Code\)$/u;
 
 export interface Demo1SkillFrontmatter {
   readonly name: string;
@@ -161,11 +163,12 @@ export function createDemo1ClaudeRuntimeBinding(
     effort: DEMO1_CLAUDE_EFFORT,
     artifacts: options.artifacts,
     async probe() {
+      let observedVersion: string | undefined;
       const unavailable = (detail: string): Demo1ClaudeReadiness => ({
         ready: false,
         detail,
         executable,
-        harnessVersions: [options.harnessVersion],
+        harnessVersions: observedVersion === undefined ? [] : [observedVersion],
         models: [DEMO1_CLAUDE_MODEL_ID],
         loadouts: inventory,
       });
@@ -173,13 +176,20 @@ export function createDemo1ClaudeRuntimeBinding(
         if (sha256(readFileSync(executable.path)) !== executable.digest) {
           return unavailable("claude-code executable digest changed after runtime binding");
         }
-        const version = (await command(executable.path, [
+        const versionOutput = (await command(executable.path, [
           "--model", DEMO1_CLAUDE_MODEL_ID,
           "--effort", DEMO1_CLAUDE_EFFORT,
           "--version",
         ])).stdout.trim();
-        if (!version.startsWith(options.harnessVersion)) {
-          return unavailable(`claude-code version mismatch: expected ${options.harnessVersion}, observed ${version}`);
+        const parsed = CLAUDE_VERSION_OUTPUT.exec(versionOutput);
+        if (parsed === null) {
+          return unavailable(`claude-code emitted malformed version output: ${versionOutput || "<empty>"}`);
+        }
+        observedVersion = parsed[1]!;
+        if (!CLAUDE_VERSION.test(options.harnessVersion) || observedVersion !== options.harnessVersion) {
+          return unavailable(
+            `claude-code version mismatch: expected ${options.harnessVersion || "<empty>"}, observed ${observedVersion}`,
+          );
         }
         const auth = JSON.parse((await command(executable.path, ["auth", "status"])).stdout) as {
           readonly loggedIn?: unknown;
@@ -188,7 +198,7 @@ export function createDemo1ClaudeRuntimeBinding(
         return {
           ready: true,
           executable,
-          harnessVersions: [options.harnessVersion],
+          harnessVersions: [observedVersion],
           models: [DEMO1_CLAUDE_MODEL_ID],
           loadouts: inventory,
         };

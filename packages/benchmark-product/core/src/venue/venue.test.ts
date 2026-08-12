@@ -131,11 +131,11 @@ describe("createLocalVenue Demo-1 Claude deployment", () => {
     });
     return createDemo1ClaudeRuntimeBinding({
       executablePath: process.execPath,
-      harnessVersion: process.version,
+      harnessVersion: "2.1.222",
       artifacts,
       command: async (_path, args) => args[0] === "auth"
         ? { stdout: '{"loggedIn":true}' }
-        : { stdout: `${process.version} (Claude Code)\n` },
+        : { stdout: "2.1.222 (Claude Code)\n" },
     });
   }
 

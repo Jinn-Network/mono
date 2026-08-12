@@ -18,6 +18,7 @@ const artifacts = generateDemo1InstructionArtifacts(source, {
   name: "demo1-procedure",
   description: "Use for repository implementation tasks.",
 });
+const HARNESS_VERSION = "2.1.222";
 
 const paths: WorkspacePaths = {
   root: "/attempt",
@@ -36,17 +37,21 @@ const attempt: AttemptIdentity = {
   attemptNumber: 1,
 };
 
-function runtime(authenticated = true) {
+function runtime(
+  authenticated = true,
+  harnessVersion = HARNESS_VERSION,
+  versionOutput = `${HARNESS_VERSION} (Claude Code)\n`,
+) {
   const calls: string[][] = [];
   const binding = createDemo1ClaudeRuntimeBinding({
     executablePath: process.execPath,
-    harnessVersion: process.version,
+    harnessVersion,
     artifacts,
     command: async (_path, args) => {
       calls.push([...args]);
       return args[0] === "auth"
         ? { stdout: JSON.stringify({ loggedIn: authenticated }) }
-        : { stdout: `${process.version} (Claude Code)\n` };
+        : { stdout: versionOutput };
     },
   });
   return { binding, calls };
@@ -90,7 +95,7 @@ describe("Demo-1 real Claude runtime inventory", () => {
       ["auth", "status"],
     ]);
     expect(readiness.models).toEqual([DEMO1_CLAUDE_MODEL_ID]);
-    expect(readiness.harnessVersions).toEqual([process.version]);
+    expect(readiness.harnessVersions).toEqual([HARNESS_VERSION]);
     expect(readiness.loadouts).toEqual([
       { kind: "jinn.skill.v1", name: "SKILL.md", digest: artifacts.skill.digest.sha256 },
       { kind: "jinn.skill.v1", name: "CLAUDE.md", digest: artifacts.baseline.digest.sha256 },
@@ -99,6 +104,29 @@ describe("Demo-1 real Claude runtime inventory", () => {
 
   it("fails readiness when real authentication is not available", async () => {
     expect((await runtime(false).binding.probe()).ready).toBe(false);
+  });
+
+  it.each(["", "2.1", "2.1.222.1"])(
+    "refuses configured version %j rather than accepting an observed exact-version prefix",
+    async (configured) => {
+      const readiness = await runtime(true, configured).binding.probe();
+      expect(readiness.ready).toBe(false);
+      expect(readiness.harnessVersions).toEqual([HARNESS_VERSION]);
+      expect(readiness.detail).toMatch(/version mismatch/u);
+    },
+  );
+
+  it.each([
+    "",
+    "2.1.222",
+    "2.1.222-beta (Claude Code)",
+    "2.1.222 (Claude Code) extra",
+    "Claude Code 2.1.222",
+  ])("refuses malformed or non-exact Claude version output %j", async (output) => {
+    const readiness = await runtime(true, HARNESS_VERSION, output).binding.probe();
+    expect(readiness.ready).toBe(false);
+    expect(readiness.harnessVersions).toEqual([]);
+    expect(readiness.detail).toMatch(/malformed version output/u);
   });
 });
 
