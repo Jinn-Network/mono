@@ -40,7 +40,7 @@ function fixture() {
     results: [result],
     evaluationSpec: exact("evaluation-spec", text("evaluation-spec")),
   };
-  const verdictEnvelope = buildVerdictEnvelope({
+  const verdictBytes = buildVerdictEnvelope({
     _type: IN_TOTO_STATEMENT_TYPE,
     subject: [
       { name: "task", digest: { sha256: task.digest.slice(7) } },
@@ -55,7 +55,6 @@ function fixture() {
       verdict: "pass",
     },
   }, [{ keyid: "did:key:evaluator", sig: "c2ln" }]);
-  const verdictBytes = text(JSON.stringify(verdictEnvelope));
   const evaluationEvidence = exact("evaluation-evidence", text("evaluation-evidence"));
   const derivedTaskBytes = text("exact-derived-task");
   const derivedTaskDigest = documentDigest(derivedTaskBytes);

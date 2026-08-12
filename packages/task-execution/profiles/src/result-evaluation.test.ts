@@ -69,7 +69,12 @@ describe("buildVerdictEnvelope — the delivered verdict IS the claim (design §
       },
     };
 
-    const envelope = buildVerdictEnvelope(statement, [{ sig: "deadbeef", keyid: "evaluator-key-1" }]);
+    const envelopeBytes = buildVerdictEnvelope(statement, [{ sig: "deadbeef", keyid: "evaluator-key-1" }]);
+    const envelope = JSON.parse(decodeUtf8(envelopeBytes)) as {
+      payloadType: string;
+      payload: string;
+      signatures: { keyid?: string; sig: string }[];
+    };
     expect(envelope.payloadType).toBe("application/vnd.in-toto+json");
 
     const decoded = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
@@ -80,5 +85,61 @@ describe("buildVerdictEnvelope — the delivered verdict IS the claim (design §
     for (const name of required) {
       expect(deliveredNames.has(name), `measurement "${name}" must be delivered`).toBe(true);
     }
+  });
+
+  // Regression for the defect-#34 class (canonical JCS DSSE envelope encoding): the envelope
+  // BYTES are the producer's contract. An insertion-ordered `JSON.stringify` spelling of the
+  // same envelope object is refused by trust-core's authority-bearing `parseExactDsseEnvelope`
+  // (it reconstructs through `sealDsseEnvelope` and byte-compares), so the producer must emit
+  // the canonical encoding itself rather than leave the serialization to each caller.
+  it("returns exact canonical JCS envelope bytes — code-unit-sorted keys, compact, no trailing newline", () => {
+    const statement: ResultEvaluationStatement = {
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [{
+        name: "execution/task/task.md",
+        digest: { sha256: "37bbbbed5fd87cbc8c1b2084b1c48b52170cfe0d9d0ac70f0ebe26ef3d835c9b" },
+      }],
+      predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
+      predicate: {
+        evaluatedAt: "2026-07-28T00:00:00Z",
+        evaluator: { id: "urn:uuid:00000000-0000-4000-8000-000000000000" },
+        taskSubject: "execution/task/task.md",
+        resultSubjects: ["execution/task/task.md"],
+        verdict: "pass",
+      },
+    };
+    const payloadBase64 = Buffer.from(canonicalJsonBytes(statement)).toString("base64");
+
+    const bytes = buildVerdictEnvelope(statement, [{ keyid: "evaluator-key-1", sig: "AA==" }]);
+
+    // Hand-sorted independent expectation ("payload" < "payloadType" < "signatures";
+    // "keyid" < "sig" in code-unit order), NOT derived from the implementation's serializer.
+    expect(Buffer.from(bytes).toString("utf8")).toBe(
+      `{"payload":"${payloadBase64}","payloadType":"application/vnd.in-toto+json",`
+      + `"signatures":[{"keyid":"evaluator-key-1","sig":"AA=="}]}`,
+    );
+  });
+
+  it("omits an undefined keyid from the sealed signature member instead of refusing to seal", () => {
+    const statement: ResultEvaluationStatement = {
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [{
+        name: "execution/task/task.md",
+        digest: { sha256: "37bbbbed5fd87cbc8c1b2084b1c48b52170cfe0d9d0ac70f0ebe26ef3d835c9b" },
+      }],
+      predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
+      predicate: {
+        evaluatedAt: "2026-07-28T00:00:00Z",
+        evaluator: { id: "urn:uuid:00000000-0000-4000-8000-000000000000" },
+        taskSubject: "execution/task/task.md",
+        resultSubjects: ["execution/task/task.md"],
+        verdict: "pass",
+      },
+    };
+
+    const bytes = buildVerdictEnvelope(statement, [{ sig: "AA==" }]);
+
+    const envelope = JSON.parse(decodeUtf8(bytes)) as { signatures: Record<string, unknown>[] };
+    expect(envelope.signatures).toEqual([{ sig: "AA==" }]);
   });
 });
