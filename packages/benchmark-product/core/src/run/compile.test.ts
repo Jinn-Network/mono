@@ -346,3 +346,120 @@ describe("compilePreviewRun — subsetting (BP-20)", () => {
     expect(compiled.previewBenchmarkSha256).not.toBe(officialSha256);
   });
 });
+
+describe("compileDraft — analysis selection", () => {
+  test("seals both wilson and the selected paired method into analysisPlan", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    const analysis = {
+      method: "jinn.benchmarking.method/paired-delta",
+      version: "1",
+      baseline: "baseline",
+      candidate: "sample",
+      parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+    };
+
+    const compiled = compileDraft({
+      workspaceDir,
+      draft: { ...document, spec: { ...document.spec, analysis } },
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+    });
+
+    expect(compiled.plannedRun.record.analysisPlan).toEqual([
+      { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
+      {
+        method: "jinn.benchmarking.method/paired-delta",
+        version: "1",
+        parameters: {
+          verdictRule: "sole",
+          baseline: "baseline",
+          candidate: "sample",
+          seed: 123456789,
+          resamples: 1000,
+          alpha: "0.05",
+        },
+      },
+    ]);
+  });
+
+  test("refuses an unregistered method at compile time", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    const analysis = { method: "jinn.benchmarking.method/does-not-exist", version: "1" };
+
+    try {
+      compileDraft({
+        workspaceDir,
+        draft: { ...document, spec: { ...document.spec, analysis } },
+        owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+        closeAt: "2026-08-06T00:00:00Z",
+      });
+      expect.unreachable("expected a refusal");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(BenchmarkProductError);
+      expect((cause as BenchmarkProductError).code).toBe("validation");
+      expect((cause as BenchmarkProductError).message).toMatch(/not a registered method/i);
+    }
+  });
+
+  test("refuses a paired method whose baseline or candidate does not name an arm", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    const analysis = {
+      method: "jinn.benchmarking.method/paired-delta",
+      version: "1",
+      baseline: "baseline",
+      candidate: "armZ",
+      parameters: { seed: 1, resamples: 10, alpha: "0.05" },
+    };
+
+    try {
+      compileDraft({
+        workspaceDir,
+        draft: { ...document, spec: { ...document.spec, analysis } },
+        owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+        closeAt: "2026-08-06T00:00:00Z",
+      });
+      expect.unreachable("expected a refusal");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(BenchmarkProductError);
+      expect((cause as BenchmarkProductError).code).toBe("validation");
+      expect((cause as BenchmarkProductError).message).toMatch(/candidate/i);
+    }
+  });
+
+  test("refuses parameters the method's own schema rejects", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    const analysis = {
+      method: "jinn.benchmarking.method/paired-delta",
+      version: "1",
+      baseline: "baseline",
+      candidate: "sample",
+      parameters: { seed: 1, resamples: 10, alpha: 0.05 },
+    };
+
+    try {
+      compileDraft({
+        workspaceDir,
+        draft: { ...document, spec: { ...document.spec, analysis } },
+        owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+        closeAt: "2026-08-06T00:00:00Z",
+      });
+      expect.unreachable("expected a refusal");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(BenchmarkProductError);
+      expect((cause as BenchmarkProductError).code).toBe("validation");
+      expect((cause as BenchmarkProductError).message).toMatch(/alpha/i);
+    }
+  });
+});
