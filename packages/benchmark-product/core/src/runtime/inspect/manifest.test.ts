@@ -89,6 +89,8 @@ describe("InspectSelectionManifestSchema", () => {
           openaiSdkVersion: "2.53.0",
           workerSourceSha256: manifest.runtime.workerSha256,
           runtimeHostSourceSha256: "6".repeat(64),
+          brokerSourceSha256: "7".repeat(64),
+          modelProviderSourceSha256: "8".repeat(64),
           dockerExecutableSha256: "5".repeat(64),
           dockerEngineVersion: "28.5.1",
           dockerApiVersion: "1.51",
@@ -118,6 +120,93 @@ describe("InspectSelectionManifestSchema", () => {
       runOptions: { sampleId: "Mercury_417466", maxSamples: 1 },
     });
     expect(result.success).toBe(true);
+  });
+
+  test("accepts only the sealed Luna Responses profile on a broker-only OCI runtime", () => {
+    const provider = {
+      surface: "openai-responses",
+      upstreamModel: "gpt-5.6-luna",
+      reasoningEffort: "none",
+      maxOutputTokens: 128,
+      store: false,
+      background: false,
+      stream: false,
+      serviceTier: "default",
+      tools: [],
+      fallbackModels: [],
+      retries: 0,
+      persistedConversation: false,
+      metadata: null,
+      promptCacheIdentifier: null,
+    } as const;
+    const providerManifest = {
+      ...manifest,
+      runtime: {
+        ...manifest.runtime,
+        execution: {
+          kind: "oci",
+          imageDigest: `sha256:${"2".repeat(64)}`,
+          platform: "linux/amd64",
+          inspectEvalsVersion: "0.16.0",
+          openaiSdkVersion: "2.53.0",
+          workerSourceSha256: manifest.runtime.workerSha256,
+          runtimeHostSourceSha256: "6".repeat(64),
+          brokerSourceSha256: "7".repeat(64),
+          modelProviderSourceSha256: "8".repeat(64),
+          dockerExecutableSha256: "5".repeat(64),
+          dockerEngineVersion: "28.5.1",
+          dockerApiVersion: "1.51",
+          datasetCacheSha256: "3".repeat(64),
+          isolation: {
+            readOnlyRoot: true,
+            network: "broker-only",
+            capabilities: [],
+            noNewPrivileges: true,
+            cpuCount: 1,
+            memoryBytes: 1_073_741_824,
+            pidsLimit: 64,
+            scratchBytes: 536_870_912,
+            user: "501:20",
+            mounts: ["project:ro", "dataset-cache:ro", "attempt-input:ro", "attempt-output:rw", "broker-capability:ro"],
+          },
+          broker: {
+            protocol: "jinn.network/model-broker/1",
+            requestEndpoint: "https://api.openai.com/v1/responses",
+            network: "bridge-plus-private-internal",
+            secretMount: "credential-volume:/run/secrets:ro",
+            capabilityMount: "capability-volume:/run/jinn:ro",
+            readOnlyRoot: true,
+            capabilities: [],
+            noNewPrivileges: true,
+            cpuCount: 1,
+            memoryBytes: 268_435_456,
+            pidsLimit: 32,
+            scratchBytes: 67_108_864,
+          },
+        },
+      },
+      task: {
+        ...manifest.task,
+        dataset: { ...manifest.task.dataset, selectedSampleId: "alpha", orderedSampleSha256: "4".repeat(64) },
+      },
+      arms: [
+        { armId: "luna-none", model: "jinn-openai/gpt-5.6-luna", provider },
+        { armId: "luna-low", model: "jinn-openai/gpt-5.6-luna", provider: { ...provider, reasoningEffort: "low" } },
+      ],
+      runOptions: { sampleId: "alpha", maxSamples: 1, retryOnError: 0 },
+    };
+    expect(InspectSelectionManifestSchema.safeParse(providerManifest).success).toBe(true);
+    expect(InspectSelectionManifestSchema.safeParse({
+      ...providerManifest,
+      runtime: manifest.runtime,
+    }).success).toBe(false);
+    expect(InspectSelectionManifestSchema.safeParse({
+      ...providerManifest,
+      arms: [
+        ...providerManifest.arms.slice(0, 1),
+        { ...providerManifest.arms[1], provider: { ...providerManifest.arms[1]!.provider, maxOutputTokens: 256 } },
+      ],
+    }).success).toBe(false);
   });
 
   test("secret-like configuration is refused before sealing", () => {

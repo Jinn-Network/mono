@@ -17,4 +17,6 @@ RUN python -m pip install \
 
 WORKDIR /jinn/work
 COPY --chmod=0555 worker.py /opt/jinn/worker.py
+COPY --chmod=0555 broker.py /opt/jinn/broker.py
+COPY --chmod=0555 model_provider.py /opt/jinn/model_provider.py
 ENTRYPOINT ["python", "/opt/jinn/worker.py"]

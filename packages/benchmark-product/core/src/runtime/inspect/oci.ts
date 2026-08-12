@@ -34,6 +34,26 @@ export const INSPECT_OCI_MOUNTS = [
   "attempt-output:rw",
 ] as const;
 
+export const INSPECT_OCI_PROVIDER_MOUNTS = [
+  ...INSPECT_OCI_MOUNTS,
+  "broker-capability:ro",
+] as const;
+
+export const INSPECT_BROKER_POLICY = Object.freeze({
+  protocol: "jinn.network/model-broker/1" as const,
+  requestEndpoint: "https://api.openai.com/v1/responses" as const,
+  network: "bridge-plus-private-internal" as const,
+  secretMount: "credential-volume:/run/secrets:ro" as const,
+  capabilityMount: "capability-volume:/run/jinn:ro" as const,
+  readOnlyRoot: true as const,
+  capabilities: [] as [],
+  noNewPrivileges: true as const,
+  cpuCount: 1,
+  memoryBytes: 268_435_456,
+  pidsLimit: 32,
+  scratchBytes: 67_108_864,
+});
+
 export const InspectOciHostBindingSchema = z.object({
   kind: z.literal("oci"),
   dockerPath: SafeAbsolutePathSchema,
@@ -160,10 +180,17 @@ async function runBoundedProcess(
   args: readonly string[],
   stdin?: string,
   signal?: AbortSignal,
+  environment?: NodeJS.ProcessEnv,
+  exposeStderr = false,
 ): Promise<ProcessResult> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(executable, args, { stdio: ["pipe", "pipe", "pipe"], signal });
+    const child = spawn(executable, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      signal,
+      ...(environment === undefined ? {} : { env: environment }),
+    });
     const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
     let bytes = 0;
     const capture = (chunk: Buffer): void => {
       bytes += chunk.length;
@@ -171,11 +198,16 @@ async function runBoundedProcess(
       else stdout.push(chunk);
     };
     child.stdout.on("data", capture);
-    child.stderr.on("data", (chunk: Buffer) => { bytes += chunk.length; if (bytes > 1_000_000) child.kill("SIGKILL"); });
+    child.stderr.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > 1_000_000) child.kill("SIGKILL");
+      else if (exposeStderr) stderr.push(chunk);
+    });
     child.once("error", reject);
     child.once("exit", (code, exitSignal) => {
       if (code !== 0) {
-        reject(new Error(`OCI runtime command exited ${String(code ?? exitSignal)}`));
+        const safeDetail = exposeStderr ? Buffer.concat(stderr).toString("utf8").trim() : "";
+        reject(new Error(`OCI runtime command exited ${String(code ?? exitSignal)}${safeDetail === "" ? "" : `: ${safeDetail}`}`));
         return;
       }
       resolvePromise({ stdout: Buffer.concat(stdout).toString("utf8").trim() });
@@ -204,6 +236,10 @@ const WorkerEnvelopeSchema = z.discriminatedUnion("ok", [
 function inspectWorkerSourceSha256(): string {
   const path = fileURLToPath(new URL("./worker.py", import.meta.url));
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function inspectRuntimeAssetSha256(name: "broker.py" | "model_provider.py"): string {
+  return createHash("sha256").update(readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)))).digest("hex");
 }
 
 export function inspectOciRunnerPath(): string {
@@ -236,6 +272,9 @@ export async function probeInspectOciSelection(
   if (image.Id !== binding.imageDigest) throw new TypeError("OCI image ID does not match the selected digest");
 
   const workerSourceSha256 = inspectWorkerSourceSha256();
+  const brokerSourceSha256 = inspectRuntimeAssetSha256("broker.py");
+  const modelProviderSourceSha256 = inspectRuntimeAssetSha256("model_provider.py");
+  const providerBacked = input.arms.some((arm) => arm.provider !== undefined);
   const probeArgs = buildInspectOciRunArgs(binding, {
     name: `jinn-inspect-probe-${randomUUID().replaceAll("-", "").slice(0, 20)}`,
     operation: "probe",
@@ -254,6 +293,9 @@ export async function probeInspectOciSelection(
   if (runtime.inspectEvalsVersion !== SUPPORTED_INSPECT_EVALS_VERSION) throw new TypeError("Inspect Evals version drifted in the OCI image");
   if (runtime.openaiSdkVersion !== SUPPORTED_OPENAI_SDK_VERSION) throw new TypeError("OpenAI SDK version drifted in the OCI image");
   if (runtime.workerSha256 !== undefined && runtime.workerSha256 !== workerSourceSha256) throw new TypeError("OCI worker source differs from the product worker");
+  if (runtime.brokerSha256 !== brokerSourceSha256 || runtime.modelProviderSha256 !== modelProviderSourceSha256) {
+    throw new TypeError("OCI broker or model-provider source differs from the product runtime assets");
+  }
 
   const manifest = InspectSelectionManifestSchema.parse({
     schema: INSPECT_SELECTION_SCHEMA,
@@ -269,19 +311,22 @@ export async function probeInspectOciSelection(
         openaiSdkVersion: SUPPORTED_OPENAI_SDK_VERSION,
         workerSourceSha256,
         runtimeHostSourceSha256: inspectOciRunnerSha256(),
+        brokerSourceSha256,
+        modelProviderSourceSha256,
         dockerExecutableSha256: createHash("sha256").update(readFileSync(binding.dockerPath)).digest("hex"),
         dockerEngineVersion: server.Version,
         dockerApiVersion: server.ApiVersion,
         datasetCacheSha256: directoryTreeSha256(binding.datasetCacheDir),
         isolation: {
           readOnlyRoot: true,
-          network: "none",
+          network: providerBacked ? "broker-only" : "none",
           capabilities: [],
           noNewPrivileges: true,
           ...INSPECT_OCI_LIMITS,
           user: binding.user,
-          mounts: INSPECT_OCI_MOUNTS,
+          mounts: providerBacked ? INSPECT_OCI_PROVIDER_MOUNTS : INSPECT_OCI_MOUNTS,
         },
+        ...(providerBacked ? { broker: INSPECT_BROKER_POLICY } : {}),
       },
     },
     task: envelope.value.task,
@@ -314,8 +359,31 @@ export async function assertInspectOciHostUndrifted(
     || server.ApiVersion !== execution.dockerApiVersion
     || inspectWorkerSourceSha256() !== execution.workerSourceSha256
     || inspectOciRunnerSha256() !== execution.runtimeHostSourceSha256
+    || inspectRuntimeAssetSha256("broker.py") !== execution.brokerSourceSha256
+    || inspectRuntimeAssetSha256("model_provider.py") !== execution.modelProviderSourceSha256
     || createHash("sha256").update(readFileSync(binding.dockerPath)).digest("hex") !== execution.dockerExecutableSha256
   ) {
     throw new TypeError("OCI image, Docker runtime, or worker source drifted after selection");
   }
+}
+
+/** Starts the sealed broker image, validates its health contract, then removes all transient OCI
+ * resources. It performs no model request and receives only an opaque host descriptor path. */
+export async function assertInspectOciBrokerReady(
+  binding: InspectOciHostBinding,
+  manifest: InspectSelectionManifest,
+  hostConnectionDescriptor: string | undefined,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!manifest.arms.some((arm) => arm.provider !== undefined)) return;
+  if (hostConnectionDescriptor === undefined) throw new TypeError("OpenAI connection is not configured");
+  const name = `jinn-inspect-preflight-${randomUUID().replaceAll("-", "").slice(0, 20)}`;
+  await runBoundedProcess(
+    process.execPath,
+    [inspectOciRunnerPath(), "probe-broker", binding.dockerPath, binding.imageDigest, name],
+    undefined,
+    signal,
+    { LANG: "C.UTF-8", JINN_INSPECT_HOST_CONNECTION_DESCRIPTOR: hostConnectionDescriptor },
+    true,
+  );
 }

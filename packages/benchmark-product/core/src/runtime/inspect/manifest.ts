@@ -23,6 +23,30 @@ export const InspectArmConfigurationSchema = z.object({
   model: z.string().min(1),
   modelArgs: z.record(z.string(), SafeJsonSchema).optional(),
   modelRoles: z.record(z.string(), z.string().min(1)).optional(),
+  provider: z.object({
+    surface: z.literal("openai-responses"),
+    upstreamModel: z.literal("gpt-5.6-luna"),
+    reasoningEffort: z.enum(["none", "low"]),
+    maxOutputTokens: z.literal(128),
+    store: z.literal(false),
+    background: z.literal(false),
+    stream: z.literal(false),
+    serviceTier: z.literal("default"),
+    tools: z.tuple([]),
+    fallbackModels: z.tuple([]),
+    retries: z.literal(0),
+    persistedConversation: z.literal(false),
+    metadata: z.null(),
+    promptCacheIdentifier: z.null(),
+  }).strict().optional(),
+}).superRefine((arm, context) => {
+  if (arm.provider === undefined) return;
+  if (arm.model !== "jinn-openai/gpt-5.6-luna") {
+    context.addIssue({ code: "custom", path: ["model"], message: "provider-backed arms require jinn-openai/gpt-5.6-luna" });
+  }
+  if (arm.modelArgs !== undefined || arm.modelRoles !== undefined) {
+    context.addIssue({ code: "custom", message: "provider-backed arms refuse modelArgs and modelRoles outside the sealed generation block" });
+  }
 });
 
 export const InspectRunOptionsSchema = z.object({
@@ -47,12 +71,36 @@ const InspectOciIsolationSchema = z.object({
   pidsLimit: z.number().int().positive(),
   scratchBytes: z.number().int().positive(),
   user: z.string().regex(/^[0-9]+:[0-9]+$/),
-  mounts: z.tuple([
-    z.literal("project:ro"),
-    z.literal("dataset-cache:ro"),
-    z.literal("attempt-input:ro"),
-    z.literal("attempt-output:rw"),
+  mounts: z.union([
+    z.tuple([
+      z.literal("project:ro"),
+      z.literal("dataset-cache:ro"),
+      z.literal("attempt-input:ro"),
+      z.literal("attempt-output:rw"),
+    ]),
+    z.tuple([
+      z.literal("project:ro"),
+      z.literal("dataset-cache:ro"),
+      z.literal("attempt-input:ro"),
+      z.literal("attempt-output:rw"),
+      z.literal("broker-capability:ro"),
+    ]),
   ]),
+}).strict();
+
+const InspectBrokerPolicySchema = z.object({
+  protocol: z.literal("jinn.network/model-broker/1"),
+  requestEndpoint: z.literal("https://api.openai.com/v1/responses"),
+  network: z.literal("bridge-plus-private-internal"),
+  secretMount: z.literal("credential-volume:/run/secrets:ro"),
+  capabilityMount: z.literal("capability-volume:/run/jinn:ro"),
+  readOnlyRoot: z.literal(true),
+  capabilities: z.tuple([]),
+  noNewPrivileges: z.literal(true),
+  cpuCount: z.literal(1),
+  memoryBytes: z.literal(268_435_456),
+  pidsLimit: z.literal(32),
+  scratchBytes: z.literal(67_108_864),
 }).strict();
 
 export const InspectOciRuntimeIdentitySchema = z.object({
@@ -63,11 +111,14 @@ export const InspectOciRuntimeIdentitySchema = z.object({
   openaiSdkVersion: z.literal(SUPPORTED_OPENAI_SDK_VERSION),
   workerSourceSha256: Sha256Schema,
   runtimeHostSourceSha256: Sha256Schema,
+  brokerSourceSha256: Sha256Schema,
+  modelProviderSourceSha256: Sha256Schema,
   dockerExecutableSha256: Sha256Schema,
   dockerEngineVersion: z.string().min(1),
   dockerApiVersion: z.string().min(1),
   datasetCacheSha256: Sha256Schema,
   isolation: InspectOciIsolationSchema,
+  broker: InspectBrokerPolicySchema.optional(),
 }).strict();
 
 export const InspectSelectionManifestSchema = z.object({
@@ -131,7 +182,13 @@ export const InspectSelectionManifestSchema = z.object({
   }),
   runOptions: InspectRunOptionsSchema,
 }).strict().superRefine((manifest, context) => {
-  if (manifest.runtime.execution === undefined) return;
+  const providerBacked = manifest.arms.some((arm) => arm.provider !== undefined);
+  if (manifest.runtime.execution === undefined) {
+    if (providerBacked) {
+      context.addIssue({ code: "custom", path: ["runtime", "execution"], message: "provider-backed arms require OCI execution" });
+    }
+    return;
+  }
   if (manifest.runOptions.sampleId === undefined) {
     context.addIssue({ code: "custom", path: ["runOptions", "sampleId"], message: "OCI execution requires one exact sampleId" });
   }
@@ -140,6 +197,21 @@ export const InspectSelectionManifestSchema = z.object({
   }
   if (manifest.task.dataset.orderedSampleSha256 === undefined) {
     context.addIssue({ code: "custom", path: ["task", "dataset", "orderedSampleSha256"], message: "OCI execution requires an ordered selected-sample digest" });
+  }
+  if (providerBacked && manifest.runtime.execution.isolation.network !== "broker-only") {
+    context.addIssue({ code: "custom", path: ["runtime", "execution", "isolation", "network"], message: "provider-backed arms require the broker-only OCI network" });
+  }
+  if (providerBacked && !(manifest.runtime.execution.isolation.mounts as readonly string[]).includes("broker-capability:ro")) {
+    context.addIssue({ code: "custom", path: ["runtime", "execution", "isolation", "mounts"], message: "provider-backed arms require the per-attempt broker capability mount" });
+  }
+  if (providerBacked && manifest.runtime.execution.broker === undefined) {
+    context.addIssue({ code: "custom", path: ["runtime", "execution", "broker"], message: "provider-backed arms require the sealed broker policy" });
+  }
+  if (!providerBacked && manifest.runtime.execution.broker !== undefined) {
+    context.addIssue({ code: "custom", path: ["runtime", "execution", "broker"], message: "credential-free OCI selections cannot carry a broker policy" });
+  }
+  if (providerBacked && manifest.runOptions.retryOnError !== 0) {
+    context.addIssue({ code: "custom", path: ["runOptions", "retryOnError"], message: "provider-backed arms require retryOnError: 0" });
   }
 });
 

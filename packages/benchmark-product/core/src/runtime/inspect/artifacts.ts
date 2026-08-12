@@ -34,6 +34,29 @@ export const InspectCellSummarySchema = z.object({
   evaluatedAt: z.string().datetime({ offset: true }),
   nativeLogSha256: z.string().regex(/^[a-f0-9]{64}$/),
   nativeLogBytes: z.number().int().nonnegative(),
+  provider: z.object({
+    surface: z.literal("openai-responses"),
+    resolvedModel: z.string().nullable(),
+    callCount: z.number().int().nonnegative(),
+    usage: z.record(z.string(), z.unknown()).nullable(),
+    terminalStatus: z.enum([
+      "completed",
+      "authentication-failure",
+      "rate-limited",
+      "timeout",
+      "broker-loss",
+      "provider-5xx",
+      "provider-failure",
+      "budget-rejected",
+      "method-conflict",
+      "capability-rejected",
+      "malformed-request",
+      "no-call",
+    ]),
+    eventDigest: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+    brokerProtocol: z.literal("jinn.network/model-broker/1"),
+    brokerSourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict().optional(),
 });
 export type InspectCellSummary = z.infer<typeof InspectCellSummarySchema>;
 
