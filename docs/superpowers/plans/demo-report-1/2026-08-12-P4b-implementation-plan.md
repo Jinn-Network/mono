@@ -608,19 +608,36 @@ PR A left `page.tsx:124` behind a minimal `claim.headline ? … : null` guard, s
 
 **Gate:** RTL renders paired and wilson claims; the wilson branch is visually unchanged; the stored-Report `role="alert"` degradation path preserved; walkthrough prints no `undefined` on either branch; `web` **`yarn typecheck` exit 0** — the leg PR A added after it caught a break `vitest` structurally could not.
 
-### Task 8a — sample-benchmark provenance
+### Task 8a — DROPPED (2026-08-12). Superseded by a documented architectural constraint.
 
-**Files:** `core/src/intake/sample.ts` · fixtures pinned to the sample benchmark digest
+**What it was:** make the bundled sample benchmark carry task provenance, so a clustered paired method could run on the sample path. Two successive stop-and-report findings retired it.
 
-`sample.ts:154` does `candidateTask.payload = { forecast: {...} }`, discarding `payload.provenance`. Preserve provenance by merging rather than replacing.
+**First finding — the plan's diagnosis was wrong.** This section originally read "`sample.ts:154` … discarding `payload.provenance`. Preserve provenance by merging rather than replacing." The upstream fixture (`task-supply/admission/fixtures/prediction-snapshot-v1/task.json`) carries **no `provenance` key at all**, so nothing was being discarded and the prescribed merge would have merged `{}` into `{}` — a silent no-op that a weaker test would have reported as a pass. Provenance had to be *synthesized*, not preserved.
 
-**This changes the sample benchmark's digest**, so every fixture pinned to it moves. That is deliberate, not incidental: enumerate them, update them in this commit, and call each out in the PR body. If the count is larger than a handful, stop and report before proceeding.
+**Second finding — synthesis is impossible under the frozen contract.** Two contracts are mutually exclusive for the prediction-forecast profile:
 
-**Gate:** a sample task retains `payload.provenance`; a paired method runs on the sample path without a typed provenance refusal; full suite green with the new digest.
+- `task-supply/admission/src/prediction-snapshot.ts:159-160` requires `Object.keys(payload).sort().join(",") === "forecast"` — the payload must be **exactly** `{forecast}`.
+- `benchmarking/records/src/benchmark/checks.ts:56-58` reads provenance from **exactly one location**, `task.data.payload["provenance"]`, with no fallback and no alternative accepted location.
+
+There is no third attachment point: `prediction-snapshot.ts:125` also closes the Task object to exactly `evaluation,instructions,outputs,payload,profile,protocol`, so provenance cannot be a top-level sibling either.
+
+**The recorded constraint:** *prediction-forecast tasks structurally cannot carry payload provenance under the frozen `PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1`, and therefore cannot be scored by any clustered paired method — `paired-delta@1`, `paired-mcnemar@1`, or `provenance-cluster-sign@1`. This is a contract conflict, not an oversight.* The bundled sample benchmark can never demo a paired method.
+
+**Why this costs nothing here.** The demo's real path is SWE-imported `repository-work/1.0` tasks, which carry provenance natively (`interop/src/import/swebench.ts`) and never pass through the prediction-specific admission policy. And the sample's only reachable paired state was interval-withheld anyway — it has three tasks against a `minN` of five — which Task 8b's purpose-built fixture now covers along with interval-present.
+
+**Rejected, deliberately:** amending `PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1` to admit a provenance key (a frozen, versioned, cross-package contract change to satisfy a test fixture — the tail wagging the dog), and weakening `sample.ts`'s admission sanity call (it exists to prove the frozen contract holds; neutering it would pass CI while destroying the property it guarantees).
+
+The open product question — *should prediction-forecast tasks be paired-scoreable?* — is filed as a `design` issue against whoever owns prediction admission. It is explicitly **not** scoped into this program.
 
 ### Task 8b — paired end-to-end coverage
 
-**Files:** `core/src/run/run-path.integration.test.ts`
+**Files:** `core/src/run/run-path.integration.test.ts` · a new purpose-built test benchmark fixture
+
+**The bundled sample benchmark structurally cannot reach interval-present.** It has exactly three tasks (`sample-market-alpha`, `-bravo`, `-charlie`) and `paired-delta@1`'s floor is `minN = 5` paired tasks. No provenance decision changes this — it is a task-count fact. Recorded here so it is not rediscovered.
+
+So **8b builds its own test benchmark** for interval-present: ≥5 tasks across ≥2 provenance clusters. It is a test fixture, not a product surface, and ships no user-visible behavior. Task 8a's one-cluster synthesis already covers interval-withheld on the sample path without extra fixture work.
+
+If the fixture-builder pushes this task meaningfully past its 1.5-day budget, flag rather than trim coverage — interval-withheld is what the slate/e2e lane's gate asserts against, and interval-present is the state a reader of the demo report will actually look at.
 
 One paired draft, full lifecycle, **three states**:
 

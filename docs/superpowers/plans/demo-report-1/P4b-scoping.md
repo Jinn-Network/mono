@@ -338,18 +338,45 @@ suffix removed — so imported slates now cluster by repository as intended.
 **The product half below is UNCHANGED and still open**: `sample.ts:154` is
 byte-identical at the new head. It remains unowned.
 
-`core/src/intake/sample.ts:154` overwrites the payload wholesale
-(`candidateTask.payload = { forecast: {...} }`), removing `payload.provenance`,
-which `resolveBenchmarkTaskProvenance` requires
-(`records/src/benchmark/checks.ts:56-63`).
+**CORRECTION (2026-08-12): this section's diagnosis was wrong twice, and the
+product half is now closed as NOT-FIXABLE-BY-DESIGN rather than open.**
+
+The text below said `sample.ts:154` "removes `payload.provenance`". It removes
+nothing — the upstream fixture
+(`task-supply/admission/fixtures/prediction-snapshot-v1/task.json`) carries no
+`provenance` key at all. Provenance would have to be *synthesized*, not
+preserved, so the prescribed "merge rather than replace" fix was a no-op.
+
+Synthesis is then blocked by a genuine contract conflict:
+
+- `task-supply/admission/src/prediction-snapshot.ts:159-160` requires
+  `Object.keys(payload).sort().join(",") === "forecast"` — the payload must be
+  **exactly** `{forecast}`. `:125` likewise closes the Task object to exactly
+  `evaluation,instructions,outputs,payload,profile,protocol`.
+- `records/src/benchmark/checks.ts:56-58` reads provenance from **exactly one
+  location**, `task.data.payload["provenance"]`, with no fallback.
+
+**Documented architectural constraint:** *prediction-forecast tasks
+structurally cannot carry payload provenance under the frozen
+`PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1`, and therefore cannot be scored by
+any clustered paired method (`paired-delta@1`, `paired-mcnemar@1`,
+`provenance-cluster-sign@1`). This is a contract conflict, not an oversight.*
+The bundled sample benchmark can never demo a paired method.
+
+Amending the frozen policy, or weakening `sample.ts`'s admission sanity call,
+were both considered and rejected — see the implementation plan's Task 8a
+section. The open product question (*should prediction-forecast tasks be
+paired-scoreable?*) is filed as a separate `design` issue and is explicitly not
+scoped into this program.
 
 **Consequence:** no clustered paired method can run on the sample/demo path.
 SWE-bench-imported tasks do carry provenance
 (`benchmarking/interop/src/import/swebench.ts:68-71`), so the real demo slate
-is unaffected — but any rehearsal or preview on the sample benchmark is.
+is unaffected — but any rehearsal or preview on the sample benchmark is. P4b
+Task 8b therefore builds its own `repository-work`-profile fixtures rather than
+relying on the sample.
 
-Fixing it changes the sample benchmark's digest, which invalidates fixtures
-pinned to it — so it is a deliberate change, not a drive-by. Estimated ~1 day.
+The original text follows, retained as the record of what was believed:
 
 This originally compounded with the C4-lane finding that the SWE-bench importer
 built its cluster key as `https://github.com/<repo>@<base_commit>`, making every
