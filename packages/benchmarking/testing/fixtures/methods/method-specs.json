@@ -191,6 +191,67 @@
     "version": "1"
   },
   {
+    "clusteringRule": "task-provenance-source",
+    "computeAvailability": "available",
+    "deterministic": true,
+    "exclusionRule": "pair Task digests judged in both arms; per-Task rates average all judged replicates; report full remainder",
+    "id": "jinn.benchmarking.method/paired-delta",
+    "outputShape": "paired mean rate difference + two-sided clustered BCa interval + exclusions + conflicted cells",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "alpha": {
+          "enum": [
+            "0.10",
+            "0.05",
+            "0.01"
+          ]
+        },
+        "baseline": {
+          "type": "string"
+        },
+        "candidate": {
+          "type": "string"
+        },
+        "resamples": {
+          "maximum": 100000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "seed": {
+          "maximum": 4294967295,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "verdictRule": {
+          "enum": [
+            "sole",
+            "unanimous",
+            "any-pass",
+            "majority"
+          ]
+        }
+      },
+      "required": [
+        "verdictRule",
+        "baseline",
+        "candidate",
+        "seed",
+        "resamples",
+        "alpha"
+      ],
+      "type": "object"
+    },
+    "referenceSet": "v1-reference",
+    "requiredInputs": [
+      "matrix.cells",
+      "referenced-verdicts",
+      "task-provenance-source"
+    ],
+    "resamplingProcedure": "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration; two passes at alpha/2 and 1-alpha/2 over one seed",
+    "version": "1"
+  },
+  {
     "clusteringRule": "delegate-defined",
     "computeAvailability": "available",
     "deterministic": true,

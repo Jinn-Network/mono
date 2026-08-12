@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -29,6 +30,21 @@ async function tmp(): Promise<string> {
 }
 
 describe("materializeLoadout — jinn.harness-state.v1", () => {
+  it("materializes the valid empty learner-public tree as an empty directory", async () => {
+    const inputDir = await tmp();
+    try {
+      const loadout = {
+        kind: "jinn.harness-state.v1",
+        name: "learner-state",
+        digest: `sha256:${createHash("sha256").update("").digest("hex")}`,
+      };
+      await materializeLoadout(loadout, inputDir, async () => packageBytes([]));
+      await expect(readdir(join(inputDir, "learner-state"))).resolves.toEqual([]);
+    } finally {
+      await rm(inputDir, { recursive: true, force: true });
+    }
+  });
+
   it("materializes a digest-verified package as a directory tree at the canonical loadout path", async () => {
     const inputDir = await tmp();
     try {
@@ -80,7 +96,6 @@ describe("materializeLoadout — jinn.harness-state.v1", () => {
     const inputDir = await tmp();
     try {
       const bytes = Buffer.from("verified loadout bytes");
-      const { createHash } = await import("node:crypto");
       const loadout = {
         kind: "jinn.skill.v1",
         name: "review-skill",

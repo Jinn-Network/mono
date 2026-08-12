@@ -66,7 +66,8 @@ and principal. No private-key, credential, or ambient environment material
 is copied into browser state.
 
 The shipped routes cover workspace initialization; draft create/read/list/
-edit/inspect; bundled sample and SWE-bench intake; arm add/update/remove/
+edit/inspect; bundled sample, SWE-bench intake, and real Inspect runtime
+selection; arm add/update/remove/
 list; authority show plus sponsor-only grant/revoke; real-local-venue
 preview; quote; and authority-gated lock. All facts and transitions come
 from core operations through Server Actions. Successful mutations
@@ -156,6 +157,9 @@ Covers the design spec §4.6 Benchmark-draft row. The **Quote** sub-surface
     `armRemove` / `arm remove`, `armUpdate` / `arm update`
   - task intake → `importSweBenchRows` / `import swebench`,
     `sampleInit` / `sample init`
+  - evaluation runtime selection → `selectInspectEvaluation` /
+    `runtime inspect select`; the form selects an existing task and runtime
+    configuration and is not an authoring environment
   - preview → `runPreview` / `preview` — ungated, non-advancing; every
     rendered preview artifact leads with the "rehearsal — not official
     evidence" marker (design spec §7.2, BP-20 addendum) so it cannot be

@@ -2,10 +2,9 @@
 //
 // Ground truth is computed HERE, independently of `@jinn-network/benchmarking-aggregate`'s
 // implementation (kit-precedes-implementation, program §7.6): this script re-implements the
-// closed-form Wilson interval, the exact McNemar test (ported verbatim from the already-shipped
-// `packages/core/src/paired.ts`, itself independently tested), and the Chen 2021 unbiased
-// pass@k estimator from scratch. `aggregate` is written afterward to reproduce these pinned
-// numbers, not the other way around.
+// closed-form Wilson interval, exact McNemar and whole-provenance sign tests (independently of the
+// registry), and the Chen 2021 unbiased pass@k estimator from scratch. `aggregate` is written
+// afterward to reproduce these pinned numbers, not the other way around.
 //
 // Run: `node scripts/generate-method-fixtures.mjs` from the package root. Deterministic —
 // re-running reproduces byte-identical fixture files.
@@ -56,6 +55,16 @@ function mcnemarExact(b, c) {
     cdf += term;
   }
   return Math.min(1, 2 * cdf);
+}
+
+function exactTwoSidedSign(favorable, unfavorable) {
+  const n = favorable + unfavorable;
+  if (n === 0) return 1;
+  if (favorable === 0 || unfavorable === 0) return 2 ** (1 - n);
+  const k = Math.min(favorable, unfavorable);
+  let numerator = 0;
+  for (let index = 0; index <= k; index++) numerator += binomial(n, index);
+  return Math.min(1, (2 * numerator) / (2 ** n));
 }
 
 function binomial(n, k) {
@@ -272,6 +281,7 @@ const passAtKFixture = {
         missingTaskDigests: [taskDigest("passk/t2")],
       },
     },
+    incompatible: { count: 0, tasks: [] },
     conflicted: { count: 0, cellKeys: [] },
   },
 };
@@ -351,6 +361,162 @@ const mcnemarFixture = {
     clusteredPValue: "0.3173",
     designEffect: "1.0000",
     conflicted: { count: 0, cellKeys: [] },
+  },
+};
+
+// --- fixture 3b: provenance-cluster-sign@1 -------------------------------------------------
+
+const clusterSignOutcomes = Array.from({ length: 6 }, (_, index) =>
+  [`cluster-sign/t${index + 1}`, "fail", "pass"]);
+const clusterSignCells = clusterSignOutcomes.flatMap(([label]) => [
+  cell(label, "armA", 1, { outcome: "judged", verdicts: ["v"], validVerdicts: ["v"] }),
+  cell(label, "armB", 1, { outcome: "judged", verdicts: ["v"], validVerdicts: ["v"] }),
+]);
+const clusterSignVerdictOutcomes = {};
+const clusterSignTaskProvenance = {};
+for (const [label, baseline, candidate] of clusterSignOutcomes) {
+  const task = taskDigest(label);
+  clusterSignVerdictOutcomes[digest(`${label}/armA/verdict/v`)] = verdictOutcome(baseline);
+  clusterSignVerdictOutcomes[digest(`${label}/armB/verdict/v`)] = verdictOutcome(candidate);
+  clusterSignTaskProvenance[task] = { source: `fixture-source/${task}` };
+}
+const clusterSignTasks = clusterSignOutcomes.map(([label]) => taskDigest(label)).sort();
+const clusterSignFixture = {
+  methodId: "jinn.benchmarking.method/provenance-cluster-sign",
+  methodVersion: "1",
+  parameters: { baseline: "armA", candidate: "armB" },
+  verdictRule: "unanimous",
+  matrices: [matrix(clusterSignCells)],
+  verdictOutcomes: clusterSignVerdictOutcomes,
+  taskProvenance: clusterSignTaskProvenance,
+  runReplicates: 1,
+  expectedResults: {
+    verdictRule: "unanimous",
+    baseline: "armA",
+    candidate: "armB",
+    pairing: { taskDigests: clusterSignTasks },
+    clustering: { basis: "task-provenance-source", clusters: 6 },
+    favorable: 6,
+    unfavorable: 0,
+    tied: 0,
+    nonTied: 6,
+    pValue: String(exactTwoSidedSign(6, 0)),
+    votes: clusterSignTasks.map((task) => ({
+      cluster: ["source", `fixture-source/${task}`],
+      taskDelta: 1,
+      vote: "favorable",
+    })),
+    excluded: { count: 0, cellKeys: [] },
+    conflicted: { count: 0, cellKeys: [] },
+  },
+};
+
+// --- fixture 3c: paired-delta@1 -------------------------------------------------------------
+// Six single-Task clusters at R=2. Both replicates agree within each arm, so every per-Task
+// delta is exactly +1 and the bootstrap is degenerate: observed == low == high == 1, with no
+// need to re-implement BCa here. Endpoint distinctness is unit-tested in `aggregate`.
+
+const pairedDeltaLabels = Array.from({ length: 6 }, (_, index) => `paired-delta/t${index + 1}`);
+const pairedDeltaCells = pairedDeltaLabels.flatMap((label) => [
+  cell(label, "armA", 1, { outcome: "judged", verdicts: ["r1"], validVerdicts: ["r1"] }),
+  cell(label, "armA", 2, { outcome: "judged", verdicts: ["r2"], validVerdicts: ["r2"] }),
+  cell(label, "armB", 1, { outcome: "judged", verdicts: ["r1"], validVerdicts: ["r1"] }),
+  cell(label, "armB", 2, { outcome: "judged", verdicts: ["r2"], validVerdicts: ["r2"] }),
+]);
+const pairedDeltaVerdictOutcomes = {};
+const pairedDeltaTaskProvenance = {};
+for (const label of pairedDeltaLabels) {
+  const task = taskDigest(label);
+  for (const replicate of ["r1", "r2"]) {
+    pairedDeltaVerdictOutcomes[digest(`${label}/armA/verdict/${replicate}`)] = verdictOutcome("fail");
+    pairedDeltaVerdictOutcomes[digest(`${label}/armB/verdict/${replicate}`)] = verdictOutcome("pass");
+  }
+  pairedDeltaTaskProvenance[task] = { source: `fixture-source/${task}` };
+}
+const pairedDeltaTasks = pairedDeltaLabels.map((label) => taskDigest(label)).sort();
+const pairedDeltaFixture = {
+  methodId: "jinn.benchmarking.method/paired-delta",
+  methodVersion: "1",
+  parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" },
+  verdictRule: "unanimous",
+  matrices: [matrix(pairedDeltaCells)],
+  verdictOutcomes: pairedDeltaVerdictOutcomes,
+  taskProvenance: pairedDeltaTaskProvenance,
+  runReplicates: 2,
+  expectedResults: {
+    verdictRule: "unanimous",
+    baseline: "armA",
+    candidate: "armB",
+    pairs: 6,
+    delta: fixed4(1),
+    interval: { alpha: fixed4(0.05), low: fixed4(1), high: fixed4(1) },
+    reasons: [],
+    pairing: { taskDigests: pairedDeltaTasks },
+    clustering: { basis: "task-provenance-source", clusters: 6 },
+    excluded: { count: 0, cellKeys: [] },
+    conflicted: { count: 0, cellKeys: [] },
+    bootstrap: {
+      procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+      // 2000 = 2 x 1000 resamples: this method runs two bootstrap passes (alpha/2 and
+      // 1-alpha/2), and `sourceClusters` multiplies its second argument by the cluster count
+      // to derive `draws`.
+      ...sourceClusters(pairedDeltaTasks, 2000),
+    },
+  },
+};
+
+// --- fixture 3d: paired-delta@1 with the interval withheld ----------------------------------
+// Four paired Tasks sharing ONE provenance source: below minN=5 AND below the two-cluster
+// floor, so both gates fire. Pins the typed no-interval contract — interval null, both reason
+// strings, and a delta that still survives (an underpowered run must still report its point
+// estimate). Task deltas are +1,+1,+1,0, so delta is exactly 0.75 by hand.
+const withheldLabels = Array.from({ length: 4 }, (_, index) => `paired-delta-withheld/t${index + 1}`);
+const WITHHELD_SOURCE = "fixture-source/paired-delta-withheld";
+const withheldCandidate = ["pass", "pass", "pass", "fail"];
+const withheldCells = withheldLabels.flatMap((label) => [
+  cell(label, "armA", 1, { outcome: "judged", verdicts: ["r1"], validVerdicts: ["r1"] }),
+  cell(label, "armB", 1, { outcome: "judged", verdicts: ["r1"], validVerdicts: ["r1"] }),
+]);
+const withheldVerdictOutcomes = {};
+const withheldTaskProvenance = {};
+withheldLabels.forEach((label, index) => {
+  withheldVerdictOutcomes[digest(`${label}/armA/verdict/r1`)] = verdictOutcome("fail");
+  withheldVerdictOutcomes[digest(`${label}/armB/verdict/r1`)] = verdictOutcome(withheldCandidate[index]);
+  withheldTaskProvenance[taskDigest(label)] = { source: WITHHELD_SOURCE };
+});
+const withheldTasks = withheldLabels.map((label) => taskDigest(label)).sort();
+const pairedDeltaWithheldFixture = {
+  methodId: "jinn.benchmarking.method/paired-delta",
+  methodVersion: "1",
+  parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" },
+  verdictRule: "unanimous",
+  matrices: [matrix(withheldCells)],
+  verdictOutcomes: withheldVerdictOutcomes,
+  taskProvenance: withheldTaskProvenance,
+  runReplicates: 1,
+  expectedResults: {
+    verdictRule: "unanimous",
+    baseline: "armA",
+    candidate: "armB",
+    pairs: 4,
+    delta: fixed4(0.75),
+    interval: null,
+    reasons: [
+      "fewer than minN=5 paired tasks (got 4)",
+      "fewer than two source clusters (got 1)",
+    ],
+    pairing: { taskDigests: withheldTasks },
+    clustering: { basis: "task-provenance-source", clusters: 1 },
+    excluded: { count: 0, cellKeys: [] },
+    conflicted: { count: 0, cellKeys: [] },
+    bootstrap: {
+      procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+      basis: "task-provenance-source-family",
+      count: 1,
+      unit: "source-cluster",
+      draws: 0,
+      clusters: [{ key: ["source", WITHHELD_SOURCE], members: withheldTasks }],
+    },
   },
 };
 
@@ -552,6 +718,9 @@ const fixtures = {
   "pass-at-k": passAtKFixture,
   "avg-at-k": avgAtKFixture,
   "paired-mcnemar": mcnemarFixture,
+  "provenance-cluster-sign": clusterSignFixture,
+  "paired-delta": pairedDeltaFixture,
+  "paired-delta-withheld": pairedDeltaWithheldFixture,
   "clean-subset": cleanSubsetFixture,
   "noninferiority-pass": noninferiorityPassFixture,
   "noninferiority-fail": noninferiorityFailFixture,

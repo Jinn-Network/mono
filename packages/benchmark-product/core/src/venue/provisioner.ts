@@ -18,6 +18,8 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { parseCellKey } from "@jinn-network/benchmarking-records";
+import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
   harvest as workspaceHarvest,
   STAGED_SEALED_TASK_FILENAME,
@@ -34,6 +36,15 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
 import { sha256Hex } from "../workspace/sealed-store.js";
+import {
+  INSPECT_EMBEDDED_EVALUATOR_ID,
+  InspectCellSummarySchema,
+  INSPECT_NATIVE_LOG_MEDIA_TYPE,
+  INSPECT_SUMMARY_MEDIA_TYPE,
+  INSPECT_TASK_PROFILE_URI,
+} from "../runtime/inspect/artifacts.js";
+import type { InspectHostBinding } from "../runtime/inspect/host.js";
+import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
 import { sealVerdictStatement } from "./signing.js";
 
 /**
@@ -118,14 +129,18 @@ function solveProvisionerContract(sealedTaskBytes: Uint8Array): ProvisionerContr
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
-      // Both solve launchers (prediction-v1-baseline, sample-uniform) write the Task's sole
-      // declared output to out/prediction.json and a structured-output envelope alongside it.
-      // Neither name is the Task's declared output name ("prediction"), and the structured
-      // envelope must not appear in the delivered manifest at all (it is backend/host metadata,
-      // never a Task output) -- so both are normalized before the platform's own `harvest()` walks
-      // out/. Moving structured-output.json out of out/ before `readResultEnvelope` runs is safe:
-      // with the file absent it returns `undefined`, and an exit-0 process still interprets as
-      // `delivered` (`@jinn-network/task-execution-launchers`'s `interpretResult`).
+      // This venue's own `sample-uniform` launcher writes the Task's sole declared output to
+      // out/prediction.json and a structured-output envelope alongside it. Neither name is the
+      // Task's declared output name ("prediction"), and the structured envelope must not appear in
+      // the delivered manifest at all (it is backend/host metadata, never a Task output) -- so both
+      // are normalized before the platform's own `harvest()` walks out/. Moving
+      // structured-output.json out of out/ before `readResultEnvelope` runs is safe: with the file
+      // absent it returns `undefined`, and an exit-0 process still interprets as `delivered`
+      // (`@jinn-network/task-execution-launchers`'s `interpretResult`).
+      //
+      // `prediction-v1-baseline` no longer needs the rename: since #39 it writes out/prediction
+      // directly, which is what every consumer of a signed Delivery already expected. Both guards
+      // below are existence-checked, so that launcher simply falls through them.
       const structuredOutputPath = join(paths.out, "structured-output.json");
       if (existsSync(structuredOutputPath)) {
         await rename(structuredOutputPath, join(paths.meta, "structured-output.json"));
@@ -207,6 +222,11 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
         throw new Error("benchmark-product local venue harvest ran before setup registered evaluation-cell materials");
       }
       const verdictPath = join(paths.out, "verdict");
+      // #39b(b): the same unconditional read the daemon's evaluator provisioner carried. A harness
+      // that refused its subject exits 65 having written no verdict, and that exit code already
+      // classifies the failure; letting the read's ENOENT escape harvest replaces that
+      // classification with an infrastructure blame. Nothing to seal means nothing to seal.
+      if (!existsSync(verdictPath)) return workspaceHarvest(paths, declaredOutputs);
       const statementBytes = new Uint8Array(await readFile(verdictPath));
       const envelopeBytes = await sealVerdictStatement({
         statementBytes,
@@ -244,6 +264,124 @@ function unsupportedProfileProvisionerContract(profileUri: string | undefined): 
   };
 }
 
+export interface InspectProvisionerOptions {
+  readonly selectionManifestSha256: string;
+  readonly manifest: InspectSelectionManifest;
+  readonly host: InspectHostBinding;
+  readonly evaluator: VenueEvaluatorSigner;
+}
+
+function inspectProvisionerContract(
+  input: LocalProvisionerInput,
+  options: InspectProvisionerOptions,
+): ProvisionerContract {
+  return {
+    workspaceKind: (): WorkspaceKind => "dir",
+    async setup(_view, paths) {
+      await ensureWorkspaceDirectories(paths);
+      const nonceParts = input.submission.nonce.split(":");
+      const cellKey = nonceParts.at(-2);
+      if (cellKey === undefined) throw new Error("Inspect Submission nonce carries no cell key");
+      const coordinate = parseCellKey(cellKey);
+      const arm = options.manifest.arms.find((candidate) => candidate.armId === coordinate.armId);
+      if (arm === undefined) throw new Error(`Inspect selection carries no configuration for arm ${coordinate.armId}`);
+      const taskSelection = (input.task.payload as { selectionManifestSha256?: unknown } | undefined)?.selectionManifestSha256;
+      if (taskSelection !== options.selectionManifestSha256) {
+        throw new Error("Inspect Task selection digest does not match the venue's sealed manifest");
+      }
+      const workerInput = {
+        projectDir: options.host.kind === "oci" ? "/jinn/project" : options.host.projectDir,
+        outputDir: options.host.kind === "oci" ? "/jinn/output" : paths.out,
+        manifest: options.manifest,
+        arm,
+        selectionManifestSha256: options.selectionManifestSha256,
+        cellKey,
+        repetition: coordinate.replicate,
+      };
+      await Promise.all([
+        writeFile(join(paths.input, "task.sealed"), input.sealedTaskBytes),
+        writeFile(join(paths.input, "inspect-run.json"), JSON.stringify(workerInput), { mode: 0o600 }),
+      ]);
+    },
+    executionEnv: ({ env }) => ({ ...env }),
+    async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
+      const nativeSource = join(paths.out, "inspect.eval");
+      const summarySource = join(paths.out, "inspect-summary.json");
+      const nativeBytes = new Uint8Array(await readFile(nativeSource));
+      const summaryBytes = new Uint8Array(await readFile(summarySource));
+      const summary = InspectCellSummarySchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(summaryBytes)));
+      if (summary.nativeLogSha256 !== sha256Hex(nativeBytes) || summary.nativeLogBytes !== nativeBytes.length) {
+        throw new Error("Inspect summary does not bind the exact native EvalLog bytes");
+      }
+      await rename(nativeSource, join(paths.out, "inspect-log"));
+      await rename(summarySource, join(paths.out, "inspect-summary"));
+
+      if (summary.terminal === "scored") {
+        if (summary.verdict === null || summary.measurement === null) {
+          throw new Error("Inspect scored terminal carries no verdict/measurement");
+        }
+        const taskSha256 = sha256Hex(input.sealedTaskBytes);
+        const evaluationSpecSha256 = input.task.evaluation?.digest?.sha256;
+        if (evaluationSpecSha256 === undefined) throw new Error("Inspect Task carries no EvaluationSpec digest");
+        const unsigned = buildResultEvaluationPayload({
+          task: { name: "inspect-task.json", digest: `sha256:${taskSha256}` },
+          results: [{
+            name: "inspect.eval",
+            digest: `sha256:${summary.nativeLogSha256}`,
+            mediaType: INSPECT_NATIVE_LOG_MEDIA_TYPE,
+            annotations: { "jinn.network/native-runtime": "inspect" },
+          }],
+          evaluator: {
+            id: INSPECT_EMBEDDED_EVALUATOR_ID,
+            extensions: { "jinn.network/relationship": "same-execution-scorer" },
+          },
+          evaluatedAt: summary.evaluatedAt,
+          verdict: summary.verdict,
+          evaluationSpecification: {
+            name: "inspect-score-evaluation-spec.json",
+            digest: `sha256:${evaluationSpecSha256}`,
+          },
+          evaluationMethod: {
+            name: "inspect-ai-native-scorer",
+            digest: `sha256:${options.manifest.runtime.workerSha256}`,
+            annotations: {
+              "jinn.network/inspect-version": options.manifest.runtime.inspectVersion,
+              "jinn.network/scorer": summary.scorer,
+            },
+          },
+          measurements: [{ name: "inspect-score-pass", value: summary.measurement }],
+          evidence: [{
+            name: "inspect.eval",
+            digest: `sha256:${summary.nativeLogSha256}`,
+            mediaType: INSPECT_NATIVE_LOG_MEDIA_TYPE,
+          }],
+          explanation: "Projected from the configured scorer in the same Inspect execution; this is not independent evaluation.",
+          limitations: ["same-execution-scorer", "self-run-operator-custody"],
+        });
+        const envelope = await sealVerdictStatement({
+          statementBytes: unsigned,
+          evaluatorId: INSPECT_EMBEDDED_EVALUATOR_ID,
+          expectedEvaluationSpecificationSha256: evaluationSpecSha256,
+          signer: options.evaluator.signer,
+        });
+        await writeFile(join(paths.out, "verdict"), envelope, { mode: 0o600, flag: "wx" });
+      }
+
+      const result = await workspaceHarvest(paths, declaredOutputs);
+      const allowedMediaTypes: Record<string, string> = {
+        "inspect-log": INSPECT_NATIVE_LOG_MEDIA_TYPE,
+        "inspect-summary": INSPECT_SUMMARY_MEDIA_TYPE,
+        verdict: "application/vnd.in-toto+json",
+      };
+      const manifest = result.manifest
+        .filter((entry) => Object.hasOwn(allowedMediaTypes, entry.path))
+        .map((entry) => ({ ...entry, mediaType: allowedMediaTypes[entry.path]! }));
+      await wipeScratch(paths);
+      return { manifest, omissions: result.omissions, integrityViolations: result.integrityViolations };
+    },
+  };
+}
+
 // ── selector ──────────────────────────────────────────────────────────────────────────────────
 
 export interface CreateLocalProvisionerOptions {
@@ -258,6 +396,7 @@ export interface CreateLocalProvisionerOptions {
    * production callers never set it.
    */
   readonly evaluationContextVariationForTesting?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
+  readonly inspect?: InspectProvisionerOptions;
 }
 
 export function createLocalProvisioner(
@@ -285,6 +424,12 @@ export function createLocalProvisioner(
             ? {}
             : { contextVariation: options.evaluationContextVariationForTesting }),
         }),
+      };
+    }
+    if (profileUri === INSPECT_TASK_PROFILE_URI && options.inspect !== undefined) {
+      return {
+        id: "benchmark-product-inspect-dir-v1",
+        contract: inspectProvisionerContract(input, options.inspect),
       };
     }
     return {

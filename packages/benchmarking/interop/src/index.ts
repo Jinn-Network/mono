@@ -12,14 +12,17 @@ export type {
   SweBenchRow,
 } from "./import/swebench.js";
 
-export { importInspectEvals } from "./import/inspect.js";
-export type { InspectEvalTask, InspectImportOptions } from "./import/inspect.js";
+export { toCalendarStrictRfc3339 } from "./import/rfc3339-from-source.js";
 
 export { exportCroissant } from "./export/croissant.js";
 export type { CroissantDocument, CroissantFileObject } from "./export/croissant.js";
 
-export { exportEvalLog } from "./export/evallog.js";
-export type { EvalLog, EvalLogSample, EvidenceResolver } from "./export/evallog.js";
+export { exportMatrixProjection } from "./export/matrix-projection.js";
+export type {
+  EvidenceResolver,
+  MatrixProjection,
+  MatrixProjectionSample,
+} from "./export/matrix-projection.js";
 
 export { exportStaticBundle } from "./export/static-bundle.js";
 export type { StaticBundle } from "./export/static-bundle.js";

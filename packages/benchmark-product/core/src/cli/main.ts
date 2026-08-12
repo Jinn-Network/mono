@@ -58,12 +58,14 @@ import {
   runStatus,
   runVerify,
   sampleInit,
+  selectInspectEvaluation,
   updateDraft,
   type ArmWarning,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
   type RunLaunchDeps,
+  type SelectInspectEvaluationInput,
 } from "../operations/index.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
@@ -84,6 +86,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   import swebench  --workspace <dir> --principal <id> --draft <draftId> --file <rows.json>
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
+  runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
   arm add          --workspace <dir> --principal <id> --draft <draftId>
                    --arm <armId> --pinning <json> [--notes <text>]
   arm update       --workspace <dir> --principal <id> --draft <draftId>
@@ -106,6 +110,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   report           --workspace <dir> --principal <id> --draft <draftId>
   verify           --workspace <dir> --principal <id> --draft <draftId>
   publish          --workspace <dir> --principal <id> --draft <draftId>
+                   [--include-native-artifacts]
   bundle verify    --bundle <dir> [--json]
   help                  (also: --help, or no arguments)
 
@@ -122,6 +127,7 @@ const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
+const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -140,7 +146,7 @@ const COLLECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const RESULTS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const VERIFY_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft", "include-native-artifacts"] as const;
 const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
@@ -173,7 +179,12 @@ function renderResult<T>(result: OperationResult<T>, jsonMode: boolean, humanSuc
 function buildOperationContext(args: ParsedArgs, context: CliContext): OperationContext {
   const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
   const principal = required(args, "principal");
-  return { workspaceDir, principal, clock: context.clock };
+  return {
+    workspaceDir,
+    principal,
+    clock: context.clock,
+    ...(context.runtimeHost === undefined ? {} : { runtimeHost: context.runtimeHost }),
+  };
 }
 
 /** Renders `warnings` (arm mutations, spec: duplicate-pinning is a surface, not a refusal) as human-mode lines. */
@@ -311,6 +322,26 @@ function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: b
     jsonMode,
     (value) =>
       `imported ${value.taskSha256s.length} task(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}\n`,
+  );
+}
+
+async function handleInspectRuntimeSelect(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_INSPECT_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    SelectInspectEvaluationInput,
+    "draftId"
+  >;
+  const result = await selectInspectEvaluation(opContext, { draftId, ...configuration } as SelectInspectEvaluationInput);
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `selected Inspect evaluation ${value.selectionManifestSha256} for draft ${draftId}\n`,
   );
 }
 
@@ -611,7 +642,10 @@ async function handlePublish(args: ParsedArgs, context: CliContext, jsonMode: bo
   assertKnownFlags(args, PUBLISH_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
-  const result = await runPublish(opContext, { draftId });
+  const result = await runPublish(opContext, {
+    draftId,
+    ...(present(args, "include-native-artifacts") ? { includeNativeArtifacts: true } : {}),
+  });
   return renderResult(
     result,
     jsonMode,
@@ -641,6 +675,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["inspect", handleInspect],
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
+  ["runtime inspect select", handleInspectRuntimeSelect],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],

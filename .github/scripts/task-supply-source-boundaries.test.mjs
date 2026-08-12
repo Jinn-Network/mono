@@ -40,10 +40,13 @@ const FORBIDDEN_ROOTS = [
   join(root, 'packages', 'environments', 'verification'),
 ];
 
-// Admission's approved task-execution import is exactly the portable protocol package used by
-// its deterministic prediction fixture. Every other task-execution package remains denied by
-// family-derived default.
-const ADMISSION_TASK_EXECUTION_ALLOWED = ['@jinn-network/task-execution-protocol'];
+// Admission's approved task-execution imports are exactly the portable protocol and profile
+// packages used to build and validate its deterministic prediction snapshot. Every other
+// task-execution package remains denied by family-derived default.
+const ADMISSION_TASK_EXECUTION_ALLOWED = [
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol',
+];
 
 const ADMISSION_FORBIDDEN_EXTRA = [
   '@jinn-network/task-derivation',
@@ -416,8 +419,8 @@ test('the attestation and verification bans hold by exact name and by wildcard f
 });
 
 test('task-supply source boundaries remain one-way across the approved graph', () => {
-  // admission imports environments/record, trust-core, and the portable protocol used to build
-  // its deterministic prediction receipt fixture.
+  // admission imports environments/record, trust-core, and the portable protocol/profile pair
+  // used to build and validate its deterministic prediction receipt fixture.
   // `src/testing.ts` is production source under this same boundary: its `vitest` import is an
   // optional peer (not a Jinn package), and its only Jinn import is the approved
   // `@jinn-network/environment-record`.

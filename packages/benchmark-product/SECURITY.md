@@ -99,6 +99,23 @@ owner is outside the authorization boundary and can deny service or replace
 private mutable state; integrity checks make sealed-byte substitution and
 malformed durable state fail closed.
 
+### Optional evaluation-runtime worker
+
+The Inspect adapter executes user-selected Python tasks, solvers, tools,
+scorers, and providers only in a supervised child process. They never import
+into the web request process. Selection seals the worker, Python executable,
+installed-package environment, Inspect distribution, task source/project, and
+material run configuration; launch re-probes that identity before accepting a
+cell submission. The child receives a minimal environment with no ambient
+credential variables. Credentialed provider execution is not supported until an
+explicit allowlisted secret-forward port exists.
+
+This process boundary isolates the web lifecycle from imported Python code but
+is not a hostile-code or filesystem sandbox. Task code retains the product OS
+user's filesystem permissions. A customer running untrusted or secret-bearing
+code must isolate the complete worker in a container or worker host. See the
+[Inspect runtime guide](./INSPECT-RUNTIME.md).
+
 ### Public disclosure
 
 `publish` authorizes disclosure of BP-40's fixed allowlisted closure. Mutable
@@ -109,6 +126,12 @@ is not a general PII scrubber. Portable verification authenticates one
 snapshot and independently checks manifest, graph, trust, Matrix, Report,
 claim, cancellation, and asset consistency after the source workspace is
 gone.
+
+Inspect native logs are private until an Inspect-backed publication receives
+an explicit `includeNativeArtifacts` approval. That approval copies the exact
+viewer-ready logs into the public bundle. Logs may contain prompts, responses,
+tool calls, transcripts, model metadata, or user data; the product does not
+silently scrub or reclassify them.
 
 ## Filesystem attack surface
 

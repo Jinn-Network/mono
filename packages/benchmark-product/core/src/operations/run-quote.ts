@@ -31,6 +31,7 @@ import { quoteRun, type QuoteReport } from "@jinn-network/benchmarking-run";
 import type { RunRecord } from "@jinn-network/benchmarking-records";
 import type { BackendCapabilities } from "@jinn-network/task-execution-backend";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
+import { createRuntimeVenue } from "../runtime/adapter.js";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition, type LifecycleState } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -241,8 +242,6 @@ export function runQuote(
 ): Promise<OperationResult<RunQuoteResult>> {
   const at = context.clock();
   const clockedContext: OperationContext = { ...context, clock: () => at };
-  const createVenue = deps.createVenue ?? createLocalVenue;
-
   return operateAsync({
     context: clockedContext,
     action: "quote",
@@ -250,6 +249,8 @@ export function runQuote(
     inputs: input,
     run: async () => {
       const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+      const createVenue: typeof createLocalVenue = deps.createVenue
+        ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
       const nextState = ensureQuotable(document.state, input.draftId);
 
       const closeAt = computeCloseAt(at, document.spec.policy.closeAfterMs);
@@ -277,6 +278,7 @@ export function runQuote(
       let quote: QuoteReport;
       let capabilities: BackendCapabilities;
       try {
+        await venue.preflightRun?.();
         capabilities = await venue.backend.capabilities();
         quote = quoteRun(compiled.benchmarkRecord, compiled.plannedRun.record, capabilities);
       } finally {

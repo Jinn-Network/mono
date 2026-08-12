@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { codeOnly } from "./_support/source-text.js";
 
 const harvestedModules = [
   ["self-evaluation", new URL("../../src/evaluator/self-evaluation.ts", import.meta.url)],
@@ -41,7 +42,7 @@ function findForbiddenNativeDependencies(source: string): string[] {
 describe("harvested evaluator primitive architecture", () => {
   it("has no bridge, legacy runtime, signer grant, ephemeral key, in-memory intent, or fake trust/evidence dependency", () => {
     const offenders = harvestedModules.flatMap(([name, url]) => {
-      const source = readFileSync(fileURLToPath(url), "utf8");
+      const source = codeOnly(readFileSync(fileURLToPath(url), "utf8"));
       return findForbiddenNativeDependencies(source).map((label) => `${name}: ${label}`);
     });
 
@@ -68,5 +69,14 @@ describe("harvested evaluator primitive architecture", () => {
       "permissive trust",
       "fake trust or evidence",
     ]);
+  });
+
+  it("does not read a banned term out of prose", () => {
+    expect(findForbiddenNativeDependencies(codeOnly(
+      "/** Idempotent and a no-op here. */\n// also a no-op, and randomUUID in prose\nconst value = 1;",
+    ))).toEqual([]);
+    expect(findForbiddenNativeDependencies(codeOnly(
+      "/** safe */\nconst runtime = createNoopRuntime();",
+    ))).toEqual(["no-op runtime"]);
   });
 });

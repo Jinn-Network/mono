@@ -95,9 +95,10 @@ function binding(key: string): ResolvedBinding {
     binding: {
       key: { didKey: key, keyid: key },
       // Every scope a native role can require, including the announce-plane scope the three
-      // `*-discovery` roles gained in issue #2525.
+      // `*-discovery` roles gained in issue #2525 and the admission-receipt scope the `admission`
+      // role gained in #33.
       scope: ["authorizations", "observations", "deliveries", "verdicts", "settlements",
-        "jinn:discovery-announcements"],
+        "jinn:discovery-announcements", "https://spec.jinn.network/trust-scopes/admission-receipts/v1"],
       validFrom: "2026-08-01T00:00:00.000Z",
     },
     effectiveStart: "2026-08-01T00:00:00.000Z",
@@ -831,15 +832,15 @@ describe("production prediction-market deployment module — harvest-time identi
         harnessState: outDir, secrets: outDir, tmp: outDir, meta: outDir,
       } as unknown as WorkspacePaths;
       // Identical statement construction to the previous test, with only `evaluator.id`
-      // changed to match `roles.agent`. It still doesn't harvest cleanly (this hand-built
-      // statement doesn't survive `sealSignedRecord`'s canonical re-encoding byte-for-byte
-      // -- a fixture-fidelity limit, not a real production path), but it now fails at the
-      // *next* check in sequence ("not canonical exact bytes", composition.ts:344) rather
-      // than the identity-authority guard (composition.ts:335). Reaching a check that only
-      // runs after the identity `if` block completes false is proof the identity guard
-      // specifically is what `evaluator.id` flips -- not a false positive tripped by some
-      // unrelated field this fixture also carries.
-      await expect(contract.harvest(paths, [])).rejects.toThrow(/not canonical exact bytes/);
+      // changed to match `roles.agent`. These are the real harness producer's bytes
+      // (`buildResultEvaluationPayload`) under the real prediction evaluation-method digest, so
+      // the whole harvest now completes: the statement is sealed verbatim into a DSSE envelope.
+      // Reaching the seal -- which only runs after the identity `if` block completes false -- is
+      // proof the identity guard specifically is what `evaluator.id` flips, not a false positive
+      // tripped by some unrelated field this fixture also carries. Before #35 this same call
+      // stopped one step later at "not canonical exact bytes", which every genuine harness run
+      // hit too.
+      await expect(contract.harvest(paths, [])).resolves.toBeDefined();
     } finally {
       await composition.close();
       value.store.close();

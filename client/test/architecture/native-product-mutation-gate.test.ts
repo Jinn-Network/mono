@@ -70,6 +70,30 @@ describe('native product recursive mutation gate', () => {
     expect(result.violations.map(({ kind }) => kind)).toContain(expected);
   });
 
+  it('ignores SOURCE_PATTERNS markers in prose without hiding a real marker beside prose', () => {
+    const prose = fixture({
+      'entry.ts': [
+        '/** acceptLegacyCards: true; capabilityMatch = async () => ({ ok: true }); */',
+        "// archive.since(''); ephemeral-discovery-key; synthesizeLegacyExecutionDocuments();",
+        '/* deliveryExtensions(); ZERO_SUBMISSION; taskId: 0n; */',
+        'export const safe = true;',
+      ].join('\n'),
+    });
+    expect(inspectNativeProductBoundary({ sourceRoot: prose.root, entries: [prose.entry] }).violations)
+      .toEqual([]);
+
+    const code = fixture({
+      'entry.ts': [
+        '/** A comment beside the real marker. */',
+        "const keyId = 'ephemeral-discovery-key'; void keyId;",
+      ].join('\n'),
+    });
+    expect(inspectNativeProductBoundary({ sourceRoot: code.root, entries: [code.entry] }).violations)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'ephemeral-discovery-key' }),
+      ]));
+  });
+
   it('kills duplicate venue ownership and unresolved or compatibility runtime edges', () => {
     const duplicate = fixture({
       'entry.ts': "import './first.js'; import('./second.js');",

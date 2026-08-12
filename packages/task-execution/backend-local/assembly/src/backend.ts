@@ -120,6 +120,7 @@ import {
   type RecorderAvailability,
   type TrustKeyConfig,
 } from "./capabilities.js";
+import { deliveryOutputsFromHarvest } from "./delivery-outputs.js";
 import { projectObservations } from "./observation.js";
 import {
   createEvidenceJoin,
@@ -753,11 +754,33 @@ function dssePreAuthEncoding(payloadType: string, payloadBytes: Uint8Array): Uin
 }
 
 /**
- * Signs the Delivery's own already-sealed bytes and wraps the result in a structurally-valid DSSE
- * envelope (a JSON object `{payloadType, payload, signatures}`, matching
- * `@jinn-network/trust-core`'s `DsseEnvelope` shape exactly, byte-for-byte JSON-compatible with
- * `parseDsseEnvelope`). `deliveryBytes` is passed through untouched as the envelope's `payload` --
- * seal-once: it is never re-encoded, re-ordered, or re-canonicalized here.
+ * Signs the Delivery's own already-sealed bytes and wraps the result in a DSSE envelope (a JSON
+ * object `{payload, payloadType, signatures}`, matching `@jinn-network/trust-core`'s
+ * `DsseEnvelope` shape exactly). `deliveryBytes` is passed through untouched as the envelope's
+ * `payload` -- seal-once: it is never re-encoded, re-ordered, or re-canonicalized here.
+ *
+ * The ENVELOPE's own encoding is RFC 8785 JCS (sorted keys, compact separators) via
+ * `serializeCanonicalJson` -- the same sealer every other canonical byte production in this
+ * file already uses -- byte-identical to what trust-core's `sealDsseEnvelope` emits. That is
+ * load-bearing, not cosmetic (defect #34): the authority-bearing consumer of
+ * these bytes is `parseExactDsseEnvelope` (reached via the client's `verifyNativeDsse` ->
+ * `client/src/evaluator/native-subject-authority.ts`), which accepts ONLY the sole producer
+ * encoding and rejects every alternate spelling by reconstructing through `sealDsseEnvelope`
+ * and comparing bytes. This previously emitted plain `JSON.stringify` in `payloadType, payload,
+ * signatures` insertion order -- structurally fine under the LOOSE `parseDsseEnvelope` the
+ * settlement-grade checker uses (so the producing operator's own side passed), but refused by
+ * the strict cross-operator parse, surfacing as `envelope-signature-invalid` even though the
+ * Ed25519 signature was perfectly valid. Loosening the strict parser would be the wrong repair;
+ * its fail-closed strictness is the design.
+ *
+ * `serializeCanonicalJson` is the protocol package's own JCS re-implementation (Global
+ * Constraints -- never a shared runtime dep with trust-core), the same
+ * cross-boundary-duplication precedent `dssePreAuthEncoding` above already follows. Both sort
+ * keys with an identical `compareCodeUnitStrings` and emit compact separators, so for this
+ * envelope's flat all-string shape the two serializers agree byte-for-byte;
+ * `backend.evidence.test.ts` pins the exact bytes against an independently hand-sorted
+ * expectation, and `client/test/daemon/settlement-grade.test.ts` round-trips these production
+ * bytes through the real `parseExactDsseEnvelope`/`verifyNativeDsse` path.
  */
 function sealExecutorBindingEnvelope(
   deliveryBytes: Uint8Array,
@@ -770,7 +793,7 @@ function sealExecutorBindingEnvelope(
     payload: Buffer.from(deliveryBytes).toString("base64"),
     signatures: [{ keyid: key.keyId, sig: Buffer.from(signature).toString("base64") }],
   };
-  return new TextEncoder().encode(JSON.stringify(envelope));
+  return serializeCanonicalJson(envelope as unknown as JsonValue);
 }
 
 /**
@@ -809,6 +832,18 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private readonly shutdownDrainFailures: Error[] = [];
 
   constructor(private readonly config: LocalTaskExecutionBackendConfig) {
+    // #36. When capture is on, `createEvidenceJoin` puts `executor` and `source` (as the
+    // recording's `producer`) into the evidence graph as two SEPARATE `agent`-kind identities
+    // under two differently-named descriptors, and the execution recorder correctly refuses one
+    // identity claiming both roles. A composition that passes one IRI twice can therefore never
+    // record an attempt -- which stayed latent until the first live run, where it surfaced as an
+    // opaque `dependency-unavailable` terminal after the attempt had already been claimed.
+    // Refuse the composition instead of every attempt it would go on to start.
+    if ((config.recorderAvailability ?? "none") !== "none" && config.source === config.executor) {
+      throw new Error(
+        "local backend source and executor must be distinct graph identities when evidence capture is enabled",
+      );
+    }
     this.writer = acquireStateRootWriter(config.stateRoot);
     this.capacity = new CapacityGate(config.maxConcurrentAttempts ?? 4);
     this.rebuildIndexes();
@@ -1891,7 +1926,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     // Reserved keys win: `extensions` spreads first so no extension can shadow a canonical
     // Delivery field below.
-    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://spec.jinn.network/profiles/task-execution/v1", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
+    // #39: the Delivery declares the Task's declared outputs, never the raw harvest manifest --
+    // see `deliveryOutputsFromHarvest` for why the manifest is deliberately wider.
+    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://spec.jinn.network/profiles/task-execution/v1", attempt, task: documentDigest(input.taskBytes), outputs: deliveryOutputsFromHarvest(harvest.manifest, input.task.outputs), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
     // Finding E31: sign the Delivery's own already-sealed bytes exactly once, never re-seal --
     // see the module-level comment above `sealExecutorBindingEnvelope`. Additive: with no
     // delivery-signing key configured, `deliveryBytes` above is computed identically to before

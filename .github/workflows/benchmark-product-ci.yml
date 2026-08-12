@@ -51,6 +51,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - id: inspect-python
+        name: Install the pinned optional Inspect runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify and install the supported Inspect wheel
+        run: |
+          python -m pip download --no-deps --only-binary=:all: --dest "$RUNNER_TEMP/inspect-wheel" inspect-ai==0.3.255
+          echo "958e773a8d0cc8873314e3f96d1143cbb4e0b9e4bacc2cbec6b4d5576ceecf2c  $RUNNER_TEMP/inspect-wheel/inspect_ai-0.3.255-py3-none-any.whl" | sha256sum -c -
+          python -m pip install "$RUNNER_TEMP/inspect-wheel/inspect_ai-0.3.255-py3-none-any.whl"
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
@@ -92,6 +102,8 @@ jobs:
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
       - name: Verify Benchmark Product core
         working-directory: packages/benchmark-product/core
+        env:
+          JINN_INSPECT_PYTHON: ${{ steps.inspect-python.outputs.python-path }}
         run: |
           yarn install --immutable
           yarn typecheck
@@ -99,6 +111,17 @@ jobs:
           yarn build
           yarn check:parity
           yarn pack:smoke
+      - name: Verify the real OCI Inspect and fake-broker boundaries
+        working-directory: packages/benchmark-product/core
+        run: |
+          docker build --platform linux/amd64 --tag jinn-inspect-worker:0.3.255-ci src/runtime/inspect
+          mkdir -p "$RUNNER_TEMP/inspect-dataset-cache"
+          JINN_INSPECT_OCI_IMAGE="$(docker image inspect --format '{{.Id}}' jinn-inspect-worker:0.3.255-ci)" \
+          JINN_INSPECT_OCI_DATASET_CACHE="$RUNNER_TEMP/inspect-dataset-cache" \
+          JINN_DOCKER_PATH="$(command -v docker)" \
+          yarn vitest run \
+            src/runtime/inspect/broker.integration.test.ts \
+            src/runtime/inspect/oci.integration.test.ts
       - name: Upload Benchmark Product runtime distributions
         uses: actions/upload-artifact@v4
         with:

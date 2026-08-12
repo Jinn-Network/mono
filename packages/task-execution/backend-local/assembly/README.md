@@ -8,8 +8,11 @@ the `awaitIndexed` port, design §10).
 
 This package **is** the local backend (program §6 naming decision: it keeps the `backend-local`
 npm name). Per the consumption rule (program §7.18), it is a library — every hosting product
-embeds its own instance with its own state root, consumed only through this package's standard
-`TaskExecutionBackend` interface. The `supervisor`/`workspace`/`launchers` sibling packages exist
+embeds one or more role-scoped instances, each with its own state root, namespace, writer lock,
+executor identity, and purpose-scoped signing key, consumed only through this package's standard
+`TaskExecutionBackend` interface. Two roles never share a state root or key: for example, Policy
+Optimization composes separate solver and evaluator instances while the backend API remains
+unchanged. The `supervisor`/`workspace`/`launchers` sibling packages exist
 to be consumed individually when building *other* backends; nothing outside
 `packages/task-execution/backend-local/` may import them directly except this package, the
 `@jinn-network/task-execution-testing` `./backend-local` slice, and the evaluation harness's

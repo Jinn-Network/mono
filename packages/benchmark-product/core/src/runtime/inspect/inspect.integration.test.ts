@@ -1,0 +1,343 @@
+import { appendFileSync, cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, test } from "vitest";
+import { parseMatrix } from "@jinn-network/benchmarking-records";
+import { readAuditEntries } from "../../audit/journal.js";
+import type { OperationContext } from "../../operations/context.js";
+import { createDraft, updateDraft } from "../../operations/drafts.js";
+import { initWorkspace } from "../../operations/init.js";
+import { selectInspectEvaluation } from "../../operations/inspect-runtime.js";
+import { runCollect } from "../../operations/run-collect.js";
+import { runCancel } from "../../operations/run-cancel.js";
+import { runLaunch } from "../../operations/run-launch.js";
+import { runLock } from "../../operations/run-lock.js";
+import { runQuote } from "../../operations/run-quote.js";
+import { runReport } from "../../operations/report.js";
+import { runPublish } from "../../operations/publish.js";
+import { runPreview } from "../../operations/preview.js";
+import { runVerify } from "../../operations/verify.js";
+import { verifyPublicBundle } from "../../bundle/verify.js";
+import { readRunJournalEntries } from "../../run/journal.js";
+import { getSealedBytes } from "../../workspace/sealed-store.js";
+
+const pythonPath = process.env.JINN_INSPECT_PYTHON;
+const fixtureDir = dirname(fileURLToPath(new URL("../../../test/fixtures/inspect-project/hermetic_eval.py", import.meta.url)));
+const workspaces: string[] = [];
+
+afterEach(() => {
+  if (process.env.JINN_KEEP_INSPECT_WORKSPACE !== "1") {
+    for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+function context(workspaceDir: string): OperationContext {
+  return { workspaceDir, principal: "sponsor-1", clock: () => new Date().toISOString() };
+}
+
+describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => {
+  test("rejects source drift after lock before accepting any cell submission", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-drift-"));
+    const projectDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-project-"));
+    workspaces.push(workspaceDir, projectDir);
+    cpSync(fixtureDir, projectDir, { recursive: true });
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: "inspect-drift", name: "Inspect drift fixture" }).ok).toBe(true);
+    expect((await selectInspectEvaluation(ctx, {
+      draftId: "inspect-drift",
+      pythonPath: pythonPath!,
+      projectDir,
+      taskReference: "hermetic_eval.py@hermetic_eval",
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scorer: { name: "match", passValue: "C" },
+    })).ok).toBe(true);
+    expect((await runQuote(ctx, { draftId: "inspect-drift" })).ok).toBe(true);
+    expect(runLock(ctx, { draftId: "inspect-drift" }).ok).toBe(true);
+
+    appendFileSync(join(projectDir, "hermetic_eval.py"), "\n# material drift after lock\n");
+    const launched = await runLaunch(ctx, { draftId: "inspect-drift" });
+    expect(launched.ok).toBe(false);
+    if (!launched.ok) expect(launched.error.code).toBe("venue-unavailable");
+    const journal = readRunJournalEntries(workspaceDir, "inspect-drift");
+    expect(journal.some((entry) => entry.kind === "driver-failed")).toBe(true);
+    expect(journal.some((entry) => entry.kind === "submission-accepted")).toBe(false);
+  }, 120_000);
+
+  test("returns a typed validation error before execution for credential-shaped sealed input", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-secret-"));
+    workspaces.push(workspaceDir);
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: "inspect-secret", name: "Inspect secret fixture" }).ok).toBe(true);
+    const selected = await selectInspectEvaluation(ctx, {
+      draftId: "inspect-secret",
+      pythonPath: pythonPath!,
+      projectDir: fixtureDir,
+      taskReference: "hermetic_eval.py@hermetic_eval",
+      taskArgs: { api_key: "must-not-be-sealed" },
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected.ok).toBe(false);
+    if (!selected.ok) expect(selected.error.code).toBe("validation");
+  });
+
+  test("does not reflect arbitrary task import errors into operation or audit output", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-redaction-"));
+    const projectDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-redaction-project-"));
+    workspaces.push(workspaceDir, projectDir);
+    const sentinel = "PRIVATE_PROVIDER_PAYLOAD_8f3b2c5d";
+    writeFileSync(join(projectDir, "leaky_eval.py"), `raise RuntimeError(${JSON.stringify(sentinel)})\n`);
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: "inspect-redaction", name: "Inspect redaction fixture" }).ok).toBe(true);
+    const selected = await selectInspectEvaluation(ctx, {
+      draftId: "inspect-redaction",
+      pythonPath: pythonPath!,
+      projectDir,
+      taskReference: "leaky_eval.py@leaky_eval",
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected.ok).toBe(false);
+    expect(JSON.stringify({ selected, audit: readAuditEntries(workspaceDir) })).not.toContain(sentinel);
+  }, 120_000);
+
+  test("refuses a real multiple-scorer task instead of silently selecting one score", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-multiple-scorers-"));
+    workspaces.push(workspaceDir);
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: "inspect-multiple-scorers", name: "Inspect multiple scorers" }).ok).toBe(true);
+    const selected = await selectInspectEvaluation(ctx, {
+      draftId: "inspect-multiple-scorers",
+      pythonPath: pythonPath!,
+      projectDir: fixtureDir,
+      taskReference: "hermetic_eval.py@multiple_scorer_eval",
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected.ok).toBe(false);
+    if (!selected.ok) expect(selected.error.code).toBe("execution");
+  }, 120_000);
+
+  test("accounts for a real Inspect scorer failure without inventing a verdict", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-scorer-failure-"));
+    workspaces.push(workspaceDir);
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: "inspect-scorer-failure", name: "Inspect scorer failure" }).ok).toBe(true);
+    expect((await selectInspectEvaluation(ctx, {
+      draftId: "inspect-scorer-failure",
+      pythonPath: pythonPath!,
+      projectDir: fixtureDir,
+      taskReference: "hermetic_eval.py@scorer_failure_eval",
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scorer: { name: "exploding_scorer", passValue: "C" },
+      runOptions: { retryOnError: 1 },
+    })).ok).toBe(true);
+    expect((await runQuote(ctx, { draftId: "inspect-scorer-failure" })).ok).toBe(true);
+    expect(runLock(ctx, { draftId: "inspect-scorer-failure" }).ok).toBe(true);
+    expect((await runLaunch(ctx, { draftId: "inspect-scorer-failure" })).ok).toBe(true);
+    const collected = await runCollect(ctx, { draftId: "inspect-scorer-failure" });
+    expect(collected.ok, JSON.stringify(collected)).toBe(true);
+    if (!collected.ok) throw new Error("unreachable");
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+    expect(matrix.cells).toHaveLength(2);
+    expect(matrix.cells.every((cell) => cell.outcome === "unscorable")).toBe(true);
+    expect(matrix.cells.every((cell) => cell.verdicts.length === 0)).toBe(true);
+  }, 120_000);
+
+  test("honors Inspect maxSamples without multiplying or omitting benchmark cells", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-incomplete-"));
+    workspaces.push(workspaceDir);
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: "inspect-incomplete", name: "Inspect incomplete samples" }).ok).toBe(true);
+    expect((await selectInspectEvaluation(ctx, {
+      draftId: "inspect-incomplete",
+      pythonPath: pythonPath!,
+      projectDir: fixtureDir,
+      taskReference: "hermetic_eval.py@hermetic_eval",
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scorer: { name: "match", passValue: "C" },
+      runOptions: { maxSamples: 1 },
+    })).ok).toBe(true);
+    expect((await runQuote(ctx, { draftId: "inspect-incomplete" })).ok).toBe(true);
+    expect(runLock(ctx, { draftId: "inspect-incomplete" }).ok).toBe(true);
+    expect((await runLaunch(ctx, { draftId: "inspect-incomplete" })).ok).toBe(true);
+    const collected = await runCollect(ctx, { draftId: "inspect-incomplete" });
+    expect(collected.ok, JSON.stringify(collected)).toBe(true);
+    if (!collected.ok) throw new Error("unreachable");
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+    expect(matrix.cells).toHaveLength(2);
+    expect(matrix.cells.every((cell) => cell.outcome === "judged")).toBe(true);
+    expect(matrix.cells.every((cell) => cell.verdicts.length === 1)).toBe(true);
+  }, 120_000);
+
+  test("cancels the supervised Inspect worker and accounts for every expected cell", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-cancel-"));
+    workspaces.push(workspaceDir);
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: "inspect-cancel", name: "Inspect cancellation" }).ok).toBe(true);
+    expect((await selectInspectEvaluation(ctx, {
+      draftId: "inspect-cancel",
+      pythonPath: pythonPath!,
+      projectDir: fixtureDir,
+      taskReference: "hermetic_eval.py@hermetic_eval",
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scorer: { name: "match", passValue: "C" },
+    })).ok).toBe(true);
+    expect((await runQuote(ctx, { draftId: "inspect-cancel" })).ok).toBe(true);
+    expect(runLock(ctx, { draftId: "inspect-cancel" }).ok).toBe(true);
+    let requestedPromise: ReturnType<typeof runCancel> | undefined;
+    const launched = await runLaunch(ctx, { draftId: "inspect-cancel" }, {
+      onSolveAttemptNonterminal() {
+        requestedPromise ??= runCancel(ctx, { draftId: "inspect-cancel" });
+      },
+    });
+    expect(launched.ok, JSON.stringify(launched)).toBe(true);
+    expect(requestedPromise).toBeDefined();
+    if (requestedPromise === undefined) throw new Error("unreachable");
+    const requested = await requestedPromise;
+    expect(requested.ok, JSON.stringify(requested)).toBe(true);
+    if (!requested.ok) throw new Error("unreachable");
+    expect(requested.result.phase).toBe("requested");
+    const cancelled = await runCancel(ctx, { draftId: "inspect-cancel" });
+    expect(cancelled.ok, JSON.stringify(cancelled)).toBe(true);
+    if (!cancelled.ok || cancelled.result.phase !== "cancelled") throw new Error("unreachable");
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, cancelled.result.matrixSha256));
+    expect(matrix.completeness).toMatchObject({ expected: 2, judged: 0, runOutcome: "cancelled" });
+    expect(matrix.cells).toHaveLength(2);
+  }, 120_000);
+
+  test("runs an unmodified task across two arms and preserves its native evidence through reporting", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-"));
+    workspaces.push(workspaceDir);
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: "inspect-real", name: "Inspect real fixture" }).ok).toBe(true);
+    expect(updateDraft(ctx, { draftId: "inspect-real", patch: { replicates: 2 } }).ok).toBe(true);
+
+    const selected = await selectInspectEvaluation(ctx, {
+      draftId: "inspect-real",
+      pythonPath: pythonPath!,
+      projectDir: fixtureDir,
+      taskReference: "hermetic_eval.py@hermetic_eval",
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    const previewed = await runPreview(ctx, { draftId: "inspect-real", items: 1 });
+    expect(previewed.ok, JSON.stringify(previewed)).toBe(true);
+    if (!previewed.ok) throw new Error("unreachable");
+    expect(previewed.result.preview.arms.every((arm) => arm.outcomes.delivered === 2)).toBe(true);
+    const quoted = await runQuote(ctx, { draftId: "inspect-real" });
+    expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+    expect(runLock(ctx, { draftId: "inspect-real" }).ok).toBe(true);
+    expect((await runLaunch(ctx, { draftId: "inspect-real" })).ok).toBe(true);
+
+    const collected = await runCollect(ctx, { draftId: "inspect-real" });
+    expect(collected.ok).toBe(true);
+    if (!collected.ok) throw new Error("unreachable");
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+    expect(matrix.cells).toHaveLength(4);
+    expect(
+      matrix.cells.every((cell) => cell.verdicts.length === 1),
+      JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, "inspect-real") }),
+    ).toBe(true);
+
+    const deliveries = readRunJournalEntries(workspaceDir, "inspect-real")
+      .filter((entry) => entry.kind === "delivery");
+    expect(deliveries).toHaveLength(4);
+    for (const delivery of deliveries) {
+      expect(delivery.outputs.map((output) => output.name).sort()).toEqual([
+        "inspect-log",
+        "inspect-summary",
+        "verdict",
+      ]);
+      for (const output of delivery.outputs) expect(getSealedBytes(workspaceDir, output.sha256).length).toBeGreaterThan(0);
+    }
+
+    expect((await runReport(ctx, { draftId: "inspect-real" })).ok).toBe(true);
+    const verified = await runVerify(ctx, { draftId: "inspect-real" });
+    expect(verified.ok && verified.result.checks).toEqual([
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+    ]);
+
+    const refusedPublish = await runPublish(ctx, { draftId: "inspect-real" });
+    expect(refusedPublish.ok).toBe(false);
+    if (!refusedPublish.ok) expect(refusedPublish.error.code).toBe("validation");
+    const published = await runPublish(ctx, {
+      draftId: "inspect-real",
+      includeNativeArtifacts: true,
+    });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) throw new Error("unreachable");
+
+    const detachedRoot = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-bundle-"));
+    workspaces.push(detachedRoot);
+    const detachedBundle = join(detachedRoot, "bundle");
+    cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
+    rmSync(workspaceDir, { recursive: true, force: true });
+    expect((await verifyPublicBundle(detachedBundle)).checks).toEqual([
+      "manifest",
+      "evidence-closure",
+      "trust",
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+    ]);
+    const nativeLogs = readdirSync(join(detachedBundle, "native", "inspect"))
+      .map((name) => join(detachedBundle, "native", "inspect", name));
+    expect(nativeLogs).toHaveLength(4);
+    for (const logPath of nativeLogs) {
+      const officialRead = spawnSync(
+        pythonPath!,
+        ["-c", "from inspect_ai.log import read_eval_log; import sys; assert read_eval_log(sys.argv[1]).status == 'success'", logPath],
+        { encoding: "utf8" },
+      );
+      expect(officialRead.status, officialRead.stderr).toBe(0);
+    }
+    const viewerBundleDir = join(detachedRoot, "inspect-view-bundle");
+    const officialViewer = spawnSync(
+      join(dirname(pythonPath!), "inspect"),
+      ["view", "bundle", "--log-dir", join(detachedBundle, "native", "inspect"), "--output-dir", viewerBundleDir],
+      { encoding: "utf8" },
+    );
+    expect(officialViewer.status, officialViewer.stderr).toBe(0);
+    expect(readdirSync(viewerBundleDir).length).toBeGreaterThan(0);
+    rmSync(nativeLogs[0]!);
+    await expect(verifyPublicBundle(detachedBundle)).rejects.toThrow();
+  }, 120_000);
+});

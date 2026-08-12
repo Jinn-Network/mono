@@ -301,4 +301,51 @@ describe('NativeClaimCoordinator', () => {
     await subject.coordinator.stopWorker();
     expect(await replacement.workerOwned()).toBe(true);
   });
+
+  // #37: live gate round 22 wedged operator B's work loop permanently. One tick outran the 30s
+  // lease TTL (its RPC fallback chain timed out), the lease lapsed, and every subsequent tick threw
+  // out of `renewWorker()` — 320 consecutive ticks, zero claims attempted, only a daemon restart
+  // cleared it. A lapsed lease that nobody else took is this worker's to resume.
+  // Mutation check: delete the `acquireLease` arm from `requireLiveWorker`'s catch and the first
+  // test reddens on the very first `renewWorker()`.
+  it('re-acquires its own lapsed worker lease and keeps claiming instead of wedging forever', async () => {
+    const subject = setup();
+    // The wall-clock lapse a slow tick produces: the row is still ours, it is simply past expiry.
+    subject.store.db.prepare(`UPDATE native_worker_leases SET expires_at = ?`)
+      .run('2026-08-01T23:59:00.000Z');
+    expect(await subject.coordinator.workerOwned()).toBe(false);
+
+    expect(() => subject.coordinator.renewWorker()).not.toThrow();
+    expect(await subject.coordinator.workerOwned()).toBe(true);
+    expect(subject.store.db.prepare(`SELECT owner_id, expires_at FROM native_worker_leases`).get())
+      .toEqual({ owner_id: 'worker-a', expires_at: '2026-08-02T00:01:00.000Z' });
+
+    await expect(subject.coordinator.process(
+      subject.item,
+      { taskBytes: new Uint8Array([1]), submissionBytes: new Uint8Array([2]) },
+    )).resolves.toMatchObject({ kind: 'claim-finalized' });
+    expect(subject.broadcast).toHaveBeenCalledOnce();
+  });
+
+  it('still refuses a live lease held by a different worker after its own lapses', async () => {
+    const subject = setup();
+    // Another worker legitimately took the scope over while ours was lapsed. Re-acquire must refuse:
+    // this is the mutual-exclusion guarantee, and recovery may never step over a live foreign owner.
+    subject.store.db.prepare(`UPDATE native_worker_leases SET owner_id = ?, expires_at = ?`)
+      .run('worker-b', '2026-08-02T01:00:00.000Z');
+
+    expect(() => subject.coordinator.renewWorker()).toThrow(NativeWorkerLeaseError);
+    // The refusal comes from `acquireLease`, so the re-acquire was attempted and declined —
+    // not skipped.
+    expect(() => subject.coordinator.renewWorker()).toThrow('already held by worker-b');
+    await expect(subject.coordinator.process(
+      subject.item,
+      { taskBytes: new Uint8Array([1]), submissionBytes: new Uint8Array([2]) },
+    )).rejects.toThrow(NativeWorkerLeaseError);
+
+    expect(subject.broadcast).not.toHaveBeenCalled();
+    expect(subject.state.listOperations()).toEqual([]);
+    expect(subject.store.db.prepare(`SELECT owner_id, expires_at FROM native_worker_leases`).get())
+      .toEqual({ owner_id: 'worker-b', expires_at: '2026-08-02T01:00:00.000Z' });
+  });
 });

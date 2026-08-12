@@ -1,12 +1,15 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { BindingResolver, ResolvedBinding } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, parseSignedRecordEnvelope } from "@jinn-network/trust-core";
 import {
   EVALUATION_SPEC_FORMAT_URI,
   EVALUATION_TASK_PROFILE_URI,
   EVAL_SEMANTICS_VERSION,
+  VERDICT_DSSE_PAYLOAD_TYPE,
+  ResultEvaluationStatementShape,
   buildEvaluationTaskProfile,
   sealEvaluationSpec,
   sealTaskProfile,
@@ -50,9 +53,10 @@ function binding(key: string): ResolvedBinding {
     binding: {
       key: { didKey: key, keyid: key },
       // Every scope a native role can require, including the announce-plane scope the three
-      // `*-discovery` roles gained in issue #2525 — a "grants everything" binding must grant it.
+      // `*-discovery` roles gained in issue #2525 and the admission-receipt scope the `admission`
+      // role gained in #33 — a "grants everything" binding must grant them.
       scope: ["authorizations", "observations", "deliveries", "verdicts", "settlements",
-        "jinn:discovery-announcements"],
+        "jinn:discovery-announcements", "https://spec.jinn.network/trust-scopes/admission-receipts/v1"],
       validFrom: "2026-08-01T00:00:00.000Z",
     },
     effectiveStart: "2026-08-01T00:00:00.000Z",
@@ -798,14 +802,28 @@ async function harvestContractFor(
   } as never);
   const workRoot = await mkdtemp(join(tmpdir(), "jinn-native-evaluator-method-guard-"));
   roots.push(workRoot);
-  const outDir = join(workRoot, "out");
-  await mkdir(outDir, { recursive: true });
+  // Distinct directories per slot. A harvest that gets all the way through delegates to the dir
+  // provisioner, which unconditionally removes `paths.secrets` and `paths.tmp` -- aliasing every
+  // slot to one directory would delete the sealed `out/verdict` before a test could read it.
+  const dir = async (name: string) => {
+    const path = join(workRoot, name);
+    await mkdir(path, { recursive: true });
+    return path;
+  };
+  const outDir = await dir("out");
   return {
     contract: selected.contract,
     outDir,
     paths: {
-      root: outDir, input: outDir, work: outDir, out: outDir, logs: outDir,
-      harnessState: outDir, secrets: outDir, tmp: outDir, meta: outDir,
+      root: workRoot,
+      input: await dir("input"),
+      work: await dir("work"),
+      out: outDir,
+      logs: await dir("logs"),
+      harnessState: await dir("harness-state"),
+      secrets: await dir("secrets"),
+      tmp: await dir("tmp"),
+      meta: await dir("meta"),
     } as unknown as WorkspacePaths,
   };
 }
@@ -859,18 +877,147 @@ describe("native evaluator multi-registration harvest method-digest guard", () =
     }
   });
 
-  it("gets past the method-digest guard to a later check when the verdict names the serving method", async () => {
+  it("gets past the method-digest guard and seals when the verdict names the serving method", async () => {
     const { value, composition, harvestable, verdict } = await twoMethodFixture();
     try {
       await writeFile(join(harvestable.outDir, "verdict"), verdict(`sha256:${SWE_METHOD_SHA256}`));
       // Identical statement, only the method digest changed to the one the durable swe-rebench
-      // spec selects. It still doesn't harvest cleanly (this hand-built statement doesn't
-      // survive `sealSignedRecord`'s canonical re-encoding byte-for-byte -- a fixture-fidelity
-      // limit, not a production path), but it now fails at the *next* check in sequence rather
-      // than the authority guard. Reaching a check that only runs after the authority `if`
-      // completes false is what proves the method-digest term is the one the digest flips.
+      // spec selects. Reaching the seal -- a step that only runs after the authority `if`
+      // completes false -- is what proves the method-digest term is the one the digest flips.
+      await expect(harvestable.contract.harvest(harvestable.paths, [])).resolves.toBeDefined();
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+});
+
+/**
+ * #35 -- the harvest seal must agree, byte for byte, with what the harness actually graded.
+ *
+ * The evaluation harness writes `out/verdict` through `@jinn-network/attestation-issuer`'s
+ * `buildResultEvaluationPayload` -> `deterministicJsonBytes`: sorted keys, two-space indent,
+ * trailing LF (`packages/task-execution/evaluation-harness/src/runtime.ts`). That is the only
+ * producer on the deterministic-process evaluation path the live gate's CP6 runs -- both the
+ * prediction and swe-rebench registrations spawn it through `makeEvaluationLauncher`.
+ *
+ * The seal used to route through `sealSignedRecord`, which re-serializes the parsed statement with
+ * trust-core's COMPACT `canonicalJsonBytes`, and then byte-compared that re-encoding against the
+ * harness's file. The two spellings never agree for any non-trivial object, so the comparison threw
+ * on every genuine harness run -- one step past #34's subject-authority check, after grading had
+ * already happened. `packages/benchmark-product/core/src/venue/signing.ts` documents the same
+ * divergence, confirmed there against the real compiled harness binary.
+ *
+ * The guarantee the check exists for -- what-was-graded equals what-is-signed -- is kept and made
+ * strictly stronger: the exact harness bytes are pinned to the attestation family's canonical
+ * spelling and then signed verbatim via `sealSignedPayload`, so the DSSE payload IS the graded
+ * file rather than a re-encoding of it. Both exact deterministic spellings are ratified consumer
+ * input (`packages/benchmarking/aggregate/src/resolved-inputs.ts` accepts either), and no verdict
+ * consumer requires the compact one.
+ */
+describe("native evaluator harvest seals the exact harness verdict bytes (#35)", () => {
+  async function predictionFixture() {
+    const value = await fixture();
+    const composition = await buildNativeEvaluatorComposition(value.config);
+    const admitted = admittedEvaluation(value.state, specificationFor(PREDICTION_PARSER));
+    const harvestable = await harvestContractFor(value.backendConfigs[0]!, admitted);
+    const statement = {
+      task: { name: admitted.task.name, digest: admitted.task.digest },
+      results: [{ name: admitted.result.name, digest: admitted.result.digest }],
+      evaluator: { id: AGENT },
+      evaluatedAt: "2026-08-02T13:00:00.000Z",
+      verdict: "pass",
+      evaluationSpecification: { name: admitted.evaluationSpec.name, digest: admitted.evaluationSpec.digest },
+      evaluationMethod: { name: "prediction-evaluator-v1", digest: METHOD_DIGEST },
+    } as const;
+    return { value, composition, harvestable, statement };
+  }
+
+  it("seals real harness bytes verbatim and the envelope round-trips through the strict verifier", async () => {
+    const { value, composition, harvestable, statement } = await predictionFixture();
+    try {
+      // The real producer, byte for byte -- not a hand-rolled fixture spelling.
+      const harnessBytes = buildResultEvaluationPayload(statement);
+      // Guards the premise: these ARE the pretty bytes, and they are NOT the compact ones.
+      expect(new TextDecoder().decode(harnessBytes)).toContain("\n  ");
+      expect(Buffer.from(canonicalJsonBytes(JSON.parse(new TextDecoder().decode(harnessBytes)))))
+        .not.toEqual(Buffer.from(harnessBytes));
+
+      await writeFile(join(harvestable.outDir, "verdict"), harnessBytes);
+      await expect(harvestable.contract.harvest(harvestable.paths, [])).resolves.toBeDefined();
+
+      const sealedBytes = new Uint8Array(await readFile(join(harvestable.outDir, "verdict")));
+      const parsed = parseSignedRecordEnvelope(sealedBytes, VERDICT_DSSE_PAYLOAD_TYPE);
+      // Signed == graded, byte for byte.
+      expect(Buffer.from(parsed.payloadBytes)).toEqual(Buffer.from(harnessBytes));
+      expect(parsed.signatures.length).toBeGreaterThan(0);
+      // And the sealed payload still satisfies the strict statement parser end to end.
+      const verified = ResultEvaluationStatementShape.parse(JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(parsed.payloadBytes),
+      ));
+      expect(verified.predicate.verdict).toBe("pass");
+      expect(verified.predicate.evaluator.id).toBe(AGENT);
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+
+  it("still refuses a statement whose bytes are not the canonical attestation spelling", async () => {
+    const { value, composition, harvestable, statement } = await predictionFixture();
+    try {
+      // Semantically identical, non-canonical spelling: a grader that hand-rolls its own
+      // serialization must not get those exact bytes signed.
+      const noncanonical = new TextEncoder().encode(
+        JSON.stringify(JSON.parse(new TextDecoder().decode(buildResultEvaluationPayload(statement)))),
+      );
+      await writeFile(join(harvestable.outDir, "verdict"), noncanonical);
       await expect(harvestable.contract.harvest(harvestable.paths, []))
         .rejects.toThrow(/not canonical exact bytes/);
+      // Nothing was sealed over the refused bytes.
+      expect(Buffer.from(new Uint8Array(await readFile(join(harvestable.outDir, "verdict")))))
+        .toEqual(Buffer.from(noncanonical));
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+
+  it("still refuses a statement tampered after the harness wrote it", async () => {
+    const { value, composition, harvestable, statement } = await predictionFixture();
+    try {
+      // Canonical spelling, but the verdict now names an evaluator this Attempt never authorized.
+      const tampered = buildResultEvaluationPayload({ ...statement, evaluator: { id: "urn:jinn:evaluator:impostor" } });
+      await writeFile(join(harvestable.outDir, "verdict"), tampered);
+      await expect(harvestable.contract.harvest(harvestable.paths, []))
+        .rejects.toThrow(/outside its exact Attempt authority/);
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+
+  /**
+   * #39b(b) -- diagnosability. When the harness refuses its subject it exits 65 without writing
+   * `out/verdict`, and the launch plan correctly maps 65 to blame `task` /
+   * `invalid-evaluation-input`. The harvest then read `out/verdict` unconditionally, so its ENOENT
+   * propagated into the backend's `harvest failed:` catch and OVERWROTE that classification with
+   * `infrastructure` / `backend-unavailable` -- pointing a live diagnosis at the host instead of at
+   * the refused subject.
+   *
+   * Harvest is contracted to run "after success, failure, cancellation, and expiry"
+   * (`ProvisionerContract.harvest`), so it must not presuppose a verdict. With no verdict there is
+   * nothing to seal: it delegates, records the omission, and lets the exit code classify.
+   */
+  it("harvests a verdict-less refused attempt without overwriting the exit-code blame", async () => {
+    const { value, composition, harvestable } = await predictionFixture();
+    try {
+      const result = await harvestable.contract.harvest(harvestable.paths, [
+        { name: "verdict", mediaType: "application/vnd.in-toto+json", required: true },
+      ]);
+      expect(result.manifest).toEqual([]);
+      expect(result.omissions).toEqual(["verdict"]);
+      expect(result.integrityViolations).toEqual([]);
     } finally {
       await composition.close();
       value.store.close();

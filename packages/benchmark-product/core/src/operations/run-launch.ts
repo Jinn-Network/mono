@@ -56,6 +56,7 @@ import { requireRunState, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
+import { createRuntimeVenue } from "../runtime/adapter.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -191,8 +192,6 @@ export function runLaunch(
 ): Promise<OperationResult<RunLaunchResult>> {
   const at = context.clock();
   const clockedContext: OperationContext = { ...context, clock: () => at };
-  const createVenue = deps.createVenue ?? createLocalVenue;
-
   return operateAsync({
     context: clockedContext,
     action: "launch",
@@ -200,6 +199,8 @@ export function runLaunch(
     inputs: input,
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
+      const createVenue: typeof createLocalVenue = deps.createVenue
+        ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 
       const transitioned = transition("locked", "launch");
       if (!transitioned.ok) {
@@ -310,8 +311,6 @@ export function runResume(
 ): Promise<OperationResult<RunResumeResult>> {
   const at = context.clock();
   const clockedContext: OperationContext = { ...context, clock: () => at };
-  const createVenue = deps.createVenue ?? createLocalVenue;
-
   return operateAsync({
     context: clockedContext,
     action: "run.resume",
@@ -319,6 +318,8 @@ export function runResume(
     inputs: input,
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "running");
+      const createVenue: typeof createLocalVenue = deps.createVenue
+        ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 
       // BP-22: a pending cancellation is finalized by re-running `cancel`, never by `resume` —
       // an interrupted cancel left the run mid-drain, and `cancel` is the only operation that

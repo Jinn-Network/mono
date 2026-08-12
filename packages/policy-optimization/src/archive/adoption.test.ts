@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { expressAsRunPinning } from "@jinn-network/policy-identity";
 import { manifestFor } from "../testing/archive-fixtures.js";
 import { tupleFor } from "../testing/wave-fixtures.js";
+import type { RecommendationDecision } from "../recommendation.js";
 import {
   adopt,
   adoptionConfigFragment,
@@ -11,6 +12,7 @@ import {
   declaredAdoptionComponentClasses,
   emptyAdoptionLog,
   isAdoptionComponentClass,
+  prepareAdoption,
   rollback,
   sortAdoptionComponentClasses,
 } from "./adoption.js";
@@ -128,6 +130,62 @@ describe("adopt", () => {
     const first = adopt({ log: emptyAdoptionLog(), scope: SCOPE, tupleDigest: FIRST, requires: [], approved: [] });
     expect(() => adopt({ log: logWith(first), scope: SCOPE, tupleDigest: FIRST, requires: [], approved: [] }))
       .toThrow(expect.objectContaining({ category: "adoption-gate" }));
+  });
+});
+
+describe("prepareAdoption", () => {
+  const decision: RecommendationDecision = {
+    projection: "RecommendationDecision" as const,
+    status: "inconclusive" as const,
+    recommendedTupleDigest: FIRST,
+    currentTupleDigest: FIRST,
+    challengerTupleDigest: SECOND,
+    reasonCodes: ["mcnemar-not-significant" as const],
+    basis: { runDigest: FIRST, matrixDigest: SECOND, reportDigests: [], methodRefs: [] },
+    limitations: [
+      "independence: disclosed — solver and evaluator roles use separate identities and keys, but the same operator, host, OS user, and administrative domain control both" as const,
+    ],
+  };
+
+  it("keeps inconclusive adoption behind the explicit advanced override and records its label", () => {
+    expect(() => prepareAdoption({
+      log: emptyAdoptionLog(), scope: SCOPE, tupleDigest: SECOND, requires: [], approved: [],
+      recommendation: decision, baseConfigurationRevision: "r1", currentConfigurationRevision: "r1",
+      routePayloadConsent: true, explicitConfirmation: true,
+    })).toThrow(/advanced override/u);
+    const record = prepareAdoption({
+      log: emptyAdoptionLog(), scope: SCOPE, tupleDigest: SECOND, requires: ["hook"], approved: ["hook"],
+      recommendation: decision, baseConfigurationRevision: "r1", currentConfigurationRevision: "r1",
+      routePayloadConsent: true, explicitConfirmation: true,
+      overrideInconclusive: { warningAcknowledged: true, reason: "operator accepts local risk" },
+    });
+    expect(record).toMatchObject({
+      tupleDigest: SECOND,
+      recommendationStatus: "inconclusive",
+      overrideReason: "operator accepts local risk",
+      baseConfigurationRevision: "r1",
+      payloadClassesApproved: ["hook"],
+    });
+  });
+
+  it("preserves the promising label on an advanced operator override", () => {
+    const promising = { ...decision, status: "promising" as const };
+    const record = prepareAdoption({
+      log: emptyAdoptionLog(), scope: SCOPE, tupleDigest: SECOND, requires: [], approved: [],
+      recommendation: promising, baseConfigurationRevision: "r1", currentConfigurationRevision: "r1",
+      routePayloadConsent: true, explicitConfirmation: true,
+      overrideInconclusive: { warningAcknowledged: true, reason: "continue learning in production" },
+    });
+    expect(record.recommendationStatus).toBe("promising");
+  });
+
+  it("refuses an override when configuration moved after the campaign snapshot", () => {
+    expect(() => prepareAdoption({
+      log: emptyAdoptionLog(), scope: SCOPE, tupleDigest: SECOND, requires: [], approved: [],
+      recommendation: decision, baseConfigurationRevision: "r1", currentConfigurationRevision: "r2",
+      routePayloadConsent: true, explicitConfirmation: true,
+      overrideInconclusive: { warningAcknowledged: true, reason: "risk accepted" },
+    })).toThrow(/configuration moved/u);
   });
 });
 

@@ -10,6 +10,10 @@
       "sha256": "3143c16c647b6f03063a5c58c699273270f501ad29aa97156f95f176a695cb4c"
     },
     {
+      "id": "exports/matrix-projection.json",
+      "sha256": "903a83d0de3aeca1abd854bced8d9fc13306c36dc0b457b3aaba006c5b2c2653"
+    },
+    {
       "id": "exports/static-bundle.json",
       "sha256": "53e3d3b27552033e6e9bf100c9db8dc74fc7093675304f3818ed75f42b4b58fa"
     },
@@ -27,11 +31,11 @@
     },
     {
       "id": "methods/conflict-cases.json",
-      "sha256": "dcc20ded922689cddc5cc16c6e332ba0e3c7c5cbafde84dbbc08effa3eaa6d7e"
+      "sha256": "0784e581136c8ac3f9dfddcbc9d19e0d52931e239acd0ef062e91e07f6a5233c"
     },
     {
       "id": "methods/conformance-cases.json",
-      "sha256": "4fdddbcdc1a688df97227e213d081118dd9dd2b2d5390ae1dc97af133429c8ed"
+      "sha256": "3abf59001e4b53895bda5520e8af132275729a59e144bf9da773a2f87cd253b7"
     },
     {
       "id": "methods/fully-attrited-avg-at-k.json",
@@ -47,7 +51,7 @@
     },
     {
       "id": "methods/method-specs.json",
-      "sha256": "ce67ff1cfd4a545c8822e42eb0b1939f242df8d71ce4bc6a99a004d163983390"
+      "sha256": "78903ad241416a0b59f636c6c8077d219bb7e0cd0d8bc9dda4aa18f317bafe1a"
     },
     {
       "id": "methods/noninferiority-cluster-bca.json",
@@ -70,6 +74,14 @@
       "sha256": "ea292e5dcb1bed1b4b35fca990e841326bd731bc70ffebb0ca48b8d15b05574f"
     },
     {
+      "id": "methods/paired-delta-withheld.json",
+      "sha256": "5ec8b616468fb223aefb5681295c9c71cd884505685e13428d660120941a0874"
+    },
+    {
+      "id": "methods/paired-delta.json",
+      "sha256": "ee87f4d240c373131edf81677209e4183c2032db7d015a1149cdcfcc2b5dc7fd"
+    },
+    {
       "id": "methods/paired-exclusion-r1.json",
       "sha256": "327c6935a4bf9935849f920d198ec73e1ba6b6f6131319c139f6574eab467c30"
     },
@@ -84,6 +96,18 @@
     {
       "id": "methods/pass-at-k.json",
       "sha256": "272f6d5a5012754520aa3689e2773e498f600336f94b650dd916bdb3514b61c8"
+    },
+    {
+      "id": "methods/provenance-cluster-sign-conformance.json",
+      "sha256": "e12d346125b4caaae62c2d4a8589da39d6eedaf4799e30f22e9037bcbac69900"
+    },
+    {
+      "id": "methods/provenance-cluster-sign-method-spec.json",
+      "sha256": "6869c2cedbb3547753f04b514b96f2ddee267a61c8cfd95f6166a10ed0d8cc6b"
+    },
+    {
+      "id": "methods/provenance-cluster-sign.json",
+      "sha256": "cd12cdd5c0112aa81488310aab2cc13807b1d7a58a06fa5e8c70bd7103eab8f5"
     },
     {
       "id": "methods/subject-isolation.json",
@@ -154,5 +178,12 @@
       "sha256": "7e9c75881166982f6de603023320c9f20551244e88c2b4207cbe5876e518e009"
     }
   ],
-  "errata": []
+  "errata": [
+    {
+      "id": "exports/eval-log.json",
+      "supersededBy": "exports/matrix-projection.json",
+      "date": "2026-08-12",
+      "reason": "This historical Jinn projection is not an Inspect EvalLog. Use the Jinn-owned Matrix projection fixture; genuine Inspect logs are produced by Inspect itself."
+    }
+  ]
 }

@@ -69,6 +69,7 @@ import { requireRunState, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
+import { createRuntimeVenue } from "../runtime/adapter.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -176,8 +177,6 @@ export function runCancel(
 ): Promise<OperationResult<RunCancelResult>> {
   const at = context.clock();
   const clockedContext: OperationContext = { ...context, clock: () => at };
-  const createVenue = deps.createVenue ?? createLocalVenue;
-
   return operateAsync({
     context: clockedContext,
     action: "cancel",
@@ -209,6 +208,8 @@ export function runCancel(
 
       try {
         const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+        const createVenue: typeof createLocalVenue = deps.createVenue
+          ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
         const alreadyRequested = cancelRequested(clockedContext.workspaceDir, input.draftId);
 
       // Terminal idempotency: once THIS operation has closed the run, return its exact durable

@@ -263,6 +263,16 @@
       }
     },
     {
+      "operation": "selectInspectEvaluation",
+      "cliVerb": "runtime inspect select",
+      "authorityGated": false,
+      "description": "Selects, probes, and digest-binds an unmodified Inspect evaluation and its runtime configuration.",
+      "gui": {
+        "status": "shipped",
+        "action": "runtime.inspect.select"
+      }
+    },
+    {
       "operation": "updateDraft",
       "cliVerb": "draft update",
       "authorityGated": false,

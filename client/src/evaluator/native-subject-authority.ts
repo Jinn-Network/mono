@@ -66,14 +66,22 @@ export interface NativeSubjectAuthorityDependencies {
       readonly address: string;
       readonly atTime: string;
       readonly purpose: "native:solver-settlement" | "native:evaluator-settlement";
-    }): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }>;
+    }): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string; readonly transient?: boolean }>;
   };
 }
 
 export class NativeSubjectAuthorityError extends Error {
   override readonly name = "NativeSubjectAuthorityError";
-  constructor(readonly reason: string, detail?: string) {
+  /**
+   * `false` (default) — a genuine authority REFUSAL: a check ran and the subject's authority is
+   * invalid. Deterministic; the evaluator terminalizes it (retrying never succeeds).
+   * `true` — the check could NOT complete because a live chain read (`Safe.isOwner`) failed. The
+   * subject may well be valid; the evaluator retries instead of terminalizing to the SLA.
+   */
+  readonly transient: boolean;
+  constructor(readonly reason: string, detail?: string, options?: { readonly transient?: boolean }) {
     super(detail === undefined ? reason : `${reason}: ${detail}`);
+    this.transient = options?.transient ?? false;
   }
 }
 
@@ -253,7 +261,11 @@ export async function verifyNativeSubjectAuthority(input: {
     purpose: "native:solver-settlement",
   });
   if (!executorSettlement.ok) {
-    throw new NativeSubjectAuthorityError("executor-settlement-binding-failed", executorSettlement.reason);
+    throw new NativeSubjectAuthorityError(
+      "executor-settlement-binding-failed",
+      executorSettlement.reason,
+      { transient: executorSettlement.transient },
+    );
   }
 
   if (claim.executor.agent === claim.evaluator.agent
@@ -266,7 +278,11 @@ export async function verifyNativeSubjectAuthority(input: {
     purpose: "native:evaluator-settlement",
   });
   if (!evaluatorBinding.ok) {
-    throw new NativeSubjectAuthorityError("evaluator-binding-failed", evaluatorBinding.reason);
+    throw new NativeSubjectAuthorityError(
+      "evaluator-binding-failed",
+      evaluatorBinding.reason,
+      { transient: evaluatorBinding.transient },
+    );
   }
 
   const proof = {

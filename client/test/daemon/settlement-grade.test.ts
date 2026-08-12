@@ -20,7 +20,8 @@ import { mkdtemp, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
-import { sealDsseEnvelope, dssePreAuthEncoding } from '@jinn-network/trust-core';
+import bs58 from 'bs58';
+import { sealDsseEnvelope, dssePreAuthEncoding, parseExactDsseEnvelope } from '@jinn-network/trust-core';
 import {
   BASE_SEPOLIA_TODAY,
   keccakEvidenceHash,
@@ -35,6 +36,7 @@ import { makeLocalTaskExecutionBackend } from '@jinn-network/task-execution-back
 import type { LauncherContract } from '@jinn-network/task-execution-launchers';
 import type { ProvisionerContract } from '@jinn-network/task-execution-workspace';
 import { Store } from '../../src/store/store.js';
+import { verifyNativeDsse } from '../../src/daemon/native-trust-catalog.js';
 import { EngagementLedger, type EngagementRow } from '../../src/daemon/engagement-ledger.js';
 import {
   EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE,
@@ -279,6 +281,39 @@ describe('buildVerifySettlementGrade: executorBinding', () => {
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.executorBinding).toEqual({ status: 'verified' });
+  });
+
+  // Defect #34 follow-up: the self-check must be as strict as the remote evaluator's
+  // authority-bearing parse. A validly-signed envelope in a NON-canonical spelling (plain
+  // `JSON.stringify`, insertion-ordered keys -- exactly what the pre-fix producer emitted) was
+  // accepted by the loose `parseDsseEnvelope` here while the remote `parseExactDsseEnvelope`
+  // refused it, so a producing operator could never detect its own encoding drift before a
+  // remote evaluator rejected the round. Fail-fast: the operator's own settlement grade must
+  // refuse the alternate spelling too.
+  test('invalid when the envelope is validly signed but not the exact canonical producer encoding', async () => {
+    const delivery = sealDelivery(baseDeliveryFields());
+    const digest = digestOf(delivery);
+    const signature = signPreAuth(executorKeyPair.privateKey, EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE, delivery);
+    const nonCanonical = new TextEncoder().encode(JSON.stringify({
+      payloadType: EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE,
+      payload: Buffer.from(delivery).toString('base64'),
+      signatures: [{ keyid: EXECUTOR_KEY_ID, sig: Buffer.from(signature).toString('base64') }],
+    }));
+    // Sanity: the strict parser genuinely refuses this spelling -- the premise of the test.
+    expect(() => parseExactDsseEnvelope(nonCanonical)).toThrow();
+
+    const verify = buildVerifySettlementGrade(buildInput({ getDeliverySignature: getDeliverySignatureFor(digest, nonCanonical) }));
+    const result = await verify({
+      attempt: REVISED_ATTEMPT,
+      delivery: JSON.parse(new TextDecoder().decode(delivery)),
+      deliveryBytes: delivery,
+      deliveryDigest: digest,
+      config: BASE_SEPOLIA_TODAY,
+    });
+    expect(result.executorBinding).toEqual({
+      status: 'invalid',
+      detail: expect.stringContaining('DSSE parsing') as unknown as string,
+    });
   });
 });
 
@@ -607,7 +642,10 @@ describe('executorBinding against a REAL LocalTaskExecutionBackend delivery (fin
     },
   };
 
-  async function produceRealSignedDelivery(): Promise<{
+  async function produceRealSignedDelivery(signing: {
+    readonly keyId?: string;
+    readonly keyPair?: { privateKey: KeyObject; publicKey: KeyObject };
+  } = {}): Promise<{
     readonly deliveryBytes: Uint8Array;
     readonly digest: `sha256:${string}`;
     readonly getDeliverySignature: (candidate: `sha256:${string}`) => Uint8Array | undefined;
@@ -615,7 +653,8 @@ describe('executorBinding against a REAL LocalTaskExecutionBackend delivery (fin
   }> {
     const stateRoot = await mkdtemp(join(tmpdir(), 'jinn-settlement-grade-e31-'));
     roots.push(stateRoot);
-    const keyPair = generateKeyPairSync('ed25519');
+    const keyPair = signing.keyPair ?? generateKeyPairSync('ed25519');
+    const keyId = signing.keyId ?? EXECUTOR_KEY_ID;
 
     const task = sealTask({
       protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
@@ -686,7 +725,7 @@ describe('executorBinding against a REAL LocalTaskExecutionBackend delivery (fin
       // Exactly the shape `composition-root.ts` wires `input.deliverySigningKey` into.
       trustKeys: {
         deliverySigningKey: {
-          keyId: EXECUTOR_KEY_ID,
+          keyId,
           sign: (payload) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
         },
       },
@@ -730,5 +769,96 @@ describe('executorBinding against a REAL LocalTaskExecutionBackend delivery (fin
       config: BASE_SEPOLIA_TODAY,
     });
     expect(result.executorBinding).toEqual({ status: 'verified' });
+  });
+
+  // ── Defect #34: cross-operator round trip, producer -> STRICT verifier ──────────────────────
+  //
+  // The test above proves operator B's own side accepts B's envelope -- `settlement-grade.ts`
+  // parses it with trust-core's LOOSE `parseDsseEnvelope`, which tolerates any JSON spelling.
+  // That is exactly why defect #34 survived to a live round: the gap was never covered here.
+  // Operator A's evaluator does NOT use the loose parser. It reaches the envelope through
+  // `verifyNativeDsse` (`src/daemon/native-trust-catalog.ts`), whose first act is the STRICT
+  // `parseExactDsseEnvelope` -- which accepts only `sealDsseEnvelope`'s exact RFC 8785 JCS bytes
+  // and reconstructs-then-byte-compares to reject every alternate spelling. Before the fix the
+  // producer emitted plain `JSON.stringify` in `payloadType, payload, signatures` insertion
+  // order, so the strict parse threw, `verifyNativeDsse` swallowed it into
+  // `validSignerKeyids: []`, and `packages/trust/core/src/verify.ts` surfaced the perfectly
+  // valid Ed25519 signature as `executor-binding-failed: envelope-signature-invalid`
+  // (`src/evaluator/native-subject-authority.ts`).
+  //
+  // These three tests span the whole obligation: the real producer path must round-trip through
+  // the real strict verifier path (1), the strict path must still refuse a forged signature (2),
+  // and it must still refuse a non-canonical spelling (3) -- the fix is producer-side; the
+  // verifier's fail-closed strictness is the design and must not regress.
+
+  /** The real Ed25519 `did:key` multicodec identifier `verifyNativeDsse` decodes and verifies
+   * against. The `EXECUTOR_KEY_ID` constant used above is a placeholder string that no real
+   * verifier can resolve, so the strict path needs genuine key material here. */
+  function realDidKey(publicKey: KeyObject): string {
+    const der = Buffer.from(publicKey.export({ format: 'der', type: 'spki' }));
+    return `did:key:z${bs58.encode(Buffer.concat([Buffer.from([0xed, 0x01]), der.subarray(12)]))}`;
+  }
+
+  async function realSignedDeliveryUnderDidKey() {
+    const keyPair = generateKeyPairSync('ed25519');
+    const keyId = realDidKey(keyPair.publicKey);
+    const produced = await produceRealSignedDelivery({ keyId, keyPair });
+    const envelopeBytes = produced.getDeliverySignature(produced.digest);
+    if (envelopeBytes === undefined) throw new Error('expected a delivery signature envelope');
+    return { ...produced, keyId, keyPair, envelopeBytes };
+  }
+
+  test('an envelope the REAL producer emitted verifies through the REAL strict verifier the evaluator uses', async () => {
+    const { keyId, envelopeBytes, deliveryBytes } = await realSignedDeliveryUnderDidKey();
+
+    // The strict parse itself -- the exact call that threw before the fix.
+    const parsed = parseExactDsseEnvelope(envelopeBytes);
+    expect(parsed.payloadType).toBe(EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE);
+    // Seal-once still holds: the payload is the untouched sealed Delivery bytes.
+    expect(parsed.payloadBytes).toEqual(deliveryBytes);
+
+    // And the whole verifier operator A runs, end to end.
+    expect(verifyNativeDsse(envelopeBytes).validSignerKeyids).toEqual([keyId]);
+  });
+
+  test('the strict verifier still REFUSES a forged signature over a canonically-encoded envelope', async () => {
+    const { keyId, envelopeBytes } = await realSignedDeliveryUnderDidKey();
+    const parsed = parseExactDsseEnvelope(envelopeBytes);
+
+    // Flip one byte of the real signature, then re-seal through the canonical producer so the
+    // ONLY defect is cryptographic -- proving the strict path checks signatures, not merely
+    // encoding.
+    const tampered = Uint8Array.from(Buffer.from(parsed.signatures[0]!.sig, 'base64'));
+    tampered[0] = (tampered[0]! ^ 0xff) & 0xff;
+    const forged = sealDsseEnvelope({
+      payloadType: parsed.payloadType,
+      payloadBytes: parsed.payloadBytes,
+      signatures: [{ keyid: keyId, signature: tampered }],
+    });
+
+    expect(() => parseExactDsseEnvelope(forged)).not.toThrow();
+    expect(verifyNativeDsse(forged).validSignerKeyids).toEqual([]);
+  });
+
+  test('the strict verifier still REFUSES the non-canonical spelling of an otherwise-valid envelope', async () => {
+    const { envelopeBytes } = await realSignedDeliveryUnderDidKey();
+    const envelope = JSON.parse(new TextDecoder().decode(envelopeBytes)) as {
+      payloadType: string;
+      payload: string;
+      signatures: readonly { keyid: string; sig: string }[];
+    };
+
+    // Byte-for-byte the pre-fix producer encoding: same fields, same valid signature, only the
+    // key order differs. The strict parser must keep refusing it -- the repair was to stop
+    // PRODUCING this, never to start ACCEPTING it.
+    const reordered = new TextEncoder().encode(JSON.stringify({
+      payloadType: envelope.payloadType,
+      payload: envelope.payload,
+      signatures: envelope.signatures,
+    }));
+    expect(reordered).not.toEqual(envelopeBytes);
+
+    expect(() => parseExactDsseEnvelope(reordered)).toThrow();
+    expect(verifyNativeDsse(reordered).validSignerKeyids).toEqual([]);
   });
 });

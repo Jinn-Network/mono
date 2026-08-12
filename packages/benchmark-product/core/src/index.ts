@@ -41,6 +41,7 @@ export {
   DraftIdSchema,
   DraftPolicySchema,
   DraftSpecSchema,
+  EvaluationRuntimeBindingSchema,
   PinningSchema,
   TaskSetSchema,
   VenueSchema,
@@ -54,8 +55,27 @@ export type {
   AssurancePreset,
   DraftDocument,
   DraftSpec,
+  EvaluationRuntimeBinding,
   ResolvedAssurance,
 } from "./domain/draft.js";
+
+// Runtime-neutral adapter catalog. Lifecycle state stores only an opaque digest-bound binding.
+export {
+  NATIVE_RUNTIME_ADAPTER_ID,
+  createRuntimeVenue,
+  listRuntimeAdapters,
+  runtimeSubmissionBaseline,
+  runtimeNativeArtifactPublicationPolicy,
+} from "./runtime/adapter.js";
+export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary } from "./runtime/adapter.js";
+export { createDefaultBenchmarkRuntimeHost } from "./runtime/host-port.js";
+export type {
+  BenchmarkRuntimeHost,
+  BenchmarkRuntimeHostOptions,
+  OpenAIHostConnection,
+  InspectRuntimeSelectionRequest,
+  InspectRuntimeSelectionResolution,
+} from "./runtime/host-port.js";
 
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
 export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/workspace.js";
@@ -98,6 +118,7 @@ export {
   runStatus,
   runVerify,
   sampleInit,
+  selectInspectEvaluation,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -159,6 +180,8 @@ export type {
   SampleInitInput,
   SampleInitResult,
   SampleInitTaskSummary,
+  SelectInspectEvaluationInput,
+  SelectInspectEvaluationResult,
   UpdateDraftInput,
   VenueHonesty,
 } from "./operations/index.js";

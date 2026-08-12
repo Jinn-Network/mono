@@ -34,6 +34,7 @@ import {
 } from '@jinn-network/trust-core';
 import type { VerdictPorts } from '@jinn-network/marketplace-venue-base';
 import type { EvidenceBindingPorts } from '@jinn-network/task-execution-backend-local';
+import { buildInfo } from '../build-info.js';
 import type { NativeEnvelopeAuthorityPort } from '../evaluator/native-verdict-verification.js';
 import { createVerdictGate } from '../evaluator/verdict-gate.js';
 import {
@@ -48,7 +49,7 @@ import { NativeEvaluatorStateRepository, type NativeEvaluationRow } from './nati
 import {
   buildNativeWorkspaceRuntime,
 } from './native-solver-backend.js';
-import type { NativeTrustAuthority } from './native-trust-catalog.js';
+import { NativeTrustCatalogReadError, type NativeTrustAuthority } from './native-trust-catalog.js';
 import type { RoleIdentitySet } from './role-identities.js';
 
 const DELIVERY_PAYLOAD_TYPE = 'application/vnd.jinn.marketplace.executor-binding.v1+json';
@@ -245,7 +246,10 @@ export function buildNativeEvaluatorSubjectAuthority(input: {
           });
           return { ok: true as const };
         } catch (cause) {
-          return { ok: false as const, reason: String(cause) };
+          // A transient chain-read failure (the `Safe.isOwner` RPC could not complete) is flagged
+          // so the evaluator retries it rather than terminalizing a passing subject; every other
+          // failure here is a deterministic refusal and stays terminal.
+          return { ok: false as const, reason: String(cause), transient: cause instanceof NativeTrustCatalogReadError };
         }
       },
     },
@@ -317,8 +321,18 @@ export async function assembleNativeEvaluatorComposition(
     ...(input.graderReportSources === undefined ? {} : { graderReportSources: input.graderReportSources }),
     backend: {
       stateRoot: `${identity.stateDir}/evaluator-backend`,
+      // #36. `source` and `executor` are TWO separate `agent`-kind identities in the evidence
+      // graph the backend records (the backend-local evidence join derives the recording's
+      // `producer` descriptor from `source`, and gives it a different descriptor name than the
+      // `executor` one), so passing one IRI for both makes the execution recorder refuse the
+      // recording outright — which, under `recorderAvailability: "always"`, terminalized CP6
+      // grading 122ms in, before the harness ever spawned. Same split the solver backend has
+      // always used (`composition-root.ts`): `executor` is the runtime that ran the attempt,
+      // `source` is the operator identity it ran as. `source` deliberately stays the persistent
+      // agent IRI — it is also the protocol observation envelope source that an attempt log's
+      // authoritative-source pin is keyed on, so changing it would orphan in-flight observations.
       source: identity.agentIri,
-      executor: identity.agentIri,
+      executor: `urn:jinn:operator-runtime:${buildInfo.implVersion}`,
       profileStore: { get: (candidate) => candidate === evaluationProfileDigest ? evaluationProfile : undefined },
       launcherDeployment: input.launcherDeployment,
       workspaceRuntime: buildNativeWorkspaceRuntime(),

@@ -199,6 +199,17 @@ async function prepare(
     );
   }
   assertIssuerOperationActive(options?.signal);
+  // ISSUER-CONTRACT ENCODING NOTE (defect #34 follow-up): this ENVELOPE deliberately serializes
+  // via `deterministicJsonBytes` -- sorted keys but PRETTY-PRINTED (2-space indent, `": "`
+  // separators, trailing newline) -- the same convention as the payload above, and the exact
+  // bytes pinned by `fixtures/issuer-contract-v1/` ("the exact envelope bytes are the retry
+  // unit", README). These bytes are NOT compatible with `@jinn-network/trust-core`'s
+  // authority-bearing `parseExactDsseEnvelope`, which accepts only `sealDsseEnvelope`'s compact
+  // RFC 8785 JCS encoding and refuses this spelling on whitespace alone. No native-path
+  // consumer routes these envelopes to that strict parser today (evidence-protocol validation is
+  // structural). Do not point a strict-parse consumer at these bytes, and do not change this
+  // encoding, without a new issuer-contract fixture version (v2) and regenerated
+  // expected-digests -- changing it moves every digest derived from these envelope bytes.
   const envelopeBytes = deterministicJsonBytes({
     payloadType: DSSE_PAYLOAD_TYPE,
     payload: standardBase64(payloadBytes),
@@ -235,6 +246,11 @@ export function buildResultEvaluationPayload(
   input: PrepareResultEvaluationInput,
 ): Uint8Array {
   return deterministicJsonBytes(buildResultEvaluationStatement(input));
+}
+
+/** Exact byte convention used by attestation payload producers and host-side verifiers. */
+export function canonicalAttestationJsonBytes(value: unknown): Uint8Array {
+  return deterministicJsonBytes(value);
 }
 
 export async function prepareExecutionVerification(
