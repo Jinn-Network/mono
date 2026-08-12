@@ -71,6 +71,7 @@ import {
   type NativeEvaluatorCoordinatorResult,
   type NativeEvaluatorVerdictVerificationPort,
 } from "./native-evaluator-coordinator.js";
+import { nativeEvaluationHostInputs } from "./native-evaluation-context.js";
 import {
   openNativeEvaluatorPublisher,
   type NativeEvaluatorPublisher,
@@ -524,6 +525,24 @@ function stateBackedProvisioner(input: {
     if (specification.length !== 1) {
       throw new NativeEvaluatorCompositionError("durable evaluation has no unique EvaluationSpec");
     }
+    // Everything the HOST owes the workspace on top of the evaluation Task's own subject graph:
+    // the bound EvaluationSpec, plus -- for a prediction-parsed specification -- the evaluation
+    // context that specification's adapter reads. Built here, before provisioning, out of durable
+    // artifacts this evaluation has already verified. A specification whose context cannot be
+    // derived refuses the Attempt naming the exact field at fault, instead of staging nothing and
+    // letting the harness's optional read degrade it to an empty context (#41).
+    const hostInputs = nativeEvaluationHostInputs({
+      specification: parseEvaluationSpec(specification[0]!.bytes),
+      specificationBytes: specification[0]!.bytes,
+      specificationMediaType: EVALUATION_SPEC_MEDIA_TYPE,
+      subjectTaskBytes: () => {
+        const subjectTask = artifacts.filter(({ role }) => role === "task");
+        if (subjectTask.length !== 1) {
+          throw new NativeEvaluatorCompositionError("durable evaluation has no unique subject Task");
+        }
+        return subjectTask[0]!.bytes;
+      },
+    });
     const provisioner = makeDirProvisioner({
       sealedTaskBytes: local.sealedTaskBytes,
       dispatchContextBytes: local.dispatchContextBytes,
@@ -533,6 +552,12 @@ function stateBackedProvisioner(input: {
       ...(input.diskFloorBytes === undefined ? {} : { diskFloorBytes: input.diskFloorBytes }),
       async fetchInput(descriptor) {
         const digest = digestFromDescriptor(descriptor);
+        // A host-staged input is served by its own exact digest. It is not a durable subject
+        // artifact (the context is derived, not stored), so it is resolved before the subject
+        // lookup and never widens what a Task-declared input can reach.
+        const staged = hostInputs.find((candidate) =>
+          candidate.name === descriptor.name && candidate.digest === digest);
+        if (staged !== undefined) return staged.bytes;
         const matches = artifacts.filter((artifact) => artifact.digest === digest);
         if (matches.length !== 1) {
           throw new NativeEvaluatorCompositionError(`evaluation input ${descriptor.name} has no unique exact artifact`);
@@ -548,16 +573,16 @@ function stateBackedProvisioner(input: {
           if (grants.length !== 0) {
             throw new NativeEvaluatorCompositionError("evaluator-sealed Submission must remain grant-free");
           }
-          const evaluationSpecInput = {
-            name: "evaluation-spec.json",
-            digest: { sha256: specification[0]!.digest.slice("sha256:".length) },
-            mediaType: EVALUATION_SPEC_MEDIA_TYPE,
-          } as NonNullable<typeof view.task.inputs>[number];
+          const hostInputDescriptors = hostInputs.map((staged) => ({
+            name: staged.name,
+            digest: { sha256: staged.digest.slice("sha256:".length) },
+            mediaType: staged.mediaType,
+          }) as NonNullable<typeof view.task.inputs>[number]);
           await provisioner.setup({
             ...view,
             task: {
               ...view.task,
-              inputs: [...(view.task.inputs ?? []), evaluationSpecInput],
+              inputs: [...(view.task.inputs ?? []), ...hostInputDescriptors],
             },
           }, paths, grants);
         },

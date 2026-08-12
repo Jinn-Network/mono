@@ -23,7 +23,7 @@ import {
 } from "@jinn-network/task-execution-evaluator-adapters";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
-import { documentDigest, sealSubmission } from "@jinn-network/task-execution-protocol";
+import { documentDigest, sealSubmission, sealTask } from "@jinn-network/task-execution-protocol";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import type {
   LocalTaskExecutionBackend,
@@ -304,6 +304,33 @@ function sweRebenchRegistrationSource(evaluator = AGENT): string {
     methodSha256: SWE_METHOD_SHA256,
     methodUri: SWE_METHOD_URI,
     compatibleWith: `specification.familyBlock.parser.id === ${JSON.stringify(SWE_REBENCH_PARSER.id)}`,
+  });
+}
+
+/**
+ * A real `prediction-forecast` subject Task. Since #41 the native provisioner derives the staged
+ * `input/evaluation-context.json` from the durable subject Task whenever the EvaluationSpec names
+ * the prediction parser, so a placeholder string in that artifact slot no longer provisions -- and
+ * should not: production never holds one.
+ */
+function predictionSubjectTaskBytes(): Uint8Array {
+  return sealTask({
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+    profile: {
+      uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
+      digest: { sha256: "4".repeat(64) },
+    },
+    payload: {
+      forecast: {
+        marketId: "composition-fixture-market",
+        question: "Will the composition fixture market resolve?",
+        consensusProbabilityYes: "0.500000",
+        observedAt: "2026-08-02T00:00:00Z",
+        resolvesAt: "2026-08-03T00:00:00Z",
+      },
+    },
+    instructions: "Submit a prediction.",
+    outputs: [{ name: "prediction", mediaType: "application/json", required: true }],
   });
 }
 
@@ -699,7 +726,10 @@ function admittedEvaluation(
   };
   const sealedSpecification = sealEvaluationSpec(specification);
   const subject = {
-    task: artifact("task", "method-guard-subject-task"),
+    task: (() => {
+      const bytes = predictionSubjectTaskBytes();
+      return { name: "task", bytes, digest: documentDigest(bytes) };
+    })(),
     submission: artifact("submission", "method-guard-subject-submission"),
     requesterEnvelope: artifact("requester-envelope", "method-guard-requester-envelope"),
     admissionReceipt: artifact("admission-receipt", "method-guard-admission-receipt"),
@@ -1043,12 +1073,21 @@ describe("native evaluator sealed-Submission provisioner", () => {
       submissionBytes,
       submissionDigest: documentDigest(submissionBytes),
     } as never);
+    const subjectTaskBytes = predictionSubjectTaskBytes();
     vi.spyOn(value.state, "listSubjectArtifacts").mockReturnValue([
       {
         role: "evaluation-spec",
         name: "evaluation-spec.json",
         digest: specification.digest,
         bytes: specification.bytes,
+      } as never,
+      // Since #41 a prediction-parsed specification also makes the provisioner derive the staged
+      // evaluation context from the durable subject Task, so this mock must carry one.
+      {
+        role: "task",
+        name: "task",
+        digest: documentDigest(subjectTaskBytes),
+        bytes: subjectTaskBytes,
       } as never,
     ]);
     const selected = config.provisioner({
