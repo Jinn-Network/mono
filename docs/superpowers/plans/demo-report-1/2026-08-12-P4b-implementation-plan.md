@@ -26,14 +26,29 @@
 
 ## PR structure — two stacked PRs
 
-Recorded decision, per the coordinator's prompt to choose:
+**AMENDED 2026-08-12 (coordinator-approved re-scope). The original 1,2,3 / 4-8 split was wrong; the table below supersedes it.**
 
 | PR | Tasks | Scope | Why the seam is here |
 |---|---|---|---|
-| **A — selection** | 1, 2, 3 | Draft field → sealed `analysisPlan` → Report produced with the selected method | Touches nothing publish-facing. A paired Report can be produced and verified before any presentation code moves. Independently reviewable and independently revertable. |
-| **B — presentation** | 4, 5, 6, 7, 8 | Golden guards, claim package, bundle assets, web, e2e + docs | All the byte-risk lives here, fenced by Task 4's guards. Stacked on A because `buildClaimPackage` needs a paired Report to exist. |
+| **A — selection through claim** | 1, 2, 4, 5, then 3-completion | Draft field → sealed `analysisPlan` → Report produced with the selected method → claim package built from it, guards landing first | `runReport` is ONE operation spanning report production *and* claim building. This is the smallest boundary at which the capability actually works end to end. |
+| **B — presentation** | 6, 7, 8 | Bundle assets, web, e2e + docs | All remaining byte-risk, fenced behind guards that already exist from PR A's Task 4. |
 
-**The golden byte-equality guard (Task 4) is the first task of PR B and touches no production code.** It lands before the first commit that modifies `claim.ts` or `assets.ts`, satisfying the constraint that the guard precedes the mutation.
+**The golden byte-equality guard (Task 4) is still the first task to touch this area, and still touches no production code.** It lands before the first commit that modifies `claim.ts` or `assets.ts`, satisfying the ratified guard-before-mutation constraint — which is exactly why Task 4 moved into PR A alongside Task 5 rather than Task 5 moving alone.
+
+### Why the original split failed — recorded so the reasoning is reviewable
+
+The first version of this plan split "produce the Report with the selected method" (Task 3) from "method-dispatching claim package" (Task 5) across two PRs. **That seam does not exist in the code.**
+
+`operations/report.ts` produces the Report at `:144`, seals it at `:166-167`, then calls `buildClaimPackage` **unconditionally** at `:174`. `buildClaimPackage` calls `wilsonSubjectResults`, which throws at `report/claim.ts:206` for any results lacking wilson's `arms` shape. A selected non-wilson method therefore produces and seals a *correct* Report and then dies one step later inside the same function. This affects **every** non-wilson method, not only `paired-delta`: `avg-at-k@1` fails a step later at `HeadlineArmSchema`.
+
+Found by the Task 3 implementer, which got a true RED for the right reason, made the Step-3 production change (correct, typecheck clean, 21 of 22 tests passing), then refused either to delete the failing test or to reach into `claim.ts` unauthorized, and stopped and reported. That was the right call and it is why the defect surfaced at implementation time rather than at review.
+
+Two alternatives were considered and **rejected**:
+
+- **(a) Fold a minimal `claim.ts` guard into Task 3.** Rejected: it breaks the ratified guard-before-mutation rule, which requires Task 4's golden byte guards to land before anything touches `claim.ts`.
+- **(b) Narrow Task 3's paired test to assert that the operation *fails* with a documented reason.** Rejected: it would ship a PR A whose headline capability provably does not work, and bank a passing test on broken behavior. An honest characterization of a broken state is still a green test standing in for a capability we claimed to deliver.
+
+The Task 3 production change survives the re-scope unaltered under every option considered, so no implementation work was lost — only the ordering changed. Task 3's *test* completes after Task 5 makes the whole operation succeed, which is why it appears as "3-completion" at the end of PR A.
 
 ## Worktree and branch protocol
 
