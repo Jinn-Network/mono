@@ -12,13 +12,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { requirementsDigest, type LocalCellPinningEvidence } from "@jinn-network/benchmarking-local";
 import type { RunRecord } from "@jinn-network/benchmarking-records";
-import type { AssemblyPorts } from "@jinn-network/benchmarking-run";
+import type { AssemblyPorts, InScopeCell } from "@jinn-network/benchmarking-run";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles";
 import { loadOrCreateEvaluatorSigningKeys, type VerdictSigningKey } from "../venue/signing.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
-import { buildRunAssemblyPorts } from "./assembly-ports.js";
+import { buildAssemblyPortsFromFacts, buildRunAssemblyPorts } from "./assembly-ports.js";
 import { writeCancelMarker } from "./cancel-marker.js";
 
 const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
@@ -130,5 +131,84 @@ describe("buildRunAssemblyPorts — runCancelled derivation (BP-22)", () => {
     writeCancelMarker(workspaceDir, "draft-other", { requestedAt: "2026-08-05T00:00:00Z", principal: "sponsor-1" });
     const ports = buildPorts("draft-1");
     expect(ports.inputScope.runCancelled).toBeUndefined();
+  });
+});
+
+const PINNING_CELL_KEY = `${"a".repeat(64)}/candidate/1`;
+const PINNING = {
+  harness: { id: "claude-code", version: "2.1.34" },
+  model: { id: "claude-haiku-4-5-20251001" },
+  loadout: { kind: "jinn.skill.v1", name: "candidate", digest: "b".repeat(64) },
+  isolationPolicy: "unrestricted",
+};
+
+function pinningCell(dispatches: number, evidenceRef?: LocalCellPinningEvidence): InScopeCell {
+  return {
+    cellKey: PINNING_CELL_KEY,
+    armId: "candidate",
+    replicate: 1,
+    taskDigest: "a".repeat(64),
+    dispatches,
+    verdicts: [],
+    ...(evidenceRef === undefined ? {} : { evidenceRef }),
+  };
+}
+
+function pinningPorts(cells: readonly InScopeCell[]): AssemblyPorts {
+  return buildAssemblyPortsFromFacts({
+    runRecord: { policy: { submissionBaseline: {} } } as RunRecord,
+    cells,
+    owner: OWNER,
+    runCancelled: false,
+    receiptsByTaskDigest: new Map(),
+    resolveBytes: () => new Uint8Array(),
+    evaluatorKeys: () => new Map(),
+  });
+}
+
+async function observePinning(cells: readonly InScopeCell[]) {
+  return pinningPorts(cells).pinning.observe(undefined, {
+    cellKey: PINNING_CELL_KEY,
+    arm: { armId: "candidate", pinning: PINNING },
+  });
+}
+
+describe("product pinning assembly uses only durable real evidence (P2b)", () => {
+  it("an exact digest-bound admission proof earns match", async () => {
+    await expect(observePinning([pinningCell(1, {
+      admission: { ready: true, checkedRequirementsDigest: requirementsDigest(PINNING) },
+    })])).resolves.toEqual({
+      harness: "match",
+      model: "match",
+      loadout: "match",
+      isolation: "match",
+    });
+  });
+
+  it("missing cell evidence is unverifiable on every axis", async () => {
+    await expect(observePinning([])).resolves.toEqual({
+      harness: "unverifiable",
+      model: "unverifiable",
+      loadout: "unverifiable",
+      isolation: "unverifiable",
+    });
+  });
+
+  it("affirmative contradictory evidence remains mismatch", async () => {
+    const result = await observePinning([pinningCell(1, {
+      observations: [{ axis: "model", value: { id: "claude-opus-4-1" }, source: "runtime-observation" }],
+    })]);
+    expect(result.model).toBe("mismatch");
+  });
+
+  it("a dispatched cell without proof never matches an enforced axis", async () => {
+    await expect(observePinning([pinningCell(1)])).resolves.toEqual({
+      harness: "unverifiable",
+      model: "unverifiable",
+      loadout: "unverifiable",
+      // Isolation remains the explicitly disclosed vacuous inventory result; it does not rely
+      // on verifyRunPinning and is not an enforced identity axis.
+      isolation: "match",
+    });
   });
 });

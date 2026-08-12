@@ -32,7 +32,10 @@
 
 import { verify as cryptoVerify, type KeyObject } from "node:crypto";
 import type { CellCoord, RunRecord } from "@jinn-network/benchmarking-records";
-import { localAssemblyPorts } from "@jinn-network/benchmarking-local";
+import {
+  localAssemblyPorts,
+  type LocalCellPinningEvidence,
+} from "@jinn-network/benchmarking-local";
 import type { AssemblyPorts, InScopeCell, InScopeVerdict } from "@jinn-network/benchmarking-run";
 import { dssePreAuthEncoding, parseDsseEnvelope } from "@jinn-network/trust-core";
 import { parseEvaluationSpec, type EvaluationSpec } from "@jinn-network/task-execution-profiles";
@@ -42,6 +45,11 @@ import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { LocalAdmissionReceiptFact } from "./admission-receipts.js";
 import { cancelRequested } from "./cancel-marker.js";
 import type { CellJournalFold } from "./journal.js";
+import {
+  parseRunPinningEvidenceArtifact,
+  pinningEvidenceFacts,
+} from "./pinning-evidence.js";
+import { refuse } from "../errors.js";
 
 /**
  * `InScopeCell.evaluationSpecDigest` is the `sha256:<hex>`-PREFIXED form (verified against
@@ -157,7 +165,10 @@ export function buildAssemblyPortsFromFacts(input: BuildAssemblyPortsFromFactsIn
       evidenceFor: (cellKey) => {
         const cell = input.cells.find((candidate) => candidate.cellKey === cellKey);
         if (cell === undefined || cell.dispatches === 0) return { dispatches: 0 };
-        return { dispatches: cell.dispatches, admission: { ready: true } };
+        const evidence = cell.evidenceRef as LocalCellPinningEvidence | undefined;
+        return evidence === undefined
+          ? { dispatches: cell.dispatches }
+          : { ...evidence, dispatches: cell.dispatches };
       },
     },
     admission: {
@@ -195,6 +206,25 @@ function buildInScopeCells(
 
     const { evaluationSpecDigest, evaluationSpec } = subjectEvaluationSpecRef(workspaceDir, coord.taskDigest);
     const verdicts = buildVerdicts(workspaceDir, cell, evaluationSpec);
+    let pinningEvidence: LocalCellPinningEvidence | undefined;
+    if (cell.pinningEvidenceSha256 !== undefined) {
+      try {
+        const artifact = parseRunPinningEvidenceArtifact(
+          getSealedBytes(workspaceDir, cell.pinningEvidenceSha256),
+        );
+        if (
+          cell.submissionSha256 === undefined
+          || artifact.submissionDigest !== `sha256:${cell.submissionSha256}`
+        ) throw new Error("run-pinning evidence names another Submission");
+        pinningEvidence = pinningEvidenceFacts(artifact);
+      } catch {
+        refuse(
+          "record-integrity",
+          `runs.${cell.cellKey}.pinningEvidenceSha256`,
+          `run-pinning evidence ${cell.pinningEvidenceSha256} is missing or invalid`,
+        );
+      }
+    }
 
     return {
       cellKey: coord.cellKey,
@@ -204,6 +234,7 @@ function buildInScopeCells(
       dispatches: cell.dispatches,
       ...(cell.dispatches > 0 ? { accounted: cell.dispatches } : {}),
       ...(cell.submissionSha256 !== undefined ? { submissionDigest: `sha256:${cell.submissionSha256}` as const } : {}),
+      ...(pinningEvidence === undefined ? {} : { evidenceRef: pinningEvidence }),
       ...(cell.attempt !== undefined ? { attempt: cell.attempt } : {}),
       ...(cell.deliverySha256 !== undefined
         ? { deliveryBytes: getSealedBytes(workspaceDir, cell.deliverySha256), deliveryDigest: `sha256:${cell.deliverySha256}` as const }

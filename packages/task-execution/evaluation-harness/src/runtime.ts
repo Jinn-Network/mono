@@ -39,6 +39,7 @@ import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import { STAGED_SEALED_TASK_FILENAME } from "@jinn-network/task-execution-workspace";
 import {
   EvaluationOperationalError,
+  isEvaluationOperationalError,
   validateCompletedEvaluation,
   type ClaimEvidence,
   type CompletedEvaluation,
@@ -956,9 +957,15 @@ export async function runEvaluationHarness(
       reportRefusal("invalid-evaluation-input", cause.message);
       return EVALUATION_HARNESS_EXIT_INVALID_INPUT;
     }
+    // Brand, not `instanceof`: the throwing adapter comes from a separately-imported deployment
+    // module that resolves its own copy of this package, so the class objects differ and
+    // `instanceof` drops the one thing the operator needs -- see
+    // `EVALUATION_OPERATIONAL_ERROR_BRAND`. This line is the whole difference between a readable
+    // refusal and `refused (evaluation-operational-failure)` with no reason at all; the backend
+    // carries this stderr text into the attempt journal's terminal detail and the audit row.
     reportRefusal(
       "evaluation-operational-failure",
-      cause instanceof EvaluationOperationalError ? cause.safeDetail : undefined,
+      isEvaluationOperationalError(cause) ? cause.safeDetail : undefined,
     );
     return EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE;
   }

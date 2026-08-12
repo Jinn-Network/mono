@@ -32,7 +32,11 @@ const PINNING = {
 /** The inventory every launcher declares today. */
 const VENUE: LocalPinningVenue = { isolationInventory: ["unrestricted"] };
 
-const ADMITTED: LocalCellPinningEvidence = { admission: { ready: true } };
+function admittedFor(pinning: Readonly<Record<string, unknown>>): LocalCellPinningEvidence {
+  return { admission: { ready: true, checkedRequirementsDigest: requirementsDigest(pinning) } };
+}
+
+const ADMITTED: LocalCellPinningEvidence = admittedFor(PINNING);
 
 describe("corroborate", () => {
   test("an exact object observation corroborates an exact pin", () => {
@@ -110,11 +114,16 @@ describe("hasExecutionEvidence", () => {
     expect(hasExecutionEvidence({ dispatches: 0 })).toBe(false);
     expect(hasExecutionEvidence({ dispatches: 1 })).toBe(true);
     // A declared zero-dispatch cell is not outvoted by a stray admission record.
-    expect(hasExecutionEvidence({ dispatches: 0, admission: { ready: true } })).toBe(false);
+    expect(hasExecutionEvidence({
+      dispatches: 0,
+      admission: { ready: true, checkedRequirementsDigest: requirementsDigest({}) },
+    })).toBe(false);
   });
 
   test("an admission attempt or a recorded observation counts", () => {
-    expect(hasExecutionEvidence({ admission: { ready: false } })).toBe(true);
+    expect(hasExecutionEvidence({
+      admission: { ready: false, checkedRequirementsDigest: requirementsDigest({}) },
+    })).toBe(true);
     expect(hasExecutionEvidence({
       observations: [{ axis: "model", value: MODEL, source: "runtime-observation" }],
     })).toBe(true);
@@ -152,7 +161,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
       pinning: PINNING,
       venue: VENUE,
       evidence: {
-        admission: { ready: true },
+        ...ADMITTED,
         observations: [{ axis: "loadout", value: LOADOUT, source: "materialization" }],
       },
     })).toBe("match");
@@ -164,7 +173,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
       pinning: PINNING,
       venue: VENUE,
       evidence: {
-        admission: { ready: true },
+        ...ADMITTED,
         observations: [{
           axis: "loadout",
           value: { ...LOADOUT, digest: `sha256:${"c".repeat(64)}` },
@@ -181,7 +190,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
       pinning: harnessStatePinning,
       venue: VENUE,
       evidence: {
-        admission: { ready: true },
+        ...admittedFor(harnessStatePinning),
         observations: [{ axis: "loadout", value: HARNESS_STATE_LOADOUT, source: "materialization" }],
       },
     })).toBe("match");
@@ -191,7 +200,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
       pinning: harnessStatePinning,
       venue: VENUE,
       evidence: {
-        admission: { ready: true },
+        ...admittedFor(harnessStatePinning),
         observations: [{
           axis: "loadout",
           value: { ...HARNESS_STATE_LOADOUT, digest: `sha256:${"e".repeat(64)}` },
@@ -203,7 +212,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
     expect(pinningStatusForAxis({
       axis: "loadout",
       pinning: harnessStatePinning,
-      evidence: ADMITTED,
+      evidence: admittedFor(harnessStatePinning),
       venue: VENUE,
     })).toBe("match");
   });
@@ -225,7 +234,13 @@ describe("pinningStatusForAxis (identity design §7)", () => {
       axis: "harness",
       pinning: PINNING,
       venue: VENUE,
-      evidence: { admission: { ready: false, detail: "harness digest mismatch" } },
+      evidence: {
+        admission: {
+          ready: false,
+          detail: "harness digest mismatch",
+          checkedRequirementsDigest: requirementsDigest(PINNING),
+        },
+      },
     })).toBe("unverifiable");
   });
 
@@ -235,7 +250,11 @@ describe("pinningStatusForAxis (identity design §7)", () => {
       pinning: PINNING,
       venue: VENUE,
       evidence: {
-        admission: { ready: false, detail: "model pin mismatch" },
+        admission: {
+          ready: false,
+          detail: "model pin mismatch",
+          checkedRequirementsDigest: requirementsDigest(PINNING),
+        },
         observations: [{ axis: "model", value: { id: "other" }, source: "admission-probe" }],
       },
     })).toBe("mismatch");
@@ -255,7 +274,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
       venue: VENUE,
       strength: "attested",
       evidence: {
-        admission: { ready: true },
+        ...ADMITTED,
         observations: [{ axis: "harness", value: HARNESS, source: "runtime-observation" }],
       },
     })).toBe("match");
@@ -263,6 +282,17 @@ describe("pinningStatusForAxis (identity design §7)", () => {
 });
 
 describe("the admission receipt is bound to the pinning it was issued against", () => {
+  test("a bare readiness boolean is not identity proof", () => {
+    expect(pinningStatusForAxis({
+      axis: "model",
+      pinning: PINNING,
+      venue: VENUE,
+      // Runtime compatibility check: legacy/fabricated input can still reach this JS boundary,
+      // but the bridge refuses it. The public type now prevents constructing it accidentally.
+      evidence: { admission: { ready: true } } as unknown as LocalCellPinningEvidence,
+    })).toBe("unverifiable");
+  });
+
   test("a receipt naming this exact pinning keeps its force", () => {
     expect(pinningStatusForAxis({
       axis: "model",
@@ -320,17 +350,19 @@ describe("an id-only harness pin is one the gate never inspects", () => {
   });
 
   test("adding a version or a digest restores the enforced leg", () => {
+    const versionPinning = { harness: { id: "codex", version: "1.0.0" } };
     expect(pinningStatusForAxis({
       axis: "harness",
-      pinning: { harness: { id: "codex", version: "1.0.0" } },
+      pinning: versionPinning,
       venue: VENUE,
-      evidence: ADMITTED,
+      evidence: admittedFor(versionPinning),
     })).toBe("match");
+    const digestPinning = { harness: { id: "codex", digest: `sha256:${"f".repeat(64)}` } };
     expect(pinningStatusForAxis({
       axis: "harness",
-      pinning: { harness: { id: "codex", digest: `sha256:${"f".repeat(64)}` } },
+      pinning: digestPinning,
       venue: VENUE,
-      evidence: ADMITTED,
+      evidence: admittedFor(digestPinning),
     })).toBe("match");
   });
 
@@ -340,7 +372,10 @@ describe("an id-only harness pin is one the gate never inspects", () => {
       pinning: { harness: { id: "codex" } },
       venue: VENUE,
       evidence: {
-        admission: { ready: true },
+        admission: {
+          ready: true,
+          checkedRequirementsDigest: requirementsDigest({ harness: { id: "codex" } }),
+        },
         observations: [{
           axis: "harness",
           value: { id: "claude-code" },
@@ -351,11 +386,12 @@ describe("an id-only harness pin is one the gate never inspects", () => {
   });
 
   test("the rule is specific to harness; other axes are unaffected", () => {
+    const modelPinning = { model: { id: "anthropic/claude-haiku-4-5" } };
     expect(pinningStatusForAxis({
       axis: "model",
-      pinning: { model: { id: "anthropic/claude-haiku-4-5" } },
+      pinning: modelPinning,
       venue: VENUE,
-      evidence: ADMITTED,
+      evidence: admittedFor(modelPinning),
     })).toBe("match");
   });
 });
@@ -382,7 +418,13 @@ describe("the vacuous isolation axis", () => {
       axis: "isolation",
       pinning: PINNING,
       venue: VENUE,
-      evidence: { admission: { ready: false, detail: "loadout digest mismatch" } },
+      evidence: {
+        admission: {
+          ready: false,
+          detail: "loadout digest mismatch",
+          checkedRequirementsDigest: requirementsDigest(PINNING),
+        },
+      },
     })).toBe("match");
   });
 
@@ -468,7 +510,7 @@ describe("pinningObservationForCell", () => {
       pinning: { harness: HARNESS, isolationPolicy: "unrestricted" },
       venue: VENUE,
       evidence: {
-        admission: { ready: true },
+        ...admittedFor({ harness: HARNESS, isolationPolicy: "unrestricted" }),
         observations: [{ axis: "harness", value: { id: "codex" }, source: "runtime-observation" }],
       },
     })).toEqual({
@@ -505,7 +547,10 @@ describe("localPinningObservation port", () => {
   test("lets an arm pin override the baseline for grading", async () => {
     const observed = await port({
       "task/arm/1": {
-        admission: { ready: true },
+        ...admittedFor({
+          isolationPolicy: "unrestricted",
+          harness: { id: "codex", version: "1.0.0" },
+        }),
         observations: [{ axis: "harness", value: HARNESS, source: "runtime-observation" }],
       },
     }).observe(null, {
