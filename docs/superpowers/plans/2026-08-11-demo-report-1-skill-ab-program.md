@@ -53,7 +53,7 @@ Each packet: read-only recon → seam report (committed under `docs/superpowers/
 
 ## Stage 1 — Engineering packets (sequenced by recon; target ~7–12 agent-dev-days total)
 
-Dependency order: **P1 → P2 → P3 → P5**, with **P4** parallel after R4. Each packet: own `feat` issue, TDD, PR to the integration branch, reviewed per repo rules (no self-merge). Each implementer writes their task-level plan from the recon report before coding.
+Dependency order: **P1 → P2 → P2b → P5** and **P3a → P3b → P5**, with **P4 → P4b → P5** parallel after R4. Each packet has its own issue, TDD, PR to the integration branch, and independent review per repo rules (no self-merge). Each implementer writes its task-level plan from the recon report before coding.
 
 - **P1 — Venue generalization.** Non-prediction task profiles register and quote through the product venue. Gate: existing prediction sample byte-stable; new profile family admitted end-to-end in a kit test.
 - **P2 — Launcher arm wiring.** claude-code launcher runs as a venue arm with enforced pinning on model / skill-load / effort / version axes. Gate: deterministic `SKILL.md` and `AGENTS.md` generation from one literal `source.md`, byte-identical instruction bodies, symmetric materialization/exclusion, and normalized patches byte-identical to no-loadout controls.
@@ -99,7 +99,7 @@ An independent verifier receives a clean environment containing only the sealed 
 
 ## Timeline (working estimate, not a promise)
 
-Day 1: Stage-0 recon fans out. Days 2–10: P1→P2→P3 (+P4). Days 3–9 parallel: E1 draft, model suitability, E2 rehearsals, E3 red-team. Day ~10–12: P5 green → lock → ordering anchor → official run. Day ~12–14: report, verification, cold recomputation, publication handoff.
+Day 1: Stage-0 recon fans out. Days 2–10: P1→P2→P2b, P3a→P3b, and P4→P4b. Days 3–9 parallel: E1 draft, model suitability, E2 rehearsals, E3 red-team. Day ~10–12: P5 green → lock → ordering anchor → official run. Day ~12–14: report, verification, cold recomputation, publication handoff.
 
 ## Ownership
 

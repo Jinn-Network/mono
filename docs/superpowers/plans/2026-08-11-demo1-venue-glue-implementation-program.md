@@ -230,11 +230,11 @@ small.
   near-mechanical) into a NEW task-execution sibling package (NOT
   evaluator-adapters — its charter says "never shells out",
   `container-grader-source.ts:118-123`). Full catalog **Add** procedure +
-  task-execution guard triplet + the 8-step edge checklist (worked
-  example: BP-31 commit `670124427`) for benchmark-product-core → new
-  package.
+  task-execution package guard triplet. P3a does not add a benchmark-product
+  consumer edge.
 - **P3b:** add the product dependency plus its architecture boundary and
-  build-order entries, then extend the venue's generated deployment module
+  build-order entries using the full 8-step consumer-edge checklist (worked
+  example: BP-31 commit `670124427`), then extend the venue's generated deployment module
   (`venue.ts:283-328`, prediction-only today) to also emit a swe-rebench
   registration: `containerGraderReportSource` +
   `createSweRebenchEvaluatorRegistration` (both already exported by
