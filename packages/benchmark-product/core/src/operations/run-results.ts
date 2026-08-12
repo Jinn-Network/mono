@@ -29,9 +29,11 @@ import {
   type MatrixRecord,
   type Outcome,
   type ReportRecord,
+  type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
 import { ClaimPackageSchema, type ClaimPackage } from "../report/claim.js";
 import { foldRunJournal, readRunJournalEntries, type CellJournalFold } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
@@ -152,6 +154,27 @@ export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "Distinct solver and evaluator identities prove agent-distinctness only — each evaluator identity is backed by its own workspace-minted signing key, whose verdict signature this product verifies — not that they are independent real-world parties.",
 ];
 
+const MULTI_POLICY_ISOLATION_LIMIT =
+  "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is unverifiable: this configured venue admits both unrestricted and OCI-container execution, so its multi-policy inventory cannot establish containment from admission alone.";
+
+/** Run-derived disclosure; the unrestricted branch returns the historical array byte-for-byte. */
+export function localVenueLimitsForRun(
+  runRecord: Pick<RunRecord, "policy">,
+): readonly string[] {
+  const posture = venueIsolationPostureForPolicy(
+    runRecord.policy.submissionBaseline?.["isolationPolicy"],
+  );
+  if (posture.inventory.length === 1) {
+    return LOCAL_VENUE_LIMITS;
+  }
+  return [
+    LOCAL_VENUE_LIMITS[0]!,
+    LOCAL_VENUE_LIMITS[1]!,
+    MULTI_POLICY_ISOLATION_LIMIT,
+    ...LOCAL_VENUE_LIMITS.slice(3),
+  ];
+}
+
 function bareSha256(digest: string): string {
   return digest.startsWith("sha256:") ? digest.slice("sha256:".length) : digest;
 }
@@ -218,11 +241,14 @@ export function unverifiableAxisCounts(cells: readonly MatrixCell[]): VenueHones
 
 /** The exact venue-honesty block carried by every claim; shared by report production and
  * independent claim re-derivation. */
-export function buildLocalVenueHonesty(cells: readonly MatrixCell[]): VenueHonesty {
+export function buildLocalVenueHonesty(
+  cells: readonly MatrixCell[],
+  runRecord: Pick<RunRecord, "policy">,
+): VenueHonesty {
   return {
     venue: "self-run",
     preRegistration: "structural-and-append-order-only",
-    limits: LOCAL_VENUE_LIMITS,
+    limits: localVenueLimitsForRun(runRecord),
     unverifiableAxisCounts: unverifiableAxisCounts(cells),
   };
 }
@@ -321,7 +347,7 @@ export function runResults(
 
       // Re-parsed for completeness's sake — every referenced record is re-verified on read
       // (getSealedBytes's own digest check) rather than trusted from RunState alone.
-      parseRun(getSealedBytes(context.workspaceDir, runState.runSha256));
+      const runRecord = parseRun(getSealedBytes(context.workspaceDir, runState.runSha256));
       parseBenchmark(getSealedBytes(context.workspaceDir, document.spec.taskSet.benchmarkSha256));
       const matrix = parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256));
 
@@ -341,7 +367,7 @@ export function runResults(
         attrition: matrix.attrition,
         cells,
         dissentCells: dissentCellKeys(cells),
-        venueHonesty: buildLocalVenueHonesty(matrix.cells),
+        venueHonesty: buildLocalVenueHonesty(matrix.cells, runRecord),
         ...(document.state === "reported" || document.state === "published-bundle"
           ? { report: readReportedProjection(context.workspaceDir, input.draftId, runState) }
           : {}),

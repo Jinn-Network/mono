@@ -2,6 +2,17 @@
 
 This directory retains evidence from a manual, credential-free Benchmark Product run through the real Inspect `0.3.255` runtime. It is independent of the automated test assertions: the built product CLI created, previewed, quoted, locked, launched, collected, reported, verified, and published the run.
 
+## Current-verifier note — 2026-08-12
+
+The bundle passed the verifier that produced it, but it does not pass the
+current verifier. It predates the later requirement that every Inspect bundle
+carry the exact sealed runtime-selection bytes and now fails closed at
+`evidence-closure`; the retained bundle contains only that selection's digest.
+The historical bytes and observations below are unchanged, but the command in
+“Re-verify the retained evidence” no longer returns success. The current
+credential-free detached proof, including exact runtime-selection closure, is
+[Truthful Inspect OCI isolation accounting](../2026-08-12-inspect-isolation-accounting.md).
+
 A separate opt-in external-provider check is recorded in [luna-smoke.md](luna-smoke.md). That smoke used Luna through Inspect directly and deliberately does not claim that the Benchmark Product forwards provider credentials.
 
 ## What this proves

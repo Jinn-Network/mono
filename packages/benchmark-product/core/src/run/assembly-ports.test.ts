@@ -18,7 +18,7 @@ import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core"
 import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles";
 import { loadOrCreateEvaluatorSigningKeys, type VerdictSigningKey } from "../venue/signing.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
-import { buildRunAssemblyPorts } from "./assembly-ports.js";
+import { buildAssemblyPortsFromFacts, buildRunAssemblyPorts } from "./assembly-ports.js";
 import { writeCancelMarker } from "./cancel-marker.js";
 
 const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
@@ -111,6 +111,42 @@ describe("buildRunAssemblyPorts trust resolver — signature-verified, fail-clos
     const ports = buildPorts();
 
     await expect(resolveEvaluator(ports, EVALUATOR_1, `sha256:${"e".repeat(64)}`)).resolves.toBe("unresolved");
+  });
+});
+
+describe("buildAssemblyPortsFromFacts isolation inventory", () => {
+  async function isolationStatus(isolationPolicy: string) {
+    const cell = {
+      cellKey: "cell-1",
+      armId: "arm-1",
+      replicate: 1,
+      taskDigest: "a".repeat(64),
+      dispatches: 1,
+      verdicts: [],
+    };
+    const ports = buildAssemblyPortsFromFacts({
+      runRecord: {
+        policy: { submissionBaseline: { isolationPolicy } },
+      } as unknown as RunRecord,
+      cells: [cell],
+      owner: OWNER,
+      runCancelled: false,
+      receiptsByTaskDigest: new Map(),
+      resolveBytes: () => new Uint8Array(),
+      evaluatorKeys: () => new Map(),
+    });
+    return ports.pinning.observe(undefined, {
+      cellKey: cell.cellKey,
+      arm: { pinning: {} },
+    });
+  }
+
+  it("preserves the native venue's singleton vacuous match", async () => {
+    await expect(isolationStatus("unrestricted")).resolves.toMatchObject({ isolation: "match" });
+  });
+
+  it("makes OCI isolation unverifiable because the configured venue admits two policies", async () => {
+    await expect(isolationStatus("oci-container")).resolves.toMatchObject({ isolation: "unverifiable" });
   });
 });
 
