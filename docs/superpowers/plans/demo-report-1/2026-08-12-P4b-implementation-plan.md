@@ -527,9 +527,43 @@ Their **acceptance criteria are fixed and binding** — they are the contract PR
 | # | Task | Est. | Acceptance criteria |
 |---|---|---|---|
 | **5** | Method-dispatching claim package. `claim.ts:49-54,129` (`headline` optional + sibling `comparison`), `:192-215` (`wilsonSubjectResults` becomes one branch of a dispatch on `reportRecord.method.id`), `:262` and `verification/claim-consistency.ts:67` (select the plan entry matching the produced method rather than `[0]`). | **2.0–3.0** | A paired Report builds a claim carrying `comparison`; **the wilson golden from Task 4 still passes byte-identically**; `assertClaimConsistency` round-trips both shapes; `CLAIM_PACKAGE_SCHEMA_ID` unchanged at `/1`; a claim missing both `headline` and `comparison` is refused. |
-| **6** | Method-dispatching bundle assets. `assets.ts:118-156` (`requireWilsonFacts` becomes a dispatch), `:446-447` (both call sites). Neutral copy at `:249` and `:318` **unchanged**. | **2.0** | A paired bundle materializes and `bundle verify` passes on it; **every wilson golden from Task 4 still passes byte-identically**; no directional language appears on any publish-facing surface. Coordinator notified at task start to trigger the §5.3 copy agent. |
-| **7** | Web renders both claim shapes. `web/.../results/page.tsx:27,124` — the unguarded `headline.wilsonInterval.low` dereference must become shape-aware. `inspect` surfaces the selected method (`operations/inspect.ts`). | **1.0** | RTL renders a paired claim and a wilson claim; no unguarded dereference; the existing stored-Report `role="alert"` degradation path is preserved. |
-| **8** | End-to-end and docs. Extend `run-path.integration.test.ts`; update `PUBLIC-BUNDLE.md:91`, `design-system/ADAPTATION.md:18`, `core/scripts/m1-walkthrough.mjs:222`. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → `bundle verify` with zero manual intervention. Docs describe method selection accurately without asserting a comparative winner. |
+| **6** | Method-dispatching bundle assets. `assets.ts:118-156` (`requireWilsonFacts` becomes a dispatch), `:446-447` (both call sites). All neutral copy **unchanged** — see the seven-surface list below. | **2.0** | A paired bundle materializes and `bundle verify` passes on it; **every wilson golden from Task 4 still passes byte-identically**; no directional language appears on any publish-facing surface. |
+| **7** | Web renders both claim shapes. `web/.../results/page.tsx:27,124` — the unguarded `headline.wilsonInterval.low` dereference must become shape-aware. `inspect` surfaces the selected method (`operations/inspect.ts`). Also `core/scripts/m1-walkthrough.mjs:222`, which emits `armHeadline: report.claimPackage.headline` and yields a silent `undefined` on the paired branch under §5.2's optional-headline shape. | **1.0** | RTL renders a paired claim and a wilson claim; no unguarded dereference; the existing stored-Report `role="alert"` degradation path preserved; the walkthrough transcript never emits `undefined` for either branch. |
+| **8** | End-to-end and docs. Extend `run-path.integration.test.ts`; update the documentation surfaces in the seven-surface list. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → `bundle verify` with zero manual intervention. Docs describe method selection accurately without asserting a comparative winner. All three render states pinned per surface (below). |
+
+#### The neutrality promise ships on SEVEN surfaces, not three
+
+Verified in-tree at the PR A chain tip. Partial editing would ship a bundle whose badge contradicts its HTML, so any copy change touches all seven together or none:
+
+| Surface | Location |
+|---|---|
+| HTML body | `bundle/assets.ts:249` |
+| `badge.svg` | `bundle/assets.ts:278` — `<title>` **and** the `data-field="neutral-status"` text |
+| `social-card.svg` | `bundle/assets.ts:288` — `<title>` **and** `data-field="neutral-status"` (two occurrences) |
+| `README.md` | `bundle/assets.ts:318` |
+| `share.txt` | `bundle/assets.ts:440` |
+| Public bundle doc | `PUBLIC-BUNDLE.md:91-94` and `:105-106` |
+| Design-system doc | `design-system/ADAPTATION.md:16-19` |
+
+**Wilson-branch strings must stay byte-identical on all seven**, including the checked-in proof bundle. Task 4's goldens already cover the five in-code surfaces — `index.html`, `badge.svg`, `social-card.svg`, `README.md`, `share.txt` — because they pin every asset `buildPublicAssets` emits, not just the large ones. The two documentation surfaces are not byte-guarded by tests and need manual care.
+
+#### Three render states, pinned per surface
+
+Whatever copy the operator approves, the paired branch has **three** distinct states, and compact assets route through `boundedVisual` with roughly a 90-character budget:
+
+1. **Interval present** — delta and interval both rendered.
+2. **Interval withheld with reasons** — fewer than five paired tasks, or fewer than two provenance clusters; `delta` still renders, `interval` is null, and the reason strings must surface rather than silently vanish.
+3. **Zero pairs** — no `delta` either.
+
+Task 8's acceptance criteria pin all three per surface. State 2 is the one most likely to be dropped, and it is exactly the state the C4 lane's end-to-end gate asserts against.
+
+#### A distinct limitations entry is required
+
+The report's limitations need an entry separate from the MDE line:
+
+> this method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered
+
+The interval-withheld branch and the below-MDE branch are **different failures** and must not read as one caveat. Conflating them would let an underpowered run be mistaken for a null result.
 
 ### PR B test blast radius
 
