@@ -82,6 +82,7 @@ const ROLE_ORDER: readonly BundleEvidenceCatalog["records"][number]["roles"][num
   "evaluation-spec",
   "admission-receipt",
   "solve-submission",
+  "run-pinning-evidence",
   "evaluation-submission",
   "solve-delivery",
   "solve-output",
@@ -243,7 +244,17 @@ function recordClosure(input: MaterializeBundleInput): {
       const isEvaluation = entry.leg === "evaluation";
       addRole(evidenceRecords, entry.submissionSha256, isEvaluation ? "evaluation-submission" : "solve-submission");
       if (!isEvaluation) {
-        graph.solveSubmissions.push({ cellKey: entry.cellKey, dispatch: entry.dispatch, sha256: entry.submissionSha256 });
+        if (entry.pinningEvidenceSha256 !== undefined) {
+          addRole(evidenceRecords, entry.pinningEvidenceSha256, "run-pinning-evidence");
+        }
+        graph.solveSubmissions.push({
+          cellKey: entry.cellKey,
+          dispatch: entry.dispatch,
+          sha256: entry.submissionSha256,
+          ...(entry.pinningEvidenceSha256 === undefined
+            ? {}
+            : { pinningEvidenceSha256: entry.pinningEvidenceSha256 }),
+        });
       } else {
         const bytes = getSealedBytes(workspaceDir, entry.submissionSha256);
         let submission: ReturnType<typeof SubmissionRecordSchema.parse>;
@@ -394,6 +405,9 @@ function recordClosure(input: MaterializeBundleInput): {
       dispatches: cell?.dispatches ?? 0,
       ...(cell !== undefined && cell.dispatches > 0 ? { accounted: cell.dispatches } : {}),
       ...(cell?.submissionSha256 !== undefined ? { submissionSha256: cell.submissionSha256 } : {}),
+      ...(cell?.pinningEvidenceSha256 !== undefined
+        ? { pinningEvidenceSha256: cell.pinningEvidenceSha256 }
+        : {}),
       ...(cell?.attempt !== undefined ? { attempt: cell.attempt } : {}),
       ...(cell?.deliverySha256 !== undefined ? { deliverySha256: cell.deliverySha256 } : {}),
       ...(cell?.deliveryOutputs !== undefined ? { solveOutputs: cell.deliveryOutputs.map((output) => ({ ...output })) } : {}),

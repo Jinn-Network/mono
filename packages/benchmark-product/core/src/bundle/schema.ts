@@ -40,6 +40,7 @@ export const BundleEvidenceCatalogSchema = z.object({
       "evaluation-spec",
       "admission-receipt",
       "solve-submission",
+      "run-pinning-evidence",
       "evaluation-submission",
       "solve-delivery",
       "solve-output",
@@ -92,6 +93,7 @@ export const BundleAssemblyHeaderSchema = z.object({
       cellKey: z.string().min(1),
       dispatch: z.number().int().positive(),
       sha256: Sha256HexSchema,
+      pinningEvidenceSha256: Sha256HexSchema.optional(),
     })),
     evaluationSubmissions: z.array(z.object({
       cellKey: z.string().min(1),
@@ -133,6 +135,7 @@ export const BundleAssemblyCellSchema = z.object({
   dispatches: z.number().int().nonnegative(),
   accounted: z.number().int().positive().optional(),
   submissionSha256: Sha256HexSchema.optional(),
+  pinningEvidenceSha256: Sha256HexSchema.optional(),
   attempt: z.string().min(1).optional(),
   deliverySha256: Sha256HexSchema.optional(),
   solveOutputs: z.array(z.object({ name: z.string(), sha256: Sha256HexSchema })).optional(),

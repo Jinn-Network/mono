@@ -96,6 +96,10 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     cellKey: z.string(),
     dispatch: z.number().int().positive(),
     submissionSha256: Sha256HexSchema,
+    /** Exact product-CAS artifact containing the real run-pinning gate result for this solve
+     * Submission. Optional for evaluation legs, legacy entries, and accepted backends that did
+     * not expose a verification gate. */
+    pinningEvidenceSha256: Sha256HexSchema.optional(),
     /** Which leg's Submission this is (BP-21). Optional: legacy entries carry no leg. */
     leg: z.enum(["solve", "evaluation"]).optional(),
   }),
@@ -219,6 +223,7 @@ export interface CellJournalFold {
   readonly lastDispatch: number;
   readonly attempt?: string;
   readonly submissionSha256?: string;
+  readonly pinningEvidenceSha256?: string;
   readonly deliverySha256?: string;
   readonly deliveryOutputs?: readonly { readonly name: string; readonly sha256: string }[];
   /** Every journaled verdict for the current dispatch, in journal order (BP-21). */
@@ -253,6 +258,7 @@ interface MutableFold {
   replaceableReason?: CellStatusEventLike["replaceableReason"];
   detail?: string;
   submissionSha256?: string;
+  pinningEvidenceSha256?: string;
   deliverySha256?: string;
   deliveryOutputs?: { name: string; sha256: string }[];
   verdicts: CellVerdictFold[];
@@ -343,7 +349,12 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       // must not overwrite it (pre-BP-21, the evaluation Submission's entry clobbered the solve
       // digest here — leg-less legacy entries keep that last-wins behavior verbatim, since a
       // legacy journal offers no way to tell the two legs apart).
-      if (entry.leg !== "evaluation") fold.submissionSha256 = entry.submissionSha256;
+      if (entry.leg !== "evaluation") {
+        fold.submissionSha256 = entry.submissionSha256;
+        // A fresh solve acceptance without proof must clear any earlier dispatch's proof. This
+        // makes missing evidence stay missing instead of inheriting a prior match.
+        fold.pinningEvidenceSha256 = entry.pinningEvidenceSha256;
+      }
     } else if (entry.kind === "delivery") {
       const fold = ensure(entry.cellKey, "", 0);
       fold.deliverySha256 = entry.deliverySha256;
@@ -378,6 +389,9 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       lastDispatch: fold.lastDispatch,
       ...(fold.attempt !== undefined ? { attempt: fold.attempt } : {}),
       ...(fold.submissionSha256 !== undefined ? { submissionSha256: fold.submissionSha256 } : {}),
+      ...(fold.pinningEvidenceSha256 !== undefined
+        ? { pinningEvidenceSha256: fold.pinningEvidenceSha256 }
+        : {}),
       ...(fold.deliverySha256 !== undefined ? { deliverySha256: fold.deliverySha256 } : {}),
       ...(fold.deliveryOutputs !== undefined ? { deliveryOutputs: fold.deliveryOutputs } : {}),
       verdicts: fold.verdicts,
