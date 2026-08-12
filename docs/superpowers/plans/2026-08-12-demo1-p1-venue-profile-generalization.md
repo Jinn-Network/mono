@@ -4,7 +4,7 @@
 
 **Goal:** Make the benchmark product's local venue admit `repository-work/1.0` Tasks end-to-end for solve legs — resolve the profile, advertise it in capabilities, select a provisioner that materializes a real checked-out repository, run a real subprocess arm against it, and harvest the declared `patch` output — while the prediction-forecast sample stays byte-for-byte identical.
 
-**Architecture:** The venue's profile seam is five sites (profile resolution, provisioner capabilities, provisioner selection, launcher `taskProfiles`, and the backend's intersection of the last two). Today only two profile URIs pass all five. This packet adds a third by: (1) a product-owned repository-work provisioner that materializes the Task's declared `repository-state` descriptor as a detached git worktree at `paths.work` via a venue-held bare-repo mirror cache; (2) a product-bundled hermetic `sample-repository-work` launcher, mirroring the blessed `sample-uniform` precedent, so the profile has a CI-safe arm with no external binary; (3) the five-site wiring in `venue.ts`. The evaluation leg for repository-work is deliberately out of scope (P3 owns container grading) and must refuse typed, not crash.
+**Architecture:** The venue's profile seam is five sites (profile resolution, provisioner capabilities, provisioner selection, launcher `taskProfiles`, and the backend's intersection of the last two). Today only two profile URIs pass all five. This packet adds a third by: (1) a product-owned repository-work adapter that resolves the Task's declared `repository-state` descriptor through a venue-held bare-repo mirror cache, then delegates detached checkout and harvest to the platform's `makeWorktreeProvisioner`; (2) a product-bundled hermetic `sample-repository-work` launcher, mirroring the blessed `sample-uniform` precedent, so the profile has a CI-safe arm with no external binary; (3) the five-site wiring in `venue.ts`. The evaluation leg for repository-work is deliberately out of scope (P3 owns container grading) and must refuse typed, not crash.
 
 **Tech Stack:** TypeScript (ESM, NodeNext), Node 22, Vitest 4, Yarn 4.13.0 workspaces with `portal:` cross-tree deps. Platform packages consumed: `@jinn-network/task-execution-{protocol,profiles,workspace,launchers,backend-local,supervisor}`.
 
@@ -20,15 +20,18 @@
 - **Commands run from `packages/benchmark-product/core`** unless stated. Targeted test form (matches CI's own usage at `benchmark-product-ci.yml:90`): `yarn vitest run <path>`.
 - **No agent self-merge.** The operator merges the packet PR after independent review.
 
-## Deviation from the approved D1 design — read before Task 3
+## Post-implementation correction to the D1 record — authoritative
 
-The approved recon recommendation was "mirror-cache **+ delegate to `makeWorktreeProvisioner`**, including authoring production `WorkspaceRuntimePorts`." Closer reading of the delegation target changes that call, and this plan implements the leaner alternative:
+The original draft rejected the approved "mirror-cache + `makeWorktreeProvisioner`" design on a false factual premise. It claimed that no production `WorkspaceRuntimePorts` implementation existed and proposed copying the platform's checkout logic into the product. That decision is **retracted and superseded by this section**.
 
-- `makeWorktreeProvisioner` (`packages/task-execution/backend-local/workspace/src/worktree-provisioner.ts:17-37`) is `makeDirProvisioner` plus a `setup` override. Reaching it drags in `DirProvisionerOptions.runtime: WorkspaceRuntimePorts` (`dir-provisioner.ts:21-28`), whose `assertHarnessGroupEmpty` and `ensureMetaReserve` have real process-group and disk-reserve semantics the product has no business implementing. **No production implementation of those ports exists anywhere in the repo** — the only ones are test doubles in `packages/task-execution/testing/`.
-- Worse, `makeDirProvisioner.setup` materializes `view.task.inputs` through `materializeInput` (`dir-provisioner.ts:113`), which writes a **single file** per descriptor. Our `repository-state` descriptor would land as a junk file at `input/repository-state` unless the view is filtered before delegation.
-- The product's two existing provisioner contracts are already hand-built for exactly this reason — see the `venue/provisioner.ts` module header and the `sample-uniform.ts` header ("the platform intentionally exposes no non-public helpers to import, so this is a small, self-contained reimplementation rather than a reuse of platform internals").
+The missed production precedent starts at `packages/policy-optimization/src/host-local/live-swe-rebench-runner.ts:342-347`, where `workspaceRuntime()` supplies the two callbacks. The same production path delegates checkout to `makeWorktreeProvisioner`, resolves the `repository-state` descriptor through `fetchInput`, and tears the worktree down in `finally` at lines 373-409. The landed P1 implementation follows that precedent:
 
-**Decision:** reimplement the ~12 lines of git checkout logic in the product, matching the established in-tree precedent, and drop the `WorkspaceRuntimePorts` task entirely. This is a scope *reduction* (≈ −0.5 agent-days) and removes a class of runtime-semantics risk. It has been flagged to the program coordinator; if overruled, Task 3 changes shape and Task 0 (author production `WorkspaceRuntimePorts`) is added back.
+- the product validates the profile-specific `uri` and `annotations.ref`, resolving the mirror before it constructs the platform provisioner;
+- `runtime` supplies the same no-op `assertHarnessGroupEmpty` and `ensureMetaReserve` callbacks used by the production precedent;
+- `fetchInput` handles `repository-state` explicitly while `makeWorktreeProvisioner` owns staged inputs, detached checkout, exact-oid verification, and base harvest behavior;
+- profile/mirror failures are wrapped in `ProvisioningRejectedError`, and worktree removal plus prune runs in `finally`.
+
+The approved D1 reuse decision therefore stands. Any manual-checkout prose or code formerly present later in this execution plan is historical draft material and is not an implementation instruction.
 
 ## File Structure
 
@@ -642,8 +645,8 @@ git commit -m "feat(benchmark-product): hermetic sample-repository-work launcher
 
 **Design notes for the implementer:**
 - The Task's repository descriptor is `task.inputs.find((i) => i.name === "repository-state")`, carrying `uri` and `annotations.ref`. The profile requires both (`packages/task-execution/profiles/src/documents/repository-work-1.0.ts:44`).
-- Read the head-commit constraints straight from the platform: 40 lowercase hex, verified after checkout, and the worktree must be detached (`worktree-provisioner.ts:18,26-29`). Reimplement, do not import — see the deviation note above.
-- Harvest ordering matters: rename **before** calling `workspaceHarvest`, because `harvest` walks `out/` and stamps `mediaType` from the declared slot whose `name` equals the artifact path (`harvest.ts:110-114`, changed by PR #2556). An artifact still named `patch.diff` gets no mediaType.
+- Delegate the checkout constraints to `makeWorktreeProvisioner`: 40 lowercase hex, exact HEAD verification, and detached worktree state (`worktree-provisioner.ts:18,26-29`). The product must not copy those semantics.
+- Harvest ordering matters: normalize output names **before** calling the delegated base harvest, because harvest walks `out/` and stamps `mediaType` from the declared slot whose `name` equals the artifact path (`harvest.ts:110-114`, changed by PR #2556). An artifact still named `patch.diff` gets no mediaType.
 - `structured-output.json` must leave `out/` or it lands in the signed Delivery's outputs — exactly the reasoning already written at `provisioner.ts:121-128`.
 
 - [ ] **Step 1: Write the failing test**
@@ -812,113 +815,65 @@ Expected: FAIL — the selector returns `benchmark-product-unsupported-dir-v1`, 
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `provisioner.ts`, add `REPOSITORY_WORK_PROFILE_URI` to the existing `@jinn-network/task-execution-profiles` import, add `import { execFile } from "node:child_process";` / `import { promisify } from "node:util";` / `import type { RepositoryMirrorPort } from "./repository-mirror.js";` / `import type { ResourceDescriptor, TaskSpecification } from "@jinn-network/task-execution-protocol";`, and insert this section immediately before the `── unsupported profiles` divider:
+The original code sketch for this step manually ran `git worktree add`. Independent review found that sketch violated the approved reuse contract. It is superseded by the landed implementation, which imports `makeWorktreeProvisioner` and `ProvisioningRejectedError` from `@jinn-network/task-execution-workspace`, plus `canonicalJsonBytes` from `@jinn-network/trust-core`.
+
+The contract keeps only product-specific orchestration:
 
 ```ts
-// ── repository-work cells ────────────────────────────────────────────────────────────────────
-
-const execFileAsync = promisify(execFile);
-const REPOSITORY_OID_PATTERN = /^[0-9a-f]{40}$/u;
-
-/**
- * Not a reuse of the platform's `makeWorktreeProvisioner`: reaching it would require the product
- * to implement `WorkspaceRuntimePorts` (process-group gating, meta reserve) it has no business
- * owning, and its inherited `makeDirProvisioner.setup` would materialize the `repository-state`
- * descriptor as a junk FILE via `materializeInput`. Same reasoning as `./sample-uniform.ts`'s
- * self-contained planning guards. The checkout constraints below are the platform's, verbatim:
- * 40-hex oid, HEAD equals the requested oid, and the worktree is detached.
- */
-async function git(args: readonly string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", [...args], {
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  return stdout.trim();
-}
-
-interface RepositoryWorkProvisionerOptions {
-  readonly sealedTaskBytes: Uint8Array;
-  readonly dispatchContextBytes: Uint8Array;
-  readonly task: TaskSpecification;
-  readonly mirror: RepositoryMirrorPort | undefined;
-}
-
-/** The Task's declared repository descriptor (`repository-work/1.0` inputConventions). */
-function repositoryStateDescriptor(task: TaskSpecification): { uri: string; oid: string } {
-  const descriptor = (task.inputs ?? []).find(
-    (input: ResourceDescriptor) => input.name === "repository-state",
-  );
-  if (descriptor === undefined) {
-    throw new Error(
-      'benchmark-product local venue: repository-work Task declares no "repository-state" input',
-    );
-  }
-  const uri = descriptor.uri;
-  const oid = (descriptor.annotations as { ref?: unknown } | undefined)?.ref;
-  if (typeof uri !== "string" || uri.length === 0) {
-    throw new Error('benchmark-product local venue: "repository-state" input carries no uri');
-  }
-  if (typeof oid !== "string" || !REPOSITORY_OID_PATTERN.test(oid)) {
-    throw new Error(
-      'benchmark-product local venue: "repository-state" annotations.ref must be exactly 40 lowercase hex characters',
-    );
-  }
-  return { uri, oid };
-}
-
 function repositoryWorkProvisionerContract(
   options: RepositoryWorkProvisionerOptions,
 ): ProvisionerContract {
+  let resolved: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
   return {
     workspaceKind: (): WorkspaceKind => "worktree",
-    async setup(_view, paths) {
+    async setup(view, paths, grants) {
       const { uri, oid } = repositoryStateDescriptor(options.task);
       if (options.mirror === undefined) {
-        throw new Error(
+        throw new ProvisioningRejectedError(
           "benchmark-product local venue cannot provision a repository-work cell: no repository mirror is configured",
         );
       }
-      await ensureWorkspaceDirectories(paths);
-      await Promise.all([
-        writeFile(join(paths.input, STAGED_SEALED_TASK_FILENAME), options.sealedTaskBytes),
-        writeFile(join(paths.input, "dispatch-context.json"), options.dispatchContextBytes),
-      ]);
-      const mirrorDir = await options.mirror.ensure({ uri, oid });
-      // git refuses a worktree destination that already exists.
-      await rm(paths.work, { recursive: true, force: true });
-      await git(["-C", mirrorDir, "worktree", "add", "--detach", paths.work, oid]);
-      const actual = await git(["-C", paths.work, "rev-parse", "HEAD"]);
-      if (actual !== oid) throw new Error(`worktree resolved ${actual}, expected ${oid}`);
-      const branch = await git(["-C", paths.work, "symbolic-ref", "-q", "HEAD"]).catch(() => "");
-      if (branch !== "") throw new Error(`worktree is attached to ${branch}`);
+      const mirrorDir = await options.mirror.ensure({ uri, oid }).catch((error) => {
+        throw new ProvisioningRejectedError(
+          error instanceof Error ? error.message : "repository mirror resolution failed",
+          error,
+        );
+      });
+      const base = makeWorktreeProvisioner({
+        sealedTaskBytes: options.sealedTaskBytes,
+        dispatchContextBytes: options.dispatchContextBytes,
+        referenceRepository: mirrorDir,
+        oid,
+        runtime: { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined },
+        fetchInput: async (descriptor) => {
+          if (descriptor.name === "repository-state") {
+            return canonicalJsonBytes({ oid, repository: mirrorDir });
+          }
+          throw new Error(`repository-work provisioner refused unknown input "${descriptor.name}"`);
+        },
+      });
+      await base.setup(view, paths, grants);
+      resolved = { base, mirrorDir };
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
-      // Same normalization contract as the solve path above, for this profile's declared slots.
-      // Renames run BEFORE `workspaceHarvest` because harvest stamps each artifact's mediaType
-      // from the declared slot whose name equals its path -- an artifact still called
-      // "patch.diff" would be collected untyped.
-      const structuredOutputPath = join(paths.out, "structured-output.json");
-      if (existsSync(structuredOutputPath)) {
-        await rename(structuredOutputPath, join(paths.meta, "structured-output.json"));
+      if (resolved === undefined) {
+        throw new Error("benchmark-product local venue repository-work harvest ran before setup");
       }
-      for (const slot of declaredOutputs) {
-        for (const suffix of [".diff", ".patch", ".md", ".json", ".txt"]) {
-          const candidate = join(paths.out, `${slot.name}${suffix}`);
-          if (!existsSync(join(paths.out, slot.name)) && existsSync(candidate)) {
-            await rename(candidate, join(paths.out, slot.name));
-          }
-        }
+      try {
+        // Normalize declared output names, then delegate harvest to resolved.base.
+        return await resolved.base.harvest(paths, declaredOutputs);
+      } finally {
+        await runGit(["-C", resolved.mirrorDir, "worktree", "remove", "--force", paths.work])
+          .catch(() => rm(paths.work, { recursive: true, force: true }));
+        await runGit(["-C", resolved.mirrorDir, "worktree", "prune"]).catch(() => undefined);
       }
-      const declared = new Set(declaredOutputs.map((slot) => slot.name));
-      const result = await workspaceHarvest(paths, declaredOutputs);
-      const manifest = result.manifest.filter((entry) => declared.has(entry.path));
-      await wipeScratch(paths);
-      return { manifest, omissions: result.omissions, integrityViolations: result.integrityViolations };
     },
   };
 }
 ```
+
+The excerpt is intentionally structural; `provisioner.ts` is the executable authority for the exact normalization and teardown helpers. This shape mirrors `packages/policy-optimization/src/host-local/live-swe-rebench-runner.ts:342-409` rather than copying checkout logic.
 
 Then extend `CreateLocalProvisionerOptions` with:
 
@@ -1423,58 +1378,31 @@ git diff --name-only origin/integration/evidence-v1 -- packages/task-execution p
 
 Expected: **empty output.** P1 is product-only.
 
-- [ ] **Step 5: Open the PR**
+- [x] **Step 5: Update the existing PR record**
 
-```bash
-git push -u origin claude/demo1-p1-venue-profiles
-gh pr create --base integration/evidence-v1 \
-  --title "feat(benchmark-product): admit repository-work Tasks on the local venue" \
-  --body-file <(cat <<'BODY'
-Closes the P1 packet of the Demo-1 venue-glue program.
+PR #2587 is the live review record. Its body supersedes the abandoned draft template that previously appeared here and accurately states that the product delegates checkout to `makeWorktreeProvisioner`. The PR remains draft until its remote checks and independent review are green.
 
-## What this does
-Makes the local venue admit `repository-work/1.0` for solve legs across all five profile sites, and ships a hermetic `sample-repository-work` arm so the profile is verifiable in CI without an external binary.
+- [x] **Step 6: Record independent review**
 
-## Design deviation from the approved recon (D1)
-The approved design was "mirror-cache + delegate to `makeWorktreeProvisioner`, incl. authoring production `WorkspaceRuntimePorts`". This PR reimplements ~12 lines of git checkout in the product instead. Rationale in `docs/superpowers/plans/2026-08-12-demo1-p1-venue-profile-generalization.md` § "Deviation": delegation drags in `WorkspaceRuntimePorts` (process-group/disk-reserve semantics the product should not own — no production implementation exists anywhere in the repo) and its inherited `makeDirProvisioner.setup` would materialize `repository-state` as a junk file. Matches the in-tree precedent documented in `sample-uniform.ts`'s header. Net scope reduction.
-
-## Local full-chain verification
-CI is path-blind to the upstream half of this chain, so it was run locally:
-- 22-package portal chain from `benchmark-product-ci.yml:69-92`: **green**
-- `benchmark-product/core`: `typecheck`, `test`, `build`, `check:parity`, `pack:smoke`: **green**
-- Pre-packet baseline at `04f309de8`: 68 files / 683 tests passing, zero pre-existing failures
-
-## Pinned literals
-None changed. `venue.integration.test.ts`, `run-quote.test.ts`, `run-path.integration.test.ts`, `cli-lifecycle.integration.test.ts`, `public-quickstart.test.ts` and `sample-uniform.test.ts` pass **unmodified** (verified by empty `git diff`).
-
-## Out of scope
-The repository-work EVALUATION leg (container grading) is P3. `prepareEvaluationCell` still refuses a non-prediction payload, typed and deliberately.
-
-## Not touched
-`intake/swebench.ts` and `interop/src/import/swebench.ts` (C4's P0-interop packet). No platform package is modified.
-BODY
-) --draft
-```
-
-- [ ] **Step 6: Request an independent review**
-
-Dispatch an independent Opus reviewer per `superpowers:requesting-code-review`. The implementing lane never reviews itself.
+Independent review confirmed the code path and requested this documentation-only correction. The implementation lane performed no approval, merge, or ready transition.
 
 ---
 
 ## Implementation deviations (recorded after execution)
 
-Three deviations from this plan's literal code were made during implementation. All were defects in the plan's draft test code, caught by running the tests; none weakened an assertion. Recorded here so a later reader — and P2's implementer, who will reuse these patterns — is not misled by the drafts above.
+Four deviations from this plan's literal text were made during implementation. The first corrects a false architectural premise; the remaining three were defects in the draft test code caught by running the tests. None weakened an assertion. Recorded here so a later reader — and P2's implementer, who will reuse these patterns — is not misled by the drafts above.
 
-1. **Task 3, helper reuse.** `provisioner.test.ts` already defined `workspacePathsUnder(root)`, structurally identical to this plan's proposed `workspacePathsFor`. The existing helper was reused instead of adding a duplicate. `gitIn` and `makeUpstreamRepository` had no equivalents and were added as written.
+1. **D1 and Task 3, platform reuse correction.** The draft's claim that no production `WorkspaceRuntimePorts` precedent existed was false. `packages/policy-optimization/src/host-local/live-swe-rebench-runner.ts:342-347` supplies the production runtime callbacks; its `solverProvisioner` delegates to `makeWorktreeProvisioner` and owns teardown at lines 373-409. P1 now follows that shape, uses `ProvisioningRejectedError` for typed setup rejection, and tears the delegated worktree down in `finally`. The proposed hand-written checkout was removed.
 
-2. **Task 5, Submission construction (plan bug).** The draft hand-encoded a Submission object and imported `sealTask` from `task-execution-profiles`. Both are wrong: `sealTask`/`sealSubmission` are exported from `@jinn-network/task-execution-protocol` (`sealing.ts`), and `SubmissionRecordSchema` additionally requires `submission`, `requester`, `idempotencyKey` and `deadline` — `backend.submit()` validates against it and would have rejected with `invalid-document`. The landed test uses a `submissionFor` helper calling `sealSubmission`, mirroring `venue.integration.test.ts`. Two related corrections: `SubmissionAck` is a discriminated union, so `ack.submission` needs an `accepted` narrowing first; and `ObservationSnapshot` is `{descriptor, cursor, observations}` with no top-level `attempt`, so the draft's polling loop was replaced with `await venue.backend.drain()` then a single `observe()` asserting `snapshot.descriptor.derived`. **Reusable lesson: copy the submit/observe/deliver pattern from `venue.integration.test.ts` verbatim rather than reconstructing it.**
+2. **Task 3, helper reuse.** `provisioner.test.ts` already defined `workspacePathsUnder(root)`, structurally identical to this plan's proposed `workspacePathsFor`. The existing helper was reused instead of adding a duplicate. `gitIn` and `makeUpstreamRepository` had no equivalents and were added as written.
 
-3. **Task 6, arm pinning (plan bug).** The draft pinned `isolationPolicy: "unrestricted"` on the new arm. The `RunRecord` schema (`packages/benchmarking/records/src/run/schema.ts:98-107`) refuses any arm key that also appears in `policy.submissionBaseline` **regardless of value**, and `compileDraft` (`run/compile.ts:105`) unconditionally injects `submissionBaseline: { isolationPolicy: VENUE_ISOLATION_POLICY }` into every RunRecord. So pinning `isolationPolicy` on an arm always collides in this product — nothing to do with repository-work. The landed test pins only `harness`, matching the file's own `setUpTwoArmDraft` fixture. **Reusable lesson for P2: arms pin `harness`, `model` and `loadout`; they must not restate `isolationPolicy`.**
+3. **Task 5, Submission construction (plan bug).** The draft hand-encoded a Submission object and imported `sealTask` from `task-execution-profiles`. Both are wrong: `sealTask`/`sealSubmission` are exported from `@jinn-network/task-execution-protocol` (`sealing.ts`), and `SubmissionRecordSchema` additionally requires `submission`, `requester`, `idempotencyKey` and `deadline` — `backend.submit()` validates against it and would have rejected with `invalid-document`. The landed test uses a `submissionFor` helper calling `sealSubmission`, mirroring `venue.integration.test.ts`. Two related corrections: `SubmissionAck` is a discriminated union, so `ack.submission` needs an `accepted` narrowing first; and `ObservationSnapshot` is `{descriptor, cursor, observations}` with no top-level `attempt`, so the draft's polling loop was replaced with `await venue.backend.drain()` then a single `observe()` asserting `snapshot.descriptor.derived`. **Reusable lesson: copy the submit/observe/deliver pattern from `venue.integration.test.ts` verbatim rather than reconstructing it.**
+
+4. **Task 6, arm pinning (plan bug).** The draft pinned `isolationPolicy: "unrestricted"` on the new arm. The `RunRecord` schema (`packages/benchmarking/records/src/run/schema.ts:98-107`) refuses any arm key that also appears in `policy.submissionBaseline` **regardless of value**, and `compileDraft` (`run/compile.ts:105`) unconditionally injects `submissionBaseline: { isolationPolicy: VENUE_ISOLATION_POLICY }` into every RunRecord. So pinning `isolationPolicy` on an arm always collides in this product — nothing to do with repository-work. The landed test pins only `harness`, matching the file's own `setUpTwoArmDraft` fixture. **Reusable lesson for P2: arms pin `harness`, `model` and `loadout`; they must not restate `isolationPolicy`.**
 
 Task 6 confirmed the plan's central claim that **no source change is required** at the quote seam: `coverageRefusals` and `unsupportedPinningErrors` both walk `capabilities.runPinning.keys` generically.
 
-## Self-Review
+## Acceptance mapping
 
 **Spec coverage** — every P1 acceptance criterion maps to a task:
 
@@ -1485,7 +1413,7 @@ Task 6 confirmed the plan's central claim that **no source change is required** 
 | 3. Prediction sample byte-stable, enumerated suites green unmodified | Task 7 Step 3 (mechanical `git diff` gate) |
 | 4. Quote-time coverage duplication stays in sync; cross-check extended not weakened | Task 6 |
 | 5. Harvest normalization for `patch`/`summary`/`evidence` parallel to the prediction path | Task 3 Step 3 harvest + Step 1 harvest test |
-| 6. Provisioner design decision recorded | § "Deviation from the approved D1 design" |
+| 6. Provisioner design decision recorded | § "Post-implementation correction to the D1 record" |
 
 **Placeholder scan** — no TBD/TODO, no "add error handling", no "similar to Task N". Every code step carries the actual content. Two tasks (5, 6) legitimately have no source change; both say so explicitly and both name the exact fallback if a field accessor mismatches, with an explicit prohibition on weakening assertions.
 
