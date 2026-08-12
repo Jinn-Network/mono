@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   BENCHMARKING_METHOD_IDS,
@@ -14,7 +15,7 @@ import { canonicalJsonBytes, recordDigest, sealDsseEnvelope } from "@jinn-networ
 import type { VenueHonesty } from "../operations/run-results.js";
 import { LOCAL_VENUE_LIMITS, unverifiableAxisCounts } from "../operations/run-results.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
-import { buildClaimPackage, CLAIM_PACKAGE_SCHEMA_ID, ClaimPackageSchema } from "./claim.js";
+import { buildClaimPackage, type BuildClaimPackageInput, CLAIM_PACKAGE_SCHEMA_ID, ClaimPackageSchema } from "./claim.js";
 
 const MATCH_ALL = { harness: "match", model: "match", loadout: "match", isolation: "match", checksFailed: [] } as const;
 const AUTHOR = "urn:uuid:33333333-3333-5333-8333-333333333333";
@@ -416,5 +417,44 @@ describe("buildClaimPackage", () => {
         assurance: { ...FIXTURE_ASSURANCE, resolved: { ...FIXTURE_ASSURANCE.resolved, verdictRule: "majority" } },
       }),
     ).toThrow(/sealed Run/);
+  });
+});
+
+/** P4b Task 4 (`docs/superpowers/plans/demo-report-1/2026-08-12-P4b-implementation-plan.md`): a
+ * golden byte-equality guard that lands BEFORE any commit touches `claim.ts`, so later tasks that
+ * teach this builder to dispatch on method cannot silently drift wilson's own output. Built from
+ * the exact same deterministic fixture every other test in this file already uses. */
+function readGolden(name: string): string {
+  return readFileSync(new URL(`../bundle/__fixtures__/wilson-golden/${name}`, import.meta.url), "utf8");
+}
+
+async function wilsonGoldenInput(): Promise<BuildClaimPackageInput> {
+  const { matrix, run, produced } = await buildFixture();
+  const matrixRecord = parseMatrix(matrix.bytes);
+  const runRecord = parseRun(run.bytes);
+  return {
+    draftId: "wilson-golden",
+    benchmarkSha256: "b".repeat(64),
+    runRecord,
+    runSha256: run.digest.slice("sha256:".length),
+    matrixRecord,
+    matrixSha256: matrix.digest.slice("sha256:".length),
+    reportRecord: produced.record,
+    reportSha256: sha256Hex(produced.bytes),
+    reportEnvelopeSha256: sha256Hex(produced.envelope),
+    venueHonesty: venueHonestyFor(matrixRecord),
+    verificationCommandVerb: "verify",
+    assurance: FIXTURE_ASSURANCE,
+  };
+}
+
+describe("Task 4 golden guard: wilson claim package byte-equality", () => {
+  it("wilson claim package serializes byte-identically to the committed golden", async () => {
+    const claim = buildClaimPackage(await wilsonGoldenInput());
+    // Exactly what writeClaimPackage does in production (claim.ts:338-341): schema-validate, then
+    // canonical JSON bytes -- compact, sorted keys, no trailing newline. A guard that serialized
+    // differently from production would not be guarding production.
+    const serialized = new TextDecoder().decode(canonicalJsonBytes(ClaimPackageSchema.parse(claim)));
+    expect(serialized).toBe(readGolden("claim-package.json"));
   });
 });
