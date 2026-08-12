@@ -55,6 +55,12 @@ import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
  * module can never drift from what `planRun`/`sealRun` actually accept. */
 type RunAnalysisPlanEntry = NonNullable<RunRecord["analysisPlan"]>[number];
 
+/** `analysis.parameters` keys `buildAnalysisPlan` always derives itself — from the draft's
+ * resolved `verdictRule` and the validated `analysis.baseline`/`analysis.candidate` — never from
+ * caller-supplied `parameters`. A caller setting one of these is expressing a misunderstanding of
+ * how the plan is assembled and must be told, not silently overridden or silently stripped. */
+const RESERVED_ANALYSIS_PARAMETER_KEYS = ["verdictRule", "baseline", "candidate"] as const;
+
 /**
  * The sealed analysis plan. `wilson@1` is always present — it is the product's baseline read and
  * every existing consumer expects it — and a selected non-wilson method is appended, so the plan
@@ -66,12 +72,6 @@ type RunAnalysisPlanEntry = NonNullable<RunRecord["analysisPlan"]>[number];
  * would otherwise seal into an immutable Run and only fail at `report` time — after the run has
  * been executed and paid for.
  */
-/** `analysis.parameters` keys `buildAnalysisPlan` always derives itself — from the draft's
- * resolved `verdictRule` and the validated `analysis.baseline`/`analysis.candidate` — never from
- * caller-supplied `parameters`. A caller setting one of these is expressing a misunderstanding of
- * how the plan is assembled and must be told, not silently overridden or silently stripped. */
-const RESERVED_ANALYSIS_PARAMETER_KEYS = ["verdictRule", "baseline", "candidate"] as const;
-
 function buildAnalysisPlan(spec: DraftSpec, verdictRule: ResolvedAssurance["verdictRule"]): RunAnalysisPlanEntry[] {
   const wilson: RunAnalysisPlanEntry = {
     method: BENCHMARKING_METHOD_IDS.wilson,

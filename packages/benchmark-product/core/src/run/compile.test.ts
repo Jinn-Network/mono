@@ -463,9 +463,19 @@ describe("compileDraft — analysis selection", () => {
     }
   });
 
-  test.each(["verdictRule", "baseline", "candidate"] as const)(
+  // Each override value below is one that `validateParameters` would ACCEPT on its own, so the
+  // reserved-key guard is the only thing that can refuse it. That matters: an earlier version of
+  // this test used "override-attempt" for every key, which `verdictRule`'s enum rejects downstream
+  // anyway (registry.ts's VERDICT_RULE_PROPERTY) — that row passed with the guard removed and so
+  // proved nothing. "unanimous" is a VALID rule that merely conflicts with this draft's resolved
+  // "sole", which is exactly the override that would otherwise detonate at report time.
+  test.each([
+    ["verdictRule", "unanimous"],
+    ["baseline", "not-an-arm"],
+    ["candidate", "not-an-arm"],
+  ] as const)(
     "refuses analysis.parameters carrying the reserved key %s (it would silently override a validated value)",
-    async (reservedKey) => {
+    async (reservedKey, overrideValue) => {
       const clock = makeClock();
       const draftId = await setUpDraftWithSample(clock);
       addTwoDistinctArms(clock, draftId);
@@ -475,7 +485,7 @@ describe("compileDraft — analysis selection", () => {
         version: "1",
         baseline: "baseline",
         candidate: "sample",
-        parameters: { seed: 1, resamples: 10, alpha: "0.05", [reservedKey]: "override-attempt" },
+        parameters: { seed: 1, resamples: 10, alpha: "0.05", [reservedKey]: overrideValue },
       };
 
       try {
@@ -495,7 +505,13 @@ describe("compileDraft — analysis selection", () => {
         // path is caught and re-wrapped under the generic "spec" path — the message is preserved
         // verbatim, which is what every other buildAnalysisPlan-refusal test in this file already
         // asserts on rather than the wrapped path.
-        expect(error.message).toContain(reservedKey);
+        //
+        // Match the reserved-key refusal specifically rather than merely containing the key name:
+        // the refusal's own tail names all three keys, so `toContain(reservedKey)` would be
+        // satisfied by any of them — and by unrelated validation errors that happen to mention it.
+        expect(error.message).toMatch(
+          new RegExp(`may not set reserved key\\(s\\)[^—]*\\b${reservedKey}\\b`),
+        );
       }
     },
   );
