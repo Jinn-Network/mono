@@ -272,6 +272,8 @@ Add to `packages/benchmark-product/core/src/run/compile.test.ts`:
 
 The last test is the one that matters most: `alpha: 0.05` as a raw number is exactly the defect the benchmarking conformance kit caught during P4. It must be refused at compile time, not at seal time, because a seal-time failure happens after the operator has committed to the run. Adapt `compileDraftFixture` to the file's existing helper (`compile.test.ts` already builds drafts around `compileDraft`).
 
+**Corrected plan-level oversight (found in review, applied in the P4b-T3 fix pass):** the `parameters` object below spreads `...(analysis.parameters ?? {})` **last**, which lets a caller-supplied `analysis.parameters.baseline` / `.candidate` / `.verdictRule` silently override the values this function just validated — a non-arm `baseline` seals straight into the immutable Run, and a conflicting `verdictRule` only detonates later at report time. The implementation must refuse (not silently strip, not merely reorder the spread) when `analysis.parameters` carries any of the three reserved keys `verdictRule`, `baseline`, `candidate`, with a test per reserved key. The step-level code sample below is left as originally written for the historical record; do not implement it as shown.
+
 Also **keep the existing single-entry assertion at `:163-169` passing unchanged** for a draft with no analysis block — that is the backward-compatibility guarantee.
 
 - [ ] **Step 2: Run to verify they fail**
@@ -529,7 +531,7 @@ Their **acceptance criteria are fixed and binding** — they are the contract PR
 | **5** | Method-dispatching claim package. `claim.ts:49-54,129` (`headline` optional + sibling `comparison`), `:192-215` (`wilsonSubjectResults` becomes one branch of a dispatch on `reportRecord.method.id`), `:262` and `verification/claim-consistency.ts:67` (select the plan entry matching the produced method rather than `[0]`). | **2.0–3.0** | A paired Report builds a claim carrying `comparison`; **the wilson golden from Task 4 still passes byte-identically**; `assertClaimConsistency` round-trips both shapes; `CLAIM_PACKAGE_SCHEMA_ID` unchanged at `/1`; a claim missing both `headline` and `comparison` is refused. |
 | **6** | Method-dispatching bundle assets. `assets.ts:118-156` (`requireWilsonFacts` becomes a dispatch), `:446-447` (both call sites). All neutral copy **unchanged** — see the seven-surface list below. | **2.0** | A paired bundle materializes and `bundle verify` passes on it; **every wilson golden from Task 4 still passes byte-identically**; no directional language appears on any publish-facing surface. |
 | **7** | Web renders both claim shapes. `web/.../results/page.tsx:27,124` — the unguarded `headline.wilsonInterval.low` dereference must become shape-aware. `inspect` surfaces the selected method (`operations/inspect.ts`). Also `core/scripts/m1-walkthrough.mjs:222`, which emits `armHeadline: report.claimPackage.headline` and yields a silent `undefined` on the paired branch under §5.2's optional-headline shape. | **1.0** | RTL renders a paired claim and a wilson claim; no unguarded dereference; the existing stored-Report `role="alert"` degradation path preserved; the walkthrough transcript never emits `undefined` for either branch. |
-| **8** | End-to-end and docs. Extend `run-path.integration.test.ts`; update the documentation surfaces in the seven-surface list. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → `bundle verify` with zero manual intervention. Docs describe method selection accurately without asserting a comparative winner. All three render states pinned per surface (below). |
+| **8** | End-to-end and docs. Extend `run-path.integration.test.ts`; update the documentation surfaces in the seven-surface list. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → `bundle verify` with zero manual intervention. Docs describe method selection accurately without asserting a comparative winner. All three render states pinned per surface (below). **As of the P4b-T3 fix pass, the paired report path is exercised end-to-end only at the zero-pairs state; the interval-present and interval-withheld states are not yet covered anywhere in-tree — their tests are Task 8's to write, not assumed already present.** |
 
 #### The neutrality promise ships on SEVEN surfaces, not three
 
@@ -577,8 +579,14 @@ Benchmark-product CI does not trigger on every path this touches, so the local c
 
 ```bash
 cd packages/benchmark-product/core && yarn typecheck && yarn vitest run
-cd ../web && yarn vitest run
+cd ../web && yarn typecheck && yarn vitest run
 cd ../../.. && node .github/scripts/fixture-manifest.mjs --check
 ```
+
+`web`'s `yarn typecheck` is load-bearing, not optional: `web` is strict-mode and `next build` fails on a
+type error, but `yarn vitest run` alone strips types and structurally cannot catch one (found in
+review: `results/page.tsx`'s unguarded `Object.entries(claim.headline)` after `headline` became
+optional in Task 5 typechecked-red while every `vitest` run stayed green). Both legs are mandatory
+on every pass through this chain, not just PR B's.
 
 Plus, for PR B, an explicit statement that the Task 4 goldens are unmodified — `git diff <merge-base>...HEAD -- '*wilson-golden*'` must be empty.
