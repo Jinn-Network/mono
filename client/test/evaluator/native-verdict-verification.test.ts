@@ -35,7 +35,10 @@ function nonCanonicalSpelling(envelopeBytes: Uint8Array): Uint8Array {
   }));
 }
 
-function fixture(options: { readonly respellVerdict?: (bytes: Uint8Array) => Uint8Array } = {}) {
+function fixture(options: {
+  readonly respellVerdict?: (bytes: Uint8Array) => Uint8Array;
+  readonly verdict?: "pass" | "fail" | "inconclusive";
+} = {}) {
   const task = exact("task", text("exact-task"));
   const result = exact("prediction", text("exact-result"));
   const solutionEvidence = exact("solution-evidence", text("solution-evidence"));
@@ -71,7 +74,7 @@ function fixture(options: { readonly respellVerdict?: (bytes: Uint8Array) => Uin
       evaluator: { id: EVALUATOR },
       taskSubject: task.digest,
       resultSubjects: [result.digest],
-      verdict: "pass",
+      verdict: options.verdict ?? "pass",
     },
   }, [{ keyid: "did:key:evaluator", sig: "c2ln" }]);
   // The Delivery below binds whatever bytes come out of here, so a re-spelled verdict stays
@@ -172,6 +175,27 @@ describe("buildNativeEvaluatorVerdictVerification", () => {
         settlementDeclarationKey: "did:key:evaluator-declaration",
         onChainVerdictCode: 1,
       }),
+    }));
+  });
+
+  // Defect-#41 class: the harness's ratified verdict vocabulary is exactly `pass|fail|inconclusive`
+  // (`ResultEvaluationStatementShape`), and the named gate reads this same field with
+  // `decisionGradeVerdictCode` to derive its `verdict-correspondence` expectation. Reading it here
+  // with a second, wider-but-different vocabulary that had no `inconclusive` case meant the honest
+  // outcome for every prediction verdict this gate's task family can currently produce was refused
+  // as `evaluation-record-graph-invalid` before any gate call -- so `recordVerdict` never ran and
+  // settlement died `verdict-settlement-identity-missing`. Every ratified verdict must verify and
+  // carry its code into the gate as `onChainVerdictCode`.
+  it.each([
+    ["pass", 1],
+    ["fail", 2],
+    ["inconclusive", 4],
+  ] as const)("verifies a ratified %s verdict and carries code %i into the gate", async (verdict, code) => {
+    const deps = dependencies();
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(fixture({ verdict })))
+      .resolves.toEqual({ ok: true, verdictCode: code });
+    expect(deps.gate).toHaveBeenCalledWith(expect.objectContaining({
+      verdict: expect.objectContaining({ onChainVerdictCode: code }),
     }));
   });
 
