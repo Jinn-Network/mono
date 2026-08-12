@@ -83,8 +83,12 @@ function fixture(overrides: {
     },
     report: {
       method: {
-        id: overrides.inconsistentMirrors === true ? "report-method-stored" : "jinn.benchmarking.method/wilson",
-        version: "1",
+        // P4b Task 6: `buildPublicAssets` now dispatches the results-parsing shape on
+        // `method.id`, so the id itself must stay a registered method (the distinguishing,
+        // never-reconciled marker this test proves moves to `version` instead, which the
+        // dispatch never consults).
+        id: "jinn.benchmarking.method/wilson",
+        version: overrides.inconsistentMirrors === true ? "report-method-stored" : "1",
         parameters: { sourceMarker: overrides.inconsistentMirrors === true ? "REPORT-PARAMETERS-STORED" : "shared" },
       },
       preregistered: overrides.inconsistentMirrors !== true,
@@ -134,8 +138,9 @@ function fixture(overrides: {
         reportEnvelopeSha256: SHA.envelope,
       },
       method: {
-        id: overrides.inconsistentMirrors === true ? "claim-method-stored" : "jinn.benchmarking.method/wilson",
-        version: "1",
+        // See the matching comment on `report.method` above.
+        id: "jinn.benchmarking.method/wilson",
+        version: overrides.inconsistentMirrors === true ? "claim-method-stored" : "1",
         parameters: { sourceMarker: overrides.inconsistentMirrors === true ? "CLAIM-PARAMETERS-STORED" : "shared" },
         preregistered: true,
       },
@@ -411,6 +416,158 @@ describe("Task 4 golden guard: wilson bundle asset byte-equality", () => {
     expect(Object.keys(assets).sort()).toEqual([...WILSON_GOLDEN_ASSET_NAMES].sort());
     for (const [name, bytes] of Object.entries(assets)) {
       expect(text(bytes), name).toBe(readGolden(name));
+    }
+  });
+});
+
+/**
+ * P4b Task 6 (`docs/superpowers/plans/demo-report-1/2026-08-12-P4b-implementation-plan.md`):
+ * `buildPublicAssets` must dispatch on the produced method instead of hard-requiring wilson@1's
+ * `arms` shape, so a paired-delta@1 bundle materializes too. Structure only -- pairs, delta,
+ * interval or the withheld reasons -- with NO directional sentence; the five neutral-copy strings
+ * stay byte-identical regardless of which branch produced the facts (proven by the Task 4 golden
+ * guard above, which must keep passing unmodified once this dispatch lands).
+ *
+ * `pairedFixture` swaps only `report.method`/`report.results`/`claim.method`/`claim.results` onto
+ * the wilson fixture's scaffolding (matrix, claim scope, disclosures, assurance, etc. are
+ * irrelevant to which method produced the results) -- mirrors how `report/claim.test.ts`'s paired
+ * fixture stays isolated from the report-production wiring, so a regression here can only be
+ * caused by `buildPublicAssets` itself, never by an unrelated path.
+ */
+interface ComparisonInput {
+  readonly pairs: number;
+  readonly delta: string | null;
+  readonly interval: { readonly alpha: string; readonly low: string; readonly high: string } | null;
+  readonly reasons: readonly string[];
+}
+
+function pairedFixture(comparison: ComparisonInput): PublicAssetInput {
+  const base = fixture();
+  const results = {
+    pairs: comparison.pairs,
+    delta: comparison.delta,
+    interval: comparison.interval,
+    reasons: [...comparison.reasons],
+    pairing: { taskDigests: [] },
+    clustering: { basis: "task-provenance-source", clusters: comparison.pairs > 0 ? 1 : 0 },
+    excluded: { count: 0, cellKeys: [] },
+    conflicted: { count: 0, cellKeys: [] },
+    bootstrap: { procedure: "xorshift32-v1", seed: 123456789, resamples: 1000 },
+  };
+  const wrapped = { perSubject: [{ subjectSha256: SHA.matrix, results }] };
+  return {
+    ...base,
+    report: {
+      ...base.report,
+      method: {
+        id: "jinn.benchmarking.method/paired-delta",
+        version: "1",
+        parameters: { baseline: "armA", candidate: "armB", seed: 123456789, resamples: 1000, alpha: "0.05" },
+      },
+      results: wrapped,
+    },
+    claim: {
+      ...base.claim,
+      method: { ...base.claim.method, id: "jinn.benchmarking.method/paired-delta" },
+      results: wrapped,
+    },
+  } as unknown as PublicAssetInput;
+}
+
+const INTERVAL_PRESENT: ComparisonInput = {
+  pairs: 6,
+  delta: "0.1667",
+  interval: { alpha: "0.05", low: "0.0100", high: "0.3200" },
+  reasons: [],
+};
+
+const INTERVAL_WITHHELD: ComparisonInput = {
+  pairs: 2,
+  delta: "0.0000",
+  interval: null,
+  reasons: [
+    "fewer than minN=5 paired tasks (got 2)",
+    "fewer than two source clusters (got 1)",
+  ],
+};
+
+const ZERO_PAIRS: ComparisonInput = {
+  pairs: 0,
+  delta: null,
+  interval: null,
+  reasons: [
+    "fewer than minN=5 paired tasks (got 0)",
+    "fewer than two source clusters (got 0)",
+  ],
+};
+
+/** README.md renders free text through the module's own `escapeMarkdown`, which backslash-escapes
+ * markdown-special characters including parentheses -- the same treatment every other free-text
+ * field on this surface already gets (limitations, disclosures, etc.). Mirrors that one behavior
+ * so assertions against a withheld-reason string (which legitimately contains parens, e.g. "(got
+ * 2)") match what the surface actually renders rather than the raw, un-escaped source string. */
+function markdownEscaped(value: string): string {
+  return value.replace(/([[\]()*_`|#!])/gu, "\\$1");
+}
+
+describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
+  test("interval-present: renders pairs, delta, and interval bounds without throwing, with no directional sentence", () => {
+    const assets = buildPublicAssets(pairedFixture(INTERVAL_PRESENT));
+    const html = text(assets["index.html"]);
+    const readme = text(assets["README.md"]);
+    for (const surface of [html, readme]) {
+      expect(surface).toContain("0.1667");
+      expect(surface).toContain("0.0100");
+      expect(surface).toContain("0.3200");
+      expect(surface).not.toMatch(/candidate (wins|beats|is best)/iu);
+    }
+    // The five neutral-copy strings are unconditional literals -- still present on the paired
+    // branch, per the ratified "no publish-facing surface goes directional" constraint.
+    expect(html).toContain("No comparative winner is stated");
+  });
+
+  test("interval-withheld: both reason strings surface on the full report and delta still renders", () => {
+    const assets = buildPublicAssets(pairedFixture(INTERVAL_WITHHELD));
+    const html = text(assets["index.html"]);
+    const readme = text(assets["README.md"]);
+    for (const surface of [html, readme]) {
+      expect(surface).toContain("0.0000");
+      expect(surface).not.toMatch(/candidate (wins|beats|is best)/iu);
+    }
+    for (const reason of INTERVAL_WITHHELD.reasons) {
+      expect(html).toContain(reason);
+      expect(readme).toContain(markdownEscaped(reason));
+    }
+  });
+
+  test("interval-withheld: compact surfaces (badge, social-card, share.txt) render non-empty paired facts, not silently truncated to nothing", () => {
+    const assets = buildPublicAssets(pairedFixture(INTERVAL_WITHHELD));
+    for (const path of ["badge.svg", "social-card.svg"] as const) {
+      const svg = text(assets[path]);
+      const match = /data-field="paired-status"[^>]*>([^<]+)</u.exec(svg);
+      expect(match, path).not.toBeNull();
+      expect(match![1]!.trim().length, path).toBeGreaterThan(0);
+      expect(match![1]).toContain("Pairs 2");
+    }
+    const share = text(assets["share.txt"]);
+    expect(share).toMatch(/Pairs 2/u);
+    expect(share.length).toBeGreaterThan(0);
+  });
+
+  test("zero-pairs: no delta, no interval, and no crash", () => {
+    const assets = buildPublicAssets(pairedFixture(ZERO_PAIRS));
+    const html = text(assets["index.html"]);
+    const readme = text(assets["README.md"]);
+    for (const surface of [html, readme]) {
+      expect(surface).toContain("Pairs");
+      expect(surface).not.toContain("0.1667");
+    }
+    for (const reason of ZERO_PAIRS.reasons) {
+      expect(html).toContain(reason);
+      expect(readme).toContain(markdownEscaped(reason));
+    }
+    for (const path of ["badge.svg", "social-card.svg", "share.txt"] as const) {
+      expect(() => text(assets[path])).not.toThrow();
     }
   });
 });
