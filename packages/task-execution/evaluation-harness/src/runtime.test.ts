@@ -591,6 +591,94 @@ describe("runEvaluationHarness", () => {
     await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
   });
 
+  /**
+   * #39b(a) -- diagnosability. The live gate's first harness run refused its subject and exited
+   * 65 in 413ms with BOTH captured harness logs at 0 bytes: the refusal was caught here and
+   * converted straight to an exit code, so the only artifact of a fully-diagnosed refusal was a
+   * bare number. The reason has to survive the exit.
+   *
+   * Stderr is the channel deliberately: the backend already captures it and already tails it into
+   * the terminal detail (`harnessLogTail` in the local backend's completion path), so one write
+   * carries the reason all the way to the operator's audit row. Only the refusal class and its own
+   * structural message go out -- never subject bytes, provider diagnostics, or secrets.
+   */
+  test("writes an input refusal's reason to stderr instead of exiting silently", async () => {
+    const fixture = await makeFixture();
+    const written: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+
+    // The live #39 shape, reconstructed: a Delivery declaring its output by FILENAME against a
+    // Task that declares the logical name. Everything else about the subject is exact, so the
+    // harness reaches `verifyEvaluationSubject` and refuses there -- the very refusal whose reason
+    // the live run lost.
+    const subjectTaskBytes = await readFile(join(fixture.paths.input, "subject-task.json"));
+    const resultBytes = await readFile(join(fixture.paths.input, "result.patch"));
+    const misnamedDelivery = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
+      task: documentDigest(subjectTaskBytes),
+      outputs: [{
+        name: "result.patch.json",
+        mediaType: "text/x-diff",
+        digest: { sha256: digestHex(resultBytes) },
+      }],
+      outcome: "fulfilled",
+      createdAt: "2026-07-29T12:00:00.000Z",
+    });
+    const evaluationTask = deriveEvaluationTask({
+      subjectTask: { name: "subject-task.json", digest: digestString(subjectTaskBytes) },
+      subjectDelivery: { name: "subject-delivery.json", digest: digestString(misnamedDelivery) },
+      subjectResults: [{ name: "result.patch.json", digest: digestString(resultBytes) }],
+      evaluationSpecDigest: fixture.specDigest,
+    });
+    await writeFile(join(fixture.paths.input, "subject-delivery.json"), misnamedDelivery);
+    await writeFile(join(fixture.paths.input, "result.patch.json"), resultBytes);
+    await writeFile(join(fixture.paths.input, "task.sealed"), evaluationTask.bytes);
+    const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    const stderr = written.join("");
+    expect(stderr).toContain("evaluation-harness: refused");
+    expect(stderr).toContain("invalid-evaluation-input");
+    // The structural reason itself, naming the offending output -- not just a category.
+    expect(stderr).toContain(
+      "subject Delivery output result.patch.json is not declared by the Task",
+    );
+  });
+
+  test("writes an operational failure's class to stderr", async () => {
+    const fixture = await makeFixture();
+    const written: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(
+      async () => { throw new Error("adapter blew up with a secret: hunter2"); },
+    );
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE);
+    const stderr = written.join("");
+    expect(stderr).toContain("evaluation-harness: refused");
+    expect(stderr).toContain("evaluation-operational-failure");
+    // An unclassified failure's message is never safe to echo.
+    expect(stderr).not.toContain("hunter2");
+  });
+
   test("rejects a CompletedEvaluation missing a spec-required measurement", async () => {
     const fixture = await makeFixture();
     const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(

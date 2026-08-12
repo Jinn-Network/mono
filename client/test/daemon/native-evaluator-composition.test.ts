@@ -996,6 +996,33 @@ describe("native evaluator harvest seals the exact harness verdict bytes (#35)",
       value.store.close();
     }
   });
+
+  /**
+   * #39b(b) -- diagnosability. When the harness refuses its subject it exits 65 without writing
+   * `out/verdict`, and the launch plan correctly maps 65 to blame `task` /
+   * `invalid-evaluation-input`. The harvest then read `out/verdict` unconditionally, so its ENOENT
+   * propagated into the backend's `harvest failed:` catch and OVERWROTE that classification with
+   * `infrastructure` / `backend-unavailable` -- pointing a live diagnosis at the host instead of at
+   * the refused subject.
+   *
+   * Harvest is contracted to run "after success, failure, cancellation, and expiry"
+   * (`ProvisionerContract.harvest`), so it must not presuppose a verdict. With no verdict there is
+   * nothing to seal: it delegates, records the omission, and lets the exit code classify.
+   */
+  it("harvests a verdict-less refused attempt without overwriting the exit-code blame", async () => {
+    const { value, composition, harvestable } = await predictionFixture();
+    try {
+      const result = await harvestable.contract.harvest(harvestable.paths, [
+        { name: "verdict", mediaType: "application/vnd.in-toto+json", required: true },
+      ]);
+      expect(result.manifest).toEqual([]);
+      expect(result.omissions).toEqual(["verdict"]);
+      expect(result.integrityViolations).toEqual([]);
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
 });
 
 describe("native evaluator sealed-Submission provisioner", () => {

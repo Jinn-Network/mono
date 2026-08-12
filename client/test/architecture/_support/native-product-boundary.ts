@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import ts from 'typescript';
+import { codeOnly } from './source-text.js';
 
 export type NativeBoundaryViolationKind =
   | 'bridge-delivery-extension'
@@ -225,7 +226,8 @@ function violationsForSource(file: string, source: string): {
   readonly violations: NativeBoundaryViolation[];
   readonly venueOwners: string[];
 } {
-  const violations = SOURCE_PATTERNS.flatMap(({ kind, pattern, detail }) => pattern.test(source)
+  const code = codeOnly(source);
+  const violations = SOURCE_PATTERNS.flatMap(({ kind, pattern, detail }) => pattern.test(code)
     ? [{ kind, file, detail } satisfies NativeBoundaryViolation]
     : []);
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
