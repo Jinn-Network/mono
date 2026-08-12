@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Version** | 1.0 |
-| **Date** | 2026-08-11 |
+| **Version** | 1.1 |
+| **Date** | 2026-08-12 |
 | **Author** | GTM execution session (Ritsu + Claude Fable 5); seam facts from three deep code explorations, path:line-cited |
 | **Shape** | `design` (this document); execution packets are `feat`/`fix`/`test` |
 | **Depends on** | [`2026-08-11-demo-report-1-skill-ab-program.md`](./2026-08-11-demo-report-1-skill-ab-program.md) (the eval-method stream this engineering serves), [`2026-08-05-benchmark-product-design.md`](../specs/2026-08-05-benchmark-product-design.md) (§3 consumption contract, §7 venue) |
-| **Does not do** | Eval-method work (power analysis, red-team, lock, publication — the sibling program owns it); marketplace venue; CI-dockerized grading; any GTM surface |
+| **Does not do** | Eval-method work (power analysis, red-team, lock, and the publication handoff — the sibling program owns it); network publication topology; marketplace venue; CI-dockerized grading; any GTM surface |
 
 Demo report #1 (the pre-registered skill-vs-AGENTS.md A/B) requires the
 benchmark product's venue to run coding-agent arms with container grading
@@ -19,6 +19,19 @@ implementer tasks with acceptance criteria.
 Exploration also found a real integrity bug (fabricated admission evidence
 → unearned Matrix `match`), promoted to packet P2b — fixing it is a
 precondition of a "pristine" demo report.
+
+## 2026-08-12 execution amendment
+
+The operator approved completion through the **publication boundary**, not network publication. The engineering finish line is a sealed Benchmark/Run/Matrix/Report closure, locally emitted deletion-portable bundle, exact cold recomputation, and publication handoff packet. Public report hosting, a signed Record Discovery author source, archive mirroring, Explorer ingestion, and `spec.jinn.network` deployment are separate design work and must not be improvised here.
+
+Additional locked constraints:
+
+- P2 binds `claude-haiku-4-5-20251001` at `high` effort through a real product-owned inventory. It must support a true no-file arm C without falsely earning loadout `match`.
+- P2 makes `SKILL.md` and `AGENTS.md` from one frozen source body, materializes both through the same digest-verifying path, proves the loader-visible placement, and symmetrically excludes experiment-created instruction files from harvested patches. If that requires a platform-semantics change, the packet stops for operator review.
+- P2b removes fabricated admission readiness; only real `verifyRunPinning` evidence may yield Matrix `match`.
+- P3 is split into P3a (the pinned OCI grader package) and P3b (the benchmark-product binding). P3b seals test material, image, parser, timeout, and grader-program identities and pre-stages images for `--pull never` grading.
+- P5 remains a 3-task × 2-arm × 2-replicate **plumbing** gate and starts only with at least 40 GiB free. It proves all twelve cells accounted, gold PASS / empty FAIL, three repository clusters, and `draws === resamples × clusterCount`; it does not estimate capability.
+- The subsequent three-arm official design has a hard ceiling of 600 cells. The engineering packets must not bake in a larger run or automatic post-lock top-ups.
 
 ## Session kickoff (paste into a NEW session)
 
