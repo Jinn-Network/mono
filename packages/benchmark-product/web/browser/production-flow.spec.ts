@@ -3,7 +3,10 @@ import { spawnSync } from "node:child_process";
 import { basename, join, resolve } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page, type Response } from "@playwright/test";
-import { DynamicResponseBodyAudit } from "../src/test/dynamic-response-audit";
+import {
+  DynamicResponseBodyAudit,
+  isExactChromiumAbort,
+} from "../src/test/dynamic-response-audit";
 import { PINNED_PERMISSIONS_POLICY as PERMISSIONS_POLICY } from "./chromium-policy";
 import { readRuntimeConfig } from "./runtime-config";
 
@@ -328,7 +331,10 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
     expect(headers["permissions-policy"]).toBe(PERMISSIONS_POLICY);
     const body = await captured.body;
     if (body.kind === "aborted") {
-      expect(body.detail, `${response.request().method()} ${response.url()} did not complete`).toMatch(/ERR_ABORTED|aborted/u);
+      expect(
+        isExactChromiumAbort(body.detail),
+        `${response.request().method()} ${response.url()} did not complete: ${body.detail}`,
+      ).toBe(true);
       continue;
     }
     expect(body.kind, body.kind === "error" ? body.detail : undefined).toBe("complete");

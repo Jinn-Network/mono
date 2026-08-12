@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DynamicResponseBodyAudit,
+  isExactChromiumAbort,
   type AuditableResponse,
 } from "./dynamic-response-audit";
 
@@ -90,5 +91,44 @@ describe("DynamicResponseBodyAudit", () => {
       kind: "aborted",
       detail: "net::ERR_ABORTED",
     });
+  });
+
+  it("accepts only surrounding whitespace when normalizing Chromium's exact abort code", () => {
+    expect(isExactChromiumAbort("\t net::ERR_ABORTED \r\n")).toBe(true);
+    expect(isExactChromiumAbort("net::ERR_ABORTED_BY_CLIENT")).toBe(false);
+    expect(isExactChromiumAbort("stream aborted unexpectedly")).toBe(false);
+    expect(isExactChromiumAbort("net::err_aborted")).toBe(false);
+    expect(isExactChromiumAbort("net::ERR_ABORTED.")).toBe(false);
+  });
+
+  it.each([
+    "net::ERR_ABORTED_BY_CLIENT",
+    "stream aborted unexpectedly",
+  ])("fails closed for near-miss request failure %s", async (errorText) => {
+    const audit = new DynamicResponseBodyAudit<AuditableResponse>({
+      failurePollAttempts: 1,
+      failurePollDelayMs: 0,
+    });
+    audit.capture(response({
+      body: () => Promise.reject(new Error("body unavailable")),
+      failure: { errorText },
+    }));
+
+    await expect(audit.settleBeforeNextBrowserOperation()).rejects.toThrow(
+      new RegExp(`response ended with an unexpected failure: ${errorText}`, "u"),
+    );
+  });
+
+  it("accepts surrounding whitespace on Chromium's exact abort code", async () => {
+    const audit = new DynamicResponseBodyAudit<AuditableResponse>({
+      failurePollAttempts: 1,
+      failurePollDelayMs: 0,
+    });
+    audit.capture(response({
+      body: () => Promise.reject(new Error("body unavailable")),
+      failure: { errorText: "  net::ERR_ABORTED\n" },
+    }));
+
+    await expect(audit.settleBeforeNextBrowserOperation()).resolves.toBeUndefined();
   });
 });

@@ -25,6 +25,12 @@ export interface DynamicResponseBodyAuditOptions {
   readonly failurePollDelayMs?: number;
 }
 
+/** Chromium may surround its network failure text with transport whitespace. Normalize only that
+ * framing; do not fold case, punctuation, suffixes, or prose into the one accepted abort code. */
+export function isExactChromiumAbort(detail: string): boolean {
+  return detail.trim() === "net::ERR_ABORTED";
+}
+
 /**
  * Starts body retention at the response event and provides an explicit barrier before the next
  * browser operation. Chromium frees protocol response bodies on navigation; awaiting this barrier
@@ -64,7 +70,7 @@ export class DynamicResponseBodyAudit<TResponse extends AuditableResponse> {
       if (result.kind === "error") {
         throw new Error(`${label} response body was not auditable: ${result.detail}`);
       }
-      if (result.kind === "aborted" && !/ERR_ABORTED|aborted/u.test(result.detail)) {
+      if (result.kind === "aborted" && !isExactChromiumAbort(result.detail)) {
         throw new Error(`${label} response ended with an unexpected failure: ${result.detail}`);
       }
       this.#settled += 1;
