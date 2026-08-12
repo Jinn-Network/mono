@@ -11,7 +11,7 @@
  * pinning shape mirror `../venue/venue.integration.test.ts`.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -61,6 +61,7 @@ import { readRunJournalEntries } from "./journal.js";
 const SIX_FRACTION_DIGITS = /^-?\d+\.\d{6}$/;
 
 let workspaceDir: string;
+const detachedRoots: string[] = [];
 
 beforeEach(() => {
   workspaceDir = mkdtempSync(join(tmpdir(), "bp12-run-path-"));
@@ -68,6 +69,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(workspaceDir, { recursive: true, force: true });
+  for (const root of detachedRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 /**
@@ -408,7 +410,20 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   expect(published.ok, JSON.stringify(published)).toBe(true);
   if (!published.ok) throw new Error("unreachable");
 
-  const bundleDir = join(workspaceDir, published.result.bundleRelativePath);
+  // Read the Report while the authenticated builder store is still present, then sever every
+  // dependency on that store before bundle verification. The detached bundle must survive after
+  // the entire originating workspace (sealed records, keys, journals, and artifacts) is gone.
+  const report = parseReport(getSealedBytes(workspaceDir, reported.result.reportSha256));
+  const perSubject = (report.results as { readonly perSubject?: readonly { readonly results?: unknown }[] }).perSubject;
+  expect(perSubject).toHaveLength(1);
+
+  const detachedRoot = mkdtempSync(join(tmpdir(), `benchmark-product-${scenario.draftId}-bundle-`));
+  detachedRoots.push(detachedRoot);
+  const bundleDir = join(detachedRoot, "bundle");
+  cpSync(join(workspaceDir, published.result.bundleRelativePath), bundleDir, { recursive: true });
+  rmSync(workspaceDir, { recursive: true, force: true });
+  expect(existsSync(workspaceDir)).toBe(false);
+
   const bundleVerification = await verifyPublicBundle(bundleDir);
   expect(bundleVerification.checks).toEqual([
     "manifest",
@@ -419,9 +434,6 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
     "claim-consistency",
   ]);
 
-  const report = parseReport(getSealedBytes(workspaceDir, reported.result.reportSha256));
-  const perSubject = (report.results as { readonly perSubject?: readonly { readonly results?: unknown }[] }).perSubject;
-  expect(perSubject).toHaveLength(1);
   return {
     comparison: perSubject![0]!.results as PairedComparison,
     bundleDir,
