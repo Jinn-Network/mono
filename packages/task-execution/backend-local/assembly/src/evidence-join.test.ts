@@ -194,7 +194,13 @@ describe("evidence recorder join (C3)", () => {
    */
   test("one identity used as both source and executor is refused; two distinct identities record cleanly (#36)", async () => {
     const bytes = new TextEncoder().encode("exact");
-    const start = async (source: string, executor: string, attempt: `urn:uuid:${string}`) =>
+    // `createEvidenceJoin` types both identities as `${string}:${string}` (evidence-join.ts:54-55);
+    // plain `string` is not assignable to it, so the helper must carry the same shape.
+    const start = async (
+      source: `${string}:${string}`,
+      executor: `${string}:${string}`,
+      attempt: `urn:uuid:${string}`,
+    ) =>
       createEvidenceJoin({
         ports: ports(new InMemoryEvidenceRepository()),
         source,
