@@ -626,9 +626,12 @@ describe("runResults — failure block, sourced from the run journal fold (BP-22
     expect(attritionTotals).toEqual({ judged: 1, unscorable: 1, expired: 4 });
     for (const arm of Object.keys(matrix.attrition.perArm)) {
       const judgedForArm = matrix.cells.filter((cell) => cell.armId === arm && cell.outcome === "judged").length;
-      expect(reported.result.claimPackage.headline[arm]?.n, arm).toBe(judgedForArm);
+      // P4b Task 5: `headline` is optional on ClaimPackage (a paired-delta Report carries
+      // `comparison` instead); this operation is wilson-only until Task 3 completes, so it is
+      // always present here.
+      expect(reported.result.claimPackage.headline?.[arm]?.n, arm).toBe(judgedForArm);
     }
-    expect(Object.values(reported.result.claimPackage.headline).reduce((sum, arm) => sum + arm.n, 0)).toBe(1);
+    expect(Object.values(reported.result.claimPackage.headline!).reduce((sum, arm) => sum + arm.n, 0)).toBe(1);
 
     const verified = await runVerify(contextFor(clock), { draftId: "draft-1" });
     expect(verified.ok, JSON.stringify(verified)).toBe(true);

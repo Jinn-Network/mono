@@ -356,8 +356,10 @@ describe("strict-agreement — manufactured dissent reduces to conflicted (AC2, 
       expect(claim.conflicted.cellKeys).toEqual([...wilson.conflicted.cellKeys]);
       expect(claim.assurance.preset).toBe("strict-agreement");
       expect(claim.assurance.resolved.verdictRule).toBe("unanimous");
+      // P4b Task 5: `headline` is optional on ClaimPackage (paired-delta carries `comparison`
+      // instead); this lifecycle is wilson-only, so it is always present here.
       for (const armId of ["baseline", "sample-uniform"]) {
-        expect(claim.headline[armId]?.n, armId).toBe(0);
+        expect(claim.headline?.[armId]?.n, armId).toBe(0);
       }
 
       // ── dissent never dropped: spot-check one cell's two verdict digests, present verbatim
@@ -426,9 +428,10 @@ describe("evaluator-panel with overrides {minVerdicts: 3} — majority through r
       expect(claim.assurance.resolved.minVerdicts).toBe(3);
       expect(claim.assurance.resolved.verdictRule).toBe("majority");
       expect(claim.conflicted.count).toBe(0);
+      // P4b Task 5: `headline` is optional on ClaimPackage; this lifecycle is wilson-only.
       for (const armId of ["baseline", "sample-uniform"]) {
-        expect(claim.headline[armId]?.n, armId).toBe(3);
-        expect(Number(claim.headline[armId]?.passRate), armId).toBe(1);
+        expect(claim.headline?.[armId]?.n, armId).toBe(3);
+        expect(Number(claim.headline?.[armId]?.passRate), armId).toBe(1);
       }
     },
     300_000,

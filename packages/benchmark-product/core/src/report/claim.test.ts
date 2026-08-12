@@ -6,14 +6,18 @@ import {
   BENCHMARKING_PROTOCOL,
   compareCodeUnitStrings,
   parseMatrix,
+  parseReport,
   parseRun,
   sealMatrix,
+  sealReport,
   sealRun,
+  type BenchmarkRecord,
 } from "@jinn-network/benchmarking-records";
 import { createMethodRegistry, produceReport, type DsseSigner, type MethodPorts } from "@jinn-network/benchmarking-aggregate";
 import { canonicalJsonBytes, recordDigest, sealDsseEnvelope } from "@jinn-network/trust-core";
 import type { VenueHonesty } from "../operations/run-results.js";
 import { LOCAL_VENUE_LIMITS, unverifiableAxisCounts } from "../operations/run-results.js";
+import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import { buildClaimPackage, type BuildClaimPackageInput, CLAIM_PACKAGE_SCHEMA_ID, ClaimPackageSchema } from "./claim.js";
 
@@ -456,5 +460,350 @@ describe("Task 4 golden guard: wilson claim package byte-equality", () => {
     // differently from production would not be guarding production.
     const serialized = new TextDecoder().decode(canonicalJsonBytes(ClaimPackageSchema.parse(claim)));
     expect(serialized).toBe(readGolden("claim-package.json"));
+  });
+});
+
+/**
+ * P4b Task 5: a paired-delta@1 Report built DIRECTLY via `sealReport`, not through
+ * `produceReport`/the method registry -- `operations/report.ts`'s method-selection wiring is a
+ * separate task and deliberately absent right now (see the implementation plan's Testing
+ * approach). This mirrors the real `pairedDeltaMethod.compute()` output shape
+ * (`benchmarking/aggregate/src/registry.ts`) verbatim, wrapped in the standard
+ * `{perSubject: [{subjectSha256, results}]}` envelope used by every method.
+ *
+ * The two sealed `analysisPlan` entries deliberately carry DIFFERENT `verdictRule` values
+ * ("sole" for wilson, "majority" for paired-delta) -- in real compiled data the two entries agree
+ * (`run/compile.ts`'s buildAnalysisPlan), so a regression from "select the plan entry matching
+ * the produced Report's method" back to "always read analysisPlan[0]" would otherwise pass this
+ * fixture silently. Disagreeing values make the regression fail loudly via the assurance
+ * cross-check instead.
+ */
+interface PairedFixture {
+  readonly matrixRecord: ReturnType<typeof parseMatrix>;
+  readonly runRecord: ReturnType<typeof parseRun>;
+  readonly reportRecord: ReturnType<typeof parseReport>;
+  readonly matrixSha256: string;
+  readonly runSha256: string;
+  readonly reportSha256: string;
+  readonly reportEnvelopeSha256: string;
+}
+
+const PAIRED_FIXTURE_ASSURANCE = {
+  preset: "direct-check",
+  resolved: {
+    independence: "disclosed",
+    minVerdicts: 1,
+    distinctEvaluator: false,
+    verdictRule: "majority",
+  },
+} as const;
+
+/** The exact shape `comparisonProjection` (claim.ts) must extract from `pairedResults` below,
+ * verbatim -- used by the "carries comparison" assertion. */
+const EXPECTED_COMPARISON = {
+  pairs: 2,
+  delta: "0.0000",
+  interval: null,
+  reasons: ["fewer than minN=5 paired tasks (got 2)"],
+  pairing: { taskDigests: ["1".repeat(64), "2".repeat(64)] },
+  clustering: { basis: "task-provenance-source", clusters: 1 },
+  excluded: { count: 0, cellKeys: [] },
+  conflicted: { count: 0, cellKeys: [] },
+  bootstrap: {
+    procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
+    basis: "task-provenance-source-family", count: 1, unit: "source-cluster", draws: 0,
+    clusters: [{ key: ["source", "fixture-repo"], members: ["1".repeat(64), "2".repeat(64)] }],
+  },
+};
+
+function buildPairedFixture(): PairedFixture {
+  const passVerdict = verdictEnvelope("pass", "paired-a1");
+  const failVerdict = verdictEnvelope("fail", "paired-b2");
+
+  const run = sealRun({
+    protocol: BENCHMARKING_PROTOCOL,
+    benchmark: { digest: { sha256: "b".repeat(64) } },
+    owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
+    // Distinct pinning is required (§7.1): arms with byte-identical pinning are refused at seal.
+    arms: [{ armId: "armA", pinning: { label: "armA" } }, { armId: "armB", pinning: { label: "armB" } }],
+    replicates: 1,
+    policy: {
+      completenessFloor: "1",
+      cellWindow: 60_000,
+      replacement: { allowed: false },
+      independence: "disclosed",
+      evaluation: { minVerdicts: 1, distinctEvaluator: false },
+      submissionBaseline: {},
+    },
+    analysisPlan: [
+      { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
+      {
+        method: BENCHMARKING_METHOD_IDS.pairedDelta, version: BENCHMARKING_METHOD_VERSION,
+        parameters: {
+          verdictRule: "majority", baseline: "armA", candidate: "armB",
+          seed: 123456789, resamples: 1000, alpha: "0.05",
+        },
+      },
+    ],
+    closeAt: "2026-08-04T00:00:00Z",
+  });
+
+  const task1 = "1".repeat(64);
+  const task2 = "2".repeat(64);
+
+  const perArmComplete = {
+    expected: 2, judged: 2, unjudged: 0, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0,
+  };
+
+  const matrix = sealMatrix({
+    protocol: BENCHMARKING_PROTOCOL,
+    run: { digest: { sha256: run.digest.slice("sha256:".length) } },
+    closeBoundary: { at: "2026-08-04T00:00:00Z" },
+    cells: [
+      {
+        cellKey: `${task1}/armA/1`, taskDigest: task1, armId: "armA", replicate: 1,
+        dispatches: 1, accounted: 1,
+        submission: `sha256:${"3".repeat(64)}`, delivery: `sha256:${"4".repeat(64)}`,
+        verdicts: [recordDigest(passVerdict)], validVerdicts: [recordDigest(passVerdict)],
+        outcome: "judged", verification: MATCH_ALL, integrityTier: "re-derivable",
+      },
+      {
+        cellKey: `${task1}/armB/1`, taskDigest: task1, armId: "armB", replicate: 1,
+        dispatches: 1, accounted: 1,
+        submission: `sha256:${"5".repeat(64)}`, delivery: `sha256:${"6".repeat(64)}`,
+        verdicts: [recordDigest(passVerdict)], validVerdicts: [recordDigest(passVerdict)],
+        outcome: "judged", verification: MATCH_ALL, integrityTier: "re-derivable",
+      },
+      {
+        cellKey: `${task2}/armA/1`, taskDigest: task2, armId: "armA", replicate: 1,
+        dispatches: 1, accounted: 1,
+        submission: `sha256:${"7".repeat(64)}`, delivery: `sha256:${"8".repeat(64)}`,
+        verdicts: [recordDigest(failVerdict)], validVerdicts: [recordDigest(failVerdict)],
+        outcome: "judged", verification: MATCH_ALL, integrityTier: "re-derivable",
+      },
+      {
+        cellKey: `${task2}/armB/1`, taskDigest: task2, armId: "armB", replicate: 1,
+        dispatches: 1, accounted: 1,
+        submission: `sha256:${"9".repeat(64)}`, delivery: `sha256:${"a".repeat(64)}`,
+        verdicts: [recordDigest(passVerdict)], validVerdicts: [recordDigest(passVerdict)],
+        outcome: "judged", verification: MATCH_ALL, integrityTier: "re-derivable",
+      },
+    ],
+    exclusions: [],
+    attrition: { perArm: { armA: perArmComplete, armB: perArmComplete }, asymmetryFlags: [] },
+    completeness: { expected: 4, judged: 4, floor: "1", runOutcome: "complete" },
+    assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
+  });
+
+  const matrixDigestHex = matrix.digest.slice("sha256:".length);
+
+  // Mirrors pairedDeltaMethod.compute()'s return shape (registry.ts) verbatim -- see
+  // EXPECTED_COMPARISON above for what buildClaimPackage must extract from it.
+  const pairedResults = {
+    verdictRule: "majority",
+    baseline: "armA",
+    candidate: "armB",
+    ...EXPECTED_COMPARISON,
+  };
+
+  const disclosurePerSubject = {
+    subjectSha256: matrixDigestHex,
+    integrityTiers: { "re-derivable": 4, "attested-only": 0 },
+    pinning: {
+      harness: { match: 4, mismatch: 0, unverifiable: 0 },
+      model: { match: 4, mismatch: 0, unverifiable: 0 },
+      loadout: { match: 4, mismatch: 0, unverifiable: 0 },
+      isolation: { match: 4, mismatch: 0, unverifiable: 0 },
+    },
+    independence: 0,
+    completeness: { expected: 4, judged: 4, floor: "1", runOutcome: "complete" as const },
+    attrition: { perArm: { armA: perArmComplete, armB: perArmComplete }, asymmetryFlags: [] },
+  };
+
+  const reportSealed = sealReport({
+    protocol: BENCHMARKING_PROTOCOL,
+    subjects: [{ digest: { sha256: matrixDigestHex } }],
+    method: {
+      id: BENCHMARKING_METHOD_IDS.pairedDelta,
+      version: BENCHMARKING_METHOD_VERSION,
+      parameters: {
+        verdictRule: "majority", baseline: "armA", candidate: "armB",
+        seed: 123456789, resamples: 1000, alpha: "0.05",
+      },
+    },
+    preregistered: true,
+    results: { perSubject: [{ subjectSha256: matrixDigestHex, results: pairedResults }] },
+    disclosures: { perSubject: [disclosurePerSubject] },
+    limitations: ["This is a local, self-run venue."],
+    author: AUTHOR,
+  });
+
+  return {
+    matrixRecord: parseMatrix(matrix.bytes),
+    runRecord: parseRun(run.bytes),
+    reportRecord: parseReport(reportSealed.bytes),
+    matrixSha256: matrixDigestHex,
+    runSha256: run.digest.slice("sha256:".length),
+    reportSha256: sha256Hex(reportSealed.bytes),
+    // No real DSSE envelope is built for this direct-sealed fixture; buildClaimPackage treats
+    // this as an opaque identity string, never dereferencing or re-verifying it.
+    reportEnvelopeSha256: "e".repeat(64),
+  };
+}
+
+describe("buildClaimPackage — paired-delta@1 comparison shape (P4b Task 5)", () => {
+  it("builds a claim carrying `comparison`, not `headline`, extracted verbatim from the paired Report", () => {
+    const fixture = buildPairedFixture();
+    const claim = buildClaimPackage({
+      draftId: "paired-1",
+      benchmarkSha256: "b".repeat(64),
+      runRecord: fixture.runRecord,
+      runSha256: fixture.runSha256,
+      matrixRecord: fixture.matrixRecord,
+      matrixSha256: fixture.matrixSha256,
+      reportRecord: fixture.reportRecord,
+      reportSha256: fixture.reportSha256,
+      reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+      venueHonesty: venueHonestyFor(fixture.matrixRecord),
+      verificationCommandVerb: "verify",
+      assurance: PAIRED_FIXTURE_ASSURANCE,
+    });
+
+    expect(claim.comparison).toEqual(EXPECTED_COMPARISON);
+    expect(claim.headline).toBeUndefined();
+    // The top-level conflicted field (always required, regardless of method) mirrors the
+    // paired-delta method's own conflicted count -- same source, never invented.
+    expect(claim.conflicted).toEqual(EXPECTED_COMPARISON.conflicted);
+    expect(claim.method).toEqual({
+      id: "jinn.benchmarking.method/paired-delta", version: "1",
+      parameters: fixture.reportRecord.method.parameters, preregistered: true,
+    });
+
+    // The claim must still satisfy its own schema (comparison present is sufficient).
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+  });
+
+  it("throws when the stated verdictRule matches wilson's plan entry rather than the produced paired-delta entry (proves entry SELECTION, not analysisPlan[0])", () => {
+    const fixture = buildPairedFixture();
+    expect(() =>
+      buildClaimPackage({
+        draftId: "paired-1",
+        benchmarkSha256: "b".repeat(64),
+        runRecord: fixture.runRecord,
+        runSha256: fixture.runSha256,
+        matrixRecord: fixture.matrixRecord,
+        matrixSha256: fixture.matrixSha256,
+        reportRecord: fixture.reportRecord,
+        reportSha256: fixture.reportSha256,
+        reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+        venueHonesty: venueHonestyFor(fixture.matrixRecord),
+        verificationCommandVerb: "verify",
+        // "sole" matches analysisPlan[0] (wilson) but not the produced paired-delta entry
+        // ("majority") -- if the code selected by index rather than by method id, this call
+        // would NOT throw, silently accepting the wrong entry.
+        assurance: { ...PAIRED_FIXTURE_ASSURANCE, resolved: { ...PAIRED_FIXTURE_ASSURANCE.resolved, verdictRule: "sole" } },
+      }),
+    ).toThrow(/sealed Run/);
+  });
+});
+
+describe("buildClaimPackage — schema requires headline or comparison", () => {
+  it("refuses a claim carrying neither headline nor comparison", async () => {
+    const { matrix, run, produced } = await buildFixture();
+    const matrixRecord = parseMatrix(matrix.bytes);
+    const runRecord = parseRun(run.bytes);
+    const claim = buildClaimPackage({
+      draftId: "draft-1",
+      benchmarkSha256: "b".repeat(64),
+      runRecord,
+      runSha256: run.digest.slice("sha256:".length),
+      matrixRecord,
+      matrixSha256: matrix.digest.slice("sha256:".length),
+      reportRecord: produced.record,
+      reportSha256: sha256Hex(produced.bytes),
+      reportEnvelopeSha256: sha256Hex(produced.envelope),
+      venueHonesty: venueHonestyFor(matrixRecord),
+      verificationCommandVerb: "verify",
+      assurance: FIXTURE_ASSURANCE,
+    });
+
+    const { headline: _headline, ...withoutHeadline } = claim;
+    expect(ClaimPackageSchema.safeParse(withoutHeadline).success).toBe(false);
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+  });
+});
+
+describe("assertClaimConsistency (P4b Task 5): round-trips both shapes", () => {
+  it("round-trips a wilson claim built by buildClaimPackage", async () => {
+    const { matrix, run, produced } = await buildFixture();
+    const matrixRecord = parseMatrix(matrix.bytes);
+    const runRecord = parseRun(run.bytes);
+    const runSha256 = run.digest.slice("sha256:".length);
+    const matrixSha256 = matrix.digest.slice("sha256:".length);
+    const reportSha256 = sha256Hex(produced.bytes);
+    const reportEnvelopeSha256 = sha256Hex(produced.envelope);
+
+    const claim = buildClaimPackage({
+      draftId: "draft-1",
+      benchmarkSha256: "b".repeat(64),
+      runRecord,
+      runSha256,
+      matrixRecord,
+      matrixSha256,
+      reportRecord: produced.record,
+      reportSha256,
+      reportEnvelopeSha256,
+      venueHonesty: venueHonestyFor(matrixRecord),
+      verificationCommandVerb: "verify",
+      assurance: FIXTURE_ASSURANCE,
+    });
+
+    expect(() =>
+      assertClaimConsistency({
+        claim,
+        identities: { benchmarkSha256: "b".repeat(64), runSha256, matrixSha256, reportSha256, reportEnvelopeSha256 },
+        // Unused by assertClaimConsistency (never dereferenced in its body) -- see claim-consistency.ts.
+        benchmarkRecord: {} as unknown as BenchmarkRecord,
+        runRecord,
+        matrixRecord,
+        reportRecord: produced.record,
+        draftId: "draft-1",
+        assurancePreset: FIXTURE_ASSURANCE.preset,
+      }),
+    ).not.toThrow();
+  });
+
+  it("round-trips a paired-delta claim carrying comparison", () => {
+    const fixture = buildPairedFixture();
+    const claim = buildClaimPackage({
+      draftId: "paired-1",
+      benchmarkSha256: "b".repeat(64),
+      runRecord: fixture.runRecord,
+      runSha256: fixture.runSha256,
+      matrixRecord: fixture.matrixRecord,
+      matrixSha256: fixture.matrixSha256,
+      reportRecord: fixture.reportRecord,
+      reportSha256: fixture.reportSha256,
+      reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+      venueHonesty: venueHonestyFor(fixture.matrixRecord),
+      verificationCommandVerb: "verify",
+      assurance: PAIRED_FIXTURE_ASSURANCE,
+    });
+
+    expect(() =>
+      assertClaimConsistency({
+        claim,
+        identities: {
+          benchmarkSha256: "b".repeat(64), runSha256: fixture.runSha256, matrixSha256: fixture.matrixSha256,
+          reportSha256: fixture.reportSha256, reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+        },
+        benchmarkRecord: {} as unknown as BenchmarkRecord,
+        runRecord: fixture.runRecord,
+        matrixRecord: fixture.matrixRecord,
+        reportRecord: fixture.reportRecord,
+        draftId: "paired-1",
+        assurancePreset: PAIRED_FIXTURE_ASSURANCE.preset,
+      }),
+    ).not.toThrow();
   });
 });

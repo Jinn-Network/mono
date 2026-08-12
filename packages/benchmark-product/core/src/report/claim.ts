@@ -4,13 +4,18 @@
  * re-running anything.
  *
  * `buildClaimPackage` is PURE — no filesystem, no digest recomputation, no re-derivation of the
- * sealed Report's own judgment. Every headline number, disclosure, limitation, and attrition
- * figure is EXTRACTED verbatim from the records the caller already sealed and verified elsewhere
- * (`../operations/report.ts`), never recomputed here — a claim package that silently disagreed
- * with its own cited report would be worse than one that failed to build. Nothing is dropped:
- * `conflicted`, `completeness`, and `attrition` are always present, even when they carry
+ * sealed Report's own judgment. Every headline-or-comparison number, disclosure, limitation, and
+ * attrition figure is EXTRACTED verbatim from the records the caller already sealed and verified
+ * elsewhere (`../operations/report.ts`), never recomputed here — a claim package that silently
+ * disagreed with its own cited report would be worse than one that failed to build. Nothing is
+ * dropped: `conflicted`, `completeness`, and `attrition` are always present, even when they carry
  * unwelcome numbers (a conflicted cell, an incomplete run) — spec §8.2's whole point is that the
  * claim package cannot be more flattering than the sealed records it cites.
+ *
+ * P4b Task 5: `buildClaimPackage` DISPATCHES on the produced Report's `method.id` — wilson@1's
+ * per-arm `headline` and paired-delta@1's `comparison` are mutually exclusive siblings, exactly
+ * one of which is present on any given claim (the schema refuses a claim carrying neither). Same
+ * "extracted, never recomputed" posture regardless of which method produced the Report.
  *
  * BP-20 (spec §7.2): the optional `rehearsal` block names any disclosed preview that preceded
  * this run's lock, verbatim from the caller's `previewDisclosure` input — used previews are named
@@ -25,6 +30,7 @@
  */
 
 import { z } from "zod";
+import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { PRODUCT_BRANDING } from "../branding.js";
@@ -56,6 +62,30 @@ const HeadlineArmSchema = z.object({
 const ConflictedSchema = z.object({
   count: z.number().int().nonnegative(),
   cellKeys: z.array(z.string()),
+});
+
+const PairedIntervalSchema = z.object({ alpha: z.string(), low: z.string(), high: z.string() });
+
+/**
+ * paired-delta@1's comparison block (P4b Task 5), sibling to `headline` (BP-13 method dispatch).
+ * Carried verbatim from the method's own compute() output (`benchmarking/aggregate/src/
+ * registry.ts`'s pairedDeltaMethod) — never recomputed, per this module's header. `baseline`,
+ * `candidate`, and `verdictRule` are deliberately NOT repeated here: they already live in the
+ * claim's `method.parameters` block, sealed verbatim by `run/compile.ts`'s buildAnalysisPlan.
+ * `pairing`, `clustering`, and `bootstrap` carry richer nested shapes than a claim reader needs
+ * pinned exactly, so — like this schema's own `results` field — they are typed loosely rather
+ * than re-specified field-by-field.
+ */
+const ComparisonSchema = z.object({
+  pairs: z.number().int().nonnegative(),
+  delta: z.string().nullable(),
+  interval: PairedIntervalSchema.nullable(),
+  reasons: z.array(z.string()),
+  pairing: z.object({ taskDigests: z.array(z.string()) }),
+  clustering: z.object({ basis: z.string(), clusters: z.number().int().nonnegative() }),
+  excluded: ConflictedSchema,
+  conflicted: ConflictedSchema,
+  bootstrap: z.unknown(),
 });
 
 const IntegrityTierCountsSchema = z.object({
@@ -126,7 +156,10 @@ export const ClaimPackageSchema = z.object({
     preregistered: z.boolean(),
   }),
   results: z.unknown(),
-  headline: z.record(z.string(), HeadlineArmSchema),
+  /** wilson@1's per-arm headline. Optional and additive (P4b Task 5, mirrors the `rehearsal`
+   * precedent below): a paired claim carries `comparison` instead — see the schema-level refine
+   * at the bottom of this object, which refuses a claim carrying neither. */
+  headline: z.record(z.string(), HeadlineArmSchema).optional(),
   completeness: z.unknown(),
   attrition: z.unknown(),
   conflicted: ConflictedSchema,
@@ -145,6 +178,17 @@ export const ClaimPackageSchema = z.object({
     previewCount: z.number().int().positive(),
     timestamps: z.array(Rfc3339Schema).min(1),
   }).optional(),
+  /** P4b Task 5: present only for a paired-delta@1 Report, sibling to `headline`. See
+   * `ComparisonSchema`'s own comment. */
+  comparison: ComparisonSchema.optional(),
+}).superRefine((claim, ctx) => {
+  if (claim.headline === undefined && claim.comparison === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "claim package must carry either headline (wilson@1) or comparison (paired-delta@1)",
+      path: ["headline"],
+    });
+  }
 });
 
 export type ClaimPackage = z.infer<typeof ClaimPackageSchema>;
@@ -181,37 +225,112 @@ export interface BuildClaimPackageInput {
   readonly previewDisclosure?: { readonly previewCount: number; readonly timestamps: readonly string[] };
 }
 
-interface WilsonSubjectResults {
-  readonly arms: Record<string, unknown>;
+type Comparison = z.infer<typeof ComparisonSchema>;
+
+/** What every method branch below must produce: EITHER `headline` (wilson@1) OR `comparison`
+ * (paired-delta@1), plus the top-level `conflicted` block every claim carries regardless of
+ * method. */
+interface MethodProjection {
+  readonly headline?: Record<string, unknown>;
+  readonly comparison?: Comparison;
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
 
-/** M1's only wired method (`../run/compile.ts` hardcodes `wilson@1`) — this narrow, local shape
- * check is deliberately not a general Method-results parser; a mismatch here means the sealed
- * Report was not produced by wilson@1, which this product never does today. */
-function wilsonSubjectResults(reportRecord: ReportRecord): WilsonSubjectResults {
+/** Every method this product wires publishes its single Matrix subject's results at this fixed
+ * path — the wrapper itself is method-agnostic; only what's inside `results` differs by method. */
+function singleSubjectResults(reportRecord: ReportRecord): unknown {
   const results = reportRecord.results as { readonly perSubject?: readonly { readonly results?: unknown }[] } | undefined;
   const perSubject = results?.perSubject;
   if (!Array.isArray(perSubject) || perSubject.length !== 1) {
-    throw new Error("claim package: expected exactly one Report subject (wilson@1's single-Matrix results shape)");
+    throw new Error("claim package: expected exactly one Report subject (this product's single-Matrix Report shape)");
   }
-  const subjectResults = perSubject[0]?.results as
+  return perSubject[0]?.results;
+}
+
+/** wilson@1's per-arm headline projection. A narrow, local shape check — deliberately not a
+ * general Method-results parser; a mismatch here means the sealed Report was not produced by
+ * wilson@1. */
+function wilsonProjection(subjectResults: unknown): MethodProjection {
+  const shape = subjectResults as
     | { readonly arms?: unknown; readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown } }
     | undefined;
   if (
-    typeof subjectResults?.arms !== "object" || subjectResults.arms === null
-    || typeof subjectResults.conflicted?.count !== "number"
-    || !Array.isArray(subjectResults.conflicted.cellKeys)
+    typeof shape?.arms !== "object" || shape.arms === null
+    || typeof shape.conflicted?.count !== "number"
+    || !Array.isArray(shape.conflicted.cellKeys)
   ) {
     throw new Error("claim package: Report results do not carry wilson@1's arms/conflicted shape");
   }
   return {
-    arms: subjectResults.arms as Record<string, unknown>,
-    conflicted: {
-      count: subjectResults.conflicted.count,
-      cellKeys: subjectResults.conflicted.cellKeys as readonly string[],
-    },
+    headline: shape.arms as Record<string, unknown>,
+    conflicted: { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] },
   };
+}
+
+/** paired-delta@1's comparison projection (P4b Task 5), sibling to `wilsonProjection`. Carried
+ * verbatim from the method's own compute() output (`benchmarking/aggregate/src/registry.ts`'s
+ * pairedDeltaMethod) — never recomputed. Same narrow, local-shape-check posture as
+ * `wilsonProjection`: a mismatch here means the sealed Report was not produced by paired-delta@1. */
+function comparisonProjection(subjectResults: unknown): MethodProjection {
+  const shape = subjectResults as
+    | {
+        readonly pairs?: unknown;
+        readonly delta?: unknown;
+        readonly interval?: unknown;
+        readonly reasons?: unknown;
+        readonly pairing?: { readonly taskDigests?: unknown };
+        readonly clustering?: { readonly basis?: unknown; readonly clusters?: unknown };
+        readonly excluded?: { readonly count?: unknown; readonly cellKeys?: unknown };
+        readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
+        readonly bootstrap?: unknown;
+      }
+    | undefined;
+  if (
+    typeof shape?.pairs !== "number"
+    || !(typeof shape.delta === "string" || shape.delta === null)
+    || typeof shape.interval !== "object"
+    || !Array.isArray(shape.reasons)
+    || !Array.isArray(shape.pairing?.taskDigests)
+    || typeof shape.clustering?.basis !== "string"
+    || typeof shape.clustering.clusters !== "number"
+    || typeof shape.excluded?.count !== "number"
+    || !Array.isArray(shape.excluded.cellKeys)
+    || typeof shape.conflicted?.count !== "number"
+    || !Array.isArray(shape.conflicted.cellKeys)
+    || shape.bootstrap === undefined
+  ) {
+    throw new Error("claim package: Report results do not carry paired-delta@1's comparison shape");
+  }
+  const conflicted = { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] };
+  return {
+    comparison: {
+      pairs: shape.pairs,
+      delta: shape.delta as string | null,
+      interval: shape.interval as Comparison["interval"],
+      reasons: [...(shape.reasons as readonly string[])],
+      pairing: { taskDigests: [...(shape.pairing.taskDigests as readonly string[])] },
+      clustering: { basis: shape.clustering.basis, clusters: shape.clustering.clusters },
+      excluded: { count: shape.excluded.count, cellKeys: [...(shape.excluded.cellKeys as readonly string[])] },
+      conflicted: { count: conflicted.count, cellKeys: [...conflicted.cellKeys] },
+      bootstrap: shape.bootstrap,
+    },
+    conflicted,
+  };
+}
+
+/** Dispatches on the produced Report's method (P4b Task 5) — the claim package's headline/
+ * comparison projection is no longer a mandatory wilson@1 gate. Any method this product has not
+ * wired a projection for throws rather than silently building an incomplete claim. */
+function methodProjection(reportRecord: ReportRecord): MethodProjection {
+  const subjectResults = singleSubjectResults(reportRecord);
+  switch (reportRecord.method.id) {
+    case BENCHMARKING_METHOD_IDS.wilson:
+      return wilsonProjection(subjectResults);
+    case BENCHMARKING_METHOD_IDS.pairedDelta:
+      return comparisonProjection(subjectResults);
+    default:
+      throw new Error(`claim package: method "${reportRecord.method.id}" has no claim-package projection`);
+  }
 }
 
 interface DisclosurePerSubjectShape {
@@ -256,10 +375,15 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
 
   // BP-21: the assurance block may only state primitives the sealed Run record itself carries.
   // `../run/compile.ts` seals the first three into `policy` at lock time and `verdictRule` into
-  // `analysisPlan[0].parameters` (BP-13 F2) — all four are checked against the sealed Run.
+  // the analysisPlan entry matching the produced Report's method (BP-13 F2, P4b Task 5) — all
+  // four are checked against the sealed Run. The sealed plan may carry more than one entry (one
+  // per candidate method), so the entry is SELECTED by method match, not read at a fixed index.
   const { resolved } = input.assurance;
   const policy = input.runRecord.policy;
-  const analysisParameters = input.runRecord.analysisPlan?.[0]?.parameters as
+  const matchingPlanEntry = input.runRecord.analysisPlan?.find(
+    (entry) => entry.method === reportRecord.method.id && entry.version === reportRecord.method.version,
+  );
+  const analysisParameters = matchingPlanEntry?.parameters as
     | { readonly verdictRule?: unknown }
     | undefined;
   if (
@@ -274,7 +398,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     );
   }
 
-  const wilsonResults = wilsonSubjectResults(reportRecord);
+  const projection = methodProjection(reportRecord);
   const disclosuresPerSubject = (reportRecord.disclosures?.perSubject ?? []) as readonly DisclosurePerSubjectShape[];
   const taskCount = new Set(input.matrixRecord.cells.map((cell) => cell.taskDigest)).size;
 
@@ -302,10 +426,10 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       preregistered: reportRecord.preregistered ?? false,
     },
     results: reportRecord.results,
-    headline: wilsonResults.arms as ClaimPackage["headline"],
+    ...(projection.headline !== undefined ? { headline: projection.headline as ClaimPackage["headline"] } : {}),
     completeness: input.matrixRecord.completeness,
     attrition: input.matrixRecord.attrition,
-    conflicted: { count: wilsonResults.conflicted.count, cellKeys: [...wilsonResults.conflicted.cellKeys] },
+    conflicted: { count: projection.conflicted.count, cellKeys: [...projection.conflicted.cellKeys] },
     assurance: {
       preset: input.assurance.preset,
       resolved: { ...resolved },
@@ -331,6 +455,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
           },
         }
       : {}),
+    ...(projection.comparison !== undefined ? { comparison: projection.comparison } : {}),
   };
 }
 
