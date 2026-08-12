@@ -467,6 +467,18 @@ async function admissionReceiptFailure(
     return `carried receipt digest ${String(carriedDigest)} does not match exact envelope digest ${actualDigest}`;
   }
 
+  // Completes this gate's encoding floor (see `parseVerdict`). This read differs from the other
+  // two: it interprets the envelope through a Zod SHAPE, which accepts any JSON spelling, so the
+  // strict parse is added as a gate rather than swapped in -- `checkAdmissionReceipt` below still
+  // consumes the shape-parsed envelope. Producer drift here is self-consistent (the carried
+  // descriptor digest is taken over whatever bytes the producer emitted, and the signature stays
+  // valid over the payload), so no other check on this path can catch it.
+  try {
+    parseExactDsseEnvelope(input.admissionReceipt.envelopeBytes);
+  } catch (cause) {
+    return `admission-receipt envelope is not the exact producer encoding: ${String(cause)}`;
+  }
+
   let envelope: unknown;
   try {
     envelope = parseJson(input.admissionReceipt.envelopeBytes, "admission-receipt envelope");

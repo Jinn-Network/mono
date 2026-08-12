@@ -226,7 +226,9 @@ function makeStatement(
   return statement as unknown as Record<string, unknown>;
 }
 
-function makeFixture(): {
+function makeFixture(
+  options: { readonly respellReceipt?: (bytes: Uint8Array) => Uint8Array } = {},
+): {
   input: VerdictObservationGateInput;
   statement: Record<string, unknown>;
 } {
@@ -281,10 +283,16 @@ function makeFixture(): {
     predicateType: "https://spec.jinn.network/attestations/admission-receipt/v1",
     predicate: { issuer: ADMISSION_AGENT },
   };
-  const receiptEnvelopeBytes = signedEnvelope(
+  const canonicalReceiptEnvelopeBytes = signedEnvelope(
     canonicalJsonBytes(admissionStatement),
     ADMISSION_KEY,
   );
+  // Producer drift is SELF-CONSISTENT: the descriptor below binds whatever bytes come out of
+  // here, so a re-spelled receipt still satisfies the carried-digest check and still carries a
+  // valid signature. The encoding gate is then the only check that can catch it -- which is
+  // precisely the defect-#34 shape, and why a digest-only test would prove nothing here.
+  const receiptEnvelopeBytes =
+    options.respellReceipt?.(canonicalReceiptEnvelopeBytes) ?? canonicalReceiptEnvelopeBytes;
   const receiptDescriptor = {
     name: "admission-receipt",
     digest: { sha256: documentDigest(receiptEnvelopeBytes).slice("sha256:".length) },
@@ -448,6 +456,21 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     expect(await gateVerdictObservation(input, makePorts())).toEqual({
       decisionGrade: false,
       failures: [{ check: "admission-receipt", detail: expect.any(String) }],
+    });
+  });
+
+  // The last loose read on this gate (residual named in the previous PR). Unlike the two above,
+  // this one is not a `parseDsseEnvelope` swap -- it parsed via a Zod envelope SHAPE, which
+  // accepts any JSON spelling. The receipt here is fully self-consistent: carried digest matches,
+  // signature valid, only the encoding differs, so nothing but an encoding gate can refuse it.
+  test("refuses a self-consistent admission receipt that is not the exact producer encoding", async () => {
+    const fixture = makeFixture({ respellReceipt: nonCanonicalSpelling });
+    expect(await gateVerdictObservation(fixture.input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{
+        check: "admission-receipt",
+        detail: expect.stringContaining("exact producer encoding") as unknown as string,
+      }],
     });
   });
 
