@@ -1,3 +1,4 @@
+import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import type { MatrixRecord, ReportRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { readFileSync } from "node:fs";
@@ -27,9 +28,32 @@ interface WilsonArmFact {
 }
 
 interface WilsonFacts {
+  readonly kind: "wilson";
   readonly arms: readonly WilsonArmFact[];
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
+
+/**
+ * paired-delta@1's rendering-relevant projection (P4b Task 6), sibling to `WilsonFacts`. A narrow
+ * subset of the method's full `comparison` output (`report/claim.ts`'s `ComparisonSchema`) --
+ * only what a public bundle asset actually presents: pairs, delta, interval-or-withheld-reasons,
+ * and the shared `conflicted` block every method carries.
+ */
+interface ComparisonFacts {
+  readonly kind: "comparison";
+  readonly baseline: string;
+  readonly candidate: string;
+  readonly alpha: string;
+  readonly pairs: number;
+  readonly delta: string | null;
+  readonly interval: { readonly alpha: string; readonly low: string; readonly high: string } | null;
+  readonly reasons: readonly string[];
+  readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
+}
+
+/** What every method branch below must produce for asset rendering. Discriminated by `kind` so
+ * the render helpers can narrow rather than re-check shape. */
+type MethodFacts = WilsonFacts | ComparisonFacts;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -115,24 +139,32 @@ function recordPaths(input: PublicAssetInput): readonly string[] {
   return input.recordSha256s.map((sha256) => `records/${sha256}.bin`);
 }
 
-function requireWilsonFacts(value: unknown, label: string): WilsonFacts {
-  const results = value as {
-    readonly perSubject?: readonly {
-      readonly results?: {
-        readonly arms?: Record<string, {
-          readonly n?: unknown;
-          readonly passRate?: unknown;
-          readonly wilsonInterval?: { readonly low?: unknown; readonly high?: unknown };
-        }>;
-        readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
-      };
-    }[];
-  };
-  const subject = results?.perSubject?.[0]?.results;
-  if (results?.perSubject?.length !== 1 || subject?.arms === undefined || subject.conflicted === undefined) {
-    throw new Error(`${label}: expected wilson@1's single-subject results shape`);
+/** Every method this product wires publishes its single Matrix subject's results at this fixed
+ * path -- mirrors `report/claim.ts`'s `singleSubjectResults`; the wrapper itself is
+ * method-agnostic, only what's inside `results` differs by method. */
+function singleSubjectResults(value: unknown, label: string): unknown {
+  const results = value as { readonly perSubject?: readonly { readonly results?: unknown }[] } | undefined;
+  if (results?.perSubject?.length !== 1) {
+    throw new Error(`${label}: expected exactly one subject (this product's single-Matrix Report shape)`);
   }
-  const arms = Object.entries(subject.arms).map(([armId, arm]) => {
+  return results.perSubject[0]?.results;
+}
+
+/** wilson@1's per-arm facts projection. A narrow, local shape check -- deliberately not a general
+ * Method-results parser; a mismatch here means the sealed Report was not produced by wilson@1. */
+function wilsonProjection(subjectResults: unknown, label: string): WilsonFacts {
+  const shape = subjectResults as {
+    readonly arms?: Record<string, {
+      readonly n?: unknown;
+      readonly passRate?: unknown;
+      readonly wilsonInterval?: { readonly low?: unknown; readonly high?: unknown };
+    }>;
+    readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
+  } | undefined;
+  if (shape?.arms === undefined || shape.conflicted === undefined) {
+    throw new Error(`${label}: expected wilson@1's arms/conflicted shape`);
+  }
+  const arms = Object.entries(shape.arms).map(([armId, arm]) => {
     if (
       typeof arm.n !== "number"
       || typeof arm.passRate !== "string"
@@ -143,16 +175,94 @@ function requireWilsonFacts(value: unknown, label: string): WilsonFacts {
     }
     return { armId, n: arm.n, passRate: arm.passRate, low: arm.wilsonInterval.low, high: arm.wilsonInterval.high };
   });
-  if (typeof subject.conflicted.count !== "number" || !Array.isArray(subject.conflicted.cellKeys)) {
+  if (typeof shape.conflicted.count !== "number" || !Array.isArray(shape.conflicted.cellKeys)) {
     throw new Error(`${label}: conflicted facts are invalid`);
   }
   return {
+    kind: "wilson",
     arms,
     conflicted: {
-      count: subject.conflicted.count,
-      cellKeys: subject.conflicted.cellKeys.map((value) => String(value)),
+      count: shape.conflicted.count,
+      cellKeys: shape.conflicted.cellKeys.map((value) => String(value)),
     },
   };
+}
+
+/** paired-delta@1's comparison facts projection (P4b Task 6), sibling to `wilsonProjection`. Same
+ * narrow, local-shape-check posture: a mismatch here means the sealed Report was not produced by
+ * paired-delta@1. Mirrors `report/claim.ts`'s `comparisonProjection`, narrowed to only the fields
+ * a public bundle asset presents. */
+function comparisonProjection(
+  subjectResults: unknown,
+  parameters: unknown,
+  label: string,
+): ComparisonFacts {
+  const shape = subjectResults as {
+    readonly pairs?: unknown;
+    readonly delta?: unknown;
+    readonly interval?: { readonly alpha?: unknown; readonly low?: unknown; readonly high?: unknown } | null;
+    readonly reasons?: unknown;
+    readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown };
+  } | undefined;
+  const parameterShape = parameters as {
+    readonly baseline?: unknown;
+    readonly candidate?: unknown;
+    readonly alpha?: unknown;
+  } | undefined;
+  if (
+    typeof shape?.pairs !== "number"
+    || !(typeof shape.delta === "string" || shape.delta === null)
+    || !Array.isArray(shape.reasons)
+    || typeof shape.conflicted?.count !== "number"
+    || !Array.isArray(shape.conflicted.cellKeys)
+    || !(
+      shape.interval === null
+      || (
+        typeof shape.interval?.alpha === "string"
+        && typeof shape.interval.low === "string"
+        && typeof shape.interval.high === "string"
+      )
+    )
+    || typeof parameterShape?.baseline !== "string"
+    || typeof parameterShape.candidate !== "string"
+    || typeof parameterShape.alpha !== "string"
+    || !["0.10", "0.05", "0.01"].includes(parameterShape.alpha)
+  ) {
+    throw new Error(`${label}: expected paired-delta@1's pairs/delta/interval/reasons/conflicted shape`);
+  }
+  return {
+    kind: "comparison",
+    baseline: parameterShape.baseline,
+    candidate: parameterShape.candidate,
+    alpha: Number(parameterShape.alpha).toFixed(4),
+    pairs: shape.pairs,
+    delta: shape.delta,
+    interval: shape.interval === null ? null : { alpha: shape.interval.alpha as string, low: shape.interval.low as string, high: shape.interval.high as string },
+    reasons: shape.reasons.map((value) => String(value)),
+    conflicted: {
+      count: shape.conflicted.count,
+      cellKeys: shape.conflicted.cellKeys.map((value) => String(value)),
+    },
+  };
+}
+
+/** Dispatches on the produced method (P4b Task 6) -- mirrors `report/claim.ts`'s
+ * `methodProjection`, so the two dispatches read as one pattern. Any method this product has not
+ * wired an asset projection for throws rather than silently rendering incomplete facts. */
+function methodProjection(
+  value: unknown,
+  method: { readonly id: string; readonly parameters: unknown },
+  label: string,
+): MethodFacts {
+  const subjectResults = singleSubjectResults(value, label);
+  switch (method.id) {
+    case BENCHMARKING_METHOD_IDS.wilson:
+      return wilsonProjection(subjectResults, label);
+    case BENCHMARKING_METHOD_IDS.pairedDelta:
+      return comparisonProjection(subjectResults, method.parameters, label);
+    default:
+      throw new Error(`${label}: method "${method.id}" has no bundle-asset projection`);
+  }
 }
 
 function outcomeLabel(outcome: MatrixRecord["completeness"]["runOutcome"]): string {
@@ -165,7 +275,7 @@ function scopeLine(input: PublicAssetInput): string {
   return `${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${input.claim.scope.venue}`;
 }
 
-function adverseFacts(input: PublicAssetInput, reportFacts: WilsonFacts): readonly string[] {
+function adverseFacts(input: PublicAssetInput, reportFacts: MethodFacts): readonly string[] {
   const facts: string[] = [];
   if (input.matrix.completeness.runOutcome !== "complete") facts.push(`Matrix: ${outcomeLabel(input.matrix.completeness.runOutcome)}; incomplete cells remain accounted below.`);
   if (reportFacts.conflicted.count > 0) facts.push(`Report conflicted cells: ${reportFacts.conflicted.count}.`);
@@ -193,13 +303,39 @@ function armResultTable(facts: WilsonFacts, caption: string): string {
   return `<div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(caption)}"><table><caption>${escapeMarkup(caption)}</caption><thead><tr><th scope="col">Arm</th><th scope="col">n</th><th scope="col">Pass rate</th><th scope="col">Interval low</th><th scope="col">Interval high</th></tr></thead><tbody>${armRows(facts)}</tbody></table></div>`;
 }
 
+/** Operator-approved P4b copy. The order is part of the public reading contract: direction,
+ * estimate, interval status, exact alpha, then the number of paired Tasks. */
+function pairedEstimateLine(facts: ComparisonFacts): string {
+  const estimate = facts.delta === null ? "unavailable" : facts.delta;
+  const interval = facts.interval === null
+    ? "withheld"
+    : `${facts.interval.low} to ${facts.interval.high}`;
+  return `Candidate minus baseline estimate (${facts.candidate} minus ${facts.baseline}): ${estimate}. Interval: ${interval}. Alpha: ${facts.alpha}. Paired task count: ${facts.pairs}.`;
+}
+
+/** Full-report (unbounded) rendering of paired-delta@1 facts: pairs, delta, and either the
+ * interval bounds or -- when withheld -- every reason string, in full (no truncation budget
+ * applies on this surface, unlike the compact assets below). */
+function comparisonFactsHtml(facts: ComparisonFacts): string {
+  const intervalHtml = facts.interval === null
+    ? `<p>Interval withheld.</p>${list(facts.reasons, "No withheld reason recorded.")}`
+    : `<dl class="facts"><div><dt>Interval low</dt><dd>${escapeMarkup(facts.interval.low)}</dd></div><div><dt>Interval high</dt><dd>${escapeMarkup(facts.interval.high)}</dd></div><div><dt>Alpha</dt><dd>${escapeMarkup(facts.alpha)}</dd></div></dl>`;
+  return `<p class="paired-estimate">${escapeMarkup(pairedEstimateLine(facts))}</p><dl class="facts"><div><dt>Paired task count</dt><dd>${facts.pairs}</dd></div><div><dt>Candidate minus baseline estimate</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${intervalHtml}`;
+}
+
+/** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6). The wilson branch is
+ * byte-identical to before this dispatch existed -- `armResultTable` itself is untouched. */
+function armResultsHtml(facts: MethodFacts, wilsonCaption: string): string {
+  return facts.kind === "wilson" ? armResultTable(facts, wilsonCaption) : comparisonFactsHtml(facts);
+}
+
 function attritionRows(input: PublicAssetInput): string {
   return Object.entries(input.matrix.attrition.perArm).map(([armId, counts]) =>
     `<tr><th scope="row">${escapeMarkup(armId)}</th><td>${counts.expected}</td><td>${counts.judged}</td><td>${counts.unjudged}</td><td>${counts.unscorable}</td><td>${counts.expired}</td><td>${counts.invalidated}</td><td>${counts.excluded}</td><td>${counts.replacements}</td></tr>`
   ).join("");
 }
 
-function buildIndex(input: PublicAssetInput, reportFacts: WilsonFacts, claimFacts: WilsonFacts): string {
+function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const outcome = input.matrix.completeness.runOutcome;
   const status = outcomeLabel(outcome);
   const adverse = adverseFacts(input, reportFacts);
@@ -246,14 +382,14 @@ ${embeddedFontCss()}
 <p class="status" data-run-outcome="${outcome}">${escapeMarkup(status)}</p>
 <h1>Colophon report</h1>
 <p class="lede">${escapeMarkup(scopeLine(input))}</p>
-<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>
+${reportFacts.kind === "wilson" ? '<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>' : `<p class="neutral">${escapeMarkup(pairedEstimateLine(reportFacts))}</p>`}
 </header>
 <main>
 <section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>
 <section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>
 <section aria-labelledby="matrix-heading"><h2 id="matrix-heading">Sealed Matrix accounting</h2><p class="source-label">Source: authenticated <a href="matrix.json">matrix.json</a>; values below are copied without reconciliation.</p><pre>${escapeMarkup(canonicalText({ completeness: input.matrix.completeness, attrition: input.matrix.attrition }))}</pre><h3>Completeness and attrition</h3><dl class="facts"><div><dt>Matrix run outcome</dt><dd>${escapeMarkup(outcome)}</dd></div><div><dt>Matrix expected</dt><dd>${input.matrix.completeness.expected}</dd></div><div><dt>Matrix judged</dt><dd>${input.matrix.completeness.judged}</dd></div><div><dt>Matrix floor</dt><dd>${escapeMarkup(input.matrix.completeness.floor)}</dd></div></dl><div class="table-scroll" tabindex="0" role="region" aria-label="Per-arm Matrix attrition"><table><caption>Exact per-arm attrition stored in the Matrix</caption><thead><tr><th scope="col">Arm</th><th scope="col">Expected</th><th scope="col">Judged</th><th scope="col">Unjudged</th><th scope="col">Unscorable</th><th scope="col">Expired</th><th scope="col">Invalidated</th><th scope="col">Excluded</th><th scope="col">Replacements</th></tr></thead><tbody>${attritionRows(input)}</tbody></table></div><h3>Matrix asymmetry flags</h3>${list(input.matrix.attrition.asymmetryFlags, "None recorded in the Matrix.")}</section>
-<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>Sealed Report arm results</h3>${armResultTable(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
-<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>Stored claim mirror</h3>${armResultTable(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
+<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>${reportFacts.kind === "wilson" ? "Sealed Report arm results" : "Sealed Report paired comparison"}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
+<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>${claimFacts.kind === "wilson" ? "Stored claim mirror" : "Stored paired claim mirror"}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
 <section aria-labelledby="dissent-heading"><h2 id="dissent-heading">Verification assembly dissent</h2><p class="source-label">Source: authenticated <a href="verification/assembly.jsonl">verification assembly</a>.</p><dl class="facts"><div><dt>Dissenting cells</dt><dd>${input.dissentCellKeys.length}</dd></div></dl>${list(input.dissentCellKeys, "None recorded in the verification assembly.")}</section>
 <section id="limitations" aria-labelledby="limitations-heading"><h2 id="limitations-heading">Limitations by stored source</h2><h3>Sealed Report limitations</h3>${list(input.report.limitations ?? [], "None recorded in the sealed Report.")}<h3>Stored Claim limitations</h3>${list(input.claim.limitations, "None recorded in the stored Claim.")}<h3>Local self-run trust boundary stored in the Claim</h3><pre>${escapeMarkup(canonicalText(input.claim.venueHonesty))}</pre></section>
 <section aria-labelledby="records-heading"><h2 id="records-heading">Records and exact identities</h2><dl class="facts"><div><dt>Report SHA-256</dt><dd class="digest">${input.reportSha256}</dd></div><div><dt>Matrix SHA-256</dt><dd class="digest">${input.matrixSha256}</dd></div><div><dt>Run SHA-256</dt><dd class="digest">${input.claim.records.runSha256}</dd></div><div><dt>Report envelope SHA-256</dt><dd class="digest">${input.claim.records.reportEnvelopeSha256}</dd></div></dl><h3>Top-level records and catalogs</h3><ul class="compact-list">${topLevelFiles.map(([path, label]) => `<li><a href="${path}">${escapeMarkup(label)} <span class="digest">(${path})</span></a></li>`).join("")}</ul><h3>Every manifest-listed content-addressed record</h3><ul class="compact-list">${casFiles.map((path) => `<li><a href="${path}">CAS record <span class="digest">(${path})</span></a></li>`).join("")}</ul></section>
@@ -264,28 +400,50 @@ ${embeddedFontCss()}
 </html>\n`;
 }
 
-function compactStatus(input: PublicAssetInput, reportFacts: WilsonFacts): string {
+function compactStatus(input: PublicAssetInput, reportFacts: MethodFacts): string {
   return `${outcomeLabel(input.matrix.completeness.runOutcome)} · Report conflicts ${reportFacts.conflicted.count} · Claim conflicts ${input.claim.conflicted.count} · assembly dissent ${input.dissentCellKeys.length} · Matrix asymmetry ${input.matrix.attrition.asymmetryFlags.length} · Report limitations ${(input.report.limitations ?? []).length} · Claim limitations ${input.claim.limitations.length}`;
 }
 
-function buildBadge(input: PublicAssetInput, reportFacts: WilsonFacts): string {
+/** Compact paired surfaces deliberately carry no estimate, interval bound, alpha, or pair count.
+ * They disclose the interval state and point to the relative full-report path instead. */
+function pairedCompactFragment(facts: MethodFacts): string {
+  if (facts.kind === "wilson") return "";
+  if (facts.delta === null) return "Paired estimate unavailable · read full report at index.html";
+  if (facts.interval === null) return "Paired estimate reported; interval withheld · index.html";
+  return "Paired estimate and interval in full report · index.html";
+}
+
+function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const scope = scopeLine(input);
   const status = compactStatus(input, reportFacts);
   const digest = input.reportSha256.slice(0, 12);
   const exactArms = input.claim.scope.arms.map((arm) => arm.armId).join(" · ");
   const visualStatus = boundedVisual(status, 112);
   const visualConfig = boundedVisual(scope, 112);
-  return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 920 150" width="920" height="150" style="max-width:100%;height:auto"><title id="title">Colophon · ${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))}; no comparative winner stated</title><desc id="desc">${escapeMarkup(`${scope}. Exact configuration arm IDs: ${exactArms}. ${status}. Full Report SHA-256 ${input.reportSha256}. Read index.html limitations and verification.`)}</desc><metadata>${escapeMarkup(`Report SHA-256: ${input.reportSha256}; exact arm IDs: ${exactArms}`)}</metadata><style>${embeddedFontCss()}</style><rect width="920" height="150" fill="#14120e"/><rect x="18" y="18" width="12" height="12" transform="rotate(45 24 24)" fill="#c7402a"/><text x="44" y="30" fill="#f7f4ed" font-family="Newsreader,serif" font-size="21" font-weight="650">Colophon</text><line x1="20" x2="900" y1="42" y2="42" stroke="#6b675f"/><text data-field="neutral-status" x="20" y="66" fill="#f7f4ed" font-family="Public Sans,sans-serif" font-size="16" font-weight="700">${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))} · no comparative winner stated</text><text data-field="adverse-status" x="20" y="90" fill="#f07a62" font-family="Public Sans,sans-serif" font-size="12">${escapeMarkup(visualStatus)}</text><text data-field="config-summary" x="20" y="112" fill="#d8d1c5" font-family="Public Sans,sans-serif" font-size="13">${escapeMarkup(visualConfig)}</text><a href="index.html#limitations"><text x="20" y="136" fill="#9eb9ef" font-family="IBM Plex Mono,monospace" font-size="11">Report ${digest} · index.html#limitations · index.html#verification</text></a></svg>\n`;
+  // Extra row only for the paired branch (P4b Task 6) -- empty string for wilson keeps every
+  // wilson byte, including the fixed 150-height viewBox, identical to before this dispatch.
+  const pairedFragment = pairedCompactFragment(reportFacts);
+  const height = pairedFragment === "" ? 150 : 176;
+  const pairedRow = pairedFragment === ""
+    ? ""
+    : `<a href="index.html"><text data-field="paired-status" x="20" y="160" fill="#d8d1c5" font-family="Public Sans,sans-serif" font-size="12">${escapeMarkup(pairedFragment)}</text></a>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 920 ${height}" width="920" height="${height}" style="max-width:100%;height:auto"><title id="title">Colophon · ${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))}; no comparative winner stated</title><desc id="desc">${escapeMarkup(`${scope}. Exact configuration arm IDs: ${exactArms}. ${status}. Full Report SHA-256 ${input.reportSha256}. Read index.html limitations and verification.`)}</desc><metadata>${escapeMarkup(`Report SHA-256: ${input.reportSha256}; exact arm IDs: ${exactArms}`)}</metadata><style>${embeddedFontCss()}</style><rect width="920" height="${height}" fill="#14120e"/><rect x="18" y="18" width="12" height="12" transform="rotate(45 24 24)" fill="#c7402a"/><text x="44" y="30" fill="#f7f4ed" font-family="Newsreader,serif" font-size="21" font-weight="650">Colophon</text><line x1="20" x2="900" y1="42" y2="42" stroke="#6b675f"/><text data-field="neutral-status" x="20" y="66" fill="#f7f4ed" font-family="Public Sans,sans-serif" font-size="16" font-weight="700">${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))} · no comparative winner stated</text><text data-field="adverse-status" x="20" y="90" fill="#f07a62" font-family="Public Sans,sans-serif" font-size="12">${escapeMarkup(visualStatus)}</text><text data-field="config-summary" x="20" y="112" fill="#d8d1c5" font-family="Public Sans,sans-serif" font-size="13">${escapeMarkup(visualConfig)}</text><a href="index.html#limitations"><text x="20" y="136" fill="#9eb9ef" font-family="IBM Plex Mono,monospace" font-size="11">Report ${digest} · index.html#limitations · index.html#verification</text></a>${pairedRow}</svg>\n`;
 }
 
-function buildSocialCard(input: PublicAssetInput, reportFacts: WilsonFacts): string {
+function buildSocialCard(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const scope = scopeLine(input);
   const status = compactStatus(input, reportFacts);
   const armIds = input.claim.scope.arms.map((arm) => arm.armId).join(" · ");
   const digest = input.reportSha256.slice(0, 12);
   const visualStatus = boundedVisual(status, 112);
   const visualConfig = boundedVisual(`${input.claim.scope.arms.length} configurations: ${armIds}`, 40);
-  return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 630" width="1200" height="630" style="max-width:100%;height:auto"><title id="title">Colophon · ${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))}; neutral benchmark report</title><desc id="desc">${escapeMarkup(`${scope}. Exact configuration arm IDs: ${armIds}. ${status}. Full Report SHA-256 ${input.reportSha256}. Read index.html limitations and verification.`)}</desc><metadata>${escapeMarkup(`Report SHA-256: ${input.reportSha256}; exact arm IDs: ${armIds}`)}</metadata><style>${embeddedFontCss()}</style><rect width="1200" height="630" fill="#f7f4ed"/><line x1="72" x2="1128" y1="72" y2="72" stroke="#14120e" stroke-width="2"/><rect x="78" y="93" width="18" height="18" transform="rotate(45 87 102)" fill="#c7402a"/><text x="118" y="112" fill="#14120e" font-family="Newsreader,serif" font-size="32" font-weight="650">Colophon</text><text data-field="neutral-status" x="78" y="180" fill="#c7402a" font-family="Public Sans,sans-serif" font-size="20" font-weight="700" letter-spacing="1">${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))} · NO COMPARATIVE WINNER STATED</text><text x="78" y="290" fill="#14120e" font-family="Newsreader,serif" font-size="76" font-weight="500">Benchmark report</text><text data-field="adverse-status" x="78" y="350" fill="#c7402a" font-family="Public Sans,sans-serif" font-size="22">${escapeMarkup(visualStatus)}</text><text data-field="config-summary" x="78" y="405" fill="#14120e" font-family="Public Sans,sans-serif" font-size="23">${escapeMarkup(visualConfig)}</text><text x="78" y="452" fill="#14120e" font-family="Public Sans,sans-serif" font-size="22">${escapeMarkup(scope)}</text><line x1="78" x2="1122" y1="492" y2="492" stroke="#cfc8bb"/><a href="index.html#verification"><text x="78" y="540" fill="#27406b" font-family="IBM Plex Mono,monospace" font-size="16">Report ${digest} · index.html#limitations · index.html#verification</text></a><text x="78" y="580" fill="#6b675f" font-family="Public Sans,sans-serif" font-size="16">${escapeMarkup(PRODUCT_BRANDING.attribution)}</text></svg>\n`;
+  // Extra row only for the paired branch (P4b Task 6) -- empty string for wilson, appended after
+  // the last existing element, keeps every wilson byte identical to before this dispatch.
+  const pairedFragment = pairedCompactFragment(reportFacts);
+  const pairedRow = pairedFragment === ""
+    ? ""
+    : `<a href="index.html"><text data-field="paired-status" x="78" y="605" fill="#6b675f" font-family="Public Sans,sans-serif" font-size="16">${escapeMarkup(pairedFragment)}</text></a>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 630" width="1200" height="630" style="max-width:100%;height:auto"><title id="title">Colophon · ${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))}; neutral benchmark report</title><desc id="desc">${escapeMarkup(`${scope}. Exact configuration arm IDs: ${armIds}. ${status}. Full Report SHA-256 ${input.reportSha256}. Read index.html limitations and verification.`)}</desc><metadata>${escapeMarkup(`Report SHA-256: ${input.reportSha256}; exact arm IDs: ${armIds}`)}</metadata><style>${embeddedFontCss()}</style><rect width="1200" height="630" fill="#f7f4ed"/><line x1="72" x2="1128" y1="72" y2="72" stroke="#14120e" stroke-width="2"/><rect x="78" y="93" width="18" height="18" transform="rotate(45 87 102)" fill="#c7402a"/><text x="118" y="112" fill="#14120e" font-family="Newsreader,serif" font-size="32" font-weight="650">Colophon</text><text data-field="neutral-status" x="78" y="180" fill="#c7402a" font-family="Public Sans,sans-serif" font-size="20" font-weight="700" letter-spacing="1">${escapeMarkup(outcomeLabel(input.matrix.completeness.runOutcome))} · NO COMPARATIVE WINNER STATED</text><text x="78" y="290" fill="#14120e" font-family="Newsreader,serif" font-size="76" font-weight="500">Benchmark report</text><text data-field="adverse-status" x="78" y="350" fill="#c7402a" font-family="Public Sans,sans-serif" font-size="22">${escapeMarkup(visualStatus)}</text><text data-field="config-summary" x="78" y="405" fill="#14120e" font-family="Public Sans,sans-serif" font-size="23">${escapeMarkup(visualConfig)}</text><text x="78" y="452" fill="#14120e" font-family="Public Sans,sans-serif" font-size="22">${escapeMarkup(scope)}</text><line x1="78" x2="1122" y1="492" y2="492" stroke="#cfc8bb"/><a href="index.html#verification"><text x="78" y="540" fill="#27406b" font-family="IBM Plex Mono,monospace" font-size="16">Report ${digest} · index.html#limitations · index.html#verification</text></a><text x="78" y="580" fill="#6b675f" font-family="Public Sans,sans-serif" font-size="16">${escapeMarkup(PRODUCT_BRANDING.attribution)}</text>${pairedRow}</svg>\n`;
 }
 
 function markdownArmTable(facts: WilsonFacts): string {
@@ -296,7 +454,33 @@ function markdownArmTable(facts: WilsonFacts): string {
   ].join("\n");
 }
 
-function buildReadme(input: PublicAssetInput, reportFacts: WilsonFacts, claimFacts: WilsonFacts): string {
+/** Markdown counterpart to `comparisonFactsHtml` (P4b Task 6): pairs, delta, and either the
+ * interval bounds or every withheld reason, in full -- no truncation budget on this surface. */
+function comparisonFactsMarkdown(facts: ComparisonFacts): string {
+  const delta = facts.delta === null ? "—" : escapeMarkdown(facts.delta);
+  const intervalLines = facts.interval === null
+    ? ["- Interval: withheld", ...facts.reasons.map((reason) => `  - ${escapeMarkdown(reason)}`)]
+    : [
+        `- Interval low: ${escapeMarkdown(facts.interval.low)}`,
+        `- Interval high: ${escapeMarkdown(facts.interval.high)}`,
+        `- Alpha: ${escapeMarkdown(facts.alpha)}`,
+      ];
+  return [
+    escapeMarkdown(pairedEstimateLine(facts)),
+    "",
+    `- Paired task count: ${facts.pairs}`,
+    `- Candidate minus baseline estimate: ${delta}`,
+    ...intervalLines,
+  ].join("\n");
+}
+
+/** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6), markdown counterpart
+ * to `armResultsHtml`. The wilson branch is byte-identical to before this dispatch existed. */
+function armResultsMarkdown(facts: MethodFacts): string {
+  return facts.kind === "wilson" ? markdownArmTable(facts) : comparisonFactsMarkdown(facts);
+}
+
+function buildReadme(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const adverse = adverseFacts(input, reportFacts);
   const arms = input.claim.scope.arms.map((arm) =>
     `- **${escapeMarkdown(arm.armId)}** — pinning: ${escapeMarkdown(canonicalText(arm.pinning))}`
@@ -343,9 +527,9 @@ Source: authenticated [\`matrix.json\`](matrix.json). These stored values are no
 
 Source: authenticated [\`report.json\`](report.json). These stored values are not reconciled with another source.
 
-### Sealed Report arm results
+### ${reportFacts.kind === "wilson" ? "Sealed Report arm results" : "Sealed Report paired comparison"}
 
-${markdownArmTable(reportFacts)}
+${armResultsMarkdown(reportFacts)}
 
 ### Report method and preregistration
 
@@ -369,9 +553,9 @@ ${reportLimitations}
 
 Source: authenticated [\`claim-package.json\`](claim-package.json). These stored values are not reconciled with another source.
 
-### Stored claim mirror
+### ${claimFacts.kind === "wilson" ? "Stored claim mirror" : "Stored paired claim mirror"}
 
-${markdownArmTable(claimFacts)}
+${armResultsMarkdown(claimFacts)}
 
 ### Claim method and preregistration
 
@@ -436,15 +620,19 @@ ${FONT_LICENSES.map(([name, path]) => `## ${name} font license\n\n\`\`\`text\n${
 `;
 }
 
-function buildShareText(input: PublicAssetInput, reportFacts: WilsonFacts): string {
-  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}. ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}. Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
+function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): string {
+  // Paired branch only (P4b Task 6): empty string for wilson keeps this sentence byte-identical
+  // to before this dispatch existed.
+  const pairedFragment = pairedCompactFragment(reportFacts);
+  const pairedClause = pairedFragment === "" ? "" : ` ${plainText(pairedFragment)}.`;
+  return `Colophon · ${outcomeLabel(input.matrix.completeness.runOutcome)}; no comparative winner stated. ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${plainText(input.claim.scope.venue)}. ${plainText(compactStatus(input, reportFacts))}. Report ${input.reportSha256}.${pairedClause} Full report: index.html; limitations: index.html#limitations; verify: index.html#verification with ${plainText(input.claim.verification.command)}. ${PRODUCT_BRANDING.attribution}\n`;
 }
 
 /** Fixed, deterministic public-bundle/2 presentation bytes. The builder only projects already
  * verified stored facts; it never computes a statistic, selects a winner, or reconciles records. */
 export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<string, Uint8Array>> {
-  const reportFacts = requireWilsonFacts(input.report.results, "sealed Report");
-  const claimFacts = requireWilsonFacts(input.claim.results, "stored claim package");
+  const reportFacts = methodProjection(input.report.results, input.report.method, "sealed Report");
+  const claimFacts = methodProjection(input.claim.results, input.claim.method, "stored claim package");
   return {
     "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts)),
     "badge.svg": encoder.encode(buildBadge(input, reportFacts)),

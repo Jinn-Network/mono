@@ -102,8 +102,18 @@ A citation should include at least:
 - the standalone verification command or a byte-preserving location of the
   complete directory.
 
-Do not cite a badge, card, or headline as if it were the full result. The current
-method states no comparative winner; no asset may infer one from point estimates.
+Do not cite a badge, card, or headline as if it were the full result. A `wilson@1`
+report states no comparative winner. A `paired-delta@1` full report spells out the
+candidate-minus-baseline direction and presents the estimate, interval or withheld
+state, exact alpha, and paired Task count together. Its compact badge, social card,
+and share text contain no result number and link relatively to `index.html`; they are
+signposts to the full report, never alternate conclusions.
+
+Every paired Report also carries a limitation stating that the method estimates an
+effect but does not gate one: no verdict, threshold, or selection was registered.
+That limitation stays separate from power or minimum-detectable-effect disclosures;
+an interval withheld for insufficient pairs or clusters is not the same claim as a
+completed interval whose sensitivity is below a target effect.
 
 ## Trust, privacy, and limitations
 
