@@ -30,6 +30,7 @@ import {
   InspectCellSummarySchema,
   INSPECT_TASK_PROFILE_URI,
 } from "../runtime/inspect/artifacts.js";
+import { InspectSelectionManifestSchema, type InspectSelectionManifest } from "../runtime/inspect/manifest.js";
 import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import { buildPublicAssets } from "./assets.js";
 import { verifyBundleSnapshot, type VerifyBundleSnapshotDeps } from "./manifest.js";
@@ -254,6 +255,7 @@ export async function verifyPublicBundle(
   const expectedRoles = new Map<string, Set<EvidenceRole>>();
   const evaluationSpecs = new Map<string, ReturnType<typeof parseEvaluationSpec>>();
   const taskSpecs = new Map<string, ReturnType<typeof TaskSpecificationSchema.parse>>();
+  const inspectSelections = new Map<string, InspectSelectionManifest>();
   const minVerdicts = run.policy.evaluation?.minVerdicts ?? 1;
 
   for (const cell of assembly.cells) {
@@ -269,6 +271,27 @@ export async function verifyPublicBundle(
     if (taskBytes === undefined) refuse("record-integrity", "evidence-closure", `${coord.cellKey} has no exact Task bytes`);
     const task = taskSpecs.get(coord.taskDigest) ?? parseRecord(taskBytes, TaskSpecificationSchema, `records/${coord.taskDigest}.bin`);
     taskSpecs.set(coord.taskDigest, task);
+    if (task.profile.uri === INSPECT_TASK_PROFILE_URI) {
+      const payload = task.payload as { selectionManifestSha256?: unknown };
+      const selectionSha256 = payload.selectionManifestSha256;
+      if (typeof selectionSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(selectionSha256)) {
+        refuse("record-integrity", "evidence-closure", `${coord.cellKey} Inspect Task has no sealed runtime selection identity`);
+      }
+      addRole(expectedRoles, selectionSha256, "runtime-selection");
+      if (!inspectSelections.has(selectionSha256)) {
+        const selectionBytes = records.get(selectionSha256);
+        if (selectionBytes === undefined) {
+          refuse("record-integrity", "evidence-closure", `${coord.cellKey} has no exact Inspect runtime selection bytes`);
+        }
+        const selection = parseRecord(
+          selectionBytes,
+          InspectSelectionManifestSchema,
+          `records/${selectionSha256}.bin`,
+        );
+        requireCanonical(selectionBytes, selection, `records/${selectionSha256}.bin`);
+        inspectSelections.set(selectionSha256, selection);
+      }
+    }
     const evaluationSpecSha256 = task.evaluation?.digest?.sha256;
     if (typeof evaluationSpecSha256 !== "string") refuse("record-integrity", "evidence-closure", `${coord.cellKey} Task has no EvaluationSpec digest`);
     addRole(expectedRoles, evaluationSpecSha256, "evaluation-spec");
@@ -421,6 +444,26 @@ export async function verifyPublicBundle(
           || summary.nativeLogBytes !== nativeBytes.length
           || sha256(nativeBytes) !== nativeLog.sha256
         ) refuse("record-integrity", "evidence-closure", "Inspect summary does not bind the exact native log or a scored terminal");
+        const selectionSha256 = (task.payload as { selectionManifestSha256?: unknown }).selectionManifestSha256;
+        const selection = typeof selectionSha256 === "string" ? inspectSelections.get(selectionSha256) : undefined;
+        const arm = selection?.arms.find((candidate) => candidate.armId === cell.armId);
+        if (selection === undefined || arm === undefined) {
+          refuse("record-integrity", "evidence-closure", "Inspect same-execution score has no exact selected arm configuration");
+        }
+        if (arm.provider === undefined) {
+          if (summary.provider !== undefined) {
+            refuse("record-integrity", "evidence-closure", "credential-free Inspect arm carries provider evidence");
+          }
+        } else if (
+          summary.provider?.surface !== arm.provider.surface
+          || summary.provider.resolvedModel !== arm.provider.upstreamModel
+          || summary.provider.callCount !== 1
+          || summary.provider.terminalStatus !== "completed"
+          || summary.provider.brokerProtocol !== selection.runtime.execution?.broker?.protocol
+          || summary.provider.brokerSourceSha256 !== selection.runtime.execution?.brokerSourceSha256
+        ) {
+          refuse("record-integrity", "evidence-closure", "Inspect provider evidence differs from the sealed arm/runtime selection");
+        }
       } else if (
         edge.evaluator === undefined || edge.evalTaskSha256 === undefined
         || edge.evalSubmissionSha256 === undefined || edge.evalAttempt === undefined

@@ -13,6 +13,7 @@ export const INSPECT_LAUNCHER_ID = "inspect-ai";
 export interface InspectLauncherOptions {
   readonly host: InspectHostBinding;
   readonly manifest: InspectSelectionManifest;
+  readonly hostConnectionDescriptor?: string;
 }
 
 function requirePinning(view: TaskView, manifest: InspectSelectionManifest): void {
@@ -67,7 +68,12 @@ export function makeInspectLauncher(options: InspectLauncherOptions): LauncherCo
             network: "none",
           })],
           cwd: paths.work,
-          env: { LANG: "C.UTF-8" },
+          env: {
+            LANG: "C.UTF-8",
+            ...(options.hostConnectionDescriptor === undefined
+              ? {}
+              : { JINN_INSPECT_HOST_CONNECTION_DESCRIPTOR: options.hostConnectionDescriptor }),
+          },
           validExitCodes: [0],
           resultContract: { envelopeFormat: "inspect-worker-v1" },
           interruptionBehavior: "nonrepeatable",

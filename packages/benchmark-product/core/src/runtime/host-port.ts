@@ -1,4 +1,7 @@
-import { resolve } from "node:path";
+import { lstatSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createLocalVenue, type LocalVenue, type LocalVenueOptions } from "../venue/venue.js";
 import { probeInspectSelection, type InspectHostBinding } from "./inspect/host.js";
 import { probeInspectOciSelection } from "./inspect/oci.js";
@@ -43,7 +46,81 @@ export interface BenchmarkRuntimeHost {
   ): LocalVenue;
 }
 
-export function createDefaultBenchmarkRuntimeHost(): BenchmarkRuntimeHost {
+export interface OpenAIHostConnection {
+  /** Return a host-owned key file mount. The product validates metadata but never reads bytes. */
+  keyFilePath(workspaceDir: string): string | undefined;
+  /** TEST ONLY: a sanitized OpenAI Responses body used to prove the native Inspect transcript
+   * path without network or credentials. Production CLI/web bootstrap never supplies this. */
+  responseFixturePathForTesting?(workspaceDir: string): string | undefined;
+}
+
+export interface BenchmarkRuntimeHostOptions {
+  readonly openAI?: OpenAIHostConnection;
+  readonly repositoryRoot?: string;
+}
+
+function inside(path: string, root: string): boolean {
+  const value = relative(root, path);
+  return value === "" || (!value.startsWith("..") && !isAbsolute(value));
+}
+
+function createOpenAIConnectionDescriptor(
+  connection: OpenAIHostConnection | undefined,
+  workspaceDir: string,
+  repositoryRoot: string,
+): { readonly path?: string; readonly cleanup: () => void } {
+  const candidateInput = connection?.keyFilePath(workspaceDir)?.trim();
+  if (candidateInput === undefined || candidateInput === "") return { cleanup() {} };
+  if (!isAbsolute(candidateInput)) throw new TypeError("BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE must be absolute");
+  const inputStat = lstatSync(candidateInput);
+  if (!inputStat.isFile() || inputStat.isSymbolicLink()) {
+    throw new TypeError("OpenAI credential mount must be a regular, non-symlink file");
+  }
+  const candidate = realpathSync(candidateInput);
+  const stat = lstatSync(candidate);
+  if ((stat.mode & 0o400) === 0 || (stat.mode & 0o077) !== 0 || (process.getuid !== undefined && stat.uid !== process.getuid())) {
+    throw new TypeError("OpenAI credential mount must be owned by this user and inaccessible to group/other users");
+  }
+  // Preview constructs its isolated scratch root lazily after venue creation, so containment
+  // validation must not require that root to exist yet.
+  const workspace = resolve(workspaceDir);
+  if (inside(candidate, workspace) || inside(candidate, repositoryRoot)) {
+    throw new TypeError("OpenAI credential mount must be outside the product workspace and repository");
+  }
+  const responseFixture = connection?.responseFixturePathForTesting?.(workspaceDir)?.trim();
+  let responseFixtureEntry: Record<string, unknown> = {};
+  if (responseFixture !== undefined && responseFixture !== "") {
+    if (!isAbsolute(responseFixture)) throw new TypeError("test broker response fixture path must be absolute");
+    const responseInputStat = lstatSync(responseFixture);
+    if (!responseInputStat.isFile() || responseInputStat.isSymbolicLink()) {
+      throw new TypeError("test broker response fixture must be a regular, non-symlink file");
+    }
+    const canonicalResponseFixture = realpathSync(responseFixture);
+    const responseStat = lstatSync(canonicalResponseFixture);
+    responseFixtureEntry = {
+      testResponseFixture: canonicalResponseFixture,
+      testResponseMetadata: {
+        dev: responseStat.dev,
+        ino: responseStat.ino,
+        mode: responseStat.mode & 0o777,
+        size: responseStat.size,
+        uid: responseStat.uid,
+      },
+    };
+  }
+  const directory = mkdtempSync(join(tmpdir(), "jinn-benchmark-host-connection-"));
+  const path = join(directory, "connection.json");
+  writeFileSync(path, JSON.stringify({
+    schema: "jinn.network/benchmark-product/host-connection/1",
+    openAIKeyFile: candidate,
+    metadata: { dev: stat.dev, ino: stat.ino, mode: stat.mode & 0o777, size: stat.size, uid: stat.uid },
+    ...responseFixtureEntry,
+  }), { encoding: "utf8", mode: 0o600 });
+  return { path, cleanup: () => rmSync(directory, { recursive: true, force: true }) };
+}
+
+export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeHostOptions = {}): BenchmarkRuntimeHost {
+  const repositoryRoot = realpathSync(hostOptions.repositoryRoot ?? fileURLToPath(new URL("../../../../..", import.meta.url)));
   return {
     async resolveInspectSelection(input, signal) {
       if (input.execution === "oci") {
@@ -76,8 +153,30 @@ export function createDefaultBenchmarkRuntimeHost(): BenchmarkRuntimeHost {
         binding,
       };
     },
-    createVenue(binding, options) {
-      return createLocalVenue({ ...options, ...(binding === undefined ? {} : { evaluationRuntime: binding }) });
+    createVenue(binding, venueOptions) {
+      const descriptor = binding?.adapterId === "inspect"
+        ? createOpenAIConnectionDescriptor(hostOptions.openAI, venueOptions.workspaceDir, repositoryRoot)
+        : { cleanup() {} };
+      try {
+        const venue = createLocalVenue({
+          ...venueOptions,
+          ...(binding === undefined ? {} : { evaluationRuntime: binding }),
+          ...(descriptor.path === undefined ? {} : { inspectHostConnectionDescriptor: descriptor.path }),
+        });
+        return {
+          ...venue,
+          async shutdown() {
+            try {
+              await venue.shutdown();
+            } finally {
+              descriptor.cleanup();
+            }
+          },
+        };
+      } catch (cause) {
+        descriptor.cleanup();
+        throw cause;
+      }
     },
   };
 }

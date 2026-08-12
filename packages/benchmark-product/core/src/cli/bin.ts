@@ -11,7 +11,9 @@
 import { runCli } from "./main.js";
 import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
 
-const runtimeHost = createDefaultBenchmarkRuntimeHost();
+const runtimeHost = createDefaultBenchmarkRuntimeHost({
+  openAI: { keyFilePath: () => process.env.BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE },
+});
 
 const result = await runCli(process.argv.slice(2), {
   cwd: process.cwd(),

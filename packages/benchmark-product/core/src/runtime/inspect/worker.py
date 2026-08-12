@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlparse
 # The selected project is an input, not worker state. Enforce this again in-process because task
 # loading can traverse Inspect-managed import paths before any adapter callback runs.
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+os.environ["HF_DATASETS_CACHE"] = "/tmp/jinn-hf-datasets"
 sys.dont_write_bytecode = True
 
 import inspect_ai
@@ -28,6 +29,21 @@ from inspect_ai.log import read_eval_log
 SUPPORTED_INSPECT_VERSION = "0.3.255"
 SUPPORTED_INSPECT_WHEEL_SHA256 = "958e773a8d0cc8873314e3f96d1143cbb4e0b9e4bacc2cbec6b4d5576ceecf2c"
 IGNORED_PROJECT_PARTS = {".git", ".inspect_ai", ".mypy_cache", ".pytest_cache", ".venv", "__pycache__"}
+
+
+def prepare_readonly_hf_dataset_cache() -> None:
+    """Keep prefetched bytes read-only while giving datasets a scratch lock/index root."""
+    source = Path(os.environ.get("HF_HOME", "")) / "datasets"
+    target = Path(os.environ["HF_DATASETS_CACHE"])
+    target.mkdir(parents=True, exist_ok=True)
+    if not source.is_dir():
+        return
+    for entry in source.iterdir():
+        if entry.name.endswith(".lock"):
+            continue
+        link = target / entry.name
+        if not link.exists() and not link.is_symlink():
+            link.symlink_to(entry)
 
 
 def sha256_file(path: Path) -> str:
@@ -136,8 +152,25 @@ def distribution_for_reference(reference: str) -> importlib.metadata.Distributio
     return importlib.metadata.distribution(sorted(candidates)[0])
 
 
-def resolve_source(project_dir: Path, reference: str, task_file: str) -> dict[str, Any]:
+def resolve_source(project_dir: Path, reference: str, task_file: str | None) -> dict[str, Any]:
     distribution = distribution_for_reference(reference)
+    if distribution is not None and task_file is None:
+        # Installed registry tasks such as inspect_evals/arc_easy expose no task_file through
+        # Inspect's public EvalSpec or registry metadata. Bind the complete executable
+        # distribution rather than inventing a source filename.
+        distribution_sha256 = distribution_content_sha256(distribution)
+        return {
+            "kind": "installed-package",
+            "path": f"{reference.split('/', 1)[0].replace('-', '_')}/",
+            "sha256": distribution_sha256,
+            "distribution": {
+                "name": distribution.metadata["Name"],
+                "version": distribution.version,
+                "sha256": distribution_sha256,
+            },
+        }
+    if task_file is None:
+        raise ValueError("Inspect task exposes no source file or installed distribution identity")
     raw_path = Path(task_file)
     if distribution is not None:
         distribution_root = Path(distribution.locate_file("")).resolve()
@@ -232,6 +265,8 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
         **require_runtime(),
         "adapterVersion": "1",
         "workerSha256": sha256_file(Path(__file__).resolve()),
+        "brokerSha256": sha256_file(Path("/opt/jinn/broker.py")) if Path("/opt/jinn/broker.py").is_file() else None,
+        "modelProviderSha256": sha256_file(Path("/opt/jinn/model_provider.py")) if Path("/opt/jinn/model_provider.py").is_file() else None,
     }
     project_dir = Path(config["projectDir"]).resolve()
     if not project_dir.is_dir():
@@ -288,10 +323,17 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     manifest = config["manifest"]
     arm = config["arm"]
     options = manifest.get("runOptions", {})
+    provider_records = None
+    provider = arm.get("provider")
+    if provider is not None:
+        sys.path.insert(0, "/opt/jinn")
+        import model_provider
+        model_provider.configure(config["cellKey"])
+        provider_records = model_provider.records
     kwargs: dict[str, Any] = {
         "task_args": manifest["task"]["args"],
         "model": arm["model"],
-        "model_args": arm.get("modelArgs", {}),
+        "model_args": {} if provider is not None else arm.get("modelArgs", {}),
         "model_roles": arm.get("modelRoles"),
         "epochs": 1,
         "max_tasks": 1,
@@ -305,6 +347,15 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             "jinn.repetition": config["repetition"],
         },
     }
+    if provider is not None:
+        # These are Inspect GenerateConfig fields (eval **kwargs), not ModelAPI constructor
+        # arguments. Keeping the two channels separate is required by Inspect's public API.
+        kwargs.update({
+            "reasoning_effort": provider["reasoningEffort"],
+            "max_tokens": provider["maxOutputTokens"],
+            "max_retries": 0,
+            "timeout": 120,
+        })
     option_names = {
         "sampleId": "sample_id",
         "maxSamples": "max_samples",
@@ -353,6 +404,10 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("OpenAI SDK package drifted during OCI execution")
         if actual_runtime["workerSha256"] != execution["workerSourceSha256"]:
             raise ValueError("OCI worker source drifted from the sealed runtime identity")
+        if sha256_file(Path("/opt/jinn/broker.py")) != execution["brokerSourceSha256"]:
+            raise ValueError("OCI broker source drifted from the sealed runtime identity")
+        if sha256_file(Path("/opt/jinn/model_provider.py")) != execution["modelProviderSourceSha256"]:
+            raise ValueError("OCI model provider source drifted from the sealed runtime identity")
         actual_runtime["execution"] = execution
     actual_components = resolved_selection_components(
         project_dir,
@@ -418,6 +473,18 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         "nativeLogSha256": sha256_file(native_log),
         "nativeLogBytes": native_log.stat().st_size,
     }
+    if provider_records is not None:
+        records = provider_records()
+        summary["provider"] = {
+            "surface": provider["surface"],
+            "resolvedModel": records[-1].get("resolvedModel") if records else None,
+            "callCount": len(records),
+            "usage": records[-1].get("usage") if records else None,
+            "terminalStatus": records[-1].get("status") if records else "no-call",
+            "eventDigest": records[-1].get("eventDigest") if records else None,
+            "brokerProtocol": "jinn.network/model-broker/1",
+            "brokerSourceSha256": manifest["runtime"]["execution"]["brokerSourceSha256"],
+        }
     (output_dir / "inspect-summary.json").write_text(
         json.dumps(summary, sort_keys=True, separators=(",", ":")), encoding="utf-8"
     )
@@ -429,6 +496,7 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "usage: worker.py probe|run [config.json]"}))
         return 2
     try:
+        prepare_readonly_hf_dataset_cache()
         config = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")) if len(sys.argv) == 3 else json.load(sys.stdin)
         # Task imports and model/scorer code may print. Keep stdout reserved for the bounded
         # worker protocol; the host captures and discards stderr rather than reflecting it.

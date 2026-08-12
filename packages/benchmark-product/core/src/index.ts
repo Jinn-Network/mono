@@ -71,6 +71,8 @@ export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary } from "./runtime/
 export { createDefaultBenchmarkRuntimeHost } from "./runtime/host-port.js";
 export type {
   BenchmarkRuntimeHost,
+  BenchmarkRuntimeHostOptions,
+  OpenAIHostConnection,
   InspectRuntimeSelectionRequest,
   InspectRuntimeSelectionResolution,
 } from "./runtime/host-port.js";
