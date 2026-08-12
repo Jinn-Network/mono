@@ -115,12 +115,32 @@ export interface EvaluationOperationalErrorOptions {
   readonly cause?: unknown;
 }
 
+/**
+ * Registry-symbol brand for `EvaluationOperationalError`. `Symbol.for` resolves through the
+ * cross-realm global symbol registry, so this key is identical no matter how many copies of this
+ * package are loaded.
+ *
+ * It exists because `instanceof` is NOT a sound test for this error. A deployment module is
+ * imported by absolute URL (`runtime.ts`'s `deploymentFromEnvironment`) and resolves its own
+ * dependency graph, so the adapter that throws routinely holds a DIFFERENT class object than the
+ * runtime that catches -- the classic dual-package hazard, and exactly how a live operator runs a
+ * deployment module. Live evidence (native gate round 25, 2026-08-12): a prediction adapter threw
+ * `EvaluationOperationalError{safeDetail:"the evaluation context carries no resolutionSnapshot"}`,
+ * `runtime.ts`'s `instanceof` said no, and the operator's only record of the refusal was
+ * `evaluation-harness: refused (evaluation-operational-failure)` -- the reason, which the error
+ * was carrying the whole time, never reached the log line, the attempt journal, or the audit row.
+ */
+export const EVALUATION_OPERATIONAL_ERROR_BRAND: unique symbol = Symbol.for(
+  "jinn.task-execution.evaluation-operational-error.v1",
+);
+
 /** Typed no-verdict path for provider failure, invalid output, timeout, cancellation, or crash. */
 export class EvaluationOperationalError extends Error {
   readonly canonicalCode: EvaluationFailureCode;
   readonly reason: EvaluationFailureReason;
   readonly recoveryAdvice: EvaluationRecoveryAdvice;
   readonly safeDetail: string;
+  readonly [EVALUATION_OPERATIONAL_ERROR_BRAND] = true;
 
   constructor(options: EvaluationOperationalErrorOptions) {
     super(options.safeDetail, { cause: options.cause });
@@ -130,6 +150,20 @@ export class EvaluationOperationalError extends Error {
     this.recoveryAdvice = options.recoveryAdvice;
     this.safeDetail = options.safeDetail;
   }
+}
+
+/**
+ * Brand-based recognition that survives the dual-package hazard `instanceof` does not. Use this
+ * anywhere a caught value's operational detail is about to be read; `instanceof` there silently
+ * discards the detail of every error thrown by a separately-resolved copy of this package.
+ */
+export function isEvaluationOperationalError(
+  value: unknown,
+): value is EvaluationOperationalError {
+  return typeof value === "object"
+    && value !== null
+    && (value as Record<PropertyKey, unknown>)[EVALUATION_OPERATIONAL_ERROR_BRAND] === true
+    && typeof (value as { readonly safeDetail?: unknown }).safeDetail === "string";
 }
 
 const AUTHORITY_OVERRIDE_FIELDS = [
