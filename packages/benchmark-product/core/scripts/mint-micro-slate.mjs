@@ -211,17 +211,57 @@ async function fetchRows() {
   return INSTANCES.map((id) => found.get(id));
 }
 
-function resolveImage(image) {
-  const output = execFileSync(
-    "docker",
-    ["buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"],
-    { encoding: "utf8", timeout: 120_000 },
-  );
-  const digest = JSON.parse(output).digest;
-  if (typeof digest !== "string" || !HEX_DIGEST.test(digest)) {
-    fail(`docker returned no sha256 manifest digest for ${image}`);
+/**
+ * Resolves a tag to its manifest digest via the public Docker Hub registry API, falling back to
+ * the docker CLI.
+ *
+ * The registry API is primary so a re-mint needs no Docker daemon: this fixture is re-minted on a
+ * schedule (once after the provenance cluster fix, again when the grading seam publishes its
+ * material contract), and a mint that only works on a machine with Docker running is a mint that
+ * silently stops being reproducible.
+ *
+ * The two sources were verified equivalent against this fixture's own docker-CLI-minted digests —
+ * all three matched exactly — so this is a substitution, not a redefinition of what is pinned.
+ */
+async function resolveImage(image) {
+  const [repository] = image.split(":");
+  const slash = repository.indexOf("/");
+  const digest = slash === -1
+    ? undefined
+    : await hubDigest(repository.slice(0, slash), repository.slice(slash + 1), image.slice(repository.length + 1) || "latest");
+  const resolved = digest ?? dockerDigest(image);
+  if (typeof resolved !== "string" || !HEX_DIGEST.test(resolved)) {
+    fail(`could not resolve a sha256 manifest digest for ${image}`);
   }
-  return { source: image, reference: pinnedReference(image, digest), digest };
+  return { source: image, reference: pinnedReference(image, resolved), digest: resolved };
+}
+
+async function hubDigest(namespace, repository, tag) {
+  try {
+    const url = `https://hub.docker.com/v2/repositories/${namespace}/${repository}/tags/${tag}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(45_000) });
+    if (!response.ok) return undefined;
+    const digest = (await response.json()).digest;
+    return typeof digest === "string" && HEX_DIGEST.test(digest) ? digest : undefined;
+  } catch {
+    return undefined; // Fall through to the docker CLI.
+  }
+}
+
+function dockerDigest(image) {
+  try {
+    const output = execFileSync(
+      "docker",
+      ["buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"],
+      { encoding: "utf8", timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    return JSON.parse(output).digest;
+  } catch (cause) {
+    fail(
+      `registry API did not resolve ${image} and the docker fallback failed `
+      + `(is the daemon running?): ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +276,7 @@ assertSlateAdmissible(parsed);
 const rows = [];
 const provenanceRows = [];
 for (const row of parsed) {
-  const pin = resolveImage(row.image_name);
+  const pin = await resolveImage(row.image_name);
   rows.push(toSweRebenchRow(row, pin));
   provenanceRows.push({
     instance_id: row.instance_id,

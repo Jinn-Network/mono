@@ -11,6 +11,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { resolveBenchmarkTaskProvenance } from "@jinn-network/benchmarking-records";
 import { SWE_REBENCH_PARSER } from "@jinn-network/task-execution-evaluator-adapters";
 import { describe, expect, test } from "vitest";
 import { convertSweBenchRows } from "./swebench.js";
@@ -49,6 +50,13 @@ interface MicroSlateProvenance {
 function readJson<T>(name: string): T {
   return JSON.parse(readFileSync(fileURLToPath(new URL(name, FIXTURE_DIR)), "utf8")) as T;
 }
+
+const CONVERT_OPTS = {
+  name: "P5 micro-slate",
+  description: "Three-task SWE-bench-shaped gate slate spanning three source repos.",
+  version: "0.1.0",
+  provenanceTimestamp: "2026-08-11T00:00:00Z",
+};
 
 const rows = (): MicroSlateRow[] => readJson<MicroSlateRow[]>("rows.json");
 const provenance = (): MicroSlateProvenance => readJson<MicroSlateProvenance>("provenance.json");
@@ -151,14 +159,39 @@ describe("P5 micro-slate fixture", () => {
   });
 
   test("converts to a sealed Benchmark over three distinct Task digests", () => {
-    const imported = convertSweBenchRows(rows(), {
-      name: "P5 micro-slate",
-      description: "Three-task SWE-bench-shaped gate slate spanning three source repos.",
-      version: "0.1.0",
-      provenanceTimestamp: "2026-08-11T00:00:00Z",
+    const converted = convertSweBenchRows(rows(), CONVERT_OPTS);
+    expect(converted.imported.tasks).toHaveLength(3);
+    expect(new Set(converted.imported.tasks.map((task) => task.digest)).size).toBe(3);
+    expect(converted.imported.benchmark.record.items).toHaveLength(3);
+    // P0-interop half (b): the product retains each row's EvaluationSpec bytes, keyed by the
+    // digest its Task references, because the venue's evaluation path resolves them that way.
+    expect(converted.evaluationSpecs).toHaveLength(3);
+  });
+
+  test("resolves to three repo-level provenance clusters, one per source repo", () => {
+    // This is the post-cluster-fix mint. Before that fix the provenance source carried
+    // `@<base_commit>`, so three tasks across three repos produced three keys that merely LOOKED
+    // correct while every real slate degenerated to one cluster per task. Asserting the keys are
+    // repo-level — and carry no commit — is what makes this fixture demonstrate the fix rather
+    // than coincidentally agree with it.
+    const converted = convertSweBenchRows(rows(), CONVERT_OPTS);
+    const byDigest = new Map(converted.imported.tasks.map((task) => [task.digest, task.bytes]));
+    const clusters = converted.imported.tasks.map((task) => {
+      const resolved = resolveBenchmarkTaskProvenance(task.digest, (digest) =>
+        byDigest.get(digest as `sha256:${string}`));
+      if (!resolved.ok) throw new Error(`provenance did not resolve: ${resolved.reason}`);
+      return resolved.provenance.cluster;
     });
-    expect(imported.tasks).toHaveLength(3);
-    expect(new Set(imported.tasks.map((task) => task.digest)).size).toBe(3);
-    expect(imported.benchmark.record.items).toHaveLength(3);
+
+    expect(new Set(clusters.map((cluster) => cluster.value)).size).toBe(3);
+    for (const cluster of clusters) {
+      expect(cluster.tag).toBe("source");
+      expect(cluster.value).not.toContain("@");
+    }
+    expect(clusters.map((cluster) => cluster.value).sort()).toEqual([
+      "https://github.com/gerlero/foamlib",
+      "https://github.com/python-wheel-build/fromager",
+      "https://github.com/qBraid/pyqasm",
+    ]);
   });
 });

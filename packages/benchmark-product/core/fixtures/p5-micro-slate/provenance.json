@@ -3,7 +3,7 @@
   "dataset": "nebius/SWE-rebench-leaderboard",
   "config": "default",
   "split": "test",
-  "mintedAt": "2026-08-11T17:25:31.226Z",
+  "mintedAt": "2026-08-11T23:58:13.629Z",
   "timeoutSeconds": 1800,
   "exclusionRules": {
     "maxFailToPass": 10,
