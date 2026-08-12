@@ -141,6 +141,7 @@ describe("cancel mid-run on the real local venue (BP-22)", () => {
       // the headline's n. Expired cancellation-drain cells remain in completeness/attrition but
       // never become implicit failures in a score denominator.
       // P4b Task 5: `headline` is optional on ClaimPackage; this lifecycle is wilson-only.
+      expect(claim.headline).toBeDefined();
       for (const arm of Object.keys(matrix.attrition.perArm)) {
         const judgedForArm = matrix.cells.filter((cell) => cell.armId === arm && cell.outcome === "judged").length;
         expect(claim.headline?.[arm]?.n, arm).toBe(judgedForArm);

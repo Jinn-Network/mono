@@ -358,6 +358,7 @@ describe("strict-agreement — manufactured dissent reduces to conflicted (AC2, 
       expect(claim.assurance.resolved.verdictRule).toBe("unanimous");
       // P4b Task 5: `headline` is optional on ClaimPackage (paired-delta carries `comparison`
       // instead); this lifecycle is wilson-only, so it is always present here.
+      expect(claim.headline).toBeDefined();
       for (const armId of ["baseline", "sample-uniform"]) {
         expect(claim.headline?.[armId]?.n, armId).toBe(0);
       }
@@ -429,6 +430,7 @@ describe("evaluator-panel with overrides {minVerdicts: 3} — majority through r
       expect(claim.assurance.resolved.verdictRule).toBe("majority");
       expect(claim.conflicted.count).toBe(0);
       // P4b Task 5: `headline` is optional on ClaimPackage; this lifecycle is wilson-only.
+      expect(claim.headline).toBeDefined();
       for (const armId of ["baseline", "sample-uniform"]) {
         expect(claim.headline?.[armId]?.n, armId).toBe(3);
         expect(Number(claim.headline?.[armId]?.passRate), armId).toBe(1);
