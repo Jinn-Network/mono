@@ -241,18 +241,12 @@ if (dockerPath === undefined || dockerArgs[0] !== "run") {
     process.stderr.write("OCI runner requires exact container and image identities\n");
     process.exitCode = 2;
   } else {
+    const terminationSignals = ["SIGTERM", "SIGINT", "SIGHUP"];
     let terminating = false;
     let settled = false;
     let terminationSignal;
     let broker;
-    try {
-      const connection = readConnection(process.env.JINN_INSPECT_HOST_CONNECTION_DESCRIPTOR);
-      broker = setupBroker(dockerPath, dockerArgs, containerName, imageDigest, connection);
-    } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : "unknown failure";
-      process.stderr.write(`OCI credential broker preflight failed: ${detail}\n`);
-      process.exit(1);
-    }
+    let child;
 
     const cleanup = () => {
       docker(dockerPath, ["rm", "--force", containerName]);
@@ -260,42 +254,60 @@ if (dockerPath === undefined || dockerArgs[0] !== "run") {
         cleanupBroker(dockerPath, broker);
       }
     };
-    const child = spawn(dockerPath, dockerArgs, { stdio: "inherit", env: dockerEnvironment });
+    const finishTermination = () => {
+      cleanup();
+      for (const signal of terminationSignals) process.removeAllListeners(signal);
+      process.kill(process.pid, terminationSignal ?? "SIGTERM");
+    };
     const terminate = (signal) => {
       if (terminating || settled) return;
       terminating = true;
       terminationSignal = signal;
-      child.kill(signal);
+      child?.kill(signal);
       cleanup();
+      if (child === undefined) finishTermination();
     };
 
-    const finishTermination = () => {
-      cleanup();
-      for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.removeAllListeners(signal);
-      process.kill(process.pid, terminationSignal ?? "SIGTERM");
-    };
+    // Cancellation can be requested as soon as the supervisor publishes a live attempt. Own the
+    // signals before any broker setup or Docker spawn so that startup cancellation cannot take the
+    // default Node signal path and strand a container created by the already-starting Docker CLI.
+    for (const signal of terminationSignals) process.on(signal, () => terminate(signal));
 
-    for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => terminate(signal));
-    child.once("error", (error) => {
-      settled = true;
+    try {
+      const connection = readConnection(process.env.JINN_INSPECT_HOST_CONNECTION_DESCRIPTOR);
+      broker = setupBroker(dockerPath, dockerArgs, containerName, imageDigest, connection);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : "unknown failure";
+      process.stderr.write(`OCI credential broker preflight failed: ${detail}\n`);
       cleanup();
-      if (terminating) {
-        finishTermination();
-        return;
-      }
-      process.stderr.write(`OCI runtime could not start: ${error instanceof Error ? error.name : "unknown error"}\n`);
+      for (const signal of terminationSignals) process.removeAllListeners(signal);
       process.exitCode = 1;
-    });
-    child.once("exit", (code, signal) => {
-      settled = true;
-      cleanup();
-      if (terminating) {
-        finishTermination();
-        return;
-      }
-      if (signal !== null) process.kill(process.pid, signal);
-      else process.exitCode = code ?? 1;
-    });
+    }
+    if (process.exitCode === undefined) {
+      child = spawn(dockerPath, dockerArgs, { stdio: "inherit", env: dockerEnvironment });
+      child.once("error", (error) => {
+        settled = true;
+        cleanup();
+        if (terminating) {
+          finishTermination();
+          return;
+        }
+        for (const signal of terminationSignals) process.removeAllListeners(signal);
+        process.stderr.write(`OCI runtime could not start: ${error instanceof Error ? error.name : "unknown error"}\n`);
+        process.exitCode = 1;
+      });
+      child.once("exit", (code, signal) => {
+        settled = true;
+        cleanup();
+        if (terminating) {
+          finishTermination();
+          return;
+        }
+        for (const terminationSignalName of terminationSignals) process.removeAllListeners(terminationSignalName);
+        if (signal !== null) process.kill(process.pid, signal);
+        else process.exitCode = code ?? 1;
+      });
+    }
   }
 }
 }
