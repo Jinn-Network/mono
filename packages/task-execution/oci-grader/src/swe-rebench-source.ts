@@ -60,6 +60,12 @@ function transitionIdentities(value: unknown, label: string): string[] {
   const identities = stringArray(value, label);
   const seenNormalized = new Set<string>();
   for (const identity of identities) {
+    // The frozen grader's Python `re` patterns give `\d`, `\s`, and `\b` Unicode semantics,
+    // while JavaScript does not. Admitting only ASCII identities makes the host-side twin exact
+    // over its entire input domain without changing the frozen measuring-instrument bytes.
+    if (!/^[\x00-\x7f]*$/u.test(identity)) {
+      refuse(`${label} contains a non-ASCII transition identity`);
+    }
     const normalized = normalizeSweRebenchTestIdentity(identity);
     if (normalized.length === 0) {
       refuse(`${label} contains a transition identity that is empty after grader normalization`);

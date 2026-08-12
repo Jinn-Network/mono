@@ -301,6 +301,49 @@ describe("sweRebenchOciGraderReportSource", () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
+  it("refuses an Arabic-Indic timing digit before Python and JavaScript regex semantics can diverge", async () => {
+    const unicodeRow = { ...ROW, FAIL_TO_PASS: ["tests/test_a.py::test_a [١s]"] };
+    const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+    const { work, request: input } = request(specification({}, unicodeRow));
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await expect(source.read(input)).rejects.toThrow(/non-ASCII transition identity/u);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("refuses Unicode whitespace and word-boundary representatives before normalization", async () => {
+    const unicodeRows = [
+      { ...ROW, FAIL_TO_PASS: ["tests/test_a.py::test_a\u00a0[1s]"] },
+      { ...ROW, FAIL_TO_PASS: ["tests/test_a.py::test_a in 1 secé"] },
+    ];
+    for (const row of unicodeRows) {
+      const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+      const { work, request: input } = request(specification({}, row));
+      const source = sweRebenchOciGraderReportSource({
+        attemptWorkRoot: () => work,
+        runPinnedOciGraderForTesting: runner,
+      } as never);
+
+      await expect(source.read(input)).rejects.toThrow(/non-ASCII transition identity/u);
+      expect(runner).not.toHaveBeenCalled();
+    }
+  });
+
+  it("continues to grade ordinary ASCII transition identities", async () => {
+    const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+    const { work, request: input } = request();
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await expect(source.read(input)).resolves.toBeDefined();
+    expect(runner).toHaveBeenCalledOnce();
+  });
+
   it("refuses a specification carrying no row material", async () => {
     const { work, request: input } = request(specification({ testMaterial: [] }));
     const source = sweRebenchOciGraderReportSource({
