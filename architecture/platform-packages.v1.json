@@ -133,7 +133,7 @@
   },
   "releaseGroups": {
     "platform-v1": {
-      "expectedPackageCount": 51,
+      "expectedPackageCount": 52,
       "publishPolicies": [
         "canary-only"
       ],
@@ -3397,6 +3397,49 @@
         "fixtures": [
           "fixtures"
         ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-oci-grader",
+      "path": "packages/task-execution/oci-grader",
+      "domain": "task-execution",
+      "role": "host-owned OCI grader execution",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
         "conformance": []
       },
       "supersedes": [],

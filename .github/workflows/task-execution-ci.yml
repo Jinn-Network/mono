@@ -620,8 +620,74 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  oci-grader:
+    needs: [foundation, backend, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness, evaluator-adapters]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all Task Execution distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: task-execution-*-dist
+          path: .task-execution-dist
+      - name: Place Task Execution distributions
+        run: |
+          for package in protocol backend profiles evaluation-harness evaluator-adapters; do
+            mkdir -p "packages/task-execution/${package}/dist"
+            cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/${package}/dist/"
+          done
+          for package in supervisor workspace launchers; do
+            mkdir -p "packages/task-execution/backend-local/${package}/dist"
+            cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/backend-local/${package}/dist/"
+          done
+          mkdir -p packages/task-execution/backend-local/assembly/dist
+          cp -R ".task-execution-dist/task-execution-backend-local-dist/." packages/task-execution/backend-local/assembly/dist/
+      - name: Restore executable bit on native custody binaries
+        run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable)
+          (cd packages/task-execution/backend && yarn install --immutable)
+          (cd packages/task-execution/profiles && yarn install --immutable)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable)
+      - name: Build evidence contract packages from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+      - name: Verify Task Execution OCI Grader
+        working-directory: packages/task-execution/oci-grader
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution OCI Grader distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-oci-grader-dist
+          path: packages/task-execution/oci-grader/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, foundation, backend, testing, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness, evaluator-adapters]
+    needs: [architecture, foundation, backend, testing, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness, evaluator-adapters, oci-grader]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -638,6 +704,7 @@ jobs:
           BACKEND_LOCAL_RESULT: ${{ needs.backend-local.result }}
           EVALUATION_HARNESS_RESULT: ${{ needs.evaluation-harness.result }}
           EVALUATOR_ADAPTERS_RESULT: ${{ needs.evaluator-adapters.result }}
+          OCI_GRADER_RESULT: ${{ needs.oci-grader.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
@@ -650,7 +717,8 @@ jobs:
             "$LAUNCHERS_RESULT" \
             "$BACKEND_LOCAL_RESULT" \
             "$EVALUATION_HARNESS_RESULT" \
-            "$EVALUATOR_ADAPTERS_RESULT"; do
+            "$EVALUATOR_ADAPTERS_RESULT" \
+            "$OCI_GRADER_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -670,7 +738,10 @@ jobs:
           path: .task-execution-dist
       - name: Place package distributions
         run: |
-          for package in protocol backend testing profiles evaluation-harness evaluator-adapters; do
+          # Every package the packed-types guard packs needs its dist staged here: `npm pack
+          # --ignore-scripts` skips `prepack`, so a package with no dist/ packs an empty tarball
+          # and the consumer fails with TS2307 instead of a missing-build error.
+          for package in protocol backend testing profiles evaluation-harness evaluator-adapters oci-grader; do
             mkdir -p "packages/task-execution/${package}/dist"
             cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/${package}/dist/"
           done
