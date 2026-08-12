@@ -129,14 +129,18 @@ function solveProvisionerContract(sealedTaskBytes: Uint8Array): ProvisionerContr
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
-      // Both solve launchers (prediction-v1-baseline, sample-uniform) write the Task's sole
-      // declared output to out/prediction.json and a structured-output envelope alongside it.
-      // Neither name is the Task's declared output name ("prediction"), and the structured
-      // envelope must not appear in the delivered manifest at all (it is backend/host metadata,
-      // never a Task output) -- so both are normalized before the platform's own `harvest()` walks
-      // out/. Moving structured-output.json out of out/ before `readResultEnvelope` runs is safe:
-      // with the file absent it returns `undefined`, and an exit-0 process still interprets as
-      // `delivered` (`@jinn-network/task-execution-launchers`'s `interpretResult`).
+      // This venue's own `sample-uniform` launcher writes the Task's sole declared output to
+      // out/prediction.json and a structured-output envelope alongside it. Neither name is the
+      // Task's declared output name ("prediction"), and the structured envelope must not appear in
+      // the delivered manifest at all (it is backend/host metadata, never a Task output) -- so both
+      // are normalized before the platform's own `harvest()` walks out/. Moving
+      // structured-output.json out of out/ before `readResultEnvelope` runs is safe: with the file
+      // absent it returns `undefined`, and an exit-0 process still interprets as `delivered`
+      // (`@jinn-network/task-execution-launchers`'s `interpretResult`).
+      //
+      // `prediction-v1-baseline` no longer needs the rename: since #39 it writes out/prediction
+      // directly, which is what every consumer of a signed Delivery already expected. Both guards
+      // below are existence-checked, so that launcher simply falls through them.
       const structuredOutputPath = join(paths.out, "structured-output.json");
       if (existsSync(structuredOutputPath)) {
         await rename(structuredOutputPath, join(paths.meta, "structured-output.json"));
@@ -218,6 +222,11 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
         throw new Error("benchmark-product local venue harvest ran before setup registered evaluation-cell materials");
       }
       const verdictPath = join(paths.out, "verdict");
+      // #39b(b): the same unconditional read the daemon's evaluator provisioner carried. A harness
+      // that refused its subject exits 65 having written no verdict, and that exit code already
+      // classifies the failure; letting the read's ENOENT escape harvest replaces that
+      // classification with an infrastructure blame. Nothing to seal means nothing to seal.
+      if (!existsSync(verdictPath)) return workspaceHarvest(paths, declaredOutputs);
       const statementBytes = new Uint8Array(await readFile(verdictPath));
       const envelopeBytes = await sealVerdictStatement({
         statementBytes,

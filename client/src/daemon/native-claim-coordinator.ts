@@ -4,6 +4,7 @@ import type { NativeDiscoveryQueuedCard } from './native-discovery.js';
 import type { NativeClaimDecision } from './native-claim-policy.js';
 import {
   NativeOperatorStateRepository,
+  NativeWorkerLeaseError,
   type NativeClaimObservation,
   type NativeEngagementRow,
   type NativeOperationRow,
@@ -73,27 +74,41 @@ export class NativeClaimCoordinator {
   }) {}
 
   startWorker(): void {
-    this.input.state.acquireLease({
+    this.input.state.acquireLease(this.leaseScope());
+    this.workerStarted = true;
+  }
+
+  private leaseScope() {
+    return {
       role: 'solver',
       chainId: this.input.chain.chainId,
       coordinator: this.input.chain.taskCoordinator,
       operatorAgent: this.input.operatorAgent,
       ownerId: this.input.worker.ownerId,
       ttlMs: this.input.worker.ttlMs,
-    });
-    this.workerStarted = true;
+    } as const;
   }
 
   private requireLiveWorker(): void {
     if (!this.workerStarted) throw new Error('native claim coordinator has not acquired its worker lease');
-    this.input.state.renewLease({
-      role: 'solver',
-      chainId: this.input.chain.chainId,
-      coordinator: this.input.chain.taskCoordinator,
-      operatorAgent: this.input.operatorAgent,
-      ownerId: this.input.worker.ownerId,
-      ttlMs: this.input.worker.ttlMs,
-    });
+    const scope = this.leaseScope();
+    try {
+      this.input.state.renewLease(scope);
+    } catch (error) {
+      if (!(error instanceof NativeWorkerLeaseError)) throw error;
+      // #37: a renew refusal means our own row lapsed — one work tick outran the lease TTL (a
+      // stalled RPC fallback chain is enough) — and `renewLease`'s `expires_at > now` guard can
+      // never match again. Without a re-acquire this worker is wedged for the life of the process:
+      // `workerStarted` stays true, so every later tick takes this same branch and throws, and only
+      // a daemon restart clears it. Live gate round 22 lost operator B for 320 consecutive ticks.
+      //
+      // This is NOT a weakening of mutual exclusion. `acquireLease` refuses whenever a LIVE lease is
+      // held by a DIFFERENT owner, so a scope another worker legitimately took over during our lapse
+      // still throws here and the tick still fails retryably, exactly as today. Only an expired
+      // lease — or one still recorded under our own owner id — is resumed, and neither has another
+      // writer behind it.
+      this.input.state.acquireLease(scope);
+    }
   }
 
   renewWorker(): void {

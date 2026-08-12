@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import type { PublicAssetInput } from "./assets.js";
 import { buildPublicAssets } from "./assets.js";
@@ -381,5 +382,35 @@ describe("BP-41 public report assets", () => {
     }
     expect(text(assets["badge.svg"])).toContain(SHA.report);
     expect(text(assets["social-card.svg"])).toContain(SHA.report);
+  });
+});
+
+/** P4b Task 4 (`docs/superpowers/plans/demo-report-1/2026-08-12-P4b-implementation-plan.md`): a
+ * golden byte-equality guard that lands BEFORE any commit touches `assets.ts`, so later tasks that
+ * teach this builder to dispatch on method cannot silently drift a single byte of wilson's own
+ * output. `materializePublicBundle` (`bundle/materialize.ts`) writes exactly the bytes this
+ * builder returns, with no further transformation, so decoding to UTF-8 text and comparing
+ * against the committed golden is byte-for-byte equivalent to what production writes. */
+function readGolden(name: string): string {
+  return readFileSync(new URL(`./__fixtures__/wilson-golden/${name}`, import.meta.url), "utf8");
+}
+
+function wilsonGoldenAssetInput(): PublicAssetInput {
+  return fixture();
+}
+
+const WILSON_GOLDEN_ASSET_NAMES = ["index.html", "badge.svg", "social-card.svg", "README.md", "share.txt"];
+
+describe("Task 4 golden guard: wilson bundle asset byte-equality", () => {
+  test("wilson bundle assets serialize byte-identically to the committed goldens", () => {
+    const assets = buildPublicAssets(wilsonGoldenAssetInput());
+    // Assert the key set itself first: iterating `Object.entries(assets)` alone would silently
+    // pass if `buildPublicAssets` ever stopped emitting one of these assets -- a dropped key is
+    // simply never visited by the loop below, so the guard must check the set is complete, not
+    // just that whatever is present matches.
+    expect(Object.keys(assets).sort()).toEqual([...WILSON_GOLDEN_ASSET_NAMES].sort());
+    for (const [name, bytes] of Object.entries(assets)) {
+      expect(text(bytes), name).toBe(readGolden(name));
+    }
   });
 });

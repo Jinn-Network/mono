@@ -43,6 +43,7 @@ const DRAFT_SPEC_FIELD_NAMES = new Set([
   "budget",
   "venue",
   "evaluationRuntime",
+  "analysis",
 ]);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

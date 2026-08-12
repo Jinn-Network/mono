@@ -1,15 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { codeOnly } from './_support/source-text.js';
 
-const workLoop = readFileSync(
+const workLoop = codeOnly(readFileSync(
   fileURLToPath(new URL('../../src/daemon/work-loop.ts', import.meta.url)),
   'utf8',
-);
-const composition = readFileSync(
+));
+const composition = codeOnly(readFileSync(
   fileURLToPath(new URL('../../src/daemon/composition-root.ts', import.meta.url)),
   'utf8',
-);
+));
 
 function nativeMethod(source: string): string {
   const start = source.indexOf('private async processNativeCard');
@@ -19,6 +20,17 @@ function nativeMethod(source: string): string {
 }
 
 describe('Phase B native claim architecture boundaries', () => {
+  it('ignores dependency markers in prose without hiding executable fallback code', () => {
+    const prose = codeOnly([
+      '/** runPipeline and acceptLegacyCards are historical terms. */',
+      '// capabilityMatch: async () => ({ ok: true })',
+      'const safe = true;',
+    ].join('\n'));
+    expect(prose).not.toMatch(/runPipeline|synthesizeLegacy|capabilityMatch|acceptLegacyCards/u);
+    expect(codeOnly('/** safe */\nrunPipeline();'))
+      .toMatch(/runPipeline|synthesizeLegacy|capabilityMatch|acceptLegacyCards/u);
+  });
+
   it('keeps native ingestion on B5 claim coordination and outside legacy pipeline/bridges', () => {
     const source = nativeMethod(workLoop);
     expect(source).toContain('nativeClaimCoordinator!.process');

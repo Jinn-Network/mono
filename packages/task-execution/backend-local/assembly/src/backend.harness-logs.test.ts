@@ -177,11 +177,20 @@ describe("harness stdio capture (#2538 F5)", () => {
 
   /**
    * The capture must not reshape the signed Delivery. `harvest` collects `logs/` into the
-   * manifest, so without the exclusion every Delivery on every attempt would suddenly publish
-   * whatever the harness happened to print, as a content-addressed output. Backend state stays
-   * backend state; a log the HARNESS itself writes under `logs/` is delivered exactly as before.
+   * manifest, so without the exclusion the backend's own stdio capture would reach the manifest
+   * at all -- and whatever the harness happened to print would be content-addressed into backend
+   * state on every attempt. That exclusion is what this test guards, and it still holds: the
+   * stdio capture appears in neither the manifest nor the Delivery.
+   *
+   * What the harness itself writes under `logs/` is still collected into the harvest manifest, and
+   * so still reaches the attempt record and the evidence receipt. It is NOT declared as a Delivery
+   * output, because the Task never declared it (#39): a Delivery declaring a name outside the
+   * Task's `outputs` is refused wholesale by the evaluator's `verifyEvaluationSubject`, so
+   * publishing an incidental log there did not add an artifact -- it made the whole Delivery
+   * unevaluatable. The signed Delivery answers the requester's contract; the manifest keeps the
+   * full record.
    */
-  test("the stdio capture is never published as a Delivery output, and harness-written logs still are", async () => {
+  test("the stdio capture is never published as a Delivery output, and harness-written logs stay out of the Task contract", async () => {
     const root = await mkdtemp(join(tmpdir(), "jinn-harness-stdio-ok-"));
     roots.push(root);
     const backend = fixture(root, [
@@ -208,9 +217,15 @@ describe("harness stdio capture (#2538 F5)", () => {
       outputs: readonly { name: string }[];
     };
     const names = delivery.outputs.map(({ name }) => name).sort();
-    expect(names).toStrictEqual(["logs/harness-authored.log", "patch"]);
+    // Exactly the Task's declaration -- see `documents()` above.
+    expect(names).toStrictEqual(["patch"]);
     expect(names).not.toContain(`logs/${HARNESS_STDOUT_LOG}`);
     expect(names).not.toContain(`logs/${HARNESS_STDERR_LOG}`);
+    expect(names).not.toContain("logs/harness-authored.log");
+
+    // The harness's own log is still COLLECTED and retained -- narrowing the Delivery's
+    // declarations does not delete anything the backend keeps.
+    expect(await readFile(join(attemptRoot, "logs", "harness-authored.log"), "utf8")).toBe("mine");
   }, 30_000);
 });
 
