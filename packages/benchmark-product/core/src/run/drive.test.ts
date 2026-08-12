@@ -455,6 +455,58 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
     expect(entries.find((entry) => entry.kind === "delivery")).toBeDefined();
   });
 
+  test("async evaluation preparation failure -> one could-not-grade terminal per evaluator leg", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const solveDeliveryDigestHex = "d".repeat(64);
+    const predictionArtifactHex = "e".repeat(64);
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: { "att-solve-1": [fakeDeliveryRef("att-solve-1", solveDeliveryDigestHex)] },
+      deliveryBytesByDigest: {
+        [`sha256:${solveDeliveryDigestHex}`]: utf8({
+          outputs: [{ name: "prediction", digest: { sha256: predictionArtifactHex } }],
+        }),
+      },
+      artifactBytesByDigest: { [predictionArtifactHex]: utf8({ probabilityYes: "0.5" }) },
+    });
+    const failingVenue = fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }, 2);
+    failingVenue.prepareEvaluationCell = async () => {
+      throw new Error("pinned grader image is unavailable");
+    };
+
+    await driveCellEvents(
+      {
+        workspaceDir,
+        draftId: "draft-1",
+        venue: failingVenue,
+        backend,
+        runSha256: "r".repeat(64),
+        owner: "urn:uuid:owner",
+        cellWindowMs: 3_600_000,
+        minVerdicts: 2,
+        liveClock: clock,
+      },
+      (async function* () {
+        yield { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" } as CellStatusEvent;
+      })(),
+    );
+
+    expect(readRunJournalEntries(workspaceDir, "draft-1").filter((entry) => entry.kind === "evaluation"))
+      .toEqual([
+        expect.objectContaining({
+          evaluationTerminal: "could-not-grade",
+          detail: "pinned grader image is unavailable",
+          evalIndex: 1,
+        }),
+        expect.objectContaining({
+          evaluationTerminal: "could-not-grade",
+          detail: "pinned grader image is unavailable",
+          evalIndex: 2,
+        }),
+      ]);
+  });
+
   test("evaluation submission rejected by the backend -> could-not-grade with the backend's detail", async () => {
     const clock = makeClock();
     const { taskSha256 } = storeSubjectTaskAndSpec();

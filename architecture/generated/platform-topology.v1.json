@@ -92,6 +92,11 @@
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
+        "to": "@jinn-network/task-execution-oci-grader"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
         "to": "@jinn-network/task-execution-profiles"
       },
       {
@@ -42075,6 +42080,7 @@
           "@jinn-network/task-execution-evaluation-harness",
           "@jinn-network/task-execution-evaluator-adapters",
           "@jinn-network/task-execution-launchers",
+          "@jinn-network/task-execution-oci-grader",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
           "@jinn-network/task-execution-supervisor",

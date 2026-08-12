@@ -38,7 +38,8 @@ const PRODUCT_PACKAGES = [
 // `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor`
 // + `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
 // sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters`
-// (the real evaluation leg), and `trust-core` (DSSE verdict signing). BP-13 (Report production/
+// (the real evaluation leg), and `trust-core` (DSSE verdict signing). Demo-1 P3b adds the
+// `task-execution-oci-grader` product consumer edge. BP-13 (Report production/
 // verification) added `benchmarking-aggregate` for `produceReport`/`verifyReport` and the §9.2
 // method registry. BP-30 registered the second family member, `web`; BP-31 adds its sole direct
 // production Jinn edge, `@jinn-network/benchmark-product-core`. The matching portal resolutions
@@ -62,6 +63,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-evaluation-harness',
       '@jinn-network/task-execution-evaluator-adapters',
       '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-oci-grader',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
       '@jinn-network/task-execution-supervisor',
@@ -107,6 +109,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-evaluation-harness',
       '@jinn-network/task-execution-evaluator-adapters',
       '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-oci-grader',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
       '@jinn-network/task-execution-supervisor',
@@ -135,6 +138,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
   ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
   ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
+  ['@jinn-network/task-execution-oci-grader', join(root, 'packages', 'task-execution', 'oci-grader')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
