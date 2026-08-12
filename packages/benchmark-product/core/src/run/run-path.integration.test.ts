@@ -56,7 +56,8 @@ import { SOLVE_HARNESS_PINS, type LocalVenue } from "../venue/venue.js";
 import { resultsArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import type { ProxiedBackend } from "./drive.js";
-import { readRunJournalEntries } from "./journal.js";
+import { readRunJournalEntries, type RunJournalEntry } from "./journal.js";
+import { parseRunPinningEvidence } from "./pinning-evidence.js";
 
 const SIX_FRACTION_DIGITS = /^-?\d+\.\d{6}$/;
 
@@ -538,6 +539,21 @@ describe("official run path — public operations only, real local venue (AC2)",
         expect(entry).toMatchObject({
           evaluator: "urn:jinn:benchmark-product:local-venue:evaluator-1",
           evalIndex: 1,
+        });
+      }
+      const solveAcceptances = journalEntries.filter(
+        (entry): entry is Extract<RunJournalEntry, { kind: "submission-accepted" }> =>
+          entry.kind === "submission-accepted" && entry.leg === "solve",
+      );
+      expect(solveAcceptances).toHaveLength(6);
+      for (const entry of solveAcceptances) {
+        expect(entry.pinningEvidenceSha256, entry.cellKey).toMatch(/^[a-f0-9]{64}$/u);
+        const evidence = parseRunPinningEvidence(
+          getSealedBytes(workspaceDir, entry.pinningEvidenceSha256!),
+        );
+        expect(evidence.admission, entry.cellKey).toMatchObject({
+          ready: true,
+          checkedRequirementsDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
         });
       }
 

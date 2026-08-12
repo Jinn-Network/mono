@@ -44,11 +44,12 @@ weaker fact into `match`:
   means nothing else was runnable. That is a real match, and it is vacuous — the identity
   design's per-axis *strength* is where the vacuity is disclosed, not the Matrix tri-state,
   which answers the different question of whether the pin was honored.
-- **A gate receipt is bound to the map it was issued against.** When
-  `LocalRunPinningCheck.checkedRequirementsDigest` is present and disagrees with the JCS
-  digest of the pinning being graded, the receipt is about some other map: every enforced
-  axis loses its admission leg. It does not suppress a disagreeing observation — hiding an
-  observed mismatch would be a worse error than losing a match.
+- **A gate receipt is bound to the map it was issued against.**
+  `LocalRunPinningCheck.checkedRequirementsDigest` must equal the JCS digest of the pinning
+  being graded. A missing digest is not identity proof; a different digest is proof about some
+  other map. In either case every enforced axis loses its admission leg. This does not suppress
+  a disagreeing observation — hiding an observed mismatch would be a worse error than losing a
+  match.
 - **An id-only harness pin can never reach `match`.** The local gate compares harness
   versions and digests, never ids, so its acceptance of `{id}` alone says nothing about what
   ran. (The gate's silence on id is an upstream defect, filed separately; this is the

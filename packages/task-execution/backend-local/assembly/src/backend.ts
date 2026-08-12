@@ -129,7 +129,11 @@ import {
 } from "./evidence-join.js";
 import { materializeSecretForwards, type SecretForwardResolver } from "./secret-forwards.js";
 import { materializeHostSecretForwards, type HostSecretResolver } from "./host-secret-forwards.js";
-import { type LocalLauncherDeployment, verifyRunPinning } from "./pinning.js";
+import {
+  type LocalLauncherDeployment,
+  type RunPinningCheck,
+  verifyRunPinning,
+} from "./pinning.js";
 import { ObservationWatchRegistry } from "./watch-registry.js";
 
 // Core requirement comparison classes (profiles §5.1 / program §7.3). Profile-added entries
@@ -675,6 +679,8 @@ interface StoredSubmission {
   readonly parsed: SubmissionRecord;
   readonly taskDigest: `sha256:${string}`;
   readonly attempt: AttemptUri;
+  /** Exact result of the deployment gate that admitted this Submission, when one ran. */
+  readonly runPinning?: RunPinningCheck;
 }
 
 interface AttemptMeta {
@@ -695,6 +701,8 @@ interface PersistedSubmission {
   readonly submission: SubmissionUri;
   readonly requester: string;
   readonly idempotencyKey: string;
+  /** Optional for durable entries accepted before truthful pinning evidence was introduced. */
+  readonly runPinning?: RunPinningCheck;
 }
 
 interface PersistedAttempt extends AttemptMeta {}
@@ -1115,6 +1123,18 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     return this.capabilitiesValue();
   }
 
+  /**
+   * Returns the exact run-pinning gate result stored with an accepted Submission.
+   *
+   * This is a concrete local-backend evidence seam, deliberately not part of the frozen generic
+   * `TaskExecutionBackend`/`SubmissionAck` contract. Unknown, rejected, legacy, or deployments
+   * without a verification gate return `undefined`; callers must never manufacture a result.
+   */
+  pinningEvidenceForSubmission(ref: SubmissionUri): RunPinningCheck | undefined {
+    const evidence = this.submissionsByUri.get(ref)?.runPinning;
+    return evidence === undefined ? undefined : { ...evidence };
+  }
+
   private preflightLaunchers(request: PreflightRequest): readonly LauncherContract[] {
     const harness = requestedInventoryValue(request.requirements?.["harness"]);
     if (request.taskProfile === undefined) {
@@ -1405,6 +1425,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     };
     let selectedLauncher: LauncherContract;
     let preplanned: LaunchPlan;
+    let runPinning: RunPinningCheck | undefined;
     try {
       selectedLauncher = this.selectLauncher(view);
       const deployment = this.config.launcherDeployments?.[selectedLauncher.id];
@@ -1417,14 +1438,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         });
       }
       if (deployment !== undefined) {
-        const pinning = await verifyRunPinning(
+        runPinning = await verifyRunPinning(
           deployment,
           merged.effective as Record<string, unknown>,
+          submission.requirements ?? {},
         );
-        if (!pinning.ready) {
+        if (!runPinning.ready) {
           this.capacity.release(attempt);
           return this.reject(submissionUri, "unsupported-requirement", {
-            detail: pinning.detail ?? "selected launcher is not ready for the requested pins",
+            detail: runPinning.detail ?? "selected launcher is not ready for the requested pins",
           });
         }
       }
@@ -1477,6 +1499,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       parsed: submission,
       taskDigest,
       attempt,
+      ...(runPinning === undefined ? {} : { runPinning }),
     };
     this.attempts.set(attempt, meta);
     this.submissionsByScope.set(scope, stored);
@@ -2182,6 +2205,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         submission: asSubmissionUri(stored.parsed.submission),
         requester: stored.parsed.requester,
         idempotencyKey: stored.parsed.idempotencyKey,
+        ...(stored.runPinning === undefined ? {} : { runPinning: stored.runPinning }),
       } satisfies PersistedSubmission as unknown as JsonValue),
     );
     this.persistAttemptMetadata(attempt);
@@ -2221,6 +2245,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
             parsed,
             taskDigest: metadata.taskDigest,
             attempt: metadata.attempt,
+            ...(metadata.runPinning === undefined ? {} : { runPinning: metadata.runPinning }),
           };
           this.submissionsByScope.set(
             scopeKey(metadata.requester, metadata.idempotencyKey),

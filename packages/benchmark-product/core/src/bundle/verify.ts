@@ -20,6 +20,11 @@ import { didKeyFromEd25519PublicKey } from "../report/signing.js";
 import { buildPublicReportTrustDeps } from "../report/trust.js";
 import { buildAssemblyPortsFromFacts, type AssemblyPublicKeyRecord } from "../run/assembly-ports.js";
 import {
+  parseRunPinningEvidenceArtifact,
+  pinningEvidenceFacts,
+  type RunPinningEvidence,
+} from "../run/pinning-evidence.js";
+import {
   parsePredictionSnapshotAdmissionReceipt,
   type LocalAdmissionReceiptFact,
 } from "../run/admission-receipts.js";
@@ -323,6 +328,7 @@ export async function verifyPublicBundle(
 
   unique(assembly.header.graph.solveSubmissions.map((edge) => `${edge.cellKey}:${edge.dispatch}`), "verification.graph.solveSubmissions.coordinates");
   const solveSubmissionByCoordinate = new Map<string, (typeof assembly.header.graph.solveSubmissions)[number]>();
+  const pinningEvidenceByDigest = new Map<string, RunPinningEvidence>();
   for (const edge of assembly.header.graph.solveSubmissions) {
     const coord = coordinatesByKey.get(edge.cellKey);
     if (coord === undefined) refuse("record-integrity", "evidence-closure", `solve Submission ${edge.sha256} names an unknown cell`);
@@ -340,6 +346,28 @@ export async function verifyPublicBundle(
       || submission.nonce !== expectedNonce
       || submission.idempotencyKey !== cellIdempotencyKey(`sha256:${identities.runSha256}`, edge.cellKey, edge.dispatch)
     ) refuse("record-integrity", "evidence-closure", `solve Submission ${edge.sha256} does not bind its Task/cell/dispatch`);
+    if (edge.pinningEvidenceSha256 !== undefined) {
+      addRole(expectedRoles, edge.pinningEvidenceSha256, "run-pinning-evidence");
+      const evidenceBytes = records.get(edge.pinningEvidenceSha256);
+      if (evidenceBytes === undefined) {
+        refuse("record-integrity", "evidence-closure", `run-pinning evidence ${edge.pinningEvidenceSha256} bytes are missing`);
+      }
+      let evidence: RunPinningEvidence;
+      try {
+        evidence = parseRunPinningEvidenceArtifact(evidenceBytes);
+      } catch {
+        refuse("record-integrity", "evidence-closure", `run-pinning evidence ${edge.pinningEvidenceSha256} is invalid`);
+      }
+      requireCanonical(
+        evidenceBytes,
+        evidence,
+        `records/${edge.pinningEvidenceSha256}.bin`,
+      );
+      if (evidence.submissionDigest !== `sha256:${edge.sha256}`) {
+        refuse("record-integrity", "evidence-closure", `run-pinning evidence ${edge.pinningEvidenceSha256} names another Submission`);
+      }
+      pinningEvidenceByDigest.set(edge.pinningEvidenceSha256, evidence);
+    }
     solveSubmissionByCoordinate.set(`${edge.cellKey}:${edge.dispatch}`, edge);
   }
   for (const cell of assembly.cells) {
@@ -563,6 +591,14 @@ export async function verifyPublicBundle(
     const finalSubmission = cell.submissionSha256 === undefined ? undefined : solveSubmissionByCoordinate.get(`${cell.cellKey}:${cell.dispatches}`);
     if ((cell.submissionSha256 === undefined) !== (finalSubmission === undefined)) refuse("record-integrity", "evidence-closure", `${cell.cellKey} final solve Submission linkage disagrees`);
     if (finalSubmission !== undefined && finalSubmission.sha256 !== cell.submissionSha256) refuse("record-integrity", "evidence-closure", `${cell.cellKey} final solve Submission digest disagrees`);
+    if (finalSubmission?.pinningEvidenceSha256 !== cell.pinningEvidenceSha256) {
+      refuse("record-integrity", "evidence-closure", `${cell.cellKey} final run-pinning evidence linkage disagrees`);
+    }
+    let pinningEvidence: RunPinningEvidence | undefined;
+    if (cell.pinningEvidenceSha256 !== undefined) {
+      pinningEvidence = pinningEvidenceByDigest.get(cell.pinningEvidenceSha256);
+      if (pinningEvidence === undefined) refuse("record-integrity", "evidence-closure", `${cell.cellKey} run-pinning evidence bytes are missing or unreachable`);
+    }
     const finalDelivery = solveDeliveryByCell.get(cell.cellKey);
     if ((cell.deliverySha256 === undefined) !== (finalDelivery === undefined)) refuse("record-integrity", "evidence-closure", `${cell.cellKey} final solve Delivery linkage disagrees`);
     if (finalDelivery !== undefined && (
@@ -619,6 +655,7 @@ export async function verifyPublicBundle(
       dispatches: cell.dispatches,
       ...(cell.accounted === undefined ? {} : { accounted: cell.accounted }),
       ...(cell.submissionSha256 === undefined ? {} : { submissionDigest: `sha256:${cell.submissionSha256}` as const }),
+      ...(pinningEvidence === undefined ? {} : { evidenceRef: pinningEvidenceFacts(pinningEvidence) }),
       ...(cell.attempt === undefined ? {} : { attempt: cell.attempt }),
       ...(cell.deliverySha256 === undefined ? {} : { deliveryDigest: `sha256:${cell.deliverySha256}` as const, deliveryBytes: records.get(cell.deliverySha256) }),
       ...(cell.evaluationSpecSha256 === undefined ? {} : { evaluationSpecDigest: `sha256:${cell.evaluationSpecSha256}` }),
