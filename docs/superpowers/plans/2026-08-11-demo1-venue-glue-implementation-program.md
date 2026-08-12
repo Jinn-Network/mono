@@ -30,8 +30,10 @@ Additional locked constraints:
 - P2 makes `SKILL.md` and `AGENTS.md` from one frozen source body, materializes both through the same digest-verifying path, proves the loader-visible placement, and symmetrically excludes experiment-created instruction files from harvested patches. If that requires a platform-semantics change, the packet stops for operator review.
 - P2b removes fabricated admission readiness; only real `verifyRunPinning` evidence may yield Matrix `match`.
 - P3 is split into P3a (the pinned OCI grader package) and P3b (the benchmark-product binding). P3b seals test material, image, parser, timeout, and grader-program identities and pre-stages images for `--pull never` grading.
+- Before the first canary publication of `@jinn-network/task-execution-oci-grader`, verify the npm-side trusted-publisher binding for this repository's protected `npm-publish` workflow. Repository configuration alone is not proof of the npm-side binding; if it cannot be verified, stop for operator action. Stable publication is not required by this program.
 - P5 remains a 3-task × 2-arm × 2-replicate **plumbing** gate and starts only with at least 40 GiB free. It proves all twelve cells accounted, gold PASS / empty FAIL, three repository clusters, and `draws === resamples × clusterCount`; it does not estimate capability.
 - The subsequent three-arm official design has a hard ceiling of 600 cells. The engineering packets must not bake in a larger run or automatic post-lock top-ups.
+- Insufficient disk, missing execution credentials, a failed or inconclusive Haiku gate, no eligible content artifact, or a required platform-semantics change produces a stop-and-evidence handoff. The program does not delete caches or user data, switch models or sources, or weaken a gate automatically.
 
 ## Session kickoff (paste into a NEW session)
 
