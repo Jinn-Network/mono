@@ -53,8 +53,8 @@ test('the reusable interface grants OIDC only to artifact-only attestation jobs'
   }
   assert.match(
     header,
-    /secrets:\n\s+JINN_MARKETPLACE_FORK_RPC_URL:\n\s+required: false\n\s+JINN_PROFILE_MANIFEST_SIGNING_KEY:\n\s+required: false\n\s+JINN_PROFILE_MANIFEST_KEY_ID:\n\s+required: false\n/u,
-    'the reusable interface must name exactly its optional domain and profile-signing secrets',
+    /secrets:\n\s+JINN_PROFILE_MANIFEST_SIGNING_KEY:\n\s+required: false\n\s+JINN_PROFILE_MANIFEST_KEY_ID:\n\s+required: false\n/u,
+    'the reusable interface must name exactly its optional profile-signing secrets',
   );
   assert.match(header, /contents: read/u);
   for (const job of ['artifacts', 'verification_receipt']) {
@@ -149,18 +149,7 @@ test('every catalog-selected platform gate remains independently triggered and i
     assert.match(block, /needs: catalog/u);
     assert.match(block, new RegExp(`uses: \\.\\/.github/workflows/${filename.replace('.', '\\.')}\\n`, 'u'));
     assert.doesNotMatch(block, /secrets: inherit/u);
-    if (jobId === 'marketplace') {
-      assert.match(
-        block,
-        /secrets:\n\s+JINN_MARKETPLACE_FORK_RPC_URL: \$\{\{ secrets\.JINN_MARKETPLACE_FORK_RPC_URL \}\}/u,
-      );
-      assert.match(
-        header,
-        /secrets:\n\s+JINN_MARKETPLACE_FORK_RPC_URL:\n\s+required: false/u,
-      );
-    } else {
-      assert.doesNotMatch(block, /\n\s+secrets:/u, `${filename} must receive no caller secrets`);
-    }
+    assert.doesNotMatch(block, /\n\s+secrets:/u, `${filename} must receive no caller secrets`);
   }
   assert.match(domains.get('task_execution').source, /workflow_dispatch:/u);
 });

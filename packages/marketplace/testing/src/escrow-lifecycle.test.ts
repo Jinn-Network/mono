@@ -2,9 +2,9 @@ import { describe, expect, test, vi } from "vitest";
 import { describeEscrowLifecycle, type ForkEscrowContext } from "./escrow-lifecycle.js";
 import { BASE_SEPOLIA_TODAY, TASK_COORDINATOR_ABI } from "@jinn-network/marketplace-binding";
 import { readFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
 import { createPublicClient, createWalletClient, decodeEventLog, http, parseEther, type Abi, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { anvilAvailable, startSnapshotAnvil } from "./anvil-state.js";
 
 const ROOT = new URL("../../../../", import.meta.url);
 const DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as Hex;
@@ -12,14 +12,6 @@ const NATIVE_PAYMENT = "0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05b
 
 async function artifact(path: string): Promise<{ abi: Abi; bytecode: Hex }> {
   return JSON.parse(await readFile(new URL(`contracts/artifacts/${path}`, ROOT), "utf8")) as { abi: Abi; bytecode: Hex };
-}
-
-async function anvilAvailable(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const probe = spawn("anvil", ["--version"]);
-    probe.on("error", () => resolve(false));
-    probe.on("exit", (code) => resolve(code === 0));
-  });
 }
 
 const hasAnvil = await anvilAvailable();
@@ -55,13 +47,10 @@ describe("today-generation escrow lifecycle fixture (§13)", () => {
     expect(context.refund).not.toHaveBeenCalled();
   });
 
-  describe.runIf(hasAnvil)("Anvil fork of Base Sepolia (§13)", () => {
+  describe.runIf(hasAnvil)("committed Anvil state (§13)", () => {
   test("runs post, claim, solution/evaluation delivery, settlement, finalization and refund against deployed local contracts", async () => {
-    const port = 9700 + (process.pid % 500);
-    const url = `http://127.0.0.1:${port}`;
-    const anvil = spawn("anvil", ["--fork-url", process.env.JINN_MARKETPLACE_FORK_RPC_URL ?? "https://base-sepolia.publicnode.com", "--port", String(port), "--silent"]);
-    const ready = await new Promise<boolean>((resolve) => { const timer = setTimeout(() => resolve(false), 12_000); const poll = setInterval(async () => { try { await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' }); clearInterval(poll); clearTimeout(timer); resolve(true); } catch {} }, 150); });
-    if (!ready) { anvil.kill(); throw new Error("Anvil/Base-Sepolia fork prerequisite unavailable; fixture did not run"); }
+    const anvil = await startSnapshotAnvil();
+    const url = anvil.rpcUrl;
     try {
       const account = privateKeyToAccount(DEV_KEY);
       const publicClient = createPublicClient({ transport: http(url) });
@@ -87,38 +76,12 @@ describe("today-generation escrow lifecycle fixture (§13)", () => {
         refund: async () => { const before = await publicClient.readContract({ address: router, abi: routerA.abi, functionName: "taskPayments", args: [taskId] }) as readonly unknown[]; await write(router, routerA.abi, "refundUnusedTaskBudget", [taskId]); const after = await publicClient.readContract({ address: router, abi: routerA.abi, functionName: "taskPayments", args: [taskId] }) as readonly unknown[]; expect(after[6]).toBe(0n); expect(after[7]).toBe(0n); expect(after[8]).toBe(true); expect(after[9]).toBe(true); return { refunded: (before[6] as bigint) + (before[7] as bigint) }; },
       };
       await describeEscrowLifecycle({ ...BASE_SEPOLIA_TODAY, generation: "today", jinnRouter: router, taskCoordinator: coordinator, mechMarketplace: marketplace, activityChecker: activity }, ctx, "today");
-    } finally { anvil.kill(); }
+    } finally { await anvil.stop(); }
   }, 60_000);
 
   test("drives a mined losing settlement through the real race-loss lifecycle without verdict or refund writes", async () => {
-    const port = 10_200 + (process.pid % 500);
-    const url = `http://127.0.0.1:${port}`;
-    const anvil = spawn("anvil", [
-      "--fork-url",
-      process.env.JINN_MARKETPLACE_FORK_RPC_URL ?? "https://base-sepolia.publicnode.com",
-      "--port",
-      String(port),
-      "--silent",
-    ]);
-    const ready = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), 12_000);
-      const poll = setInterval(async () => {
-        try {
-          await fetch(url, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}',
-          });
-          clearInterval(poll);
-          clearTimeout(timer);
-          resolve(true);
-        } catch {}
-      }, 150);
-    });
-    if (!ready) {
-      anvil.kill();
-      throw new Error("Anvil/Base-Sepolia fork prerequisite unavailable; fixture did not run");
-    }
+    const anvil = await startSnapshotAnvil();
+    const url = anvil.rpcUrl;
 
     try {
       const account = privateKeyToAccount(DEV_KEY);
@@ -387,7 +350,7 @@ describe("today-generation escrow lifecycle fixture (§13)", () => {
       expect(paymentAfter.slice(6, 10)).toEqual(paymentBeforeTerminal?.slice(6, 10));
       expect(attemptAfter.verdictCount).toBe(0);
     } finally {
-      anvil.kill();
+      await anvil.stop();
     }
   }, 60_000);
   });

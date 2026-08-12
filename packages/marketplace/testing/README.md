@@ -33,7 +33,7 @@ The package currently runs:
 - the reusable `describeNamedChecks` evaluation-leg suite: exact pair-derived bytes, strict
   verdict-code mapping, requester self-claim-on-solve, evaluator distinctness, and settlement
   trust joins against parsed, sealed `@jinn-network/trust-testing` bindings;
-- the today-generation anvil-fork escrow-lifecycle fixtures and the Attempt-URI two-party
+- the today-generation snapshot-backed Anvil escrow-lifecycle fixtures and the Attempt-URI two-party
   agreement checks (requester/operator/third-party independent computation).
 
 The revised-contract suite remains a later milestone in the same plan.
@@ -44,7 +44,8 @@ suite the tier-3 chain adapters must satisfy. It publishes four subpath exports 
 fixtures and their driver (`VENUE_REVERT_FIXTURES`, `describeVenueRevertClassification`), the
 broadcast-profile driver (`describeBroadcastProfileConformance`, seven relayer obligations), the
 log-source driver (`describeLogSourceConformance`, seven chunking and dual-cursor obligations), and
-the Anvil-fork integration backbone (`withForkVenue`, `describeForkVenueConformance`). Every driver
+the snapshot-backed Anvil integration backbone (`withForkVenue`, `describeForkVenueConformance`;
+the `Fork` names are retained for API compatibility). Every driver
 declares its own subject interfaces and imports nothing from
 `@jinn-network/marketplace-venue-base`, so the kit's fixtures are authoritative before an
 implementation exists; `src/venue-conformance.test.ts` is the runner that binds the real
@@ -54,8 +55,16 @@ implementation exists; `src/venue-conformance.test.ts` is the runner that binds 
 yarn vitest run src/venue-conformance.test.ts
 ```
 
-The fork blocks need Foundry's `anvil` on `PATH` and a reachable Base Sepolia RPC (override with
-`JINN_MARKETPLACE_FORK_RPC_URL`); without `anvil` they report skipped, never failed.
+The Anvil blocks need Foundry's `anvil` on `PATH` and load the repository's committed
+`client/test/_support/fixtures/anvil-base-v3-state/state.json`; they perform no live RPC calls.
+Source-tree consumers may point `JINN_MARKETPLACE_ANVIL_STATE_PATH` at another local copy of that
+same fixture. A missing or unreadable fixture fails loudly and never falls back to a network.
+Without `anvil`, local package runs report these blocks skipped; Marketplace CI installs the pinned
+Anvil version, so the blocking PR check always executes them.
+
+Live Base Sepolia drift and the canonical deployed-address configuration belong to
+`.github/workflows/environment-suite.yml`, whose real T2/T3 loops run separately from PR
+verification. They are intentionally not evidence produced by this deterministic conformance kit.
 
 Consumed by component packages as a **devDependency only, never a production dependency** — but
 note this kit does not itself appear in `binding`/`projector`/`pipeline`'s `package.json`

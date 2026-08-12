@@ -10,8 +10,6 @@ on:
         required: true
         type: string
     secrets:
-      JINN_MARKETPLACE_FORK_RPC_URL:
-        required: false
       JINN_PROFILE_MANIFEST_SIGNING_KEY:
         required: false
       JINN_PROFILE_MANIFEST_KEY_ID:
@@ -79,8 +77,6 @@ jobs:
     uses: ./.github/workflows/marketplace-ci.yml
     with:
       source_sha: ${{ inputs.source_sha }}
-    secrets:
-      JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
 
   task_execution:
     needs: catalog
