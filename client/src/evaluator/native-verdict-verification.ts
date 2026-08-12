@@ -7,7 +7,7 @@ import {
   sealDelivery,
 } from "@jinn-network/task-execution-protocol";
 import {
-  parseDsseEnvelope,
+  parseExactDsseEnvelope,
 } from "@jinn-network/trust-core";
 import {
   verdictCodeFromValue,
@@ -53,9 +53,18 @@ function equal(left: Uint8Array, right: Uint8Array): boolean {
     && left.every((value, index) => value === right[index]);
 }
 
+/**
+ * Reads the delivered verdict's code from its DSSE envelope, using the STRICT
+ * `parseExactDsseEnvelope` -- the same authority-bearing parser the cross-operator consumer
+ * applies via `verifyNativeDsse` (defect-#34 follow-up). The loose structural parser accepted
+ * alternate JSON spellings the strict one refuses, so this operator's own pre-settlement path
+ * derived a verdict code from bytes that could never settle; the refusal surfaced later as an
+ * opaque `settlement-join` signature failure instead of naming the encoding. Refusing here
+ * returns `undefined`, which `verifyExactGraph` reports as `evaluation-record-graph-invalid`.
+ */
 function codeFromVerdict(bytes: Uint8Array): VerdictCode | undefined {
   try {
-    const envelope = parseDsseEnvelope(bytes);
+    const envelope = parseExactDsseEnvelope(bytes);
     const statement = ResultEvaluationStatementShape.parse(JSON.parse(
       new TextDecoder("utf-8", { fatal: true }).decode(envelope.payloadBytes),
     ));
