@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -563,6 +564,15 @@ function stateBackedProvisioner(input: {
         executionEnv: provisioner.executionEnv,
         async harvest(paths, outputs) {
           const verdictPath = join(paths.out, "verdict");
+          // #39b(b): harvest is contracted to run "after success, failure, cancellation, and
+          // expiry", so it must not presuppose a verdict. A harness that REFUSED its subject exits
+          // 65 having written nothing, and the launch plan already maps 65 to blame `task` /
+          // `invalid-evaluation-input`. Reading unconditionally made that read's ENOENT propagate
+          // into the backend's `harvest failed:` catch, which overwrote the correct classification
+          // with `infrastructure` / `backend-unavailable` -- aiming a live diagnosis at the host
+          // instead of at the refused subject. With no verdict there is nothing to seal: delegate,
+          // let the omission be recorded, and let the exit code classify.
+          if (!existsSync(verdictPath)) return provisioner.harvest(paths, outputs);
           const payloadBytes = new Uint8Array(await readFile(verdictPath));
           const statement = ResultEvaluationStatementSchema.parse(JSON.parse(
             new TextDecoder("utf-8", { fatal: true }).decode(payloadBytes),
