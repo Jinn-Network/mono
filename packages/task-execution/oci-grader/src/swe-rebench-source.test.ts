@@ -255,6 +255,52 @@ describe("sweRebenchOciGraderReportSource", () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
+  it("refuses distinct same-family identities that collide after grader normalization", async () => {
+    const collidingRow = {
+      ...ROW,
+      FAIL_TO_PASS: ["tests/test_a.py::test_a [1s]", "tests/test_a.py::test_a"],
+    };
+    const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+    const { work, request: input } = request(specification({}, collidingRow));
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await expect(source.read(input)).rejects.toThrow(/duplicate transition identity after grader normalization/u);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("refuses distinct transition-family identities that overlap after grader normalization", async () => {
+    const collidingRow = {
+      ...ROW,
+      FAIL_TO_PASS: ["tests/test_a.py::test_a [1s]"],
+      PASS_TO_PASS: ["tests/test_a.py::test_a"],
+    };
+    const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+    const { work, request: input } = request(specification({}, collidingRow));
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await expect(source.read(input)).rejects.toThrow(/identities overlap after grader normalization/u);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("refuses a whitespace-only identity that is empty after grader normalization", async () => {
+    const whitespaceRow = { ...ROW, FAIL_TO_PASS: [" \t\n "] };
+    const runner = vi.fn(async () => canonicalJsonBytes({ log: "", report: {} }));
+    const { work, request: input } = request(specification({}, whitespaceRow));
+    const source = sweRebenchOciGraderReportSource({
+      attemptWorkRoot: () => work,
+      runPinnedOciGraderForTesting: runner,
+    } as never);
+
+    await expect(source.read(input)).rejects.toThrow(/empty after grader normalization/u);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it("refuses a specification carrying no row material", async () => {
     const { work, request: input } = request(specification({ testMaterial: [] }));
     const source = sweRebenchOciGraderReportSource({

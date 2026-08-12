@@ -14,7 +14,10 @@ import type {
 } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes, sha256Hex } from "./canonical.js";
 import { cancelled, refuse, refuseSubjectDigest } from "./errors.js";
-import { SWE_REBENCH_OCI_GRADER_PROGRAM_BYTES } from "./grader-program.js";
+import {
+  normalizeSweRebenchTestIdentity,
+  SWE_REBENCH_OCI_GRADER_PROGRAM_BYTES,
+} from "./grader-program.js";
 import { PINNED_IMAGE_BODY, type PinnedOciGraderInput } from "./invocation.js";
 import { runPinnedOciGrader, type PinnedOciRunnerOptions } from "./runner.js";
 
@@ -55,11 +58,16 @@ function stringArray(value: unknown, label: string): string[] {
 
 function transitionIdentities(value: unknown, label: string): string[] {
   const identities = stringArray(value, label);
-  const seen = new Set<string>();
+  const seenNormalized = new Set<string>();
   for (const identity of identities) {
-    if (identity.length === 0) refuse(`${label} contains an empty transition identity`);
-    if (seen.has(identity)) refuse(`${label} contains a duplicate transition identity`);
-    seen.add(identity);
+    const normalized = normalizeSweRebenchTestIdentity(identity);
+    if (normalized.length === 0) {
+      refuse(`${label} contains a transition identity that is empty after grader normalization`);
+    }
+    if (seenNormalized.has(normalized)) {
+      refuse(`${label} contains a duplicate transition identity after grader normalization`);
+    }
+    seenNormalized.add(normalized);
   }
   return identities;
 }
@@ -69,9 +77,10 @@ function assertDisjointTransitions(
   passToPass: readonly string[],
   label: string,
 ): void {
-  const failSet = new Set(failToPass);
-  if (passToPass.some((identity) => failSet.has(identity))) {
-    refuse(`${label} FAIL_TO_PASS and PASS_TO_PASS identities overlap`);
+  const normalizedFailToPass = new Set(failToPass.map(normalizeSweRebenchTestIdentity));
+  if (passToPass.some((identity) =>
+    normalizedFailToPass.has(normalizeSweRebenchTestIdentity(identity)))) {
+    refuse(`${label} FAIL_TO_PASS and PASS_TO_PASS identities overlap after grader normalization`);
   }
 }
 

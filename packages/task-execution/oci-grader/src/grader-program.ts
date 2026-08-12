@@ -2,6 +2,25 @@
 
 import { sha256Hex } from "./canonical.js";
 
+// TypeScript twin of the frozen Python `normalize_test_name` below. Host preflight imports this
+// helper so identities are checked under the same timing-suffix semantics the measuring
+// instrument uses. It deliberately lives beside the frozen implementation: moving the Python
+// body behind generated interpolation would risk changing already-published grader bytes.
+const SWE_REBENCH_TIMING_PATTERNS = [
+  /\s*\[\s*\d+(?:\.\d+)?\s*(?:ms|s)\s*\]\s*$/giu,
+  /\s+in\s+\d+(?:\.\d+)?\s+(?:msec|sec)\b/giu,
+  /\s*\(\s*\d+(?:\.\d+)?\s*(?:ms|s)\s*\)\s*$/giu,
+] as const;
+
+/** Normalize a transition identity exactly as the frozen grader does before score lookup. */
+export function normalizeSweRebenchTestIdentity(identity: string): string {
+  let normalized = identity;
+  for (const pattern of SWE_REBENCH_TIMING_PATTERNS) {
+    normalized = normalized.replace(pattern, "");
+  }
+  return normalized.trim();
+}
+
 /**
  * The reviewed program mounted read-only into the already-pinned task image. It copies the
  * image's repository into the grader-only output mount, applies only the exact solver and public
