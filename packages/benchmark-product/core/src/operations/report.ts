@@ -4,13 +4,17 @@
  * its claim package from the closed run's own sealed Matrix, via
  * `@jinn-network/benchmarking-aggregate`'s `produceReport`.
  *
- * `produceReport` recomputes wilson@1 from exact subject bytes and resolved referenced records
- * (this workspace's own sealed-bytes store, via `../report/ports.ts`'s `buildMethodPorts`) —
- * this module never computes results itself, it only supplies the exact inputs and stores what
- * comes back. `verdictRule` is the SAME rule `../run/compile.ts` (BP-13 correction F2) already
- * sealed into the Run's `analysisPlan[0].parameters` — passing the identical value here is what
- * makes `derivePreregistered`'s exact-JSON comparison succeed, deriving `preregistered: true` for
- * a genuinely pre-registered analysis rather than merely a matching-by-accident one.
+ * `produceReport` recomputes whichever method the sealed Run's own `analysisPlan` selected — from
+ * exact subject bytes and resolved referenced records (this workspace's own sealed-bytes store,
+ * via `../report/ports.ts`'s `buildMethodPorts`) — this module never computes results itself, it
+ * only supplies the exact inputs and stores what comes back. `../run/compile.ts`'s
+ * `buildAnalysisPlan` seals `[wilson]` or `[wilson, selected]`; this operation reads the LAST
+ * entry (the selected method when present, wilson otherwise) and passes its EXACT sealed
+ * `parameters` straight through. Passing that identical tuple is what makes
+ * `derivePreregistered`'s exact-JSON comparison succeed, deriving `preregistered: true` for a
+ * genuinely pre-registered analysis rather than merely a matching-by-accident one — selecting the
+ * method is a pure read of the already-sealed Run, so it changes nothing about which analysis
+ * runs, only which one this operation asks the platform to recompute.
  *
  * The Report is signed with a SEPARATE workspace key from the venue's verdict-signing key (see
  * `../report/signing.ts`'s module header for why) — this operation loads or creates it, same as
@@ -38,12 +42,7 @@
  * the crash-safety ordering above.
  */
 
-import {
-  BENCHMARKING_METHOD_IDS,
-  BENCHMARKING_METHOD_VERSION,
-  parseMatrix,
-  parseRun,
-} from "@jinn-network/benchmarking-records";
+import { parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { produceReport, type ProducedReport } from "@jinn-network/benchmarking-aggregate";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
@@ -131,13 +130,22 @@ export function runReport(
           ? [...LOCAL_VENUE_LIMITS, previewDisclosureLine(previewLog)]
           : LOCAL_VENUE_LIMITS;
 
+      // The sealed plan is [wilson] or [wilson, selected] (see run/compile.ts's buildAnalysisPlan).
+      // The selected method is the last entry; passing its EXACT sealed parameters is what makes
+      // derivePreregistered's exact-JSON comparison succeed.
+      const planEntries = runRecord.analysisPlan ?? [];
+      const selected = planEntries[planEntries.length - 1];
+      if (selected === undefined) {
+        refuse("record-integrity", "run", "sealed Run carries no analysisPlan entry to report from");
+      }
+
       let produced: ProducedReport;
       try {
         produced = await produceReport(
           {
             ...ports,
             subjects: [matrixBytes],
-            method: { id: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: {} },
+            method: { id: selected.method, version: selected.version, parameters: selected.parameters },
             verdictRule,
             limitations,
             author: runState.owner,

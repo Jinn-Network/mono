@@ -18,7 +18,7 @@ import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
 import { authorityGrant } from "./authority-ops.js";
 import type { OperationContext } from "./context.js";
-import { createDraft, readDraftDocument } from "./drafts.js";
+import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { readAuditEntries } from "../audit/journal.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
@@ -291,6 +291,15 @@ async function setUpClosedRun(
   options: {
     readonly evaluationModes?: readonly ("success" | "no-delivery" | "no-verdict")[];
     readonly failPrepareCalls?: readonly number[];
+    /** P4b Task 3: patched onto the draft spec (via updateDraft) before quote/lock, so
+     * compileDraft's buildAnalysisPlan seals the named method into the Run's analysisPlan. */
+    readonly analysis?: {
+      readonly method: string;
+      readonly version: string;
+      readonly baseline?: string;
+      readonly candidate?: string;
+      readonly parameters?: Record<string, unknown>;
+    };
   } = {},
 ): Promise<void> {
   initWorkspace(contextFor(clock));
@@ -300,6 +309,10 @@ async function setUpClosedRun(
   if (!sample.ok) throw new Error("unreachable");
   armAdd(contextFor(clock), { draftId, armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
   armAdd(contextFor(clock), { draftId, armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+  if (options.analysis !== undefined) {
+    const patched = updateDraft(contextFor(clock), { draftId, patch: { analysis: options.analysis } });
+    expect(patched.ok).toBe(true);
+  }
   const quoted = await runQuote(contextFor(clock), { draftId });
   expect(quoted.ok).toBe(true);
   const locked = runLock(contextFor(clock), { draftId });
@@ -363,6 +376,64 @@ describe("runReport — happy path", () => {
       });
       expect(outcome.result.claimPackage.assurance.disclosure).toContain("agent-distinctness");
       expect(outcome.result.claimPackage.assurance.disclosure).toContain("party-independence");
+    },
+    30_000,
+  );
+});
+
+describe("runReport — analysis method selection (P4b Task 3)", () => {
+  test(
+    "produces the Report with the selected paired method and derives preregistered",
+    async () => {
+      const clock = makeClock();
+      // Every evaluation is dispatched in "no-verdict" mode, so no cell in either arm is ever
+      // "judged" and no Task is ever paired across baseline/candidate. paired-delta@1's compute
+      // (registry.ts) only resolves Task provenance for a paired Task — with zero pairs it never
+      // does, which is what lets this fixture avoid the sample benchmark's known provenance gap
+      // (P4b scoping §6.1: the bundled sample benchmark's Tasks carry no `payload.provenance`, so
+      // a paired analysis with any real pairing cannot compute on the sample path). This still
+      // exercises the real produceReport() call runReport() makes, with a real sealed Run/Matrix.
+      await setUpClosedRun(clock, "draft-1", {
+        evaluationModes: Array(8).fill("no-verdict"),
+        analysis: {
+          method: "jinn.benchmarking.method/paired-delta",
+          version: "1",
+          baseline: "baseline",
+          candidate: "sample",
+          parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+        },
+      });
+
+      const outcome = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+      if (!outcome.ok) return;
+
+      const reportRecord = parseReport(getSealedBytes(workspaceDir, outcome.result.reportSha256));
+      expect(reportRecord.method.id).toBe("jinn.benchmarking.method/paired-delta");
+      expect(reportRecord.method.parameters).toMatchObject({
+        alpha: "0.05",
+        baseline: "baseline",
+        candidate: "sample",
+      });
+      // The whole point: the produced tuple must be exactly-JSON-equal to a sealed plan entry.
+      expect(reportRecord.preregistered).toBe(true);
+    },
+    30_000,
+  );
+
+  test(
+    "still produces a wilson Report, preregistered, when no analysis block is set",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock);
+
+      const outcome = await runReport(contextFor(clock), { draftId: "draft-1" });
+      expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+      if (!outcome.ok) return;
+
+      const reportRecord = parseReport(getSealedBytes(workspaceDir, outcome.result.reportSha256));
+      expect(reportRecord.method.id).toBe("jinn.benchmarking.method/wilson");
+      expect(reportRecord.preregistered).toBe(true);
     },
     30_000,
   );
