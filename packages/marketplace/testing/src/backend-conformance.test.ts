@@ -2,17 +2,14 @@
 //
 // 1. A stub-chain run (this file, always on -- no network dependency) that exercises the exact
 //    same suite against `makeMarketplaceBackend` wired to in-memory ports, so the suite's own
-//    logic is proven fast and hermetically before spending an Anvil fork on it.
-// 2. The Anvil-fork run (§13 "local fork" -- forks Base Sepolia and posts against the REAL
-//    deployed JinnRouterV3), which additionally proves the chain-venue wiring itself. Skips
-//    cleanly when no RPC is reachable (mirrors `client/scripts/e2e-validate.ts`'s own skip
-//    discipline) or when `anvil` (Foundry) is not on PATH.
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+//    logic is proven fast before spending a snapshot-backed Anvil process on it.
+// 2. The snapshot-backed Anvil run (§13 "local fork" compatibility name), which deploys and posts
+//    against a real JinnRouterV3 without any live RPC dependency. It skips only when `anvil`
+//    (Foundry) is not on PATH.
 import {
   BASE_SEPOLIA_TODAY,
   createInMemoryMarketplaceObserveStore,
   createInMemoryPostingIntentStore,
-  encodeCreateTaskCalldata,
   makeMarketplaceBackend,
   type MarketplaceBackendPorts,
   type PostingTerms,
@@ -30,6 +27,12 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { describeMarketplaceBackendConformance } from "./backend-conformance.js";
+import { anvilAvailable } from "./anvil-state.js";
+import {
+  startForkVenue,
+  type ForkVenueDeployment,
+  type ForkVenueSession,
+} from "./venue-fork.js";
 
 const TERMS: PostingTerms = {
   solutionMaxDeliveryRateWei: 10n,
@@ -67,76 +70,11 @@ describe("marketplace backend conformance -- stub-chain (hermetic)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Anvil-fork run
+// Snapshot-backed Anvil run
 // ---------------------------------------------------------------------------
 
-const FORK_RPC_CANDIDATES = [
-  process.env["JINN_MARKETPLACE_FORK_RPC_URL"],
-  "https://base-sepolia.publicnode.com",
-  "https://sepolia.base.org",
-  "https://base-sepolia-rpc.publicnode.com",
-].filter((url): url is string => typeof url === "string" && url.trim().length > 0);
-
-let FORK_RPC_URL = FORK_RPC_CANDIDATES[0] ?? "https://base-sepolia.publicnode.com";
-// A per-process port prevents an interrupted local run from sharing a fork (and account nonce
-// state) with the next run. CI may pin a port when its runner policy requires one.
-const ANVIL_PORT = Number(process.env["JINN_MARKETPLACE_ANVIL_PORT"] ?? 8600 + (process.pid % 1000));
-const ANVIL_URL = `http://127.0.0.1:${ANVIL_PORT}`;
-// Anvil's default well-known dev account #0 -- funded with 10000 ETH on every fresh fork.
+// Anvil's default well-known dev account #0 -- funded in the committed state fixture.
 const DEV_PRIVATE_KEY: Hex = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
-async function isReachable(url: string): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", method: "eth_chainId", params: [], id: 1 }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-/** Publicnode intermittently 403s archive eth_getStorageAt; probe before committing the fork URL. */
-async function supportsArchiveReads(url: string): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8_000);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "eth_getStorageAt",
-        params: ["0x0000000000000000000000000000000000000001", "0x0", "0x1"],
-        id: 1,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!response.ok) return false;
-    const body = await response.json() as { result?: unknown; error?: { message?: string } };
-    if (body.error?.message?.toLowerCase().includes("archive")) return false;
-    return typeof body.result === "string";
-  } catch {
-    return false;
-  }
-}
-
-async function anvilAvailable(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const probe = spawn("anvil", ["--version"]);
-    probe.on("error", () => resolve(false));
-    probe.on("exit", (code) => resolve(code === 0));
-  });
-}
-
-let anvilProcess: ChildProcessWithoutNullStreams | undefined;
 let forkTransactionQueue = Promise.resolve();
 
 async function serializeForkTransaction<T>(work: () => Promise<T>): Promise<T> {
@@ -153,50 +91,17 @@ async function serializeForkTransaction<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-async function startAnvilFork(): Promise<boolean> {
-  const hasAnvil = await anvilAvailable();
-  if (!hasAnvil) return false;
-
-  for (const candidate of FORK_RPC_CANDIDATES) {
-    if (!(await isReachable(candidate))) continue;
-    // Prefer archive-capable endpoints; still try non-archive as last resort within the list.
-    const archiveOk = await supportsArchiveReads(candidate);
-    if (!archiveOk && candidate !== FORK_RPC_CANDIDATES[FORK_RPC_CANDIDATES.length - 1]) continue;
-
-    FORK_RPC_URL = candidate;
-    anvilProcess = spawn("anvil", ["--fork-url", FORK_RPC_URL, "--port", String(ANVIL_PORT), "--silent"]);
-    const ready = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), 20_000);
-      const check = setInterval(() => {
-        isReachable(ANVIL_URL).then((up) => {
-          if (up) {
-            clearInterval(check);
-            clearTimeout(timer);
-            resolve(true);
-          }
-        }).catch(() => {});
-      }, 500);
-    });
-    if (ready) return true;
-    stopAnvilFork();
-  }
-  return false;
-}
-
-function stopAnvilFork(): void {
-  anvilProcess?.kill();
-  anvilProcess = undefined;
-}
-
 const TASK_CREATED_EVENT = parseAbi([
   "event TaskCreated(address indexed creator, uint256 indexed taskId, bytes32 indexed manifestDigest, bytes32 taskCidDigest, uint32 maxClaims, uint256 solutionBudget, uint256 verdictBudget)",
 ])[0];
 
+let forkVenue: ForkVenueDeployment | undefined;
+
 function makeForkBackedBackend(): TestableBackend {
+  if (forkVenue === undefined) throw new Error("snapshot-backed venue was not started");
   const account = privateKeyToAccount(DEV_PRIVATE_KEY);
-  const transport = http(ANVIL_URL, {
-    retryCount: 2,
-    retryDelay: 250,
+  const transport = http(forkVenue.rpcUrl, {
+    retryCount: 0,
     timeout: 30_000,
   });
   const publicClient = createPublicClient({ transport });
@@ -246,17 +151,28 @@ function makeForkBackedBackend(): TestableBackend {
         }),
       },
     },
-    observe: createInMemoryMarketplaceObserveStore(BASE_SEPOLIA_TODAY),
+    observe: createInMemoryMarketplaceObserveStore(forkVenue.chain),
   };
-  return makeMarketplaceBackend(BASE_SEPOLIA_TODAY, ports);
+  return makeMarketplaceBackend(forkVenue.chain, ports);
 }
 
-describe.runIf(await startAnvilFork())(
-  "marketplace backend conformance -- Anvil fork of Base Sepolia (§13)",
+const hasAnvil = await anvilAvailable();
+
+describe.runIf(hasAnvil)(
+  "marketplace backend conformance -- committed Anvil state (§13)",
   { timeout: 60_000 },
   () => {
-    afterAll(() => {
-      stopAnvilFork();
+    let session: ForkVenueSession | undefined;
+
+    beforeAll(async () => {
+      session = await startForkVenue("today");
+      forkVenue = session.deployment;
+      forkTransactionQueue = Promise.resolve();
+    }, 90_000);
+
+    afterAll(async () => {
+      forkVenue = undefined;
+      await session?.close();
     });
 
     describeMarketplaceBackendConformance(makeForkBackedBackend);

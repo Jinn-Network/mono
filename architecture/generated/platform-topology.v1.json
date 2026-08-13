@@ -1778,7 +1778,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2979,
       "generatedOutputSources": 1314,
-      "generatorSources": 617,
+      "generatorSources": 618,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -2238,6 +2238,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/layer-publish-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/marketplace-hermetic-anvil.test.mjs"
       },
       {
         "categories": [

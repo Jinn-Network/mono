@@ -26,7 +26,8 @@ test('the canary job directly calls same-SHA platform verification with least pr
   for (const permission of ['contents: read', 'id-token: write', 'attestations: write', 'artifact-metadata: write']) {
     assert.ok(block.includes(permission), `missing caller permission ${permission}`);
   }
-  assert.match(block, /JINN_MARKETPLACE_FORK_RPC_URL: \$\{\{ secrets\.JINN_MARKETPLACE_FORK_RPC_URL \}\}/u);
+  assert.doesNotMatch(block, /JINN_MARKETPLACE_FORK_RPC_URL/u);
+  assert.match(block, /JINN_PROFILE_MANIFEST_SIGNING_KEY/u);
   assert.doesNotMatch(block, /secrets: inherit/u);
 });
 

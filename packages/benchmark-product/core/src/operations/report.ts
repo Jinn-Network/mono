@@ -59,7 +59,7 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
-import { LOCAL_VENUE_LIMITS, buildLocalVenueHonesty } from "./run-results.js";
+import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -140,15 +140,16 @@ export function runReport(
       const previewLimitation = previewLog !== undefined && previewLog.count > 0
         ? previewDisclosureLine(previewLog)
         : undefined;
+      const venueLimits = localVenueLimitsForRun(runRecord);
       const limitations = selected.method === BENCHMARKING_METHOD_IDS.pairedDelta
         ? [
-            ...LOCAL_VENUE_LIMITS,
+            ...venueLimits,
             PAIRED_ESTIMATE_LIMITATION,
             ...(previewLimitation === undefined ? [] : [previewLimitation]),
           ]
         : previewLimitation === undefined
-          ? LOCAL_VENUE_LIMITS
-          : [...LOCAL_VENUE_LIMITS, previewLimitation];
+          ? venueLimits
+          : [...venueLimits, previewLimitation];
 
       let produced: ProducedReport;
       try {
@@ -180,7 +181,7 @@ export function runReport(
       // Step 3: build AND write the claim package. Both can throw (a results-shape mismatch in
       // buildClaimPackage, a schema violation or disk failure in writeClaimPackage) — that must
       // surface here, before the draft is transitioned, not after.
-      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells);
+      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord);
 
       const claimPackage = buildClaimPackage({
         draftId: input.draftId,

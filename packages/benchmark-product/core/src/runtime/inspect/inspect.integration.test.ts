@@ -270,6 +270,7 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     expect(matrix.cells).toHaveLength(4);
+    expect(matrix.cells.every((cell) => cell.verification.isolation === "match")).toBe(true);
     expect(
       matrix.cells.every((cell) => cell.verdicts.length === 1),
       JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, "inspect-real") }),
