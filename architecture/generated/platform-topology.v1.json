@@ -52,12 +52,37 @@
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
+        "to": "@jinn-network/benchmarking-publication"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
         "to": "@jinn-network/benchmarking-records"
       },
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
         "to": "@jinn-network/benchmarking-run"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-serve"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-transport-http"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/record-publication"
       },
       {
         "from": "@jinn-network/benchmark-product-core",
@@ -42636,8 +42661,13 @@
           "@jinn-network/benchmarking-aggregate",
           "@jinn-network/benchmarking-interop",
           "@jinn-network/benchmarking-local",
+          "@jinn-network/benchmarking-publication",
           "@jinn-network/benchmarking-records",
           "@jinn-network/benchmarking-run",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/record-discovery-transport-http",
+          "@jinn-network/record-publication",
           "@jinn-network/task-admission",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-backend-local",
