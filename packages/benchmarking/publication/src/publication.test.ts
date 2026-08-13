@@ -3,7 +3,7 @@ import {
   BENCHMARK_ACCOUNTING_MEDIA_TYPE, BENCHMARK_ACCOUNTING_RECORD_KIND, BENCHMARK_PUBLICATION_EXTENSION,
   BENCHMARKING_PROTOCOL, MATRIX_MEDIA_TYPE, MATRIX_RECORD_KIND, REPORT_MEDIA_TYPE, REPORT_V2_RECORD_KIND,
   RUN_MEDIA_TYPE, RUN_RECORD_KIND, SIGNED_REPORT_MEDIA_TYPE, cellIdempotencyKey, sealBenchmarkAccounting,
-  sealMatrix, sealRecord, sealReport, sealRun, serializeCanonicalJson, withMatrixPublicationExtension,
+  checkPublicRegistrationOrder, parseBenchmarkAccounting, parseRun, parseSignedReportRecord, readRunPublicationExtension, sealMatrix, sealRecord, sealReport, sealRun, serializeCanonicalJson, withMatrixPublicationExtension,
   withRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { sealSubmission } from "@jinn-network/task-execution-protocol";
@@ -43,28 +43,30 @@ function publicationFixture(options: {
   matrixCloseAt?: string;
   matrixRunDigest?: string;
   includeArtifact?: boolean;
+  registrationArtifactRole?: string;
   report?: boolean;
   reportMatrixDigest?: string;
-  publicRegistration?: "post-hoc" | "pre-dispatch-fail";
-  reportCheck?: { status: "pass" } | { status: "fail"; detail: string };
+  publicRegistration?: "post-hoc" | "pre-dispatch" | "pre-dispatch-fail" | "unverifiable";
+  preregistered?: boolean;
+  reportCheck?: { status: "pass" } | { status: "fail"; detail: string } | { status: "indeterminate"; detail: string };
 } = {}) {
   const artifact = sealRecord({ runtime: "v1" });
   const runSealed = sealRun(withRunPublicationExtension({
     protocol: BENCHMARKING_PROTOCOL, benchmark: { digest: { sha256: "b".repeat(64) } }, owner: "did:example:publisher",
     arms: [{ armId: "arm", pinning: {} }], replicates: 1, policy: { completenessFloor: "1", cellWindow: 1, replacement: { allowed: true }, independence: "disclosed", evaluation: {}, submissionBaseline: {} }, closeAt: "2026-08-13T00:00:00Z",
-  }, { registrationArtifacts: [{ role: "https://runtime.example/selection/v1", artifact: { name: "runtime", digest: { sha256: artifact.digest.slice(7) } } }] }));
-  const publicRegistration = options.publicRegistration === "pre-dispatch-fail" ? {
+  }, { registrationArtifacts: [{ role: options.registrationArtifactRole ?? "https://runtime.example/selection/v1", artifact: { name: "runtime", digest: { sha256: artifact.digest.slice(7) } } }] }));
+  const publicRegistration = options.publicRegistration === "pre-dispatch" || options.publicRegistration === "pre-dispatch-fail" ? {
     status: "pre-dispatch" as const,
-    runBoundary: { kind: "record-discovery" as const, source: { agent: "did:example:publisher", name: "benchmarks" }, position: { sequence: "0000000000000002", entry: `sha256:${hex}` as const } },
-    firstDispatchBoundary: { kind: "record-discovery" as const, source: { agent: "did:example:publisher", name: "benchmarks" }, position: { sequence: "0000000000000001", entry: `sha256:${hex}` as const } },
-  } : { status: "post-hoc" as const };
+    runBoundary: { kind: "record-discovery" as const, source: { agent: "did:example:publisher", name: "benchmarks" }, position: { sequence: options.publicRegistration === "pre-dispatch" ? "0000000000000001" : "0000000000000002", entry: `sha256:${hex}` as const } },
+    firstDispatchBoundary: { kind: "record-discovery" as const, source: { agent: "did:example:publisher", name: "benchmarks" }, position: { sequence: options.publicRegistration === "pre-dispatch" ? "0000000000000002" : "0000000000000001", entry: `sha256:${hex}` as const } },
+  } : options.publicRegistration === "unverifiable" ? { status: "unverifiable" as const } : { status: "post-hoc" as const };
   const accountingSealed = sealBenchmarkAccounting({ protocol: BENCHMARKING_PROTOCOL, run: { digest: { sha256: runSealed.digest.slice(7) } }, publisher: "did:example:publisher", publisherAuthority: { kind: "run-owner" }, procedure: { id: "jinn.benchmarking.accounting", version: "1.0" }, scope: { streams: scope }, publicRegistration, closeBoundary: { at: "2026-08-13T00:00:00Z" }, cells: [] });
   const matrixBase = { protocol: BENCHMARKING_PROTOCOL, run: { digest: { sha256: options.matrixRunDigest ?? runSealed.digest.slice(7) } }, closeBoundary: { at: options.matrixCloseAt ?? "2026-08-13T00:00:00Z" }, cells: [], exclusions: [], attrition: { perArm: {}, asymmetryFlags: [] }, completeness: { expected: 0, judged: 0, floor: "1", runOutcome: "partial" }, assembly: { procedure: "jinn.benchmarking.assembly", version: options.matrixVersion ?? "2.0" } };
   const accountingReference = { name: "accounting", digest: { sha256: accountingSealed.digest.slice(7) } };
   const matrixSealed = sealMatrix(options.matrixVersion === "1.0" ? matrixBase : withMatrixPublicationExtension(matrixBase, { accounting: accountingReference }));
   const delivery = sealRecord({ delivery: true });
   const registration = [
-    ...(options.includeArtifact === false ? [] : [{ id: "runtime", role: "https://runtime.example/selection/v1", digest: artifact.digest, bytes: artifact.bytes, mediaType: "application/json" }]),
+    ...(options.includeArtifact === false ? [] : [{ id: "runtime", role: options.registrationArtifactRole ?? "https://runtime.example/selection/v1", digest: artifact.digest, bytes: artifact.bytes, mediaType: "application/json" }]),
     ownerRecord("run", RUN_RECORD_KIND, RUN_MEDIA_TYPE, runSealed, "2026-08-13T00:00:00Z"),
   ];
   let input: BenchmarkPublicationPlanInput = { id: "publication-1", runId: "run", registration, accounting: {
@@ -74,10 +76,8 @@ function publicationFixture(options: {
   } };
   if (options.report) {
     const matrixDigest = options.reportMatrixDigest ?? matrixSealed.digest.slice(7);
-    const derivedCheck = publicRegistration.status === "pre-dispatch"
-      ? { status: "fail" as const, detail: "Run source position must precede the first dispatch source position" }
-      : { status: "pass" as const };
-    const payload = sealReport({ protocol: BENCHMARKING_PROTOCOL, subjects: [{ digest: { sha256: matrixDigest } }], method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} }, results: {}, disclosures: { perSubject: [{ subjectSha256: matrixDigest, integrityTiers: { "re-derivable": 0, "attested-only": 0 }, pinning: { harness: { match: 0, mismatch: 0, unverifiable: 0 }, model: { match: 0, mismatch: 0, unverifiable: 0 }, loadout: { match: 0, mismatch: 0, unverifiable: 0 }, isolation: { match: 0, mismatch: 0, unverifiable: 0 } }, independence: 0, completeness: { expected: 0, judged: 0, floor: "1", runOutcome: "partial" }, attrition: { perArm: {}, asymmetryFlags: [] } }] }, author: "did:example:publisher", [BENCHMARK_PUBLICATION_EXTENSION]: { publicRegistration: { perSubject: [{ subjectSha256: matrixDigest, status: publicRegistration.status, accounting: accountingReference, check: options.reportCheck ?? derivedCheck }] } } });
+    const derivedCheck = checkPublicRegistrationOrder(parseBenchmarkAccounting(accountingSealed.bytes));
+    const payload = sealReport({ protocol: BENCHMARKING_PROTOCOL, subjects: [{ digest: { sha256: matrixDigest } }], method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} }, results: {}, disclosures: { perSubject: [{ subjectSha256: matrixDigest, integrityTiers: { "re-derivable": 0, "attested-only": 0 }, pinning: { harness: { match: 0, mismatch: 0, unverifiable: 0 }, model: { match: 0, mismatch: 0, unverifiable: 0 }, loadout: { match: 0, mismatch: 0, unverifiable: 0 }, isolation: { match: 0, mismatch: 0, unverifiable: 0 } }, independence: 0, completeness: { expected: 0, judged: 0, floor: "1", runOutcome: "partial" }, attrition: { perArm: {}, asymmetryFlags: [] } }] }, author: "did:example:publisher", ...(options.preregistered === undefined ? {} : { preregistered: options.preregistered }), [BENCHMARK_PUBLICATION_EXTENSION]: { publicRegistration: { perSubject: [{ subjectSha256: matrixDigest, status: publicRegistration.status, accounting: accountingReference, check: options.reportCheck ?? derivedCheck }] } } });
     const envelope = signedEnvelope(payload.bytes); input = { ...input, report: { record: { id: "report", kind: REPORT_V2_RECORD_KIND, digest: sha256(envelope), bytes: envelope, mediaType: SIGNED_REPORT_MEDIA_TYPE, authority: { mode: "owner" }, announcementTimestamp: "2026-08-13T00:03:00Z" } } };
   }
   return { input, runSealed, accountingSealed, matrixSealed };
@@ -93,6 +93,62 @@ describe("benchmark publication", () => {
     expect(first.archive.streams[0]!.observations).toHaveLength(1);
     expect(first.archive.streams[0]!.conflicts).toHaveLength(1);
     expect(first.archive.streams[0]!.exactEnvelopes).toEqual([envelope]);
+  });
+
+  test("keeps source/subject streams separate while retaining duplicate, conflict, and sequence-gap evidence", () => {
+    const subject = "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa";
+    const from = (source: string, id: string, sequence: string, detail: string) => ({
+      ...observation(id, detail), source, subject, sequence,
+    });
+    const archive = buildObservationArchive({
+      submission: submissionFor(1).reference.record,
+      capturedThrough: { at: "2026-08-13T00:00:03Z", cursor: "3" },
+      snapshots: [
+        { observation: from("https://a.example/stream", "one", "0000000000000001", "same") },
+        { observation: from("https://a.example/stream", "one", "0000000000000001", "same") },
+        { observation: from("https://a.example/stream", "conflict", "0000000000000002", "left") },
+        { observation: from("https://a.example/stream", "conflict", "0000000000000002", "right") },
+        // The archive never invents a missing sequence: the gap remains observable in exact data.
+        { observation: from("https://b.example/stream", "three", "0000000000000003", "gap-after-two") },
+      ],
+    }).archive;
+    expect(archive.streams).toHaveLength(2);
+    expect(archive.streams[0]!.observations.map((entry) => entry.id)).toEqual(["one"]);
+    expect(archive.streams[0]!.conflicts).toHaveLength(1);
+    expect(archive.streams[1]!.observations.map((entry) => entry.sequence)).toEqual(["0000000000000003"]);
+  });
+
+  test.each([
+    [true, "pre-dispatch"], [false, "pre-dispatch"],
+    [true, "post-hoc"], [false, "post-hoc"],
+    [true, "unverifiable"], [false, "unverifiable"],
+  ] as const)("keeps analysis preregistration %s independent from public registration %s", (preregistered, publicRegistration) => {
+    const { input } = publicationFixture({ report: true, preregistered, publicRegistration });
+    expect(buildBenchmarkPublicationPlan(input).stages).toHaveLength(3);
+    const signed = parseSignedReportRecord(input.report!.record.bytes);
+    expect(signed.payload.preregistered).toBe(preregistered);
+    const extension = signed.payload[BENCHMARK_PUBLICATION_EXTENSION] as unknown as { readonly publicRegistration: { readonly perSubject: readonly unknown[] } };
+    expect(extension.publicRegistration.perSubject[0]!).toMatchObject({
+      status: publicRegistration,
+      check: publicRegistration === "unverifiable" ? { status: "indeterminate" } : { status: "pass" },
+    });
+  });
+
+  test("fails crossed same-source ordering and represents incomparable ordering as unverifiable", () => {
+    const crossed = publicationFixture({ report: true, publicRegistration: "pre-dispatch-fail" });
+    expect(checkPublicRegistrationOrder(parseBenchmarkAccounting(crossed.accountingSealed.bytes))).toMatchObject({ status: "fail" });
+    expect(buildBenchmarkPublicationPlan(crossed.input).stages).toHaveLength(3);
+
+    const incomparable = publicationFixture({ report: true, publicRegistration: "unverifiable" });
+    expect(checkPublicRegistrationOrder(parseBenchmarkAccounting(incomparable.accountingSealed.bytes))).toMatchObject({ status: "indeterminate" });
+    expect(buildBenchmarkPublicationPlan(incomparable.input).stages).toHaveLength(3);
+  });
+
+  test("round-trips an unknown namespaced registration-artifact role without making it core semantics", () => {
+    const role = "https://third-party.example/benchmark-artifacts/runtime-proof/v1";
+    const { input, runSealed } = publicationFixture({ registrationArtifactRole: role });
+    expect(readRunPublicationExtension(parseRun(runSealed.bytes))!.registrationArtifacts[0]!.role).toBe(role);
+    expect(buildBenchmarkPublicationPlan(input).stages[0]!.members).toContainEqual(expect.objectContaining({ role }));
   });
 
   test("rehashes exact Submission bytes and binds canonical cell, arm, replicate, and dispatch index", () => {
