@@ -39,11 +39,6 @@ export interface TaskPostResult {
 export interface PostTaskCandidateOptions {
   creatorSafeAddress?: string;
   beforeBroadcast?: () => void | Promise<void>;
-  assertFunding?: (facts: {
-    creatorSafe: string;
-    solverNetManifestCid: string;
-    proposedSpendWei: bigint;
-  }) => void | Promise<void>;
   recoveryOnly?: boolean;
 }
 
@@ -320,7 +315,6 @@ export class TaskPostingService {
         );
       }
       const posted = await this.adapter.postTask(task, {
-        assertFunding: opts.assertFunding,
         beforeBroadcast: async () => {
           await opts.beforeBroadcast?.();
           const intentAt = this.scheduler.now().toISOString();

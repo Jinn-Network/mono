@@ -19,11 +19,6 @@ export interface RecoverTaskPostInput {
 
 export interface PostTaskOptions {
   beforeBroadcast?: () => void | Promise<void>;
-  assertFunding?: (facts: {
-    creatorSafe: string;
-    solverNetManifestCid: string;
-    proposedSpendWei: bigint;
-  }) => void | Promise<void>;
   onTransactionHash?: (txHash: Hex) => void | Promise<void>;
 }
 

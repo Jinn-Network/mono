@@ -276,11 +276,6 @@ async function maybeMaterializeJinnRepoPatchPayload(
   if (task?.solverType !== 'jinn-repo.v1' || task.role === 'evaluation') {
     return null;
   }
-  if (task.spec?.['application'] !== undefined) {
-    // Application-extended tasks own their complete typed result. Falling
-    // back to a patch-only payload would silently discard application data.
-    return null;
-  }
   const repoDir = join(workingDir, 'repo');
   if (!existsSync(join(repoDir, '.git'))) {
     return null;

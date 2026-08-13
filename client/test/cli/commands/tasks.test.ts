@@ -290,15 +290,12 @@ describe('tasks submit machine contract', () => {
     expect(createCliReadOnlySignerContext).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['--id', 'legacy'],
-    ['--max-spend-wei', '100'],
-  ])('rejects request-file combined with loose flag %s', async (flag, value) => {
+  it('rejects request-file combined with legacy loose flags', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-task-submit-'));
     const file = join(dir, 'request.json');
     writeFileSync(file, JSON.stringify(request()));
     const made = makeCommandCtx({
-      argv: ['submit', '--request-file', file, flag, value, '--dry-run', '--json'],
+      argv: ['submit', '--request-file', file, '--id', 'legacy', '--dry-run', '--json'],
     });
 
     await tasksCommand.run(made.ctx);

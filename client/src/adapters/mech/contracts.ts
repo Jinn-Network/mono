@@ -23,7 +23,6 @@ import { STAKING_ABI, STOLAS_DISTRIBUTOR_ABI } from '../../earning/contracts.js'
 import { isUnauthorizedAccountError } from '../../errors/unauthorized-account.js';
 import { executeSafeTransaction, type VenueBroadcaster } from './safe.js';
 import { formatKnownRevert, formatKnownRevertDetail } from './safe-revert.js';
-import { marketplaceTaskBudgetWei } from '../../tasks/submit-preflight.js';
 import {
   flattenErrorMessage,
   isRecoverableTransactionError,
@@ -251,11 +250,9 @@ export async function submitTask(
   // `solutionBudget + verdictBudget` where each side = rate * maxClaims (the
   // per-verdict `requiredVerdicts` multiplier is gone). msg.value must match
   // exactly or createTask reverts with RouterInsufficientTaskBudget.
-  const taskBudget = marketplaceTaskBudgetWei({
-    solutionMaxDeliveryRateWei,
-    verdictMaxDeliveryRateWei,
-    maxClaims: policy.maxClaims,
-  });
+  const taskBudget =
+    solutionMaxDeliveryRateWei * BigInt(policy.maxClaims) +
+    verdictMaxDeliveryRateWei * BigInt(policy.maxClaims);
 
   const txHash = await withEvictionRecovery(
     publicClient,

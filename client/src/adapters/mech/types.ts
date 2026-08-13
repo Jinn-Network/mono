@@ -6,9 +6,6 @@ import type {
   JinnRepoAutopilotSessionTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import type {
-  IssueRelayEvaluationContextResolver,
-} from '../../issue-relay/evaluation-context-resolver.js';
-import type {
   AutopilotEvaluationContextObservation,
 } from '../../harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
 
@@ -17,22 +14,6 @@ export interface EvictionRecoveryConfig {
   stakingProxyAddress: Address;
   distributorAddress: Address;
   masterWalletClient: WalletClient;
-}
-
-export interface JinnRepoEvaluationContextResolvers {
-  readonly autopilot?: {
-    resolve(input: {
-      task: JinnRepoAutopilotSessionTask;
-      solution: AutopilotMutationResult;
-      taskId: string;
-      attemptIndex: number;
-      requestId: string;
-      solutionEnvelopeCid: string;
-      solutionOperatorSafe: string;
-      evaluatorOperatorSafe: string;
-    }): Promise<AutopilotEvaluationContextObservation | undefined>;
-  };
-  readonly issueRelay?: IssueRelayEvaluationContextResolver;
 }
 
 export interface MechAdapterConfig {
@@ -111,7 +92,18 @@ export interface MechAdapterConfig {
    * adapter never fabricates an adoption receipt: without an accepted,
    * correlation-exact observation the Solution remains pending.
    */
-  evaluationContextResolvers?: JinnRepoEvaluationContextResolvers;
+  autopilotEvaluationContextResolver?: {
+    resolve(input: {
+      task: JinnRepoAutopilotSessionTask;
+      solution: AutopilotMutationResult;
+      taskId: string;
+      attemptIndex: number;
+      requestId: string;
+      solutionEnvelopeCid: string;
+      solutionOperatorSafe: string;
+      evaluatorOperatorSafe: string;
+    }): Promise<AutopilotEvaluationContextObservation | undefined>;
+  };
 }
 
 export const MECH_MARKETPLACE_ABI = [
