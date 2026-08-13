@@ -58,6 +58,8 @@ export const PublicationStageSchema = z.object({
 });
 
 export const PublicationStateSchema = z.object({
+  /** Local is the safe default. Prospective mode is an explicit public-before-run intent. */
+  mode: z.enum(["local", "prospective"]).optional(),
   source: PublicationSourceSchema,
   registration: PublicationStageSchema,
   accounting: PublicationStageSchema,
@@ -74,6 +76,7 @@ export const DEFAULT_PUBLICATION_AGENT_KEY_REF = "workspace-owner";
 /** New managed runs always receive this state at quote time. No stage is implied complete. */
 export function createPublicationState(source: Partial<PublicationSource> = {}): PublicationState {
   return {
+    mode: "local",
     source: {
       agentKeyRef: source.agentKeyRef ?? DEFAULT_PUBLICATION_AGENT_KEY_REF,
       name: source.name ?? DEFAULT_PUBLICATION_SOURCE_NAME,
@@ -220,6 +223,9 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
           || current.publication.source.agentKeyRef !== proposed.source.agentKeyRef
         ) {
           refuse("conflict", `runs.${draftId}.publication.source`, "source name and agent key reference are immutable after a durable source append receipt");
+        }
+        if ((current.publication.mode ?? "local") !== (proposed.mode ?? "local")) {
+          refuse("conflict", `runs.${draftId}.publication.mode`, "publication mode is immutable after a durable source append receipt");
         }
         const stageNames = ["registration", "accounting", "report"] as const;
         const rank = { "not-started": 0, "in-progress": 1, complete: 2 } as const;

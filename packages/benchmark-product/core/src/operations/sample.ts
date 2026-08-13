@@ -18,6 +18,7 @@
  */
 
 import type { DraftDocument } from "../domain/draft.js";
+import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import { buildSampleBenchmark } from "../intake/sample.js";
 import { attachBenchmarkToDraft } from "./attach.js";
@@ -62,6 +63,13 @@ export function sampleInit(
 
       const sample = await buildSampleBenchmark();
 
+      // Registration closes every digest-bearing Task descriptor. Retain the exact built-in
+      // profile bytes alongside the Task/EvaluationSpec so a later prospective or post-hoc
+      // publication never has to substitute a URI for the digest-pinned document.
+      putSealedBytes(
+        clockedContext.workspaceDir,
+        sealTaskProfile(buildPredictionForecastProfile()).bytes,
+      );
       const evaluationSpecSha256 = putSealedBytes(clockedContext.workspaceDir, sample.evaluationSpec.bytes);
       const tasks: SampleInitTaskSummary[] = sample.tasks.map((task) => {
         const taskSha256 = putSealedBytes(clockedContext.workspaceDir, task.bytes);

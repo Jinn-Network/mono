@@ -61,6 +61,8 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runPreview: "preview",
   runQuote: "quote",
   runLock: "lock",
+  publicationConfigure: "publication configure",
+  publicationRegister: "publication register",
   runLaunch: "launch",
   runResume: "resume",
   runCancel: "cancel",
@@ -95,6 +97,8 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runPreview: "preview",
   runQuote: "quote",
   runLock: "lock",
+  publicationConfigure: "publication.configure",
+  publicationRegister: "publication.register",
   runLaunch: "launch",
   runResume: "run.resume",
   runCancel: "cancel",
@@ -129,6 +133,8 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
     "Runs a disposable rehearsal of the draft's arms on the local venue in a throwaway area; never official evidence, never advances the lifecycle.",
   runQuote: "Prices a compiled run against the local venue's capabilities, without spending.",
   runLock: "Seals the Run record and transitions the draft to locked (authority-gated).",
+  publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
+  publicationRegister: "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
   runLaunch: "Launches the locked run on the real local venue (authority-gated).",
   runResume: "Resumes an interrupted run, dispatching only outstanding work.",
   runCancel:
@@ -149,7 +155,7 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
  */
 export type GuiCapability =
   | { readonly status: "shipped"; readonly action: string }
-  | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" };
+  | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" | "PUB-14" };
 
 export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   initWorkspace: { status: "shipped", action: "workspace.init" },
@@ -171,6 +177,8 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runPreview: { status: "shipped", action: "run.preview" },
   runQuote: { status: "shipped", action: "run.quote" },
   runLock: { status: "shipped", action: "run.lock" },
+  publicationConfigure: { status: "deferred", deferredTo: "PUB-14" },
+  publicationRegister: { status: "deferred", deferredTo: "PUB-14" },
   runLaunch: { status: "shipped", action: "run.launch" },
   runResume: { status: "shipped", action: "run.resume" },
   runCancel: { status: "shipped", action: "run.cancel" },

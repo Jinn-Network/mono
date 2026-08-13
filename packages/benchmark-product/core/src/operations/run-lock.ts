@@ -25,8 +25,7 @@ import { compileDraft } from "../run/compile.js";
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
-import { createPublisherAuthorizationArtifact, AUTHORIZATION_MEDIA_TYPE } from "../run/publication-authorization.js";
-import { BENCHMARK_PUBLICATION_AUTHORIZATION_ROLE } from "../run/publication-source.js";
+import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
@@ -83,18 +82,15 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         closeAt,
       });
 
-      const authorization = createPublisherAuthorizationArtifact({
-        workspaceDir: clockedContext.workspaceDir,
-        owner: runState.owner,
-        effectiveAt: at,
-      });
-      const authorizationSha256 = putSealedBytes(clockedContext.workspaceDir, authorization.bytes);
       const runWithPublicationAuthorization = withRunPublicationExtension(
         compiled.plannedRun.record as unknown as Record<string, unknown>,
         {
-          registrationArtifacts: [{
-            role: BENCHMARK_PUBLICATION_AUTHORIZATION_ROLE,
-            artifact: { digest: { sha256: authorizationSha256 }, mediaType: AUTHORIZATION_MEDIA_TYPE },
+          registrationArtifacts: document.spec.evaluationRuntime === undefined ? [] : [{
+            role: INSPECT_SELECTION_CORRELATION_ROLE,
+            artifact: {
+              digest: { sha256: document.spec.evaluationRuntime.selectionManifestSha256 },
+              mediaType: "application/json",
+            },
           }],
         },
       );

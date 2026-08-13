@@ -24,16 +24,14 @@ import { sha256 as publicationSha256, type CasResult, type PublicationJournal, t
 import { atomicWriteFileSync, fsyncDirectorySync, readFileIfExistsSync } from "../fs/atomic.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import { publicationJournalPath, publicationServeRoot, publicationStatePath } from "../workspace/layout.js";
-
-const text = new TextEncoder();
-const AUTHORIZATION_MEDIA_TYPE = "application/vnd.jinn.benchmark-publication.authorization.v1+json";
+import { acquirePublicationLock } from "./publication-lock.js";
 
 function opaqueId(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function revision(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+  return createHash("sha256").update(value === undefined ? "undefined" : JSON.stringify(value), "utf8").digest("hex");
 }
 
 function readJson<T>(path: string): T | undefined {
@@ -131,6 +129,16 @@ export function createWorkspacePublicationSource(workspaceDir: string, sourceNam
   };
 }
 
+/** Cross-process source serialization. The underlying CAS revisions still detect corruption;
+ * this lock makes read/compare/write one single-writer transaction across product processes. */
+export async function withWorkspacePublicationSourceLock<T>(
+  workspaceDir: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const lock = await acquirePublicationLock(workspaceDir, "__record-discovery-source__");
+  try { return await run(); } finally { lock.release(); }
+}
+
 /** Durable neutral-plan journal, CAS-shaped so record-publication owns retry semantics. */
 export function createWorkspacePublicationJournal(workspaceDir: string, draftId: string): PublicationJournalStore {
   const path = publicationJournalPath(workspaceDir, draftId);
@@ -169,6 +177,4 @@ export function createWorkspacePublicationHttpHandler(workspaceDir: string): (re
   };
 }
 
-export const BENCHMARK_PUBLICATION_AUTHORIZATION_ROLE = "https://spec.jinn.network/artifacts/benchmark-publication-authorization/v1";
-export const BENCHMARK_PUBLICATION_AUTHORIZATION_SCOPE = "jinn:benchmark-publication";
-export { AUTHORIZATION_MEDIA_TYPE, recordPath };
+export { recordPath };

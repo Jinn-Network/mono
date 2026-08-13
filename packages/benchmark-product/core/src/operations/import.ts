@@ -14,6 +14,7 @@
  */
 
 import type { DraftDocument } from "../domain/draft.js";
+import { buildRepositoryWorkProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
 import { convertSweBenchRows } from "../intake/swebench.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import { attachBenchmarkToDraft } from "./attach.js";
@@ -71,6 +72,13 @@ export function importSweBenchRows(
         ...(input.provenanceTimestamps !== undefined ? { provenanceTimestamps: input.provenanceTimestamps } : {}),
       });
       const imported = converted.imported;
+
+      // SWE-bench Tasks bind the repository-work profile by digest. Keep its exact sealed bytes
+      // in the workspace so the publication closure remains content-addressed and offline.
+      putSealedBytes(
+        clockedContext.workspaceDir,
+        sealTaskProfile(buildRepositoryWorkProfile()).bytes,
+      );
 
       const taskSha256s = imported.tasks.map((task) => {
         const stored = putSealedBytes(clockedContext.workspaceDir, task.bytes);

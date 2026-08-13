@@ -21,7 +21,9 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/task-execution-profiles", ["task-execution", "profiles"]],
   ["@jinn-network/benchmarking-records", ["benchmarking", "records"]],
   ["@jinn-network/record-discovery-protocol", ["discovery", "protocol"]],
+  ["@jinn-network/record-discovery-client", ["discovery", "client"]],
   ["@jinn-network/record-discovery-serve", ["discovery", "serve"]],
+  ["@jinn-network/record-discovery-transport-http", ["discovery", "transport-http"]],
   ["@jinn-network/record-publication", ["discovery", "publication"]],
   ["@jinn-network/benchmarking-publication", ["benchmarking", "publication"]],
   ["@jinn-network/benchmarking-aggregate", ["benchmarking", "aggregate"]],
@@ -111,7 +113,7 @@ try {
     `
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark, runCancel } from "@jinn-network/benchmark-product-core";
+import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark, createWorkspacePublicationHttpHandler, publicationConfigure, publicationRegister, runCancel } from "@jinn-network/benchmark-product-core";
 
 const require = createRequire(import.meta.url);
 const requiredEntry = require("@jinn-network/benchmark-product-core");
@@ -125,6 +127,8 @@ if (requiredEntry.PRODUCT_BRANDING.displayName !== PRODUCT_BRANDING.displayName)
 
 if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
 if (typeof runCancel !== "function") throw new Error("runCancel missing from packed public entrypoint");
+if (typeof publicationConfigure !== "function" || typeof publicationRegister !== "function") throw new Error("publication operation facade is incomplete");
+if (typeof createWorkspacePublicationHttpHandler !== "function") throw new Error("publication HTTP composition helper is missing");
 // The bundled sample must build from the PACKED graph: this proves the admission package ships
 // its golden fixture in the tarball and the whole intake path works for an external consumer.
 const sample = await buildSampleBenchmark();
@@ -149,6 +153,10 @@ const expectedJinnDependencies = [
   "@jinn-network/benchmarking-publication",
   "@jinn-network/benchmarking-records",
   "@jinn-network/benchmarking-run",
+  "@jinn-network/record-discovery-protocol",
+  "@jinn-network/record-discovery-serve",
+  "@jinn-network/record-discovery-transport-http",
+  "@jinn-network/record-publication",
   "@jinn-network/task-admission",
   "@jinn-network/task-execution-backend",
   "@jinn-network/task-execution-backend-local",

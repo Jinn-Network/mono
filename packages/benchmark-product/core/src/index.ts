@@ -234,13 +234,7 @@ export type { PublicationCompatibilityAssessment } from "./run/publication-compa
 export {
   createWorkspacePublicationHttpHandler,
   createWorkspacePublicationSource,
-  BENCHMARK_PUBLICATION_AUTHORIZATION_ROLE,
-  BENCHMARK_PUBLICATION_AUTHORIZATION_SCOPE,
 } from "./run/publication-source.js";
-export {
-  createPublisherAuthorizationArtifact,
-  verifyPublisherAuthorizationArtifact,
-} from "./run/publication-authorization.js";
 export { foldRunJournalLineage } from "./run/journal.js";
 export type { DispatchLineageFold } from "./run/journal.js";
 
@@ -267,6 +261,8 @@ export {
   initWorkspace,
   inspectDraft,
   listDrafts,
+  publicationConfigure,
+  publicationRegister,
   runCancel,
   runCollect,
   runLaunch,
@@ -301,6 +297,9 @@ export type {
   OperationContext,
   OperationResult,
   PreviewArtifact,
+  PublicationConfigureInput,
+  PublicationRegisterInput,
+  PublicationRegistrationResult,
   QuoteArmSize,
   QuoteCoverageRefusal,
   QuoteEstimatedWallTime,

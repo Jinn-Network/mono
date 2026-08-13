@@ -1,19 +1,21 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { parseRun } from "@jinn-network/benchmarking-records";
+import { PREDICTION_FORECAST_PROFILE_DIGEST_HEX } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, sealedRecordPath } from "../workspace/sealed-store.js";
 import { armAdd, armUpdate } from "./arms.js";
 import { authorityGrant } from "./authority-ops.js";
 import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { runLock } from "./run-lock.js";
+import { buildRegistrationClosure } from "./publication-register.js";
 import { runQuote } from "./run-quote.js";
 import { sampleInit } from "./sample.js";
 
@@ -72,6 +74,45 @@ describe("runLock — lifecycle transition", () => {
 
     const entries = readAuditEntries(workspaceDir);
     expect(entries[entries.length - 1]).toMatchObject({ action: "lock", subject: "draft-1", outcome: "ok" });
+  }, 30_000);
+
+  test("retains an exact registration closure ordered Task material -> Tasks -> Benchmark -> Run", async () => {
+    const clock = makeClock();
+    await setUpQuotedDraft(clock);
+    const locked = runLock(contextFor(clock), { draftId: "draft-1" });
+    expect(locked.ok).toBe(true);
+    if (!locked.ok) return;
+
+    const members = buildRegistrationClosure(
+      workspaceDir,
+      getSealedBytes(workspaceDir, locked.result.runSha256),
+      locked.result.runSha256,
+      "2026-08-13T12:00:00Z",
+    );
+    expect(members.at(-1)?.id).toBe("run");
+    const tasks = members.filter((member) => member.id.startsWith("task:"));
+    expect(tasks).toHaveLength(3);
+    expect(tasks.every((task) => task.dependsOn?.some((id) => id.startsWith("profile:")))).toBe(true);
+    expect(tasks.every((task) => task.dependsOn?.some((id) => id.startsWith("evaluation:")))).toBe(true);
+    const benchmark = members.find((member) => member.id.startsWith("benchmark:"));
+    expect(benchmark?.dependsOn).toEqual(expect.arrayContaining(tasks.map((task) => task.id)));
+    expect(members.at(-1)?.dependsOn).toEqual([benchmark?.id]);
+
+    const profilePath = sealedRecordPath(workspaceDir, PREDICTION_FORECAST_PROFILE_DIGEST_HEX);
+    unlinkSync(profilePath);
+    expect(() => buildRegistrationClosure(
+      workspaceDir,
+      getSealedBytes(workspaceDir, locked.result.runSha256),
+      locked.result.runSha256,
+      "2026-08-13T12:00:00Z",
+    )).toThrow(/missing/);
+    writeFileSync(profilePath, "tampered");
+    expect(() => buildRegistrationClosure(
+      workspaceDir,
+      getSealedBytes(workspaceDir, locked.result.runSha256),
+      locked.result.runSha256,
+      "2026-08-13T12:00:00Z",
+    )).toThrow(/missing/);
   }, 30_000);
 
   test("refuses illegal-transition when the draft is not 'quoted' (e.g. still 'draft')", async () => {

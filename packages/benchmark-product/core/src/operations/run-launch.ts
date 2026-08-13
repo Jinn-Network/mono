@@ -46,7 +46,7 @@ import {
   type DriveDeps,
 } from "../run/drive.js";
 import { createProductLaunchCapture } from "../run/publication-capture.js";
-import { createWorkspacePublicationSource } from "../run/publication-source.js";
+import { createWorkspacePublicationSource, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
 import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
   appendRunJournalEntry,
@@ -188,6 +188,53 @@ async function runDriverGeneration<T>(
   }
 }
 
+async function createRunLaunchCapture(
+  workspaceDir: string,
+  draftId: string,
+  liveClock: () => string,
+): Promise<ReturnType<typeof createProductLaunchCapture>> {
+  const state = requireRunState(workspaceDir, draftId);
+  const publication = state.publication;
+  if (publication?.mode !== "prospective") {
+    return createProductLaunchCapture({ workspaceDir, draftId, liveClock });
+  }
+  if (publication.registration.state !== "complete" || publication.source.publicBaseUrl === undefined) {
+    refuse("conflict", `runs.${draftId}.publication.registration`, "prospective public registration must be complete and retrievable before dispatch");
+  }
+  const frozenCaptures = readRunJournalEntries(workspaceDir, draftId).filter(
+    (entry) => entry.kind === "submission-captured" && entry.publicationSourceSequence !== undefined,
+  );
+  return createProductLaunchCapture({
+    workspaceDir,
+    draftId,
+    liveClock,
+    announceSubmission: async ({ bytes, digest, at }) => withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      const source = createWorkspacePublicationSource(workspaceDir, publication.source.name);
+      if (source.source.agent !== publication.source.agentKeyRef || state.owner !== source.source.agent) {
+        refuse("conflict", `runs.${draftId}.publication.source`, "Run owner and source agent must be the same stable workspace did:key");
+      }
+      await source.writer.recover();
+      const prior = frozenCaptures.find((entry) => entry.kind === "submission-captured" && entry.submissionSha256 === digest.slice(7));
+      const receipt = await source.writer.append({
+        timestamp: prior?.at ?? at,
+        announcement: {
+          announcementId: `submission:${digest}`,
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/submission/v1", digest, mediaType: SUBMISSION_MEDIA_TYPE },
+        },
+        record: { bytes, contentType: SUBMISSION_MEDIA_TYPE },
+      });
+      const base = publication.source.publicBaseUrl!;
+      const response = await fetch(new URL(recordPath(digest), base.endsWith("/") ? base : `${base}/`));
+      const observed = response.ok ? new Uint8Array(await response.arrayBuffer()) : undefined;
+      if (observed === undefined || observed.length !== bytes.length || !observed.every((byte, index) => byte === bytes[index])) {
+        throw new Error("prospective Submission was announced but is not exactly retrievable");
+      }
+      return { sequence: receipt.sequence, entrySha256: receipt.entryDigest.slice("sha256:".length) };
+    }),
+  });
+}
+
 export function runLaunch(
   context: OperationContext,
   input: RunLaunchInput,
@@ -202,8 +249,8 @@ export function runLaunch(
     inputs: input,
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
-      const registration = requireRunState(clockedContext.workspaceDir, input.draftId).publication?.registration;
-      if (registration?.state !== "complete") {
+      const publicationIntent = requireRunState(clockedContext.workspaceDir, input.draftId).publication;
+      if (publicationIntent?.mode === "prospective" && publicationIntent.registration.state !== "complete") {
         refuse("conflict", `runs.${input.draftId}.publication.registration`, "public registration must be complete and retrievable before launch");
       }
       const createVenue: typeof createLocalVenue = deps.createVenue
@@ -263,37 +310,7 @@ export function runLaunch(
                 liveClock: context.clock,
                 recordSolveSubmissions: false,
               });
-              const currentState = requireRunState(clockedContext.workspaceDir, input.draftId);
-              const publication = currentState.publication;
-              if (publication === undefined || publication.source.publicBaseUrl === undefined) {
-                refuse("conflict", `runs.${input.draftId}.publication`, "public source location is required before launch");
-              }
-              const source = createWorkspacePublicationSource(clockedContext.workspaceDir, publication.source.name);
-              if (source.source.agent !== publication.source.agentKeyRef) {
-                refuse("conflict", `runs.${input.draftId}.publication.source`, "workspace signing key changed; refusing source re-attribution");
-              }
-              await source.writer.recover();
-              const capture = createProductLaunchCapture({
-                workspaceDir: clockedContext.workspaceDir,
-                draftId: input.draftId,
-                liveClock: context.clock,
-                announceSubmission: async ({ bytes, digest, at }) => {
-                  const receipt = await source.writer.append({
-                    timestamp: at,
-                    announcement: {
-                      announcementId: `submission:${digest}`,
-                      action: "available",
-                      record: {
-                        kind: "https://spec.jinn.network/records/submission/v1",
-                        digest,
-                        mediaType: SUBMISSION_MEDIA_TYPE,
-                      },
-                    },
-                    record: { bytes, contentType: SUBMISSION_MEDIA_TYPE },
-                  });
-                  return { sequence: receipt.sequence, entrySha256: receipt.entryDigest.slice("sha256:".length) };
-                },
-              });
+              const capture = await createRunLaunchCapture(clockedContext.workspaceDir, input.draftId, context.clock);
               const driveDeps: DriveDeps = {
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
@@ -429,7 +446,7 @@ export function runResume(
                 liveClock: context.clock,
                 recordSolveSubmissions: false,
               });
-              const capture = createProductLaunchCapture({ workspaceDir: clockedContext.workspaceDir, draftId: input.draftId, liveClock: context.clock });
+              const capture = await createRunLaunchCapture(clockedContext.workspaceDir, input.draftId, context.clock);
               const driveDeps: DriveDeps = {
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
