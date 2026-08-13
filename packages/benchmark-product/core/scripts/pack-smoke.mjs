@@ -113,7 +113,7 @@ try {
     `
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark, createWorkspacePublicationHttpHandler, publicationConfigure, publicationRegister, runCancel } from "@jinn-network/benchmark-product-core";
+import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, HARBOR_ADAPTER_ID, SUPPORTED_HARBOR_VERSION_RANGE, buildSampleBenchmark, createWorkspacePublicationHttpHandler, publicationConfigure, publicationRegister, runCancel } from "@jinn-network/benchmark-product-core";
 
 const require = createRequire(import.meta.url);
 const requiredEntry = require("@jinn-network/benchmark-product-core");
@@ -127,6 +127,9 @@ if (requiredEntry.PRODUCT_BRANDING.displayName !== PRODUCT_BRANDING.displayName)
 
 if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
 if (typeof runCancel !== "function") throw new Error("runCancel missing from packed public entrypoint");
+if (HARBOR_ADAPTER_ID !== "harbor" || SUPPORTED_HARBOR_VERSION_RANGE !== "0.21.x") {
+  throw new Error("packed Harbor adapter contract is missing or drifted");
+}
 if (typeof publicationConfigure !== "function" || typeof publicationRegister !== "function") throw new Error("publication operation facade is incomplete");
 if (typeof createWorkspacePublicationHttpHandler !== "function") throw new Error("publication HTTP composition helper is missing");
 // The bundled sample must build from the PACKED graph: this proves the admission package ships

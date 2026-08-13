@@ -82,6 +82,44 @@ export type {
   InspectRuntimeSelectionRequest,
   InspectRuntimeSelectionResolution,
 } from "./runtime/host-port.js";
+export {
+  HARBOR_SELECTION_SCHEMA,
+  SUPPORTED_HARBOR_VERSION_RANGE,
+  HarborSelectionManifestSchema,
+  harborSelectionManifestBytes,
+  harborSelectionManifestSha256,
+  assertSupportedHarborVersion,
+} from "./runtime/harbor/manifest.js";
+export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
+export {
+  HARBOR_SELECTION_ROLE,
+  HARBOR_CORRELATION_ROLE,
+  HARBOR_JOB_CONFIG_ROLE,
+  HARBOR_JOB_RESULT_ROLE,
+  HARBOR_TRIAL_CONFIG_ROLE,
+  HARBOR_TRIAL_RESULT_ROLE,
+  HARBOR_REWARD_ROLE,
+  HARBOR_ATIF_ROLE,
+  HARBOR_CTRF_ROLE,
+  HARBOR_LOGS_ROLE,
+  HARBOR_ARTIFACT_MANIFEST_ROLE,
+  HARBOR_COLLECTED_ARTIFACTS_ROLE,
+  HarborDirectVenue,
+  processHarborCommandRunner,
+  readHarborArchiveOnly,
+  harborEvidenceContribution,
+} from "./runtime/harbor/venue.js";
+export { resolveHarborSelection, createHarborDirectVenue } from "./runtime/harbor/host.js";
+export type {
+  HarborSelectionManifest,
+} from "./runtime/harbor/manifest.js";
+export type {
+  HarborCommandRunner,
+  HarborDispatchLineage,
+  HarborDispatchArchive,
+  HarborArchivedArtifact,
+} from "./runtime/harbor/venue.js";
+export type { HarborRuntimeSelectionRequest, HarborRuntimeSelectionResolution } from "./runtime/harbor/host.js";
 
 // Demo-1's explicit real-Claude runtime and byte-preserving arm construction. The product does
 // not discover executables or source content ambiently; callers bind both before lock.

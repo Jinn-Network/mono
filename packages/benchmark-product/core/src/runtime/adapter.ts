@@ -23,10 +23,29 @@ import {
 } from "../venue/venue.js";
 import { createDefaultBenchmarkRuntimeHost, type BenchmarkRuntimeHost } from "./host-port.js";
 import { INSPECT_ADAPTER_ID } from "./inspect/manifest.js";
+import {
+  HARBOR_ADAPTER_ID,
+  HARBOR_RUNTIME_EVIDENCE_PROFILE,
+} from "./harbor/manifest.js";
+import {
+  HARBOR_ARTIFACT_MANIFEST_ROLE,
+  HARBOR_COLLECTED_ARTIFACTS_ROLE,
+  HARBOR_ATIF_ROLE,
+  HARBOR_CORRELATION_ROLE,
+  HARBOR_CTRF_ROLE,
+  HARBOR_JOB_CONFIG_ROLE,
+  HARBOR_JOB_RESULT_ROLE,
+  HARBOR_LOGS_ROLE,
+  HARBOR_REWARD_ROLE,
+  HARBOR_SELECTION_ROLE,
+  HARBOR_TRIAL_CONFIG_ROLE,
+  HARBOR_TRIAL_RESULT_ROLE,
+} from "./harbor/venue.js";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
 export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";
 export const INSPECT_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/inspect-evidence/v1";
+export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./harbor/manifest.js";
 export const INSPECT_EVAL_LOG_ARTIFACT_ROLE = "https://product.jinn.network/artifact-roles/inspect/eval-log/v1";
 export const INSPECT_SELECTION_CORRELATION_ROLE = "https://product.jinn.network/artifact-roles/inspect/selection-manifest/v1";
 export const INSPECT_RUNTIME_PROVENANCE_ROLE = "https://product.jinn.network/artifact-roles/inspect/runtime-provenance/v1";
@@ -101,6 +120,17 @@ const inspectDefinition: AdapterDefinition = {
   },
   nativeArtifactPublication: "explicit-consent",
   profile: INSPECT_RUNTIME_EVIDENCE_PROFILE,
+};
+
+const harborDefinition: AdapterDefinition = {
+  summary: {
+    id: HARBOR_ADAPTER_ID,
+    label: "Harbor 0.21 (managed direct)",
+    available: true,
+    selectionRequired: true,
+  },
+  nativeArtifactPublication: "explicit-consent",
+  profile: HARBOR_RUNTIME_EVIDENCE_PROFILE,
 };
 
 function digestMatches(bytes: Uint8Array, descriptor: DigestBearingResourceDescriptor): boolean {
@@ -216,31 +246,79 @@ function assertInspectContribution(
   }
 }
 
+const HARBOR_REQUIRED_NATIVE_ROLES = [
+  HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE, HARBOR_TRIAL_CONFIG_ROLE,
+  HARBOR_TRIAL_RESULT_ROLE, HARBOR_REWARD_ROLE,
+] as const;
+const HARBOR_ALLOWED_NATIVE_ROLES = new Set<string>([
+  ...HARBOR_REQUIRED_NATIVE_ROLES, HARBOR_ATIF_ROLE, HARBOR_CTRF_ROLE,
+  HARBOR_LOGS_ROLE, HARBOR_ARTIFACT_MANIFEST_ROLE, HARBOR_COLLECTED_ARTIFACTS_ROLE,
+]);
+
+function assertHarborRegistration(expectedSelectionManifestSha256: string, artifacts: readonly RuntimeRegistrationArtifact[]): void {
+  const selection = artifacts.filter((artifact) => artifact.role === HARBOR_SELECTION_ROLE);
+  if (selection.length !== 1 || selection[0]!.digest !== `sha256:${expectedSelectionManifestSha256}` || !digestMatches(selection[0]!.bytes, { name: selection[0]!.id, mediaType: selection[0]!.mediaType, digest: { sha256: expectedSelectionManifestSha256 } })) {
+    throw new TypeError("Harbor registration requires the exact sealed HarborSelectionManifest bytes");
+  }
+}
+
+function assertHarborContribution(expectedSelectionManifestSha256: string, correlations: readonly RuntimeCorrelation[]): void {
+  const selection = correlations.filter((correlation) => correlation.role === HARBOR_SELECTION_ROLE);
+  const jobTrial = correlations.filter((correlation) => correlation.role === HARBOR_CORRELATION_ROLE);
+  if (selection.length !== 1 || selection[0]!.artifact.digest.sha256 !== expectedSelectionManifestSha256 || jobTrial.length !== 1) {
+    throw new TypeError("Harbor dispatch requires one selection correlation and one Job/Trial correlation");
+  }
+}
+
+function harborRoleChecks(expectedSelectionManifestSha256: string, correlations: readonly RuntimeCorrelation[], artifacts: readonly RuntimeNativeArtifact[]): PublicationCheck[] {
+  const selection = correlations.filter((value) => value.role === HARBOR_SELECTION_ROLE);
+  const jobTrial = correlations.filter((value) => value.role === HARBOR_CORRELATION_ROLE);
+  const availableRoles = new Set(artifacts.map((value) => value.role));
+  const allowed = artifacts.every((value) => HARBOR_ALLOWED_NATIVE_ROLES.has(value.role));
+  return [
+    selection.length === 1 && selection[0]!.artifact.digest.sha256 === expectedSelectionManifestSha256
+      ? { name: "harbor-selection-manifest-binding", status: "pass" }
+      : { name: "harbor-selection-manifest-binding", status: "fail", detail: "Harbor dispatch must carry the sealed selection manifest" },
+    jobTrial.length === 1
+      ? { name: "harbor-job-trial-correlation", status: "pass" }
+      : { name: "harbor-job-trial-correlation", status: "fail", detail: "Harbor dispatch must carry exactly one Job/Trial correlation" },
+    HARBOR_REQUIRED_NATIVE_ROLES.every((role) => availableRoles.has(role))
+      ? { name: "harbor-required-native-evidence", status: "pass" }
+      : { name: "harbor-required-native-evidence", status: "fail", detail: "Harbor Job/Trial configuration, result, and reward evidence are required" },
+    allowed
+      ? { name: "harbor-allowed-native-artifact-roles", status: "pass" }
+      : { name: "harbor-allowed-native-artifact-roles", status: "fail", detail: "unrecognised Harbor native-artifact role" },
+  ];
+}
+
 function createPublicationAdapter(
   definition: AdapterDefinition,
   binding: EvaluationRuntimeBinding | undefined,
   options: RuntimeEvidenceAdapterOptions = {},
 ): RuntimePublicationAdapter {
   const adapterId = binding?.adapterId ?? NATIVE_RUNTIME_ADAPTER_ID;
-  const expectedSelectionManifestSha256 = adapterId === INSPECT_ADAPTER_ID ? binding?.selectionManifestSha256 : undefined;
-  const expectedProfile = adapterId === INSPECT_ADAPTER_ID ? INSPECT_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE;
+  const selectedRuntime = adapterId === INSPECT_ADAPTER_ID || adapterId === HARBOR_ADAPTER_ID;
+  const expectedSelectionManifestSha256 = selectedRuntime ? binding?.selectionManifestSha256 : undefined;
+  const expectedProfile = adapterId === INSPECT_ADAPTER_ID ? INSPECT_RUNTIME_EVIDENCE_PROFILE : adapterId === HARBOR_ADAPTER_ID ? HARBOR_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE;
   const adapter: RuntimePublicationAdapter = {
     adapterId,
     profile: definition.profile,
     async registration() {
       // No reserialization or descriptor synthesis: registration bytes are already sealed by the runtime.
       const artifacts = options.registrationArtifacts ?? [];
-      if (expectedSelectionManifestSha256 !== undefined) assertInspectRegistration(expectedSelectionManifestSha256, artifacts);
+      if (adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertInspectRegistration(expectedSelectionManifestSha256, artifacts);
+      if (adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertHarborRegistration(expectedSelectionManifestSha256, artifacts);
       return artifacts;
     },
     async dispatch(input: RuntimeEvidenceDispatchInput) {
       // A native source can be absent or collection can fail. Preserve those facts rather than inventing a blob.
       const correlations = input.correlations ?? [];
-      if (expectedSelectionManifestSha256 !== undefined) assertInspectContribution(expectedSelectionManifestSha256, correlations);
+      if (adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertInspectContribution(expectedSelectionManifestSha256, correlations);
+      if (adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertHarborContribution(expectedSelectionManifestSha256, correlations);
       return { correlations, nativeArtifacts: input.nativeArtifacts ?? [] };
     },
     async verify(input) {
-      const prefix = adapterId === INSPECT_ADAPTER_ID ? "inspect" : "native";
+      const prefix = adapterId === INSPECT_ADAPTER_ID ? "inspect" : adapterId === HARBOR_ADAPTER_ID ? "harbor" : "native";
       const correlations = input.dispatch.correlations;
       const nativeArtifacts = input.dispatch.nativeArtifacts;
       return [
@@ -249,7 +327,8 @@ function createPublicationAdapter(
           : { name: `${prefix}-runtime-profile`, status: "fail" as const, detail: "publication adapter profile does not match its selected runtime identity" },
         roleCheck(correlations, nativeArtifacts),
         disclosureCheck(nativeArtifacts),
-        ...(expectedSelectionManifestSha256 === undefined ? [] : inspectRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts)),
+        ...(adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? inspectRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
+        ...(adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? harborRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
         await exactEvidenceCheck(`${prefix}-exact-native-evidence`, correlations, nativeArtifacts, input.references),
       ];
     },
@@ -259,6 +338,7 @@ function createPublicationAdapter(
 
 const nativeAdapter = legacyAdapter(nativeDefinition);
 const inspectAdapter = legacyAdapter(inspectDefinition);
+const harborAdapter = legacyAdapter(harborDefinition);
 
 /**
  * Creates the publication-facing adapter for a particular sealed runtime binding. The caller
@@ -273,13 +353,14 @@ export function createRuntimeEvidenceAdapter(
   return createPublicationAdapter({
     summary: adapter.summary,
     nativeArtifactPublication: adapter.nativeArtifactPublication,
-    profile: adapter.summary.id === INSPECT_ADAPTER_ID ? INSPECT_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE,
+    profile: adapter.summary.id === INSPECT_ADAPTER_ID ? INSPECT_RUNTIME_EVIDENCE_PROFILE : adapter.summary.id === HARBOR_ADAPTER_ID ? HARBOR_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE,
   }, binding, options);
 }
 
 const ADAPTERS = new Map<string, EvaluationRuntimeAdapter>([
   [nativeAdapter.summary.id, nativeAdapter],
   [inspectAdapter.summary.id, inspectAdapter],
+  [harborAdapter.summary.id, harborAdapter],
 ]);
 
 function adapterFor(binding: EvaluationRuntimeBinding | undefined): EvaluationRuntimeAdapter {

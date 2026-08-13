@@ -59,13 +59,14 @@ describe("public surface", () => {
       "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertSweBenchRows",
       "runPreview", "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
       "runReport", "runVerify", "runPublish", "listRuntimeAdapters", "runtimeNativeArtifactPublicationPolicy", "createRuntimeVenue",
-      "createDefaultBenchmarkRuntimeHost",
+      "createDefaultBenchmarkRuntimeHost", "resolveHarborSelection", "createHarborDirectVenue", "harborEvidenceContribution",
     ] as const) {
       expect(typeof entry[name], name).toBe("function");
     }
     expect(entry.LIFECYCLE_STATES).toContain("published-bundle");
     expect(entry.GATED_OPERATIONS).toContain("lock");
     expect(entry.LOCAL_VENUE_LIMITS).toContainEqual(expect.stringContaining("self-run"));
+    expect(entry.HARBOR_ADAPTER_ID).toBe("harbor");
     expect(publicTypesCompile).toBeUndefined();
   });
 });
