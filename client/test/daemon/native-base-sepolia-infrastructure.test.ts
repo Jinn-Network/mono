@@ -651,8 +651,10 @@ describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
 // Round 26 (CP6 live gate, Base Sepolia): the multi-provider RPC fallback chain served
 // `finalized` heads that disagreed by 130-500 blocks between consecutive polls, and operator B's
 // solution-settlement row was flipped to `status='orphaned'` with a NULL block number at
-// 22:25:58Z even though its settlement transaction (0xc5d458e1…, block 45401836) was mined,
-// successful, and finalized. Every classifier below must therefore treat ABSENCE — a lookup the
+// 2026-08-12T22:23:42.835Z even though its settlement transaction (0xc5d458e1…, block 45401836)
+// was mined, successful, and finalized. (That persisted flip fired exactly ONCE, on the
+// `does not bind the exact public Delivery` branch; the 48 that followed came from the unbounded
+// give-up loop fixed above.) Every classifier below must therefore treat ABSENCE — a lookup the
 // polled provider cannot answer — as "not yet", and reserve `orphaned` for POSITIVE evidence
 // (a receipt that reverted, or a block hash the canonical chain does not carry).
 describe('transaction classification under multi-provider replica lag', () => {
