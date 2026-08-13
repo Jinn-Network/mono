@@ -39,13 +39,21 @@
  *     on-chain facts, but a disagreement there is a legitimate protocol-level signal the reducer
  *     already knows how to reject on (`content-corruption`), not a reason to drop the event.
  *   - Unresolvable delivered content (the IPFS fetch itself fails) is DIFFERENT from a mismatch,
- *     and is a drop, not an admit-without-the-field: a drop is retryable (the log id never enters
- *     `processedLogIds`, so the next tick re-attempts it once IPFS catches up), while an admit is
- *     permanent (the event is marked processed forever with the missing correspondence baked into
- *     `pendingMechDeliveries`, and the later router claim is rejected for a fact a retry seconds
- *     later would have supplied). Fail-closed means dropping the ambiguous "not fetched yet" case,
- *     not admitting it as if it were a confirmed rejection -- only a genuinely on-chain-permanent
- *     gap (no request reference at all) is a drop for a different, non-retryable reason.
+ *     and is a drop, not an admit-without-the-field: admitting is actively worse, because the event
+ *     would be marked processed forever with the missing correspondence baked into
+ *     `pendingMechDeliveries`, and the later router claim rejected for a fact that was merely slow
+ *     to arrive. Fail-closed means dropping the ambiguous "not fetched yet" case, not admitting it
+ *     as if it were a confirmed rejection.
+ *
+ *     A DROP IS NOT A RETRY (defect #47). Earlier revisions of this comment claimed the next tick
+ *     re-attempts a dropped event because its log id never enters `processedLogIds`. That is false
+ *     on the production wiring: `ChainLogSource.poll()` commits its advanced block cursor inside
+ *     its own transaction BEFORE it returns the logs
+ *     (`packages/marketplace/venue-base/src/log-source/chain-log-source.ts`), so each log is
+ *     offered to `enrich` exactly once, ever. Every drop here is permanent for that log, and the
+ *     only recovery is an explicit operator-run re-projection of the block range -- see
+ *     `projector-replay.ts` and `docs/runbooks/projector-replay.md`. Fail-closed is still the right
+ *     call for an ambiguous resolution; what it costs is a replay, not a free retry.
  *
  * Resolution goes entirely through host-injected ports (`ProjectorEnrichPorts`) -- this module
  * never hard-wires an IPFS gateway URL or duplicates ABI/contract-read logic that belongs to the
@@ -97,6 +105,16 @@ export interface ProjectorEnrichPorts {
    * to `fetchIpfsBytes` — the legacy composition has no HTTP record source.
    */
   readonly fetchDeliveryBytes?: (digest: Sha256Digest) => Promise<Uint8Array | undefined>;
+  /**
+   * Resolves a Task document's raw content bytes for its sha256-CID anchor -- the second leg of the
+   * digest join below. Exactly the same #23/#2559/#2561 class as `fetchDeliveryBytes`: a native
+   * Task record is HTTP-served off the requester's own record plane and may never land on the
+   * queried IPFS gateway, so an IPFS-only resolver drops every event for a native task at
+   * `resolveTaskProjection`'s content-fetch step even after its Submission resolves. Undefined on
+   * any miss; the caller re-derives and checks the digest, so untrusted bytes are never admitted.
+   * Absent falls back to `fetchIpfsBytes` -- the legacy composition has no HTTP record source.
+   */
+  readonly fetchTaskBytes?: (digest: Sha256Digest) => Promise<Uint8Array | undefined>;
   /**
    * Host-resolved signed Submission bytes for an on-chain task. Revised generation supplies the
    * on-chain `submissionDigest` anchor as a hint; today generation has no on-chain anchor at all,
@@ -287,6 +305,8 @@ export function createProjectorEnrich(
     readonly generation: ContractGeneration;
     readonly submissionDigest?: Sha256Digest;
     readonly onChainTaskDigest?: Sha256Digest;
+    /** `"<event> at block <n>"` -- a drop is permanent, so the log line must name the replay range. */
+    readonly origin: string;
   }): Promise<ResolvedTaskProjection | undefined> {
     const submissionBytes = await ports.resolveSubmissionBytes({
       chainId: input.chainId,
@@ -297,7 +317,10 @@ export function createProjectorEnrich(
       submissionDigest: input.submissionDigest,
     });
     if (submissionBytes === undefined) {
-      ports.logger?.warn(`[projector-enrich] no Submission resolved for task ${input.taskId} -- dropping`);
+      ports.logger?.warn(
+        `[projector-enrich] no Submission resolved for task ${input.taskId} `
+          + `(${input.origin}) -- dropping`,
+      );
       return undefined;
     }
     const record = parseSubmissionBytes(submissionBytes);
@@ -344,7 +367,9 @@ export function createProjectorEnrich(
       );
       return undefined;
     }
-    const taskBytes = await ports.fetchIpfsBytes(claimedTaskDigest);
+    // Record-plane first (native Tasks are HTTP-served), IPFS gateway after -- `fetchTaskBytes`
+    // already layers both; the legacy composition, which has no record source, stays IPFS-only.
+    const taskBytes = await (ports.fetchTaskBytes ?? ports.fetchIpfsBytes)(claimedTaskDigest);
     if (taskBytes === undefined) {
       ports.logger?.warn(`[projector-enrich] Task content ${claimedTaskDigest} for task ${input.taskId} unresolvable -- dropping`);
       return undefined;
@@ -370,7 +395,10 @@ export function createProjectorEnrich(
   } | undefined> {
     const facts = await ports.readTodayDeliveryFacts(requestId);
     if (facts === undefined) {
-      ports.logger?.warn(`[projector-enrich] no on-chain request reference for requestId ${requestId} -- dropping Deliver`);
+      ports.logger?.warn(
+        `[projector-enrich] no on-chain solution OR verdict request reference for requestId `
+          + `${requestId} -- dropping Deliver`,
+      );
       return undefined;
     }
     const onChainSha256CidDigest = digestFromBytes32(data);
@@ -384,10 +412,11 @@ export function createProjectorEnrich(
     // both; only the legacy composition, which has no HTTP record source, falls back to IPFS alone.
     const deliveryBytes = await (ports.fetchDeliveryBytes ?? ports.fetchIpfsBytes)(onChainSha256CidDigest);
     if (deliveryBytes === undefined) {
-      // Unresolvable-right-now is overwhelmingly transient (the record hasn't propagated yet) --
-      // dropping lets the next tick retry it. Admitting instead would permanently mark this log
-      // id processed with no correspondence, so a later, genuine "content is corrupt" rejection
-      // and a merely-not-yet-fetched delivery would be indistinguishable and both permanent.
+      // Unresolvable-right-now is overwhelmingly transient (the record hasn't propagated yet).
+      // Admitting instead would permanently mark this log id processed with no correspondence, so
+      // a later, genuine "content is corrupt" rejection and a merely-not-yet-fetched delivery
+      // would be indistinguishable and both permanent. The drop is permanent too (see the module
+      // comment) -- recovery is an explicit replay, not the next tick.
       ports.logger?.warn(
         `[projector-enrich] delivery content ${onChainSha256CidDigest} for requestId ${requestId} `
           + 'unresolvable -- dropping Deliver so a later tick can retry',
@@ -469,6 +498,7 @@ export function createProjectorEnrich(
         generation: event.derivation.contractGeneration,
         submissionDigest,
         onChainTaskDigest,
+        origin: `${event.event} at block ${event.derivation.blockNumber}`,
       });
       if (taskProjection === undefined) return undefined;
 

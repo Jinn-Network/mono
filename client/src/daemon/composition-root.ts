@@ -741,6 +741,16 @@ export function buildLegacyDeliveryExtensions(input: {
 // `readRouterDeliveryFacts` today-generation read exactly, per that module's own doc comment
 // directing a host-injected port to do this read rather than duplicate it inside the enrich
 // module itself.
+//
+// PRODUCER/VERIFIER PARITY (defect #47): the producing side registers a SOLUTION request and a
+// VERDICT request in two disjoint on-chain maps — `TaskCoordinator._requestRefs` (written by
+// `registerRequest`, read by `getRequestRef`) and `TaskCoordinator._verdictRequestRefs` (written
+// by `registerVerdictRequest`, read by `getVerdictRequestRef`, `TaskCoordinator.sol:359/458`).
+// A verifier that consults only `getRequestRef` therefore reports "no on-chain request reference"
+// for every verdict delivery that ever settled, and enrich drops the Mech `Deliver` that carries
+// the evaluator's verdict — the reason the round-28 verdict announcement never projected. The
+// verdict maps' own anchor is `VerdictRecord.verdictCidDigest` (`getVerdict`), the exact analogue
+// of `AttemptRecord.solutionCidDigest` for the solution leg.
 const REQUEST_REF_VIEW_ABI = [{
   name: 'getRequestRef', type: 'function', stateMutability: 'view',
   inputs: [{ name: 'requestId', type: 'bytes32' }],
@@ -772,6 +782,69 @@ const GET_ATTEMPT_VIEW_ABI = [{
   }],
 }] as const;
 
+const VERDICT_REQUEST_REF_VIEW_ABI = [{
+  name: 'getVerdictRequestRef', type: 'function', stateMutability: 'view',
+  inputs: [{ name: 'requestId', type: 'bytes32' }],
+  outputs: [
+    { name: 'taskId', type: 'uint256' },
+    { name: 'attemptIndex', type: 'uint32' },
+    { name: 'verdictIndex', type: 'uint32' },
+    { name: 'exists', type: 'bool' },
+  ],
+}] as const;
+
+/**
+ * `TaskCoordinator.getVerdict` — `verdictCidDigest` is the exact digest argument the evaluator's
+ * `claimVerdictDelivery(verdictRequestId, verdictDigest, verdictCode)` wrote through
+ * `recordVerdict` (`TaskCoordinator.sol:403`), the verdict-leg counterpart of the solution leg's
+ * `AttemptRecord.solutionCidDigest`.
+ */
+const GET_VERDICT_VIEW_ABI = [{
+  name: 'getVerdict', type: 'function', stateMutability: 'view',
+  inputs: [
+    { name: 'taskId', type: 'uint256' },
+    { name: 'attemptIndex', type: 'uint32' },
+    { name: 'verdictIndex', type: 'uint32' },
+  ],
+  outputs: [{
+    name: 'verdict', type: 'tuple',
+    components: [
+      { name: 'taskId', type: 'uint256' },
+      { name: 'attemptIndex', type: 'uint32' },
+      { name: 'verdictIndex', type: 'uint32' },
+      { name: 'evaluator', type: 'address' },
+      { name: 'requestId', type: 'bytes32' },
+      { name: 'verdictCidDigest', type: 'bytes32' },
+      { name: 'verdictCode', type: 'uint8' },
+      { name: 'status', type: 'uint8' },
+    ],
+  }],
+}] as const;
+
+/**
+ * `TaskCoordinator.getTask` — read directly off the coordinator this composition already holds,
+ * not through `getTaskCidDigest`'s router→`taskCoordinator()`→`getTask` two-hop (that indirection
+ * exists only for the legacy adapter, which is handed a router address).
+ */
+const GET_TASK_VIEW_ABI = [{
+  name: 'getTask', type: 'function', stateMutability: 'view',
+  inputs: [{ name: 'taskId', type: 'uint256' }],
+  outputs: [{
+    name: 'task', type: 'tuple',
+    components: [
+      { name: 'creator', type: 'address' },
+      { name: 'taskCidDigest', type: 'bytes32' },
+      { name: 'manifestDigest', type: 'bytes32' },
+      { name: 'status', type: 'uint8' },
+      { name: 'policy', type: 'uint8' },
+      { name: 'claimCount', type: 'uint32' },
+      { name: 'submittedCount', type: 'uint32' },
+      { name: 'finalizedAttemptCount', type: 'uint32' },
+      { name: 'creatorCredited', type: 'bool' },
+    ],
+  }],
+}] as const;
+
 /** Real (gap 1 CLOSED): a raw sha256-digest IPFS fetch, reusing the existing gateway machinery
  * (`client/src/adapters/mech/ipfs.ts`) already proven for the rest of the daemon. */
 function buildFetchIpfsBytes(gatewayUrl: string): (digest: `sha256:${string}`) => Promise<Uint8Array | undefined> {
@@ -785,8 +858,13 @@ function buildFetchIpfsBytes(gatewayUrl: string): (digest: `sha256:${string}`) =
   };
 }
 
-/** Real (gap 1 CLOSED): today-generation on-chain delivery-fact read via `TaskCoordinator`. */
-function buildReadTodayDeliveryFacts(
+/**
+ * Real (gap 1 CLOSED): today-generation on-chain delivery-fact read via `TaskCoordinator`.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver against the deployed
+ * contract's real two-map shape, matching the `buildResolveSubmissionBytes` precedent below.
+ */
+export function buildReadTodayDeliveryFacts(
   publicClient: PublicClient,
   taskCoordinator: Address,
 ): ProjectorEnrichPorts['readTodayDeliveryFacts'] {
@@ -798,17 +876,82 @@ function buildReadTodayDeliveryFacts(
         functionName: 'getRequestRef',
         args: [requestId],
       });
-      if (!exists) return undefined;
-      const attempt = await publicClient.readContract({
+      if (exists) {
+        const attempt = await publicClient.readContract({
+          address: taskCoordinator,
+          abi: GET_ATTEMPT_VIEW_ABI,
+          functionName: 'getAttempt',
+          args: [taskId, attemptIndex],
+        });
+        return { taskId, attemptIndex, onChainKeccak: attempt.solutionCidDigest };
+      }
+    } catch {
+      // A solution-leg read failure must not hide the verdict leg: the two maps are disjoint and
+      // a requestId absent from one is expected, not an error. Fall through and ask the other.
+    }
+    try {
+      const [taskId, attemptIndex, verdictIndex, exists] = await publicClient.readContract({
         address: taskCoordinator,
-        abi: GET_ATTEMPT_VIEW_ABI,
-        functionName: 'getAttempt',
-        args: [taskId, attemptIndex],
+        abi: VERDICT_REQUEST_REF_VIEW_ABI,
+        functionName: 'getVerdictRequestRef',
+        args: [requestId],
       });
-      return { taskId, attemptIndex, onChainKeccak: attempt.solutionCidDigest };
+      if (!exists) return undefined;
+      const verdict = await publicClient.readContract({
+        address: taskCoordinator,
+        abi: GET_VERDICT_VIEW_ABI,
+        functionName: 'getVerdict',
+        args: [taskId, attemptIndex, verdictIndex],
+      });
+      return { taskId, attemptIndex, onChainKeccak: verdict.verdictCidDigest };
     } catch {
       return undefined;
     }
+  };
+}
+
+/**
+ * The canonical on-chain Task anchor (`TaskCoordinator.getTask(taskId).taskCidDigest`) — the exact
+ * value `TaskCreated` carries in its `taskCidDigest` field, written once by `createTask`
+ * (`TaskCoordinator.sol:227`) and never mutated afterwards, which is why the per-process memo below
+ * is sound.
+ *
+ * The native Submission resolver keys its association on `(chainId, coordinator, taskId,
+ * taskDigest)`, but `eventIdentity` only surfaces a `taskDigest` for `TaskCreated` — every other
+ * event class reaches `resolveTaskProjection` with the anchor absent (defect #47). Reading it back
+ * off the coordinator restores the key for those classes without weakening anything: the
+ * association resolver re-checks the digest against its stored Task bytes, and `resolveTaskProjection`
+ * independently re-derives it from the fetched content, so a wrong anchor here can only ever fail
+ * closed. Undefined on any failure — an unknown task, a reverting read, an all-zero record.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver.
+ */
+export function buildReadOnChainTaskDigest(
+  publicClient: PublicClient,
+  taskCoordinator: Address,
+): (taskId: bigint) => Promise<`sha256:${string}` | undefined> {
+  const memo = new Map<string, `sha256:${string}` | undefined>();
+  return async (taskId) => {
+    const key = taskId.toString();
+    if (memo.has(key)) return memo.get(key);
+    let digest: `sha256:${string}` | undefined;
+    try {
+      const task = await publicClient.readContract({
+        address: taskCoordinator,
+        abi: GET_TASK_VIEW_ABI,
+        functionName: 'getTask',
+        args: [taskId],
+      });
+      const anchor = task.taskCidDigest;
+      if (/^0x[0-9a-fA-F]{64}$/.test(anchor) && !/^0x0{64}$/i.test(anchor)) {
+        digest = `sha256:${anchor.slice(2).toLowerCase()}`;
+      }
+    } catch {
+      // A miss is never memoized as a negative: a task created after this read must resolve later.
+      return undefined;
+    }
+    if (digest !== undefined) memo.set(key, digest);
+    return digest;
   };
 }
 
@@ -1273,10 +1416,18 @@ function buildProjector(input: {
       throw new Error('native projector requires a requester association directory and B2 requester-submission identity');
     })())
     : undefined;
+  const readOnChainTaskDigest = buildReadOnChainTaskDigest(input.publicClient, input.chain.taskCoordinator);
   const resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'] = input.mode === 'native'
     ? async ({ chainId, taskCoordinator, taskId, taskDigest }) => {
-      if (taskDigest === undefined || resolveAssociation === undefined) return undefined;
-      return resolveAssociation({ chainId, coordinator: taskCoordinator, taskId, taskDigest });
+      if (resolveAssociation === undefined) return undefined;
+      // `taskDigest` is present only for `TaskCreated`, which carries the anchor in its own facts.
+      // Every other class (`Deliver`, `SolutionDeliveryClaimed`, `VerdictDeliveryClaimed`, the
+      // attempt events) arrives without it, and refusing on absence dropped 100% of them — the
+      // reason `projector_observations` stayed empty through the whole of round 28 and the verdict
+      // announcement never projected (defect #47). Read the same anchor back off the coordinator.
+      const anchor = taskDigest ?? await readOnChainTaskDigest(taskId);
+      if (anchor === undefined) return undefined;
+      return resolveAssociation({ chainId, coordinator: taskCoordinator, taskId, taskDigest: anchor });
     }
     : buildResolveSubmissionBytes({
       publicClient: input.publicClient,
@@ -1292,6 +1443,14 @@ function buildProjector(input: {
   const fetchDeliveryBytes: ProjectorEnrichPorts['fetchDeliveryBytes'] = resolveDeliveryBytes === undefined
     ? undefined
     : async (digest) => (await resolveDeliveryBytes(digest)) ?? fetchIpfsBytes(digest);
+  // The Task document is on exactly the same serving plane as the delivery records (the requester
+  // publishes it there), and equally may never reach the IPFS gateway. Without this the digest
+  // join's second leg — `resolveTaskProjection`'s fetch of the Task content — misses for every
+  // native task and drops the event even after its Submission resolves (defect #47, the
+  // #23/#2559/#2561 class). Same resolver, same origins, same digest re-derivation by the caller.
+  const fetchTaskBytes: ProjectorEnrichPorts['fetchTaskBytes'] = resolveDeliveryBytes === undefined
+    ? undefined
+    : async (digest) => (await resolveDeliveryBytes(digest)) ?? fetchIpfsBytes(digest);
   const enrich = createProjectorEnrich({
     chain: input.chain,
     publicClient: input.publicClient,
@@ -1301,6 +1460,7 @@ function buildProjector(input: {
     readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator),
     allowLegacySignedTaskV1: input.mode === 'legacy',
     ...(fetchDeliveryBytes === undefined ? {} : { fetchDeliveryBytes }),
+    ...(fetchTaskBytes === undefined ? {} : { fetchTaskBytes }),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
