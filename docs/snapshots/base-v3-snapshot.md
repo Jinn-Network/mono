@@ -11,7 +11,9 @@ code regression, never infra flake.
 - **Committed address manifest:** `client/test/_support/fixtures/anvil-base-v3-state/addresses.json`
 - **Loaded by:** `spawnAnvilFromState({ statePath })` in
   [`client/test/_support/chain/anvil.ts`](../../client/test/_support/chain/anvil.ts)
-  (runs `anvil --load-state <path>`)
+  and the Marketplace conformance harness in
+  [`packages/marketplace/testing/src/anvil-state.ts`](../../packages/marketplace/testing/src/anvil-state.ts)
+  (both run `anvil --load-state <path>`)
 - **Spec:** [`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`](../superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md)
   §4 (snapshot, not fork) + §5 (fidelity) + §14 (what this does not cover)
 
@@ -109,8 +111,9 @@ deployer nonce before deploying the fixture V3 stack. CREATE addresses depend on
 the deployer nonce, not bytecode, so this prevents a genuine rebuild from
 reusing the stale pre-trim router sentinel address.
 
-The Foundry/Anvil version pin in
-[`hermetic-gate.yml`](../../.github/workflows/hermetic-gate.yml) moves in
+The Foundry/Anvil version pins in
+[`hermetic-gate.yml`](../../.github/workflows/hermetic-gate.yml) and
+[`marketplace-ci.yml`](../../.github/workflows/marketplace-ci.yml) move in
 lockstep with this fixture: if you rebuild with a new Anvil version, update the
 workflow pin in the same PR and verify `anvil --load-state` still accepts the
 committed `state.json`.

@@ -206,23 +206,13 @@ function RoleChips({
 interface RegistryCardProps {
   summary: SolverNetManifestSummary;
   /**
-   * Roles the operator has joined for this SolverNet (manifest cid keyed in
-   * config.joinedSolverNets). Empty / undefined means not joined.
-   */
-  joinedRoles?: ReadonlyArray<'solver' | 'evaluator'>;
-  /**
-   * True for the canonical first-run demo net (#1240). When set and the
-   * operator has not joined, the card is badged "Recommended demo" and its
-   * CTA reads "Try the demo" instead of "Join".
+   * True for the canonical first-run demo net (#1240). When set, the card is
+   * badged "Recommended demo".
    */
   recommended?: boolean;
 }
 
-function RegistryCard({ summary, joinedRoles, recommended }: RegistryCardProps): JSX.Element {
-  const joinHref = `/operator/join/${encodeURIComponent(summary.manifestCid)}`;
-  const isJoined = (joinedRoles ?? []).length > 0;
-  const isLaunched = summary.status === 'launched';
-  const ctaLabel = isJoined ? 'Edit' : recommended ? 'Try the demo' : 'Join';
+function RegistryCard({ summary, recommended }: RegistryCardProps): JSX.Element {
   return (
     <Card
       data-testid="registry-card"
@@ -247,7 +237,7 @@ function RegistryCard({ summary, joinedRoles, recommended }: RegistryCardProps):
             </span>
           </div>
           <span className="flex items-center gap-2">
-            {recommended && !isJoined && (
+            {recommended && (
               <Badge
                 data-testid="registry-card-recommended"
                 variant="secondary"
@@ -274,39 +264,7 @@ function RegistryCard({ summary, joinedRoles, recommended }: RegistryCardProps):
         </div>
 
         <footer className="flex items-center justify-end gap-3">
-          {isJoined && (
-            <Badge
-              data-testid="registry-card-joined"
-              data-manifest-cid={summary.manifestCid}
-              variant="success"
-              className="rounded-full px-2.5 py-1"
-            >
-              JOINED · {(joinedRoles ?? []).join(', ')}
-            </Badge>
-          )}
-          {isLaunched ? (
-            <Button
-              asChild
-              variant={isJoined ? 'secondary' : 'default'}
-              data-testid="registry-join-cta"
-              data-manifest-cid={summary.manifestCid}
-            >
-              <Link href={joinHref}>{ctaLabel}</Link>
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="secondary"
-              data-testid="registry-join-cta"
-              data-manifest-cid={summary.manifestCid}
-              disabled
-              aria-disabled
-              className="pointer-events-none"
-            >
-              {isJoined ? 'Edit' : 'Join'}
-            </Button>
-          )}
-        </footer>
+                  </footer>
       </article>
     </Card>
   );
@@ -325,19 +283,7 @@ export function RegistryCatalog({
     queryFn: () => api.solvernets.listRegistry(),
     refetchInterval: refetchIntervalMs,
   });
-  // Joined state — manifest-cid-keyed dict from operator config. Used to
-  // render a JOINED badge alongside the Join CTA so operators don't see a
-  // stale "Join" button after a successful join. Refetched on the same
-  // cadence as the registry; the SPA's join/leave mutations should also
-  // invalidate this query (post-mutation cache busts are out of scope here).
-  const joinedQuery = useQuery({
-    queryKey: ['operator', 'joined'],
-    queryFn: () => api.operator.listJoined(),
-    refetchInterval: refetchIntervalMs,
-  });
-  const joinedByCid = joinedQuery.data?.joinedSolverNets ?? {};
-
-  if (isLoading || joinedQuery.isLoading) {
+  if (isLoading) {
     return (
       <p
         data-testid="registry-catalog-loading"
@@ -348,9 +294,8 @@ export function RegistryCatalog({
     );
   }
 
-  if (isError || joinedQuery.isError) {
-    const visibleError = isError ? error : joinedQuery.error;
-    const copy = registryErrorCopy(visibleError);
+  if (isError) {
+    const copy = registryErrorCopy(error);
     return (
       <Alert
         data-testid="registry-catalog-error"
@@ -391,7 +336,6 @@ export function RegistryCatalog({
 
   const allSummaries = data?.summaries ?? [];
   const summaries = allSummaries
-    .filter((summary) => joinedByCid[summary.manifestCid] === undefined)
     // AC2: internal / smoke-test nets are never the primary Discover choice.
     .filter((summary) => !isInternalSolverNet(summary))
     // AC1/AC4: hoist the canonical demo net to the top. Stable sort preserves
@@ -420,9 +364,7 @@ export function RegistryCatalog({
           data-testid="registry-catalog-empty"
           className="p-6 font-mono text-[13px] text-[var(--fg-muted)]"
         >
-          {allSummaries.length === 0
-            ? 'No launched SolverNets available.'
-            : 'No unjoined SolverNets available.'}
+          No launched SolverNets available.
         </Card>
       ) : (
         <div className="flex flex-col gap-2.5">
@@ -430,7 +372,6 @@ export function RegistryCatalog({
             <RegistryCard
               key={summary.manifestCid}
               summary={summary}
-              joinedRoles={joinedByCid[summary.manifestCid]?.roles}
               recommended={isDemoSolverNet(summary)}
             />
           ))}

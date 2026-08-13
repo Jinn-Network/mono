@@ -40,7 +40,11 @@ import {
 import type { CanonicalTaskCreatedReader } from './native-fleet-requester-write.js';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
-import { buildNativeResolveRecord } from './composition-root.js';
+import {
+  buildNativeResolveRecord,
+  buildReadTodayDeliveryFacts,
+  buildRecordPlaneCounterpartyDeliveryResolver,
+} from './composition-root.js';
 import type { NativeClaimRuntimeInput, NativeOwnDeliveryRecords } from './composition-root.js';
 import {
   buildNativeClaimPolicy,
@@ -63,6 +67,7 @@ import {
 } from './native-fleet-discovery.js';
 import type { NativeDiscoveryConsumer } from './native-discovery.js';
 import type { NativePublicRecordTransport } from './native-infrastructure-bundle.js';
+import { listPublicRecordDigests } from './native-evaluator-public-record-index.js';
 import { NativeOperatorStateRepository } from './native-operator-state.js';
 import type { NativeProjectorExactPorts } from './native-projector-ports.js';
 import { openNativeTrustCatalog, type NativeTrustAuthority } from './native-trust-catalog.js';
@@ -349,6 +354,13 @@ export interface FleetNativeRuntimeInput {
   readonly password: string;
   readonly workerOwnerId: string;
   readonly fetchImpl?: (request: string | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * Optional, and only the counterparty delivery resolver reads it today. Its "candidate hashes to
+   * the on-chain anchor but names a DIFFERENT attempt" branch is the one genuinely suspicious thing
+   * this module can observe, and without a logger it is silent — the refusal itself still reaches
+   * the operator through `NativeAnnouncementRecordError`, but not what was rejected or why.
+   */
+  readonly logger?: { warn(message: string): void };
 }
 
 function required<T>(value: T | undefined, key: string): T {
@@ -522,6 +534,17 @@ export async function buildFleetNativeRuntime(
     solutionDelivery: buildFleetOwnSolutionDeliveryResolver(state),
     evaluationDelivery: lateBoundEvaluationRecords.resolve,
   };
+  // #2644 parity for the ANNOUNCE leg. `ownDeliveryRecords` above answers for a delivery this
+  // operator produced; a REQUESTER announcing a counterparty's settled delivery holds no such
+  // record and never will, so it anchors the published one against
+  // `getAttempt(...).solutionCidDigest` and fetches it off the same record plane the enrich leg
+  // already reads (`listRecordPlaneDigests` below). Same origins, same digest re-derivation.
+  const counterpartySolutionDelivery = buildRecordPlaneCounterpartyDeliveryResolver({
+    readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, chain.taskCoordinator),
+    fetchDeliveryBytes: nativeRecordBytes,
+    listRecordPlaneDigests: (limit) => listPublicRecordDigests(input.store, limit),
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
   const projectorPorts: NativeProjectorExactPorts = {
     resolveRecord: buildNativeResolveRecord(
       chain,
@@ -531,9 +554,16 @@ export async function buildFleetNativeRuntime(
       }),
       nativeRecordBytes,
       ownDeliveryRecords,
+      counterpartySolutionDelivery,
     ),
     verifyVerdictObservation: lateBoundVerdict.port,
     resolveDeliveryBytes: nativeRecordBytes,
+    // Defect #48. The requester's candidate content addresses for a counterparty's solution
+    // Delivery: today generation puts the sha256 anchor only on the Mech `Deliver` this operator
+    // does not subscribe to, so the projector keys its fetch off the signed record-plane location
+    // statements instead — hints, re-checked against the coordinator's own keccak anchor by
+    // `buildRecordPlaneSolutionDeliveryPort` before anything is believed about them.
+    listRecordPlaneDigests: (limit) => listPublicRecordDigests(input.store, limit),
   };
 
   const discovery = await buildFleetNativeDiscovery({

@@ -1,5 +1,6 @@
 import type { JinnConfig } from '../config.js';
-import { createHttpDiscoveryAPI } from '../discovery/http.js';
+import { createHttpDiscoveryClient } from '../discovery-client/http.js';
+import type { SolverNetManifestSummary } from '../solvernets/registry-client.js';
 
 export const MARKETPLACE_TASK_FRESHNESS_RESERVE_MS = 60_000;
 
@@ -136,20 +137,32 @@ export function selectMarketplaceTaskSolverNet(args: {
   return selected[0]!.manifestCid;
 }
 
-export async function resolveMarketplaceTaskSolverNet(args: {
-  config: JinnConfig;
-  explicitManifestCid?: string;
-  requestedName?: string;
-}): Promise<string> {
-  const discovery = args.config.discovery;
+/**
+ * The one HTTP `listLaunchedSolverNets` read left in the marketplace submit
+ * path. One-swap R3b (issue #2494) retired the duplicate leg that
+ * `cli/commands/tasks.ts` used to build for its own preflight, so this module
+ * is now the single owner — and the only place the D-wave has to look when the
+ * legacy indexer finally goes away.
+ */
+export async function listMarketplaceLaunchedSolverNets(
+  config: JinnConfig,
+): Promise<SolverNetManifestSummary[]> {
+  const discovery = config.discovery;
   if (discovery?.mode !== 'http' || !discovery.url) {
     throw new Error(
       'HTTP discovery indexer must be configured to resolve a marketplace SolverNet',
     );
   }
-  const summaries = await createHttpDiscoveryAPI({
-    url: discovery.url,
-  }).listLaunchedSolverNets({ status: ['launched'] });
+  return createHttpDiscoveryClient({ url: discovery.url })
+    .listLaunchedSolverNets({ status: ['launched'] });
+}
+
+export async function resolveMarketplaceTaskSolverNet(args: {
+  config: JinnConfig;
+  explicitManifestCid?: string;
+  requestedName?: string;
+}): Promise<string> {
+  const summaries = await listMarketplaceLaunchedSolverNets(args.config);
   return selectMarketplaceTaskSolverNet({
     summaries,
     explicitManifestCid: args.explicitManifestCid,

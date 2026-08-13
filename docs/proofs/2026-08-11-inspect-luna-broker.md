@@ -3,6 +3,29 @@
 This is the sanitized verification record for the Benchmark Product's
 credential-isolated `jinn-openai/gpt-5.6-luna` runtime.
 
+## Erratum — 2026-08-12
+
+The real provider calls, exact returned model identities, Inspect-native log
+observations, and technical end-to-end lifecycle result below remain valid.
+The pre-fix Matrix, Report, Report envelope, and public-bundle identities are
+superseded as publication evidence: the venue advertised only the
+`unrestricted` isolation policy even though the sealed OCI Run admitted both
+unrestricted and OCI-container execution. That singleton inventory produced
+an unearned isolation `match` which the venue could not prove per cell.
+
+The corrected implementation derives a multi-policy inventory from the sealed
+Run and reports OCI isolation as `unverifiable`; it does not manufacture new
+per-cell isolation evidence. The credential-free correction proof is recorded
+in [Truthful Inspect OCI isolation accounting](./2026-08-12-inspect-isolation-accounting.md).
+
+The reused capped test key was an explicitly accepted exception for this
+technical proof. Because that key had previously appeared in chat, this record
+is not evidence of never-exposed credential handling; no fresh-key rerun is
+claimed or required for the correction. The detached live bundle previously
+listed at `/private/tmp/jinn-inspect-luna-approved-bundle-final-20260811` is no
+longer present. Its recorded digests remain historical observations, but the
+bundle cannot now be independently reverified from the repository.
+
 ## Result
 
 - **Credential-free production-shaped lifecycle: PASS.** The real Inspect
@@ -15,13 +38,13 @@ credential-isolated `jinn-openai/gpt-5.6-luna` runtime.
   official launch, collection, reporting, publication, and detached
   verification. Both official provider calls resolved exactly to
   `gpt-5.6-luna`; no fallback or implicit retry occurred.
-- **Fresh-credential handling gate: NOT SATISFIED.** At the operator's explicit
-  direction, the live run reused a capped test key that had previously appeared
-  in chat. The product received it only through the required owner-only file,
-  and that file was deleted immediately after the official launch, but this run
-  cannot prove that the credential was never exposed outside the runtime host.
-  The key must be revoked. A release policy requiring a fresh never-in-chat key
-  still needs one short rerun; the product/runtime behavior itself is proven.
+- **Fresh-credential handling exception: ACCEPTED FOR THIS TECHNICAL PROOF.** At
+  the operator's explicit direction, the live run reused a capped test key that
+  had previously appeared in chat. The product received it only through the
+  required owner-only file, and that file was deleted immediately after the
+  official launch, but this run cannot prove that the credential was never
+  exposed outside the runtime host. No fresh-key rerun is part of this proof;
+  the product/runtime behavior itself is proven subject to this limitation.
 
 The live result supersedes the earlier
 [direct Luna smoke](./2026-08-10-inspect-runtime/luna-smoke.md), which did not
@@ -127,9 +150,10 @@ The source product workspace was then deleted. From the copied directory alone:
 - both native logs still passed `read_eval_log()`; and
 - Inspect View still produced a viewer.
 
-The approved detached bundle was retained locally at
-`/private/tmp/jinn-inspect-luna-approved-bundle-final-20260811`. It is evidence,
-not a committed repository fixture.
+The approved detached bundle was retained locally at the time of the proof at
+`/private/tmp/jinn-inspect-luna-approved-bundle-final-20260811`. As recorded in
+the erratum, that path is no longer present; the bundle was never a committed
+repository fixture.
 
 ## Credential and isolation observations
 
@@ -154,8 +178,8 @@ enforcement and cross-attempt capability isolation. The live ARC task was kept
 unmodified and therefore was not replaced with this attack fixture.
 
 The run does **not** rehabilitate the credential's prior chat exposure. The
-operator must revoke it; only a fresh never-in-chat key can satisfy that
-separate operational gate.
+accepted exception proves only the technical runtime behavior and cannot be
+cited as evidence that a credential was never exposed.
 
 ## Defects found and corrected during the live proof
 

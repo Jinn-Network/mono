@@ -157,7 +157,6 @@ test('legacy task_runs store coupling stays confined to its declared inventory a
     'client/src/daemon/delivery-watcher.ts',
     'client/src/daemon/work-loop-corpus.ts',
     'client/src/harnesses/engine/backfill-failed-deliveries.ts',
-    'client/src/harnesses/engine/engine.ts',
     'client/src/store/store.ts',
   ], 'a new TaskRunPersistence import means a new consumer of the legacy task_runs store that must be ledgered');
 

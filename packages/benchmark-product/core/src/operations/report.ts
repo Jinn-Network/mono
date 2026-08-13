@@ -50,6 +50,10 @@ import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { requireRunState, writeRunState } from "../run/state.js";
@@ -59,7 +63,7 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
-import { LOCAL_VENUE_LIMITS, buildLocalVenueHonesty } from "./run-results.js";
+import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -72,6 +76,7 @@ export interface RunReportResult {
   readonly reportEnvelopeSha256: string;
   readonly preregistered: boolean;
   readonly claimPackage: ClaimPackage;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 /** The report's verb string for the claim package's `verification.command`. */
@@ -104,6 +109,10 @@ export function runReport(
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
       }
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        clockedContext.workspaceDir,
+        document.spec.evaluationRuntime,
+      );
 
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
       if (runState.runSha256 === undefined || runState.matrixSha256 === undefined) {
@@ -141,15 +150,16 @@ export function runReport(
       const previewLimitation = previewLog !== undefined && previewLog.count > 0
         ? previewDisclosureLine(previewLog)
         : undefined;
+      const venueLimits = localVenueLimitsForRun(runRecord);
       const limitations = selected.method === BENCHMARKING_METHOD_IDS.pairedDelta
         ? [
-            ...LOCAL_VENUE_LIMITS,
+            ...venueLimits,
             PAIRED_ESTIMATE_LIMITATION,
             ...(previewLimitation === undefined ? [] : [previewLimitation]),
           ]
         : previewLimitation === undefined
-          ? LOCAL_VENUE_LIMITS
-          : [...LOCAL_VENUE_LIMITS, previewLimitation];
+          ? venueLimits
+          : [...venueLimits, previewLimitation];
 
       let produced: ProducedReport;
       try {
@@ -181,7 +191,7 @@ export function runReport(
       // Step 3: build AND write the claim package. Both can throw (a results-shape mismatch in
       // buildClaimPackage, a schema violation or disk failure in writeClaimPackage) — that must
       // surface here, before the draft is transitioned, not after.
-      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells);
+      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord);
 
       const claimPackage = buildClaimPackage({
         draftId: input.draftId,
@@ -232,6 +242,7 @@ export function runReport(
         reportEnvelopeSha256,
         preregistered: produced.record.preregistered ?? false,
         claimPackage,
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       };
     },
   });

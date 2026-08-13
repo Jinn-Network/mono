@@ -24,7 +24,9 @@ import {
   BASE_SEPOLIA_TODAY,
   REVISED_LEG_SOLUTION,
   REVISED_LEG_VERDICT,
+  deriveMarketplaceAttemptUri,
   encodeRevisedRequestData,
+  keccakEvidenceHash,
 } from '@jinn-network/marketplace-binding';
 import {
   createMarketplaceProjectionState,
@@ -43,6 +45,7 @@ import { documentDigest } from '@jinn-network/task-execution-protocol';
 import {
   NativeAnnouncementRecordError,
   buildNativeResolveRecord,
+  buildRecordPlaneCounterpartyDeliveryResolver,
 } from '../../src/daemon/composition-root.js';
 import {
   buildFleetDeliveryBytesResolver,
@@ -445,11 +448,27 @@ describe('native announce path — delivery record resolution (#45)', () => {
       createMarketplaceProjectionState(),
     );
 
-    await expect(projectAnnouncements(transition, ports)).rejects.toThrow(
-      NativeAnnouncementRecordError,
-    );
+    const result = await projectAnnouncements(transition, ports);
+
+    // The refusal is recorded, by name and with the anchor, rather than thrown out of the whole
+    // call. `announce.ts` scopes a `resolveRecord` throw to the record that threw it, so the
+    // tampered evaluation-delivery no longer drops its neighbours' announcements with it.
+    expect(result.refusals).toMatchObject([{
+      kind: 'announcement-record-unresolved',
+      role: 'evaluation-delivery',
+      reason: expect.stringContaining('NativeAnnouncementRecordError'),
+    }]);
+    expect((result.refusals[0] as { reason: string }).reason)
+      .toContain(EVALUATION_DELIVERY_DIGEST);
     // No fabricated announcement, and the verdict gate never saw substitute material.
     expect(verified).toEqual([]);
+    expect(result.announcements.find(
+      (announcement) => announcement.derivation.event === 'VerdictDeliveryClaimed',
+    )).toBeUndefined();
+    // The solution delivery in the same tick still published — the whole point of the isolation.
+    expect(result.announcements.find(
+      (announcement) => announcement.derivation.event === 'SolutionDeliveryClaimed',
+    )).toMatchObject({ action: 'available' });
   });
 
   it('names role, anchor digest and cause on every refusal so the loop can log them', async () => {
@@ -905,6 +924,324 @@ describe('native announce path — TODAY generation (V3) delivery records (#45)'
     expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
     expect(error.role).toBe('evaluation-delivery');
     expect(error.message).toContain('canonical Base Sepolia coordinator');
+  });
+});
+
+// --- The REQUESTER's today-generation shape. ---
+//
+// PR #2644 taught the enrich/observe path to derive a counterparty's Delivery off the record plane
+// and re-verify it against the coordinator's keccak anchor. The ANNOUNCE path never learned it: its
+// today leg keys `ownRecords`, i.e. this operator's OWN durable solver store, which a requester by
+// definition does not have. Observed live on Base Sepolia replaying task 1236 during the
+// DR-2026-08-05 gate endgame (operator A requester/evaluator svc72, operator B solver svc75):
+//
+//   NativeAnnouncementRecordError: native resolveRecord refused the "delivery" record: this
+//   operator holds no single durable solution-delivery record for task=1236 attempt=0
+//
+// The five canonical events journalled and the observations emitted, so the range is SPENT
+// (`docs/runbooks/projector-replay.md`): the drop is permanent, and a rewind cannot republish it --
+// `hasCanonicalEvent` suppresses the identical event_key again. Recovery would need those rows
+// cleared/orphaned first, which no shipped tool does yet. The cause is not transient either, so the
+// same failure would repeat on the next task to hit this path -- which is what this fix prevents.
+
+/** keccak256 over the exact sealed Delivery — `getAttempt(...).solutionCidDigest`. */
+const SOLUTION_ON_CHAIN_KECCAK = keccakEvidenceHash(SOLUTION_DELIVERY_BYTES);
+const REQUESTER_ATTEMPT_URI = deriveMarketplaceAttemptUri({
+  chainId: BASE_SEPOLIA_TODAY.chainId,
+  coordinator: COORDINATOR,
+  taskId: TASK_ID,
+  attemptIndex: ATTEMPT_INDEX,
+});
+
+/**
+ * A Delivery record naming the on-chain attempt, so the resolver's attempt/task leg has something
+ * true to check. The shared fixture's `deliveryDocument` names a random urn instead.
+ */
+const REQUESTER_DELIVERY_BYTES = encodeJson({
+  protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
+  attempt: REQUESTER_ATTEMPT_URI,
+  task: `sha256:${'7'.repeat(64)}`,
+  outputs: [],
+  outcome: 'fulfilled',
+  summary: 'counterparty solution delivery',
+  createdAt: '2026-08-05T12:00:00Z',
+});
+const REQUESTER_DELIVERY_DIGEST = documentDigest(REQUESTER_DELIVERY_BYTES);
+const REQUESTER_DELIVERY_KECCAK = keccakEvidenceHash(REQUESTER_DELIVERY_BYTES);
+
+/**
+ * The five publication events the live run lost, in order. NO Mech `Deliver`: the requester's log
+ * filter scans the router, the coordinator and its OWN mech only, so operator B's delivering mech
+ * is invisible here. `recordPlaneDelivery` on the claim's projection is what #2644 supplies in its
+ * place, and it is what makes `observe.ts` emit `delivery-recorded.v1` rather than a false
+ * `rejected`/`invalid-reference` terminal.
+ */
+function requesterTodaySequence(input: {
+  readonly deliveryBytes?: Uint8Array;
+} = {}): readonly ObservationMarketplaceEvent[] {
+  const bytes = input.deliveryBytes ?? REQUESTER_DELIVERY_BYTES;
+  const recordPlaneDelivery = {
+    sha256Digest: documentDigest(bytes),
+    keccakEvidenceHash: keccakEvidenceHash(bytes),
+    onChainKeccak: keccakEvidenceHash(bytes),
+  };
+  return [
+    projectable({
+      event: 'TaskCreated',
+      facts: {
+        creator: CREATOR,
+        taskId: TASK_ID,
+        manifestDigest: `0x${'0'.repeat(64)}` as Hex,
+        taskCidDigest: `0x${'7'.repeat(64)}` as Hex,
+        maxClaims: 2,
+        solutionBudget: 100n,
+        verdictBudget: 20n,
+      },
+      derivation: todayDerivation('TaskCreated', 400),
+    } as MarketplaceEvent),
+    projectable({
+      event: 'TaskAttemptCreated',
+      facts: {
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+        operator: OPERATOR,
+        requestId: SOLUTION_REQUEST_ID,
+        priorityMech: OPERATOR,
+        deliveryRate: 10n,
+      },
+      derivation: todayDerivation('TaskAttemptCreated', 401),
+    } as MarketplaceEvent),
+    projectable({
+      event: 'SolutionDeliveryClaimed',
+      facts: {
+        operator: OPERATOR,
+        requestId: SOLUTION_REQUEST_ID,
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+      },
+      derivation: todayDerivation('SolutionDeliveryClaimed', 402),
+    } as MarketplaceEvent, { recordPlaneDelivery }),
+    projectable({
+      event: 'EvaluationAttemptCreated',
+      facts: {
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+        verdictIndex: VERDICT_INDEX,
+        requestId: VERDICT_REQUEST_ID,
+        evaluator: EVALUATOR,
+        priorityMech: EVALUATOR,
+        deliveryRate: 20n,
+      },
+      derivation: todayDerivation('EvaluationAttemptCreated', 403),
+    } as MarketplaceEvent),
+    projectable({
+      event: 'VerdictDeliveryClaimed',
+      facts: {
+        evaluator: EVALUATOR,
+        requestId: VERDICT_REQUEST_ID,
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+        verdictIndex: VERDICT_INDEX,
+        verdictCode: VERDICT_CODE,
+      },
+      derivation: todayDerivation('VerdictDeliveryClaimed', 404),
+    } as MarketplaceEvent),
+  ];
+}
+
+/** The coordinator's own anchor for the attempt, the only binding a requester holds. */
+function requesterChainReads(input: { readonly onChainKeccak?: Hex } = {}) {
+  return async (requestId: Hex) => (
+    requestId === SOLUTION_REQUEST_ID
+      ? {
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+        onChainKeccak: input.onChainKeccak ?? REQUESTER_DELIVERY_KECCAK,
+      }
+      : undefined
+  );
+}
+
+describe('native announce path — requester-side counterparty delivery (#2644 parity)', () => {
+  it('anchors a counterparty Delivery off the record plane when this operator holds none', async () => {
+    const sequence = requesterTodaySequence();
+    const plane = new Map<`sha256:${string}`, Uint8Array>([
+      // A decoy ahead of the real record: the catalog only decides what to TRY.
+      [documentDigest(EVALUATION_DELIVERY_BYTES), EVALUATION_DELIVERY_BYTES],
+      [REQUESTER_DELIVERY_DIGEST, REQUESTER_DELIVERY_BYTES],
+    ]);
+    const evaluator = evaluatorState();
+    const { ports } = announcePorts({
+      resolveRecord: buildNativeResolveRecord(
+        BASE_SEPOLIA_TODAY,
+        async () => SUBMISSION_BYTES,
+        undefined,
+        {
+          // The requester's solver store is EMPTY — it never produced this delivery.
+          solutionDelivery: async () => undefined,
+          evaluationDelivery: buildNativeEvaluationDeliveryRecordResolver(evaluator as never),
+        },
+        buildRecordPlaneCounterpartyDeliveryResolver({
+          readTodayDeliveryFacts: requesterChainReads(),
+          fetchDeliveryBytes: async (digest) => plane.get(digest),
+          listRecordPlaneDigests: () => [...plane.keys()],
+        }),
+      ),
+      verifyVerdictObservation: m4bGate(evaluator),
+    });
+    const transition = reduceMarketplaceProjection(sequence, createMarketplaceProjectionState());
+
+    // The premise: observe.ts DID emit the delivery observation off the record plane (#2644).
+    expect(transition.observations.map(({ type }) => type)).toContain(
+      'network.jinn.task-execution.delivery-recorded.v1',
+    );
+
+    const result = await projectAnnouncements(transition, ports);
+
+    // RED BEFORE THIS FIX: `resolveRecord` threw `…holds no single durable solution-delivery
+    // record for task=42 attempt=3`, which aborted the whole call and dropped all five events'
+    // announcements — the live Base Sepolia failure.
+    expect(result.refusals).toEqual([]);
+    expect(result.announcements.find(
+      (announcement) => announcement.derivation.event === 'SolutionDeliveryClaimed',
+    )).toMatchObject({
+      action: 'available',
+      record: { kind: RECORD_KINDS.delivery, digest: REQUESTER_DELIVERY_DIGEST },
+    });
+    // The verdict announcement — the DR-2026-08-05 G-loop criterion — publishes alongside it.
+    expect(result.announcements.find(
+      (announcement) => announcement.derivation.event === 'VerdictDeliveryClaimed',
+    )).toMatchObject({
+      action: 'available',
+      record: { kind: RECORD_KINDS.delivery, digest: EVALUATION_DELIVERY_DIGEST },
+    });
+  });
+
+  it('prefers this operator\'s OWN durable record over the record plane', async () => {
+    // A solver still answers from its own store; the fallback is strictly additive. The plane here
+    // would answer with different bytes, so a resolver that reached for it would be visible.
+    const resolveRecord = buildNativeResolveRecord(
+      BASE_SEPOLIA_TODAY,
+      async () => SUBMISSION_BYTES,
+      undefined,
+      {
+        solutionDelivery: async () => SOLUTION_DELIVERY_BYTES,
+        evaluationDelivery: async () => undefined,
+      },
+      buildRecordPlaneCounterpartyDeliveryResolver({
+        readTodayDeliveryFacts: requesterChainReads(),
+        fetchDeliveryBytes: async () => REQUESTER_DELIVERY_BYTES,
+        listRecordPlaneDigests: () => [REQUESTER_DELIVERY_DIGEST],
+      }),
+    );
+    const claimed = requesterTodaySequence().find(
+      (event) => event.event === 'SolutionDeliveryClaimed',
+    )!;
+
+    const material = await resolveRecord(claimed, 'delivery');
+    expect(material.bytes).toEqual(SOLUTION_DELIVERY_BYTES);
+  });
+
+  it('refuses bytes that do not hash to the coordinator\'s anchor', async () => {
+    // The record plane is a HINT. A candidate that does not re-derive to the on-chain keccak is
+    // never admitted, however confidently the catalog names it.
+    const resolveRecord = buildNativeResolveRecord(
+      BASE_SEPOLIA_TODAY,
+      async () => SUBMISSION_BYTES,
+      undefined,
+      { solutionDelivery: async () => undefined, evaluationDelivery: async () => undefined },
+      buildRecordPlaneCounterpartyDeliveryResolver({
+        readTodayDeliveryFacts: requesterChainReads({ onChainKeccak: `0x${'c'.repeat(64)}` }),
+        fetchDeliveryBytes: async () => REQUESTER_DELIVERY_BYTES,
+        listRecordPlaneDigests: () => [REQUESTER_DELIVERY_DIGEST],
+      }),
+    );
+    const claimed = requesterTodaySequence().find(
+      (event) => event.event === 'SolutionDeliveryClaimed',
+    )!;
+
+    const error = await resolveRecord(claimed, 'delivery').catch((cause) => cause);
+    expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(error.role).toBe('delivery');
+    expect(error.message).toContain('no single durable solution-delivery record');
+  });
+
+  it('names the CHAIN read, not the record plane, when the anchor read is unavailable (#2647)', async () => {
+    // The enrich-side sibling of this leg turns a transport failure into a replayable DROP, because
+    // it has a role to protect and a rejection to avoid. This leg has neither: `todayDeliveryMaterial`
+    // refuses either way, and per #2649 that refusal is permanent for the event. What it must not do
+    // is send the operator to debug the counterparty's serving plane for a failure that never
+    // reached it — so the plane is not consulted at all, and the warning says why.
+    const warnings: string[] = [];
+    let planeConsulted = false;
+    const resolveRecord = buildNativeResolveRecord(
+      BASE_SEPOLIA_TODAY,
+      async () => SUBMISSION_BYTES,
+      undefined,
+      { solutionDelivery: async () => undefined, evaluationDelivery: async () => undefined },
+      buildRecordPlaneCounterpartyDeliveryResolver({
+        readTodayDeliveryFacts: async () => 'unavailable',
+        fetchDeliveryBytes: async () => {
+          planeConsulted = true;
+          return REQUESTER_DELIVERY_BYTES;
+        },
+        listRecordPlaneDigests: () => [REQUESTER_DELIVERY_DIGEST],
+        logger: { warn: (message) => warnings.push(message) },
+      }),
+    );
+    const claimed = requesterTodaySequence().find(
+      (event) => event.event === 'SolutionDeliveryClaimed',
+    )!;
+
+    const error = await resolveRecord(claimed, 'delivery').catch((cause) => cause);
+    expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(planeConsulted).toBe(false);
+    expect(warnings.some((line) => line.includes('unavailable')
+      && line.includes('the record plane was never consulted'))).toBe(true);
+  });
+
+  it('refuses a candidate that hashes to the anchor but names a different attempt', async () => {
+    // The bytes carry the coordinator's anchor yet describe another Attempt — a contradiction the
+    // chain itself asserts against. Same posture as the adoption port's gate 4.
+    const foreign = deliveryDocument(
+      'urn:jinn:marketplace:attempt:84532:0x0000000000000000000000000000000000000000:99:0',
+      'a delivery for someone else\'s attempt',
+    );
+    const resolveRecord = buildNativeResolveRecord(
+      BASE_SEPOLIA_TODAY,
+      async () => SUBMISSION_BYTES,
+      undefined,
+      { solutionDelivery: async () => undefined, evaluationDelivery: async () => undefined },
+      buildRecordPlaneCounterpartyDeliveryResolver({
+        readTodayDeliveryFacts: requesterChainReads({ onChainKeccak: keccakEvidenceHash(foreign) }),
+        fetchDeliveryBytes: async () => foreign,
+        listRecordPlaneDigests: () => [documentDigest(foreign)],
+      }),
+    );
+    const claimed = requesterTodaySequence().find(
+      (event) => event.event === 'SolutionDeliveryClaimed',
+    )!;
+
+    const error = await resolveRecord(claimed, 'delivery').catch((cause) => cause);
+    expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(error.message).toContain('no single durable solution-delivery record');
+  });
+
+  it('keeps refusing when no record-plane fallback is wired into the composition', async () => {
+    // A composition without a record plane behaves exactly as it did before this fix.
+    const resolveRecord = buildNativeResolveRecord(
+      BASE_SEPOLIA_TODAY,
+      async () => SUBMISSION_BYTES,
+      undefined,
+      { solutionDelivery: async () => undefined, evaluationDelivery: async () => undefined },
+    );
+    const claimed = requesterTodaySequence().find(
+      (event) => event.event === 'SolutionDeliveryClaimed',
+    )!;
+
+    const error = await resolveRecord(claimed, 'delivery').catch((cause) => cause);
+    expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(error.message).toContain(`task=${TASK_ID} attempt=${ATTEMPT_INDEX}`);
   });
 });
 

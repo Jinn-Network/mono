@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VerdictRuleSchema, type VerdictRule } from "@jinn-network/task-execution-profiles";
 
 export const INSPECT_ADAPTER_ID = "inspect" as const;
 export const SUPPORTED_INSPECT_VERSION = "0.3.255" as const;
@@ -8,6 +9,12 @@ export const SUPPORTED_OPENAI_SDK_VERSION = "2.53.0" as const;
 export const SUPPORTED_OCI_PYTHON_VERSION = "3.11.9" as const;
 export const SUPPORTED_OCI_PLATFORM = "linux/amd64" as const;
 export const INSPECT_SELECTION_SCHEMA = "jinn.network/benchmark-product/inspect-selection/1" as const;
+export const INSPECT_SANDBOX_SELECTION_SCHEMA = "jinn.network/benchmark-product/inspect-selection/2" as const;
+export const INSPECT_MULTI_SCORER_SELECTION_SCHEMA = "jinn.network/benchmark-product/inspect-selection/3" as const;
+export const INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA = "jinn.network/benchmark-product/inspect-selection/4" as const;
+export const INSPECT_SANDBOX_PROTOCOL = "jinn.network/inspect-sandbox-host/1" as const;
+export const INSPECT_SANDBOX_PROVIDER = "jinn-oci" as const;
+export const INSPECT_SANDBOX_PACKAGE_VERSION = "0.1.0" as const;
 export const INSPECT_ARM_REQUIREMENT_KEY = "jinn.network/inspect-arm" as const;
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -17,6 +24,62 @@ const SafeJsonSchema: z.ZodType<unknown> = z.lazy(() => z.union([
   z.array(SafeJsonSchema),
   z.record(z.string(), SafeJsonSchema),
 ]));
+
+const PublicMeasurementNameSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9._-]{0,63}$/);
+
+export const InspectScoreProjectionSchema = z.object({
+  measurementName: PublicMeasurementNameSchema,
+  scorerName: z.string().min(1),
+  subScoreKey: z.string().min(1).optional(),
+  passValue: JsonScalarSchema,
+}).strict();
+export type InspectScoreProjection = z.infer<typeof InspectScoreProjectionSchema>;
+
+function verdictRuleMeasurements(rule: VerdictRule, names = new Set<string>()): Set<string> {
+  if ("threshold" in rule) names.add(rule.threshold.measurement);
+  else if ("all" in rule) rule.all.forEach((child) => verdictRuleMeasurements(child, names));
+  else if ("any" in rule) rule.any.forEach((child) => verdictRuleMeasurements(child, names));
+  else if ("not" in rule) verdictRuleMeasurements(rule.not, names);
+  else if ("inconclusiveWhen" in rule) verdictRuleMeasurements(rule.inconclusiveWhen, names);
+  return names;
+}
+
+function validateScoringPolicy(
+  scoring: { readonly projections: readonly z.infer<typeof InspectScoreProjectionSchema>[]; readonly verdictRule: VerdictRule },
+  context: z.RefinementCtx,
+): void {
+  const projectionNames = scoring.projections.map((projection) => projection.measurementName);
+  if (new Set(projectionNames).size !== projectionNames.length) {
+    context.addIssue({ code: "custom", path: ["projections"], message: "measurement names must be unique" });
+  }
+  const referencedNames = verdictRuleMeasurements(scoring.verdictRule);
+  const projected = new Set(projectionNames);
+  if (
+    referencedNames.size !== projected.size
+    || [...referencedNames].some((name) => !projected.has(name))
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["verdictRule"],
+      message: "verdictRule measurement references must exactly match the configured projections",
+    });
+  }
+}
+
+export const InspectScoringRequestSchema = z.object({
+  projections: z.array(InspectScoreProjectionSchema).min(1),
+  verdictRule: VerdictRuleSchema,
+}).strict().superRefine(validateScoringPolicy);
+export type InspectScoringRequest = z.infer<typeof InspectScoringRequestSchema>;
+export type InspectScoringSelectionRequest =
+  | {
+    readonly scorer: { readonly name: string; readonly passValue: string | number | boolean | null };
+    readonly scoring?: never;
+  }
+  | {
+    readonly scorer?: never;
+    readonly scoring: InspectScoringRequest;
+  };
 
 export const InspectArmConfigurationSchema = z.object({
   armId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
@@ -103,6 +166,39 @@ const InspectBrokerPolicySchema = z.object({
   scratchBytes: z.literal(67_108_864),
 }).strict();
 
+export const InspectSandboxPolicySchema = z.object({
+  provider: z.literal(INSPECT_SANDBOX_PROVIDER),
+  platform: z.literal(SUPPORTED_OCI_PLATFORM),
+  user: z.literal("65532:65532"),
+  readOnlyRoot: z.literal(true),
+  network: z.literal("none"),
+  capabilities: z.tuple([]),
+  noNewPrivileges: z.literal(true),
+  cpuCount: z.literal(1),
+  memoryBytes: z.literal(536_870_912),
+  pidsLimit: z.literal(32),
+  scratchBytes: z.literal(268_435_456),
+  maxEnvironments: z.literal(1),
+  maxOperations: z.literal(64),
+  commandTimeoutSeconds: z.literal(30),
+  totalTimeoutSeconds: z.literal(120),
+  maxInputBytes: z.literal(16 * 1024 * 1024),
+  maxOutputBytes: z.literal(20 * 1024 * 1024),
+  maxReadFileBytes: z.literal(100 * 1024 * 1024),
+}).strict();
+
+const InspectSandboxRuntimeSchema = z.object({
+  protocol: z.literal(INSPECT_SANDBOX_PROTOCOL),
+  provider: z.literal(INSPECT_SANDBOX_PROVIDER),
+  packageVersion: z.literal(INSPECT_SANDBOX_PACKAGE_VERSION),
+  providerSourceSha256: Sha256Schema,
+  controllerSourceSha256: Sha256Schema,
+  imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  platform: z.literal(SUPPORTED_OCI_PLATFORM),
+  policySha256: Sha256Schema,
+  policy: InspectSandboxPolicySchema,
+}).strict();
+
 export const InspectOciRuntimeIdentitySchema = z.object({
   kind: z.literal("oci"),
   imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
@@ -119,10 +215,25 @@ export const InspectOciRuntimeIdentitySchema = z.object({
   datasetCacheSha256: Sha256Schema,
   isolation: InspectOciIsolationSchema,
   broker: InspectBrokerPolicySchema.optional(),
+  sandbox: InspectSandboxRuntimeSchema.optional(),
 }).strict();
 
-export const InspectSelectionManifestSchema = z.object({
-  schema: z.literal(INSPECT_SELECTION_SCHEMA),
+const InspectResolvedSandboxSchema = z.object({
+  type: z.literal(INSPECT_SANDBOX_PROVIDER),
+  config: z.object({
+    schema: z.literal("jinn.network/benchmark-product/inspect-sandbox/1"),
+    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    platform: z.literal(SUPPORTED_OCI_PLATFORM),
+    policySha256: Sha256Schema,
+  }).strict(),
+}).strict();
+
+const InspectDeclaredSandboxSchema = z.object({
+  type: z.literal("docker"),
+  config: z.null(),
+}).strict();
+
+const InspectSelectionManifestBaseFields = {
   runtime: z.object({
     adapterVersion: z.literal("1"),
     workerSha256: Sha256Schema,
@@ -147,7 +258,8 @@ export const InspectSelectionManifestSchema = z.object({
     args: z.record(z.string(), SafeJsonSchema),
     resolvedName: z.string().min(1),
     resolvedVersion: z.string().nullable(),
-    resolvedSandbox: z.null(),
+    declaredSandbox: InspectDeclaredSandboxSchema.optional(),
+    resolvedSandbox: z.union([z.null(), InspectResolvedSandboxSchema]),
     source: z.object({
       kind: z.enum(["project-file", "installed-package"]),
       path: z.string().min(1),
@@ -175,14 +287,81 @@ export const InspectSelectionManifestSchema = z.object({
     }),
   }),
   arms: z.array(InspectArmConfigurationSchema).min(2),
+  runOptions: InspectRunOptionsSchema,
+} as const;
+
+const LegacyInspectSelectionManifestSchema = z.object({
+  schema: z.union([z.literal(INSPECT_SELECTION_SCHEMA), z.literal(INSPECT_SANDBOX_SELECTION_SCHEMA)]),
+  ...InspectSelectionManifestBaseFields,
   scorer: z.object({
     name: z.string().min(1),
     passValue: JsonScalarSchema,
     definition: SafeJsonSchema,
-  }),
-  runOptions: InspectRunOptionsSchema,
+  }).strict(),
+}).strict();
+
+const ResolvedInspectScoringSchema = z.object({
+  projections: z.array(InspectScoreProjectionSchema).min(1),
+  verdictRule: VerdictRuleSchema,
+  inspectMetrics: SafeJsonSchema.nullable(),
+  inspectEpochReducers: z.array(z.string().min(1)).nullable(),
+}).strict().superRefine(validateScoringPolicy);
+
+const MultiScorerInspectSelectionManifestSchema = z.object({
+  schema: z.union([
+    z.literal(INSPECT_MULTI_SCORER_SELECTION_SCHEMA),
+    z.literal(INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA),
+  ]),
+  ...InspectSelectionManifestBaseFields,
+  scorers: z.array(z.object({
+    name: z.string().min(1),
+    definition: SafeJsonSchema,
+  }).strict()).min(1),
+  scoring: ResolvedInspectScoringSchema,
 }).strict().superRefine((manifest, context) => {
+  const scorerNames = manifest.scorers.map((scorer) => scorer.name);
+  if (new Set(scorerNames).size !== scorerNames.length) {
+    context.addIssue({ code: "custom", path: ["scorers"], message: "resolved Inspect scorer names must be distinct" });
+  }
+  const knownScorers = new Set(scorerNames);
+  manifest.scoring.projections.forEach((projection, index) => {
+    if (!knownScorers.has(projection.scorerName)) {
+      context.addIssue({
+        code: "custom",
+        path: ["scoring", "projections", index, "scorerName"],
+        message: "projection must reference a resolved Inspect scorer",
+      });
+    }
+  });
+});
+
+export const InspectSelectionManifestSchema = z.union([
+  LegacyInspectSelectionManifestSchema,
+  MultiScorerInspectSelectionManifestSchema,
+]).superRefine((manifest, context) => {
   const providerBacked = manifest.arms.some((arm) => arm.provider !== undefined);
+  const sandboxed = manifest.runtime.execution?.sandbox !== undefined;
+  const sandboxSchema = manifest.schema === INSPECT_SANDBOX_SELECTION_SCHEMA
+    || manifest.schema === INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA;
+  if (sandboxed !== sandboxSchema) {
+    context.addIssue({ code: "custom", path: ["schema"], message: "sandbox selections require their sandbox selection schema" });
+  }
+  if (sandboxed !== (manifest.task.resolvedSandbox !== null) || sandboxed !== (manifest.task.declaredSandbox !== undefined)) {
+    context.addIssue({ code: "custom", path: ["task", "resolvedSandbox"], message: "sandbox runtime, declared sandbox, and effective sandbox must be present together" });
+  }
+  if (sandboxed) {
+    const selected = manifest.runtime.execution?.sandbox;
+    const resolved = manifest.task.resolvedSandbox;
+    if (
+      selected === undefined
+      || resolved === null
+      || resolved.config.imageDigest !== selected.imageDigest
+      || resolved.config.platform !== selected.platform
+      || resolved.config.policySha256 !== selected.policySha256
+    ) {
+      context.addIssue({ code: "custom", path: ["task", "resolvedSandbox"], message: "effective sandbox must match the sealed sandbox runtime" });
+    }
+  }
   if (manifest.runtime.execution === undefined) {
     if (providerBacked) {
       context.addIssue({ code: "custom", path: ["runtime", "execution"], message: "provider-backed arms require OCI execution" });
@@ -218,6 +397,15 @@ export const InspectSelectionManifestSchema = z.object({
 export type InspectArmConfiguration = z.infer<typeof InspectArmConfigurationSchema>;
 export type InspectRunOptions = z.infer<typeof InspectRunOptionsSchema>;
 export type InspectSelectionManifest = z.infer<typeof InspectSelectionManifestSchema>;
+export type InspectMultiScorerSelectionManifest = z.infer<typeof MultiScorerInspectSelectionManifestSchema>;
+export type InspectSandboxPolicy = z.infer<typeof InspectSandboxPolicySchema>;
+
+export function isInspectMultiScorerSelection(
+  manifest: InspectSelectionManifest,
+): manifest is InspectMultiScorerSelectionManifest {
+  return manifest.schema === INSPECT_MULTI_SCORER_SELECTION_SCHEMA
+    || manifest.schema === INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA;
+}
 
 const SECRETISH_KEY = /(?:^|[_-])(api[_-]?key|authorization|credential|password|private[_-]?key|secret|token)(?:$|[_-])/iu;
 const SECRETISH_VALUES = [

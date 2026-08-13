@@ -24,8 +24,8 @@ import {
   parseAutopilotAdoptionReceiptComment,
   parseIssueRelayAssuranceComment,
   type AcceptedSolutionAdoptionReceipt,
-  type AutopilotDeliveryContradictionReason,
   type AutopilotDeliveryCommandResultV1,
+  type AutopilotDeliveryContradictionReason,
   type AutopilotDeliveryExpectation,
   type AutopilotDeliveryObservation,
   type AutopilotDeliveryPendingReason,
@@ -303,18 +303,41 @@ describe('Autopilot delivery wire contracts', () => {
     }).success).toBe(false);
   });
 
-  it('wraps observations in a strict machine-command result', () => {
-    const observation = fixture('delivery-pending.json');
-    const value = {
+  // PUBLISHED EXTERNAL BOUNDARY. `Jinn-Network/autopilot` value-imports
+  // `AutopilotDeliveryCommandResultV1Schema` from `@jinn-network/sdk/autopilot`
+  // (`src/lifecycle/marketplace-delivery.ts:18`) and parses the verb's stdout
+  // with it (`:317`). Dropping the export breaks that consumer's compile on its
+  // next SDK bump, so this pin asserts PRESENCE from both barrels.
+  it('publishes the delivery command-result envelope from both barrels', async () => {
+    const autopilotModule: Record<string, unknown> =
+      await import('../src/autopilot.js');
+    const jinnRepoModule: Record<string, unknown> =
+      await import('../src/solvernets/jinn-repo.js');
+    expect(autopilotModule['AutopilotDeliveryCommandResultV1Schema'])
+      .toBeDefined();
+    expect(jinnRepoModule['AutopilotDeliveryCommandResultV1Schema'])
+      .toBe(autopilotModule['AutopilotDeliveryCommandResultV1Schema']);
+  });
+
+  it('parses the verb envelope the external consumer sends and rejects drift', () => {
+    const observation = fixture('verified-solution.json');
+    const envelope = {
       schemaVersion: 1,
-      generatedAt: '2026-07-24T12:00:00.000Z',
+      generatedAt: '2026-07-27T12:00:00.000Z',
       verb: 'tasks observe-autopilot-delivery',
       observation,
     };
-    expect(AutopilotDeliveryCommandResultV1Schema.parse(value)).toEqual(value);
+    expect(AutopilotDeliveryCommandResultV1Schema.parse(envelope))
+      .toEqual(envelope);
+    // The `verb` literal is the contract the consumer keys on; a renamed verb
+    // must fail loudly here rather than parse into a stale shape.
     expect(AutopilotDeliveryCommandResultV1Schema.safeParse({
-      ...value,
-      generatedAt: new Date(),
+      ...envelope,
+      verb: 'tasks observe-delivery',
+    }).success).toBe(false);
+    expect(AutopilotDeliveryCommandResultV1Schema.safeParse({
+      ...envelope,
+      unexpected: true,
     }).success).toBe(false);
   });
 });

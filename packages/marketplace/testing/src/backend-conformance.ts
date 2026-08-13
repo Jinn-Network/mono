@@ -690,7 +690,7 @@ function replaceEvidenceReferences(
 
 /**
  * `describeMarketplaceBackendConformance` -- the two layers (design §12/§13; ruling §7.19). Both
- * are fork-backed when `makeBackend` is wired to a real Anvil fork (see
+ * are chain-backed when `makeBackend` is wired to snapshot-backed Anvil (see
  * `backend-conformance.test.ts`); the native §16.2 layer's own assertions are pure/local (they
  * check the composed profiles+trust primitives, not the chain venue itself).
  */

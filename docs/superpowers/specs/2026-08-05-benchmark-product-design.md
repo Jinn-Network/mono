@@ -1309,6 +1309,43 @@ release, or deployment semantics reopened):**
   grants no hosting, pricing, billing, account, release, extraction, or external-domain
   authority.
 
+**Addendum — 2026-08-13, private Inspect runtime-host boundary (Tier 4 adapter
+authority only; no protocol, record, package, lifecycle, operation, or isolation-claim
+semantics reopened):**
+
+- **Ownership boundary.** Inspect continues to own task and dataset loading, solvers,
+  agents, scorers, its public sandbox API and sandbox-event semantics, native EvalLogs,
+  and Inspect View. Colophon owns the product-specific composition required to select and
+  lock that runtime, supervise it outside the web request process, constrain credentials
+  and host resources, retain its native artifacts, and bind its results into the existing
+  Jinn lifecycle and evidence closure. The adapter does not translate an Inspect task,
+  solver, scorer, or log into a competing Jinn implementation.
+- **Narrow host authority, not a generic service.** The optional OCI adapter may implement
+  one fixed, digest-bound host policy for the supported task-level default Docker sandbox.
+  That authority is part of the Tier 4 venue/runtime composition needed to execute selected
+  evaluations safely; it does not create an operator console, universal sandbox service,
+  provider platform, task-authoring environment, or new task-execution backend contract.
+  Custom providers and configurations, per-sample files/setup, multiple environments,
+  task egress, remote workers, and general sandbox orchestration remain outside this
+  authority.
+- **Private interfaces.** Inspect selection manifests, host-connection descriptors,
+  model-broker and sandbox-host wire operations, provider names, and controller policies
+  are private Tier 4 interfaces. They may be digest-bound into product method material,
+  but they are neither Jinn protocol records nor Tier 3 platform APIs, and no Tier 1–3
+  schema, conformance kit, fixture, or implementation may treat them as normative.
+- **Truthful assurance.** A product-controlled container and Inspect-native sandbox events
+  are operational containment evidence only. They do not manufacture positive per-cell
+  Jinn isolation evidence: the existing multi-policy local venue continues to report
+  isolation as `unverifiable`, and same-execution Inspect scoring remains attributable but
+  never independent.
+- **Promotion trigger.** The runtime-neutral product lifecycle and injected host port remain
+  intentionally narrow for the first external runtime. A second independent product or
+  evaluation-runtime consumer may justify a reusable Tier 3 capability, but only through a
+  separate approved design that identifies one service-neutral job, performs the standards
+  audit, defines public contracts, and ships a conformance kit before its implementation.
+  Reuse-looking code inside this adapter is not by itself authority to promote or generalize
+  it, and no such promotion occurs in this addendum.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

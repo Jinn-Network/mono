@@ -40,7 +40,7 @@ import type { AssemblyPorts, InScopeCell, InScopeVerdict } from "@jinn-network/b
 import { dssePreAuthEncoding, parseDsseEnvelope } from "@jinn-network/trust-core";
 import { parseEvaluationSpec, type EvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/signing.js";
-import { VENUE_ISOLATION_INVENTORY } from "../venue/venue.js";
+import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { LocalAdmissionReceiptFact } from "./admission-receipts.js";
 import { cancelRequested } from "./cancel-marker.js";
@@ -154,14 +154,16 @@ export interface BuildAssemblyPortsFromFactsInput {
  * derived port (pinning, admission, cancellation, trust, cost) is built here so the two
  * skeptic paths cannot silently diverge. */
 export function buildAssemblyPortsFromFacts(input: BuildAssemblyPortsFromFactsInput): AssemblyPorts {
+  const submissionBaseline = input.runRecord.policy.submissionBaseline as Record<string, unknown>;
+  const isolationPosture = venueIsolationPostureForPolicy(submissionBaseline["isolationPolicy"]);
   return localAssemblyPorts({
     inputScope: {
       cellsForRun: () => [...input.cells],
       ...(input.runCancelled ? { runCancelled: true } : {}),
     },
     pinning: {
-      submissionBaseline: input.runRecord.policy.submissionBaseline as Record<string, unknown>,
-      isolationInventory: VENUE_ISOLATION_INVENTORY,
+      submissionBaseline,
+      isolationInventory: isolationPosture.inventory,
       evidenceFor: (cellKey) => {
         const cell = input.cells.find((candidate) => candidate.cellKey === cellKey);
         if (cell === undefined || cell.dispatches === 0) return { dispatches: 0 };

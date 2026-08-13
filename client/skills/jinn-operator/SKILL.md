@@ -87,10 +87,12 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn harnesses` | Manage operator-supplied external Harnesses |
 | `jinn solver-plugins` | Inspect, validate, pack, publish, and revoke SolverPlugin packages |
 | `jinn integrations` | Configure host AI tool integrations for Jinn |
-| `jinn codedigest-revert-check` | Decide whether an Improve commit regressed the pass rate (per-codeDigest, #764) |
 | `jinn eval` | Run a held-out slate against a checkpoint and compare its resolved rate vs the parent (#818) |
 | `jinn scrub` | Scrub eval + review tooling |
-| `jinn native-vertical` | Native requester vertical for Base Sepolia |
+| `jinn native-vertical` | Native requester vertical and role-identity keygen for Base Sepolia |
+| `jinn ceremony` | Provision native trust artifacts: role custody, on-chain anchor, and the shared trust catalog |
+| `jinn policy` | Show the resolved claim policy (read-only) |
+| `jinn wiring` | Show execution-wiring and posting entries (read-only) |
 <!-- skill:cli-table:end -->
 
 ## Phase 2: MCP Configuration

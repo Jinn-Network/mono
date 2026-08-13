@@ -35,7 +35,6 @@ jobs:
       source_sha: ${{ github.sha }}
       lane: canary
     secrets:
-      JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
       JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
       JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
 
@@ -181,7 +180,6 @@ jobs:
       source_sha: ${{ needs.resolve-stable-source.outputs.source_sha }}
       lane: stable
     secrets:
-      JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
       JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
       JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
 

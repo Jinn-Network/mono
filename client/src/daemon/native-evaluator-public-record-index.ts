@@ -152,3 +152,35 @@ export function publicRecordLocations(
       WHERE record_digest = ? ORDER BY location`,
   ).all(digest) as Array<{ location: string }>).map(({ location }) => location);
 }
+
+/**
+ * Every content address this operator holds a signed location statement for, newest statement
+ * first, capped at `limit` (defect #48, the requester's record-plane catalog).
+ *
+ * The rows are retrieval hints (see the module doc) and this reader inherits that exactly: it
+ * answers "what content could I try to fetch", never "what is true". Its one caller re-checks
+ * every candidate's bytes against an on-chain anchor before believing anything about them, so an
+ * over-broad or adversarial catalog costs fetches and nothing else.
+ *
+ * Newest-first is `rowid DESC` — insertion order, since rows are only ever appended. That is the
+ * ordering that makes the caller's scan terminate on the first candidate in the common case (the
+ * Delivery being claimed is the most recently announced record).
+ *
+ * Returns `[]` when the table does not exist. A requester-only operator never installs the
+ * evaluator schema, and a missing catalog is a MISS, not a boot failure.
+ */
+export function listPublicRecordDigests(
+  store: Store,
+  limit: number,
+): readonly `sha256:${string}`[] {
+  if (limit <= 0) return [];
+  try {
+    return (store.db.prepare(
+      `SELECT record_digest FROM native_evaluator_public_records
+        GROUP BY record_digest ORDER BY MAX(rowid) DESC LIMIT ?`,
+    ).all(limit) as Array<{ record_digest: `sha256:${string}` }>)
+      .map(({ record_digest }) => record_digest);
+  } catch {
+    return [];
+  }
+}

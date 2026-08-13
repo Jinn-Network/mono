@@ -70,4 +70,18 @@ describe("public surface", () => {
     expect(entry.HARBOR_ADAPTER_ID).toBe("harbor");
     expect(publicTypesCompile).toBeUndefined();
   });
+
+  test("keeps private Inspect host protocol and controller internals out of the product entry", () => {
+    for (const name of [
+      "createSandboxController",
+      "sandboxPolicySha256",
+      "SANDBOX_PROTOCOL",
+      "SANDBOX_POLICY",
+      "INSPECT_SANDBOX_PROTOCOL",
+      "INSPECT_SANDBOX_POLICY",
+      "INSPECT_SANDBOX_PROVIDER",
+    ]) {
+      expect(Object.hasOwn(entry, name), name).toBe(false);
+    }
+  });
 });

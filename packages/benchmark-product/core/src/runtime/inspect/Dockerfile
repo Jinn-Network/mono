@@ -15,6 +15,10 @@ RUN python -m pip install \
     && python -c 'import tiktoken; tiktoken.get_encoding("o200k_base")' \
     && chmod -R a-w "${TIKTOKEN_CACHE_DIR}"
 
+COPY sandbox_extension /opt/jinn/sandbox_extension
+RUN python -m pip install --no-deps --no-build-isolation /opt/jinn/sandbox_extension \
+    && rm -rf /opt/jinn/sandbox_extension/build /opt/jinn/sandbox_extension/*.egg-info
+
 WORKDIR /jinn/work
 COPY --chmod=0555 worker.py /opt/jinn/worker.py
 COPY --chmod=0555 broker.py /opt/jinn/broker.py

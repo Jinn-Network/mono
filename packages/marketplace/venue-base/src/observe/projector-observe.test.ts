@@ -241,6 +241,39 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
     expect(snapshot.descriptor.attempt).toBe(ATTEMPT_A);
   });
 
+  // Defect #48. Attempt URIs and Submission URIs share the `urn:uuid:` shape, so a ref can only be
+  // classified by what the log says about it -- and observations ARE emitted against a Submission
+  // subject (`submission-closed.v1`, from `TaskAttemptCreated`'s capacity close and from
+  // `VerdictDeliveryClaimed`). The subject-identity branch used to run first and swallowed the ref,
+  // so a requester adopting a closed task got `attempt-not-found` for an Attempt that was engaged,
+  // delivered and judged.
+  test("observe(submissionUri) resolves to the engaged Attempt even when the Submission is itself an observation subject", async () => {
+    const engaged = engagedObservation({
+      attempt: ATTEMPT_A, submission: SUBMISSION_A, sequence: "0000000000000002", derivation: derivation(),
+    });
+    const submissionClosed = {
+      specversion: "1.0",
+      id: `${SUBMISSION_A}:closed`,
+      source: SOURCE,
+      subject: SUBMISSION_A,
+      time: "2026-07-30T00:00:30.000Z",
+      datacontenttype: "application/json",
+      sequence: "0000000000000001",
+      taskdigest: TASK_DIGEST,
+      derivation: derivation({ event: "VerdictDeliveryClaimed" }),
+      type: "network.jinn.task-execution.submission-closed.v1",
+      data: { reason: "capacity" },
+    } as unknown as ProtocolObservation;
+    const port = createProjectorObservePort({
+      chain: CHAIN, state, logSource: fakeLogSource(), observations: async () => [submissionClosed, engaged],
+    });
+
+    const snapshot = await port.observe(SUBMISSION_A);
+
+    expect(snapshot.descriptor.attempt).toBe(ATTEMPT_A);
+    expect(snapshot.descriptor.submission).toBe(SUBMISSION_A);
+  });
+
   test("observe on an unknown ref throws TaskExecutionError(\"attempt-not-found\")", async () => {
     const port = createProjectorObservePort({
       chain: CHAIN, state, logSource: fakeLogSource(), observations: async () => [],

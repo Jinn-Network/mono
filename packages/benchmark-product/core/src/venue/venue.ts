@@ -98,6 +98,11 @@ import {
 import { createGitRepositoryMirror } from "./repository-mirror.js";
 import { deriveSampleResolution, isSampleForecastPayload } from "./resolution.js";
 import {
+  INSPECT_OCI_ISOLATION_POLICY,
+  VENUE_ISOLATION_POLICY,
+  deriveVenueIsolationPosture,
+} from "./isolation.js";
+import {
   makeSampleRepositoryWorkLauncher,
   SAMPLE_REPOSITORY_WORK_HARNESS_VERSION,
   SAMPLE_REPOSITORY_WORK_LAUNCHER_ID,
@@ -231,9 +236,7 @@ export const SOLVE_HARNESS_PINS = {
 
 export const EVALUATION_HARNESS_PIN = { id: "evaluation-harness", version: "0.1.0" } as const;
 
-export const VENUE_ISOLATION_POLICY = "unrestricted" as const;
-
-export const VENUE_ISOLATION_INVENTORY: readonly string[] = ["unrestricted"];
+export { VENUE_ISOLATION_POLICY } from "./isolation.js";
 
 /**
  * Venue evaluator identity IRI, `index` 1-based — deployment-owned, never inferred from Task
@@ -844,6 +847,10 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     };
   }
 
+  const isolationPosture = deriveVenueIsolationPosture([
+    VENUE_ISOLATION_POLICY,
+    ...(inspectHost?.kind === "oci" ? [INSPECT_OCI_ISOLATION_POLICY] : []),
+  ]);
   const provisionerCapabilities: ProvisionerCapabilities = {
     taskProfiles: [
       PREDICTION_FORECAST_PROFILE_URI,
@@ -861,7 +868,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       "text/markdown",
       ...(inspectProfile === undefined ? [] : [INSPECT_NATIVE_LOG_MEDIA_TYPE, INSPECT_SUMMARY_MEDIA_TYPE]),
     ],
-    isolation: ["process", ...(inspectHost?.kind === "oci" ? ["oci-container"] : [])],
+    isolation: isolationPosture.provisionerCapabilities,
   };
 
   const backend = makeLocalTaskExecutionBackend({

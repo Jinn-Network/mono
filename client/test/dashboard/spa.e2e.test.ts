@@ -87,26 +87,31 @@ test('SPA loads at root with the onboarding flow', async ({ page }) => {
   await expect(page.getByText('Jinn · Onboarding')).toBeVisible({ timeout: 10_000 });
 });
 
-test('Onboarding renders the five-phase list', async ({ page }) => {
-  // Onboarding shows the static hero ('Welcome to Jinn.') plus the five-row
+test('Onboarding renders the four-phase list', async ({ page }) => {
+  // Onboarding shows the static hero ('Welcome to Jinn.') plus the four-row
   // phase list from `regions/onboarding/PhaseRow.tsx` PHASE_TITLES. The active
   // row depends on bootstrap progress against the unreachable test RPC, but
-  // all five rows are always rendered (Onboarding.tsx maps [1..5] to PhaseRow
+  // all four rows are always rendered (Onboarding.tsx maps [1..4] to PhaseRow
   // unconditionally).
   //
-  // There is deliberately NO "Sign in to Claude" phase — harness auth moved
-  // into phase 5 (`HarnessSelectStep`) and the unit test
-  // `regions/Onboarding.test.tsx` ("does not render a Sign in to Claude
-  // phase") pins its absence. Asserting for it here is what rotted this file
-  // while it sat outside CI.
+  // Wave-4 D1 (DR-2026-08-05) took the rail from five rows to four: "Pick your
+  // first SolverNet" retired with the join lifecycle, and the harness + model
+  // picker that had been row 5 became row 4's readiness report once the write
+  // path that persisted its answer was gone.
+  //
+  // There is deliberately NO "Sign in to Claude" phase — harness auth lives in
+  // each harness's own store, and the unit test `regions/Onboarding.test.tsx`
+  // ("does not render a Sign in to Claude phase") pins its absence. Asserting
+  // for it here is what rotted this file while it sat outside CI.
   const url = handshakeUrl ?? `http://127.0.0.1:${PORT}/`;
   await page.goto(url);
   await expect(page.getByText('Welcome to Jinn.')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Provisioning your wallet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Fund your wallet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Joining Jinn')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('Pick your first SolverNet')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('Set up harness + model')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Check your harness')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Pick your first SolverNet')).toHaveCount(0);
+  await expect(page.getByText('Set up harness + model')).toHaveCount(0);
   await expect(page.getByText('Sign in to Claude', { exact: true })).toHaveCount(0);
 });
 

@@ -9,6 +9,7 @@ import {
   LOCATION_PROFILE_HTTPS,
   openNativeSignedSource,
   type NativeSignedSourceFaults,
+  type NativeSignedSourcePublisher,
   type NativeSignedSourceSigner,
 } from './native-signed-source.js';
 
@@ -31,6 +32,7 @@ export interface NativeSolutionPublisher extends NativeSolutionPublisherPort {
     readonly timestamp: string;
     readonly reason: WithdrawnAnnouncement['reason'];
   }): Promise<{ readonly sequence: string; readonly entryDigest: `sha256:${string}` }>;
+  committedAnnouncement: NativeSignedSourcePublisher['committedAnnouncement'];
   close(): Promise<void>;
 }
 
@@ -70,6 +72,7 @@ export async function openNativeSolutionPublisher(input: {
     sourceId: core.sourceId,
     handler: core.handler,
     close: () => core.close(),
+    committedAnnouncement: (announcementId) => core.committedAnnouncement(announcementId),
     publish: (value) => {
       if (value.publication.recordDigest !== value.artifact.digest) {
         throw new Error('solution publication digest does not equal the stored artifact digest');

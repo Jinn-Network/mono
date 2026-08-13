@@ -1,6 +1,7 @@
 /**
- * Page-split happy-path: navigate Overview → Settings → Memberships, edit a
- * joined SolverNet, save, and see the restart notification.
+ * Page-split happy-path: navigate Overview → Settings → Memberships, and see
+ * a restart notification raised by a surviving write path follow the operator
+ * across routes.
  *
  * The existing setup-mode harness in spa.e2e.test.ts spawns a real daemon
  * that serves the SPA bundle from dist/dashboard. This test mocks the
@@ -8,27 +9,35 @@
  * so the SPA renders running-mode without needing a live bootstrapped
  * fleet. It exercises the SPA wiring, not the daemon's bootstrap.
  *
- * HISTORY — this file used to drive "check the Evaluator box alongside
- * Solver, then Save". That flow no longer exists: roles are immutable
- * post-join (`JoinedNetCard.tsx` — "Roles are immutable post-join (set by
- * JoinFlow and not editable here — operators leave + rejoin to change
- * roles)"), the top tab is labelled "Settings" rather than "Operator",
- * `/operator` redirects to `/operator/memberships`, and the restart banner
- * became the `restart_required` notification AppShell renders. The test now
- * drives the surviving equivalent of the same wiring — an edit on the joined
- * card → POST /v1/operator/join/<cid> → `restartRequired` → notification —
- * because that is what the original was actually guarding.
+ * HISTORY — this file has been repointed twice as its subject surfaces moved.
+ * It first drove "check the Evaluator box alongside Solver, then Save"; roles
+ * became immutable post-join, so it moved to an edit on the joined card
+ * (POST /v1/operator/join/<cid> → `restartRequired` → notification). Wave-4 D1
+ * (DR-2026-08-05) then retired the join write path entirely, and with it the
+ * joined card's expand / model-select / Save controls.
+ *
+ * What survived is what this test now drives:
+ *   1. Memberships is a READ view (OPERATOR-APP-SPEC §2.4 keeps it as the
+ *      legacy view until cutover stage 5). GET /v1/operator/joined renders one
+ *      read-only row per configured SolverNet, and the page offers no control
+ *      that would write config.
+ *   2. The restart-required journey moves to the surviving claim authority:
+ *      PUT /v1/operator/claim-policy latches the daemon's `isRestartRequired()`
+ *      flag (`restart-required-state.ts`), and `GET /v1/notifications` serves
+ *      the resulting notice on EVERY route — which is the cross-route claim
+ *      this test is really here to make, and the reason it asserts the notice
+ *      on /operator/memberships rather than on the page that caused it.
  *
  * MIGRATED for #2408 (server-side notifications). `restart_required` is no
  * longer derived in the browser: `useNotifications.ts` is a thin fetcher over
  * `GET /v1/notifications`, and the daemon sets an explicit `isRestartRequired()`
- * flag on the three write paths it never hot-applies — `joinedSolverNets` among
- * them — then serves the already-derived notice. So the mock daemon is driven
- * statefully (empty list until the join POST fires, the notice afterwards) and
- * the assertion is made after a reload, which is the sharper claim: the pre-#2408
- * session-local `RestartPendingContext` flag could never have survived one.
+ * flag on the write paths it never hot-applies, then serves the already-derived
+ * notice. So the mock daemon is driven statefully (empty list until the write
+ * fires, the notice afterwards) and the assertion is made after a reload, which
+ * is the sharper claim: the pre-#2408 session-local `RestartPendingContext` flag
+ * could never have survived one.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Route } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,7 +46,7 @@ import { mockDaemonApi, makeRegistryManifestResponse } from './helpers/mock-daem
 
 const PORT = 17332;
 
-/** The manifest cid of the SolverNet this operator has already joined. */
+/** The manifest cid of the SolverNet this operator's config declares. */
 const JOINED_CID = 'bafkreiopalaunchedsolvernet0000000000000000000000000000';
 
 let daemon: ChildProcess | null = null;
@@ -97,18 +106,18 @@ test.afterAll(async () => {
 });
 
 
-test('operator opens the Settings tab, edits a joined SolverNet, saves, and sees the restart notification', async ({ page }) => {
+test('operator opens the Settings tab, saves claim policy, and sees the restart notification on the read-only Memberships view', async ({ page }) => {
   await mockDaemonApi(page);
 
   /**
    * Stands in for the daemon's `isRestartRequired()` flag (`restart-required-state.ts`),
-   * which the `joinedSolverNets` write path sets and `/v1/notifications` reads. Flipped by
-   * the join POST route below, consumed by the notifications route below that.
+   * which the claim-policy write path sets and `/v1/notifications` reads. Flipped by
+   * the PUT route below, consumed by the notifications route below that.
    */
   let restartRequired = false;
 
   // Per-test overrides, registered AFTER mockDaemonApi so they win.
-  // 1. one already-joined SolverNet for MembershipsTab to render.
+  // 1. one already-configured SolverNet for MembershipsTab to render.
   await page.route(
     (url) => url.pathname === '/v1/operator/joined',
     (route) =>
@@ -129,8 +138,9 @@ test('operator opens the Settings tab, edits a joined SolverNet, saves, and sees
         }),
       }),
   );
-  // 2. the per-CID manifest the card resolves its catalog entry from. Without
-  //    it the card treats the membership as orphaned and offers Leave, not Edit.
+  // 2. the per-CID manifest, kept from the pre-D1 version of this test: the
+  //    registry surface still resolves it, and serving it proves the read view
+  //    does not depend on it.
   await page.route(
     (url) => url.pathname === `/v1/solvernets/registry/${JOINED_CID}`,
     (route) =>
@@ -139,19 +149,34 @@ test('operator opens the Settings tab, edits a joined SolverNet, saves, and sees
         body: JSON.stringify(makeRegistryManifestResponse({ manifestCid: JOINED_CID })),
       }),
   );
-  // 3. the save POST reports the config change needs a restart — and, like the real write
-  //    path, latches the daemon-side flag that `/v1/notifications` derives the notice from.
+  // 3. claim policy — the GET seeds the editor; the PUT reports the change needs a
+  //    restart AND, like the real write path, latches the daemon-side flag that
+  //    `/v1/notifications` derives its notice from.
   await page.route(
-    (url) => url.pathname === `/v1/operator/join/${JOINED_CID}`,
-    (route) => {
-      restartRequired = true;
+    (url) => url.pathname === '/v1/operator/claim-policy',
+    (route: Route) => {
+      if (route.request().method() === 'PUT') {
+        restartRequired = true;
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ restartRequired: true }),
+        });
+      }
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          ok: true,
-          restartRequired: true,
-          manifestCid: JOINED_CID,
-          config: { manifestCid: JOINED_CID, name: 'Prediction Markets', roles: ['solver'] },
+          claimPolicy: { mode: 'every-runnable' },
+          executionWiring: [
+            {
+              workKind: 'prediction.v1',
+              harness: 'claude-code-learner',
+              model: 'claude-haiku-4-5-20251001',
+              plugins: ['jinn-prediction-plugin'],
+              credentialRef: 'default',
+              isolationPolicy: 'worktree',
+            },
+          ],
+          restartRequired: false,
         }),
       });
     },
@@ -189,20 +214,17 @@ test('operator opens the Settings tab, edits a joined SolverNet, saves, and sees
 
   // The Settings top tab exists and points at the operator section. Asserted
   // as a link rather than clicked through: `/operator` redirects to whichever
-  // sub-route is currently the default landing tab, that default has already
-  // moved once (memberships → claim-policy), and claim-policy white-screens
-  // under this mock — `ClaimPolicyTab` passes `query.data.executionWiring`
-  // straight into `entries.length` with no fallback, so a response lacking
-  // that field throws and blanks the route. Driving the journey through it
-  // would couple this test to an unrelated page's robustness.
+  // sub-route is currently the default landing tab, and that default has
+  // already moved once (memberships → claim-policy). Driving the journey
+  // through the redirect would couple this test to that choice.
   await expect(page.getByRole('link', { name: /^settings$/i })).toHaveAttribute(
     'href',
     '/operator',
   );
 
-  // Go straight to Memberships, where joined SolverNets are edited. Same
-  // direct-navigation idiom join.e2e.test.ts uses for /operator/registry.
   const origin = new URL(page.url()).origin;
+
+  // ── Memberships is a read view ──────────────────────────────────────────
   await page.goto(`${origin}/operator/memberships`);
   await expect(page).toHaveURL(/\/operator\/memberships$/);
 
@@ -213,31 +235,37 @@ test('operator opens the Settings tab, edits a joined SolverNet, saves, and sees
     .first();
   await expect(card).toBeVisible({ timeout: 15_000 });
   await expect(card.getByTestId('joined-net-card-name')).toHaveText('Prediction Markets');
+  await expect(card.getByTestId('joined-net-card-role-solver')).toBeVisible();
+  await expect(card).toContainText('claude-haiku-4-5-20251001');
 
-  // Expand the edit body, change the model, save.
-  await card.getByTestId('joined-net-card-toggle').click();
-  await expect(card).toHaveAttribute('data-expanded', 'true');
+  // The join lifecycle is gone, so the page must offer nothing that would
+  // write config. Pin the absence — a regrown control here would POST at a
+  // route that no longer exists.
+  await expect(page.getByTestId('memberships-tab').getByRole('button')).toHaveCount(0);
+  await expect(card.getByTestId('joined-net-card-toggle')).toHaveCount(0);
+  await expect(card.getByTestId('joined-net-card-save')).toHaveCount(0);
+  await expect(card.getByTestId('joined-net-card-leave')).toHaveCount(0);
 
-  const save = card.getByTestId('joined-net-card-save');
-  await expect(save).toBeDisabled(); // nothing dirty yet
+  // ── A surviving write raises the notice, which follows across routes ─────
+  await page.goto(`${origin}/operator/claim-policy`);
+  await expect(page.getByTestId('claim-policy-tab')).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId('claim-policy-spend-cap').fill('250000000000000');
 
-  await card.getByTestId('joined-net-card-model-select').selectOption('claude-sonnet-4-6');
-  await expect(save).toBeEnabled();
-
-  const savePost = page.waitForResponse(
+  const savePut = page.waitForResponse(
     (res) =>
-      new URL(res.url()).pathname === `/v1/operator/join/${JOINED_CID}` &&
-      res.request().method() === 'POST',
+      new URL(res.url()).pathname === '/v1/operator/claim-policy' &&
+      res.request().method() === 'PUT',
   );
-  await save.click();
-  await savePost;
+  await page.getByTestId('claim-policy-save').click();
+  await savePut;
 
   // Post-#2408 the notice is server state, not session state: the save latched the daemon's
   // restart-required flag, so the next `GET /v1/notifications` carries `restart_required`.
-  // Reload rather than waiting out `useNotifications`' 30s `refetchInterval` — it is both
-  // faster and the stronger assertion, since the flag now outlives the browser session that
-  // set it (the removed `RestartPendingContext` boolean was lost on any reload).
-  await page.reload();
+  // Reload onto a DIFFERENT route rather than waiting out `useNotifications`' 30s
+  // `refetchInterval` — it is both faster and the stronger assertion, since the flag now
+  // outlives both the browser session that set it and the page that caused it (the removed
+  // `RestartPendingContext` boolean was lost on any reload).
+  await page.goto(`${origin}/operator/memberships`);
 
   // AppShell mounts `useNotifications` on every route, so the notice renders here on
   // /operator/memberships. Stable data-kind hook from NotificationItem; copy may evolve.

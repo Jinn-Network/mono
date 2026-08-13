@@ -54,6 +54,56 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packageRoot = join(root, 'packages', 'benchmark-product');
+const architectureCatalogPath = join(root, 'architecture', 'platform-packages.v1.json');
+
+// Product-private runtime identifiers may be sealed into a Colophon method, but that does not
+// promote them into a protocol, platform API, or conformance surface. Keep the exact identifiers
+// here so any Tier 1-3 adoption requires an explicit architecture change rather than an ambient
+// copy from the reference product.
+const PRIVATE_RUNTIME_IDENTIFIERS = [
+  'jinn.network/benchmark-product/host-connection/1',
+  'jinn.network/benchmark-product/inspect-cell-summary/1',
+  'jinn.network/benchmark-product/inspect-sandbox/1',
+  'jinn.network/benchmark-product/inspect-selection/1',
+  'jinn.network/benchmark-product/inspect-selection/2',
+  'jinn.network/inspect-arm',
+  'jinn.network/inspect-sandbox-host/1',
+  'jinn.network/model-broker/1',
+  'jinn.network/profiles/inspect-evaluation/1',
+];
+
+const FIRST_PARTY_SCAN_IGNORES = new Set([
+  '.git', '.next', '.yarn', 'build', 'coverage', 'dist', 'node_modules',
+]);
+
+function firstPartyFiles(directory) {
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory() && FIRST_PARTY_SCAN_IGNORES.has(entry.name)) return [];
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return firstPartyFiles(path);
+    return entry.isFile() ? [path] : [];
+  });
+}
+
+function privateRuntimeIdentifierViolations(roots) {
+  return roots.flatMap(firstPartyFiles).flatMap((file) => {
+    const bytes = readFileSync(file);
+    if (bytes.includes(0)) return [];
+    const source = bytes.toString('utf8');
+    return PRIVATE_RUNTIME_IDENTIFIERS
+      .filter((identifier) => source.includes(identifier))
+      .map((identifier) => `${relative(root, file)} -> ${identifier}`);
+  }).sort();
+}
+
+function tierOneToThreePackageRoots() {
+  const catalog = JSON.parse(readFileSync(architectureCatalogPath, 'utf8'));
+  assert.ok(Array.isArray(catalog.packages), 'architecture catalog has no package inventory');
+  return catalog.packages
+    .filter((entry) => [1, 2, 3].includes(entry.tier))
+    .map((entry) => resolve(root, entry.path));
+}
 
 // Every direct child directory of packages/benchmark-product/ (excluding node_modules) that has a
 // `src/` -- today only `core/src`, automatically covering a future `web/src` without editing this
@@ -234,6 +284,37 @@ test('the allow-list admits its members and refuses everything else, wildcards a
       'every explicitly denied family, including the deep-import exemplars, must be refused by the allow-list',
     );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('the private runtime identifier scanner catches every product interface', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmark-product-private-runtime-'));
+  try {
+    const source = join(fixture, 'tier-3');
+    mkdirSync(source);
+    for (const [index, identifier] of PRIVATE_RUNTIME_IDENTIFIERS.entries()) {
+      writeFileSync(join(source, `leak-${index}.json`), JSON.stringify({ identifier }));
+    }
+    assert.deepEqual(
+      privateRuntimeIdentifierViolations([source]).map((entry) => entry.slice(entry.indexOf(' -> ') + 4)),
+      [...PRIVATE_RUNTIME_IDENTIFIERS].sort(),
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('private Inspect runtime interfaces remain in the Tier 4 product', () => {
+  assert.deepEqual(
+    privateRuntimeIdentifierViolations(tierOneToThreePackageRoots()),
+    [],
+    'a Tier 1-3 package treats a private Benchmark Product runtime interface as normative',
+  );
+  const productSource = firstPartyFiles(packageRoot)
+    .map((file) => readFileSync(file))
+    .filter((bytes) => !bytes.includes(0))
+    .map((bytes) => bytes.toString('utf8'))
+    .join('\n');
+  for (const identifier of PRIVATE_RUNTIME_IDENTIFIERS) {
+    assert.ok(productSource.includes(identifier), `private runtime guard is vacuous for ${identifier}`);
+  }
 });
 
 test('source boundaries are per-member: web has one server-only public core edge', () => {

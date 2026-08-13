@@ -32,7 +32,7 @@ yarn vitest run \
   test/mcp/search-records-corpus.test.ts \
   test/mcp/acquire-artifact-fast-path.test.ts \
   test/api/daemon-api-auth.test.ts \
-  test/smoke/donation-mode-smoke.test.ts \
+  test/smoke/donation-ipfs-http-smoke.test.ts \
   test/solver-types/swe-rebench-v2-auto.test.ts \
   test/e2e/swe-rebench-v2.test.ts \
   test/adapters/mech/safe-revert.test.ts \
@@ -49,8 +49,8 @@ Do not remove tests or lower assertions to pass this gate. If a test exposes a
 real mismatch in the public flow, fix the implementation or explicitly hold the
 release.
 
-`yarn e2e:donation` (and the corpus integration suite, `vitest run test/corpus`)
-remain fast mocked/smoke checks. They do not replace `yarn release:olas-rails-smoke --execute`, which is the
+`vitest run test/smoke/donation-ipfs-http-smoke.test.ts` (and the corpus
+integration suite, `vitest run test/corpus`) remain fast mocked/smoke checks. They do not replace `yarn release:olas-rails-smoke --execute`, which is the
 release-blocking proof that the tokenless OLAS rails smoke harness can complete a
 prediction.v1 loop on Base Sepolia and claim staking rewards.
 

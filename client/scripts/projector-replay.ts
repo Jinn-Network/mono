@@ -13,8 +13,10 @@
  *     --chain-id 84532 \
  *     --to-block 45420024 [--apply]
  *
- * PICK THE NARROWEST TARGET THAT COVERS THE EVENT YOU LOST — one block below it, no further. The
- * example above is round-28's: `VerdictDeliveryClaimed` at 45420025, so `--to-block 45420024`.
+ * PICK THE NARROWEST TARGET THAT COVERS WHAT YOU ARE RECOVERING — one block below the earliest
+ * event you need re-offered, no further. The example above is round-28's: `VerdictDeliveryClaimed`
+ * at 45420025, so `--to-block 45420024`. For requester-side adoption the earliest event you need
+ * is `TaskCreated` — the whole-lifecycle rewind is the correct target, not an over-reach.
  *
  * The rewind writes ONE `log_cursors` row and signs nothing. The REPLAY it causes is not so narrow,
  * and this is the part operators get wrong:
@@ -27,10 +29,19 @@
  *     when announcement publication throws. So a replay is ONE-SHOT per range: `hasCanonicalEvent`
  *     suppresses those events afterwards. A tick that journals but fails to announce is spent.
  *
- * Widening the range does not make a requester see more. A requester never subscribes to the
- * counterparty's mech, so the mech `Deliver` is structurally absent from its stream; re-offering
- * `SolutionDeliveryClaimed` without it emits a `rejected`/`invalid-reference` attempt-terminal that
- * folds the attempt `contradictory` and makes it UNADOPTABLE. See the runbook's step 2.
+ * A requester still never subscribes to the counterparty's mech, so the mech `Deliver` is
+ * structurally absent from its stream — but since #2644 that is no longer fatal. The requester
+ * resolves the counterparty's published Delivery record off the record plane and binds it to the
+ * coordinator's own keccak anchor, so `SolutionDeliveryClaimed` yields a real `delivery-recorded`;
+ * a requester that cannot resolve the record DROPS the event, leaving it replayable, instead of
+ * emitting `rejected`/`invalid-reference`. The ANNOUNCE leg resolves the same record the same
+ * digest-verified way, so the fold and the announcement now succeed together — before that parity
+ * a requester folded the attempt correctly and then refused to publish it. An announce-leg drop is
+ * PERMANENT once journalled — a rewind replays the identical event_key and is filtered right back
+ * out by `hasCanonicalEvent`, it is not a retry path (see the runbook's "What the replay it causes
+ * writes"). So run the runbook's step-2 pre-flight BEFORE `--apply` — both serving planes up and
+ * hashing to their own digests, both coordinator reads round-tripping — rather than spend this
+ * rewind on a drop it cannot undo.
  */
 import { createPublicClient, http, type Hex } from 'viem';
 import { openVenueState } from '@jinn-network/marketplace-venue-base';

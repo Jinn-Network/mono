@@ -98,13 +98,11 @@ import {
   DEFAULT_HARNESS,
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
-import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js';
 import { createAutopilotEvaluationContextResolver } from './autopilot/autopilot-evaluation-context-resolver.js';
 import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github-adoption-receipt-observer.js';
 import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
 import { createIssueRelayEvaluationContextResolver } from './issue-relay/evaluation-context-resolver.js';
 import { createIssueRelayGitHubRestReadPort } from './issue-relay/github-receipt-observer.js';
-import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { protocolExecutorMode } from './erc8004/identity.js';
 import {
@@ -670,16 +668,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: undefined,
   };
 
-  // #1037: same eager-register / late-populate pattern for the join applier.
-  // The join endpoint registers eagerly inside startApiServer; the applier is
-  // built only after the latest join-consuming subsystem (the engine view,
-  // wired in the Daemon ctor). The endpoint tolerates an empty holder in the
-  // gap between server-start and populate by falling back to
-  // restartRequired:true.
-  const joinApplierHolder: {
-    current: import('./daemon/join-applier.js').JoinApplier | undefined;
-  } = { current: undefined };
-
   // #641: latest published `@jinn-network/client` version, back-filled by the
   // start-time npm-registry check below. `/v1/status.latestVersion` reads this
   // via the `latestVersion` getter threaded into the ApiServer status config.
@@ -691,7 +679,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // through the CLI module. Those objects (`publicClient`, `masterWallet`,
   // `earningStore`) aren't constructed until after bootstrap completes, well
   // after `startApiServer` registers the route (same eager-register /
-  // late-populate holder pattern as `joinApplierHolder` above).
+  // late-populate holder pattern used elsewhere in this file).
   const claimRewardsRouteHolder: {
     current: import('./api/admin-endpoint.js').ClaimRewardsRouteContext | undefined;
   } = { current: undefined };
@@ -993,14 +981,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             resolve();
           });
         },
-        // #1037: hot-apply a join to the running daemon. Populated after the
-        // join-consuming subsystems are built (see joinApplierHolder). Empty
-        // until then → the endpoint returns restartRequired:true.
-        joinApplier: joinApplierHolder,
         // #983: mutate the in-memory config so GET /v1/bootstrap reflects the
         // completion flag live (the endpoint persists to disk; this keeps the
-        // configReader's in-memory read consistent — same pattern as the
-        // join-applier's config write). Cast: JinnConfig has the optional field.
+        // configReader's in-memory read consistent).
+        // Cast: JinnConfig has the optional field.
         markOnboardingComplete: () => {
           (config as { onboardingComplete?: boolean }).onboardingComplete = true;
         },
@@ -1637,8 +1621,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     .map((entry) => entry.manifestCid);
 
   // #547: only scan/ingest evaluation opportunities when this operator holds the
-  // evaluator role in at least one joined SolverNet. The join applier flips this
-  // on live via adapter.setEvaluatorEnabled(true).
+  // evaluator role in at least one joined SolverNet. Restart-required since
+  // Wave-4 D1 retired the hot-apply join applier with the claim gate.
   const evaluatorEnabled = Object.values(config.joinedSolverNets ?? {})
     .some((entry) => entry.roles.includes('evaluator'));
 
@@ -1961,14 +1945,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   harnessReadinessRegistryHolder.current = harnessReadinessRegistry;
   console.log('[main] HarnessReadinessRegistry started; /v1/harnesses/readiness routes active.');
 
-  // #1037: always construct the engine eligibility view (mutable) so a
-  // hot-applied join can inject its cid live. Previously this was wired only
-  // when config.joinedSolverNets was truthy; a zero-join daemon then ran the
-  // legacy solverType gate. With an always-present empty view, a zero-join
-  // daemon rejects cid-bearing tasks (its discovery cid set is empty so it
-  // discovers none) and still passes legacy no-cid tasks. See plan §behaviour-change.
-  const joinedSolverNetsView = createMutableJoinedSolverNetsView(config.joinedSolverNets);
-
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
   // Packaging deps: artifacts are always written to served_artifacts
@@ -2113,61 +2089,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     scrubPipeline: sellerScrubPipeline,
   });
   capturePublishRef.current = liveCapturePublisher.publishCapture;
-
-  // ── Reputation feedback hook (jinn-mono-yg4) ──────────────────────────────
-  //
-  // After the evaluator's claimDelivery succeeds, the engine fires
-  // `ReputationRegistry.giveFeedback(harnessAgentId, …)` so the harness's
-  // agent NFT accrues a rating (DR §4.3). This requires:
-  //
-  //   1. A `ReputationRegistryClient` for the active chain. We use the
-  //      canonical 0x8004… deployment; writes route through the operator's
-  //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
-  //      identity.
-  //   2. An agentId resolver — looks up the harness's agentId from the
-  //      parent manifest's evidenceHash via the shared `DiscoveryAPI`. When
-  //      no DiscoveryAPI is available the resolver returns null cleanly and
-  //      the hook becomes a no-op (defensive: feedback is non-fatal).
-  //
-  // Skipped when the operator hasn't minted an agent NFT yet (matches the
-  // IdentityPublisher gating above).
-  let reputationFeedback:
-    | NonNullable<import('./harnesses/engine/engine.js').TaskEngineOptions['reputationFeedback']>
-    | undefined;
-  if (agentId) {
-    const { getReputationRegistryAddress, ReputationRegistryClient } = await import(
-      './erc8004/index.js'
-    );
-    const chainId = config.network === 'testnet' ? 84532 : 8453;
-    const reputationRegistryAddress = getReputationRegistryAddress(chainId);
-    if (reputationRegistryAddress) {
-      const reputationClient = new ReputationRegistryClient({
-        reputationRegistryAddress,
-        publicClient: agentClients.publicClient,
-        walletClient: agentClients.walletClient,
-        safeAddress,
-      });
-      const { resolveAgentIdForManifest } = await import(
-        './erc8004/index.js'
-      );
-      reputationFeedback = {
-        client: reputationClient,
-        resolveAgentId: (manifestHash) =>
-          resolveAgentIdForManifest({ manifestHash, discoveryApi: sharedDiscoveryApi }),
-      };
-      console.log(
-        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${sharedDiscoveryApi ? ' discoveryApi=active' : ' (no discoveryApi — resolver always null)'}`,
-      );
-    } else {
-      console.log(
-        `[main] ReputationFeedback: disabled (no canonical ReputationRegistry deployed on chainId=${chainId})`,
-      );
-    }
-  } else {
-    console.log(
-      '[main] ReputationFeedback: disabled (no agent_id on active service — same gating as IdentityPublisher)',
-    );
-  }
 
   // ── SolverNet subsystem (Task 11 of solvernet-creation-and-launch.md) ─────
   //
@@ -2587,6 +2508,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           stateRoot: join(config.earningDir, '..', 'native'),
           password: PASSWORD,
           workerOwnerId: cryptoRandomUUID(),
+          logger: { warn: (message) => console.warn(message) },
         })
       : undefined;
     composition = await buildOperatorComposition({
@@ -2634,14 +2556,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // Finding E16 / the C2 ruling: no process-global broadcaster — this daemon's ONE Safe
     // broadcaster (built above, bound to `safeAddress`) is threaded explicitly to every legacy
     // `executeSafeTransaction` call site this daemon owns, before any loop can write. Must run
-    // before `daemon.start()`; `adapter` / `deliveryDeps` / `reputationFeedback.client` are all
+    // before `daemon.start()`; `adapter` / `deliveryDeps` are all
     // constructed earlier in this function (composition is built last because it needs
     // `identityRegistryAddress` etc. resolved first), so late-binding via setter/mutation is how
     // they pick up the one broadcaster rather than each racing to build their own against the
     // same Safe.
     adapter.setBroadcaster(composition.broadcaster);
     deliveryDeps.broadcaster = composition.broadcaster;
-    reputationFeedback?.client.setBroadcaster(composition.broadcaster);
 
     // C8: the work loop's own config — `composition`/`store` are supplied by `Daemon` itself.
     // Finding E36 (ruled "build it"): `archive` is now fed from `composition.archive`, the real
@@ -2784,6 +2705,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           adoptionReceipts: createFileAdoptionReceiptStore({
             dir: join(nativeRuntime.requesterWrite.requesterStateDir, 'adoptions'),
           }),
+          // Defect #48: the SAME digest-verified record-plane reader the projector already holds,
+          // so adoption can fetch the bytes of a delivery a SECOND operator produced and published
+          // there. Not a second transport, and not trusted — the caller re-derives the digest.
+          ...(nativeRuntime.projectorPorts.resolveDeliveryBytes === undefined
+            ? {}
+            : { recordPlaneBytes: nativeRuntime.projectorPorts.resolveDeliveryBytes }),
           logger: {
             info: (message) => console.log(message),
             warn: (message) => console.warn(message),
@@ -2884,9 +2811,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     creatorSafeAddress: safeAddress,
     sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     corpusFactory,
-    harnessReadinessRegistry,
-    spendCap,
-    aiUnits,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
@@ -2929,55 +2853,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
-    restorationEngine: {
-      paths: {
-        workingDirRoot: config.engine.workingDirRoot,
-        implStateDirRoot: config.engine.implStateDirRoot,
-      },
-      packagingDeps,
-      envelopeDeps,
-      deliveryDeps,
-      adoptionReceiptObserver: autopilotAdoptionReceiptObserver,
-      implRegistry,
-      solverNetRegistry,
-      // #1827: resolves envelope.task.createdAt at claim() time. getBlock
-      // errors propagate deliberately — engine.ts retries a bounded number of
-      // times and keeps/fails the task before signing rather than emitting a
-      // provenance tuple without its authoritative creation timestamp.
-      blockTimestamp: {
-        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
-          const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
-          return Number(block.timestamp);
-        },
-        configuredRpcUrls: config.rpcUrls,
-      },
-      // Spec §14, Task 28: per-launch claim eligibility filter. Operators
-      // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
-      // the engine refuses tasks whose `manifestDigest = keccak256(cid)`
-      // doesn't match a joined entry (plus a role gate). Absent when the
-      // operator hasn't joined any nets yet — the engine then falls back to
-      // the legacy solverType-keyed gate.
-      // #1037: always wire the (mutable) view so a hot-applied join is live.
-      joinedSolverNets: joinedSolverNetsView,
-      // Spec §14: task validation resolves manifest → contract → schemas.
-      // Threaded only when the SolverNet registry client was constructed
-      // (testnet branch above). The engine treats absence as "schema
-      // validation skipped" — production callers always have it.
-      ...(solverNetRegistryClientForEngine
-        ? { manifestResolver: solverNetRegistryClientForEngine }
-        : {}),
-      identityPublisher,
-      reputationFeedback,
-      operatorConfig,
-      operatorSafeAddress: safeAddress,
-      harnessMode: config.harness.mode,
-      // #1393: corpus knowledge autoload — operator opt-out flag. The corpus
-      // instance itself is injected by the Daemon (built from corpusFactory).
-      knowledge: { enabled: config.engine.knowledgeAutoload },
-      // Share the one maintained scrub pipeline (incl. optional ML PII) so task
-      // trajectories and captures are scrubbed by the same stack before publish.
-      scrubPipeline: sellerScrubPipeline,
-    },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
         ? {
@@ -3056,24 +2931,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // detected + surfaced; the process-exit recovery is flag-gated (default
     // OFF) by config.watchdogAutoRestart.
     watchdog: { autoRestart: config.watchdogAutoRestart },
-  });
-
-  // #1037: populate the join applier now that all four join-consuming
-  // subsystems exist — the live task-discovery descriptor (`taskDiscovery`),
-  // the mutable engine view (`joinedSolverNetsView`), the readiness registry,
-  // and the SolverNet registry. The join endpoint registered eagerly at
-  // server-start; before this point it returns restartRequired:true.
-  joinApplierHolder.current = createJoinApplier({
-    taskDiscovery,
-    view: joinedSolverNetsView,
-    // A hot join widens derived routing, but never an operator-pinned
-    // allowlist — boot ignores joined nets entirely in that case, so widening
-    // it live would diverge from what a restart produces.
-    learnerRouting: operatorPinnedSolverTypes ? null : learnerRouting,
-    readiness: harnessReadinessRegistry,
-    registry: solverNetRegistry,
-    config,
-    enableEvaluator: () => adapter.setEvaluatorEnabled(true),
   });
 
   if (config.watchdogAutoRestart) {

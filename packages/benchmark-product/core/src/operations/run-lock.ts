@@ -22,6 +22,10 @@ import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { compileDraft } from "../run/compile.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
@@ -40,6 +44,7 @@ export interface RunLockResult {
   readonly draft: DraftDocument;
   readonly runSha256: string;
   readonly closeAt: string;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 function computeCloseAt(at: string, closeAfterMs: number): string {
@@ -64,6 +69,10 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           `draft ${input.draftId} is in state "${document.state}" — only a quoted draft can be locked`,
         );
       }
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        clockedContext.workspaceDir,
+        document.spec.evaluationRuntime,
+      );
 
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
       const currentSpecSha256 = specDigest(document.spec);
@@ -115,7 +124,12 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const draft: DraftDocument = { ...document, state: transitioned.state, updatedAt: at };
       atomicWriteFileSync(draftPath(clockedContext.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
 
-      return { draft, runSha256, closeAt };
+      return {
+        draft,
+        runSha256,
+        closeAt,
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+      };
     },
   });
 }
