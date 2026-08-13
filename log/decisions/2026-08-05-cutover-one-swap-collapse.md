@@ -417,11 +417,35 @@ flip.
 >   from those files: the host is arm64 and the amd64 instance image runs under emulation, so
 >   emulation-crash instances, realistic grade durations, cold multi-GB pulls, and disk-floor
 >   pressure across a slate stay unexercised — a bigger-host run, not a gate precondition.
-> - **G-archive — `.local/gate-evidence/artifact-G-archive-EVIDENCE.md`.**
->   **[PENDING — being banked by the parallel G-archive run; this PR stays draft until the
->   file exists.]** Decision 3's G-archive bar is unchanged (second-daemon cold sync → digest
->   retrieval → resume → live tail, plus `runServingPlaneConformance` green against the live
->   surface), and Wave 4 does not proceed until it is green.
+> - **G-archive — green, 2026-08-13.** Consuming daemon operator id
+>   `urn:uuid:e694ec79-8162-45d2-a4f8-6d785b5e28cb` (operator B, service 75); archive sequence
+>   range consumed `0000000000000001 → 0000000000000019` on operator A's `requester` source
+>   (plus `1 → 6` on A's `evaluator-records` and `1 → 36` on B's `solver-records` in the
+>   reverse direction). All four legs ran against the **live** listeners (A on 7401, B on
+>   7402): cold sync by a checkpoint-free separate OS process (19 signed entries); digest
+>   retrieval — 61 records fetched at `/records/<hex>` and re-hashed to their path, 0 missing,
+>   0 mismatches; resume via `returningSync` (high-water mark `…017` → exactly
+>   `[…018, …019]`); live tail SSE opened and held with no stream error; plus exposure scoping
+>   (5 non-archive paths 404). `runServingPlaneConformance` — the unmodified kit — is 13/13
+>   green against all three live sources. Negative control: zero degraded lines on B while A
+>   ran, and the degraded line appears on B's first poll after A's clean stop, so the earlier
+>   silent ticks were successful polls. Evidence:
+>   `.local/gate-evidence/artifact-G-archive-EVIDENCE.md` (raw artifacts alongside it under
+>   `artifact-G-archive/`).
+>
+>   Scope stated rather than papered over: the kit's `cursor-too-old` evicted-cursor case was
+>   **skipped per the kit's own contract** — a freshly booted in-memory tail window has evicted
+>   nothing; the live tail was held open but observed **zero events**, because an append needs
+>   a chain write inside the window (the shipped script exercised a real tail event on its
+>   seeded scope); the shipped "deploy-time" separate-process script starts its **own seeded
+>   publisher** — its live-target capability was never built, so this run drove the live
+>   surface with a purpose-built read-only harness over the unmodified consumer library; and
+>   `resumeSse` has no production caller today, so the live tail is a property of the live
+>   surface rather than something the second daemon does. All four are filed as follow-ups.
+>   None weakens the legs above, every one of which ran live.
+>
+> All three artifacts are green: the Wave-4 evidence bar set by decision 3 — and tightened
+> twice since — is met, and the retirement wave is unlocked.
 >
 > Stated honestly: `.local/gate-evidence/` is gitignored, so those files are **local
 > receipts, not published artifacts**. The durable, independently checkable anchors are the
