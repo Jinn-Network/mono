@@ -35,6 +35,7 @@ import {
   HARBOR_CORRELATION_ROLE,
   HARBOR_CTRF_ROLE,
   HARBOR_JOB_CONFIG_ROLE,
+  HARBOR_INVOCATION_CONFIG_ROLE,
   HARBOR_JOB_RESULT_ROLE,
   HARBOR_LOGS_ROLE,
   HARBOR_NATIVE_PATH_ROLE_PREFIX,
@@ -43,7 +44,7 @@ import {
   HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE,
 } from "./harbor/venue.js";
-import { HarborSelectionManifestSchema, harborJobSource } from "./harbor/manifest.js";
+import { HarborSelectionManifestSchema, harborJobSource, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
 export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";
@@ -250,7 +251,7 @@ function assertInspectContribution(
 }
 
 const HARBOR_REQUIRED_NATIVE_ROLES = [
-  HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE, HARBOR_TRIAL_CONFIG_ROLE,
+  HARBOR_INVOCATION_CONFIG_ROLE, HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE, HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE, HARBOR_REWARD_ROLE,
 ] as const;
 const HARBOR_ALLOWED_NATIVE_ROLES = new Set<string>([
@@ -318,15 +319,13 @@ async function harborStructureCheck(
     const harbor = joined.harbor as { jobName?: unknown; jobId?: unknown; trialId?: unknown } | undefined;
     const lineage = joined.lineage as { submissionSha256?: unknown; attemptUri?: unknown; runSha256?: unknown; cellKey?: unknown; dispatchIndex?: unknown } | undefined;
     if (joined.selectionManifestSha256 !== expectedSelectionManifestSha256 || typeof harbor?.jobName !== "string" || typeof harbor.jobId !== "string" || typeof harbor.trialId !== "string" || typeof lineage?.submissionSha256 !== "string" || typeof lineage.attemptUri !== "string" || typeof lineage.runSha256 !== "string" || typeof lineage.cellKey !== "string" || !Number.isInteger(lineage.dispatchIndex)) throw new Error("correlation lacks complete Jinn/Harbor identity binding");
-    const job = await exact(find(HARBOR_JOB_CONFIG_ROLE)!);
+    const submittedJob = await exact(find(HARBOR_INVOCATION_CONFIG_ROLE)!);
+    const job = normalizeHarborSavedJobConfig(await exact(find(HARBOR_JOB_CONFIG_ROLE)!), submittedJob);
     const trial = await exact(find(HARBOR_TRIAL_CONFIG_ROLE)!);
     const jobResult = await exact(find(HARBOR_JOB_RESULT_ROLE)!);
     const trialResult = await exact(find(HARBOR_TRIAL_RESULT_ROLE)!);
-    const jobAttempts = job.n_attempts;
-    const concurrency = job.n_concurrent_trials ?? (job.orchestrator as { n_concurrent_trials?: unknown } | undefined)?.n_concurrent_trials;
-    const retries = (job.retry as { max_retries?: unknown } | undefined)?.max_retries ?? job.max_retries;
     const trialAttempt = trial.attempt_number ?? trial.attempt;
-    if (jobAttempts !== 1 || concurrency !== 1 || retries !== 0 || trialAttempt !== 1) throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+    if (job.n_attempts !== 1 || job.n_concurrent_trials !== 1 || job.retry.max_retries !== 0 || trialAttempt !== 1) throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
     const expectedJobName = `jinn-${lineage.submissionSha256.slice(0, 24)}-d${lineage.dispatchIndex}`;
     const effectiveJobId = jobResult.id ?? jobResult.job_id;
     const effectiveTrialId = trialResult.id ?? trialResult.trial_id;
@@ -336,8 +335,8 @@ async function harborStructureCheck(
     if (job.job_name !== expectedJobName || harbor.jobName !== expectedJobName || effectiveJobId !== harbor.jobId || effectiveTrialId !== harbor.trialId
       || selectedArm === undefined || !sameJson(job.environment, { type: selected.environment.type, ...selected.environment.configuration })
       || !sameJson(job.agents, [selectedArm.jobAgent]) || !sameJson(job.artifacts, selected.outputs.map((output) => output.artifact))
-      || (!("tasks" in expectedSource) ? job.tasks !== undefined : !sameJson(job.tasks, expectedSource.tasks))
-      || (!("datasets" in expectedSource) ? job.datasets !== undefined : !sameJson(job.datasets, expectedSource.datasets))
+      || (!("tasks" in expectedSource) ? "tasks" in job : !("tasks" in job) || !sameJson(job.tasks, expectedSource.tasks))
+      || (!("datasets" in expectedSource) ? "datasets" in job : !("datasets" in job) || !sameJson(job.datasets, expectedSource.datasets))
       || selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1 || selected.retryPolicy.maxRetries !== 0) throw new Error("Harbor Job identity, lineage, or retry policy does not match sealed Jinn selection");
     return { name: "harbor-job-trial-structure", status: "pass" };
   } catch (cause) {

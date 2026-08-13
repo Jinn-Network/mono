@@ -5,6 +5,7 @@ import { getSealedBytes } from "../../workspace/sealed-store.js";
 export const HARBOR_SELECTION_ROLE = "https://harborframework.com/artifact-roles/selection-manifest/v1";
 export const HARBOR_CORRELATION_ROLE = "https://harborframework.com/artifact-roles/job-trial-correlation/v1";
 export const HARBOR_JOB_CONFIG_ROLE = "https://harborframework.com/artifact-roles/job-config/v1";
+export const HARBOR_INVOCATION_CONFIG_ROLE = "https://harborframework.com/artifact-roles/invocation-job-config/v1";
 export const HARBOR_JOB_RESULT_ROLE = "https://harborframework.com/artifact-roles/job-result/v1";
 export const HARBOR_TRIAL_CONFIG_ROLE = "https://harborframework.com/artifact-roles/trial-config/v1";
 export const HARBOR_TRIAL_RESULT_ROLE = "https://harborframework.com/artifact-roles/trial-result/v1";

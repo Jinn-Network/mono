@@ -55,7 +55,7 @@ import {
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import { resolveHarborMaterial, type HarborHostBinding } from "../runtime/harbor/host.js";
 import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
-import { HarborJobConfigSchema, harborJobSource, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { HarborJobConfigSchema, harborJobSource, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { harborJobName } from "../runtime/harbor/launcher.js";
 import {
   HARBOR_ARTIFACT_MANIFEST_ROLE,
@@ -63,6 +63,7 @@ import {
   HARBOR_COLLECTED_ARTIFACTS_ROLE,
   HARBOR_CTRF_ROLE,
   HARBOR_JOB_CONFIG_ROLE,
+  HARBOR_INVOCATION_CONFIG_ROLE,
   HARBOR_JOB_RESULT_ROLE,
   HARBOR_LOGS_ROLE,
   HARBOR_REWARD_ROLE,
@@ -605,6 +606,7 @@ export interface HarborProvisionerOptions {
 }
 
 function harborRole(relativePath: string): string {
+  if (relativePath === "invocation/harbor-job.json") return HARBOR_INVOCATION_CONFIG_ROLE;
   if (relativePath === "config.json") return HARBOR_JOB_CONFIG_ROLE;
   if (relativePath === "result.json") return HARBOR_JOB_RESULT_ROLE;
   if (/^[^/]+\/config\.json$/u.test(relativePath)) return HARBOR_TRIAL_CONFIG_ROLE;
@@ -764,14 +766,14 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
         const trialConfigs = files.filter((path) => /^[^/]+\/config\.json$/u.test(path) && files.includes(`${path.slice(0, -"config.json".length)}result.json`));
         if (trialConfigs.length !== 1) throw new Error(`Harbor Job must contain exactly one Trial; found ${trialConfigs.length}`);
         const trialDirectory = trialConfigs[0]!.split("/")[0]!;
-        const jobConfig = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, "config.json")))) as Record<string, unknown>;
+        const savedJobConfig = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, "config.json")))) as unknown;
+        const submittedJobConfig = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(paths.input, "harbor-job.json")))) as unknown;
+        const jobConfig = normalizeHarborSavedJobConfig(savedJobConfig, submittedJobConfig);
         const trialConfig = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, trialDirectory, "config.json")))) as Record<string, unknown>;
         const jobResult = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, "result.json")))) as { id?: unknown; job_id?: unknown };
         const trialResult = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, trialDirectory, "result.json")))) as { id?: unknown; trial_id?: unknown };
-        const concurrency = jobConfig.n_concurrent_trials ?? (jobConfig.orchestrator as { n_concurrent_trials?: unknown } | undefined)?.n_concurrent_trials;
-        const retries = (jobConfig.retry as { max_retries?: unknown } | undefined)?.max_retries ?? jobConfig.max_retries;
         const trialAttempt = trialConfig.attempt_number ?? trialConfig.attempt;
-        if (jobConfig.n_attempts !== 1 || concurrency !== 1 || retries !== 0 || trialAttempt !== 1) throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+        if (jobConfig.n_attempts !== 1 || jobConfig.n_concurrent_trials !== 1 || jobConfig.retry.max_retries !== 0 || trialAttempt !== 1) throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
         jobId = typeof jobResult.id === "string" ? jobResult.id : typeof jobResult.job_id === "string" ? jobResult.job_id : jobName;
         trialId = typeof trialResult.id === "string" ? trialResult.id : typeof trialResult.trial_id === "string" ? trialResult.trial_id : trialDirectory;
         await recordHarborDispatchMapping(options.workspaceDir, `${options.selectionManifestSha256}:${runSha256}:${cellKey}:${dispatch}:${submissionSha256}`, jobId, trialId);
@@ -807,7 +809,7 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
         if (typeof outcome.termSignal === "string") status = "cancelled";
         else if (typeof outcome.exitCode === "number" && outcome.exitCode !== 0) status = "failed";
       } catch { /* the archive's native invocation entry records absence */ }
-      const required = [HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE, HARBOR_TRIAL_CONFIG_ROLE, HARBOR_TRIAL_RESULT_ROLE, HARBOR_REWARD_ROLE];
+      const required = [HARBOR_INVOCATION_CONFIG_ROLE, HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE, HARBOR_TRIAL_CONFIG_ROLE, HARBOR_TRIAL_RESULT_ROLE, HARBOR_REWARD_ROLE];
       for (const role of required) if (!native.some((entry) => entry.role === role)) {
         const reason = `expected Harbor evidence role was not collected: ${role}`;
         const bytes = new TextEncoder().encode(reason);

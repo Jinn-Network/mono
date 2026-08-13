@@ -15,7 +15,7 @@ import { createRuntimeEvidenceAdapter } from "../adapter.js";
 import { artifactsDir } from "../../workspace/layout.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { recordHarborDispatchMapping } from "../../venue/provisioner.js";
-import { HarborJobConfigSchema, harborJobSource, harborSelectionManifestBytes, type HarborSelectionManifest } from "./manifest.js";
+import { HarborJobConfigSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "./manifest.js";
 import { HARBOR_ATIF_ROLE, HARBOR_LOGS_ROLE, HARBOR_SELECTION_ROLE, harborEvidenceContributionFromArchive, readHarborDispatchArchive } from "./venue.js";
 
 const manifest: HarborSelectionManifest = {
@@ -52,7 +52,9 @@ else { if (config.datasets.length !== 1) throw new Error("one DatasetConfig requ
 if (!Array.isArray(config.artifacts) || config.artifacts.length !== 1) throw new Error("native output ArtifactConfig required"); exactKeys(config.artifacts[0], ["source", "destination"], "ArtifactConfig");
 const job = join(config.jobs_dir, config.job_name); const trial = join(job, "trial-1");
 mkdirSync(join(trial, "agent"), { recursive: true }); mkdirSync(join(trial, "verifier"), { recursive: true }); mkdirSync(join(trial, "artifacts"), { recursive: true });
-writeFileSync(join(job, "config.json"), JSON.stringify(config));
+// Harbor 0.21 persists JobConfig with model_dump_json(exclude_defaults=True).
+const savedConfig = structuredClone(config); delete savedConfig.n_attempts; delete savedConfig.retry; delete savedConfig.environment.type;
+writeFileSync(join(job, "config.json"), JSON.stringify(savedConfig));
 if (${String(failWithPartial)}) { writeFileSync(join(job, "result.json"), JSON.stringify({ id: config.job_name, status: "failed" })); writeFileSync(join(trial, "partial.log"), "partial evidence"); symlinkSync(join(trial, "partial.log"), join(trial, "unsafe-link")); process.stderr.write("fake Harbor partial failure\\n"); process.exit(2); }
 writeFileSync(join(job, "result.json"), JSON.stringify({ id: config.job_name, status: "success" }));
 writeFileSync(join(trial, "config.json"), JSON.stringify({ attempt_number: 1, task: isTask ? config.tasks[0] : { name: config.datasets[0].task_names[0] }, agent: config.agents[0] }));
@@ -78,6 +80,11 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
     expect(() => harborSelectionManifestBytes({ ...manifest, environment: { ...manifest.environment, type: manifest.environment.image } } as never)).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, source: { ...manifest.source, input: { path: "/private/host/task" } } } as never)).toThrow();
     expect(() => HarborJobConfigSchema.parse({ job_name: "job", jobs_dir: "jobs", n_attempts: 1, n_concurrent_trials: 1, retry: { max_retries: 0 }, environment: { type: manifest.environment.image }, agents: [manifest.arms[0]!.jobAgent], artifacts: manifest.outputs.map((output) => output.artifact), tasks: [manifest.source.jobInput] })).toThrow();
+    const submitted = HarborJobConfigSchema.parse({ job_name: "job", jobs_dir: "jobs", n_attempts: 1, n_concurrent_trials: 1, retry: { max_retries: 0 }, environment: { type: "docker" }, agents: [manifest.arms[0]!.jobAgent], artifacts: manifest.outputs.map((output) => output.artifact), tasks: [manifest.source.jobInput] });
+    expect(normalizeHarborSavedJobConfig({ ...submitted, n_attempts: undefined, retry: undefined, environment: {} }, submitted)).toEqual(submitted);
+    expect(() => normalizeHarborSavedJobConfig({ ...submitted, n_attempts: 2 }, submitted)).toThrow();
+    expect(() => normalizeHarborSavedJobConfig({ ...submitted, retry: { max_retries: 1 } }, submitted)).toThrow();
+    expect(() => normalizeHarborSavedJobConfig({ ...submitted, environment: { type: "daytona" } }, submitted)).toThrow(/contradicts/i);
     const datasetSource = harborJobSource({ ...manifest, source: { kind: "dataset", input: { name: "demo/dataset", version: "r1" }, jobInput: { path: ".jinn-harbor/dataset" }, resolved: manifest.source.resolved, taskName: "only-task" } });
     expect(datasetSource).toEqual({ datasets: [{ path: ".jinn-harbor/dataset", task_names: ["only-task"], n_tasks: 1 }] });
     expect(datasetSource).not.toHaveProperty("tasks");
@@ -136,7 +143,9 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       expect(archive.harbor).toMatchObject({ jobId: expect.any(String), trialId: expect.any(String), status: "completed" });
       expect(archive.nativeArtifacts.map((item) => item.path)).toEqual(expect.arrayContaining(["config.json", "result.json", "trial-1/config.json", "trial-1/result.json", "trial-1/ctrf.json", "trial-1/artifacts/unknown.bin"]));
       const effectiveJobConfig = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, archive.nativeArtifacts.find((item) => item.path === "config.json")!.sha256))) as Record<string, unknown>;
-      expect(effectiveJobConfig.environment).toEqual({ type: "docker" });
+      expect(effectiveJobConfig.environment).toEqual({});
+      expect(effectiveJobConfig).not.toHaveProperty("n_attempts");
+      expect(effectiveJobConfig).not.toHaveProperty("retry");
       expect(effectiveJobConfig).not.toHaveProperty("orchestrator");
       expect(effectiveJobConfig).not.toHaveProperty("metadata");
       expect(effectiveJobConfig).not.toHaveProperty("datasets");

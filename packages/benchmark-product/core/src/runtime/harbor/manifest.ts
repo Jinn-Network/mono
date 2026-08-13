@@ -91,6 +91,39 @@ export const HarborJobConfigSchema = z.union([
   HarborJobConfigBase.extend({ tasks: z.tuple([TaskInput]) }).strict(),
   HarborJobConfigBase.extend({ datasets: z.tuple([DatasetExecutionInput]) }).strict(),
 ]);
+export type HarborJobConfig = z.infer<typeof HarborJobConfigSchema>;
+
+/**
+ * Harbor 0.21 persists JobConfig with Pydantic `exclude_defaults=True`. Restore only the
+ * defaults that the submitted, strict JobConfig explicitly committed, then require the entire
+ * effective saved config to equal that submitted config. Explicit contradictions are never
+ * treated as omissions.
+ */
+export function normalizeHarborSavedJobConfig(saved: unknown, submitted: unknown): HarborJobConfig {
+  const committed = HarborJobConfigSchema.parse(submitted);
+  if (typeof saved !== "object" || saved === null || Array.isArray(saved)) throw new TypeError("saved Harbor JobConfig must be an object");
+  const document = saved as Record<string, unknown>;
+  const retry = document.retry;
+  const environment = document.environment;
+  const normalized: Record<string, unknown> = {
+    ...document,
+    ...(document.n_attempts === undefined && committed.n_attempts === 1 ? { n_attempts: 1 } : {}),
+    ...(retry === undefined && committed.retry.max_retries === 0
+      ? { retry: { max_retries: 0 } }
+      : typeof retry === "object" && retry !== null && !Array.isArray(retry) && (retry as Record<string, unknown>).max_retries === undefined && committed.retry.max_retries === 0
+        ? { retry: { ...(retry as Record<string, unknown>), max_retries: 0 } }
+        : {}),
+    ...(typeof environment === "object" && environment !== null && !Array.isArray(environment)
+      && (environment as Record<string, unknown>).type === undefined && committed.environment.type === "docker"
+      ? { environment: { ...(environment as Record<string, unknown>), type: "docker" } }
+      : {}),
+  };
+  const effective = HarborJobConfigSchema.parse(normalized);
+  if (!Buffer.from(canonicalJsonBytes(effective as never)).equals(Buffer.from(canonicalJsonBytes(committed as never)))) {
+    throw new TypeError("saved Harbor JobConfig contradicts the submitted JobConfig");
+  }
+  return effective;
+}
 
 export function harborJobSource(manifest: HarborSelectionManifest): { readonly tasks: readonly [z.infer<typeof TaskInput>] } | { readonly datasets: readonly [z.infer<typeof DatasetExecutionInput>] } {
   return manifest.source.kind === "task"
