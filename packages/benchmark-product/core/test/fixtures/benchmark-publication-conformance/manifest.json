@@ -4,7 +4,7 @@
   "owner": "@jinn-network/benchmark-product-core",
   "scope": "application acceptance; this is not a protocol or backend-contract conformance claim",
   "cases": [
-    { "id": "1-direct-harbor-pre-dispatch", "status": "partial", "remaining": "Registration and direct Harbor lifecycle are individually executable, but no single fixture yet proves their combined pre-dispatch ordering and full accounting closure.", "tests": ["src/operations/publication-register.test.ts", "src/runtime/harbor/harbor.test.ts"] },
+    { "id": "1-direct-harbor-pre-dispatch", "status": "covered", "tests": ["src/conformance/harbor-direct-publication.test.ts"] },
     { "id": "2-terminal-bench-2-harbor", "status": "partial", "remaining": "The filtered Terminal-Bench 2 Harbor lifecycle is executable; source/accounting/Matrix loopback closure is not combined in this fixture.", "tests": ["src/runtime/terminal-bench-2/terminal-bench-2.test.ts"] },
     { "id": "3-terminal-bench-legacy-migration", "status": "partial", "remaining": "Migration material and single-runner registration artifacts are executable; publication closure is not joined to a source fixture.", "tests": ["src/runtime/terminal-bench-2/terminal-bench-2.test.ts"] },
     { "id": "4-managed-harbor-post-hoc-no-rerun", "status": "covered", "tests": ["src/runtime/harbor/harbor.test.ts"] },
