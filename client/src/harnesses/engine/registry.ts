@@ -22,7 +22,25 @@ import {
   CLAUDE_CODE_HARNESS,
   harnessNameMatches,
 } from '../names.js';
-import type { ImplRegistry } from './engine.js';
+/**
+ * Resolves a `Harness` for a given solverType (and optional role), or returns
+ * `undefined` when nothing is registered/enabled.
+ *
+ * Declared here since Wave-4 D1 retired `engine.ts`, which used to own it:
+ * `HarnessRegistry` below is the only implementation and the only consumer.
+ */
+export interface ImplRegistry {
+  findFor(ctx: {
+    solverType: string;
+    role?: 'restoration' | 'evaluation';
+    /**
+     * Manifest-pinned Harness name (issue #2039). Takes priority over any
+     * boot-time static solverType→Harness map. Optional: callers without a
+     * task-specific Harness in hand omit it and dispatch proceeds as before.
+     */
+    harnessName?: string;
+  }): Harness | undefined;
+}
 
 // Harness dispatch defaults shared by the daemon and operator diagnostics.
 export const DEFAULT_HARNESS = CLAUDE_CODE_HARNESS;
