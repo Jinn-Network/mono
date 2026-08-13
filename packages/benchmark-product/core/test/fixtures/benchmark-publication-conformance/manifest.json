@@ -10,7 +10,7 @@
     { "id": "4-managed-harbor-post-hoc-no-rerun", "status": "covered", "tests": ["src/runtime/harbor/harbor.test.ts"] },
     { "id": "5-arbitrary-completed-harbor-history", "status": "deferred", "disposition": "Retrospective import is deferred: the product refuses a legacy run without prospective capture and never synthesizes TEP history.", "tests": ["src/run/publication-compatibility.test.ts"] },
     { "id": "6-marketplace-operator-harbor", "status": "deferred", "disposition": "Marketplace execution/product wiring is deferred; no fixture may imply an implemented marketplace Harbor runner.", "tests": [] },
-    { "id": "7-visible-replacement-no-harbor-retry", "status": "partial", "remaining": "Replacement lineage and Harbor's zero-retry configuration are separately executable; an end-to-end failed Harbor replacement fixture is still absent.", "tests": ["src/runtime/harbor/harbor.test.ts", "../../benchmarking/run/src/launch.test.ts"] },
+    { "id": "7-visible-replacement-no-harbor-retry", "status": "covered", "tests": ["src/runtime/harbor/harbor.test.ts", "../../benchmarking/run/src/launch.test.ts"] },
     { "id": "8-cancelled-partial-accounting-without-report", "status": "covered", "tests": ["src/operations/publication-accounting.test.ts"] },
     { "id": "9-independent-analysis-and-public-registration", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
     { "id": "10-legacy-report-v1-and-signed-v2", "status": "covered", "tests": ["src/operations/report.test.ts", "../../benchmarking/records/src/publication-contracts.test.ts"] },
