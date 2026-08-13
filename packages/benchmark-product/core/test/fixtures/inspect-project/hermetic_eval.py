@@ -108,8 +108,44 @@ def scorer_failure_eval():
 
 
 @task
+def multiple_scorer_failure_eval():
+    """One native scorer failure makes the selected multi-scorer claim unscorable."""
+    return Task(
+        dataset=[Sample(input="Choose C", target="C")],
+        solver=generate(),
+        scorer=[correctness_scorer(), exploding_scorer()],
+    )
+
+
+@task
 def multiple_scorer_eval():
-    """A valid Inspect task intentionally outside the adapter's first scorer slice."""
+    """A valid Inspect task with two independently named native scorer outputs."""
+    return Task(
+        dataset=[Sample(input="Choose C", target="C")],
+        solver=generate(),
+        scorer=[correctness_scorer(), policy_scorer()],
+    )
+
+
+@scorer(metrics=[])
+def correctness_scorer():
+    async def score(state, target):
+        return Score(value=CORRECT, answer=state.output.completion)
+
+    return score
+
+
+@scorer(metrics=[])
+def policy_scorer():
+    async def score(state, target):
+        return Score(value={"safe": True, "relevant": True}, answer=state.output.completion)
+
+    return score
+
+
+@task
+def duplicate_scorer_eval():
+    """Duplicate public names remain unsupported because Inspect's suffixing is private."""
     return Task(
         dataset=[Sample(input="Choose C", target="C")],
         solver=generate(),
@@ -152,6 +188,17 @@ def hosted_sandbox_eval(host_sentinel_path: str):
         dataset=[Sample(id="alpha", input="Return any text.", target="C")],
         solver=generate(),
         scorer=hosted_sandbox_scorer(host_sentinel_path),
+        sandbox="docker",
+    )
+
+
+@task(version="1.0")
+def hosted_sandbox_multiple_scorer_eval(host_sentinel_path: str):
+    """Unmodified parallel scorers through the product-hosted Inspect sandbox."""
+    return Task(
+        dataset=[Sample(id="alpha", input="Return any text.", target="C")],
+        solver=generate(),
+        scorer=[hosted_sandbox_scorer(host_sentinel_path), policy_scorer()],
         sandbox="docker",
     )
 

@@ -9,6 +9,7 @@ import type { InspectSandboxExecutionRequest } from "./inspect/oci.js";
 import type {
   InspectArmConfiguration,
   InspectRunOptions,
+  InspectScoringSelectionRequest,
   InspectSelectionManifest,
 } from "./inspect/manifest.js";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
@@ -19,11 +20,10 @@ interface InspectRuntimeSelectionBase {
   readonly taskReference: string;
   readonly taskArgs?: Readonly<Record<string, unknown>>;
   readonly arms: readonly InspectArmConfiguration[];
-  readonly scorer: { readonly name: string; readonly passValue: string | number | boolean | null };
   readonly runOptions?: InspectRunOptions;
 }
 
-export type InspectRuntimeSelectionRequest = InspectRuntimeSelectionBase & ({
+export type InspectRuntimeSelectionRequest = InspectRuntimeSelectionBase & InspectScoringSelectionRequest & ({
   readonly execution?: "local-python";
   readonly pythonPath: string;
 } | {
@@ -138,7 +138,7 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
           taskReference: input.taskReference,
           taskArgs: input.taskArgs,
           arms: input.arms,
-          scorer: input.scorer,
+          ...(input.scoring === undefined ? { scorer: input.scorer } : { scoring: input.scoring }),
           runOptions: input.runOptions,
         }, signal);
       }
@@ -153,7 +153,7 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
           taskReference: input.taskReference,
           taskArgs: input.taskArgs,
           arms: input.arms,
-          scorer: input.scorer,
+          ...(input.scoring === undefined ? { scorer: input.scorer } : { scoring: input.scoring }),
           runOptions: input.runOptions,
         }),
         binding,

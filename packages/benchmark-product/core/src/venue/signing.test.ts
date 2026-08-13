@@ -10,6 +10,7 @@ import {
   loadOrCreateEvaluatorSigningKeys,
   loadOrCreateVerdictSigningKey,
   readEvaluatorPublicKeys,
+  readOrderedVerdictMeasurements,
   readVerdictEnvelope,
   sealVerdictStatement,
 } from "./signing.js";
@@ -213,6 +214,28 @@ describe("sealVerdictStatement + readVerdictEnvelope", () => {
       measurements: { integrity: true, solverBrier: "0.010000" },
       evaluatedAt: "2026-08-05T00:00:00.000Z",
     });
+    expect(readOrderedVerdictMeasurements(envelopeBytes)).toEqual([
+      { name: "integrity", value: true },
+      { name: "solverBrier", value: "0.010000" },
+    ]);
+  });
+
+  it("refuses duplicate measurement names in the lossless verification view", async () => {
+    const json = JSON.parse(new TextDecoder().decode(statement())) as {
+      predicate: { measurements: Array<{ name: string; value: boolean }> };
+    };
+    json.predicate.measurements = [
+      { name: "duplicate", value: true },
+      { name: "duplicate", value: false },
+    ];
+    const key = loadOrCreateVerdictSigningKey(workspaceDir);
+    const envelopeBytes = await sealVerdictStatement({
+      statementBytes: canonicalJsonBytes(json),
+      evaluatorId: LEGACY_EVALUATOR,
+      expectedEvaluationSpecificationSha256: SPEC_DIGEST,
+      signer: createVerdictDsseSigner(key),
+    });
+    expect(() => readOrderedVerdictMeasurements(envelopeBytes)).toThrow(/duplicate measurement/u);
   });
 
   it("produces a signature that verifies against the workspace's own public key", async () => {

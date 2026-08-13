@@ -16,6 +16,7 @@ import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { runReport } from "../../operations/report.js";
+import { runResults } from "../../operations/run-results.js";
 import { runPublish } from "../../operations/publish.js";
 import { runPreview } from "../../operations/preview.js";
 import { runVerify } from "../../operations/verify.js";
@@ -115,7 +116,7 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     expect(JSON.stringify({ selected, audit: readAuditEntries(workspaceDir) })).not.toContain(sentinel);
   }, 120_000);
 
-  test("refuses a real multiple-scorer task instead of silently selecting one score", async () => {
+  test("refuses duplicate resolved scorer names instead of relying on Inspect's private suffixing", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-multiple-scorers-"));
     workspaces.push(workspaceDir);
     const ctx = context(workspaceDir);
@@ -125,7 +126,7 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
       draftId: "inspect-multiple-scorers",
       pythonPath: pythonPath!,
       projectDir: fixtureDir,
-      taskReference: "hermetic_eval.py@multiple_scorer_eval",
+      taskReference: "hermetic_eval.py@duplicate_scorer_eval",
       arms: [
         { armId: "control", model: "mockllm/model" },
         { armId: "candidate", model: "mockllm/model" },
@@ -146,12 +147,23 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
       draftId: "inspect-scorer-failure",
       pythonPath: pythonPath!,
       projectDir: fixtureDir,
-      taskReference: "hermetic_eval.py@scorer_failure_eval",
+      taskReference: "hermetic_eval.py@multiple_scorer_failure_eval",
       arms: [
         { armId: "control", model: "mockllm/model" },
         { armId: "candidate", model: "mockllm/model" },
       ],
-      scorer: { name: "exploding_scorer", passValue: "C" },
+      scoring: {
+        projections: [
+          { measurementName: "correct", scorerName: "correctness_scorer", passValue: "C" },
+          { measurementName: "scorer-ok", scorerName: "exploding_scorer", passValue: "C" },
+        ],
+        verdictRule: {
+          all: [
+            { threshold: { measurement: "correct", op: "eq", value: true } },
+            { threshold: { measurement: "scorer-ok", op: "eq", value: true } },
+          ],
+        },
+      },
       runOptions: { retryOnError: 1 },
     })).ok).toBe(true);
     expect((await runQuote(ctx, { draftId: "inspect-scorer-failure" })).ok).toBe(true);
@@ -194,6 +206,14 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     expect(matrix.cells).toHaveLength(2);
     expect(matrix.cells.every((cell) => cell.outcome === "judged")).toBe(true);
     expect(matrix.cells.every((cell) => cell.verdicts.length === 1)).toBe(true);
+    const legacyDelivery = readRunJournalEntries(workspaceDir, "inspect-incomplete")
+      .find((entry) => entry.kind === "delivery");
+    const legacySummary = legacyDelivery?.outputs.find((output) => output.name === "inspect-summary");
+    if (legacySummary === undefined) throw new Error("missing legacy Inspect summary");
+    expect(JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, legacySummary.sha256)))).toMatchObject({
+      schema: "jinn.network/benchmark-product/inspect-cell-summary/1",
+      scorer: "match",
+    });
   }, 120_000);
 
   test("cancels the supervised Inspect worker and accounts for every expected cell", async () => {
@@ -236,7 +256,7 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     expect(matrix.cells).toHaveLength(2);
   }, 120_000);
 
-  test("runs an unmodified task across two arms and preserves its native evidence through reporting", async () => {
+  test("runs multiple native scorers across two arms and preserves their projected evidence through detached verification", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-"));
     workspaces.push(workspaceDir);
     const ctx = context(workspaceDir);
@@ -248,21 +268,46 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
       draftId: "inspect-real",
       pythonPath: pythonPath!,
       projectDir: fixtureDir,
-      taskReference: "hermetic_eval.py@hermetic_eval",
+      taskReference: "hermetic_eval.py@multiple_scorer_eval",
       arms: [
         { armId: "control", model: "mockllm/model" },
         { armId: "candidate", model: "mockllm/model" },
       ],
-      scorer: { name: "match", passValue: "C" },
+      scoring: {
+        projections: [
+          { measurementName: "correct", scorerName: "correctness_scorer", passValue: "C" },
+          { measurementName: "safe", scorerName: "policy_scorer", subScoreKey: "safe", passValue: true },
+        ],
+        verdictRule: {
+          all: [
+            { threshold: { measurement: "correct", op: "eq", value: true } },
+            { threshold: { measurement: "safe", op: "eq", value: true } },
+          ],
+        },
+      },
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) throw new Error("unreachable");
+    expect(selected.result.runtimeMethod).toMatchObject({
+      scorerNames: ["correctness_scorer", "policy_scorer"],
+      projections: [
+        { measurementName: "correct", scorerName: "correctness_scorer" },
+        { measurementName: "safe", scorerName: "policy_scorer", subScoreKey: "safe" },
+      ],
+      verdictRuleText: "all(correct eq true, safe eq true)",
+      evaluatorRelationship: "same-execution-scorer",
+    });
     const previewed = await runPreview(ctx, { draftId: "inspect-real", items: 1 });
     expect(previewed.ok, JSON.stringify(previewed)).toBe(true);
     if (!previewed.ok) throw new Error("unreachable");
     expect(previewed.result.preview.arms.every((arm) => arm.outcomes.delivered === 2)).toBe(true);
+    expect(previewed.result.runtimeMethod).toEqual(selected.result.runtimeMethod);
     const quoted = await runQuote(ctx, { draftId: "inspect-real" });
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
-    expect(runLock(ctx, { draftId: "inspect-real" }).ok).toBe(true);
+    const locked = runLock(ctx, { draftId: "inspect-real" });
+    expect(locked.ok).toBe(true);
+    if (!locked.ok) throw new Error("unreachable");
+    expect(locked.result.runtimeMethod).toEqual(selected.result.runtimeMethod);
     expect((await runLaunch(ctx, { draftId: "inspect-real" })).ok).toBe(true);
 
     const collected = await runCollect(ctx, { draftId: "inspect-real" });
@@ -276,6 +321,11 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
       JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, "inspect-real") }),
     ).toBe(true);
 
+    const results = runResults(ctx, { draftId: "inspect-real" });
+    expect(results.ok).toBe(true);
+    if (!results.ok) throw new Error("unreachable");
+    expect(results.result.runtimeMethod).toEqual(selected.result.runtimeMethod);
+
     const deliveries = readRunJournalEntries(workspaceDir, "inspect-real")
       .filter((entry) => entry.kind === "delivery");
     expect(deliveries).toHaveLength(4);
@@ -286,15 +336,37 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
         "verdict",
       ]);
       for (const output of delivery.outputs) expect(getSealedBytes(workspaceDir, output.sha256).length).toBeGreaterThan(0);
+      const summaryOutput = delivery.outputs.find((output) => output.name === "inspect-summary");
+      if (summaryOutput === undefined) throw new Error("missing Inspect summary");
+      const summary = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, summaryOutput.sha256))) as {
+        schema: string;
+        scorers: Array<{ name: string }>;
+        measurements: Array<{ measurementName: string; value: boolean }>;
+        verdict: string;
+      };
+      expect(summary).toMatchObject({
+        schema: "jinn.network/benchmark-product/inspect-cell-summary/2",
+        scorers: [{ name: "correctness_scorer" }, { name: "policy_scorer" }],
+        measurements: [
+          { measurementName: "correct", value: true },
+          { measurementName: "safe", value: true },
+        ],
+        verdict: "pass",
+      });
     }
 
-    expect((await runReport(ctx, { draftId: "inspect-real" })).ok).toBe(true);
+    const reported = await runReport(ctx, { draftId: "inspect-real" });
+    expect(reported.ok).toBe(true);
+    if (!reported.ok) throw new Error("unreachable");
+    expect(reported.result.runtimeMethod).toEqual(selected.result.runtimeMethod);
     const verified = await runVerify(ctx, { draftId: "inspect-real" });
     expect(verified.ok && verified.result.checks).toEqual([
       "matrix-rederivation",
       "report-verification",
       "claim-consistency",
     ]);
+    if (!verified.ok) throw new Error("unreachable");
+    expect(verified.result.runtimeMethod).toEqual(selected.result.runtimeMethod);
 
     const refusedPublish = await runPublish(ctx, { draftId: "inspect-real" });
     expect(refusedPublish.ok).toBe(false);
@@ -311,7 +383,8 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     const detachedBundle = join(detachedRoot, "bundle");
     cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
     rmSync(workspaceDir, { recursive: true, force: true });
-    expect((await verifyPublicBundle(detachedBundle)).checks).toEqual([
+    const detachedVerification = await verifyPublicBundle(detachedBundle);
+    expect(detachedVerification.checks).toEqual([
       "manifest",
       "evidence-closure",
       "trust",
@@ -319,6 +392,7 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
       "report-verification",
       "claim-consistency",
     ]);
+    expect(detachedVerification.runtimeMethod).toEqual(selected.result.runtimeMethod);
     const nativeLogs = readdirSync(join(detachedBundle, "native", "inspect"))
       .map((name) => join(detachedBundle, "native", "inspect", name));
     expect(nativeLogs).toHaveLength(4);

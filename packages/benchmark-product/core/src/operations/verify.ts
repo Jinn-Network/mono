@@ -44,6 +44,10 @@ import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import { refuse } from "../errors.js";
 import { ClaimPackageSchema } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -71,6 +75,7 @@ export interface RunVerifyResult {
   readonly checks: readonly RunVerifyCheck[];
   readonly matrixSha256: string;
   readonly reportEnvelopeSha256?: string;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 export async function verifyRunWorkspace(
@@ -78,6 +83,10 @@ export async function verifyRunWorkspace(
   input: RunVerifyInput,
 ): Promise<RunVerifyResult> {
       const document = readDraftDocument(context.workspaceDir, input.draftId);
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        context.workspaceDir,
+        document.spec.evaluationRuntime,
+      );
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
       }
@@ -128,7 +137,12 @@ export async function verifyRunWorkspace(
             `draft ${input.draftId} is "${document.state}" but its RunState has no sealed Report envelope`,
           );
         }
-        return { draftId: input.draftId, checks, matrixSha256: runState.matrixSha256 };
+        return {
+          draftId: input.draftId,
+          checks,
+          matrixSha256: runState.matrixSha256,
+          ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+        };
       }
 
       if (runState.reportedAt === undefined) {
@@ -211,6 +225,7 @@ export async function verifyRunWorkspace(
         checks,
         matrixSha256: runState.matrixSha256,
         reportEnvelopeSha256: runState.reportEnvelopeSha256,
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       };
 }
 

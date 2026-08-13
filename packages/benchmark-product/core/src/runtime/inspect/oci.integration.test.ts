@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("real OCI Inspect runtime", () => {
-  test("runs an Inspect scorer through the runtime-hosted sandbox and preserves native evidence", async () => {
+  test("runs multiple Inspect scorers through the runtime-hosted sandbox and preserves native evidence", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-sandbox-"));
     const hostDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-sandbox-host-"));
     workspaces.push(workspaceDir, hostDir);
@@ -67,13 +67,24 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       projectDir: fixtureDir,
       datasetCacheDir: datasetCacheDir!,
       sandboxExecution: { provider: "jinn-oci", imageDigest: imageDigest!, platform: "linux/amd64" },
-      taskReference: "hermetic_eval.py@hosted_sandbox_eval",
+      taskReference: "hermetic_eval.py@hosted_sandbox_multiple_scorer_eval",
       taskArgs: { host_sentinel_path: sentinelPath },
       arms: [
         { armId: "sandbox-a", model: "mockllm/sandbox-a" },
         { armId: "sandbox-b", model: "mockllm/sandbox-b" },
       ],
-      scorer: { name: "hosted_sandbox_scorer", passValue: "C" },
+      scoring: {
+        projections: [
+          { measurementName: "contained", scorerName: "hosted_sandbox_scorer", passValue: "C" },
+          { measurementName: "safe", scorerName: "policy_scorer", subScoreKey: "safe", passValue: true },
+        ],
+        verdictRule: {
+          all: [
+            { threshold: { measurement: "contained", op: "eq", value: true } },
+            { threshold: { measurement: "safe", op: "eq", value: true } },
+          ],
+        },
+      },
       runOptions: { sampleId: "alpha", maxSamples: 1, maxSandboxes: 1, retryOnError: 0 },
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
@@ -96,8 +107,17 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       const summaryOutput = delivery.outputs.find((output) => output.name === "inspect-summary");
       const summary = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, summaryOutput!.sha256)));
       expect(summary).toMatchObject({
+        schema: "jinn.network/benchmark-product/inspect-cell-summary/2",
         terminal: "scored",
         verdict: "pass",
+        scorers: [
+          { name: "hosted_sandbox_scorer" },
+          { name: "policy_scorer" },
+        ],
+        measurements: [
+          { measurementName: "contained", value: true },
+          { measurementName: "safe", value: true },
+        ],
         sandbox: {
           provider: "jinn-oci",
           protocol: "jinn.network/inspect-sandbox-host/1",
@@ -124,7 +144,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
       "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
       "--entrypoint=python", imageDigest!, "-c",
-      "from inspect_ai.log import list_eval_logs,read_eval_log; logs=[read_eval_log(x) for x in list_eval_logs('/logs')]; assert len(logs)==2; assert all(x.status=='success' for x in logs); events=[e for x in logs for s in (x.samples or []) for e in (s.events or []) if e.event=='sandbox']; assert len(events)>=6; assert all(x.eval.sandbox.type=='jinn-oci' for x in logs)",
+      "from inspect_ai.log import list_eval_logs,read_eval_log; logs=[read_eval_log(x) for x in list_eval_logs('/logs')]; assert len(logs)==2; assert all(x.status=='success' for x in logs); assert all(set((x.samples or [])[0].scores)=={'hosted_sandbox_scorer','policy_scorer'} for x in logs); events=[e for x in logs for s in (x.samples or []) for e in (s.events or []) if e.event=='sandbox']; assert len(events)>=6; assert all(x.eval.sandbox.type=='jinn-oci' for x in logs)",
     ], { encoding: "utf8" });
     expect(officialRead).toBe("");
     const viewerOutputRoot = join(detachedRoot, "viewer-output");

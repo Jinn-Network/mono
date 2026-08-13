@@ -336,6 +336,11 @@ export interface VerdictStatementView {
   readonly limitations?: readonly string[];
 }
 
+export interface OrderedVerdictMeasurement {
+  readonly name: string;
+  readonly value: boolean | number | string;
+}
+
 function decodeUtf8Json(bytes: Uint8Array, label: string): unknown {
   let text: string;
   try {
@@ -455,4 +460,24 @@ export function readVerdictEnvelope(envelopeBytes: Uint8Array): VerdictStatement
     refuse("execution", "payloadType", "verdict envelope payloadType is not the verdict DSSE payload type");
   }
   return parseVerdictStatement(parsed.payloadBytes, "verdict envelope payload");
+}
+
+/** Lossless measurement view for contracts that pre-register order as well as names. */
+export function readOrderedVerdictMeasurements(
+  envelopeBytes: Uint8Array,
+): readonly OrderedVerdictMeasurement[] {
+  const parsed = parseDsseEnvelope(envelopeBytes);
+  if (parsed.payloadType !== VERDICT_DSSE_PAYLOAD_TYPE) {
+    refuse("execution", "payloadType", "verdict envelope payloadType is not the verdict DSSE payload type");
+  }
+  const json = decodeUtf8Json(parsed.payloadBytes, "verdict envelope payload");
+  const statement = VerdictStatementSchema.safeParse(json);
+  if (!statement.success) {
+    refuse("execution", "verdict envelope payload", "verdict envelope payload does not conform to the expected Result Evaluation Statement shape");
+  }
+  const measurements = statement.data.predicate.measurements ?? [];
+  if (new Set(measurements.map((measurement) => measurement.name)).size !== measurements.length) {
+    refuse("execution", "verdict envelope payload", "verdict envelope carries duplicate measurement names");
+  }
+  return measurements.map((measurement) => ({ name: measurement.name, value: measurement.value }));
 }
