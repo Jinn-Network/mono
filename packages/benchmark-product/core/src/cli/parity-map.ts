@@ -68,6 +68,7 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   publicationRegister: "publication register",
   publicationAccounting: "publication accounting",
   publicationReport: "publication report",
+  publicationStatus: "publication status",
   runLaunch: "launch",
   runResume: "resume",
   runCancel: "cancel",
@@ -109,6 +110,7 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   publicationRegister: "publication.register",
   publicationAccounting: "publication.accounting",
   publicationReport: "publication.report",
+  publicationStatus: "publication.status",
   runLaunch: "launch",
   runResume: "run.resume",
   runCancel: "cancel",
@@ -148,8 +150,9 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
   runLock: "Seals the Run record and transitions the draft to locked (authority-gated).",
   publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
   publicationRegister: "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
-  publicationAccounting: "Publishes the exact complete dispatch accounting closure and its terminal Matrix v2 without rerunning work.",
+  publicationAccounting: "Publishes retained complete or partial dispatch accounting and Matrix v2 without running work or requiring a Report.",
   publicationReport: "Produces, independently verifies, and publishes the signed Report v2 envelope after its exact accounting closure.",
+  publicationStatus: "Reads the local publication state, timing assurance, receipts, compatibility, and recovery guidance without contacting a backend.",
   runLaunch: "Launches the locked run on the real local venue (authority-gated).",
   runResume: "Resumes an interrupted run, dispatching only outstanding work.",
   runCancel:
@@ -165,13 +168,12 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
 
 /**
  * GUI disposition for every shipped library operation. This is the M3 parity
- * authority: an operation is either backed by one stable GUI action id now or
- * explicitly assigned to the packet that will ship it. Silence is forbidden.
+ * authority: an operation is either backed by one stable GUI action id now or has a tested
+ * security reason it is unavailable. Silence is forbidden.
  */
 export type GuiCapability =
   | { readonly status: "shipped"; readonly action: string }
-  | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" | "PUB-14" }
-  | { readonly status: "unavailable"; readonly followUp: "PUB-14"; readonly reason: string };
+  | { readonly status: "unavailable"; readonly reason: string };
 
 export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   initWorkspace: { status: "shipped", action: "workspace.init" },
@@ -183,9 +185,11 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   sampleInit: { status: "shipped", action: "intake.sample" },
   importSweBenchRows: { status: "shipped", action: "intake.swebench" },
   selectInspectEvaluation: { status: "shipped", action: "runtime.inspect.select" },
-  selectHarborRuntime: { status: "deferred", deferredTo: "PUB-14" },
-  selectTerminalBench2Runtime: { status: "deferred", deferredTo: "PUB-14" },
-  migrateTerminalBenchLegacyTask: { status: "deferred", deferredTo: "PUB-14" },
+  // These inputs contain host paths/executable locations. A browser must not supply those
+  // paths; a future server-configured runtime catalogue can safely expose them.
+  selectHarborRuntime: { status: "unavailable", reason: "requires server-configured Harbor host paths; browser-supplied paths are forbidden" },
+  selectTerminalBench2Runtime: { status: "unavailable", reason: "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden" },
+  migrateTerminalBenchLegacyTask: { status: "unavailable", reason: "requires server-configured migration input paths; browser-supplied paths are forbidden" },
   armAdd: { status: "shipped", action: "arm.add" },
   armUpdate: { status: "shipped", action: "arm.update" },
   armRemove: { status: "shipped", action: "arm.remove" },
@@ -196,10 +200,11 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runPreview: { status: "shipped", action: "run.preview" },
   runQuote: { status: "shipped", action: "run.quote" },
   runLock: { status: "shipped", action: "run.lock" },
-  publicationConfigure: { status: "deferred", deferredTo: "PUB-14" },
-  publicationRegister: { status: "deferred", deferredTo: "PUB-14" },
-  publicationAccounting: { status: "unavailable", followUp: "PUB-14", reason: "PUB-13 exposes the accounting stage through the CLI; PUB-14 owns its consent-aware GUI action." },
-  publicationReport: { status: "unavailable", followUp: "PUB-14", reason: "PUB-13 exposes signed Report v2 publication through the CLI; PUB-14 owns its consent-aware GUI action." },
+  publicationConfigure: { status: "shipped", action: "publication.configure" },
+  publicationRegister: { status: "shipped", action: "publication.register" },
+  publicationAccounting: { status: "shipped", action: "publication.accounting" },
+  publicationStatus: { status: "shipped", action: "publication.status" },
+  publicationReport: { status: "unavailable", reason: "signed Report v2 publication requires the consent-aware GUI action supplied by the combined PUB-13/PUB-14 follow-up" },
   runLaunch: { status: "shipped", action: "run.launch" },
   runResume: { status: "shipped", action: "run.resume" },
   runCancel: { status: "shipped", action: "run.cancel" },

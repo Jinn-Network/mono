@@ -15,6 +15,10 @@ import {
   inspectDraft,
   listDrafts,
   runLock,
+  publicationAccounting,
+  publicationConfigure,
+  publicationRegister,
+  publicationStatus,
   runLaunch,
   runResume,
   runCancel,
@@ -186,6 +190,33 @@ export async function runQuoteAction(_previous: GuiActionState, formData: FormDa
 export async function runLockAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
   return executeOperation((context) => runLock(context, { draftId }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
+}
+
+/** The browser supplies a locator and draft id only. The workspace is fixed by server config. */
+export async function publicationConfigureAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation((context) => publicationConfigure(context, {
+    draftId, publicBaseUrl: field(formData, "publicBaseUrl"),
+  }), { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
+}
+
+export async function publicationRegisterAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation((context) => publicationRegister(context, {
+    draftId,
+    ...(optionalField(formData, "publicBaseUrl") === undefined ? {} : { publicBaseUrl: optionalField(formData, "publicBaseUrl")! }),
+  }), { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
+}
+
+export async function publicationStatusAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  return executeOperation((context) => publicationStatus(context, { draftId: field(formData, "draftId") }));
+}
+
+export async function publicationAccountingAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation(async (context) => publicationAccounting(context, { draftId }), {
+    revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`, `/workspace/${draftId}/results`],
+  });
 }
 
 export async function runLaunchAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {

@@ -53,6 +53,7 @@ import {
   publicationConfigure,
   publicationRegister,
   publicationReport,
+  publicationStatus,
   runPreview,
   runPublish,
   runQuote,
@@ -121,6 +122,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   lock             --workspace <dir> --principal <id> --draft <draftId>
   publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
   publication register  --workspace <dir> --principal <id> --draft <draftId> [--public-base-url <url>]
+  publication status     --workspace <dir> --principal <id> --draft <draftId>
   publication accounting --workspace <dir> --principal <id> --draft <draftId>
   publication report     --workspace <dir> --principal <id> --draft <draftId>
   launch           --workspace <dir> --principal <id> --draft <draftId>
@@ -168,6 +170,7 @@ const QUOTE_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LOCK_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
+const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -604,7 +607,7 @@ async function handlePublicationConfigure(args: ParsedArgs, context: CliContext,
   assertKnownFlags(args, PUBLICATION_CONFIGURE_FLAGS);
   const opContext = buildOperationContext(args, context);
   const result = await publicationConfigure(opContext, { draftId: required(args, "draft"), publicBaseUrl: required(args, "public-base-url") });
-  return renderResult(result, jsonMode, (value) => `configured public source at ${value.publicBaseUrl}\n`);
+  return renderResult(result, jsonMode, (value) => `configured public source at ${value.publicBaseUrl}; launch is now gated on prospective registration completing before dispatch\n`);
 }
 
 async function handlePublicationRegister(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -614,15 +617,24 @@ async function handlePublicationRegister(args: ParsedArgs, context: CliContext, 
     draftId: required(args, "draft"),
     ...(optional(args, "public-base-url") === undefined ? {} : { publicBaseUrl: optional(args, "public-base-url")! }),
   });
-  return renderResult(result, jsonMode, (value) => `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence}${value.postHoc ? " (post-hoc)" : ""}\n`);
+  return renderResult(result, jsonMode, (value) => value.postHoc
+    ? `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} post-hoc; this does not rerun completed work\n`
+    : `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} before dispatch\n`);
+}
+
+function handlePublicationStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, PUBLICATION_STATUS_FLAGS);
+  const result = publicationStatus(buildOperationContext(args, context), { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) => {
+    const stages = value.stages.map((stage) => `${stage.name}=${stage.state}`).join(", ");
+    return `publication mode=${value.mode}; analysis=${value.analysisPreregistration}; registration=${value.registrationTiming}; ${stages}\n${value.recovery.guidance}\n`;
+  });
 }
 
 async function handlePublicationAccounting(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, PUBLICATION_ACCOUNTING_FLAGS);
-  const opContext = buildOperationContext(args, context);
-  const result = await publicationAccounting(opContext, { draftId: required(args, "draft") });
-  return renderResult(result, jsonMode, (value) =>
-    `published accounting ${value.accountingSha256} and Matrix v2 ${value.matrixV2Sha256} at ${value.source.agent}/${value.source.name}\n`);
+  const result = await publicationAccounting(buildOperationContext(args, context), { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) => `published accounting ${value.accountingSha256} and Matrix v2 ${value.matrixV2Sha256}; accounting does not require a Report and does not rerun work\n`);
 }
 
 async function handlePublicationReport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
@@ -815,6 +827,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["lock", handleLock],
   ["publication configure", handlePublicationConfigure],
   ["publication register", handlePublicationRegister],
+  ["publication status", handlePublicationStatus],
   ["publication accounting", handlePublicationAccounting],
   ["publication report", handlePublicationReport],
   ["launch", handleLaunch],

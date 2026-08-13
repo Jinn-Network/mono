@@ -15,6 +15,7 @@ export const PRINCIPAL_ENV = "BENCHMARK_PRODUCT_PRINCIPAL";
 export const ENABLE_TEST_CONTROLS_ENV = "BENCHMARK_PRODUCT_ENABLE_TEST_CONTROLS";
 export const TEST_SOLVE_DELAY_MS_ENV = "BENCHMARK_PRODUCT_TEST_SOLVE_DELAY_MS";
 export const OPENAI_KEY_FILE_ENV = "BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE";
+export const PUBLICATION_PUBLIC_BASE_URL_ENV = "BENCHMARK_PRODUCT_PUBLICATION_PUBLIC_BASE_URL";
 
 /** Browser-safe readiness projection. Never returns the credential path or reads its bytes. */
 export function openAIConnectionReadiness(
@@ -33,6 +34,20 @@ export class ProductContextConfigurationError extends Error {
 export interface ProductServerConfiguration {
   readonly workspaceDir: string;
   readonly principal: string;
+}
+
+/** A deployment may set this exact public route as its publication locator. We do not derive it
+ * from request headers: forwarded host/proto values are not publication authority. */
+export function configuredPublicationPublicBaseUrl(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): string | undefined {
+  const value = environment[PUBLICATION_PUBLIC_BASE_URL_ENV]?.trim();
+  if (!value) return undefined;
+  const parsed = new URL(value);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new ProductContextConfigurationError(`${PUBLICATION_PUBLIC_BASE_URL_ENV} must be http(s)`);
+  }
+  return parsed.toString().replace(/\/$/, "");
 }
 
 export function readRunDriverTestingDeps(

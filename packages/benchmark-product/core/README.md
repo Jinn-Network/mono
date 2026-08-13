@@ -56,6 +56,8 @@ with an explicit shipped/deferred GUI disposition:
 | `migrateTerminalBenchLegacyTask` | `colophon runtime terminal-bench migrate` | Transform legacy Terminal-Bench material with pinned Harbor and preserve both byte histories. |
 | `publicationConfigure` | `colophon publication configure` | Configure the public locator and opt into prospective disclosure. |
 | `publicationRegister` | `colophon publication register` | Store, announce, and exact-probe the registration closure. |
+| `publicationStatus` | `colophon publication status` | Read timing assurance, stage receipts, compatibility, and recovery guidance without backend calls. |
+| `publicationAccounting` | `colophon publication accounting` | Publish retained complete or partial accounting and Matrix v2 without a Report or rerun. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
 | `runLaunch` | `colophon launch` | Drive the real local venue. |
@@ -106,9 +108,9 @@ Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 
 ## Authority and lifecycle behavior
 
-The **seven gated operations** are `lock`, `launch`, `cancel`, `report`,
-`publish`, `publication.configure`, and `publication.register`. The founding
-sponsor receives all seven grants. A delegated agent may perform any of them
+The **eight gated operations** are `lock`, `launch`, `cancel`, `report`,
+`publish`, `publication.configure`, `publication.register`, and
+`publication.accounting`. The founding sponsor receives all eight grants. A delegated agent may perform any of them
 only after a sponsor grants it. `authority grant` and
 `authority revoke` are separately sponsor-only, so a delegated agent cannot
 self-escalate. This is local-process policy and attribution, not operating-system

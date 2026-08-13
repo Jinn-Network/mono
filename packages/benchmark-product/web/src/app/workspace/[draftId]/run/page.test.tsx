@@ -13,6 +13,9 @@ vi.mock("@/lib/server/gui-action-registry", () => ({
     "run.resume": vi.fn(),
     "run.cancel": vi.fn(),
     "run.collect": vi.fn(),
+    "publication.configure": vi.fn(),
+    "publication.register": vi.fn(),
+    "publication.accounting": vi.fn(),
   },
 }));
 vi.mock("@/components/action-form", () => ({
@@ -36,6 +39,12 @@ function status(state: "running" | "closed", cancelRequested: boolean) {
         counts: { expected: 6, dispatched: 6, delivered: 0, judged: 0, failed: 6 },
       },
     },
+    publication: { ok: true as const, result: {
+      mode: "local", analysisPreregistration: "fixed-in-run", registrationTiming: "not-registered",
+      stages: [{ name: "registration", state: "not-started", digests: [] }, { name: "accounting", state: "not-started", digests: [] }, { name: "matrix", state: "not-started", digests: [] }, { name: "report", state: "not-started", digests: [] }],
+      compatibility: { status: "ready", dispatchCount: 0 }, postHocPublicationAvailable: state === "closed",
+      recovery: { resumable: false, guidance: "Publication remains local until you explicitly configure and register a public source." },
+    } },
   };
 }
 
@@ -58,6 +67,16 @@ describe("durable run monitor cancellation language", () => {
     }));
     expect(markup).toContain("Cancellation finalized; run is cancelled.");
     expect(markup).not.toContain("Cancellation requested; driver is draining.");
+  });
+
+  test("keeps local-first default while offering post-hoc accounting without a Report", async () => {
+    loadRunViewMock.mockReturnValue(status("closed", true));
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain("Local-first (not public by default)");
+    expect(markup).toContain("Configure post-hoc public source (does not rerun)");
+    expect(markup).toContain("Register post-hoc (does not rerun)");
+    expect(markup).toContain("Publish accounting and Matrix (does not rerun)");
+    expect(markup).toContain("does not require a Report");
   });
 
   test("renders a typed durable failure without serializing its sensitive detail", async () => {

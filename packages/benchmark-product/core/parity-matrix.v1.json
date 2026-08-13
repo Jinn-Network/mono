@@ -138,8 +138,18 @@
       "authorityGated": false,
       "description": "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "PUB-14"
+        "status": "unavailable",
+        "reason": "requires server-configured migration input paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
+      "operation": "publicationAccounting",
+      "cliVerb": "publication accounting",
+      "authorityGated": true,
+      "description": "Publishes retained complete or partial dispatch accounting and Matrix v2 without running work or requiring a Report.",
+      "gui": {
+        "status": "shipped",
+        "action": "publication.accounting"
       }
     },
     {
@@ -159,8 +169,8 @@
       "authorityGated": true,
       "description": "Configures the mutable public source locator and explicit prospective-publication intent.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "PUB-14"
+        "status": "shipped",
+        "action": "publication.configure"
       }
     },
     {
@@ -169,8 +179,18 @@
       "authorityGated": true,
       "description": "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "PUB-14"
+        "status": "shipped",
+        "action": "publication.register"
+      }
+    },
+    {
+      "operation": "publicationStatus",
+      "cliVerb": "publication status",
+      "authorityGated": false,
+      "description": "Reads the local publication state, timing assurance, receipts, compatibility, and recovery guidance without contacting a backend.",
+      "gui": {
+        "status": "shipped",
+        "action": "publication.status"
       }
     },
     {
@@ -320,8 +340,8 @@
       "authorityGated": false,
       "description": "Selects and digest-binds a managed Harbor runtime.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "PUB-14"
+        "status": "unavailable",
+        "reason": "requires server-configured Harbor host paths; browser-supplied paths are forbidden"
       }
     },
     {
@@ -340,8 +360,8 @@
       "authorityGated": false,
       "description": "Resolves one immutable Terminal-Bench 2 task and binds it to the managed Harbor runtime.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "PUB-14"
+        "status": "unavailable",
+        "reason": "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden"
       }
     },
     {

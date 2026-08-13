@@ -42,7 +42,12 @@ const privateResponseHeaders = [
 const config = {
   reactStrictMode: true,
   async headers() {
-    return [{ source: "/:path*", headers: privateResponseHeaders }];
+    return [
+      { source: "/:path*", headers: privateResponseHeaders },
+      // The core archive handler supplies immutable cache semantics per exact object. Do not
+      // overwrite it with the private app's no-store header on the fixed public mount.
+      { source: "/publication/:path*", headers: privateResponseHeaders.filter((header) => header.key !== "Cache-Control") },
+    ];
   },
   serverExternalPackages: ["@jinn-network/benchmark-product-core"],
   outputFileTracingRoot: resolve(import.meta.dirname, "../../.."),

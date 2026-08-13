@@ -105,30 +105,10 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       status: "shipped",
       action: "run.verify",
     });
-    expect(gui.filter((entry) => entry.gui.status === "deferred").map(({ operation, gui: capability }) => ({
-      operation,
-      gui: capability,
-    }))).toEqual([
-      {
-        operation: "migrateTerminalBenchLegacyTask",
-        gui: { status: "deferred", deferredTo: "PUB-14" },
-      },
-      {
-        operation: "publicationConfigure",
-        gui: { status: "deferred", deferredTo: "PUB-14" },
-      },
-      {
-        operation: "publicationRegister",
-        gui: { status: "deferred", deferredTo: "PUB-14" },
-      },
-      {
-        operation: "selectHarborRuntime",
-        gui: { status: "deferred", deferredTo: "PUB-14" },
-      },
-      {
-        operation: "selectTerminalBench2Runtime",
-        gui: { status: "deferred", deferredTo: "PUB-14" },
-      },
+    expect(gui.filter((entry) => entry.gui.status === "deferred")).toEqual([]);
+    expect(gui.find((entry) => entry.operation === "publicationAccounting")?.gui).toEqual({ status: "shipped", action: "publication.accounting" });
+    expect(gui.filter((entry) => entry.gui.status === "unavailable").map((entry) => entry.operation).sort()).toEqual([
+      "migrateTerminalBenchLegacyTask", "selectHarborRuntime", "selectTerminalBench2Runtime",
     ]);
   });
 });

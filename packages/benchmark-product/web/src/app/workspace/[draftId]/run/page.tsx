@@ -4,6 +4,8 @@ import { RunMonitorRefresh } from "@/components/run-monitor-refresh";
 import { LifecycleRail } from "@/components/lifecycle-rail";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
 import { loadRunView } from "@/lib/server/view-models";
 
@@ -16,6 +18,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   const view = loadRunView(draftId);
   const status = view.ok && view.status.ok ? view.status.result : undefined;
   const state = status?.state;
+  const publication = view.ok && view.publication.ok ? view.publication.result : undefined;
   const cancellationPending = status?.cancelRequested === true && state === "running";
   const poll = status?.driver?.status === "active" || cancellationPending;
 
@@ -45,6 +48,23 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         <ActionForm action={GUI_SERVER_ACTIONS["run.cancel"]} submitLabel="Request / finalize cancel" gated disabled={state !== "running" && !(state === "closed" && status?.cancelRequested === true)}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.collect"]} submitLabel="Collect" disabled={state !== "running" || status?.cancelRequested === true}><HiddenDraft draftId={draftId} /></ActionForm>
       </CardContent></Card>
+      <section aria-labelledby="publication-heading" className="grid gap-5 lg:grid-cols-2">
+        <Card><CardHeader><CardTitle id="publication-heading">Publication status</CardTitle></CardHeader><CardContent className="space-y-4">
+          {!publication ? <p role="status">Publication status becomes available after the Run is locked.</p> : <>
+            <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Mode</dt><dd>{publication.mode === "prospective" ? "Prospective public publication" : "Local-first (not public by default)"}</dd></div><div><dt className="font-medium">Analysis preregistration</dt><dd>{publication.analysisPreregistration === "fixed-in-run" ? "Fixed in sealed Run" : "Not locked"}</dd></div><div><dt className="font-medium">Public-registration timing</dt><dd>{publication.registrationTiming}</dd></div><div><dt className="font-medium">Public URL</dt><dd className="break-all">{publication.publicBaseUrl ?? "Not configured"}</dd></div></dl>
+            <div><h3 className="font-semibold">Stages</h3><ul aria-label="Publication stages" className="mt-2 space-y-1">{publication.stages.map((stage) => <li key={stage.name}><span className="font-medium">{stage.name}</span>: {stage.state}{stage.receipt ? ` · receipt ${stage.receipt.sourceSequence}` : ""}</li>)}</ul></div>
+            <p role="status">{publication.recovery.guidance}</p>
+            {publication.compatibility.status === "refused" ? <p role="alert">Accounting compatibility needs attention before public accounting can close.</p> : null}
+          </>}
+        </CardContent></Card>
+        <Card><CardHeader><CardTitle>Public publication controls</CardTitle></CardHeader><CardContent className="grid gap-5">
+          <p className="text-sm text-muted-foreground">Local-first is the default. Configure before dispatch only when you intend prospective public registration. The server never accepts a workspace path from this form.</p>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.configure"]} submitLabel={state === "closed" ? "Configure post-hoc public source (does not rerun)" : "Configure prospective public source"} gated disabled={state !== "locked" && state !== "closed"}><HiddenDraft draftId={draftId} /><Label htmlFor="public-base-url">Public source URL</Label><Input id="public-base-url" name="publicBaseUrl" type="url" defaultValue={publication?.publicBaseUrl} required /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.register"]} submitLabel={state === "closed" ? "Register post-hoc (does not rerun)" : "Register before dispatch"} gated disabled={state !== "locked" && state !== "closed"}><HiddenDraft draftId={draftId} /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.accounting"]} submitLabel="Publish accounting and Matrix (does not rerun)" gated disabled={state !== "closed" || publication?.postHocPublicationAvailable === false}><HiddenDraft draftId={draftId} /></ActionForm>
+          <p className="text-sm text-muted-foreground">Accounting can close a partial or cancelled managed run. It does not require a Report; Report publication is a separate future action.</p>
+        </CardContent></Card>
+      </section>
       <Card><CardHeader><CardTitle>Cells</CardTitle></CardHeader><CardContent><div tabIndex={0} role="region" aria-label="Run cells table" className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th scope="col">Arm</th><th scope="col">Replicate</th><th scope="col">Status</th><th scope="col">Dispatches</th><th scope="col">Failure / blame</th></tr></thead><tbody>{status?.cells.map((cell) => <tr key={cell.cellKey} className="border-t"><td className="py-2">{cell.armId}</td><td>{cell.replicate}</td><td>{cell.status}</td><td>{cell.dispatches}</td><td>{cell.detail ?? "—"}{cell.blame ? ` (${cell.blame})` : ""}</td></tr>)}</tbody></table></div></CardContent></Card>
     </>}
   </main>;

@@ -8,6 +8,7 @@ import {
   listDrafts,
   runStatus,
   runResults,
+  publicationStatus,
   type OperationResult,
   type RunStatusResult,
 } from "@jinn-network/benchmark-product-core";
@@ -81,12 +82,14 @@ export function loadRunView(draftId: string) {
   try {
     const context = createProductOperationContext();
     const status = runStatus(context, { draftId });
+    const publication = publicationStatus(context, { draftId });
     return {
       ok: true as const,
       draft: projectOutcomeForGui(getDraft(context, { draftId })),
       status: status.ok
         ? { ...status, result: projectRunStatusForGui(status.result) }
         : { ...status, error: projectProductErrorForGui(status.error) },
+      publication: publication.ok ? publication : { ...publication, error: projectProductErrorForGui(publication.error) },
     };
   } catch {
     return { ok: false as const, detail: safeFailureDetail() };

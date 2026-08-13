@@ -294,6 +294,8 @@ export {
 export type { PublicationSource, PublicationStage, PublicationState, RunState } from "./run/state.js";
 export { assessPublicationCompatibility } from "./run/publication-compatibility.js";
 export type { PublicationCompatibilityAssessment } from "./run/publication-compatibility.js";
+export { projectPublicationStatus } from "./run/publication-status.js";
+export type { PublicationStatusProjection, PublicationStageStatus, PublicationStageName } from "./run/publication-status.js";
 export {
   createWorkspacePublicationHttpHandler,
   createWorkspacePublicationSource,
