@@ -226,7 +226,7 @@ export async function migrateTerminalBenchLegacyMaterial(workspaceDir: string, i
     : materialSnapshot(workspaceDir, runnableMaterialPath, "manually-adjusted");
   const stdoutSha256 = putSealedBytes(workspaceDir, result.stdout);
   const stderrSha256 = putSealedBytes(workspaceDir, result.stderr);
-  const executableSha256 = createHash("sha256").update(executableBytes).digest("hex");
+  const executableSha256 = putSealedBytes(workspaceDir, executableBytes);
   if (sha256Hex(new Uint8Array(readFileSync(executable))) !== executableSha256) {
     throw new TypeError("Harbor executable changed during legacy migration");
   }

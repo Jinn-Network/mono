@@ -28,6 +28,7 @@ import {
   parseTaskProfile,
 } from "@jinn-network/task-execution-profiles";
 import { refuse } from "../errors.js";
+import { runtimeRegistrationPublicationClosure } from "../runtime/adapter.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import {
   createWorkspacePublicationJournal,
@@ -236,13 +237,11 @@ export function buildRegistrationClosure(
     taskIds.push(taskId);
   }
   const extension = readRunPublicationExtension(run as unknown as Record<string, unknown>);
-  const runtimeIds: string[] = [];
-  for (const entry of extension?.registrationArtifacts ?? []) {
-    const digestHex = entry.artifact.digest.sha256;
-    const id = `runtime:${entry.role}:${digestHex}`;
-    add(artifact(id, entry.role, digestHex, getSealedBytes(workspaceDir, digestHex), entry.artifact.mediaType ?? "application/octet-stream"));
-    runtimeIds.push(id);
-  }
+  const runtimeClosure = runtimeRegistrationPublicationClosure(workspaceDir, extension?.registrationArtifacts ?? []);
+  for (const entry of runtimeClosure.artifacts) add(artifact(
+    entry.id, entry.role, entry.digestHex, entry.bytes, entry.mediaType, entry.dependsOn,
+  ));
+  const runtimeIds = runtimeClosure.rootIds;
   const benchmarkId = `benchmark:${benchmarkSha256}`;
   const benchmarkAuthority = authorityDependencies(
     benchmarkId,

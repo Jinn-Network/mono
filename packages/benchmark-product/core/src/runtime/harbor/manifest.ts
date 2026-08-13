@@ -6,6 +6,8 @@ import { sha256Hex } from "../../workspace/sealed-store.js";
 export const HARBOR_ADAPTER_ID = "harbor" as const;
 export const HARBOR_SELECTION_SCHEMA = "jinn.network/benchmark-product/harbor-selection/1" as const;
 export const HARBOR_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/harbor-evidence/v1" as const;
+export const HARBOR_RUNTIME_EXECUTABLE_ROLE = "https://product.jinn.network/artifact-roles/harbor/runtime-executable/v1" as const;
+export const HARBOR_SOURCE_MATERIAL_ROLE = "https://product.jinn.network/artifact-roles/harbor/source-material/v1" as const;
 export const SUPPORTED_HARBOR_VERSION_RANGE = "0.21.x" as const;
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/);

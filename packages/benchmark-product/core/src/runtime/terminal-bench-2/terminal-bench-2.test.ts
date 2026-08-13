@@ -8,18 +8,19 @@ import { armAdd } from "../../operations/arms.js";
 import { createDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { publicationAccounting } from "../../operations/publication-accounting.js";
-import { publicationConfigure, publicationRegister } from "../../operations/publication-register.js";
+import { buildRegistrationClosure, publicationConfigure, publicationRegister } from "../../operations/publication-register.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { sampleInit } from "../../operations/sample.js";
 import { migrateTerminalBenchLegacyTask, selectTerminalBench2Runtime } from "../../operations/terminal-bench-2.js";
 import { readRunJournalEntries } from "../../run/journal.js";
+import { requireRunState } from "../../run/state.js";
 import { createWorkspacePublicationHttpHandler, publicArchiveUrl, recordPath } from "../../run/publication-source.js";
 import { readHarborDispatchArchive } from "../harbor/venue.js";
-import type { HarborSelectionManifest } from "../harbor/manifest.js";
+import { HarborSelectionManifestSchema, type HarborSelectionManifest } from "../harbor/manifest.js";
 import { artifactsDir } from "../../workspace/layout.js";
-import { getSealedBytes } from "../../workspace/sealed-store.js";
+import { getSealedBytes, sealedRecordPath } from "../../workspace/sealed-store.js";
 import { computeHarbor021TaskContentHash, resolveTerminalBench2Selection } from "./host.js";
 import { TERMINAL_BENCH_2_DATASET_ID, TERMINAL_BENCH_2_PROFILE, TERMINAL_BENCH_2_SELECTION_ROLE, TERMINAL_BENCH_MIGRATION_ROLE, TerminalBench2SelectionManifestSchema } from "./manifest.js";
 import { HARBOR_SELECTION_ROLE } from "../harbor/venue.js";
@@ -124,6 +125,31 @@ async function expectExactPublicBytes(base: string, path: string, expected: Uint
   expect(new Uint8Array(await response.arrayBuffer())).toEqual(expected);
 }
 
+async function expectPublishedRuntimeDependencies(base: string, draftId: string, expectedDigests: readonly string[]): Promise<void> {
+  const registered = Object.entries(requireRunState(workspaceDir, draftId).publication!.registration.digests ?? {});
+  for (const digest of new Set(expectedDigests)) {
+    expect(registered.some(([id, value]) => id.startsWith("runtime-material:") && value === digest), `registration state omitted runtime dependency ${digest}`).toBe(true);
+    await expectExactPublicBytes(base, `/publication-artifacts/sha256/${digest}`, getSealedBytes(workspaceDir, digest));
+  }
+}
+
+function expectTransitiveRuntimeDependencies(runBytes: Uint8Array, runSha256: string, expectedDigests: readonly string[]): void {
+  const members = buildRegistrationClosure(workspaceDir, runBytes, runSha256, "2026-08-13T00:00:00.000Z");
+  const byId = new Map(members.map((member) => [member.id, member]));
+  const benchmark = members.find((member) => member.id.startsWith("benchmark:"));
+  expect(benchmark).toBeDefined();
+  const reachable = new Set<string>();
+  const visit = (id: string) => {
+    if (reachable.has(id)) return;
+    reachable.add(id);
+    for (const dependency of byId.get(id)?.dependsOn ?? []) visit(dependency);
+  };
+  visit(benchmark!.id);
+  for (const digest of new Set(expectedDigests)) {
+    expect(members.some((member) => member.id.startsWith("runtime-material:") && member.digest === `sha256:${digest}` && reachable.has(member.id)), `Benchmark closure omitted runtime dependency ${digest}`).toBe(true);
+  }
+}
+
 function expectOneFilteredTrialPerDispatch(invocations: readonly Record<string, unknown>[], dispatchCount: number): void {
   expect(invocations).toHaveLength(dispatchCount);
   for (const invocation of invocations) expect(invocation).toMatchObject({
@@ -217,14 +243,28 @@ describe("Terminal-Bench 2 product profile", () => {
     const selected = await selectTerminalBench2Runtime(context, { draftId: "tb2", ...request() });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
-    const outer = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))) as { profiles: Record<string, unknown> };
-    expect(TerminalBench2SelectionManifestSchema.parse(outer.profiles[TERMINAL_BENCH_2_PROFILE]).execution).toEqual({ source: "dataset", nTasks: 1, nAttempts: 1, nConcurrent: 1, maxRetries: 0 });
+    const outer = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))));
+    const profile = TerminalBench2SelectionManifestSchema.parse(outer.profiles?.[TERMINAL_BENCH_2_PROFILE]);
+    expect(profile.execution).toEqual({ source: "dataset", nTasks: 1, nAttempts: 1, nConcurrent: 1, maxRetries: 0 });
     const quoted = await runQuote(context, { draftId: "tb2" });
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
     const locked = runLock(context, { draftId: "tb2" });
     expect(locked.ok, JSON.stringify(locked)).toBe(true);
     if (!locked.ok) return;
     const runBytes = getSealedBytes(workspaceDir, locked.result.runSha256);
+    const runtimeDependencyDigests = [
+      outer.harbor.executableSha256,
+      ...outer.source.resolved.files.map((file) => file.sha256),
+      profile.dataset.registrySnapshotSha256,
+      ...profile.selectedTask.material.files.map((file) => file.sha256),
+    ];
+    const registryBytes = getSealedBytes(workspaceDir, profile.dataset.registrySnapshotSha256);
+    rmSync(sealedRecordPath(workspaceDir, profile.dataset.registrySnapshotSha256));
+    expect(() => buildRegistrationClosure(workspaceDir, runBytes, locked.result.runSha256, "2026-08-13T00:00:00.000Z")).toThrow(/no sealed record/u);
+    writeFileSync(sealedRecordPath(workspaceDir, profile.dataset.registrySnapshotSha256), "tampered registry");
+    expect(() => buildRegistrationClosure(workspaceDir, runBytes, locked.result.runSha256, "2026-08-13T00:00:00.000Z")).toThrow(/do not match their digest/u);
+    writeFileSync(sealedRecordPath(workspaceDir, profile.dataset.registrySnapshotSha256), registryBytes);
+    expectTransitiveRuntimeDependencies(runBytes, locked.result.runSha256, runtimeDependencyDigests);
     const registration = readRunPublicationExtension(JSON.parse(new TextDecoder().decode(runBytes)) as Record<string, unknown>)!.registrationArtifacts;
     expect(registration.map((entry) => entry.role)).toEqual([HARBOR_SELECTION_ROLE, TERMINAL_BENCH_2_SELECTION_ROLE].sort());
     expect(registration).toEqual(expect.arrayContaining([
@@ -241,6 +281,7 @@ describe("Terminal-Bench 2 product profile", () => {
         `/publication-artifacts/sha256/${entry.artifact.digest.sha256}`,
         getSealedBytes(workspaceDir, entry.artifact.digest.sha256),
       );
+      await expectPublishedRuntimeDependencies(source.base, "tb2", runtimeDependencyDigests);
 
       const launch = await runLaunch(context, { draftId: "tb2" });
       expect(launch.ok, JSON.stringify(launch)).toBe(true);
@@ -301,7 +342,8 @@ describe("Terminal-Bench 2 product profile", () => {
     const selected = await selectTerminalBench2Runtime(context, { draftId: "migrated", ...request(), taskMaterialPath: selectedDataset, taskRevision: migratedTaskRevision, migrationManifestSha256: migrated.result.manifestSha256 });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
     if (!selected.ok) return;
-    const profile = TerminalBench2SelectionManifestSchema.parse((JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))) as { profiles: Record<string, unknown> }).profiles[TERMINAL_BENCH_2_PROFILE]);
+    const outer = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))));
+    const profile = TerminalBench2SelectionManifestSchema.parse(outer.profiles?.[TERMINAL_BENCH_2_PROFILE]);
     expect(profile.migrationManifestSha256).toBe(migrated.result.manifestSha256);
     expect(profile.selectedTask.material.checksum).toBe(migrated.result.manifest.runnable.checksum);
     expect((await runQuote(context, { draftId: "migrated" })).ok).toBe(true);
@@ -309,6 +351,19 @@ describe("Terminal-Bench 2 product profile", () => {
     expect(locked.ok, JSON.stringify(locked)).toBe(true);
     if (!locked.ok) return;
     const runBytes = getSealedBytes(workspaceDir, locked.result.runSha256);
+    const runtimeDependencyDigests = [
+      outer.harbor.executableSha256,
+      ...outer.source.resolved.files.map((file) => file.sha256),
+      profile.dataset.registrySnapshotSha256,
+      ...profile.selectedTask.material.files.map((file) => file.sha256),
+      migrated.result.manifest.harbor.executableSha256,
+      migrated.result.manifest.command.stdoutSha256,
+      migrated.result.manifest.command.stderrSha256,
+      ...migrated.result.manifest.source.files.map((file) => file.sha256),
+      ...migrated.result.manifest.transformed.files.map((file) => file.sha256),
+      ...migrated.result.manifest.runnable.files.map((file) => file.sha256),
+    ];
+    expectTransitiveRuntimeDependencies(runBytes, locked.result.runSha256, runtimeDependencyDigests);
     const run = JSON.parse(new TextDecoder().decode(runBytes)) as Record<string, unknown>;
     const registration = readRunPublicationExtension(run)!.registrationArtifacts;
     expect(registration.map((entry) => entry.role)).toEqual([
@@ -339,6 +394,7 @@ describe("Terminal-Bench 2 product profile", () => {
         `/publication-artifacts/sha256/${entry.artifact.digest.sha256}`,
         getSealedBytes(workspaceDir, entry.artifact.digest.sha256),
       );
+      await expectPublishedRuntimeDependencies(source.base, "migrated", runtimeDependencyDigests);
 
       const launch = await runLaunch(context, { draftId: "migrated" });
       expect(launch.ok, JSON.stringify(launch)).toBe(true);
