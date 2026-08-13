@@ -155,6 +155,23 @@ export function materialFromState(
   };
 }
 
+/** Minimum representable ISO gap between two adjacent record announcements (1ms). */
+const RECORD_ANNOUNCEMENT_STEP_MS = 1;
+
+/**
+ * Announcement timestamp for the record at `ordinal` in an evaluation's publication set, based at
+ * the outbox-shared `createdAt`. Distinct ordinals yield strictly-increasing instants so each record
+ * advances the append-only signed source head; the value is a pure function of the persisted base
+ * and ordinal, so a resumed publish recomputes the identical timestamp.
+ */
+function advanceAnnouncementTimestamp(base: string, ordinal: number): string {
+  const baseMs = Date.parse(base);
+  if (!Number.isFinite(baseMs)) {
+    throw new EvaluatorCoordinatorFailure("evaluation-publication-timestamp-invalid", base);
+  }
+  return new Date(baseMs + ordinal * RECORD_ANNOUNCEMENT_STEP_MS).toISOString();
+}
+
 function sha256Bytes32(digest: `sha256:${string}`): `0x${string}` {
   const hex = digest.slice("sha256:".length);
   if (!/^[0-9a-f]{64}$/u.test(hex)) throw new EvaluatorCoordinatorFailure("invalid-sha256-digest");
@@ -609,13 +626,40 @@ export class NativeEvaluatorCoordinator {
 
   private async publish(id: NativeOperationId): Promise<void> {
     const artifacts = this.input.state.listEvaluationArtifacts(id);
+    // A verdict graph publishes SIX records (evaluation task, submission, verdict, Delivery,
+    // Delivery envelope, evidence) into ONE append-only signed source whose head must STRICTLY
+    // advance per announcement (see packages/discovery/serve/src/source-writer.ts).
+    // `recordVerdictReady` stamps every row of the graph with one shared `createdAt`, so announcing
+    // them all at that instant collides on record 2+: record 1 advances the head to the shared
+    // instant and the other five are refused with `SourceWriterIntegrityError` FOREVER, because the
+    // retry re-reads the same fixed `createdAt` (defect #46, live round 28 / task 1236 — the
+    // evaluator-side sibling of the solver-side defect #24 that #2560 fixed the same way).
+    //
+    // Derive each record's announcement timestamp from its stable ordinal over the FULL per-
+    // evaluation publication set — including rows already `published`. Distinct ordinals give
+    // strictly-increasing timestamps in drain order; because the already-published rows keep their
+    // ordinals, the still-pending records of a WEDGED evaluation advance PAST the head that its
+    // first record already set instead of restarting from the shared `createdAt`. The derivation is
+    // a pure function of persisted data, so a resumed publish recomputes the identical timestamp and
+    // any record already committed to the source reconciles idempotently rather than re-colliding.
+    const ordinals = new Map<string, number>(
+      this.input.state.listEvaluationPublications(id)
+        .map((publication, index) => [publication.publicationKey, index] as const),
+    );
     for (const publication of this.input.state.listPendingEvaluationPublications()
       .filter(({ evaluationId }) => evaluationId === id)) {
       const artifact = artifacts.find(({ role, digest }) =>
         role === publication.role && digest === publication.recordDigest,
       );
       if (artifact === undefined) throw new EvaluatorCoordinatorFailure("evaluation-publication-artifact-missing");
-      const receipt = await this.input.publisher.publish({ publication, artifact });
+      const createdAt = advanceAnnouncementTimestamp(
+        publication.createdAt,
+        ordinals.get(publication.publicationKey) ?? 0,
+      );
+      const receipt = await this.input.publisher.publish({
+        publication: { ...publication, createdAt },
+        artifact,
+      });
       this.input.state.recordEvaluationPublicationPublished(publication.publicationKey, receipt);
     }
     // A second evaluation whose byte-identical verdict graph a prior evaluation already announced

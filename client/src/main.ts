@@ -2594,6 +2594,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
       profileStore: nativeProfileStore,
       store: sharedStore,
+      // Defect #45, same class as finding E39 below. `CompositionRootInput.logger` is optional and
+      // this call site never supplied it, so `buildProjector` omitted it in turn and EVERY
+      // `logger?.warn` inside `ProjectorLoop` and `createProjectorEnrich` was a no-op in
+      // production — including the one that reports a failed announcement publication. A verdict
+      // announcement could be suppressed on every single tick with nothing whatsoever in the
+      // daemon log. Same console-based shape every other loop in this file wires up.
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
       ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
     });
 
@@ -2683,12 +2693,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         // evaluator `state` and the coordinator's own verification gate exist, install the REAL
         // adapter so the projector re-verifies this operator's own announced verdicts against
         // durable state instead of refusing them.
-        const { buildNativeVerdictObservationAdapter } =
+        const { buildNativeVerdictObservationAdapter, buildNativeEvaluationDeliveryRecordResolver } =
           await import('./daemon/native-verdict-observation.js');
         nativeRuntime.installVerdictObservation(buildNativeVerdictObservationAdapter({
           state: fleetEvaluator.state,
           verification: fleetEvaluator.composition.verification,
         }));
+        // Defect #45. Same state, same moment, same reason: the today generation this fleet pins
+        // carries no `evaluationDeliveryDigest` on `VerdictDeliveryClaimed`, so the announce leg's
+        // `resolveRecord('evaluation-delivery')` reads the durable artifact by engagement — and the
+        // gate installed just above is what then binds those bytes to exactly one durable row.
+        nativeRuntime.installEvaluationDeliveryRecords(
+          buildNativeEvaluationDeliveryRecordResolver(fleetEvaluator.state),
+        );
         evaluatorConfig = {
           composition: fleetEvaluator.composition,
           pollIntervalMs: config.pollIntervalMs,

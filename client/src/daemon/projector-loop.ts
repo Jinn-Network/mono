@@ -211,17 +211,28 @@ export class ProjectorLoop {
       previousEntryDigest: priorEntryDigest,
       initialSequence: priorEntryDigest !== null ? BigInt(priorHead!.sequence) + 1n : undefined,
     });
-    // Announcement publication can refuse or throw on roles the composition has not wired yet
-    // (e.g. evaluation-delivery resolveRecord gap b). A throw must not discard the reducer's
-    // observations or leave the chain-log cursor ahead of the projection cursor — that would
-    // permanently drop TaskCreated facts the work loop needs for the next claim.
+    // Announcement publication can refuse or throw — a record the serving plane cannot supply, a
+    // role the composition has not wired. A throw must not discard the reducer's observations or
+    // leave the chain-log cursor ahead of the projection cursor — that would permanently drop
+    // TaskCreated facts the work loop needs for the next claim.
+    //
+    // But it must not be QUIET either (defect #45, the #33/#36/#43 opacity class): the cursor
+    // advances below and `hasCanonicalEvent` then filters these events out of every later tick's
+    // `publicationEvents`, so the announcements this tick would have published are dropped for
+    // good — including a decision-grade verdict announcement, which the ratified DR-2026-08-05
+    // G-loop criterion requires. The log therefore names the cause (native refusals carry role +
+    // on-chain anchor digest + reason in their message) AND the loss.
     let result: Awaited<ReturnType<typeof projectAnnouncements>>;
     try {
       result = await projectAnnouncements(publicationTransition, ports);
     } catch (err) {
+      const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
       this.config.logger?.warn(
-        `[projector] announcement publication failed (non-fatal): `
-          + `${err instanceof Error ? err.message : String(err)}`,
+        `[projector] announcement publication failed (non-fatal): ${cause}; `
+          + `dropped announcements for ${publicationEvents.length} publication event(s) `
+          + `[${[...new Set(publicationEvents.map((event) => event.event))].join(', ')}] `
+          + 'at blocks '
+          + `${[...new Set(publicationEvents.map((event) => String(event.derivation.blockNumber)))].join(', ')}`,
       );
       result = { announcements: [], entries: [], pages: [], refusals: [] };
     }

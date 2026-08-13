@@ -229,6 +229,30 @@ export interface NativeEvaluationPublicationRow {
   readonly createdAt: string;
 }
 
+interface RawEvaluationPublication {
+  publication_key: NativeOperationId;
+  evaluation_id: NativeOperationId;
+  source_id: string;
+  role: string;
+  record_digest: `sha256:${string}`;
+  status: "intent" | "published";
+  detail_json: string;
+  created_at: string;
+}
+
+function evaluationPublicationRow(value: RawEvaluationPublication): NativeEvaluationPublicationRow {
+  return {
+    publicationKey: value.publication_key,
+    evaluationId: value.evaluation_id,
+    sourceId: value.source_id,
+    role: value.role,
+    recordDigest: value.record_digest,
+    status: value.status,
+    detail: JSON.parse(value.detail_json),
+    createdAt: value.created_at,
+  };
+}
+
 export interface NativeEvaluationAuthority {
   readonly requester: { readonly signerKey: string; readonly sealingTime: string };
   readonly admission: { readonly signerKey: string; readonly effectiveTime: string };
@@ -1108,19 +1132,22 @@ export class NativeEvaluatorStateRepository {
   listPendingEvaluationPublications(): readonly NativeEvaluationPublicationRow[] {
     return (this.store.db.prepare(
       "SELECT * FROM native_evaluation_publication_outbox WHERE status = 'intent' ORDER BY rowid",
-    ).all() as Array<{
-      publication_key: NativeOperationId; evaluation_id: NativeOperationId; source_id: string;
-      role: string; record_digest: `sha256:${string}`; status: "intent"; detail_json: string; created_at: string;
-    }>).map((value) => ({
-      publicationKey: value.publication_key,
-      evaluationId: value.evaluation_id,
-      sourceId: value.source_id,
-      role: value.role,
-      recordDigest: value.record_digest,
-      status: value.status,
-      detail: JSON.parse(value.detail_json),
-      createdAt: value.created_at,
-    }));
+    ).all() as RawEvaluationPublication[]).map(evaluationPublicationRow);
+  }
+
+  /**
+   * Every publication of one evaluation in the SAME order the publish loop drains
+   * `listPendingEvaluationPublications` in (`rowid` — verdict-graph insertion order) — including
+   * rows already `published`. A record's index in this ordering is its stable announcement ordinal:
+   * `rowid` is assigned at insert and never moves on the `intent → published` UPDATE, so a resumed
+   * publish of a partially-published evaluation reproduces the exact ordinals it had before. The
+   * coordinator derives a strictly-advancing announcement timestamp from that ordinal so distinct
+   * records of one verdict graph never collide on the append-only signed source head.
+   */
+  listEvaluationPublications(evaluation: NativeOperationId): readonly NativeEvaluationPublicationRow[] {
+    return (this.store.db.prepare(
+      "SELECT * FROM native_evaluation_publication_outbox WHERE evaluation_id = ? ORDER BY rowid",
+    ).all(evaluation) as RawEvaluationPublication[]).map(evaluationPublicationRow);
   }
 
   recordEvaluationPublicationPublished(publication: NativeOperationId, detail: unknown): void {

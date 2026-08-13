@@ -1,8 +1,13 @@
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { documentDigest } from "@jinn-network/task-execution-protocol";
+import { archivePagePath } from "@jinn-network/record-discovery-protocol";
 import { Store } from "../../src/store/store.js";
+import { openNativeEvaluatorPublisher } from "../../src/daemon/native-evaluator-publisher.js";
 import {
   NativeEvaluatorStateRepository,
   NativeEvaluatorStateConflictError,
@@ -131,6 +136,9 @@ const verification = buildNativeEvaluatorVerdictVerification({
 
 function coordinatorFor(state: NativeEvaluatorStateRepository, input: {
   readonly observations: readonly { readonly terminal: boolean; readonly state: string }[];
+  /** Swap the role-capturing stub for a REAL signed evaluator source (defect #46). */
+  readonly publisher?: ConstructorParameters<typeof NativeEvaluatorCoordinator>[0]["publisher"];
+  readonly now?: () => Date;
 }) {
   let observation = 0;
   let attemptOpened = false;
@@ -194,15 +202,19 @@ function coordinatorFor(state: NativeEvaluatorStateRepository, input: {
       awaitIndexed: async () => ({ status: "indexed" }),
       getRecord: async () => evidenceBytes,
     },
-    publisher: {
+    publisher: input.publisher ?? ({
       sourceId: "urn:jinn:source:evaluator-records",
       publish: async ({ artifact }: { artifact: { role: string; digest: string } }) => {
         published.push(artifact.role);
         return { location: `https://evaluator.example/${artifact.digest}`, sequence: "1", entryDigest: artifact.digest };
       },
-    } as never,
+    } as never),
     verification,
-    retry: { delayMs: 5_000, maxDelayMs: 300_000 },
+    retry: {
+      delayMs: 5_000,
+      maxDelayMs: 300_000,
+      ...(input.now === undefined ? {} : { now: input.now }),
+    },
   });
   return { coordinator, published };
 }
@@ -443,5 +455,148 @@ describe("native evaluator retraction pause", () => {
     ).get(id) as { detail_json: string } | undefined;
     expect(JSON.parse(audit!.detail_json)).toMatchObject({ state: "complete" });
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "complete" });
+  });
+});
+
+/**
+ * Defect #46 — the EVALUATOR-side sibling of the solver-side defect #24 that #2560 fixed
+ * (a339c926a). A verdict graph publishes SIX records into ONE append-only signed source whose head
+ * must strictly advance per announcement. `recordVerdictReady` computes `this.timestamp()` once and
+ * writes that identical `created_at` to all six outbox rows, so record 1 published, set the head to
+ * that instant, and the other five — `evaluation-delivery` among them — were refused forever with
+ * `SourceWriterIntegrityError`, the retry re-reading the same fixed base (live round 28, task 1236).
+ *
+ * These run against the REAL `openNativeEvaluatorPublisher` source, so the refusal under test is the
+ * production `SourceWriterIntegrityError` and not a re-spelling of it.
+ */
+describe("native evaluator verdict publication timestamps (defect #46)", () => {
+  const roots: string[] = [];
+  const closers: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    await Promise.all(closers.splice(0).map((close) => close().catch(() => undefined)));
+    await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  const sourceSigner = {
+    keyId: "did:key:evaluator-discovery",
+    sign: () => new Uint8Array([1, 2, 3]),
+    verify: (_payload: Uint8Array, signature: Uint8Array) =>
+      signature.length === 3 && signature[0] === 1 && signature[1] === 2 && signature[2] === 3,
+  };
+
+  async function realPublisher() {
+    const rootDir = await mkdtemp(join(tmpdir(), "jinn-evaluator-46-"));
+    roots.push(rootDir);
+    const publisher = await openNativeEvaluatorPublisher({
+      rootDir,
+      publicBaseUrl: "https://evaluator.example/native",
+      source: { agent: "urn:jinn:evaluator:golden", name: "evaluator-records" },
+      signer: sourceSigner,
+    });
+    closers.push(() => publisher.close());
+    return publisher;
+  }
+
+  /** The announcement timestamp the signed source actually committed at each sequence. */
+  async function announcementTimestamps(
+    publisher: Awaited<ReturnType<typeof realPublisher>>,
+    count: number,
+  ): Promise<string[]> {
+    const timestamps: string[] = [];
+    for (let sequence = 1; sequence <= count; sequence += 1) {
+      const response = await publisher.handler(new Request(
+        `https://evaluator.example/native${archivePagePath("evaluator-records", String(sequence).padStart(16, "0"))}`,
+      ));
+      expect(response.status).toBe(200);
+      const parsed = JSON.parse(await response.text()) as {
+        entries: Array<{ entry: { timestamp: string } }>;
+      };
+      timestamps.push(parsed.entries[0]!.entry.timestamp);
+    }
+    return timestamps;
+  }
+
+  function expectStrictlyAdvancing(timestamps: readonly string[]): void {
+    for (let index = 1; index < timestamps.length; index += 1) {
+      expect(Date.parse(timestamps[index]!)).toBeGreaterThan(Date.parse(timestamps[index - 1]!));
+    }
+  }
+
+  it("commits all six verdict records with strictly-advancing announcement timestamps", async () => {
+    const { state, id } = seed();
+    const publisher = await realPublisher();
+    const { coordinator } = coordinatorFor(state, {
+      observations: [{ terminal: false, state: "executing" }, { terminal: true, state: "delivered" }],
+      publisher,
+    });
+
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluating" });
+    const advanced = await coordinator.reconcileEvaluation(id) as { kind: string; reason?: string };
+    expect(advanced.kind).not.toBe("failed");
+    expect(advanced.reason).toBeUndefined();
+    expect(state.getEvaluation(id)?.state).toBe("verdict-published");
+
+    // Every outbox row of the graph shares ONE `created_at` — the live condition — and all six
+    // records nonetheless reached the source, which would have refused any two sharing a timestamp.
+    const rows = state.listEvaluationPublications(id);
+    expect(rows).toHaveLength(6);
+    expect(new Set(rows.map(({ createdAt }) => createdAt)).size).toBe(1);
+    expect(rows.every(({ status }) => status === "published")).toBe(true);
+    expectStrictlyAdvancing(await announcementTimestamps(publisher, 6));
+  });
+
+  it("recovers a wedged evaluation whose first record already advanced the head (round 28, task 1236)", async () => {
+    const { state, id } = seed();
+    const publisher = await realPublisher();
+    let committed = 0;
+    let faulting = true;
+    // One record commits, then the source goes away: the exact durable shape observed live —
+    // 6 outbox rows, 1 distinct `created_at`, 1 published / 5 `intent`, head parked at that instant.
+    const faultingPublisher = {
+      sourceId: publisher.sourceId,
+      publish: async (value: Parameters<typeof publisher.publish>[0]) => {
+        if (faulting && committed >= 1) throw new Error("evaluator source briefly unavailable");
+        committed += 1;
+        return publisher.publish(value);
+      },
+    };
+    let nowMs = Date.parse("2026-08-12T22:42:29Z");
+    const { coordinator } = coordinatorFor(state, {
+      observations: [{ terminal: false, state: "executing" }, { terminal: true, state: "delivered" }],
+      publisher: faultingPublisher as never,
+      now: () => new Date(nowMs),
+    });
+
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluating" });
+    await expect(coordinator.reconcileEvaluation(id))
+      .resolves.toMatchObject({ kind: "paused" });
+    expect(state.getEvaluation(id)).toMatchObject({ state: "paused" });
+
+    const [headTimestamp] = await announcementTimestamps(publisher, 1);
+    const pendingBefore = state.listPendingEvaluationPublications()
+      .filter(({ evaluationId }) => evaluationId === id);
+    expect(pendingBefore).toHaveLength(5);
+    // Every still-pending record carries the SAME outbox `created_at` as the one already committed,
+    // and the head sits exactly on it — the condition under which naive re-publishing collides with
+    // the advanced head forever.
+    expect(new Set(pendingBefore.map(({ createdAt }) => createdAt)).size).toBe(1);
+    expect(pendingBefore[0]!.createdAt).toBe(headTimestamp);
+    expect(pendingBefore.map(({ role }) => role)).toContain("evaluation-delivery");
+
+    // Source healthy, backoff elapsed: the five stuck records must republish with timestamps that
+    // advance strictly PAST the current head, with no manual intervention.
+    faulting = false;
+    nowMs += 300_001;
+    const resumed = await coordinator.reconcileEvaluation(id) as { kind: string; reason?: string };
+    expect(resumed.kind).not.toBe("failed");
+    expect(resumed.reason).toBeUndefined();
+    expect(state.getEvaluation(id)?.state).toBe("verdict-published");
+    expect(state.listPendingEvaluationPublications()
+      .filter(({ evaluationId }) => evaluationId === id)).toHaveLength(0);
+
+    const timestamps = await announcementTimestamps(publisher, 6);
+    expect(timestamps[0]).toBe(headTimestamp);
+    expectStrictlyAdvancing(timestamps);
   });
 });
