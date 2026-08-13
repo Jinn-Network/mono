@@ -80,6 +80,7 @@ export function executionEnv(launch: LaunchEnv): Record<string, string> {
     "JINN_HARNESS_PIN_DIGEST",
     "JINN_LOADOUT_DIR",
     "CLAUDE_CONFIG_DIR",
+    "JINN_CLAUDE_OAUTH_TOKEN_FILE",
     "CODEX_HOME",
     "HERMES_HOME",
     "TMPDIR",

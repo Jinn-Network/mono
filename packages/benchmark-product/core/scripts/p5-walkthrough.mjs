@@ -137,9 +137,14 @@ export function p5ArmPinning(effectiveRequirements) {
 async function main() {
   const claudePath = resolve(option("--claude", "JINN_P5_CLAUDE_PATH"));
   const claudeVersion = option("--claude-version", "JINN_P5_CLAUDE_VERSION");
+  const claudeTokenFile = resolve(option("--claude-token-file", "JINN_P5_CLAUDE_TOKEN_FILE"));
   const dockerPath = resolve(option("--docker", "JINN_P5_DOCKER_PATH"));
-  for (const [label, path] of [["Claude Code", claudePath], ["Docker", dockerPath]]) {
-    if (!isAbsolute(path) || !existsSync(path)) fail(`${label} executable is not an existing absolute path`);
+  for (const [label, path] of [
+    ["Claude Code", claudePath],
+    ["Claude setup-token file", claudeTokenFile],
+    ["Docker", dockerPath],
+  ]) {
+    if (!isAbsolute(path) || !existsSync(path)) fail(`${label} is not an existing absolute path`);
   }
   const requestedOutput = option("--output-dir", "JINN_P5_OUTPUT_DIR", { required: false });
   const runRoot = requestedOutput === undefined
@@ -168,6 +173,10 @@ async function main() {
     executablePath: claudePath,
     harnessVersion: claudeVersion,
     artifacts,
+    oauthCredential: {
+      tokenFilePath: claudeTokenFile,
+      wrapperPath: join(runRoot, "demo1-claude-oauth-wrapper.mjs"),
+    },
   });
   const readiness = await runtime.probe();
   if (!readiness.ready) {

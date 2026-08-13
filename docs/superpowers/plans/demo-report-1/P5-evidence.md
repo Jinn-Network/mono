@@ -146,15 +146,34 @@ Final non-Docker reruns on Node 22 passed:
 - package inventory, source boundaries, and architecture generator: 28/28, followed by an exact
   generated-topology check.
 
-## Required continuation
+## Authorized recovery path
 
-The pinned-image and grader-valid-slate issues are resolved. Continuation now requires an explicit,
-attempt-safe Claude credential path whose readiness probe runs under the same isolated environment
-as execution. Host login state must not be copied into attempt workspaces implicitly. After that
-contract is implemented and independently verified, the operator must authorize a wholly new P5
-run: the locked Run recorded above cannot be resumed, retried, or topped up. A new run must again
-perform the green baseline before dispatch, account all 12 newly locked cells, emit the local
-immutable bundle, delete the builder workspace, and pass cold verification.
+The pinned-image and grader-valid-slate issues are resolved. On 2026-08-13 the operator identified
+the already-provisioned `claude setup-token` credential and authorized a wholly new P5 run. The
+credential remains in its operator-owned, non-workspace 0600 file; its path and bytes are not
+sealed into the Run, launch plan, transcript, or repository.
+
+The recovery implementation does not copy the operator's default Claude configuration into an
+attempt. Instead, each newly sealed solve Submission carries one opaque capability-grant
+descriptor. After durable spawn intent, the local backend resolves that descriptor into a 0600
+file under the attempt's private `secrets/` directory. A deterministic product-owned wrapper reads
+that file inside the child process, sets `CLAUDE_CODE_OAUTH_TOKEN` with `CLAUDE_FORCE_OAUTH=1`,
+removes conflicting Anthropic environment variables, invokes the exact bound Claude executable,
+and exits with it. The launch plan contains only the `secrets/<target>` reference. Secret bytes are
+zeroed where mutable and the attempt secrets directory is removed at terminal harvest.
+
+The wrapper digest is the sealed harness executable digest. Its source binds and re-verifies the
+underlying Claude executable path and digest before every invocation, so the wrapper cannot hide
+Claude binary drift. Readiness now uses that same wrapper and token-file contract with a freshly
+created `CLAUDE_CONFIG_DIR`, then deletes the probe directory. The real preflight passed with
+Claude Code `2.1.222`, exact model inventory `claude-haiku-4-5-20251001`, and distinct recorded
+wrapper and Claude-binary digests. This proves the former ambient-vs-isolated authentication gap is
+closed without weakening per-attempt state isolation.
+
+The new run must still repeat the disk gate and real three-task gold-PASS/empty-FAIL baseline before
+dispatch, account all 12 newly locked cells, emit the local immutable bundle, delete the builder
+workspace, and pass cold verification. The earlier locked Run remains terminal and is never
+resumed, retried, or topped up.
 
 ## Publication boundary
 

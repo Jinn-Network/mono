@@ -164,6 +164,8 @@ export interface PreparedEvaluationCell {
 
 export interface LocalVenue {
   readonly backend: LocalTaskExecutionBackend;
+  /** Opaque solve-Submission grants required by this venue's selected launcher deployment. */
+  readonly solveCapabilityGrants?: Readonly<Record<string, unknown>>;
   /** Synchronously proves this constructor owns the sole durable state-root writer before a run
    * driver is journaled. Optional only for narrow in-memory unit venues. */
   readonly assertRunOwnership?: () => void;
@@ -848,6 +850,16 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     launcherDeployments,
     provisioner,
     provisionerCapabilities,
+    ...(options.demo1ClaudeRuntime?.credential === undefined
+      ? {}
+      : {
+        capabilityGrants: (grants: Readonly<Record<string, unknown>>) =>
+          Object.entries(grants).map(([key, descriptor]) => ({ key, descriptor })),
+        secretForwardResolver: {
+          resolve: (input: { readonly grantKey: string; readonly descriptor: unknown }) =>
+            options.demo1ClaudeRuntime!.credential!.resolve(input),
+        },
+      }),
     now: options.now,
   });
 
@@ -952,6 +964,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
 
   return {
     backend,
+    ...(options.demo1ClaudeRuntime?.credential === undefined
+      ? {}
+      : { solveCapabilityGrants: options.demo1ClaudeRuntime.credential.capabilityGrants }),
     assertRunOwnership() {
       backend.assertStateRootOwnership();
     },

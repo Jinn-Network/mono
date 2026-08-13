@@ -281,6 +281,35 @@ describe("launchAndWatch (§10.1 op 4 / §7.4)", () => {
     expect(events.map((event) => event.kind)).toEqual(["dispatch", "claimed", "delivered"]);
   });
 
+  test("seals opaque capability grants into each new Submission without changing requirements", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    const originalSubmit = backend.submit.bind(backend);
+    let observed: Record<string, unknown> | undefined;
+    backend.submit = async (taskBytes, submissionBytes) => {
+      observed ??= JSON.parse(new TextDecoder().decode(submissionBytes)) as Record<string, unknown>;
+      return originalSubmit(taskBytes, submissionBytes);
+    };
+    for await (const event of launchAndWatch(bench, run, backend, baseOpts(
+      runDigest,
+      sealedTasks,
+      backend,
+      { capabilityGrants: { "demo1-claude-oauth-token": { kind: "opaque/1" } } },
+    ))) {
+      if (event.kind === "delivered") break;
+    }
+    expect(observed?.capabilityGrants).toEqual({
+      "demo1-claude-oauth-token": { kind: "opaque/1" },
+    });
+    const firstCell = expectedCellSet(bench, run)[0]!;
+    const firstArm = run.arms.find((arm) => arm.armId === firstCell.armId)!;
+    expect(observed?.requirements).toEqual({
+      ...run.policy.submissionBaseline,
+      ...firstArm.pinning,
+    });
+  });
+
   test("IMPORTANT F: backend.watch path advances cursor to terminal and aborts without hang", async () => {
     const { bench, run, runDigest, tasks } = await miniatureContext();
     const sealedTasks = sealingTasks(tasks);

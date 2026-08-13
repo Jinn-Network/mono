@@ -204,6 +204,7 @@ describe("directory provisioner", () => {
         JINN_ATTEMPT_UNDECLARED: "must-not-cross",
         JINN_HARNESS_PIN_VERSION: "1.2.3",
         JINN_LOADOUT_DIR: "/attempt/input/loadout",
+        JINN_CLAUDE_OAUTH_TOKEN_FILE: "secrets/claude-oauth",
         OPENROUTER_API_KEY: "secrets/key",
         LEAKED_TOKEN: "ambient-token",
       },
@@ -211,6 +212,7 @@ describe("directory provisioner", () => {
       JINN_ATTEMPT_INPUT: "/attempt/input",
       JINN_HARNESS_PIN_VERSION: "1.2.3",
       JINN_LOADOUT_DIR: "/attempt/input/loadout",
+      JINN_CLAUDE_OAUTH_TOKEN_FILE: "secrets/claude-oauth",
       OPENROUTER_API_KEY: "secrets/key",
     });
   });

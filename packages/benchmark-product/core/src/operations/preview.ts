@@ -212,6 +212,9 @@ export function runPreview(
         const events = launchAndWatch(compiled.previewBenchmarkRecord, compiled.plannedRun.record, venue.backend, {
           runDigest: compiled.plannedRun.digest,
           taskBytesFor: (taskDigestHex) => getSealedBytes(clockedContext.workspaceDir, taskDigestHex),
+          ...(venue.solveCapabilityGrants === undefined
+            ? {}
+            : { capabilityGrants: venue.solveCapabilityGrants }),
           clock: { now: () => new Date(context.clock()) },
         });
 

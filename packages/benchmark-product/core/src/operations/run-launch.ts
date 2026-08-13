@@ -276,6 +276,9 @@ export function runLaunch(
               const events = launchAndWatch(loaded.benchRecord, loaded.runRecord, cancellation.backend, {
                 runDigest: `sha256:${loaded.runSha256}`,
                 taskBytesFor: taskBytesForFactory(clockedContext.workspaceDir),
+                ...(venue.solveCapabilityGrants === undefined
+                  ? {}
+                  : { capabilityGrants: venue.solveCapabilityGrants }),
                 clock: { now: () => new Date(context.clock()) },
                 signal: cancellation.signal,
                 get earlyClose() {
@@ -405,6 +408,9 @@ export function runResume(
                 const events = resumeRun(loaded.benchRecord, loaded.runRecord, cancellation.backend, {
                   runDigest: `sha256:${loaded.runSha256}`,
                   taskBytesFor: taskBytesForFactory(clockedContext.workspaceDir),
+                  ...(venue.solveCapabilityGrants === undefined
+                    ? {}
+                    : { capabilityGrants: venue.solveCapabilityGrants }),
                   clock: { now: () => new Date(context.clock()) },
                   outstanding,
                   signal: cancellation.signal,
