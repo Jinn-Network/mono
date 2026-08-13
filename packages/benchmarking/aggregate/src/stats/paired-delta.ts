@@ -24,12 +24,27 @@ export interface PairedDeltaIntervalResult {
   readonly low: number;
   readonly high: number;
   readonly unit: "source-cluster";
-  /** Total xorshift32-v1 draws across both bootstrap passes. */
+  /** Unique xorshift32-v1 draws in the shared bootstrap ensemble. */
   readonly draws: number;
   readonly clusters: readonly {
     readonly key: readonly ["source" | "sourceCommitment", string];
     readonly members: readonly string[];
   }[];
+}
+
+function sameClusterManifest(
+  lower: PairedDeltaIntervalResult["clusters"],
+  upper: PairedDeltaIntervalResult["clusters"],
+): boolean {
+  if (lower.length !== upper.length) return false;
+  return lower.every((cluster, clusterIndex) => {
+    const candidate = upper[clusterIndex];
+    if (candidate === undefined
+      || cluster.key[0] !== candidate.key[0]
+      || cluster.key[1] !== candidate.key[1]
+      || cluster.members.length !== candidate.members.length) return false;
+    return cluster.members.every((member, memberIndex) => member === candidate.members[memberIndex]);
+  });
 }
 
 export function clusteredPairedDeltaInterval(
@@ -49,12 +64,21 @@ export function clusteredPairedDeltaInterval(
     resamples: opts.resamples,
     alpha: 1 - opts.alpha / 2,
   });
+  if (lower.draws !== upper.draws) {
+    throw new Error("clusteredPairedDeltaInterval: endpoint passes disagree on draw count");
+  }
+  if (!Object.is(lower.observed, upper.observed)) {
+    throw new Error("clusteredPairedDeltaInterval: endpoint passes disagree on observed value");
+  }
+  if (!sameClusterManifest(lower.clusters, upper.clusters)) {
+    throw new Error("clusteredPairedDeltaInterval: endpoint passes disagree on cluster manifest");
+  }
   return {
     delta: lower.observed,
     low: lower.lowerBound,
     high: upper.lowerBound,
     unit: "source-cluster",
-    draws: lower.draws + upper.draws,
+    draws: lower.draws,
     clusters: lower.clusters,
   };
 }

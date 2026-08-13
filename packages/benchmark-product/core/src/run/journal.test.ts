@@ -70,7 +70,15 @@ describe("append / read round trip", () => {
     const entries: RunJournalEntry[] = [
       // Legacy shape — no leg.
       { kind: "submission-accepted", at: "2026-08-05T00:00:00Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9") },
-      { kind: "submission-accepted", at: "2026-08-05T00:00:01Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("8"), leg: "solve" },
+      {
+        kind: "submission-accepted",
+        at: "2026-08-05T00:00:01Z",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("8"),
+        pinningEvidenceSha256: HEX("6"),
+        leg: "solve",
+      },
       { kind: "submission-accepted", at: "2026-08-05T00:00:02Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("7"), leg: "evaluation" },
     ];
     for (const entry of entries) appendRunJournalEntry(workspaceDir, "draft-1", entry);
@@ -299,6 +307,56 @@ describe("foldRunJournal — per-cell status", () => {
       { kind: "submission-accepted", at: "t0", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9") },
     ]);
     expect(fold.get(CELL_A)).toMatchObject({ status: "dispatched", lastDispatch: 1, submissionSha256: HEX("9") });
+  });
+
+  test("folds solve pinning evidence without letting evaluation legs overwrite it", () => {
+    const fold = foldRunJournal([
+      {
+        kind: "submission-accepted",
+        at: "t0",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("9"),
+        pinningEvidenceSha256: HEX("6"),
+        leg: "solve",
+      },
+      {
+        kind: "submission-accepted",
+        at: "t1",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("8"),
+        pinningEvidenceSha256: HEX("5"),
+        leg: "evaluation",
+      },
+    ]);
+    expect(fold.get(CELL_A)).toMatchObject({
+      submissionSha256: HEX("9"),
+      pinningEvidenceSha256: HEX("6"),
+    });
+  });
+
+  test("a later solve dispatch without proof clears the prior dispatch's evidence", () => {
+    const fold = foldRunJournal([
+      {
+        kind: "submission-accepted",
+        at: "t0",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("9"),
+        pinningEvidenceSha256: HEX("6"),
+        leg: "solve",
+      },
+      {
+        kind: "submission-accepted",
+        at: "t1",
+        cellKey: CELL_A,
+        dispatch: 2,
+        submissionSha256: HEX("8"),
+        leg: "solve",
+      },
+    ]);
+    expect(fold.get(CELL_A)?.pinningEvidenceSha256).toBeUndefined();
   });
 });
 

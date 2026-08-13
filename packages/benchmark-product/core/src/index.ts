@@ -77,6 +77,135 @@ export type {
   InspectRuntimeSelectionResolution,
 } from "./runtime/host-port.js";
 
+// Demo-1's explicit real-Claude runtime and byte-preserving arm construction. The product does
+// not discover executables or source content ambiently; callers bind both before lock.
+export {
+  DEMO1_CLAUDE_EFFORT,
+  DEMO1_CLAUDE_HARNESS_ID,
+  DEMO1_CLAUDE_MODEL_ID,
+  DEMO1_CLAUDE_MD_PATH,
+  DEMO1_EXPERIMENT_PATHS,
+  DEMO1_SKILL_PATH,
+  createDemo1ClaudeRuntimeBinding,
+  demo1ClaudeArmRequirements,
+  generateDemo1InstructionArtifacts,
+} from "./venue/demo1-claude.js";
+
+// Demo-1 pre-run selection is a fail-closed, product-owned method boundary. It consumes only
+// frozen source bytes and outcome-blind task evidence; a STOP inventory is a valid result.
+export {
+  DEMO1_DOCUMENT_SKILL_PATHS,
+  DEMO1_INSTRUCTION_TRANSFORM_ID,
+  DEMO1_INSTRUCTION_TRANSFORM_SPEC,
+  DEMO1_OUTCOME_BLIND_TASK_CHECKS,
+  DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR,
+  DEMO1_PRE_RUN_FREEZE_SCHEMA,
+  DEMO1_SKILLS_SOURCE_URL,
+  buildDemo1PreRunFreeze,
+  canonicalDemo1PreRunFreezeBytes,
+  demo1PreRunFreezeDigest,
+  parseDemo1UpstreamSkill,
+  verifyDemo1PreRunFreeze,
+} from "./method/demo1-prerun.js";
+
+// Demo-1 E4: benchmark-specific preregistration over an injected generic IPFS/ERC-8004 manifest
+// boundary. The witness is local handoff evidence, not a new record kind or publication claim.
+export {
+  DEMO1_PREREGISTRATION_BATCH_KIND,
+  DEMO1_PREREGISTRATION_MEDIA_TYPE,
+  anchorDemo1Preregistration,
+  canonicalDemo1PreregistrationCommitmentBytes,
+  canonicalDemo1PreregistrationWitnessBytes,
+  verifyDemo1PreregistrationOrdering,
+  verifyDemo1PreregistrationPreDispatch,
+  verifyDemo1PreregistrationRunOrdering,
+} from "./method/demo1-preregistration.js";
+export type {
+  Demo1OfficialDispatchEvidenceIdentity,
+  Demo1PreregistrationAnchorBoundary,
+  Demo1PreregistrationCommitment,
+  Demo1PreregistrationExternalBlock,
+  Demo1PreregistrationOrderingResult,
+  Demo1PreregistrationPreDispatchResult,
+  Demo1PreregistrationReadBack,
+  Demo1PreregistrationRunOrderingResult,
+  Demo1PreregistrationWitness,
+} from "./method/demo1-preregistration.js";
+export { DEMO1_PINNED_SKILLS_SOURCE } from "./method/demo1-prerun-source.js";
+export type {
+  Demo1AuthenticatedCandidateSource,
+  Demo1CandidateInput,
+  Demo1CandidateInventory,
+  Demo1EvidenceCheck,
+  Demo1EvidenceRef,
+  Demo1EvidenceStatus,
+  Demo1Pool,
+  Demo1PreRunFreeze,
+  Demo1PreRunFreezeDerived,
+  Demo1PreRunFreezeInput,
+  Demo1TaskEligibilityInput,
+  Demo1TaskInventory,
+} from "./method/demo1-prerun.js";
+
+// Demo-1 suitability and E2 sizing are local method artifacts, not new evidence record kinds.
+// They schedule only task identities already frozen by the pre-run method and cannot execute
+// Docker/model cells or claim power without complete rehearsal observations.
+export {
+  DEMO1_ARMS,
+  DEMO1_DESIGN_ARTIFACT_KIND,
+  DEMO1_E2_DECISION_SCHEMA,
+  DEMO1_E2_MIN_REPOSITORIES,
+  DEMO1_E2_REPLICATES,
+  DEMO1_E2_TASKS,
+  DEMO1_EQUIVALENCE_MARGIN,
+  DEMO1_HAIKU_EFFORT,
+  DEMO1_HAIKU_MODEL,
+  DEMO1_OFFICIAL_ARMS,
+  DEMO1_OFFICIAL_CELL_CEILING,
+  DEMO1_POWER_SIMULATIONS,
+  DEMO1_REHEARSAL_PLAN_SCHEMA,
+  DEMO1_SUITABILITY_REPLICATES,
+  DEMO1_SUITABILITY_TASKS,
+  DEMO1_TARGET_EFFECT,
+  DEMO1_TARGET_POWER,
+  assessDemo1HaikuSuitability,
+  buildDemo1RehearsalPlan,
+  buildDemo1RehearsalPlanFromFreeze,
+  canonicalDemo1E2DesignBytes,
+  demo1E2DesignDigest,
+  demo1RehearsalPlanDigest,
+  deriveDemo1E2Design,
+  selectDemo1OfficialDesign,
+  verifyDemo1E2Design,
+  verifyDemo1HaikuSuitabilityAssessment,
+  verifyDemo1RehearsalPlan,
+} from "./method/demo1-e2-design.js";
+export type {
+  Demo1DesignTask,
+  Demo1E2DesignDecision,
+  Demo1E2Estimates,
+  Demo1E2RehearsalInput,
+  Demo1E2TaskResult,
+  Demo1EmptyLoadoutEvidence,
+  Demo1HaikuSuitabilityAssessment,
+  Demo1PlannedCell,
+  Demo1RehearsalPlan,
+  Demo1RehearsalPlanInput,
+  Demo1SelectedDesign,
+  Demo1SimulatedDesignCandidate,
+  Demo1SuitabilityAttemptOutcome,
+  Demo1SuitabilityCellObservation,
+} from "./method/demo1-e2-design.js";
+export type {
+  Demo1ClaudeArm,
+  Demo1ClaudeCommand,
+  Demo1ClaudeReadiness,
+  Demo1ClaudeRuntimeBinding,
+  Demo1ClaudeRuntimeOptions,
+  Demo1InstructionArtifacts,
+  Demo1SkillFrontmatter,
+} from "./venue/demo1-claude.js";
+
 // Workspace metadata and the sealed-bytes store (spec §4.5): exact bytes, digest-addressed.
 export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/workspace.js";
 export type { WorkspaceMetadata } from "./workspace/workspace.js";

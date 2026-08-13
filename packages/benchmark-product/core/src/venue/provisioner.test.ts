@@ -21,6 +21,11 @@ import {
 } from "./provisioner.js";
 import { createGitRepositoryMirror } from "./repository-mirror.js";
 import { readVerdictEnvelope } from "./signing.js";
+import {
+  DEMO1_CLAUDE_MD_PATH,
+  DEMO1_SKILL_PATH,
+  generateDemo1InstructionArtifacts,
+} from "./demo1-claude.js";
 
 const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
 const EVALUATOR_2 = "urn:jinn:benchmark-product:local-venue:evaluator-2";
@@ -280,6 +285,104 @@ describe("createLocalProvisioner — repository-work cells", () => {
     expect(existsSync(join(paths.work, "README.md"))).toBe(true);
     expect(gitIn(paths.work, "rev-parse", "HEAD")).toBe(upstream.oid);
     expect(() => gitIn(paths.work, "symbolic-ref", "-q", "HEAD")).toThrow();
+  });
+
+  it("places native Claude instructions and extracts byte-identical clean patches for A, B, and no-file C", async () => {
+    const upstream = makeUpstreamRepository();
+    const artifacts = generateDemo1InstructionArtifacts(
+      new TextEncoder().encode("# Frozen source\n\nApply the procedure.\n"),
+      { name: "demo1", description: "Use for repository implementation tasks." },
+    );
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+
+    async function run(loadout: unknown): Promise<string> {
+      const root = mkdtempSync(join(tmpdir(), "provisioner-demo1-arm-"));
+      const paths = workspacePathsUnder(root);
+      const requirements: Record<string, unknown> = {
+        harness: { id: "claude-code", version: "2.1.222" },
+        model: { id: "claude-haiku-4-5-20251001" },
+        effort: "high",
+        ...(loadout === undefined ? {} : { loadout }),
+      };
+      const selected = createLocalProvisioner({
+        registry: createEvaluationCellRegistry(),
+        evaluators: [],
+        repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
+        demo1Instructions: artifacts,
+      })({
+        task,
+        sealedTaskBytes: new TextEncoder().encode("{}"),
+        dispatchContextBytes: new TextEncoder().encode("{}"),
+        submission: { requirements },
+        attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+      } as never);
+
+      await selected.contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      if (loadout === artifacts.skill) {
+        expect(readFileSync(join(paths.work, DEMO1_SKILL_PATH))).toEqual(Buffer.from(artifacts.skillMd));
+        expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(false);
+      } else if (loadout === artifacts.baseline) {
+        expect(readFileSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toEqual(Buffer.from(artifacts.claudeMd));
+        expect(existsSync(join(paths.work, DEMO1_SKILL_PATH))).toBe(false);
+      } else {
+        expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(false);
+        expect(existsSync(join(paths.work, DEMO1_SKILL_PATH))).toBe(false);
+      }
+      writeFileSync(join(paths.work, "README.md"), "upstream\nchanged\n");
+      await selected.contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+      ] as never);
+      return readFileSync(join(paths.out, "patch"), "utf8");
+    }
+
+    const skillPatch = await run(artifacts.skill);
+    const claudeMdPatch = await run(artifacts.baseline);
+    const noFilePatch = await run(undefined);
+    expect(skillPatch).toBe(noFilePatch);
+    expect(claudeMdPatch).toBe(noFilePatch);
+    expect(noFilePatch).toContain("+changed");
+    expect(noFilePatch).not.toContain("CLAUDE.md");
+    expect(noFilePatch).not.toContain("SKILL.md");
+    expect(noFilePatch).not.toContain("jinn-demo1-skill-plugin");
+  });
+
+  it("refuses every Demo-1 arm when the task repository already carries an instruction path", async () => {
+    const upstreamDir = mkdtempSync(join(tmpdir(), "provisioner-demo1-conflict-"));
+    gitIn(upstreamDir, "init", "--quiet", "--initial-branch", "main");
+    gitIn(upstreamDir, "config", "user.email", "test@example.invalid");
+    gitIn(upstreamDir, "config", "user.name", "Test");
+    writeFileSync(join(upstreamDir, "README.md"), "upstream\n");
+    writeFileSync(join(upstreamDir, "CLAUDE.md"), "pre-existing\n");
+    gitIn(upstreamDir, "add", ".");
+    gitIn(upstreamDir, "commit", "--quiet", "-m", "initial");
+    const upstream = { uri: `file://${upstreamDir}`, oid: gitIn(upstreamDir, "rev-parse", "HEAD") };
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+    const root = mkdtempSync(join(tmpdir(), "provisioner-demo1-conflict-attempt-"));
+    const artifacts = generateDemo1InstructionArtifacts(new TextEncoder().encode("body\n"), {
+      name: "demo1",
+      description: "Use for repository tasks.",
+    });
+    const requirements = { harness: { id: "claude-code" } };
+    const paths = workspacePathsUnder(root);
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
+      demo1Instructions: artifacts,
+    })({
+      task,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await expect(selected.contract.setup(
+      { task, effectiveRequirements: requirements } as never,
+      paths,
+      [],
+    )).rejects.toThrow(/already contains experiment instruction path/u);
+    expect(existsSync(paths.work)).toBe(false);
   });
 
   it("refuses a Task with no repository-state input", async () => {

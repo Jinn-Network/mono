@@ -9,6 +9,7 @@ import type { ScopedDiscoverySigner } from '@jinn-network/marketplace-projector'
 import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import { openVenueState, type VenueStateDatabase } from '@jinn-network/marketplace-venue-base';
 import { Store } from '../../src/store/store.js';
+import { NativeAnnouncementRecordError } from '../../src/daemon/composition-root.js';
 import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
 import { ProjectorLoop, type ProjectorLoopConfig } from '../../src/daemon/projector-loop.js';
 import {
@@ -489,5 +490,42 @@ describe('projector loop', () => {
     expect(warn.mock.calls.flat().join('\n')).toContain('announcement publication failed');
     expect(cursorStore.readObservations()).toHaveLength(1);
     expect(cursorStore.read()!.liveBlockNumber).toBe(120n);
+  });
+
+  // Defect #45: the swallow above is correct (observations and the cursor must survive) but it
+  // was OPAQUE — an operator saw nothing naming what was refused or what was lost, and because
+  // the cursor advances and `hasCanonicalEvent` filters these events out of every later tick, the
+  // announcements are gone for good rather than retried.
+  it('names the refusal and the announcements it permanently dropped', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(120);
+    chain.setFinalized(120n);
+    chain.addLog(120n, taskCreatedLog());
+
+    const warn = vi.fn();
+    const digest = `sha256:${'e'.repeat(64)}` as const;
+    const { projector } = loop({
+      chain,
+      state,
+      logger: { info: vi.fn(), warn },
+      resolveRecord: async () => {
+        throw new NativeAnnouncementRecordError(
+          'evaluation-delivery',
+          "no digest-verified bytes on this operator's serving plane or its configured peers",
+          digest,
+        );
+      },
+    });
+
+    await projector.tick();
+
+    const logged = warn.mock.calls.flat().join('\n');
+    expect(logged).toContain('NativeAnnouncementRecordError'); // the error NAME, not just its text
+    expect(logged).toContain('evaluation-delivery'); // the role
+    expect(logged).toContain(digest); // the on-chain anchor
+    expect(logged).toContain('serving plane'); // the cause
+    expect(logged).toContain('dropped announcements for 1 publication event(s)'); // the loss
+    expect(logged).toContain('[TaskCreated]');
+    expect(logged).toContain('120');
   });
 });

@@ -90,6 +90,53 @@ export class NativeVerdictObservationError extends Error {
 
 const EVALUATION_DELIVERY_ROLE = "evaluation-delivery";
 
+/**
+ * The projector's `resolveRecord("evaluation-delivery")` leg for the TODAY generation (defect #45).
+ *
+ * Today-generation `VerdictDeliveryClaimed` carries no `evaluationDeliveryDigest`
+ * (`packages/marketplace/projector/src/events.ts`'s `todayEvent`), so there is no digest to fetch
+ * by. The ENGAGEMENT is the key instead — the SAME narrowing
+ * `buildNativeVerdictObservationAdapter` applies below, minus the digest bind it cannot apply yet.
+ *
+ * This is not self-attestation, and the announce plane does not take these bytes on trust: the M4b
+ * gate runs immediately after, on this exact material, and re-derives `documentDigest(material.bytes)`
+ * to bind it to exactly one durable `evaluation-delivery` artifact row, then re-verifies the whole
+ * aggregate through the coordinator's own gate. Bytes substituted anywhere between here and there
+ * join zero rows and are refused. Returning the bytes is what lets that gate run at all.
+ *
+ * `undefined` (never a throw) on a miss and on an ambiguous match: `resolveRecord`'s caller turns
+ * that into a named refusal, and more than one durable evaluation for one on-chain claim is a
+ * derivation defect, not a record to guess between.
+ */
+export function buildNativeEvaluationDeliveryRecordResolver(
+  state: Pick<NativeVerdictObservationStateReader, "listEvaluations" | "listEvaluationArtifacts">,
+): (lookup: {
+  readonly chainId: number;
+  readonly coordinator: string;
+  readonly taskId: bigint;
+  readonly solutionAttemptIndex: number;
+  readonly verdictCode: number;
+  readonly evaluationRequestId: string;
+}) => Promise<Uint8Array | undefined> {
+  return async (lookup) => {
+    const requestId = lookup.evaluationRequestId.toLowerCase();
+    const coordinator = lookup.coordinator.toLowerCase();
+    const matches = state.listEvaluations().filter((evaluation) =>
+      evaluation.chainId === lookup.chainId
+      && evaluation.coordinator.toLowerCase() === coordinator
+      && evaluation.taskId === lookup.taskId
+      && evaluation.solutionAttemptIndex === lookup.solutionAttemptIndex
+      && evaluation.verdictCode === lookup.verdictCode
+      && (evaluation.evaluationRequestId ?? "").toLowerCase() === requestId);
+    if (matches.length !== 1) return undefined;
+    const deliveries = state
+      .listEvaluationArtifacts(matches[0]!.evaluationId)
+      .filter(({ role }) => role === EVALUATION_DELIVERY_ROLE);
+    if (deliveries.length !== 1) return undefined;
+    return deliveries[0]!.bytes;
+  };
+}
+
 function sha256ToBytes32(digest: `sha256:${string}`): `0x${string}` {
   const hex = digest.slice("sha256:".length);
   if (!/^[0-9a-f]{64}$/u.test(hex)) {

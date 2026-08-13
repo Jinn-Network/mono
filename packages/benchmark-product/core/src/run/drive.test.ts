@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { CellStatusEvent } from "@jinn-network/benchmarking-run";
-import type {
-  AttemptUri,
-  DeliveryRef,
-  ObservationSnapshot,
-  SubmissionAck,
-  SubmissionUri,
+import {
+  TaskExecutionError,
+  type AttemptUri,
+  type DeliveryRef,
+  type ObservationSnapshot,
+  type SubmissionAck,
+  type SubmissionUri,
 } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { sealTask } from "@jinn-network/task-execution-protocol";
@@ -21,6 +22,10 @@ import {
 } from "./drive.js";
 import { readRunJournalEntries } from "./journal.js";
 import { EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
+import {
+  parseRunPinningEvidence,
+  type VerifiedRunPinningCheck,
+} from "./pinning-evidence.js";
 
 let workspaceDir: string;
 
@@ -74,6 +79,7 @@ function makeFakeBackend(options: {
   submitResult?: SubmissionAck;
   observeResult?: ObservationSnapshot;
   hasFetchArtifact?: boolean;
+  pinningEvidence?: VerifiedRunPinningCheck;
   calls?: { submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] };
 }): ProxiedBackend {
   const calls = options.calls ?? { submits: [] };
@@ -109,6 +115,9 @@ function makeFakeBackend(options: {
       if (bytes === undefined) throw new Error(`fetchArtifact: no scripted bytes for ${JSON.stringify(descriptor)}`);
       return bytes;
     };
+  }
+  if (options.pinningEvidence !== undefined) {
+    backend.pinningEvidenceForSubmission = () => ({ ...options.pinningEvidence! });
   }
   return backend;
 }
@@ -158,7 +167,11 @@ function fakeVenue(prepared: { taskBytes: Uint8Array; taskSha256: string }, eval
 describe("createRecordingProxy", () => {
   test("journals submission-accepted from a solve-shaped nonce (<cellKey>:<dispatch>) then delegates", async () => {
     const clock = makeClock();
-    const backend = makeFakeBackend({});
+    const pinningEvidence = {
+      ready: true,
+      checkedRequirementsDigest: `sha256:${"7".repeat(64)}` as const,
+    };
+    const backend = makeFakeBackend({ pinningEvidence });
     const proxy = createRecordingProxy(backend, { workspaceDir, draftId: "draft-1", liveClock: clock });
 
     const submissionBytes = utf8({ nonce: `${CELL_A}:1`, submission: "urn:uuid:00000000-0000-4000-8000-000000000001" });
@@ -170,7 +183,40 @@ describe("createRecordingProxy", () => {
     expect(entries[0]).toMatchObject({ kind: "submission-accepted", cellKey: CELL_A, dispatch: 1, leg: "solve" });
     if (entries[0]?.kind === "submission-accepted") {
       expect(entries[0].submissionSha256).toBe(sha256Hex(submissionBytes));
+      expect(entries[0].pinningEvidenceSha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(parseRunPinningEvidence(
+        getSealedBytes(workspaceDir, entries[0].pinningEvidenceSha256!),
+      )).toEqual({ admission: pinningEvidence });
     }
+  });
+
+  test("a rejected Submission is never journaled as accepted and carries no fabricated proof", async () => {
+    const backend = makeFakeBackend({
+      submitResult: {
+        accepted: false,
+        error: new TaskExecutionError("unsupported-requirement", {
+          detail: "model pin mismatch",
+        }),
+      },
+      pinningEvidence: {
+        ready: true,
+        checkedRequirementsDigest: `sha256:${"7".repeat(64)}`,
+      },
+    });
+    const proxy = createRecordingProxy(backend, {
+      workspaceDir,
+      draftId: "draft-1",
+      liveClock: makeClock(),
+    });
+    const submissionBytes = utf8({
+      nonce: `${CELL_A}:1`,
+      submission: "urn:uuid:00000000-0000-4000-8000-000000000001",
+    });
+
+    await expect(proxy.submit(new Uint8Array([1]), submissionBytes)).resolves.toMatchObject({
+      accepted: false,
+    });
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual([]);
   });
 
   test("journals submission-accepted with leg 'evaluation' from an eval-shaped nonce (eval:<runSha256>:e<i>:<cellKey>:<dispatch>)", async () => {
@@ -453,6 +499,58 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
     expect(evaluationEntry).toMatchObject({ evaluationTerminal: "could-not-grade", detail: expect.stringContaining("EvaluationSpec") });
     // The delivery WAS still journaled — only the evaluation leg failed.
     expect(entries.find((entry) => entry.kind === "delivery")).toBeDefined();
+  });
+
+  test("async evaluation preparation failure -> one could-not-grade terminal per evaluator leg", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const solveDeliveryDigestHex = "d".repeat(64);
+    const predictionArtifactHex = "e".repeat(64);
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: { "att-solve-1": [fakeDeliveryRef("att-solve-1", solveDeliveryDigestHex)] },
+      deliveryBytesByDigest: {
+        [`sha256:${solveDeliveryDigestHex}`]: utf8({
+          outputs: [{ name: "prediction", digest: { sha256: predictionArtifactHex } }],
+        }),
+      },
+      artifactBytesByDigest: { [predictionArtifactHex]: utf8({ probabilityYes: "0.5" }) },
+    });
+    const failingVenue = fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }, 2);
+    failingVenue.prepareEvaluationCell = async () => {
+      throw new Error("pinned grader image is unavailable");
+    };
+
+    await driveCellEvents(
+      {
+        workspaceDir,
+        draftId: "draft-1",
+        venue: failingVenue,
+        backend,
+        runSha256: "r".repeat(64),
+        owner: "urn:uuid:owner",
+        cellWindowMs: 3_600_000,
+        minVerdicts: 2,
+        liveClock: clock,
+      },
+      (async function* () {
+        yield { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" } as CellStatusEvent;
+      })(),
+    );
+
+    expect(readRunJournalEntries(workspaceDir, "draft-1").filter((entry) => entry.kind === "evaluation"))
+      .toEqual([
+        expect.objectContaining({
+          evaluationTerminal: "could-not-grade",
+          detail: "pinned grader image is unavailable",
+          evalIndex: 1,
+        }),
+        expect.objectContaining({
+          evaluationTerminal: "could-not-grade",
+          detail: "pinned grader image is unavailable",
+          evalIndex: 2,
+        }),
+      ]);
   });
 
   test("evaluation submission rejected by the backend -> could-not-grade with the backend's detail", async () => {

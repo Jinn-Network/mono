@@ -56,9 +56,9 @@ describe("clusteredPairedDeltaInterval", () => {
     expect(result.delta).toBeCloseTo(1 / 3, 12);
   });
 
-  test("reports two bootstrap passes worth of draws over whole clusters", () => {
+  test("reports unique draws in the shared bootstrap ensemble over whole clusters", () => {
     const result = clusteredPairedDeltaInterval(mixed, { seed: 11, resamples: 250, alpha: 0.05 });
-    expect(result.draws).toBe(2 * 250 * 6);
+    expect(result.draws).toBe(250 * 6);
     expect(result.unit).toBe("source-cluster");
     expect(result.clusters).toHaveLength(6);
   });
@@ -71,7 +71,7 @@ describe("clusteredPairedDeltaInterval", () => {
     ];
     const result = clusteredPairedDeltaInterval(grouped, { seed: 3, resamples: 100, alpha: 0.05 });
     expect(result.clusters).toHaveLength(2);
-    expect(result.draws).toBe(2 * 100 * 2);
+    expect(result.draws).toBe(100 * 2);
   });
 
   test("computes at the two-cluster floor", () => {

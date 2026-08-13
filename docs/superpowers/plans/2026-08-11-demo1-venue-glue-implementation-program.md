@@ -2,14 +2,14 @@
 
 | | |
 |---|---|
-| **Version** | 1.1 |
-| **Date** | 2026-08-12 |
+| **Version** | 1.2 |
+| **Date** | 2026-08-13 |
 | **Author** | GTM execution session (Ritsu + Claude Fable 5); seam facts from three deep code explorations, path:line-cited |
 | **Shape** | `design` (this document); execution packets are `feat`/`fix`/`test` |
 | **Depends on** | [`2026-08-11-demo-report-1-skill-ab-program.md`](./2026-08-11-demo-report-1-skill-ab-program.md) (the eval-method stream this engineering serves), [`2026-08-05-benchmark-product-design.md`](../specs/2026-08-05-benchmark-product-design.md) (§3 consumption contract, §7 venue) |
 | **Does not do** | Eval-method work (power analysis, red-team, lock, and the publication handoff — the sibling program owns it); network publication topology; marketplace venue; CI-dockerized grading; any GTM surface |
 
-Demo report #1 (the pre-registered skill-vs-AGENTS.md A/B) requires the
+Demo report #1 (the pre-registered skill-vs-native-CLAUDE.md A/B) requires the
 benchmark product's venue to run coding-agent arms with container grading
 and paired statistics. All capabilities exist as platform libraries but the
 venue wires only the prediction-forecast family (deliberate M1 scoping).
@@ -27,13 +27,23 @@ The operator approved completion through the **publication boundary**, not netwo
 Additional locked constraints:
 
 - P2 binds `claude-haiku-4-5-20251001` at `high` effort through a real product-owned inventory. It must support a true no-file arm C without falsely earning loadout `match`.
-- P2 deterministically generates `SKILL.md` and `AGENTS.md` from one literal frozen `source.md`; their instruction bodies are byte-identical. It materializes both through the same digest-verifying path, proves loader-visible placement, symmetrically excludes experiment-created instruction files from harvested patches, and proves normalized extracted patches byte-identical to no-loadout controls. If that requires a platform-semantics change, the packet stops for operator review.
+- P2 deterministically generates `SKILL.md` and native root `CLAUDE.md` from one literal frozen `source.md`; their instruction bodies are byte-identical. It materializes both through the same digest-verifying product path, proves loader-visible placement, symmetrically excludes experiment-created instruction files from harvested patches, and proves normalized extracted patches byte-identical to no-loadout controls.
 - P2b removes fabricated admission readiness; only real `verifyRunPinning` evidence and its references may yield Matrix `match`. Missing proof remains `unverifiable`; contradictory proof remains `mismatch`.
 - P3 is split into P3a (the pinned OCI grader package) and P3b (the benchmark-product binding). P3b owns the product dependency, boundary, and build-order edge; seals test material, image, parser, timeout, and grader-program identities; pre-stages images for `--pull never` grading; keeps grader networking disabled unless declared; and re-mints the P5 fixture after the final material contract lands.
 - Before the first canary publication of `@jinn-network/task-execution-oci-grader`, verify the npm-side trusted-publisher binding for this repository's protected `npm-publish` workflow. Repository configuration alone is not proof of the npm-side binding; if it cannot be verified, stop for operator action. Stable publication is not required by this program.
 - P5 remains a 3-task × 2-arm × 2-replicate **plumbing** gate and starts only with at least 40 GiB free. It proves all twelve cells accounted, gold PASS / empty FAIL, three repository clusters, and `draws === resamples × clusterCount`; it does not estimate capability.
 - The subsequent three-arm official design has a hard ceiling of 600 cells. The engineering packets must not bake in a larger run or automatic post-lock top-ups.
 - Insufficient disk, missing execution credentials, a failed or inconclusive Haiku gate, no eligible content artifact, or a required platform-semantics change produces a stop-and-evidence handoff. The program does not delete caches or user data, switch models or sources, or weaken a gate automatically.
+
+## 2026-08-13 native-baseline amendment
+
+P2 stopped with evidence that the selected Claude Code runtime does not load `AGENTS.md` and
+that its `--plugin-dir` requires a real plugin layout. The operator changed baseline B to the
+runtime's native root-level `CLAUDE.md`. P2 therefore generates candidate `SKILL.md` and baseline
+`CLAUDE.md` from one source, uses a valid plugin directory for A and native discovery for B, and
+excludes both experiment paths symmetrically. The motivating public debate remains AGENTS.md
+versus Skills, but the run and report comparison is explicitly Skill minus CLAUDE.md; it must not
+claim to be a literal execution of an AGENTS.md arm.
 
 ## Session kickoff (paste into a NEW session)
 
@@ -181,7 +191,7 @@ Verified blockers this packet exists to clear:
    loadout digests; `verifyRunPinning` passes for a fully-pinned arm and
    **rejects** a wrong model id / wrong loadout digest (negative tests).
 3. Two byte-identical-except-loadout arms lock, dispatch, and the launcher
-   receives deterministic `SKILL.md` and `AGENTS.md` artifacts generated
+   receives deterministic `SKILL.md` and `CLAUDE.md` artifacts generated
    from one literal frozen `source.md`. Their instruction bodies are
    byte-identical, both traverse the same digest-verifying materialization
    path, and argv carries the loader-visible placement.
@@ -312,7 +322,7 @@ the eval-design stream (the sibling program).
 
 P4b is additive: end-to-end coverage spans interval-present,
 interval-withheld (every native reason), and zero-pair reports. Full paired
-reports state Skill candidate minus AGENTS.md baseline, the interval, exact
+reports state Skill candidate minus CLAUDE.md baseline, the interval, exact
 alpha `0.0500`, and paired task count; compact cards, badges, and share copy
 remain number-free and link relatively to the full report. Existing Wilson
 public-bundle bytes remain exactly unchanged.

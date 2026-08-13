@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { verifyRunPinning } from "./pinning.js";
+import { checkedRequirementsDigest, verifyRunPinning } from "./pinning.js";
 
 const deployment = {
   executable: { path: "/opt/jinn/bin/claude", digest: "a".repeat(64) },
@@ -16,11 +16,15 @@ const deployment = {
 
 describe("verifyRunPinning", () => {
   test("requires the exact executable and every requested pin", async () => {
-    await expect(verifyRunPinning(deployment, {
+    const requirements = {
       harness: { id: "claude-code", version: "1.2.3", digest: "a".repeat(64) },
       model: { id: "opus" },
       loadout: { kind: "jinn.skill.v1", name: "review-skill", digest: { sha256: "b".repeat(64) } },
-    })).resolves.toEqual({ ready: true });
+    };
+    await expect(verifyRunPinning(deployment, requirements)).resolves.toEqual({
+      ready: true,
+      checkedRequirementsDigest: checkedRequirementsDigest(requirements),
+    });
   });
 
   test("accepts a jinn.harness-state.v1 pin against a matching sha256:-prefixed readiness entry (F9)", async () => {
@@ -35,11 +39,15 @@ describe("verifyRunPinning", () => {
         };
       },
     };
-    await expect(verifyRunPinning(harnessStateDeployment, {
+    const requirements = {
       harness: { id: "claude-code", version: "1.2.3", digest: "a".repeat(64) },
       model: { id: "opus" },
       loadout: { kind: "jinn.harness-state.v1", name: "learner-state", digest: `sha256:${"c".repeat(64)}` },
-    })).resolves.toEqual({ ready: true });
+    };
+    await expect(verifyRunPinning(harnessStateDeployment, requirements)).resolves.toEqual({
+      ready: true,
+      checkedRequirementsDigest: checkedRequirementsDigest(requirements),
+    });
   });
 
   test("refuses a jinn.harness-state.v1 pin the readiness probe does not carry", async () => {

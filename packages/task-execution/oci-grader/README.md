@@ -34,11 +34,18 @@ in advance. Callers that need the grader logic under the specification's own
 digest should bake it into a per-instance image and use
 `containerGraderReportSource` instead.
 
-## Never touches
+## Image staging and child authority
 
-The network (no `fetch`; only the container runtime reaches a registry), host
-credentials or signer material (refused by path inspection before any mount),
-evidence or trust packages, verdict signing (the caller seals verdicts).
+`ensurePinnedOciImage` is the explicit parent-side pre-stage operation. It may ask the container
+runtime to pull only the exact digest and then positively re-inspects it. A product evaluator child
+runs `runPinnedOciGrader` with `imagePullPolicy: "never"`: it may inspect the pre-staged digest, but
+cannot issue a pull. If the image disappears between parent preparation and child execution, the
+grader attempt fails as unavailable and never reaches a registry. Container execution also carries
+the runtime's own `--pull never` boundary.
+
+The package never touches host credentials or signer material (refused by path inspection before
+any mount), evidence or trust packages, or verdict signing (the caller seals verdicts). Grader
+networking is disabled unless the sealed specification and the host independently opt in.
 
 ## Authority
 

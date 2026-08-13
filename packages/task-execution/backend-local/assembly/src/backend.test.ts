@@ -27,6 +27,7 @@ import {
   type LocalTaskExecutionBackend,
   type LocalTaskExecutionBackendConfig,
 } from "./backend.js";
+import { checkedRequirementsDigest } from "./pinning.js";
 
 const roots: string[] = [];
 const backends: LocalTaskExecutionBackend[] = [];
@@ -311,12 +312,16 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
       models: ["fixture-model"],
       loadouts: [{ kind: "jinn.skill.v1" as const, name: "review-skill", digest: "b".repeat(64) }],
     }));
-    const backend = fixture(await stateRoot("deployment-pinning"), {
+    const root = await stateRoot("deployment-pinning");
+    const deployment = {
+      fixture: {
+        executable: { path: "/opt/jinn/fixture", digest: "a".repeat(64) },
+        probe,
+      },
+    };
+    let backend = fixture(root, {
       launcherDeployments: {
-        fixture: {
-          executable: { path: "/opt/jinn/fixture", digest: "a".repeat(64) },
-          probe,
-        },
+        ...deployment,
       },
     });
     expect((await backend.capabilities()).runPinning.keys).toContainEqual({
@@ -324,8 +329,27 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
     });
     await expect(backend.preflight({ taskProfile: profile.profile, requirements: { loadout } })).resolves.toEqual({ ready: true });
     const task = taskBytes({ requirements: { loadout } });
-    await expect(backend.submit(task, submissionBytes(task))).resolves.toMatchObject({ accepted: true });
+    const submission = submissionBytes(task);
+    const ack = await backend.submit(task, submission);
+    expect(ack).toMatchObject({ accepted: true });
+    if (!ack.accepted) throw new Error("expected accepted Submission");
+    const expectedEvidence = {
+      ready: true,
+      // The launcher checked the richer effective map (which includes the Task-owned loadout),
+      // while the reusable evidence identity is the run-owned Submission pinning map. This
+      // Submission adds no run pinning, so its checked map is exactly empty.
+      checkedRequirementsDigest: checkedRequirementsDigest({}),
+    };
+    expect(backend.pinningEvidenceForSubmission(ack.submission)).toEqual(expectedEvidence);
     expect(probe).toHaveBeenCalledTimes(2);
+
+    // The proof is accepted-Submission metadata, not ephemeral proxy state: an idempotent retry
+    // after backend restart can recover and journal the same exact evidence.
+    await backend.drain();
+    await backend.shutdown();
+    backend = fixture(root, { launcherDeployments: deployment });
+    expect(backend.pinningEvidenceForSubmission(ack.submission)).toEqual(expectedEvidence);
+    await expect(backend.submit(task, submission)).resolves.toEqual(ack);
   });
 
   test("rejects a swapped executable before setup or spawn", async () => {

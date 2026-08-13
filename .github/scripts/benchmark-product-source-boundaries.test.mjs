@@ -20,7 +20,9 @@
 // `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor` +
 // `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
 // sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters` (the
-// real evaluation leg), and `trust-core` (DSSE verdict signing). BP-13 (Report production/
+// real evaluation leg), and `trust-core` (DSSE verdict signing). Demo-1 P3b adds
+// `task-execution-oci-grader`, the product-owned SWE-rebench grader source and pinned-image
+// pre-staging edge. BP-13 (Report production/
 // verification) added `benchmarking-aggregate` (`produceReport`/`verifyReport`, the §9.2 method
 // registry). Everything else the design's §3 table names (`benchmarking-marketplace`, the
 // `evidence-*` family, `environment-record`) is scope for a later packet and stays refused here
@@ -79,6 +81,7 @@ const CORE_ALLOWED_JINN_PACKAGES = [
   '@jinn-network/task-execution-evaluation-harness',
   '@jinn-network/task-execution-evaluator-adapters',
   '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-oci-grader',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-supervisor',

@@ -9,9 +9,10 @@
  *
  * Two composable pieces:
  * - `createRecordingProxy` — a thin pass-through wrapper over the venue's real backend that
- *   durably records every accepted Submission (solve or evaluation) before delegating. It is
- *   bookkeeping only, never a backend substitute: every method except `submit` forwards
- *   unchanged, and `submit` itself still calls straight through to the real backend.
+ *   calls the real backend and durably records only a genuinely accepted Submission (solve or
+ *   evaluation). For solve legs it also stores the concrete backend's exact run-pinning proof,
+ *   when present. It is bookkeeping only, never a backend substitute: every method forwards to
+ *   the real backend.
  * - `driveCellEvents` — folds a `CellStatusEvent` stream into the run journal and, on delivery,
  *   runs the evaluation leg synchronously in-line (prepare → seal Submission → submit through
  *   the same proxy → drain → observe → harvest the verdict or record a could-not-grade fact).
@@ -46,9 +47,18 @@ import type {
 } from "@jinn-network/task-execution-backend";
 import { sealSubmission, type ProtocolObservation, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { refuse } from "../errors.js";
-import { EVALUATION_HARNESS_PIN, EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
+import {
+  EVALUATION_HARNESS_PIN,
+  EVALUATOR_REQUIREMENT_KEY,
+  type LocalVenue,
+  type PreparedEvaluationCell,
+} from "../venue/venue.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { appendRunJournalEntry } from "./journal.js";
+import {
+  canonicalRunPinningEvidenceBytes,
+  type VerifiedRunPinningCheck,
+} from "./pinning-evidence.js";
 import { deterministicUuidUri } from "./state.js";
 
 /** What `launchAndWatch` / `resumeRun` need (`TaskExecutionBackend`) plus `drain` (the local
@@ -63,6 +73,8 @@ export interface ProxiedBackend {
   deliveries(attempt: AttemptUri): Promise<DeliveryRef[]>;
   fetchDelivery(ref: DeliveryRef): Promise<Uint8Array>;
   fetchArtifact?(descriptor: ResourceDescriptor): Promise<Uint8Array>;
+  /** Concrete local-backend evidence seam; absent means no real run-pinning proof exists. */
+  pinningEvidenceForSubmission?(ref: SubmissionUri): VerifiedRunPinningCheck | undefined;
   drain(): Promise<void>;
 }
 
@@ -115,8 +127,19 @@ export function createRecordingProxy(
       }
       const nonce = typeof parsed?.nonce === "string" ? parsed.nonce : undefined;
       const coord = nonce === undefined ? undefined : cellKeyAndDispatchFromNonce(nonce);
-      if (coord !== undefined && nonce !== undefined) {
+      const ack = await backend.submit(taskBytes, submissionBytes, engagement);
+      if (ack.accepted && coord !== undefined && nonce !== undefined) {
         const submissionSha256 = putSealedBytes(deps.workspaceDir, submissionBytes);
+        const leg = nonce.startsWith("eval:") ? "evaluation" : "solve";
+        const pinningEvidence = leg === "solve"
+          ? backend.pinningEvidenceForSubmission?.(ack.submission)
+          : undefined;
+        const pinningEvidenceSha256 = pinningEvidence === undefined
+          ? undefined
+          : putSealedBytes(
+            deps.workspaceDir,
+            canonicalRunPinningEvidenceBytes(pinningEvidence, ack.digest),
+          );
         appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
           kind: "submission-accepted",
           at: deps.liveClock(),
@@ -125,10 +148,11 @@ export function createRecordingProxy(
           submissionSha256,
           // The `eval:` prefix is this driver's own evaluation-nonce marker (see
           // `cellKeyAndDispatchFromNonce`'s doc comment); everything else is a solve dispatch.
-          leg: nonce.startsWith("eval:") ? "evaluation" : "solve",
+          leg,
+          ...(pinningEvidenceSha256 === undefined ? {} : { pinningEvidenceSha256 }),
         });
       }
-      return backend.submit(taskBytes, submissionBytes, engagement);
+      return ack;
     },
     observe: (ref) => backend.observe(ref),
     watch: backend.watch === undefined ? undefined : (ref, cursor) => backend.watch!(ref, cursor),
@@ -137,6 +161,9 @@ export function createRecordingProxy(
     deliveries: (attempt) => backend.deliveries(attempt),
     fetchDelivery: (ref) => backend.fetchDelivery(ref),
     fetchArtifact: backend.fetchArtifact === undefined ? undefined : (descriptor) => backend.fetchArtifact!(descriptor),
+    pinningEvidenceForSubmission: backend.pinningEvidenceForSubmission === undefined
+      ? undefined
+      : (ref) => backend.pinningEvidenceForSubmission!(ref),
     drain: () => backend.drain(),
   };
 }
@@ -400,12 +427,23 @@ async function prepareAndDispatchEvaluation(
   }
   const evaluationSpecBytes = getSealedBytes(deps.workspaceDir, evaluationSpecSha256);
 
-  const prepared = deps.venue.prepareEvaluationCell({
-    subjectTaskBytes,
-    subjectDeliveryBytes,
-    resultArtifacts,
-    evaluationSpecBytes,
-  });
+  let prepared: PreparedEvaluationCell;
+  try {
+    prepared = await deps.venue.prepareEvaluationCell({
+      subjectTaskBytes,
+      subjectDeliveryBytes,
+      resultArtifacts,
+      evaluationSpecBytes,
+    });
+  } catch (cause) {
+    journalCouldNotGradeLegs(
+      deps,
+      cellKey,
+      cause instanceof Error ? cause.message : String(cause),
+      evalIndexes,
+    );
+    return;
+  }
   const storedTaskSha256 = putSealedBytes(deps.workspaceDir, prepared.taskBytes);
   if (storedTaskSha256 !== prepared.taskSha256) {
     refuse(

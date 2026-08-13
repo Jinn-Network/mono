@@ -6,6 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BenchmarkProductError } from "../errors.js";
 import { SAMPLE_REPOSITORY_WORK_LAUNCHER_ID } from "./sample-repository-work.js";
 import { createLocalVenue, EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "./venue.js";
+import {
+  DEMO1_CLAUDE_MODEL_ID,
+  createDemo1ClaudeRuntimeBinding,
+  demo1ClaudeArmRequirements,
+  generateDemo1InstructionArtifacts,
+} from "./demo1-claude.js";
 
 const NOW = (): string => new Date().toISOString();
 
@@ -114,5 +120,60 @@ describe("createLocalVenue task-profile admission", () => {
     } finally {
       await venue.shutdown();
     }
+  });
+});
+
+describe("createLocalVenue Demo-1 Claude deployment", () => {
+  function demo1Runtime() {
+    const artifacts = generateDemo1InstructionArtifacts(new TextEncoder().encode("frozen body\n"), {
+      name: "demo1",
+      description: "Use for repository tasks.",
+    });
+    return createDemo1ClaudeRuntimeBinding({
+      executablePath: process.execPath,
+      harnessVersion: "2.1.222",
+      artifacts,
+      command: async (_path, args) => args[0] === "auth"
+        ? { stdout: '{"loggedIn":true}' }
+        : { stdout: "2.1.222 (Claude Code)\n" },
+    });
+  }
+
+  it("advertises exact enforced model/effort inventory and dynamically verifies exact pins", async () => {
+    const runtime = demo1Runtime();
+    venue = createLocalVenue({ workspaceDir, now: NOW, demo1ClaudeRuntime: runtime });
+    const capabilities = await venue.backend.capabilities();
+    expect(capabilities.runPinning.keys.find((entry) => entry.key === "model"))
+      .toEqual({ key: "model", inventory: [DEMO1_CLAUDE_MODEL_ID], posture: "enforced" });
+    expect(capabilities.runPinning.keys.find((entry) => entry.key === "effort")?.inventory)
+      .toEqual(["high"]);
+
+    const pinned = demo1ClaudeArmRequirements(runtime, "skill");
+    await expect(venue.backend.preflight({
+      taskProfile: "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      requirements: pinned,
+    })).resolves.toMatchObject({ ready: true });
+    await expect(venue.backend.preflight({
+      taskProfile: "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      requirements: { ...pinned, model: { id: "claude-other" } },
+    })).resolves.toMatchObject({ ready: false });
+    await expect(venue.backend.preflight({
+      taskProfile: "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      requirements: {
+        ...pinned,
+        loadout: { ...runtime.artifacts.skill, digest: { sha256: "0".repeat(64) } },
+      },
+    })).resolves.toMatchObject({ ready: false });
+  });
+
+  it("admits true no-file C without adding a loadout pin", async () => {
+    const runtime = demo1Runtime();
+    venue = createLocalVenue({ workspaceDir, now: NOW, demo1ClaudeRuntime: runtime });
+    const requirements = demo1ClaudeArmRequirements(runtime, "no-file");
+    expect(requirements).not.toHaveProperty("loadout");
+    await expect(venue.backend.preflight({
+      taskProfile: "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      requirements,
+    })).resolves.toMatchObject({ ready: true });
   });
 });

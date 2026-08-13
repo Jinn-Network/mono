@@ -18,10 +18,9 @@ export function requirementsDigest(
  * The local backend's run-pinning admission result, mirrored structurally.
  *
  * The shape is `verifyRunPinning`'s (`task-execution-backend-local`
- * `assembly/src/pinning.ts`). It is mirrored rather than imported for two reasons: the
- * benchmarking source-boundary guard forbids every evidence and concrete-backend import
- * across the whole tree, and `verifyRunPinning` is not on the backend's public surface.
- * The host that ran the gate passes its result in.
+ * `assembly/src/pinning.ts`). It is mirrored rather than imported because the benchmarking
+ * source-boundary guard forbids concrete-backend imports across the whole tree. The host that
+ * ran the gate passes its result in through the injected evidence port.
  */
 export interface LocalRunPinningCheck {
   readonly ready: boolean;
@@ -29,12 +28,11 @@ export interface LocalRunPinningCheck {
   /**
    * `sha256:<hex>` over the JCS bytes of the requirements map the gate actually checked.
    *
-   * Not part of the backend's shape today; it binds the gate result to a specific pinning
-   * map so a receipt cannot be reused against a different one. When it is present and
-   * disagrees with the pinning being graded, the gate result is about some other map and
-   * carries no weight here — the enforced axes lose their admission leg.
+   * It binds the gate result to a specific pinning map so a receipt cannot be reused against a
+   * different one. It is required for an enforced axis to reach `match`; a bare `ready: true`
+   * proves no identity and carries no weight.
    */
-  readonly checkedRequirementsDigest?: string;
+  readonly checkedRequirementsDigest: `sha256:${string}`;
 }
 
 /**
@@ -223,11 +221,8 @@ function admissionForAxis(
   const admission = evidence?.admission;
   if (admission?.ready !== true) return "not-accepted";
   if (isUninspectableHarnessPin(axis, pinned)) return "not-accepted";
-  // A receipt that names a different requirements map is a receipt about a different cell.
-  if (
-    admission.checkedRequirementsDigest !== undefined
-    && admission.checkedRequirementsDigest !== requirementsDigest(pinning)
-  ) return "not-accepted";
+  // Missing identity is not proof. A receipt that names a different map is about another cell.
+  if (admission.checkedRequirementsDigest !== requirementsDigest(pinning)) return "not-accepted";
   return "accepted";
 }
 

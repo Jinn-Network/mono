@@ -1,16 +1,16 @@
 # E1 — Comparison Frame and Citation Map
 
-**Version:** 0.5 (operator-approved frame; independent-review corrections + delta-pass residuals applied)
-**Date:** 2026-08-12
+**Version:** 0.7 (E3 closure-preparation amendment)
+**Date:** 2026-08-13
 **Author:** E1 method-stream agent
 **Program:** `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` (Stage 2, packet E1)
-**Status:** **Frame approved by the operator (Ritsu).** Nothing is locked — the lock happens at the sealed Run record, after E2's power numbers and E3's red-team register close. One open operator question remains (§2.8).
+**Status:** **Frame approved by the operator (Ritsu).** Nothing is locked — the lock happens at the sealed Run record, after E2's power numbers and E3's pre-lock dispositions close. The publication framing is resolved (§2.8); network publication remains outside this program.
 
 ---
 
 ## 0. What this document is for
 
-Demo Report #1 is the product's first published benchmark. Its motivation section has to be real: there must be a live public argument the report speaks into, and the report has to close a gap that is actually open. Part 1 establishes both with verified sources. Part 2 records the approved comparison design, and keeps the rejected alternatives on the page so the choice stays auditable.
+Demo Report #1 is the product's first sealed benchmark report bundle. Its motivation section has to be real: there must be a live public argument the report speaks into, and the report has to close a gap that is actually open. Part 1 establishes both with verified sources. Part 2 records the approved comparison design, and keeps the rejected alternatives on the page so the choice stays auditable. This program stops at the independently recomputed publication handoff; it does not claim the report is published.
 
 Two things this document does not do. It does not design engineering (that is R1–R5 and P1–P5). It does not choose statistics (that is C3/R4 — every number in the report comes from a named `BENCHMARKING_METHOD_REGISTRY` method, and this document proposes no estimator).
 
@@ -18,12 +18,14 @@ Two things this document does not do. It does not design engineering (that is R1
 
 | Question | Decision |
 |---|---|
-| **Frame** | **Mechanism vs mechanism** — same agent, same bytes, delivery varied. The higher-pull public-skill on/off alternative is declined for this report and stays available as a second report (§2.6). |
+| **Frame** | **Mechanism vs mechanism** — same agent, same instruction-body bytes, delivery varied. The Skill wrapper retains its required upstream frontmatter; only the instruction body is byte-identical. The higher-pull public-skill on/off alternative is declined for this report and stays available as a second report (§2.6). |
 | **Arm count** | **Three arms.** Arm C is the manipulation check (§2.2). The two-arm fallback is not taken. |
-| **Content artifact** | **`anthropics/skills`** (Apache-2.0 verified; the four source-available document skills excluded). The SWE-Skills-Bench upgrade path stays blocked on independent verification (§2.3). |
+| **Content source** | **`anthropics/skills`** (the four source-available document skills excluded; the selected folder requires its own compatible license). The SWE-Skills-Bench C1 path is formally withdrawn for Demo-1 (§2.3). |
 | **Public pre-registration (E4)** | **Committed**, conditional on the P5 e2e gate being green (§2.10). |
+| **Flat-file mechanism (2026-08-13)** | **Native root `CLAUDE.md`.** P2 stopped after proving Claude Code does not load `AGENTS.md`; the operator chose the runtime-native file rather than an import shim or prompt injection. The motivating public debate is retained, but the measured and reported comparison is Skill minus CLAUDE.md. |
+| **Report framing (2026-08-13)** | **Name the Vercel comparison and Hacker News objection directly and respectfully.** Attribute only source-supported facts, describe Demo-1 as a controlled follow-up rather than a correction or takedown, and require the independent arithmetic/source fact-check in E3 J7. |
 
-Still open: publication framing (§2.8 item 1). Resolved by gates rather than by the operator: arm C's pinning mechanic (E2 evidence, §2.4) and the work-directory placement leg (P2's acceptance gate, §2.8 item 2).
+No comparison-frame operator question remains open. Arm C is the true no-file control and therefore has an intentionally unverifiable loadout axis. P2 owns verification of the resolved product-side placement and exclusion path. Publication topology, author-source identity, report origin, discovery, mirrors, Explorer ingestion, key custody, and errata policy remain decisions for the separate publication program.
 
 ---
 
@@ -31,7 +33,7 @@ Still open: publication framing (§2.8 item 1). Resolved by gates rather than by
 
 ## 1.1 The argument in one paragraph
 
-Coding agents can be given repository- or task-specific instructions two ways. A **context file** (`AGENTS.md`) is loaded into the agent's context unconditionally and in full, every turn. A **skill** (`SKILL.md`) is loaded through *progressive disclosure*: only its name and description sit in context at startup, and the body enters context only if the agent decides the description matches the task. Both mechanisms are open standards with broad vendor adoption. Practitioners disagree, publicly and with numbers, about which one actually produces better agent performance — and the loudest published comparison changed the content and the mechanism at the same time, which is a dominant objection in its own Hacker News thread.
+Coding agents can be given repository- or task-specific instructions through an always-on context file or through a progressively disclosed skill. The motivating public argument names `AGENTS.md`; the bound runtime is Claude Code, whose native always-on project file is root `CLAUDE.md` and which explicitly does not load `AGENTS.md`. A skill (`SKILL.md`) exposes its metadata at startup and loads the body only when the model routes to it. Practitioners disagree, publicly and with numbers, about which delivery shape performs better — and the loudest published comparison changed content and mechanism together.
 
 ## 1.2 The two mechanisms — primary sources
 
@@ -39,13 +41,14 @@ Coding agents can be given repository- or task-specific instructions two ways. A
 |---|---|
 | [agents.md](https://agents.md/) | The AGENTS.md format homepage. "A simple, open format for guiding coding agents." Reports use by over 60k open-source projects; states the standard is stewarded by the Agentic AI Foundation under the Linux Foundation; lists 20+ compatible tools including OpenAI Codex, GitHub Copilot, Gemini CLI, Cursor, VS Code, Devin, Zed, Aider, Warp, JetBrains Junie. |
 | [github.com/agentsmd/agents.md](https://github.com/agentsmd/agents.md) | The AGENTS.md specification repository. **License: MIT.** Hosts the spec text. (The Linux Foundation stewardship statement appears on the site, not on the repo landing page.) |
+| [Claude Code memory](https://code.claude.com/docs/en/memory#agents-md) | The runtime-native rule that resolved P2: Claude Code reads `CLAUDE.md`, not `AGENTS.md`; its documented interoperability options are a `CLAUDE.md` import or symlink. Demo-1 declines either shim because it would add a third mechanism to arm B. |
 | [agentskills.io](https://agentskills.io/home) | The Agent Skills open specification. A skill is a folder with a required `SKILL.md` (YAML metadata plus instructions) and optional `scripts/`, `references/`, `assets/`. States the format "was originally developed by Anthropic, released as an open standard." Documents the three-stage progressive disclosure model: Discovery (name + description at startup), Activation (full `SKILL.md` read when the task matches), Execution. Client showcase lists 40+ adopting products including Claude Code, ChatGPT/Codex, Gemini CLI, GitHub Copilot, VS Code, Cursor, Amp, Goose, OpenHands, Factory, JetBrains Junie, Roo Code, Kiro, Tabnine. |
 | [github.com/agentskills/agentskills](https://github.com/agentskills/agentskills) | The Agent Skills spec repository. **License: Apache-2.0 for code, CC-BY-4.0 for documentation.** |
 | [Agent Skills — Claude Platform Docs](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) | The canonical vendor documentation for the mechanism under test. Specifies the three loading levels precisely: **Level 1 metadata always loaded at startup (~100 tokens per skill, name + description in the system prompt)**; **Level 2 `SKILL.md` body loaded only when the skill is triggered** (under 5k tokens); Level 3 bundled resources loaded only when read. States the `description` "is what Claude matches your request against when determining whether to trigger the Skill." |
 | [Equipping agents for the real world with Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills) — Anthropic engineering, 16 Oct 2025 | The design rationale for progressive disclosure and composability; the origin post for the mechanism. |
 | [github.com/anthropics/skills](https://github.com/anthropics/skills) | Anthropic's public skills repository. **License: Apache-2.0 for many skills**; the four document skills (`docx`, `pdf`, `pptx`, `xlsx`) are **source-available, not open source**. Ships `./spec/` and `./template/`. Relevant to Part 2 content selection. |
 
-The mechanism difference that matters for this A/B is one sentence, and it is documented, not inferred: **AGENTS.md content is present unconditionally; skill body content is present only if the model routes to it.**
+The mechanism difference that matters for this A/B is documented, not inferred: **root `CLAUDE.md` content is loaded into every Claude Code session; the skill body enters context only if the model routes to it.**
 
 ## 1.3 The live claim that started the current fight
 
@@ -82,7 +85,7 @@ These matter most, because if either already ran our experiment, the demo report
 
 ## 1.6 The gap this report closes
 
-**No published study holds the instruction bytes constant and varies only the delivery mechanism between a progressive-disclosure skill and an always-on `AGENTS.md`.**
+**No verified published study holds the instruction-body bytes constant and varies only the delivery mechanism between a Claude Code progressive-disclosure skill and native always-on root `CLAUDE.md`.**
 
 Stated precisely, and with each clause backed above:
 
@@ -93,7 +96,7 @@ Stated precisely, and with each clause backed above:
 5. The two studies that do hold content fixed vary organization *within* the skill mechanism, not the mechanism itself (§1.5) — subject to the SkillJuror verification item.
 6. Practitioners are choosing between these mechanisms today at scale, and the mechanism they overwhelmingly choose is the one with the most contradictory evidence (§1.4, Harness Engineering).
 
-The honest framing of the motivation is therefore not "nobody has studied this." It is: **this question has been argued publicly with numbers on both sides, and every published number confounds what the instructions say with how they are delivered. We hold the bytes fixed and vary only the delivery.**
+The honest framing of the motivation is therefore not "nobody has studied this." It is: **this question has been argued publicly with numbers on both sides, and every published number confounds what the instructions say with how they are delivered. We hold the instruction-body bytes fixed and vary delivery; the Skill's upstream routing frontmatter remains a measured mechanism difference.**
 
 ## 1.7 Verification log
 
@@ -109,15 +112,15 @@ Sources seen in search results but **not fetched, and therefore not cited**: HAN
 
 ## 2.1 Approved frame: mechanism versus mechanism
 
-**Same agent. Same model. Same effort. Same tasks. Same instruction bytes. Only the delivery mechanism differs.**
+**Same agent. Same model. Same effort. Same tasks. Same instruction-body bytes. Only the delivery mechanism differs.**
 
 | Arm | Delivery | What the agent sees |
 |---|---|---|
 | **A — skill** | `SKILL.md` in the skills directory, loaded through the standard progressive-disclosure path | Name + description always in context; body enters context only on model-initiated activation |
-| **B — flat** | `AGENTS.md` at repository root | Body always in context, in full, every turn |
-| **C — neither** | No instruction content. Whether the arm is pinned as an explicit empty loadout or left unpinned is an **empirical pre-lock decision** (§2.4), because an empty loadout still materializes a file | Nothing |
+| **B — flat** | `CLAUDE.md` at repository root, loaded by Claude Code's native project-memory discovery | Body always in context, in full, every turn |
+| **C — neither** | True no-file control: no loadout and no experiment-created instruction path | Nothing; the loadout axis is truthfully `unverifiable` |
 
-The measured quantity is the effect of the *delivery mechanism*, with content held byte-identical. This is exactly the contrast the public argument needs and exactly the one no published work supplies.
+The measured quantity is the effect of the *delivery mechanism*, with the instruction body held byte-identical. The Skill's upstream frontmatter is additional delivered text and part of that mechanism. This is exactly the contrast the public argument needs and exactly the one no published work supplies.
 
 ## 2.2 Arms: three, approved
 
@@ -165,10 +168,10 @@ Requirements the content must satisfy:
 | Candidate | License status | Assessment |
 |---|---|---|
 | **C2 (approved) — a skill from [github.com/anthropics/skills](https://github.com/anthropics/skills)** | **Apache-2.0 for many skills, verified at the repository level.** The four document skills (`docx`, `pdf`, `pptx`, `xlsx`) are source-available and **must be excluded**. Because the repository is not uniformly licensed, **the chosen skill's license is confirmed from its own subfolder before lock** — repository-level verification is not sufficient. | License verified live. Authored as a skill by the mechanism's originator, which removes the strongest objection to a negative result for arm A ("you wrote a bad skill"). Ships an upstream `description`, satisfying §2.4. Constraint: the chosen skill's domain must plausibly bear on a SWE-shaped slate; the creative and enterprise categories do not, so the viable set is narrow and must be named before lock. |
-| **C1 (preferred upgrade, blocked) — a skill from the 49-skill SWE-Skills-Bench set** | **Unverified. Artifact repository returned 404 (§1.7).** | Strongest option on the merits: third-party authored, domain-matched, and already measured on/off in published work — so the "does this content do anything" prior is partly known, and we could deliberately select from the seven skills the paper reports as producing meaningful gains, which are the only ones where a mechanism contrast is measurable at all. **Blocked until availability and license verify.** Do not adopt on the strength of the paper alone. |
+| **C1 (withdrawn for Demo-1) — a skill from the 49-skill SWE-Skills-Bench set** | **Unverified. Artifact repository returned 404 (§1.7).** | Strong option on the merits, but unavailable for independent source-and-license verification. The operator fixed C2 as Demo-1's source; C1 is not a live upgrade or late switching path for this run. |
 | **C3 (not recommended) — content derived from the target repositories' own public docs** | Per-repository OSS licenses; heterogeneous. | Highest ecological validity — this is what real AGENTS.md files contain — but the worst risk profile. Leakage risk is highest (a repo's own docs may touch the very issue under test), licensing is per-repo rather than uniform, and if we generate or summarize the content ourselves we inherit exactly the confound the ETH Zurich study identified with LLM-generated context files, while losing "public and licensed." |
 
-**Approved: C2** — a skill from `anthropics/skills`, Apache-2.0, with the four source-available document skills excluded. C1 remains a documented upgrade path **if and only if** its availability and license verify independently (the artifact repo returned 404 at verification, §1.7); it is not adopted on the strength of the paper alone. The specific artifact, its upstream URL, its commit or version, its license, and its sha256 go into the Benchmark record before lock.
+**Approved: C2** — a skill from `anthropics/skills`, Apache-2.0, with the four source-available document skills excluded. **C1 is formally withdrawn for Demo-1.** Its artifact repository returned 404 at verification (§1.7), and the operator has fixed C2 as this report's source rather than retaining a late content-switching path. The specific C2 artifact, its upstream URL, its commit or version, its per-folder license, and its sha256 go into the Benchmark record before lock.
 
 ## 2.4 Content identity: how it is guaranteed and how a reader audits it
 
@@ -179,46 +182,30 @@ This is the mechanic the whole frame rests on. If a reader cannot verify content
 1. **One frozen source document.** `source.md` holds the instruction body verbatim from the upstream artifact. Its sha256 is recorded in the Benchmark record before lock.
 2. **A committed, deterministic transform** produces both arm materializations:
    - **Arm A:** `SKILL.md` = the upstream YAML frontmatter block (`name`, `description`) followed by `source.md` bytes verbatim.
-   - **Arm B:** `AGENTS.md` = `source.md` bytes verbatim. No frontmatter — the AGENTS.md format has no frontmatter requirement.
-3. **The delta between arms is therefore exactly:** the YAML frontmatter block, the file name and path, and the loading mechanism they select. Nothing else — **provided both arms materialize into the same directory.** If the placement question below resolves to branch 2 (arm B in the work directory, arm A at the input root), the arms also differ by directory, the delta is wider than this list, and the difference is declared as a confound rather than absorbed.
+   - **Arm B:** root `CLAUDE.md` = `source.md` bytes verbatim, with no frontmatter.
+3. **The delta between arms is therefore exactly:** the skill frontmatter, file path, and native loading mechanism. Both verified artifacts are copied into loader-visible paths below the same repository root.
 
-**Audit path published in the report:** `sha256(source.md)`, `sha256(SKILL.md)`, `sha256(AGENTS.md)`, the frontmatter block reproduced verbatim, the transform, and the upstream artifact URL and version. A reader reconstructs both arms from the source and checks the three digests. The claim "identical content" becomes checkable rather than asserted.
+**Audit path published in the report:** `sha256(source.md)`, `sha256(SKILL.md)`, `sha256(CLAUDE.md)`, the frontmatter block reproduced verbatim, the transform, and the upstream artifact URL and version. A reader reconstructs both arms from the source and checks the three digests. The claim "identical instruction body" becomes checkable rather than asserted.
 
-**Pinning — symmetric enforcement for arms A and B looks achievable, with one leg still to confirm.**
+**Pinning and placement — resolved by the 2026-08-13 operator decision and P2 implementation.**
 
-An earlier draft flagged an open risk: that arm A's skill could pin `enforced` while arm B's plain `AGENTS.md` could only be *attested*, leaving the two arms with different pinning strength. C1's recon identifies a viable path to closing it. One half is confirmed at head; the other is not yet, and this document does not claim it is.
+The platform's `jinn.skill.v1` materializer digest-verifies each single-file loadout under the sealed input root. The benchmark product then copies and re-hashes those verified bytes into one of two Claude-native locations:
 
-- **Confirmed — the digest-verified materialization path is shared.** Arm B's flat `AGENTS.md` fits the `jinn.skill.v1` loadout kind's single-file shape, so both arms can materialize through the identical path: `materializeLoadout` at `packages/task-execution/backend-local/workspace/src/materialize.ts:112-124` writes a single file at the pin's `name` via `materializeAt`, which refuses on a sha256 mismatch (`ContentCorruptionError`, same file line 37). The pin shape is `{kind, name, digest}` — `packages/task-execution/backend-local/workspace/src/loadout.ts` (`LOADOUT_KINDS`, `canonicalLoadoutPin`).
-- **Confirmed — the launcher-wrapper leg.** The claude-code launcher pushes `--plugin-dir <loadoutPath>` into argv (`packages/task-execution/backend-local/launchers/src/claude-code.ts:23`), so a venue wrapper can drop that argument for the flat-file arm and keep arm B off the skill-loading path.
-- **NOT confirmed — the work-directory placement leg.** The claim that placing the loadout in the work directory rather than the sealed input directory sits "on existing precedent, no platform change" is **unsupported at head**. Today the loadout goes to the input root by construction at every site: `canonicalLoadoutPath` joins `inputDir` (`loadout.ts:69-71`), `planning.ts:49-53` resolves against `paths.input`, and `dir-provisioner.ts:115` — the sole `materializeLoadout` caller — passes `paths.input`. Meanwhile the launcher's `cwd` is `paths.work`. **This leg must be confirmed by P2's acceptance gate before lock, against the no-platform-change constraint.** If it turns out to require a platform change, the frame does not break, but the pinning symmetry claim weakens and the operator gets the choice again (§2.8).
+- **Arm A:** `.jinn-demo1-skill-plugin/skills/demo1/SKILL.md` inside a valid plugin root supplied through `--plugin-dir`.
+- **Arm B:** root `CLAUDE.md`, with the platform's single-file `--plugin-dir` argument removed so native project discovery is the only loading path.
+- **Arm C:** neither path exists and no loadout is pinned; its loadout axis is not claimed verified.
 
 **An instruction file inside the task's git working tree is a contamination risk, not a detail.** On a SWE-shaped slate the agent's `cwd` is the checked-out repository (`paths.work`), so any instruction file placed there is **inside the git working tree** — visible to `git status` and `git diff`, and therefore capable of leaking into patch extraction, which is how SWE-bench-shaped grading derives the submitted patch. Left unhandled, an arm could be penalized, or its patch invalidated, for a file the experiment itself placed there.
 
-**Which files are exposed depends on the unresolved placement question above, and the two branches have different consequences.** This document does not pick one — the placement leg is P2's to confirm (§2.8 item 2), so both branches are handed on:
+**The exclusion is symmetric and mechanical.** P2 removes both experiment paths before extraction in every A, B, and C cell and builds the patch with a private Git index carrying explicit exclusions for both paths. Acceptance requires A's and B's normalized patches to be byte-identical to the true no-file control for the same repository change.
 
-- **Branch 1 — both arms work-dir placed** (the mechanism C1 proposed). Arm A's `SKILL.md` is then inside the working tree exactly as arm B's `AGENTS.md` is, and **the patch-extraction exclusion must cover both instruction files**. Excluding only arm B would itself introduce a grading asymmetry — arm A's stray file contaminating its patch while arm B's does not is a difference between arms that has nothing to do with the mechanism under test, and it would bias the very comparison the report headlines.
-- **Branch 2 — only arm B moves, arm A stays at the input root** (today's behavior for loadouts). Then the exclusion covers arm B's file alone, but two things need qualifying: the "identical materialization path" claim above no longer holds unqualified, and **placement itself becomes an arm difference** — the two arms would materialize into different directories, widening the delta beyond the intended frontmatter-plus-loading-mechanism. That widening is a confound to declare in the limitations, not a detail to absorb.
+**Arm C is fixed as true no-file.** It runs unpinned on the loadout axis and the report publishes that axis as `unverifiable`; no empty artifact is materialized merely to improve a disclosure count.
 
-**Either way the exclusion must be verified, not assumed** — handed to P2 as an acceptance criterion and to E3 as a red-team item, naming the instruction file or files for whichever branch lands (§2.9).
-
-**Arm C is the one mechanic that is decided empirically, not by fiat.**
-
-The tempting move is to pin arm C as an explicit empty loadout — a digest over a zero-byte file — so that all three arms reach `match` and the report can publish `unverifiableAxisCounts.loadout` = 0. That is a stronger *claim surface*.
-
-**The red team found the catch: an empty loadout still materializes a file.** Arm C would then not be "no instructions" — it would be "a zero-byte file present in the work directory." That is a different condition from the true no-file baseline the manipulation check needs, and the difference is exactly the kind a hostile reader would find. Buying a cleaner pinning number at the cost of baseline validity would be a bad trade, and making the choice by fiat here would be asserting behavioral equivalence we have not measured.
-
-**So the decision is deferred to evidence, and taken before lock:**
-
-- **E2's previews measure whether the empty-loadout arm is behaviorally identical to a true no-file run.** Previews are disclosed rehearsals either way (§7.2).
-- **If identity holds:** pin the explicit empty loadout. All three arms reach `match`; `unverifiableAxisCounts.loadout` = 0.
-- **If it does not:** run arm C unpinned and publish the `unverifiable` loadout count honestly in the report's disclosures.
-- **Either outcome is disclosed** — including the evidence that drove it. The report states which arm-C mechanic was used and why, rather than presenting the favorable one as though it were the only option.
-
-**Naming the departure.** The program's P2 gate requires pinning `enforced`, not attested, **for every axis the A/B varies or holds**. Allowing arm C to publish an `unverifiable` loadout count is therefore a **deliberate, disclosed departure from that gate**, taken only if the evidence shows the empty-loadout alternative would compromise the baseline. It is recorded here so the departure is a visible decision rather than a silently relaxed criterion, and it is reported as such if taken.
+**Naming the departure.** The program's P2 gate requires pinning `enforced`, not attested, **for every axis the A/B varies or holds**. Arm C's `unverifiable` loadout is a deliberate, disclosed departure because baseline validity outranks a cosmetically stronger disclosure count.
 
 This keeps the pinning claim subordinate to the baseline's validity, which is the correct ordering: arm C exists to make the A-vs-B result interpretable (§2.2), and a compromised baseline defeats that purpose no matter how clean its pin looks.
 
-**Rejected alternative, recorded:** running the comparison with disclosed asymmetric pinning — arm A enforced, arm B attested — and naming the asymmetry in the limitations. This was the fallback while the arm-A/arm-B seam was open. It is not taken for arms A and B: symmetric enforcement **looks achievable pending P2's confirmation of the placement leg**, so accepting a disclosed wart there would be premature. If P2 reports the mechanism cannot be met within the no-platform-change constraint, this alternative returns to the table and the operator chooses (§2.8 item 2). Note this is a separate question from arm C's mechanics above, which remains genuinely open pending evidence.
+**Rejected alternative, recorded:** running an `AGENTS.md` arm through a generated `CLAUDE.md` import/symlink or prompt injection. That would add a third compatibility-shim mechanism instead of using Claude Code's native project-memory path, so the operator selected native root `CLAUDE.md` instead.
 
 Verification note: the path C1 reported omitted the `backend-local` segment; the file is at `packages/task-execution/backend-local/workspace/src/materialize.ts`, and the cited line range and digest-refusal behavior were confirmed there directly.
 
@@ -246,7 +233,7 @@ Agent (claude-code launcher), model, effort, harness version, task slate, contai
 
 So the pin **gates dispatch** — a run cannot launch with an effort value outside the inventory, and the flag is passed to the harness — while the Matrix never grades the axis, and **"the model actually applied that reasoning depth" is attested only**. That is what the report says about effort: pinned and dispatch-gated, not independently verified.
 
-**The loadout axis is the one the A/B varies.** Arms A and B are **targeted to reach `enforced` / `match`** on it — arm A's skill digest, arm B's `AGENTS.md` digest. That target is **confirmed for the shared digest-verified materialization path and for the launcher wrapper, and pending P2 on the placement leg** (§2.4); it is not yet a fact about the run. Whether arm C also reaches `match` (explicit empty loadout) or publishes an `unverifiable` count depends on the pre-lock evidence in §2.4. Every other axis above is held rather than varied.
+**The loadout axis is the one the A/B varies.** Arms A and B target `enforced` / `match` on it — arm A's skill digest, arm B's `CLAUDE.md` digest — through the shared digest-verified materialization/copy path. True no-file C deliberately publishes `unverifiable` on that axis. Every other axis above is held rather than varied.
 
 Because this section feeds the report's per-axis disclosures, the rule is: **the report publishes the pinning status the run actually achieved**, not the status this document targeted. If the placement leg does not land, the disclosure says so.
 
@@ -256,9 +243,9 @@ Exclusion and infra-failure retry rules are proposed by R5 **before anyone sees 
 
 ## 2.6 Blast-radius rationale: why this frame embarrasses no one
 
-- **No third party's artifact is on trial.** The same bytes appear in both arms. A negative result for arm A is a result about progressive-disclosure *delivery*, not about anyone's writing. This is the structural reason the frame is safe, and it holds even if the content is an Anthropic-authored skill.
+- **No third party's artifact is on trial.** The same instruction-body bytes appear in both arms; the Skill wrapper additionally carries its required upstream frontmatter. A negative result for arm A is a result about progressive-disclosure *delivery*, not about anyone's writing. This is the structural reason the frame is safe, and it holds even if the content is an Anthropic-authored skill.
 - **The result cannot be read as vendor-versus-vendor.** Both arms run on the same vendor's agent. There is no "X beats Y" headline available to a careless reader, because there is no X and Y.
-- **Both mechanisms have institutional backing.** AGENTS.md is stewarded under the Linux Foundation; Agent Skills originated at Anthropic and is now an open standard with 40+ adopting products. Neither is an underdog being punched down at.
+- **Both mechanisms are native to the selected runtime.** `CLAUDE.md` and Agent Skills are documented Claude Code loading mechanisms. The broader AGENTS.md standard remains the public motivation, not the literal baseline executed here.
 - **The genre is already established as a contribution, not an attack.** Vercel published a directionally negative result about skills and it was received as research. We are refining the comparison, not contradicting a person.
 
 **The higher-pull alternative, recorded honestly: a widely-used public skill on/off.**
@@ -268,54 +255,52 @@ Exclusion and infra-failure retry rules are proposed by R5 **before anyone sees 
 - **It is also already done, better.** SWE-Skills-Bench measured on/off across 49 public skills and ~565 instances. We would be second, with less data, on a weaker venue.
 - **Decision: not taken for this report.** It is a good *second* report once the venue has an external track record, and the method transfers unchanged, so it stays cheap to run later.
 
-**A third option the operator should see, because it is a presentation choice rather than a design choice.** The same design can be *framed* at publication as "the controlled version of the comparison Vercel ran" — naming the post and the Hacker News objection directly. Pull is high, because multiple commenters on a 524-point thread independently articulated our design rationale. Blast is moderate, because we would be naming a company. The design is identical either way, so this decision can be deferred to E5 and made at publication time rather than at lock.
+**Resolved report framing (operator decision, 2026-08-13).** The report names the Vercel comparison and the Hacker News objection directly, respectfully, and only to the extent supported by their own text. Demo-1 is a controlled follow-up to a live public question, not a correction, certification, or takedown. Because naming a company raises the standard on our own arithmetic and attribution, E3 J7's independent recomputation and source fact-check are mandatory before the handoff packet can close.
 
 ## 2.7 What this frame does not claim (feeds the §8.1 must-not-imply discipline)
 
 Every line below is a limitation the report carries, not a caveat to be trimmed for marketability (design §8.2).
 
-- **Not** that skills are better or worse than AGENTS.md **in general**. One agent, one model, one content artifact, one task family, one slate.
-- **Not** that skills do not work, or that AGENTS.md does not work. Content efficacy is arm C's contrast, and it is secondary.
-- **Not** a judgment of any authored skill's quality. The bytes are identical across arms; nothing here evaluates the content's merit.
+- **Not** that skills are better or worse than AGENTS.md or context files **in general**. One agent, one model, one native `CLAUDE.md` mechanism, one content artifact, one task family, one slate.
+- **Not** that skills or `CLAUDE.md` do not work. Content efficacy is arm C's contrast, and it is secondary.
+- **Not** a judgment of any authored skill's quality. The instruction-body bytes are identical across arms; the Skill's upstream routing frontmatter differs by design, and nothing here evaluates the content's merit.
 - **Not** a vendor comparison. Both arms are the same agent.
 - **Not** the skill mechanism at its best. It is the mechanism as delivered by the upstream-authored description (§2.4).
 - **Not** an official certification or a universal ranking (§8.1).
-- **Not** owner-honesty-proven. The run is on a **self-run local venue**: its pre-registration is a discipline, not a proof against its own owner (§7.1). This appears in the product and in the report.
-- **Not** a claim that every configured runtime property was independently enforced (§8.1). Effort is pinned and dispatch-gated, but is not checked by run-pinning verification and is **not a graded Matrix axis**, so that the model applied the pinned reasoning depth is **attested only** (§2.5). Per-axis pinning status — including any `attested` or `unverifiable` axis — is published, not hidden (§7.3).
+- **Not** owner-honesty-proven. The run is on a **self-run local venue**. The product and report both carry this exact sentence: **“Pre-registration here is a discipline enforced by this tool, not a proof against the run's own owner — nothing prevents the owner from having altered the record before publishing it.”**
+- **Not** a claim that every configured runtime property was independently enforced (§8.1). Exact E3 C1 limitation sentence: **“Effort was configured and dispatch-gated at `high`, but it is not a graded Matrix axis and run-pinning verification does not independently establish the reasoning depth the model applied; that property is attested only.”** Per-axis pinning status — including any `attested` or `unverifiable` axis — is reported, not hidden (§7.3).
 - **Not** generalizable below the declared MDE. An underpowered null is reported as "we cannot detect effects smaller than X" and never quietly reframed as "no effect" (E2).
 - **Not** rehearsal-free. Every preview is logged, counted, and disclosed in the limitations (§7.2).
 - **Not** re-derivable at the Matrix integrity tier. SWE-shaped tasks mint no admission receipt today, so the Matrix integrity tier on those tasks is **`attested-only`, never `re-derivable`** (C1 recon). Engineering will **disclose this for demo 1, not fix it** — so the report states it as a limitation rather than implying a stronger integrity tier than the run has.
-- **Not** disinterested. **Conflict-of-interest statement, printed plainly in the limitations:** the contributors who designed and ran this benchmark operate the venue it ran on, and the agent under test is made by the same vendor whose skill mechanism is one of the two arms. We hold no position that a particular arm should win, and the design's content-identity construction (§2.4) is what makes that claim checkable rather than a promise. Attribution is role-only per the repo's external-communication rules; no named contributors.
-- **Not** a multi-harness result. **Single-harness scope:** every cell runs the claude-code harness. Generalization to other harnesses is **unknown, not assumed** — and Claw-SWE-Bench's 27.4 pp harness-choice swing (§1.4) is the reason that line is a real limitation rather than boilerplate.
+- **Not** disinterested. **Conflict-of-interest statement, printed plainly in the limitations:** the contributors who designed and ran this benchmark operate the self-run venue it ran on, chose the slate and content artifact, built the estimator in the same program that emits the result, produced the grading environment, ran and graded both arms, and are using the report to demonstrate the benchmark product. The agent under test is made by the same vendor whose skill mechanism is one of the two arms. We hold no position that a particular arm should win; the sealed inputs, independently recomputed arithmetic, and content-identity construction (§2.4) are the checks a reader should rely on rather than that statement of intent. Attribution is role-only per the repo's external-communication rules; no named contributors.
+- **Not** a multi-harness result. Exact E3 C2 limitation sentence: **“Every cell used one Claude Code harness configuration; generalization to other harnesses or configurations is unknown, and prior work's 27.4 percentage-point harness-choice swing is why this result is bounded to the exact configuration sealed here.”**
 - **Not** silent about non-completions. **Per-arm timeout counts and per-arm retry counts are published**, not just aggregate pass rates. **Timeouts count as FAIL**, declared before the run — not dropped, not treated as missing data, not reclassified after seeing which arm they landed in.
 - **Not** seed-shopped. The **bootstrap seed is bound at lock** and published with the report, so the interval is reproducible rather than one draw among many.
 - **Not** a novelty claim that survives the SkillJuror verification item (§1.5). If E3 finds SkillJuror's flat baseline is an always-on context file, this report is a replication and says so.
 
-## 2.8 Open questions
+## 2.8 Resolved report framing and deferred publication topology
 
-Frame, arm count, and content artifact are decided (§0.1). Two items remain — one needs the operator, one does not.
+Frame, arm count, source repository, native flat-file mechanism, and report framing are decided (§0.1). The exact C2 folder remains outcome-blind method work under the frozen selection rule, not an operator framing choice.
 
-1. **Publication framing.** Name the Vercel post and the Hacker News objection directly in the report's motivation, or motivate the gap generically (§2.6)? Deferrable to E5.
+1. **Report framing — resolved.** Name the Vercel post and Hacker News objection directly and respectfully (§2.6). The independent recomputation and source fact-check in E3 J7 are mandatory.
 
-   Note this question has **narrowed** since v0.1. The MDE anchoring in §2.2.1 takes its ~21 pp figure from Vercel's published numbers, so the method section cites them regardless. What remains is a question of *prominence and tone* — whether the report leads with "the controlled version of the comparison Vercel ran," or cites the numbers in the method and motivates the gap generically — not whether Vercel is named at all.
-
-2. **Pinning symmetry, if the work-directory leg does not hold.** Re-scoped rather than withdrawn. This question was closed in v0.2 on the strength of "existing precedent, no platform change"; independent review found that claim unsupported at head for the work-directory placement leg (§2.4). It is now **resolved by P2's acceptance gate, not by the operator** — P2 confirms the mechanism or reports that it needs a platform change. The operator is only consulted if P2 reports it cannot be done within the constraint, at which point the choice is: accept disclosed asymmetric pinning between arms A and B, or spend the platform change. No decision is needed now.
+2. **Publication topology — deferred.** Public report origin, author-source identity/name, signed Record Discovery source, archive mirror, Explorer ingestion/UI, key custody, errata policy, and the live `spec.jinn.network` dependency are intentionally unresolved in this program. The publication handoff names them without choosing or implementing them.
 
 ## 2.9 Handoffs
 
-- **To E2 (power):** primary contrast is A vs B paired by task; secondary is (A ∪ B) vs C. Size both. **Anchor the MDE at ~21 pp per §2.2.1** — the Vercel contrast shaped like ours, not the 47 pp non-invocation gap — and print the achieved MDE in the report; if the accepted cell budget cannot reach it, surface that before lock rather than lowering the anchor. E2 additionally owns one new empirical item: **measure whether an explicit empty loadout is behaviorally identical to a true no-file run**, which decides arm C's pinning mechanic (§2.4). Bind and publish the bootstrap seed at lock (§2.7).
-- **To E3 (red team):** verification items open. (a) Resolve SkillJuror's "normalized flat baseline" definition (§1.5) — the novelty claim depends on it. (b) Verify the SWE-Skills-Bench artifact availability and license if C1 is pursued (§1.7, §2.3). (c) **New — confirm the instruction file(s) are excluded from patch extraction and cannot contaminate the submitted diff** (§2.4). Which files that means depends on the placement branch: **both** `SKILL.md` and `AGENTS.md` under branch 1, **`AGENTS.md` alone** under branch 2. Under branch 1, verify specifically that the exclusion is symmetric — a one-sided exclusion would bias the headline contrast. Under branch 2, check that the resulting directory difference between arms is declared as a confound. This is a live grading-validity risk on a SWE slate, not a hygiene item. E3 also owns leakage in the chosen content and description-wording freedom (§2.4). The `attested-only` Matrix integrity tier (§2.7) is a disclosure item, not a defect to attack. **Credit where due:** the empty-loadout-materializes-a-file finding is E3's, and it is why §2.4's arm-C mechanic is evidence-driven rather than asserted.
-- **To P2 (launcher arm wiring):** the target for arms A and B is that both pin `enforced` on one `jinn.skill.v1` loadout axis (arm A skill, arm B flat `AGENTS.md`). Of C1's two product-side mechanics, the `--plugin-dir` wrapper is **confirmed** at head; the **work-directory placement leg is not**, and today's code routes the loadout to the input root at every site (§2.4). **P2's acceptance gate must confirm that mechanism against the no-platform-change constraint, or report that it cannot be met.** Second acceptance item: **the instruction file(s) must be excluded from patch extraction, verified, not assumed** (§2.4) — **both `SKILL.md` and `AGENTS.md` if both arms are work-dir placed (branch 1), `AGENTS.md` alone if only arm B moves (branch 2)**. Under branch 1 the exclusion must be symmetric across arms; under branch 2, report the arms' differing materialization directories so the confound can be declared. Arm C's pin depends on E2's evidence, so build for both outcomes. **Harness version pins `enforced` and must not drift between arms** (§2.5).
+- **To E2 (power):** primary contrast is A vs B paired by task; secondary is (A ∪ B) vs true no-file C. Size both. **Anchor the MDE at ~21 pp per §2.2.1** — a motivating estimate, not a claim that CLAUDE.md reproduces Vercel's AGENTS.md mechanism — and print the achieved MDE in the report. Bind and publish the bootstrap seed at lock (§2.7).
+- **To E3 (red team):** verify SkillJuror, content availability/license, native loader behavior, and zero patch contamination. Both `.jinn-demo1-skill-plugin/**` and root `CLAUDE.md` must be excluded in every arm, and A/B patches must be byte-identical to true no-file C for the same repository change.
+- **To P2 (launcher arm wiring):** both A and B pin `enforced` on `jinn.skill.v1`; A loads a valid plugin, B uses native root `CLAUDE.md`, and C carries no loadout. Verify the copy hashes, exact runtime inventories, loader argv, symmetric exclusions, and harness-version equality.
 - **To R5:** the slate must be domain-compatible with the chosen content artifact, or the manipulation check fails by construction (§2.3).
 - **To C3/R4:** no estimator is proposed here. Every number comes from a named registry method. The registry method must support the recomputability commitment in §2.10.
-- **To E5 (publication):** the claim package ships the one-command recomputation recipe (§2.10), the COI statement, the single-harness scope line, per-arm timeout and retry counts, and the bootstrap seed (§2.7).
+- **To E5 (report and handoff):** the sealed claim package ships the one-command recomputation recipe (§2.10), the COI statement, the single-harness scope line, per-arm timeout and retry counts, and the bootstrap seed (§2.7). It does not claim network publication.
 
-## 2.10 Published commitments
+## 2.10 Pre-dispatch and handoff commitments
 
-Two commitments that raise the report above a self-published number. Both are approved; neither is optional at publication.
+Two commitments make the report bundle more than an unsupported self-run number. Both are approved; neither is optional at the publication handoff boundary.
 
 **Public pre-registration (E4) — committed, conditional on the P5 e2e gate being green.** Before the official run, we publish: the **locked method summary**, the **Run record digest**, and the **frozen grader program digest**. The grader digest matters as much as the method: pre-registering the method while leaving the grader mutable would leave the outcome definition adjustable after the fact, which is the loophole a careful reader checks for. Publishing all three before any official cell executes is what converts the local venue's structurally weak pre-registration (§7.1 — leg (a) structural and leg (c) append-order only, **no guarantee against the run owner**) into something a third party can actually hold us to. The conditionality is deliberate and is itself disclosed: we do not pre-register a run the pipeline cannot yet complete. If infrastructure trouble hits after pre-registration anyway, it is accounted for honestly in `runOutcome` rather than quietly re-run.
 
-**Third-party recomputability — a headline deliverable, not a footnote.** Every number in the report must be recomputable from the published bundle using the published verifier, by someone who does not trust us and does not run our product. The claim package ships the **one-command recipe**. This is the concrete form of the design's "evidence that outlives the product" posture (§8.2) and the honest answer to the venue limitation: we cannot prove owner-honesty by running the venue ourselves (§7.1), so instead we make every published number independently checkable and say plainly that checkability — not our good faith — is what the reader should rely on.
+**Third-party recomputability — a headline deliverable, not a footnote.** Every number in the report must be recomputable from the sealed bundle using the handoff-supplied exact verifier and canary/package artifacts, by someone who does not trust us and does not run our product. The claim package ships the **one-command recipe**. This is the concrete form of the design's "evidence that outlives the product" posture (§8.2) and the honest answer to the venue limitation: we cannot prove owner-honesty by running the venue ourselves (§7.1), so instead we make every reported number independently checkable and say plainly that checkability — not our good faith — is what the reader should rely on.
 
 Note what recomputability does and does not cover. It covers the path from the sealed bundle to the reported numbers. It does **not** make the run itself re-derivable — SWE-shaped tasks mint no admission receipt today, so the Matrix integrity tier stays `attested-only` (§2.7). Both statements appear together in the report; the strong one must not be allowed to imply the weak one.

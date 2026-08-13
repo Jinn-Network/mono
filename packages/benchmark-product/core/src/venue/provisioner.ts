@@ -16,14 +16,17 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseCellKey } from "@jinn-network/benchmarking-records";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
   harvest as workspaceHarvest,
   makeWorktreeProvisioner,
+  canonicalLoadoutPath,
+  canonicalLoadoutPin,
   ProvisioningRejectedError,
   STAGED_SEALED_TASK_FILENAME,
   type DeclaredOutputSlot,
@@ -52,6 +55,17 @@ import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
 import type { RepositoryMirrorPort } from "./repository-mirror.js";
 import { sealVerdictStatement } from "./signing.js";
+import {
+  DEMO1_CLAUDE_HARNESS_ID,
+  DEMO1_CLAUDE_MD_LOADOUT_NAME,
+  DEMO1_CLAUDE_MD_PATH,
+  DEMO1_EXPERIMENT_PATHS,
+  DEMO1_SKILL_LOADOUT_NAME,
+  DEMO1_SKILL_PATH,
+  DEMO1_SKILL_PLUGIN_DIRECTORY,
+  DEMO1_SKILL_PLUGIN_MANIFEST_PATH,
+  type Demo1InstructionArtifacts,
+} from "./demo1-claude.js";
 
 /**
  * Structurally matches `@jinn-network/task-execution-backend-local`'s own `SelectedProvisioner`
@@ -289,11 +303,120 @@ async function runGit(args: readonly string[]): Promise<void> {
   if (code !== 0) throw new Error(`git ${args[0] ?? ""} exited ${code}`);
 }
 
+async function runGitOutput(args: readonly string[], env: NodeJS.ProcessEnv): Promise<string> {
+  const child = spawn("git", [...args], {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+  const code = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (value) => resolve(value ?? 70));
+  });
+  if (code !== 0) throw new Error(`git ${args[0] ?? ""} exited ${code}: ${stderr.trim()}`);
+  return stdout;
+}
+
 interface RepositoryWorkProvisionerOptions {
   readonly sealedTaskBytes: Uint8Array;
   readonly dispatchContextBytes: Uint8Array;
   readonly task: TaskSpecification;
   readonly mirror: RepositoryMirrorPort | undefined;
+  readonly demo1Instructions?: Demo1InstructionArtifacts;
+}
+
+function harnessId(view: { readonly effectiveRequirements?: Readonly<Record<string, unknown>> }): string | undefined {
+  const harness = view.effectiveRequirements?.["harness"];
+  if (typeof harness === "string") return harness;
+  if (typeof harness !== "object" || harness === null) return undefined;
+  const id = (harness as { readonly id?: unknown }).id;
+  return typeof id === "string" ? id : undefined;
+}
+
+function digest(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function installDemo1Instructions(
+  view: { readonly effectiveRequirements?: Readonly<Record<string, unknown>> },
+  paths: WorkspacePaths,
+  artifacts: Demo1InstructionArtifacts,
+): Promise<void> {
+  for (const path of DEMO1_EXPERIMENT_PATHS) {
+    if (existsSync(join(paths.work, path))) {
+      throw new ProvisioningRejectedError(
+        `Demo-1 task repository already contains experiment instruction path "${path}"`,
+      );
+    }
+  }
+  const rawLoadout = view.effectiveRequirements?.["loadout"];
+  if (rawLoadout === undefined) return;
+  const pin = canonicalLoadoutPin(rawLoadout);
+  const expected = pin.name === DEMO1_SKILL_LOADOUT_NAME
+    ? artifacts.skill
+    : pin.name === DEMO1_CLAUDE_MD_LOADOUT_NAME
+      ? artifacts.baseline
+      : undefined;
+  if (expected === undefined || canonicalLoadoutPin(expected).digest !== pin.digest) {
+    throw new ProvisioningRejectedError(`Demo-1 refuses unregistered loadout "${pin.name}"`);
+  }
+
+  // makeWorktreeProvisioner has already sent these bytes through materializeLoadout's digest
+  // verification at input/<pin.name>. Copying is product-owned placement, and the second hash
+  // check makes the loader-visible bytes identical to the verified staging bytes.
+  const stagedBytes = new Uint8Array(await readFile(canonicalLoadoutPath(paths.input, rawLoadout)));
+  if (digest(stagedBytes) !== pin.digest) {
+    throw new ProvisioningRejectedError(`Demo-1 staged loadout "${pin.name}" changed before placement`);
+  }
+  const destination = pin.name === DEMO1_SKILL_LOADOUT_NAME
+    ? join(paths.work, DEMO1_SKILL_PATH)
+    : join(paths.work, DEMO1_CLAUDE_MD_PATH);
+  await mkdir(dirname(destination), { recursive: true });
+  if (pin.name === DEMO1_SKILL_LOADOUT_NAME) {
+    const manifest = new TextEncoder().encode('{"name":"jinn-demo1-skill","version":"1.0.0"}\n');
+    const manifestPath = join(paths.work, DEMO1_SKILL_PLUGIN_MANIFEST_PATH);
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await writeFile(manifestPath, manifest, { mode: 0o400, flag: "wx" });
+  }
+  await writeFile(destination, stagedBytes, { mode: 0o400, flag: "wx" });
+  if (digest(new Uint8Array(await readFile(destination))) !== pin.digest) {
+    throw new ProvisioningRejectedError(`Demo-1 loader-visible loadout "${pin.name}" failed its copy check`);
+  }
+}
+
+async function removeDemo1Instructions(paths: WorkspacePaths): Promise<void> {
+  await Promise.all([
+    rm(join(paths.work, DEMO1_SKILL_PLUGIN_DIRECTORY), { recursive: true, force: true }),
+    rm(join(paths.work, DEMO1_CLAUDE_MD_PATH), { force: true }),
+  ]);
+}
+
+/** Extracts repository changes without touching the real index and excludes both arms' files. */
+async function extractDemo1Patch(paths: WorkspacePaths): Promise<void> {
+  const indexPath = join(paths.meta, "demo1-patch.index");
+  await rm(indexPath, { force: true });
+  const env = {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+    GIT_INDEX_FILE: indexPath,
+  };
+  await runGitOutput(["-C", paths.work, "read-tree", "HEAD"], env);
+  await runGitOutput([
+    "-C", paths.work, "add", "-A", "--", ".",
+    `:(exclude)${DEMO1_CLAUDE_MD_PATH}`,
+    `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}`,
+    `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}/**`,
+  ], env);
+  const patch = await runGitOutput([
+    "-C", paths.work, "diff", "--cached", "--binary", "--full-index", "--no-color", "HEAD", "--",
+  ], env);
+  await writeFile(join(paths.out, "patch"), patch, { mode: 0o600 });
+  await rm(indexPath, { force: true });
 }
 
 /**
@@ -335,6 +458,7 @@ function repositoryWorkProvisionerContract(
   options: RepositoryWorkProvisionerOptions,
 ): ProvisionerContract {
   let resolved: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
+  let demo1Claude = false;
   return {
     workspaceKind: (): WorkspaceKind => "worktree",
     async setup(view, paths, grants) {
@@ -373,6 +497,23 @@ function repositoryWorkProvisionerContract(
         },
       });
       await base.setup(view, paths, grants);
+      try {
+        demo1Claude = harnessId(view) === DEMO1_CLAUDE_HARNESS_ID;
+        if (demo1Claude) {
+          if (options.demo1Instructions === undefined) {
+            throw new ProvisioningRejectedError("Demo-1 Claude Code runtime has no instruction artifact inventory");
+          }
+          await installDemo1Instructions(view, paths, options.demo1Instructions);
+        }
+      } catch (error) {
+        // A product placement refusal happens after the platform has cut the worktree. Clean up
+        // that partial setup immediately; the backend correctly has no harvest phase for a
+        // never-executed attempt.
+        await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
+          .catch(() => rm(paths.work, { recursive: true, force: true }));
+        await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
+        throw error;
+      }
       resolved = { base, mirrorDir };
     },
     executionEnv: ({ env }) => ({ ...env }),
@@ -382,6 +523,10 @@ function repositoryWorkProvisionerContract(
       }
       const { base, mirrorDir } = resolved;
       try {
+        if (demo1Claude) {
+          await removeDemo1Instructions(paths);
+          await extractDemo1Patch(paths);
+        }
         // Same normalization contract as the solve path above, for this profile's declared slots.
         // Renames run BEFORE the delegated harvest because harvest stamps each artifact's
         // mediaType from the declared slot whose name equals its path -- an artifact still called
@@ -566,6 +711,8 @@ export interface CreateLocalProvisionerOptions {
    * Absent on venues that serve no repository-work cells; a repository-work cell then refuses
    * typed at setup rather than silently provisioning an empty work tree. */
   readonly repositoryMirror?: RepositoryMirrorPort;
+  /** Demo-1's exact digest-bound skill/CLAUDE.md inventory. Absent keeps the venue unchanged. */
+  readonly demo1Instructions?: Demo1InstructionArtifacts;
 }
 
 export function createLocalProvisioner(
@@ -609,6 +756,9 @@ export function createLocalProvisioner(
           dispatchContextBytes: input.dispatchContextBytes,
           task: input.task,
           mirror: options.repositoryMirror,
+          ...(options.demo1Instructions === undefined
+            ? {}
+            : { demo1Instructions: options.demo1Instructions }),
         }),
       };
     }

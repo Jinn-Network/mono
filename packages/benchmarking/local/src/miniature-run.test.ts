@@ -19,6 +19,7 @@ import {
   axisObservationsFromRuntimeObservations,
   runPinningPropertyId,
 } from "./runtime-observations.js";
+import { requirementsDigest } from "./pinning-bridge.js";
 
 /**
  * A miniature local Run: two tasks x two arms x one replicate, executed on a local venue
@@ -158,7 +159,15 @@ function inScopeCells(): readonly InScopeCell[] {
 function pinningEvidence(): Record<string, LocalCellPinningEvidence> {
   const honest = (model: typeof MODEL_A, loadout: typeof LOADOUT_A) => ({
     dispatches: 1,
-    admission: { ready: true },
+    admission: {
+      ready: true,
+      checkedRequirementsDigest: requirementsDigest({
+        harness: HARNESS_PINNED,
+        isolationPolicy: "unrestricted",
+        model,
+        loadout,
+      }),
+    },
     observations: axisObservationsFromRuntimeObservations([
       { kind: "resource", propertyId: runPinningPropertyId("harness"), value: JSON.stringify(HARNESS_PINNED) },
       { kind: "resource", propertyId: runPinningPropertyId("model"), value: JSON.stringify(model) },
@@ -173,7 +182,15 @@ function pinningEvidence(): Record<string, LocalCellPinningEvidence> {
     // older harness build.
     [SWAPPED_CELL]: {
       dispatches: 1,
-      admission: { ready: true },
+      admission: {
+        ready: true,
+        checkedRequirementsDigest: requirementsDigest({
+          harness: HARNESS_PINNED,
+          isolationPolicy: "unrestricted",
+          model: MODEL_B,
+          loadout: LOADOUT_B,
+        }),
+      },
       observations: axisObservationsFromRuntimeObservations([
         { kind: "resource", propertyId: runPinningPropertyId("harness"), value: JSON.stringify(HARNESS_SWAPPED) },
         { kind: "resource", propertyId: runPinningPropertyId("model"), value: JSON.stringify(MODEL_A) },
