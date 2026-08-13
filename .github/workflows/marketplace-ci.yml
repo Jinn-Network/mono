@@ -6,9 +6,6 @@ on:
       source_sha:
         required: true
         type: string
-    secrets:
-      JINN_MARKETPLACE_FORK_RPC_URL:
-        required: false
   pull_request:
     paths:
       - "packages/marketplace/**"
@@ -47,6 +44,8 @@ jobs:
         run: node --test .github/scripts/marketplace-package-inventory.test.mjs
       - name: Verify source boundaries and canaries
         run: node --test .github/scripts/marketplace-source-boundaries.test.mjs
+      - name: Verify marketplace PR Anvil hermeticity
+        run: node --test .github/scripts/marketplace-hermetic-anvil.test.mjs
       - name: Custody boundaries (tripwire, marketplace-surfaces design §4.1)
         run: node --test .github/scripts/custody-boundaries.test.mjs
 
@@ -324,9 +323,13 @@ jobs:
           retention-days: 1
 
   anvil-fork:
+    # Keep this historical job id stable for required-check compatibility. The implementation
+    # loads committed state and never forks a live chain.
     needs: [binding, projector, venue-base]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      JINN_MARKETPLACE_ANVIL_STATE_PATH: ${{ github.workspace }}/client/test/_support/fixtures/anvil-base-v3-state/state.json
     steps:
       - uses: actions/checkout@v4
         with:
@@ -341,10 +344,10 @@ jobs:
       - name: Install Foundry (Anvil)
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          # Anvil fork startup/state behavior is not stable across Foundry releases. Keep the
-          # marketplace fork gate on the same snapshot-compatible build used by the repository.
+          # Anvil load-state behavior is not stable across Foundry releases. Keep this gate on
+          # the same snapshot-compatible build used by the repository's hermetic gate.
           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
-      - name: Build Hardhat contract artifacts used by the fork fixture
+      - name: Build Hardhat contract artifacts used by the snapshot fixture
         working-directory: contracts
         run: |
           yarn install --immutable
@@ -392,15 +395,11 @@ jobs:
       - name: Install Marketplace Testing toolchain
         working-directory: packages/marketplace/testing
         run: yarn install --immutable
-      - name: Run Anvil-fork marketplace conformance (§13 / M2.5)
+      - name: Run snapshot-backed marketplace conformance (§13 / M2.5)
         working-directory: packages/marketplace/testing
-        env:
-          JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
-        run: yarn vitest run src/backend-conformance.test.ts
-      - name: Run the Anvil-fork venue kit (§6.6)
+        run: yarn vitest run src/backend-conformance.test.ts src/escrow-lifecycle.test.ts
+      - name: Run the snapshot-backed Anvil venue kit (§6.6)
         working-directory: packages/marketplace/testing
-        env:
-          JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
         run: yarn vitest run src/venue-conformance.test.ts src/venue-fork.test.ts
 
   verify:
