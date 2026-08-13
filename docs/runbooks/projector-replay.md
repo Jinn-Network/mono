@@ -56,7 +56,7 @@ again over it:
 | --- | --- | --- |
 | `teeNativeMarketplaceEvents` → `native_marketplace_events` | **inside `poll()`**, before the projector sees a log | Rows carry the finality tier the log was *first fetched at*. A replayed range is refetched below `finalized` (catch-up fast path), so rows first written `safe` come back `finalized`. `apply()` **upgrades the tier in place**. Before that fix it threw, and since `apply()` is one transaction the throw discarded the **whole batch** — including the newly mined blocks above the old cursor, which are never re-listed. |
 | projector loop → `projector_canonical_events`, `projector_observations`, `projector_cursor` | after `enrich` | Journals the re-offered events and advances the cursor. **This makes a replay one-shot per range**: `hasCanonicalEvent` then suppresses those events forever. The journal write happens *even when announcement publication throws* (`projector-loop.ts`'s announce-failure catch path returns empty announcements and falls through to the same `cursorStore.write`). A range that journals but fails to announce is spent — rewind again to retry. |
-| `anchorCheckedMaterial` / requester adoption | during announcement projection | No per-record `try`/`catch`. One record that cannot be anchored aborts the rest of that tick's announcements — and, per the row above, that tick's events are journalled anyway. |
+| `anchorCheckedMaterial` / requester adoption | during announcement projection | Scoped per record. A `resolveRecord` throw is caught and recorded as an `announcement-record-unresolved` refusal (role + named cause), so the tick's *other* announcements still publish. The unanchorable record itself is still fail-closed — no announcement — and, per the row above, its event is journalled anyway, so recovering it needs another rewind once the cause is fixed. |
 
 None of that is signed material written *by the rewind*. It is signed material the daemon may now
 publish because it can finally see the events — which is the point of the procedure, and also why
@@ -98,7 +98,10 @@ publish because it can finally see the events — which is the point of the proc
    - **A requester still never sees the counterparty's mech `Deliver`.** That has not changed
      (`create-base-venue.ts` subscribes the router, the coordinator, the marketplace, and *this*
      operator's own `priorityMech`). What changed is that the record plane now supplies the witness
-     instead, so the missing `Deliver` is no longer fatal to the fold.
+     instead, so the missing `Deliver` is no longer fatal to the fold — and, since the announce
+     leg's `resolveRecord` resolves the counterparty's Delivery the same digest-verified way, no
+     longer fatal to the ANNOUNCEMENT either. Before that parity landed, a requester folded the
+     attempt correctly and then refused to publish it.
 
    **PRE-FLIGHT — mandatory, and do it BEFORE stopping the daemon.** The replay re-offers the range
    to the *current* resolvers exactly once. If a record is unresolvable at that moment the event
@@ -116,7 +119,8 @@ publish because it can finally see the events — which is the point of the proc
    worse than a 404: the resolver refuses it and you have spent the rewind either way.
 
    **Confirm RPC health too, immediately before `--apply`.** The requester's role gate reads the
-   coordinator twice per `SolutionDeliveryClaimed`, and `buildReadTodayDeliveryFacts`
+   coordinator twice per `SolutionDeliveryClaimed` — and the announce leg's counterparty resolver
+   reads `getAttempt` for the same anchor — and `buildReadTodayDeliveryFacts`
    (`client/src/daemon/composition-root.ts`) currently returns `undefined` on a read *failure* the
    same way it does for a requestId that genuinely is not ours. That reads as "not the requester",
    which is the one remaining path to a false rejection. Round-trip both reads against the

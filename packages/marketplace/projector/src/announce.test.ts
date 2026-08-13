@@ -859,4 +859,83 @@ describe("projectAnnouncements", () => {
       expect(result.refusals).toEqual([]);
     },
   );
+
+  // One unresolvable record used to take the whole tick down with it. `resolveRecord` is a HOST
+  // port -- it reaches a serving plane, a durable store, a chain read -- so a throw is an ordinary
+  // outcome for one record, not a statement about the others. But it propagated straight out of
+  // `projectAnnouncements`, and `projector-loop.ts` catches that as non-fatal and advances the
+  // cursor anyway: `hasCanonicalEvent` then filters every event in the tick out of later
+  // `publicationEvents`, so all of them are dropped for good. Observed live on Base Sepolia during
+  // the DR-2026-08-05 gate endgame -- one unanchorable counterparty Delivery dropped the other
+  // four announcements in the same tick, and recovering them costs another rewind.
+  //
+  // Fail-closed is unchanged for the record that could not be resolved: no announcement, and a
+  // named refusal. It just no longer speaks for its neighbours.
+  test("one unresolvable record refuses alone, leaving the tick's other announcements published", async () => {
+    const { ports, verified } = makePorts();
+    const attempted: string[] = [];
+    const isolated: AnnouncementProjectionPorts = {
+      ...ports,
+      async resolveRecord(event, role) {
+        attempted.push(role);
+        if (role === "delivery") {
+          throw new Error("this operator holds no single durable solution-delivery record");
+        }
+        return ports.resolveRecord(event, role);
+      },
+    };
+    const events = [task(), claim(), ...deliveryEvents(), close()];
+
+    const result = await projectAnnouncements(transition(events), isolated);
+
+    // The delivery leg was asked, and refused by name -- never silently skipped.
+    expect(attempted).toContain("delivery");
+    expect(result.refusals).toEqual([{
+      kind: "announcement-record-unresolved",
+      role: "delivery",
+      reason: "Error: this operator holds no single durable solution-delivery record",
+      derivation: deliveryEvents()[1]!.derivation,
+    }]);
+    // No delivery announcement -- fail-closed is intact.
+    expect(result.announcements.filter(
+      (announcement) => announcement.action === "available"
+        && announcement.record.kind === RECORD_KINDS.delivery,
+    )).toEqual([]);
+    // ...and the submission's availability and withdrawal still published.
+    expect(result.announcements.map(({ action }) => action)).toEqual(["available", "withdrawn"]);
+    expect(result.entries).toHaveLength(2);
+    expect(verified).toEqual([]);
+  });
+
+  test("a throwing verdict-delivery record leaves the verdict gate unrun and the rest intact", async () => {
+    const { ports, verified } = makePorts();
+    const isolated: AnnouncementProjectionPorts = {
+      ...ports,
+      async resolveRecord(event, role) {
+        if (role === "evaluation-delivery") throw new Error("serving plane unreachable");
+        return ports.resolveRecord(event, role);
+      },
+    };
+    const verdict = projectable({
+      event: "VerdictDeliveryClaimed",
+      facts: { evaluator: OPERATOR, requestId: REQUEST_ID, taskId: 42n, attemptIndex: 3, verdictIndex: 0, verdictCode: 1 },
+      derivation: derivation("VerdictDeliveryClaimed", 90),
+    });
+
+    const result = await projectAnnouncements(
+      transition([task(), claim(), ...deliveryEvents(), verdict]),
+      isolated,
+    );
+
+    expect(result.refusals).toEqual([{
+      kind: "announcement-record-unresolved",
+      role: "evaluation-delivery",
+      reason: "Error: serving plane unreachable",
+      derivation: verdict.derivation,
+    }]);
+    // The M4b gate is never handed material that was never resolved.
+    expect(verified).toEqual([]);
+    // The submission and the solution delivery both still published.
+    expect(result.announcements.map(({ action }) => action)).toEqual(["available", "available"]);
+  });
 });

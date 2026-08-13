@@ -128,11 +128,37 @@ export interface AnnouncementMaterialRefusal {
   readonly originalAnchorDerivation?: DerivationAnnotation;
 }
 
+/**
+ * The host's `resolveRecord` threw for ONE record.
+ *
+ * `resolveRecord` is a host port — it reaches a serving plane, a durable store, a chain read — so a
+ * throw is an ordinary outcome for one record and says nothing about the others. It used to
+ * propagate straight out of `projectAnnouncements`, which made it say everything about the others:
+ * `projector-loop.ts` catches that throw as non-fatal and advances the cursor regardless, and
+ * `hasCanonicalEvent` then filters every event in the tick out of later `publicationEvents`. The
+ * whole tick's announcements were dropped for good, recoverable only by spending another rewind.
+ *
+ * Observed live on Base Sepolia during the DR-2026-08-05 gate endgame: a requester replaying a
+ * counterparty's settlement could not anchor the solution Delivery, and lost the other four
+ * announcements in the same tick with it.
+ *
+ * Fail-closed is unchanged for the record itself — no announcement, and the cause is named here.
+ */
+export interface AnnouncementRecordUnresolvedRefusal {
+  readonly kind: "announcement-record-unresolved";
+  readonly role: AnnouncementRecordRole;
+  /** The thrown cause, named. Native refusals carry role + on-chain anchor digest + reason. */
+  readonly reason: string;
+  readonly derivation: DerivationAnnotation;
+}
+
 export interface AnnouncementProjectionResult {
   readonly announcements: ProjectedAnnouncement[];
   readonly entries: SignedEntry[];
   readonly pages: string[];
-  readonly refusals: Array<VerdictObservationRefusal | AnnouncementMaterialRefusal>;
+  readonly refusals: Array<
+    VerdictObservationRefusal | AnnouncementMaterialRefusal | AnnouncementRecordUnresolvedRefusal
+  >;
   readonly head?: SourceHead;
   readonly headEnvelope?: DsseEnvelope;
 }
@@ -320,10 +346,25 @@ async function anchorCheckedMaterial(
   role: AnnouncementRecordRole,
   ports: AnnouncementProjectionPorts,
   observationById: ReadonlyMap<string, { readonly data: Record<string, unknown> }>,
-  refusals: Array<VerdictObservationRefusal | AnnouncementMaterialRefusal>,
+  refusals: Array<
+    VerdictObservationRefusal | AnnouncementMaterialRefusal | AnnouncementRecordUnresolvedRefusal
+  >,
   transition: MarketplaceProjectionTransition,
 ): Promise<AnnouncementRecordMaterial | undefined> {
-  const material = await ports.resolveRecord(event, role);
+  // Scoped to THIS record (see `AnnouncementRecordUnresolvedRefusal`). A record the host cannot
+  // resolve is refused alone; its neighbours in the same tick still project.
+  let material: AnnouncementRecordMaterial;
+  try {
+    material = await ports.resolveRecord(event, role);
+  } catch (error) {
+    refusals.push({
+      kind: "announcement-record-unresolved",
+      role,
+      reason: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      derivation: event.derivation,
+    });
+    return undefined;
+  }
   const anchor = role === "submission" ? retainedReopeningAnchor(event, transition) : undefined;
   const expectedDigest = expectedMaterialDigest(event, role, observationById) ?? anchor?.digest;
   if (expectedDigest !== undefined) {
@@ -447,7 +488,9 @@ export async function projectAnnouncements(
   );
   const announcements: ProjectedAnnouncement[] = [];
   const entries: SignedEntry[] = [];
-  const refusals: Array<VerdictObservationRefusal | AnnouncementMaterialRefusal> = [];
+  const refusals: Array<
+    VerdictObservationRefusal | AnnouncementMaterialRefusal | AnnouncementRecordUnresolvedRefusal
+  > = [];
   const known = new Map<string, string>();
   let next = initialSequence;
   let previous = initialPrevious;
