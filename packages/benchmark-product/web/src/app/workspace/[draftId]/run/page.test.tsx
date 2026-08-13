@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const loadRunViewMock = vi.hoisted(() => vi.fn());
@@ -19,14 +20,14 @@ vi.mock("@/lib/server/gui-action-registry", () => ({
   },
 }));
 vi.mock("@/components/action-form", () => ({
-  ActionForm: ({ submitLabel }: { readonly submitLabel: string }) => <form>{submitLabel}</form>,
+  ActionForm: ({ submitLabel, children, disabled }: { readonly submitLabel: string; readonly children?: ReactNode; readonly disabled?: boolean }) => <form><button disabled={disabled}>{submitLabel}</button>{children}</form>,
 }));
 vi.mock("@/components/run-monitor-refresh", () => ({ RunMonitorRefresh: () => <button>Refresh</button> }));
 
 import RunMonitorPage from "./page";
 import { projectRunStatusForGui } from "@/lib/server/view-models";
 
-function status(state: "running" | "closed", cancelRequested: boolean) {
+function status(state: "running" | "closed" | "reported" | "published-bundle", cancelRequested: boolean) {
   return {
     ok: true as const,
     draft: { ok: true as const, result: {} },
@@ -41,10 +42,11 @@ function status(state: "running" | "closed", cancelRequested: boolean) {
     },
     publication: { ok: true as const, result: {
       mode: "local", analysisPreregistration: "fixed-in-run", registrationTiming: "not-registered",
-      stages: [{ name: "registration", state: "not-started", digests: [] }, { name: "accounting", state: "not-started", digests: [] }, { name: "matrix", state: "not-started", digests: [] }, { name: "report", state: "not-started", digests: [] }],
-      compatibility: { status: "ready", dispatchCount: 0 }, postHocPublicationAvailable: state === "closed",
+      stages: [{ name: "registration", state: "not-started", digests: {} }, { name: "accounting", state: "not-started", digests: {} }, { name: "matrix", state: "not-started", digests: {} }, { name: "report", state: "not-started", digests: {} }],
+      compatibility: { status: "ready", dispatchCount: 0 }, postHocPublicationAvailable: ["closed", "reported", "published-bundle"].includes(state),
       recovery: { resumable: false, guidance: "Publication remains local until you explicitly configure and register a public source." },
     } },
+    publicationConfiguration: { available: true, publicBaseUrl: "https://public.example/publication" },
   };
 }
 
@@ -77,6 +79,19 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).toContain("Register post-hoc (does not rerun)");
     expect(markup).toContain("Publish accounting and Matrix (does not rerun)");
     expect(markup).toContain("does not require a Report");
+    expect(markup).toContain("https://public.example/publication");
+    expect(markup).not.toContain('name="publicBaseUrl"');
+  });
+
+  test.each(["reported", "published-bundle"] as const)("keeps post-hoc no-rerun controls available from %s", async (state) => {
+    loadRunViewMock.mockReturnValue(status(state, false));
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain("Configure post-hoc public source (does not rerun)");
+    expect(markup).toContain("Register post-hoc (does not rerun)");
+    expect(markup).toContain("Publish accounting and Matrix (does not rerun)");
+    expect(markup).not.toContain("<button disabled=\"\">Configure post-hoc");
+    expect(markup).not.toContain("<button disabled=\"\">Register post-hoc");
+    expect(markup).not.toContain("<button disabled=\"\">Publish accounting");
   });
 
   test("renders a typed durable failure without serializing its sensitive detail", async () => {

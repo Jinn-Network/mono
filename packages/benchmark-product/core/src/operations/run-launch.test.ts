@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -16,6 +17,7 @@ import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState } from "../run/state.js";
+import { createWorkspacePublicationHttpHandler } from "../run/publication-source.js";
 import { runJournalPath } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -25,6 +27,7 @@ import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { runLaunch, runResume } from "./run-launch.js";
+import { publicationConfigure, publicationRegister } from "./publication-register.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { runStatus } from "./run-status.js";
@@ -261,6 +264,40 @@ describe("runLaunch — gating (authority-denied / grant)", () => {
 
     const outcome = await runLaunch(contextFor(clock, "agent-1"), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
     expect(outcome.ok).toBe(true);
+  }, 30_000);
+});
+
+describe("runLaunch — prospective mounted publication", () => {
+  test("registers and probes every prospective Submission beneath the exact nested archive mount", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const requested: string[] = [];
+    const server = createServer(async (request, response) => {
+      const externalPath = request.url ?? "/";
+      requested.push(externalPath);
+      if (!externalPath.startsWith("/publication/")) { response.writeHead(404).end(); return; }
+      const result = await handler(new Request(`http://127.0.0.1${externalPath.slice("/publication".length)}`, { method: request.method }));
+      response.writeHead(result.status, Object.fromEntries(result.headers));
+      response.end(Buffer.from(await result.arrayBuffer()));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("test server address unavailable");
+      const base = `http://127.0.0.1:${address.port}/publication`;
+      expect((await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+      expect((await publicationRegister(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+      const { backend, submits } = makeStatefulFakeBackend();
+      const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+      expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+      expect(submits.length).toBeGreaterThan(0);
+      expect(requested.length).toBeGreaterThan(submits.length);
+      expect(requested.every((path) => path.startsWith("/publication/"))).toBe(true);
+      expect(requested.some((path) => path.startsWith("/publication/records/"))).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   }, 30_000);
 });
 

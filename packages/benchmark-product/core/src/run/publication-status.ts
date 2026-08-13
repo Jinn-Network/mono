@@ -15,13 +15,13 @@ export interface PublicationStageStatus {
   readonly state: PublicationStage["state"];
   readonly receipt?: { readonly sourceSequence: string; readonly entrySha256: string };
   readonly sourceCutoff?: { readonly sourceSequence: string; readonly entrySha256: string };
-  readonly digests: readonly string[];
+  readonly digests: Readonly<Record<string, string>>;
 }
 export interface PublicationStatusProjection {
   readonly mode: "local" | "prospective";
   /** The Run is an analysis commitment; public-registration timing is a separate assurance. */
   readonly analysisPreregistration: "not-locked" | "fixed-in-run";
-  readonly registrationTiming: "not-registered" | "pre-dispatch" | "post-hoc";
+  readonly registrationTiming: "not-registered" | "pending-verification" | "pre-dispatch" | "post-hoc";
   readonly publicBaseUrl?: string;
   readonly stages: readonly PublicationStageStatus[];
   readonly compatibility: PublicationCompatibilityAssessment;
@@ -36,7 +36,7 @@ function stage(name: PublicationStageName, value: PublicationStage): Publication
     state: value.state,
     ...(value.receipt === undefined ? {} : { receipt: value.receipt }),
     ...(value.sourceCutoff === undefined ? {} : { sourceCutoff: value.sourceCutoff }),
-    digests: Object.values(value.digests ?? {}).sort(),
+    digests: Object.fromEntries(Object.entries(value.digests ?? {}).sort(([left], [right]) => left.localeCompare(right))),
   };
 }
 
@@ -54,13 +54,22 @@ export function projectPublicationStatus(input: {
     stage("registration", publication.registration), stage("accounting", publication.accounting),
     stage("matrix", publication.matrixV2), stage("report", publication.report),
   ];
-  const inProgress = stages.some((candidate) => candidate.state === "in-progress");
   const closed = input.lifecycleState === "closed" || input.lifecycleState === "reported" || input.lifecycleState === "published-bundle";
   const registrationTiming = publication.registration.state === "not-started"
     ? "not-registered"
-    : publication.registration.postHoc === true || (closed && (publication.mode ?? "local") === "local")
-      ? "post-hoc"
-      : "pre-dispatch";
+    : publication.registration.state === "in-progress" || publication.registration.receipt === undefined
+      ? "pending-verification"
+      : publication.registration.postHoc === true
+        ? "post-hoc"
+        : "pre-dispatch";
+  const publicComplete = publication.registration.state === "complete"
+    && publication.registration.receipt !== undefined
+    && publication.accounting.state === "complete"
+    && publication.accounting.receipt !== undefined
+    && publication.matrixV2.state === "complete"
+    && publication.matrixV2.receipt !== undefined;
+  const unverifiedComplete = stages.some((candidate) => candidate.state === "complete" && candidate.receipt === undefined);
+  const pending = stages.some((candidate) => candidate.state === "in-progress");
   return {
     mode: publication.mode ?? "local",
     analysisPreregistration: input.state.runSha256 === undefined ? "not-locked" : "fixed-in-run",
@@ -68,9 +77,15 @@ export function projectPublicationStatus(input: {
     ...(publication.source.publicBaseUrl === undefined ? {} : { publicBaseUrl: publication.source.publicBaseUrl }),
     stages,
     compatibility: input.compatibility,
-    postHocPublicationAvailable: closed && input.state.publication !== undefined && input.compatibility.status === "ready",
-    recovery: inProgress
-      ? { resumable: true, guidance: "A previous publication attempt was interrupted. Retry its stage; durable receipts and exact bytes are retained locally." }
-      : { resumable: false, guidance: "Publication remains local until you explicitly configure and register a public source." },
+    postHocPublicationAvailable: closed && input.compatibility.status === "ready",
+    recovery: unverifiedComplete
+      ? { resumable: true, guidance: "A stage is marked complete without its durable receipt and remains unverified. Retry that stage; exact local bytes are retained and no timing assurance is claimed." }
+      : pending
+        ? { resumable: true, guidance: "A previous publication attempt was interrupted. Retry its stage; durable progress and exact bytes are retained locally." }
+      : publicComplete
+        ? { resumable: false, guidance: publication.report.state === "complete" ? "Accounting, Matrix, and Report publication are complete." : "Accounting and Matrix publication are complete. A Report is optional and remains separate." }
+        : publication.registration.state === "complete"
+          ? { resumable: false, guidance: "Public registration is complete; accounting has not yet completed." }
+          : { resumable: false, guidance: "Publication remains local until you explicitly configure and register a public source." },
   };
 }

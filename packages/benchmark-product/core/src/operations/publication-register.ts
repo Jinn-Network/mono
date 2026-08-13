@@ -32,6 +32,8 @@ import { getSealedBytes } from "../workspace/sealed-store.js";
 import {
   createWorkspacePublicationJournal,
   createWorkspacePublicationSource,
+  normalizePublicArchiveBaseUrl,
+  publicArchiveUrl,
   recordPath,
   withWorkspacePublicationSourceLock,
 } from "../run/publication-source.js";
@@ -69,13 +71,9 @@ export interface PublicationRegisterDeps {
   readonly verifyOrigin?: OriginVerificationPort;
 }
 
-function publicUrl(base: string, path: string): string {
-  return new URL(path, base.endsWith("/") ? base : `${base}/`).toString();
-}
-
 async function probeExact(base: string, digest: `sha256:${string}`, bytes: Uint8Array): Promise<void> {
   let response: Response;
-  try { response = await fetch(publicUrl(base, recordPath(digest))); } catch (cause) {
+  try { response = await fetch(publicArchiveUrl(base, recordPath(digest))); } catch (cause) {
     throw new Error(`public record probe failed: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!response.ok) throw new Error(`public record probe returned ${response.status}`);
@@ -87,7 +85,7 @@ async function probeExact(base: string, digest: `sha256:${string}`, bytes: Uint8
 
 async function probeArtifactExact(base: string, digest: `sha256:${string}`, bytes: Uint8Array): Promise<void> {
   const path = `/publication-artifacts/sha256/${digest.slice(7)}`;
-  const response = await fetch(publicUrl(base, path));
+  const response = await fetch(publicArchiveUrl(base, path));
   if (!response.ok) throw new Error(`public artifact probe returned ${response.status}`);
   const observed = new Uint8Array(await response.arrayBuffer());
   if (sha256(observed) !== digest || observed.length !== bytes.length || !observed.every((byte, index) => byte === bytes[index])) {
@@ -302,8 +300,10 @@ export function publicationConfigure(
     run: async () => {
       const operationLock = await acquirePublicationLock(context.workspaceDir, input.draftId);
       try {
-      const parsed = new URL(input.publicBaseUrl);
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") refuse("validation", "publicBaseUrl", "publicBaseUrl must be http(s)");
+      let normalized: string;
+      try { normalized = normalizePublicArchiveBaseUrl(input.publicBaseUrl); } catch (cause) {
+        refuse("validation", "publicBaseUrl", cause instanceof Error ? cause.message : "invalid public archive base URL");
+      }
       const state = requireRunState(context.workspaceDir, input.draftId);
       if (state.publication === undefined) refuse("conflict", `runs.${input.draftId}`, "run has no prospective publication state");
       writeRunState(context.workspaceDir, input.draftId, {
@@ -313,10 +313,10 @@ export function publicationConfigure(
           // Configuring before execution is explicit public-before-run intent. A closed run stays
           // local and may be registered truthfully as post-hoc.
           mode: state.closedAt === undefined && state.launchedAt === undefined ? "prospective" : (state.publication.mode ?? "local"),
-          source: { ...state.publication.source, publicBaseUrl: parsed.toString().replace(/\/$/, "") },
+          source: { ...state.publication.source, publicBaseUrl: normalized },
         },
       });
-      return { publicBaseUrl: parsed.toString().replace(/\/$/, "") };
+      return { publicBaseUrl: normalized };
       } finally {
         operationLock.release();
       }
@@ -347,8 +347,11 @@ export function publicationRegister(
         refuse("conflict", `runs.${input.draftId}.publication`, "a running local run cannot be retroactively represented as public-before-dispatch");
       }
       if (input.publicBaseUrl !== undefined) {
-        const configured = new URL(input.publicBaseUrl);
-        publication = { ...publication, source: { ...publication.source, publicBaseUrl: configured.toString().replace(/\/$/, "") } };
+        let configured: string;
+        try { configured = normalizePublicArchiveBaseUrl(input.publicBaseUrl); } catch (cause) {
+          refuse("validation", "publicBaseUrl", cause instanceof Error ? cause.message : "invalid public archive base URL");
+        }
+        publication = { ...publication, source: { ...publication.source, publicBaseUrl: configured } };
         state = { ...state, publication };
         writeRunState(context.workspaceDir, input.draftId, state);
       }

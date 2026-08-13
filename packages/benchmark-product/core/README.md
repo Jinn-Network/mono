@@ -164,3 +164,7 @@ Mutable drafts, grants, journals, scratch state, and private signing keys remain
 inside the workspace. Sealed records are stored as exact digest-addressed bytes.
 `publish` is **local immutable emission only: no upload, no hosting, no deployment**, package publication, or remote write. The emitted closure is
 public and not a general PII or confidentiality scrubber.
+
+For staged publication, `publicBaseUrl` is the exact archive mount, not merely an origin. For
+example, `https://example.test/publication` resolves records beneath
+`https://example.test/publication/records/...`; an origin-root mount remains supported.

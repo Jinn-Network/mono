@@ -34,7 +34,7 @@ import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receip
 import { foldRunJournal, foldRunJournalLineage, readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readPublicationOrigin, requireWorkspaceAuthorship, recordWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
 import { assessPublicationCompatibility } from "../run/publication-compatibility.js";
-import { createWorkspacePublicationJournal, createWorkspacePublicationSource, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { createWorkspacePublicationJournal, createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
@@ -73,9 +73,8 @@ const authorship = (id: string, digest: string, bytes: Uint8Array): PublicationA
 });
 
 function timestamp(at: string, offset: number): string { return new Date(Date.parse(at) + offset).toISOString(); }
-function publicUrl(base: string, path: string): string { return new URL(path, base.endsWith("/") ? base : `${base}/`).toString(); }
 async function probeExact(base: string, digest: `sha256:${string}`, bytes: Uint8Array): Promise<void> {
-  const response = await fetch(publicUrl(base, recordPath(digest)));
+  const response = await fetch(publicArchiveUrl(base, recordPath(digest)));
   if (!response.ok) throw new Error(`public accounting input probe returned ${response.status}`);
   const observed = new Uint8Array(await response.arrayBuffer());
   if (observed.length !== bytes.length || !observed.every((value, index) => value === bytes[index])) {
@@ -83,7 +82,7 @@ async function probeExact(base: string, digest: `sha256:${string}`, bytes: Uint8
   }
 }
 async function probeArtifactExact(base: string, digest: `sha256:${string}`, bytes: Uint8Array): Promise<void> {
-  const response = await fetch(publicUrl(base, `/publication-artifacts/sha256/${digest.slice(7)}`));
+  const response = await fetch(publicArchiveUrl(base, `/publication-artifacts/sha256/${digest.slice(7)}`));
   if (!response.ok) throw new Error(`public accounting artifact probe returned ${response.status}`);
   const observed = new Uint8Array(await response.arrayBuffer());
   if (observed.length !== bytes.length || !observed.every((value, index) => value === bytes[index])) {

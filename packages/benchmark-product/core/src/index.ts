@@ -299,6 +299,8 @@ export type { PublicationStatusProjection, PublicationStageStatus, PublicationSt
 export {
   createWorkspacePublicationHttpHandler,
   createWorkspacePublicationSource,
+  normalizePublicArchiveBaseUrl,
+  publicArchiveUrl,
 } from "./run/publication-source.js";
 export { recordPublicationOrigin } from "./run/publication-authority.js";
 export { foldRunJournalLineage } from "./run/journal.js";
@@ -331,6 +333,7 @@ export {
   publicationConfigure,
   publicationRegister,
   publicationReport,
+  publicationStatus,
   runCancel,
   runCollect,
   runLaunch,

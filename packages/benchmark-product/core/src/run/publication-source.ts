@@ -6,8 +6,9 @@
  */
 
 import { createHash, verify as cryptoVerify } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { constants, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { open, realpath, stat } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
 import {
   DISCOVERY_SIGNING_SCOPE,
   MEDIA_HEAD,
@@ -37,6 +38,52 @@ import { atomicWriteFileSync, fsyncDirectorySync, readFileIfExistsSync } from ".
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import { publicationJournalPath, publicationServeRoot, publicationStatePath } from "../workspace/layout.js";
 import { acquirePublicationLock } from "./publication-lock.js";
+
+/** Canonical archive-mount contract shared by registration, accounting, launch, and Report. */
+export function normalizePublicArchiveBaseUrl(value: string): string {
+  // Validate the spelling before WHATWG URL normalization can erase encoded/raw dot segments or
+  // reinterpret a backslash as a path separator. The configured value is a mount, not a URL base
+  // that may navigate to a parent directory.
+  if (value.includes("\\")) throw new Error("public archive base URL must use a confined URL path");
+  const schemeEnd = value.indexOf("://");
+  if (schemeEnd >= 0) {
+    const afterAuthority = value.slice(schemeEnd + 3);
+    const pathStart = afterAuthority.indexOf("/");
+    const rawPath = pathStart < 0 ? "" : afterAuthority.slice(pathStart).split(/[?#]/u, 1)[0];
+    for (const segment of rawPath.split("/")) {
+      let decoded: string;
+      try { decoded = decodeURIComponent(segment); } catch {
+        throw new Error("public archive base URL must use valid URL encoding");
+      }
+      if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\")) {
+        throw new Error("public archive base URL must use a confined URL path");
+      }
+    }
+  }
+  const parsed = new URL(value);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("public archive base URL must be http(s)");
+  if (parsed.username !== "" || parsed.password !== "") throw new Error("public archive base URL must not contain credentials");
+  if (parsed.search !== "" || parsed.hash !== "") throw new Error("public archive base URL must not contain a query or fragment");
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+  return parsed.toString().replace(/\/$/, "");
+}
+
+/** `publicBaseUrl` is the exact archive mount; leading slashes never reset it to the origin. */
+export function publicArchiveUrl(publicBaseUrl: string, archivePath: string): string {
+  const base = normalizePublicArchiveBaseUrl(publicBaseUrl);
+  const relative = archivePath.replace(/^\/+/, "");
+  let unsafe = relative.length === 0;
+  try {
+    unsafe ||= relative.split("/").some((segment) => {
+      const decoded = decodeURIComponent(segment);
+      return decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\");
+    });
+  } catch { unsafe = true; }
+  if (unsafe) {
+    throw new Error("public archive path must be a non-empty confined archive path");
+  }
+  return new URL(relative, `${base}/`).toString();
+}
 
 function opaqueId(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -205,22 +252,71 @@ export function createWorkspacePublicationJournal(workspaceDir: string, draftId:
 
 /** Plain Request/Response composition for a future web mount (PUB-14 owns mounting). */
 export function createWorkspacePublicationHttpHandler(workspaceDir: string): (request: Request) => Promise<Response> {
-  const blobs = createFsBlobStore(publicationServeRoot(workspaceDir));
-  const archive = createArchiveHttpHandler({ reader: blobs });
+  const root = publicationServeRoot(workspaceDir);
+  const confinedReader = {
+    async get(path: string): Promise<{ bytes: Uint8Array; contentType: string } | undefined> {
+      const rootReal = await realpath(root);
+      const candidate = resolve(root, `.${path.startsWith("/") ? path : `/${path}`}`);
+      if (candidate !== resolve(root) && !candidate.startsWith(resolve(root) + sep)) throw new Error("unsafe publication path");
+      const readConfined = async (file: string): Promise<Uint8Array | undefined> => {
+        let handle;
+        try { handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW); } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+          throw cause;
+        }
+        try {
+          const opened = await handle.stat();
+          if (!opened.isFile()) throw new Error("publication object is not a regular file");
+          const resolved = await realpath(file);
+          if (resolved !== rootReal && !resolved.startsWith(rootReal + sep)) throw new Error("publication object resolves outside the serving root");
+          const current = await stat(resolved);
+          if (current.dev !== opened.dev || current.ino !== opened.ino) throw new Error("publication object changed during confined open");
+          return new Uint8Array(await handle.readFile());
+        } finally { await handle.close(); }
+      };
+      const bytes = await readConfined(candidate);
+      if (bytes === undefined) return undefined;
+      const declared = await readConfined(`${candidate}.content-type`);
+      const contentType = declared === undefined
+        ? "application/octet-stream"
+        : new TextDecoder("utf-8", { fatal: true }).decode(declared);
+      // Sidecars are data, never raw header syntax. Keep the accepted form deliberately narrow so
+      // a raced or corrupted sidecar cannot smuggle additional response headers.
+      if (contentType.length > 512
+        || contentType.trim() !== contentType
+        || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+(?:[ \t]*;[^\r\n\0]+)*$/u.test(contentType)) {
+        throw new Error("publication content type is invalid");
+      }
+      return { bytes, contentType };
+    },
+  };
+  const archive = createArchiveHttpHandler({ reader: confinedReader });
   return async (request) => {
-    const path = new URL(request.url).pathname;
-    const artifact = /^\/publication-artifacts\/sha256\/([a-f0-9]{64})$/.exec(path);
-    if (artifact !== null) {
-      if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
-      const object = await blobs.get(path);
-      if (object === undefined) return new Response(null, { status: 404 });
-      if (publicationSha256(object.bytes) !== `sha256:${artifact[1]}`) return new Response(null, { status: 409 });
-      return new Response(request.method === "HEAD" ? null : object.bytes, {
-        status: 200,
-        headers: { "content-type": object.contentType, "cache-control": IMMUTABLE_CACHE_CONTROL },
-      });
+    try {
+      const path = new URL(request.url).pathname;
+      const artifact = /^\/publication-artifacts\/sha256\/([a-f0-9]{64})$/.exec(path);
+      if (artifact !== null) {
+        if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+        const object = await confinedReader.get(path);
+        if (object === undefined) return new Response(null, { status: 404 });
+        if (publicationSha256(object.bytes) !== `sha256:${artifact[1]}`) return new Response(null, { status: 409 });
+        return new Response(request.method === "HEAD" ? null : object.bytes, {
+          status: 200,
+          headers: {
+            "content-type": object.contentType,
+            "cache-control": IMMUTABLE_CACHE_CONTROL,
+            "x-content-type-options": "nosniff",
+          },
+        });
+      }
+      const response = await archive(request);
+      const headers = new Headers(response.headers);
+      headers.set("x-content-type-options", "nosniff");
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    } catch {
+      // Confinement failures are indistinguishable from absence on the public surface.
+      return new Response(null, { status: 404 });
     }
-    return archive(request);
   };
 }
 

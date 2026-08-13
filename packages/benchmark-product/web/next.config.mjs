@@ -43,9 +43,9 @@ const config = {
   reactStrictMode: true,
   async headers() {
     return [
-      { source: "/:path*", headers: privateResponseHeaders },
-      // The core archive handler supplies immutable cache semantics per exact object. Do not
-      // overwrite it with the private app's no-store header on the fixed public mount.
+      // Negative lookahead is the separation boundary: the private no-store rule never matches
+      // the public archive, whose handler owns immutable cache semantics.
+      { source: "/:path((?!publication).*)", headers: privateResponseHeaders },
       { source: "/publication/:path*", headers: privateResponseHeaders.filter((header) => header.key !== "Cache-Control") },
     ];
   },

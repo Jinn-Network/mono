@@ -4,8 +4,6 @@ import { RunMonitorRefresh } from "@/components/run-monitor-refresh";
 import { LifecycleRail } from "@/components/lifecycle-rail";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
 import { loadRunView } from "@/lib/server/view-models";
 
@@ -18,7 +16,9 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   const view = loadRunView(draftId);
   const status = view.ok && view.status.ok ? view.status.result : undefined;
   const state = status?.state;
-  const publication = view.ok && view.publication.ok ? view.publication.result : undefined;
+  const publication = view.ok && view.publication?.ok ? view.publication.result : undefined;
+  const publicationConfiguration = view.ok ? view.publicationConfiguration : undefined;
+  const postHoc = state === "closed" || state === "reported" || state === "published-bundle";
   const cancellationPending = status?.cancelRequested === true && state === "running";
   const poll = status?.driver?.status === "active" || cancellationPending;
 
@@ -59,9 +59,10 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         </CardContent></Card>
         <Card><CardHeader><CardTitle>Public publication controls</CardTitle></CardHeader><CardContent className="grid gap-5">
           <p className="text-sm text-muted-foreground">Local-first is the default. Configure before dispatch only when you intend prospective public registration. The server never accepts a workspace path from this form.</p>
-          <ActionForm action={GUI_SERVER_ACTIONS["publication.configure"]} submitLabel={state === "closed" ? "Configure post-hoc public source (does not rerun)" : "Configure prospective public source"} gated disabled={state !== "locked" && state !== "closed"}><HiddenDraft draftId={draftId} /><Label htmlFor="public-base-url">Public source URL</Label><Input id="public-base-url" name="publicBaseUrl" type="url" defaultValue={publication?.publicBaseUrl} required /></ActionForm>
-          <ActionForm action={GUI_SERVER_ACTIONS["publication.register"]} submitLabel={state === "closed" ? "Register post-hoc (does not rerun)" : "Register before dispatch"} gated disabled={state !== "locked" && state !== "closed"}><HiddenDraft draftId={draftId} /></ActionForm>
-          <ActionForm action={GUI_SERVER_ACTIONS["publication.accounting"]} submitLabel="Publish accounting and Matrix (does not rerun)" gated disabled={state !== "closed" || publication?.postHocPublicationAvailable === false}><HiddenDraft draftId={draftId} /></ActionForm>
+          <p className="break-all text-sm" role="status">Server-configured archive mount: {publicationConfiguration?.publicBaseUrl ?? "Unavailable — set the publication public base URL on the server."}</p>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.configure"]} submitLabel={postHoc ? "Configure post-hoc public source (does not rerun)" : "Configure prospective public source"} gated disabled={!publicationConfiguration?.available || (state !== "locked" && !postHoc)}><HiddenDraft draftId={draftId} /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.register"]} submitLabel={postHoc ? "Register post-hoc (does not rerun)" : "Register before dispatch"} gated disabled={!publicationConfiguration?.available || (state !== "locked" && !postHoc)}><HiddenDraft draftId={draftId} /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.accounting"]} submitLabel="Publish accounting and Matrix (does not rerun)" gated disabled={!postHoc || publication?.postHocPublicationAvailable === false}><HiddenDraft draftId={draftId} /></ActionForm>
           <p className="text-sm text-muted-foreground">Accounting can close a partial or cancelled managed run. It does not require a Report; Report publication is a separate future action.</p>
         </CardContent></Card>
       </section>

@@ -22,9 +22,9 @@ describe("generated library / CLI / GUI parity", () => {
   });
 
   test("no operation remains deferred; unsafe runtime path inputs are explicitly unavailable", () => {
-    const deferred = Object.entries(GUI_CAPABILITY_CATALOG)
+    const deferred = Object.entries(GUI_CAPABILITY_CATALOG as Readonly<Record<string, { readonly status: string; readonly deferredTo?: string }>>)
       .filter(([, capability]) => capability.status === "deferred")
-      .map(([operation, capability]) => [operation, capability.status === "deferred" ? capability.deferredTo : ""]);
+      .map(([operation, capability]) => [operation, capability.deferredTo ?? ""]);
     expect(deferred).toEqual([]);
   });
 });

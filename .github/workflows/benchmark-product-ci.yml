@@ -68,6 +68,7 @@ jobs:
       # Cross-tree portal dependencies, built from source in dependency order: each one's `dist/`
       # is what the next one's type resolution reads. The full graph: BP-11's runtime closure
       # (protocol, trust-core, environment-record, profiles, records, task-admission, interop),
+      # the public Record Discovery source/transport/publication stack,
       # then BP-12's real local-venue stack (backend, supervisor, workspace, launchers -- all now
       # real runtime dependencies, not the prior test-only `task-execution-launchers`
       # devDependency) plus its evidence-* / attestation-issuer transitives and the evaluation
@@ -78,10 +79,16 @@ jobs:
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/client && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/transport-http && yarn install --immutable && yarn build)
+          (cd packages/discovery/publication && yarn install --immutable && yarn build)
           (cd packages/environments/record && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
           (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/publication && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)

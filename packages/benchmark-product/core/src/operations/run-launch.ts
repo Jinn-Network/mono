@@ -46,7 +46,7 @@ import {
   type DriveDeps,
 } from "../run/drive.js";
 import { createProductLaunchCapture } from "../run/publication-capture.js";
-import { createWorkspacePublicationSource, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
 import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
   appendRunJournalEntry,
@@ -225,7 +225,7 @@ async function createRunLaunchCapture(
         record: { bytes, contentType: SUBMISSION_MEDIA_TYPE },
       });
       const base = publication.source.publicBaseUrl!;
-      const response = await fetch(new URL(recordPath(digest), base.endsWith("/") ? base : `${base}/`));
+      const response = await fetch(publicArchiveUrl(base, recordPath(digest)));
       const observed = response.ok ? new Uint8Array(await response.arrayBuffer()) : undefined;
       if (observed === undefined || observed.length !== bytes.length || !observed.every((byte, index) => byte === bytes[index])) {
         throw new Error("prospective Submission was announced but is not exactly retrievable");

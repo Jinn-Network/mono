@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createWorkspacePublicationHttpHandler } from "@jinn-network/benchmark-product-core";
 import { readProductServerConfiguration } from "@/lib/server/product-context";
 

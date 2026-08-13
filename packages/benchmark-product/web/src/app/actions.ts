@@ -44,7 +44,7 @@ import {
   positiveIntegerField,
 } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
-import { ProductContextConfigurationError, readRunDriverTestingDeps } from "@/lib/server/product-context";
+import { ProductContextConfigurationError, readProductServerConfiguration, readRunDriverTestingDeps } from "@/lib/server/product-context";
 import { projectRunStatusForGui } from "@/lib/server/view-models";
 import { projectPublishErrorForGui } from "@/lib/server/gui-error";
 
@@ -195,17 +195,20 @@ export async function runLockAction(_previous: GuiActionState, formData: FormDat
 /** The browser supplies a locator and draft id only. The workspace is fixed by server config. */
 export async function publicationConfigureAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
-  return executeOperation((context) => publicationConfigure(context, {
-    draftId, publicBaseUrl: field(formData, "publicBaseUrl"),
-  }), { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
+  return executeOperation((context) => {
+    const configured = readProductServerConfiguration().publicationPublicBaseUrl;
+    if (configured === undefined) throw new ProductContextConfigurationError("The server must configure a publication public base URL before the GUI can publish");
+    return publicationConfigure(context, { draftId, publicBaseUrl: configured });
+  }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
 }
 
 export async function publicationRegisterAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
-  return executeOperation((context) => publicationRegister(context, {
-    draftId,
-    ...(optionalField(formData, "publicBaseUrl") === undefined ? {} : { publicBaseUrl: optionalField(formData, "publicBaseUrl")! }),
-  }), { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
+  return executeOperation((context) => {
+    const configured = readProductServerConfiguration().publicationPublicBaseUrl;
+    if (configured === undefined) throw new ProductContextConfigurationError("The server must configure a publication public base URL before the GUI can publish");
+    return publicationRegister(context, { draftId, publicBaseUrl: configured });
+  }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
 }
 
 export async function publicationStatusAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {

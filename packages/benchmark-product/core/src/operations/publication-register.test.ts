@@ -56,14 +56,17 @@ async function lockedSample(now: () => string): Promise<string> {
 async function serveWorkspace(): Promise<string> {
   const handler = createWorkspacePublicationHttpHandler(workspaceDir);
   server = createServer(async (request, response) => {
-    const result = await handler(new Request(`http://127.0.0.1${request.url ?? "/"}`, { method: request.method }));
+    const externalPath = request.url ?? "/";
+    if (externalPath !== "/publication" && !externalPath.startsWith("/publication/")) { response.writeHead(404).end(); return; }
+    const archivePath = externalPath.slice("/publication".length) || "/";
+    const result = await handler(new Request(`http://127.0.0.1${archivePath}`, { method: request.method }));
     response.writeHead(result.status, Object.fromEntries(result.headers));
     response.end(Buffer.from(await result.arrayBuffer()));
   });
   await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("loopback server has no TCP address");
-  return `http://127.0.0.1:${address.port}`;
+  return `http://127.0.0.1:${address.port}/publication`;
 }
 
 describe("publication registration authority and exact public chain", () => {
