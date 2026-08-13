@@ -94,17 +94,20 @@ const { BenchmarkRecordSchema } = await import("../dist/benchmark/schema.js");
 const { RunRecordSchema } = await import("../dist/run/schema.js");
 const { MatrixRecordSchema } = await import("../dist/matrix/schema.js");
 const { ReportRecordSchema } = await import("../dist/report/schema.js");
+const { BenchmarkAccountingRecordSchema, ObservationArchiveSchema } = await import("../dist/accounting/schema.js");
 
 const FAMILIES = [
   ["benchmark.schema.json", BenchmarkRecordSchema],
   ["run.schema.json", RunRecordSchema],
   ["matrix.schema.json", MatrixRecordSchema],
   ["report.schema.json", ReportRecordSchema],
+  ["benchmark-accounting.schema.json", BenchmarkAccountingRecordSchema],
+  ["observation-archive.schema.json", ObservationArchiveSchema],
 ];
 
 const assets = new Map();
 for (const [filename, schema] of FAMILIES) {
-  const options = filename === "matrix.schema.json" || filename === "report.schema.json"
+  const options = filename === "matrix.schema.json" || filename === "report.schema.json" || filename === "observation-archive.schema.json"
     ? { target: "draft-2020-12", unrepresentable: "any" }
     : { target: "draft-2020-12" };
   assets.set(filename, jsonBytes(postProcess(filename, z.toJSONSchema(schema, options))));

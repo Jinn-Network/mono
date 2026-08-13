@@ -1,0 +1,1200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "type": "string",
+      "const": "https://spec.jinn.network/protocols/benchmarking/v1"
+    },
+    "run": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {}
+        },
+        {
+          "type": "object",
+          "properties": {
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": {}
+        }
+      ]
+    },
+    "publisher": {
+      "type": "string"
+    },
+    "procedure": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "const": "jinn.benchmarking.accounting"
+        },
+        "version": {
+          "type": "string",
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "streams": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "record-discovery"
+                  },
+                  "source": {
+                    "type": "object",
+                    "properties": {
+                      "agent": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "agent",
+                      "name"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "through": {
+                    "type": "object",
+                    "properties": {
+                      "sequence": {
+                        "type": "string",
+                        "pattern": "^\\d{16}$"
+                      },
+                      "entry": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "sequence",
+                      "entry"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "role",
+                  "kind",
+                  "source",
+                  "through"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "substrate"
+                  },
+                  "profile": {
+                    "type": "string"
+                  },
+                  "authority": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "through": {}
+                },
+                "required": [
+                  "role",
+                  "kind",
+                  "profile",
+                  "authority",
+                  "through"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "streams"
+      ],
+      "additionalProperties": false
+    },
+    "publicRegistration": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "pre-dispatch"
+            },
+            "runBoundary": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "record-discovery"
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "agent": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "agent",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "position": {
+                      "type": "object",
+                      "properties": {
+                        "sequence": {
+                          "type": "string",
+                          "pattern": "^\\d{16}$"
+                        },
+                        "entry": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "sequence",
+                        "entry"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "source",
+                    "position"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "substrate"
+                    },
+                    "profile": {
+                      "type": "string"
+                    },
+                    "authority": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "anchor": {}
+                  },
+                  "required": [
+                    "kind",
+                    "profile",
+                    "authority",
+                    "anchor"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "firstDispatchBoundary": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "record-discovery"
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "agent": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "agent",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "position": {
+                      "type": "object",
+                      "properties": {
+                        "sequence": {
+                          "type": "string",
+                          "pattern": "^\\d{16}$"
+                        },
+                        "entry": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "sequence",
+                        "entry"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "source",
+                    "position"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "substrate"
+                    },
+                    "profile": {
+                      "type": "string"
+                    },
+                    "authority": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "anchor": {}
+                  },
+                  "required": [
+                    "kind",
+                    "profile",
+                    "authority",
+                    "anchor"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "runBoundary",
+            "firstDispatchBoundary"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "post-hoc"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "unverifiable"
+            },
+            "runBoundary": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "record-discovery"
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "agent": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "agent",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "position": {
+                      "type": "object",
+                      "properties": {
+                        "sequence": {
+                          "type": "string",
+                          "pattern": "^\\d{16}$"
+                        },
+                        "entry": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "sequence",
+                        "entry"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "source",
+                    "position"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "substrate"
+                    },
+                    "profile": {
+                      "type": "string"
+                    },
+                    "authority": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "anchor": {}
+                  },
+                  "required": [
+                    "kind",
+                    "profile",
+                    "authority",
+                    "anchor"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "firstDispatchBoundary": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "record-discovery"
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "agent": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "agent",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "position": {
+                      "type": "object",
+                      "properties": {
+                        "sequence": {
+                          "type": "string",
+                          "pattern": "^\\d{16}$"
+                        },
+                        "entry": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "sequence",
+                        "entry"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "source",
+                    "position"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "substrate"
+                    },
+                    "profile": {
+                      "type": "string"
+                    },
+                    "authority": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "anchor": {}
+                  },
+                  "required": [
+                    "kind",
+                    "profile",
+                    "authority",
+                    "anchor"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "closeBoundary": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "anchor": {
+          "type": "object",
+          "properties": {
+            "chain": {
+              "type": "string"
+            },
+            "blockNumber": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "blockHash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "chain",
+            "blockNumber",
+            "blockHash"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "at"
+      ],
+      "additionalProperties": false
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "cellKey": {
+            "type": "string"
+          },
+          "dispatches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "submission": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "record": {
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "uri": {
+                              "type": "string"
+                            },
+                            "digest": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "mediaType": {
+                              "type": "string"
+                            },
+                            "downloadLocation": {
+                              "type": "string"
+                            },
+                            "annotations": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {}
+                            },
+                            "content": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "digest": {
+                              "type": "object",
+                              "properties": {
+                                "sha256": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                }
+                              },
+                              "required": [
+                                "sha256"
+                              ],
+                              "additionalProperties": {}
+                            }
+                          },
+                          "required": [
+                            "digest"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "record"
+                  ],
+                  "additionalProperties": false
+                },
+                "attempt": {
+                  "type": "string"
+                },
+                "observations": {
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "uri": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "downloadLocation": {
+                          "type": "string"
+                        },
+                        "annotations": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "digest": {
+                          "type": "object",
+                          "properties": {
+                            "sha256": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          },
+                          "required": [
+                            "sha256"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "digest"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  ]
+                },
+                "delivery": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "record": {
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "uri": {
+                              "type": "string"
+                            },
+                            "digest": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "mediaType": {
+                              "type": "string"
+                            },
+                            "downloadLocation": {
+                              "type": "string"
+                            },
+                            "annotations": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {}
+                            },
+                            "content": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "digest": {
+                              "type": "object",
+                              "properties": {
+                                "sha256": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                }
+                              },
+                              "required": [
+                                "sha256"
+                              ],
+                              "additionalProperties": {}
+                            }
+                          },
+                          "required": [
+                            "digest"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "record"
+                  ],
+                  "additionalProperties": false
+                },
+                "evidence": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "record": {
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "uri": {
+                                "type": "string"
+                              },
+                              "digest": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "mediaType": {
+                                "type": "string"
+                              },
+                              "downloadLocation": {
+                                "type": "string"
+                              },
+                              "annotations": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "content": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "digest": {
+                                "type": "object",
+                                "properties": {
+                                  "sha256": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "sha256"
+                                ],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": [
+                              "digest"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "record"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "evaluations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "record": {
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "uri": {
+                                "type": "string"
+                              },
+                              "digest": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "mediaType": {
+                                "type": "string"
+                              },
+                              "downloadLocation": {
+                                "type": "string"
+                              },
+                              "annotations": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "content": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "digest": {
+                                "type": "object",
+                                "properties": {
+                                  "sha256": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "sha256"
+                                ],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": [
+                              "digest"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "record"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "correlations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "role": {
+                        "type": "string"
+                      },
+                      "artifact": {
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "uri": {
+                                "type": "string"
+                              },
+                              "digest": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "mediaType": {
+                                "type": "string"
+                              },
+                              "downloadLocation": {
+                                "type": "string"
+                              },
+                              "annotations": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "content": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "digest": {
+                                "type": "object",
+                                "properties": {
+                                  "sha256": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "sha256"
+                                ],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": [
+                              "digest"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "role",
+                      "artifact"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "nativeArtifacts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "role": {
+                        "type": "string"
+                      },
+                      "availability": {
+                        "type": "string",
+                        "enum": [
+                          "public",
+                          "digest-only",
+                          "source-absent",
+                          "collection-failed"
+                        ]
+                      },
+                      "artifact": {
+                        "allOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "uri": {
+                                "type": "string"
+                              },
+                              "digest": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "mediaType": {
+                                "type": "string"
+                              },
+                              "downloadLocation": {
+                                "type": "string"
+                              },
+                              "annotations": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "content": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": {}
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "digest": {
+                                "type": "object",
+                                "properties": {
+                                  "sha256": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                  }
+                                },
+                                "required": [
+                                  "sha256"
+                                ],
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": [
+                              "digest"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        ]
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "role",
+                      "availability"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "index",
+                "submission",
+                "evidence",
+                "evaluations",
+                "correlations",
+                "nativeArtifacts"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "cellKey",
+          "dispatches"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "protocol",
+    "run",
+    "publisher",
+    "procedure",
+    "scope",
+    "publicRegistration",
+    "closeBoundary",
+    "cells"
+  ],
+  "additionalProperties": {},
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "protocol",
+          "run",
+          "publisher",
+          "procedure",
+          "scope",
+          "publicRegistration",
+          "closeBoundary",
+          "cells"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+      }
+    ]
+  },
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
+}

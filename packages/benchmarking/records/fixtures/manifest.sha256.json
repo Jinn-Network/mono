@@ -2,6 +2,22 @@
   "version": 1,
   "entries": [
     {
+      "id": "benchmark-accounting/invalid-missing-protocol.json",
+      "sha256": "3bfd0451bcf248c3526388ddfa95e2f855f468e74090427273a78938f08ae4c3"
+    },
+    {
+      "id": "benchmark-accounting/invalid-unsorted-cells.json",
+      "sha256": "c1c393973c67f4f172b214b84a6502137811f6c69e60e523e78247a4de5bf122"
+    },
+    {
+      "id": "benchmark-accounting/valid.json",
+      "sha256": "68c4949c6fcdef86a7d714f6a66fa2a2de973d22bce228afc16ebb695df5ef0f"
+    },
+    {
+      "id": "benchmark-accounting/valid.sha256",
+      "sha256": "cbc9cef533a0b7638e472fb7a20f920d4006def2a571c1cc3cfd4873615c6ef3"
+    },
+    {
       "id": "benchmark/invalid-bad-version.json",
       "sha256": "392fd4652c27a73cc5967b5b78ead8c09bc336beb6a2c97e7c6dc4a184d7fc27"
     },
@@ -76,6 +92,22 @@
     {
       "id": "matrix/valid.sha256",
       "sha256": "c72ea48ab42ad2af5f8c1a9a7c0398db7b4eb62490d1cf79212adb3646ea0734"
+    },
+    {
+      "id": "observation-archive/invalid-missing-profile.json",
+      "sha256": "bcdf7c8e4d903c7231ea21ee1f0ad6f7fc547b31d219eccdf1d2bbc24694b73a"
+    },
+    {
+      "id": "observation-archive/invalid-unsorted-streams.json",
+      "sha256": "d3c783fed2b89cc9638793d1c79561de7a16e423fbb3d63c8c0fad5e12b219cd"
+    },
+    {
+      "id": "observation-archive/valid.json",
+      "sha256": "b583ae3e6842cce1925894e791509435c6dd8e328480b41950841142ec476d3b"
+    },
+    {
+      "id": "observation-archive/valid.sha256",
+      "sha256": "522f78f7540f2da392d4c1ccfadfd7d8480d5d09616af4077fecd8b439c9ab3f"
     },
     {
       "id": "report/invalid-missing-disclosures.json",

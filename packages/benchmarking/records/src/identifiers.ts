@@ -12,6 +12,10 @@ export const BENCHMARK_MEDIA_TYPE = "application/vnd.jinn.benchmarking.benchmark
 export const RUN_MEDIA_TYPE = "application/vnd.jinn.benchmarking.run.v1+json";
 export const MATRIX_MEDIA_TYPE = "application/vnd.jinn.benchmarking.matrix.v1+json";
 export const REPORT_MEDIA_TYPE = "application/vnd.jinn.benchmarking.report.v1+json";
+/** Report v2 is an exact DSSE envelope around the unchanged Report v1 payload. */
+export const SIGNED_REPORT_MEDIA_TYPE = "application/vnd.dsse.envelope.v1+json";
+export const BENCHMARK_ACCOUNTING_MEDIA_TYPE = "application/vnd.jinn.benchmarking.accounting.v1+json";
+export const BENCHMARK_OBSERVATION_ARCHIVE_MEDIA_TYPE = "application/vnd.jinn.benchmarking.observation-archive.v1+json";
 
 // Record-kind URIs (plan §Pinned-identifiers, Finding F1 sub-flag): pre-aligned at fix time to
 // the record-discovery record-kind grammar `${RECORDS_ROOT}/<segment>/<major>.<minor>`
@@ -26,9 +30,20 @@ export const BENCHMARK_RECORD_KIND = "https://spec.jinn.network/records/benchmar
 export const RUN_RECORD_KIND = "https://spec.jinn.network/records/benchmark-run/v1";
 export const MATRIX_RECORD_KIND = "https://spec.jinn.network/records/benchmark-matrix/v1";
 export const REPORT_RECORD_KIND = "https://spec.jinn.network/records/benchmark-report/v1";
+export const REPORT_V2_RECORD_KIND = "https://spec.jinn.network/records/benchmark-report/v2";
+export const BENCHMARK_ACCOUNTING_RECORD_KIND = "https://spec.jinn.network/records/benchmark-accounting/v1";
+
+export const BENCHMARK_OBSERVATION_ARCHIVE_PROFILE =
+  "https://spec.jinn.network/profiles/benchmark-observation-archive/v1";
+export const BENCHMARK_PUBLICATION_EXTENSION =
+  "https://spec.jinn.network/extensions/benchmark-publication/v1";
 
 export const ASSEMBLY_PROCEDURE = "jinn.benchmarking.assembly";
 export const ASSEMBLY_PROCEDURE_VERSION = "1.0";
+export const MATRIX_ASSEMBLY_PROCEDURE = ASSEMBLY_PROCEDURE;
+export const MATRIX_ASSEMBLY_PROCEDURE_VERSION = "2.0";
+export const BENCHMARK_ACCOUNTING_PROCEDURE = "jinn.benchmarking.accounting";
+export const BENCHMARK_ACCOUNTING_PROCEDURE_VERSION = "1.0";
 
 /** §9.2 named-method registry URIs (working titles under `jinn.benchmarking.method/`). */
 export const BENCHMARKING_METHOD_IDS = {

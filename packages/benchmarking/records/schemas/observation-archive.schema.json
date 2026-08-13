@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "profile": {
+      "type": "string",
+      "const": "https://spec.jinn.network/profiles/benchmark-observation-archive/v1"
+    },
+    "submission": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {}
+        },
+        {
+          "type": "object",
+          "properties": {
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": {}
+        }
+      ]
+    },
+    "capturedThrough": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "at"
+      ],
+      "additionalProperties": false
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "authority": {
+            "type": "string",
+            "enum": [
+              "authoritative",
+              "corroborating"
+            ]
+          },
+          "observations": {
+            "type": "array",
+            "items": {}
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "observations": {
+                  "minItems": 2,
+                  "type": "array",
+                  "items": {}
+                }
+              },
+              "required": [
+                "source",
+                "id",
+                "observations"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "exactEnvelopes": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "uri": {
+                      "type": "string"
+                    },
+                    "digest": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "downloadLocation": {
+                      "type": "string"
+                    },
+                    "annotations": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    "content": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "digest": {
+                      "type": "object",
+                      "properties": {
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      },
+                      "required": [
+                        "sha256"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "digest"
+                  ],
+                  "additionalProperties": {}
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "source",
+          "subject",
+          "authority",
+          "observations",
+          "conflicts",
+          "exactEnvelopes"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "profile",
+    "submission",
+    "capturedThrough",
+    "streams"
+  ],
+  "additionalProperties": false,
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "profile",
+          "submission",
+          "capturedThrough",
+          "streams"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+      }
+    ]
+  },
+  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
+}

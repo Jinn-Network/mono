@@ -6,18 +6,29 @@
 export {
   ASSEMBLY_PROCEDURE,
   ASSEMBLY_PROCEDURE_VERSION,
+  BENCHMARK_ACCOUNTING_MEDIA_TYPE,
+  BENCHMARK_ACCOUNTING_PROCEDURE,
+  BENCHMARK_ACCOUNTING_PROCEDURE_VERSION,
+  BENCHMARK_ACCOUNTING_RECORD_KIND,
   BENCHMARK_MEDIA_TYPE,
+  BENCHMARK_OBSERVATION_ARCHIVE_MEDIA_TYPE,
+  BENCHMARK_OBSERVATION_ARCHIVE_PROFILE,
+  BENCHMARK_PUBLICATION_EXTENSION,
   BENCHMARK_RECORD_KIND,
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
   BENCHMARKING_PROTOCOL,
   BENCHMARKING_REPORTS_SCOPE,
   MATRIX_MEDIA_TYPE,
+  MATRIX_ASSEMBLY_PROCEDURE,
+  MATRIX_ASSEMBLY_PROCEDURE_VERSION,
   MATRIX_RECORD_KIND,
   REPORT_MEDIA_TYPE,
   REPORT_RECORD_KIND,
+  REPORT_V2_RECORD_KIND,
   RUN_MEDIA_TYPE,
   RUN_RECORD_KIND,
+  SIGNED_REPORT_MEDIA_TYPE,
   TRUST_POLICY_PURPOSE_BENCHMARK_PUBLISHER,
   TRUST_POLICY_PURPOSE_RUN_OWNER,
 } from "./identifiers.js";
@@ -49,6 +60,24 @@ export {
   LowercaseSha256HexSchema,
 } from "./descriptors.js";
 export type { DigestBearingResourceDescriptor } from "./descriptors.js";
+
+// --- benchmark-publication/v1 extension helpers ---
+export {
+  MatrixPublicationExtensionSchema,
+  RegistrationArtifactSchema,
+  RunPublicationExtensionSchema,
+  matrixPublicationExtension,
+  readMatrixPublicationExtension,
+  readRunPublicationExtension,
+  runPublicationExtension,
+  withMatrixPublicationExtension,
+  withRunPublicationExtension,
+} from "./publication-extension.js";
+export type {
+  MatrixPublicationExtension,
+  RegistrationArtifact,
+  RunPublicationExtension,
+} from "./publication-extension.js";
 
 // --- the Benchmark record (§6) ---
 export { BenchmarkRecordSchema, itemTaskDigest, parseBenchmark, sealBenchmark } from "./benchmark/schema.js";
@@ -97,8 +126,38 @@ export { MatrixRecordSchema, OUTCOME_VOCABULARY, parseMatrix, sealMatrix } from 
 export type { MatrixCell, MatrixRecord, Outcome } from "./matrix/schema.js";
 
 // --- the Report record (§9.1) ---
-export { ReportRecordSchema, parseReport, sealReport } from "./report/schema.js";
-export type { ReportRecord } from "./report/schema.js";
+export { ReportRecordSchema, parseReport, parseSignedReportRecord, sealReport } from "./report/schema.js";
+export type { ReportRecord, SignedReportRecord } from "./report/schema.js";
+
+// --- BenchmarkAccounting and observation archive (benchmark-publication/v1) ---
+export {
+  AccountingScopeStreamSchema,
+  BenchmarkAccountingRecordSchema,
+  ObservationArchiveSchema,
+  RegistrationBoundarySchema,
+  TypedRecordReferenceSchema,
+  parseBenchmarkAccounting,
+  parseObservationArchive,
+  sealBenchmarkAccounting,
+  sealObservationArchive,
+} from "./accounting/schema.js";
+export type {
+  AccountingScopeStream,
+  BenchmarkAccountingCell,
+  BenchmarkAccountingDispatch,
+  BenchmarkAccountingRecord,
+  ObservationArchive,
+  ObservationArchiveStream,
+  ObservationConflict,
+  RegistrationBoundary,
+  TypedRecordReference,
+} from "./accounting/schema.js";
+export {
+  checkBenchmarkAccounting,
+  checkObservationArchive,
+  checkPublicRegistrationOrder,
+} from "./accounting/checks.js";
+export type { PublicationCheckResult } from "./accounting/checks.js";
 
 // --- fixture loaders (golden + reveal + equivalence, §16) ---
 export {

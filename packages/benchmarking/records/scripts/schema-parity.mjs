@@ -7,6 +7,7 @@ import { BenchmarkRecordSchema } from "../dist/benchmark/schema.js";
 import { RunRecordSchema } from "../dist/run/schema.js";
 import { MatrixRecordSchema } from "../dist/matrix/schema.js";
 import { ReportRecordSchema } from "../dist/report/schema.js";
+import { BenchmarkAccountingRecordSchema, ObservationArchiveSchema } from "../dist/accounting/schema.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const schemas = join(root, "schemas");
@@ -19,12 +20,21 @@ const validate = async (family) => {
 };
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 
-const runtimeSchemas = { benchmark: BenchmarkRecordSchema, run: RunRecordSchema, matrix: MatrixRecordSchema, report: ReportRecordSchema };
+const runtimeSchemas = {
+  benchmark: BenchmarkRecordSchema,
+  run: RunRecordSchema,
+  matrix: MatrixRecordSchema,
+  report: ReportRecordSchema,
+  "benchmark-accounting": BenchmarkAccountingRecordSchema,
+  "observation-archive": ObservationArchiveSchema,
+};
 const corpus = {
   benchmark: { valid: ["minimal", "valid"], invalid: ["invalid-bad-version", "invalid-item-uri-only"] },
   run: { valid: ["minimal", "valid"], invalid: ["invalid-benchmark-uri-only", "invalid-missing-closeAt"] },
   matrix: { valid: ["minimal", "valid"], invalid: ["invalid-aggregate-field", "invalid-bad-outcome", "invalid-run-uri-only"] },
   report: { valid: ["minimal", "plural-valid", "valid"], invalid: ["invalid-missing-disclosures", "invalid-subject-uri-only"] },
+  "benchmark-accounting": { valid: ["valid"], invalid: ["invalid-missing-protocol"] },
+  "observation-archive": { valid: ["valid"], invalid: ["invalid-missing-profile"] },
 };
 
 async function assertParity(kind, fixture, expected) {
