@@ -19,6 +19,7 @@
  */
 import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
 import type { ChainLogSource } from '@jinn-network/marketplace-venue-base';
+import { SourceAnnouncementConflictError } from '@jinn-network/record-discovery-serve';
 import type { Address } from 'viem';
 import {
   applyNativeMarketplaceBatch,
@@ -159,7 +160,7 @@ export interface NativeSolutionCorrections {
 
 export function buildNativeSolutionCorrections(input: {
   readonly store: Store;
-  readonly publisher: Pick<NativeSolutionPublisher, 'publish' | 'withdraw'>;
+  readonly publisher: Pick<NativeSolutionPublisher, 'publish' | 'withdraw' | 'committedAnnouncement'>;
   readonly marketplaceEvents: NativeMarketplaceEventRepository;
 }): NativeSolutionCorrections {
   const { store, publisher, marketplaceEvents } = input;
@@ -260,31 +261,47 @@ export function buildNativeSolutionCorrections(input: {
         });
         const timestamp = advanceAnnouncementTimestamp(reannounceBase, reannounced);
         reannounced += 1;
-        const receipt = await publisher.publish({
-          publication: {
-            publicationKey: announcementId,
-            engagementId: delivery.engagement_id,
-            sourceId: delivery.source_id,
-            role: 'delivery',
-            recordDigest: delivery.record_digest,
-            availability: 'available',
-            status: 'intent',
-            detail: { canonicalBlockHash: event.derivation.blockHash },
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          },
-          artifact: {
-            engagementId: delivery.engagement_id,
-            role: 'delivery',
-            family: delivery.family,
-            mediaType: delivery.media_type,
-            name: delivery.name,
-            digest: delivery.record_digest,
+        let receipt: { readonly sequence: string; readonly entryDigest: `sha256:${string}` };
+        try {
+          receipt = await publisher.publish({
+            publication: {
+              publicationKey: announcementId,
+              engagementId: delivery.engagement_id,
+              sourceId: delivery.source_id,
+              role: 'delivery',
+              recordDigest: delivery.record_digest,
+              availability: 'available',
+              status: 'intent',
+              detail: { canonicalBlockHash: event.derivation.blockHash },
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            },
+            artifact: {
+              engagementId: delivery.engagement_id,
+              role: 'delivery',
+              family: delivery.family,
+              mediaType: delivery.media_type,
+              name: delivery.name,
+              digest: delivery.record_digest,
+              bytes: delivery.exact_bytes,
+              createdAt: timestamp,
+            },
             bytes: delivery.exact_bytes,
-            createdAt: timestamp,
-          },
-          bytes: delivery.exact_bytes,
-        });
+          });
+        } catch (cause) {
+          // A conflict here is the crash window of #2636: a previous pass COMMITTED this exact
+          // announcement — its identity is deterministic (`available:<blockHash>`) — and died
+          // before recording the correction row, and this pass's fresh wall-clock timestamp can
+          // never reproduce the committed fingerprint. The source already holds the entry, so
+          // adopt its receipt rather than appending anything (`created_at` below then carries
+          // this pass's recomputed timestamp, not the committed instant, which the receipt does
+          // not expose). A conflict the source cannot account for as a committed availability —
+          // and every other failure — stays loud.
+          if (!(cause instanceof SourceAnnouncementConflictError)) throw cause;
+          const committed = await publisher.committedAnnouncement(announcementId);
+          if (committed === undefined || committed.action !== 'available') throw cause;
+          receipt = committed;
+        }
         store.db.prepare(
           `INSERT INTO native_solution_discovery_corrections
             (event_key, action, delivery_digest, announcement_id, source_sequence, entry_digest, created_at)

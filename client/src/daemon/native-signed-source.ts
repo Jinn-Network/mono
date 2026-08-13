@@ -923,6 +923,16 @@ export interface NativeSignedSourcePublisher {
       readonly location: string;
     }): Announcement;
   }): Promise<NativeSignedSourceReceipt>;
+  /**
+   * The announcement this source has already committed under `announcementId`, if any. Read-only:
+   * lets a caller whose local record of a committed append was lost to a crash adopt the
+   * committed receipt instead of re-appending bytes the source-writer would refuse (#2636).
+   */
+  committedAnnouncement(announcementId: string): Promise<{
+    readonly action: Announcement['action'];
+    readonly sequence: string;
+    readonly entryDigest: `sha256:${string}`;
+  } | undefined>;
   close(): Promise<void>;
 }
 
@@ -1080,6 +1090,16 @@ export async function openNativeSignedSource(input: {
     return {
       sourceId,
       publish,
+      async committedAnnouncement(announcementId) {
+        const state = await durable.readState();
+        const entry = state?.announcements[announcementId];
+        if (entry === undefined) return undefined;
+        return {
+          action: entry.action,
+          sequence: entry.receipt.sequence,
+          entryDigest: entry.receipt.entryDigest,
+        };
+      },
       handler: createArchiveHttpHandler({
         reader: store,
         tail: tail.source,
