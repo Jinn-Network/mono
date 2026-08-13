@@ -1,11 +1,10 @@
 import { randomUUID, createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { packedDeploymentPaths } from "@test/pack-probe.js";
 import type { BindingResolver, ResolvedBinding } from "@jinn-network/trust-core";
 import { ResultEvaluationStatementSchema } from "@jinn-network/evidence-protocol";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
@@ -79,7 +78,6 @@ const COORDINATOR = `0x${"3".repeat(40)}` as const;
 const SIGNER_HANDLE = "prediction-market-evaluator-verdict";
 const MODULE_HREF = pathToFileURL(PREDICTION_EVALUATOR_DEPLOYMENT_MODULE_PATH).href;
 const CLIENT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const execFileAsync = promisify(execFile);
 const roots: string[] = [];
 let claimEvidenceRoot: string;
 
@@ -654,15 +652,9 @@ describe("production prediction-market deployment module — npm packaging", () 
     // The sidecar written in this file's top-level beforeAll (at the same co-located
     // path the deployment module reads) is on disk for this entire suite -- exactly
     // the "real sidecar present" precondition this check must hold under, not an
-    // absence trivially passing.
-    const { stdout } = await execFileAsync("npm", ["pack", "--dry-run", "--json"], {
-      cwd: CLIENT_ROOT,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    const [entry] = JSON.parse(stdout) as readonly {
-      readonly files: readonly { readonly path: string }[];
-    }[];
-    const paths = entry!.files.map((file) => file.path);
+    // absence trivially passing. Probed via a throwaway copy, never a live-root
+    // `npm pack` — see pack-probe.ts for why the latter breaks the whole suite (#2641).
+    const paths = await packedDeploymentPaths(CLIENT_ROOT);
     expect(paths).toContain("deployments/evaluator/prediction-market-deployment.mjs");
     expect(paths).toContain("deployments/evaluator/prediction-market-evaluation-method.v1.json");
     expect(paths).not.toContain("deployments/evaluator/prediction-market-deployment.local.json");
