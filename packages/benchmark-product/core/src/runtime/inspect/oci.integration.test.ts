@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
-import { parseMatrix } from "@jinn-network/benchmarking-records";
+import { parseMatrix, parseReport, sealMatrix } from "@jinn-network/benchmarking-records";
 import { createDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { selectInspectEvaluation } from "../../operations/inspect-runtime.js";
@@ -15,13 +15,16 @@ import { runLock } from "../../operations/run-lock.js";
 import { runPreview } from "../../operations/preview.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { runReport } from "../../operations/report.js";
+import { runResults } from "../../operations/run-results.js";
 import { runPublish } from "../../operations/publish.js";
 import { runVerify } from "../../operations/verify.js";
 import type { OperationContext } from "../../operations/context.js";
 import { verifyPublicBundle } from "../../bundle/verify.js";
 import { createDefaultBenchmarkRuntimeHost } from "../host-port.js";
 import { readRunJournalEntries } from "../../run/journal.js";
-import { getSealedBytes } from "../../workspace/sealed-store.js";
+import { readRunState, writeRunState } from "../../run/state.js";
+import { getSealedBytes, putSealedBytes } from "../../workspace/sealed-store.js";
+import { createRuntimeVenue } from "../adapter.js";
 
 const imageDigest = process.env.JINN_INSPECT_OCI_IMAGE;
 const datasetCacheDir = process.env.JINN_INSPECT_OCI_DATASET_CACHE;
@@ -68,6 +71,18 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       runOptions: { sampleId: "alpha", maxSamples: 1, retryOnError: 0 },
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) throw new Error("unreachable");
+    const venue = createRuntimeVenue(selected.result.draft.spec.evaluationRuntime, {
+      workspaceDir,
+      now: context.clock,
+    });
+    try {
+      await expect(venue.backend.capabilities()).resolves.toMatchObject({
+        isolation: ["oci-container", "process"],
+      });
+    } finally {
+      await venue.shutdown();
+    }
     expect((await runPreview(context, { draftId: "inspect-oci" })).ok).toBe(true);
     expect((await runQuote(context, { draftId: "inspect-oci" })).ok).toBe(true);
     expect(runLock(context, { draftId: "inspect-oci" }).ok).toBe(true);
@@ -79,6 +94,29 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
     expect(matrix.cells).toHaveLength(2);
     expect(matrix.cells.every((cell) => cell.outcome === "judged")).toBe(true);
+    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+
+    const runState = readRunState(workspaceDir, "inspect-oci");
+    expect(runState?.matrixSha256).toBe(collected.result.matrixSha256);
+    if (runState?.matrixSha256 === undefined) throw new Error("unreachable");
+    const [firstCell, ...remainingCells] = matrix.cells;
+    if (firstCell === undefined) throw new Error("unreachable");
+    const dishonest = sealMatrix({
+      ...matrix,
+      cells: [{
+        ...firstCell,
+        verification: { ...firstCell.verification, isolation: "match" },
+      }, ...remainingCells],
+    });
+    writeRunState(workspaceDir, "inspect-oci", {
+      ...runState,
+      matrixSha256: putSealedBytes(workspaceDir, dishonest.bytes),
+    });
+    const rejected = await runVerify(context, { draftId: "inspect-oci" });
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) throw new Error("unreachable");
+    expect(rejected.error).toMatchObject({ code: "record-integrity" });
+    expect(rejected.error.issues?.[0]?.path).toBe("matrix-rederivation");
   }, 180_000);
 
   test("cancellation reaps the OCI worker without leaving a container", async () => {
@@ -233,6 +271,14 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
     const journal = readRunJournalEntries(workspaceDir, "inspect-broker");
     expect(matrix.completeness, JSON.stringify({ matrix, journal })).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
+    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+    const results = runResults(context, { draftId: "inspect-broker" });
+    expect(results.ok, JSON.stringify(results)).toBe(true);
+    if (!results.ok) throw new Error("unreachable");
+    expect(results.result.venueHonesty.unverifiableAxisCounts.isolation).toBe(2);
+    expect(results.result.venueHonesty.limits).toContainEqual(expect.stringContaining(
+      "admits both unrestricted and OCI-container execution",
+    ));
     const deliveries = journal.filter((entry) => entry.kind === "delivery");
     expect(deliveries).toHaveLength(2);
     for (const delivery of deliveries) {
@@ -248,7 +294,23 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       });
       expect(summary.provider.eventDigest).toMatch(/^[a-f0-9]{64}$/u);
     }
-    expect((await runReport(context, { draftId: "inspect-broker" })).ok).toBe(true);
+    const reported = await runReport(context, { draftId: "inspect-broker" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    if (!reported.ok) throw new Error("unreachable");
+    const report = parseReport(getSealedBytes(workspaceDir, reported.result.reportSha256));
+    expect(report.disclosures.perSubject[0]?.pinning.isolation).toEqual({
+      match: 0,
+      mismatch: 0,
+      unverifiable: 2,
+    });
+    expect(reported.result.claimPackage.disclosures.pinningUnverifiableCounts.isolation).toBe(2);
+    const venueHonesty = reported.result.claimPackage.venueHonesty as {
+      unverifiableAxisCounts: { isolation: number };
+    };
+    expect(venueHonesty.unverifiableAxisCounts.isolation).toBe(2);
+    expect(reported.result.claimPackage.limitations).toContainEqual(expect.stringContaining(
+      "admits both unrestricted and OCI-container execution",
+    ));
     expect((await runVerify(context, { draftId: "inspect-broker" })).ok).toBe(true);
     const published = await runPublish(context, { draftId: "inspect-broker", includeNativeArtifacts: true });
     expect(published.ok, JSON.stringify(published)).toBe(true);
