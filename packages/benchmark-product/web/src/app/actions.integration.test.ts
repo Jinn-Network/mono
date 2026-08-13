@@ -156,6 +156,26 @@ describe.sequential("server action layer against a real workspace", () => {
     expect(JSON.stringify(configured)).not.toContain("attacker.example");
   }, 120_000);
 
+  test("GUI signed Report v2 refuses a persisted locator that differs from the server-owned mount", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "publication-report-server-authority-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    process.env[PUBLICATION_PUBLIC_BASE_URL_ENV] = "https://public.example/archive-a";
+    await invoke("workspace.init");
+    await prepareLockedDraft("report-server-authority");
+    expect(await invoke("publication.configure", { draftId: "report-server-authority" })).toMatchObject({ status: "success" });
+
+    process.env[PUBLICATION_PUBLIC_BASE_URL_ENV] = "https://public.example/archive-b";
+    const refused = await invoke("publication.report", {
+      draftId: "report-server-authority",
+      consent: "publish-signed-report-v2",
+    });
+    expect(refused).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+    expect(JSON.stringify(refused)).not.toContain("archive-a");
+    expect(JSON.stringify(refused)).not.toContain("archive-b");
+  }, 120_000);
+
   test("OpenAI readiness exposes only a configured bit", () => {
     expect(openAIConnectionReadiness({})).toBe("not-configured");
     expect(openAIConnectionReadiness({ BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE: "/private/path/key" })).toBe("configured");

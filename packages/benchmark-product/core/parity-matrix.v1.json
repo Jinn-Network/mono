@@ -153,17 +153,6 @@
       }
     },
     {
-      "operation": "publicationAccounting",
-      "cliVerb": "publication accounting",
-      "authorityGated": true,
-      "description": "Publishes the exact complete dispatch accounting closure and its terminal Matrix v2 without rerunning work.",
-      "gui": {
-        "status": "unavailable",
-        "followUp": "PUB-14",
-        "reason": "PUB-13 exposes the accounting stage through the CLI; PUB-14 owns its consent-aware GUI action."
-      }
-    },
-    {
       "operation": "publicationConfigure",
       "cliVerb": "publication configure",
       "authorityGated": true,
@@ -199,9 +188,8 @@
       "authorityGated": true,
       "description": "Produces, independently verifies, and publishes the signed Report v2 envelope after its exact accounting closure.",
       "gui": {
-        "status": "unavailable",
-        "followUp": "PUB-14",
-        "reason": "PUB-13 exposes signed Report v2 publication through the CLI; PUB-14 owns its consent-aware GUI action."
+        "status": "shipped",
+        "action": "publication.report"
       }
     },
     {

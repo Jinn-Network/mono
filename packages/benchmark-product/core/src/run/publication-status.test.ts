@@ -58,4 +58,17 @@ describe("publication status projection", () => {
     expect(value.recovery.guidance).toMatch(/Accounting and Matrix publication are complete/);
     expect(value.recovery.guidance).not.toMatch(/remains local/);
   });
+
+  test("projects Report v2 payload and envelope identities only with its durable receipt", () => {
+    const current = state();
+    current.publication = { ...current.publication!, report: { state: "complete", digests: { payload: "a".repeat(64), record: "b".repeat(64) } } };
+    const unreceipted = projectPublicationStatus({ state: current, lifecycleState: "closed", compatibility: { status: "ready", dispatchCount: 1 } });
+    expect(unreceipted.stages[3]).toMatchObject({ name: "report", state: "complete", digests: { payload: "a".repeat(64), record: "b".repeat(64) } });
+    expect(unreceipted.recovery).toMatchObject({ resumable: true });
+
+    current.publication = { ...current.publication!, report: { state: "in-progress", digests: { payload: "a".repeat(64), record: "b".repeat(64) } } };
+    const interrupted = projectPublicationStatus({ state: current, lifecycleState: "closed", compatibility: { status: "ready", dispatchCount: 1 } });
+    expect(interrupted.recovery).toMatchObject({ resumable: true });
+    expect(interrupted.recovery.guidance).toMatch(/interrupted/);
+  });
 });

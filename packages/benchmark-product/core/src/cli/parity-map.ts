@@ -204,7 +204,7 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   publicationRegister: { status: "shipped", action: "publication.register" },
   publicationAccounting: { status: "shipped", action: "publication.accounting" },
   publicationStatus: { status: "shipped", action: "publication.status" },
-  publicationReport: { status: "unavailable", reason: "signed Report v2 publication requires the consent-aware GUI action supplied by the combined PUB-13/PUB-14 follow-up" },
+  publicationReport: { status: "shipped", action: "publication.report" },
   runLaunch: { status: "shipped", action: "run.launch" },
   runResume: { status: "shipped", action: "run.resume" },
   runCancel: { status: "shipped", action: "run.cancel" },

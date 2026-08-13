@@ -18,7 +18,9 @@ import {
   publicationAccounting,
   publicationConfigure,
   publicationRegister,
+  publicationReport,
   publicationStatus,
+  normalizePublicArchiveBaseUrl,
   runLaunch,
   runResume,
   runCancel,
@@ -218,6 +220,28 @@ export async function publicationStatusAction(_previous: GuiActionState, formDat
 export async function publicationAccountingAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
   return executeOperation(async (context) => publicationAccounting(context, { draftId }), {
+    revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`, `/workspace/${draftId}/results`],
+  });
+}
+
+/** Publishing a signed interpretation is an explicit, server-owned consent action. The browser
+ * supplies only the draft and acknowledgement; source locator and workspace authority stay server-side. */
+export async function publicationReportAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  if (field(formData, "consent") !== "publish-signed-report-v2") {
+    throw new ProductContextConfigurationError("Confirm signed Report v2 publication before continuing");
+  }
+  return executeOperation(async (context) => {
+    const configured = readProductServerConfiguration().publicationPublicBaseUrl;
+    if (configured === undefined) throw new ProductContextConfigurationError("The server must configure a publication public base URL before the GUI can publish");
+    const status = publicationStatus(context, { draftId });
+    if (!status.ok) return status;
+    if (status.result.publicBaseUrl === undefined
+      || normalizePublicArchiveBaseUrl(status.result.publicBaseUrl) !== configured) {
+      throw new ProductContextConfigurationError("The server-configured public archive mount must match the run's configured publication locator before a signed Report v2 can publish");
+    }
+    return publicationReport(context, { draftId });
+  }, {
     revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`, `/workspace/${draftId}/results`],
   });
 }

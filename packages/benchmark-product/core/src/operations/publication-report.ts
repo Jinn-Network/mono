@@ -39,7 +39,7 @@ import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { recordWorkspaceAuthorship, requireWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
-import { createWorkspacePublicationJournal, createWorkspacePublicationSource, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { createWorkspacePublicationJournal, createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
 import { requireRunState, writeRunState, type PublicationStage, type RunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
@@ -69,19 +69,21 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }
 
-function publicUrl(base: string, path: string): string {
-  return new URL(path, base.endsWith("/") ? base : `${base}/`).toString();
-}
-
 async function probeRecord(base: string, digest: string, bytes: Uint8Array, label: string): Promise<void> {
-  const response = await fetch(publicUrl(base, recordPath(`sha256:${digest}`)));
+  const url = publicArchiveUrl(base, recordPath(`sha256:${digest}`));
+  const head = await fetch(url, { method: "HEAD" });
+  if (!head.ok) throw new Error(`public ${label} HEAD probe returned ${head.status}`);
+  const response = await fetch(url);
   if (!response.ok) throw new Error(`public ${label} probe returned ${response.status}`);
   const observed = new Uint8Array(await response.arrayBuffer());
   if (!bytesEqual(observed, bytes)) throw new Error(`public ${label} probe did not return the exact sealed bytes`);
 }
 
 async function probeArtifact(base: string, digest: string, bytes: Uint8Array): Promise<void> {
-  const response = await fetch(publicUrl(base, `/publication-artifacts/sha256/${digest}`));
+  const url = publicArchiveUrl(base, `/publication-artifacts/sha256/${digest}`);
+  const head = await fetch(url, { method: "HEAD" });
+  if (!head.ok) throw new Error(`public Report payload HEAD probe returned ${head.status}`);
+  const response = await fetch(url);
   if (!response.ok) throw new Error(`public Report payload probe returned ${response.status}`);
   const observed = new Uint8Array(await response.arrayBuffer());
   if (!bytesEqual(observed, bytes)) throw new Error("public Report payload probe did not return exact payload bytes");

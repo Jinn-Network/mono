@@ -70,10 +70,15 @@ function contextFor(clock: () => string, principal = "sponsor-1"): OperationCont
   return { workspaceDir, principal, clock };
 }
 
-async function servePublicationWorkspace(): Promise<string> {
+async function servePublicationWorkspace(mount = ""): Promise<string> {
   const handler = createWorkspacePublicationHttpHandler(workspaceDir);
   publicationServer = createServer(async (request, response) => {
-    const result = await handler(new Request(`http://127.0.0.1${request.url ?? "/"}`, { method: request.method }));
+    const url = new URL(`http://127.0.0.1${request.url ?? "/"}`);
+    if (mount !== "") {
+      expect(url.pathname.startsWith(`${mount}/`)).toBe(true);
+      url.pathname = url.pathname.slice(mount.length) || "/";
+    }
+    const result = await handler(new Request(url, { method: request.method }));
     response.writeHead(result.status, Object.fromEntries(result.headers));
     response.end(Buffer.from(await result.arrayBuffer()));
   });
@@ -369,10 +374,10 @@ async function setUpClosedRun(
 
 /** The Report-v2 operation consumes the independent accounting closure; it never launches this
  * fixture's backend. Registration after close is deliberately post-hoc. */
-async function setUpPublishedAccounting(clock: () => string): Promise<void> {
+async function setUpPublishedAccounting(clock: () => string, mount = ""): Promise<void> {
   await setUpClosedRun(clock);
   recordRunPublicationAuthorship("draft-1");
-  const publicBaseUrl = await servePublicationWorkspace();
+  const publicBaseUrl = await servePublicationWorkspace(mount);
   const configured = await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl });
   expect(configured.ok, JSON.stringify(configured)).toBe(true);
   const registered = await publicationRegister(contextFor(clock), { draftId: "draft-1" });
@@ -405,6 +410,24 @@ function recordRunPublicationAuthorship(draftId: string): void {
 }
 
 describe("publication.report — signed Report v2", () => {
+  test("exactly GETs and HEAD-probes payload, envelope, and accounting support through a nested public mount", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock, "/nested/publication");
+    const published = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) return;
+    const state = readRunState(workspaceDir, "draft-1")!;
+    const base = `http://127.0.0.1:${(publicationServer!.address() as import("node:net").AddressInfo).port}/nested/publication`;
+    for (const digest of [state.accountingSha256!, state.matrixV2Sha256!, published.result.reportRecordSha256]) {
+      const path = `${base}${recordPath(`sha256:${digest}`)}`;
+      expect((await fetch(path, { method: "HEAD" })).status).toBe(200);
+      expect(new Uint8Array(await (await fetch(path)).arrayBuffer())).toEqual(getSealedBytes(workspaceDir, digest));
+    }
+    const payload = `${base}/publication-artifacts/sha256/${published.result.reportPayloadSha256}`;
+    expect((await fetch(payload, { method: "HEAD" })).status).toBe(200);
+    expect(new Uint8Array(await (await fetch(payload)).arrayBuffer())).toEqual(getSealedBytes(workspaceDir, published.result.reportPayloadSha256));
+  }, 60_000);
+
   test("preserves an existing legacy Report v1 while publishing and retrying an independent signed Report v2", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);

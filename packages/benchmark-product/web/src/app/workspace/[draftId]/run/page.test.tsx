@@ -17,6 +17,7 @@ vi.mock("@/lib/server/gui-action-registry", () => ({
     "publication.configure": vi.fn(),
     "publication.register": vi.fn(),
     "publication.accounting": vi.fn(),
+    "publication.report": vi.fn(),
   },
 }));
 vi.mock("@/components/action-form", () => ({
@@ -78,6 +79,8 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).toContain("Configure post-hoc public source (does not rerun)");
     expect(markup).toContain("Register post-hoc (does not rerun)");
     expect(markup).toContain("Publish accounting and Matrix (does not rerun)");
+    expect(markup).toContain("Publish signed Report v2 (does not rerun)");
+    expect(markup).toContain('name="consent" value="publish-signed-report-v2"');
     expect(markup).toContain("does not require a Report");
     expect(markup).toContain("https://public.example/publication");
     expect(markup).not.toContain('name="publicBaseUrl"');
@@ -89,9 +92,20 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).toContain("Configure post-hoc public source (does not rerun)");
     expect(markup).toContain("Register post-hoc (does not rerun)");
     expect(markup).toContain("Publish accounting and Matrix (does not rerun)");
+    expect(markup).toContain("Publish signed Report v2 (does not rerun)");
     expect(markup).not.toContain("<button disabled=\"\">Configure post-hoc");
     expect(markup).not.toContain("<button disabled=\"\">Register post-hoc");
     expect(markup).not.toContain("<button disabled=\"\">Publish accounting");
+    expect(markup).toContain("<button disabled=\"\">Publish signed Report v2");
+  });
+
+  test("does not enable signed Report v2 over complete-but-unreceipted accounting stages", async () => {
+    const value = status("closed", false);
+    value.publication.result.stages[1] = { name: "accounting", state: "complete", digests: { accounting: "a".repeat(64) } };
+    value.publication.result.stages[2] = { name: "matrix", state: "complete", digests: { matrixV2: "b".repeat(64) } };
+    loadRunViewMock.mockReturnValue(value);
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain("<button disabled=\"\">Publish signed Report v2");
   });
 
   test("renders a typed durable failure without serializing its sensitive detail", async () => {
