@@ -16,14 +16,20 @@ export interface CorpusOptions {
   routeResolver?: RouteResolver;
   onchain?: import('./onchain-query.js').OnchainCorpusQueryOptions;
   /**
-   * DiscoveryAPI instance for envelope queries. When provided, delegates all
-   * `queryEnvelopes` calls to the DiscoveryAPI (Ponder HTTP or onchain floor)
-   * and bypasses the `onchain` legacy path. The DiscoveryAPI owns the
-   * primary-vs-floor fallback split internally via `withFallback`.
+   * Envelope-query port. When provided, delegates all `queryEnvelopes` calls to
+   * it (Ponder HTTP or onchain floor) and bypasses the `onchain` legacy path. A
+   * full `DiscoveryAPI` satisfies it structurally, and when one is passed it
+   * owns the primary-vs-floor fallback split internally via `withFallback`.
+   *
+   * Typed as core's one-method `CorpusDiscoveryPort` rather than the whole
+   * `DiscoveryAPI` (one-swap R3b, issue #2494): `queryEnvelopes` is the only
+   * method the corpus ever calls, and the narrower type keeps `corpus/` off the
+   * legacy `discovery/` tree the D-wave deletes — which in turn is what lets
+   * `discovery-client/` depend on these shapes without a cycle back.
    *
    * When both `discovery` and `onchain` are set, `discovery` takes precedence.
    */
-  discovery?: import('../discovery/types.js').DiscoveryAPI;
+  discovery?: import('@jinn-network/core/corpus-read').CorpusDiscoveryPort;
 }
 
 export interface CorpusQuery {

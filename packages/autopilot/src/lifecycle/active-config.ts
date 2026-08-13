@@ -26,11 +26,29 @@ export const AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID_ENV =
   'JINN_AUTOPILOT_MARKETPLACE_SOLVERNET_MANIFEST_CID';
 export type AutopilotExecutionBackend = 'local' | 'marketplace';
 
+/**
+ * One-swap R3b (issue #2494) retired `jinn tasks observe-autopilot-delivery`,
+ * the marketplace backend's only way to confirm a Solution or Verdict delivery.
+ * Selecting the backend is therefore refused HERE — at configuration parse,
+ * before any Task is posted — rather than at the observation step, which would
+ * strand escrow on a session that could never be confirmed.
+ *
+ * `'marketplace'` stays in the type (and its internals stay compiled and
+ * tested) because what was retired is the legacy HTTP indexer, not the backend
+ * design: re-backing observation on a native read is what reopens it.
+ */
+export const AUTOPILOT_MARKETPLACE_BACKEND_RETIRED =
+  `${AUTOPILOT_EXECUTION_BACKEND_ENV}=marketplace is retired: exact delivery `
+  + 'observation required the legacy HTTP indexer (one-swap R3b, issue #2494). '
+  + 'Use local.';
+
 export function autopilotExecutionBackend(
   raw: string | undefined,
 ): AutopilotExecutionBackend {
   if (raw === undefined || raw === '' || raw === 'local') return 'local';
-  if (raw === 'marketplace') return 'marketplace';
+  if (raw === 'marketplace') {
+    throw new Error(AUTOPILOT_MARKETPLACE_BACKEND_RETIRED);
+  }
   throw new Error(
     `${AUTOPILOT_EXECUTION_BACKEND_ENV} must be local or marketplace`,
   );

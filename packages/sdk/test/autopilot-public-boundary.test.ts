@@ -6,7 +6,6 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   AutopilotAdoptionReceiptSchema,
   AutopilotCorrelationSchema,
-  AutopilotDeliveryCommandResultV1Schema,
   AutopilotDeliveryExpectationSchema,
   AutopilotDeliveryObservationSchema,
   AutopilotMutationResultSchema,
@@ -17,7 +16,6 @@ import {
   parseAutopilotAdoptionReceiptComment,
   type AcceptedSolutionAdoptionReceipt,
   type AutopilotDeliveryContradictionReason,
-  type AutopilotDeliveryCommandResultV1,
   type AutopilotDeliveryExpectation,
   type AutopilotDeliveryObservation,
   type AutopilotDeliveryPendingReason,
@@ -75,7 +73,6 @@ describe('@jinn-network/sdk/autopilot public boundary', () => {
     expect(TaskSubmitResultV1Schema).toBeDefined();
     expect(AutopilotDeliveryExpectationSchema).toBeDefined();
     expect(AutopilotDeliveryObservationSchema).toBeDefined();
-    expect(AutopilotDeliveryCommandResultV1Schema).toBeDefined();
 
     expectTypeOf<TaskSubmitRequestV1>().not.toBeAny();
     expectTypeOf<TaskSubmitResultV1>().not.toBeAny();
@@ -86,7 +83,6 @@ describe('@jinn-network/sdk/autopilot public boundary', () => {
     expectTypeOf<AutopilotDeliveryPendingReason>().not.toBeAny();
     expectTypeOf<AutopilotDeliveryContradictionReason>().not.toBeAny();
     expectTypeOf<AutopilotDeliveryObservation>().not.toBeAny();
-    expectTypeOf<AutopilotDeliveryCommandResultV1>().not.toBeAny();
   });
 
   it('keeps the SolverNet barrel on the identical schema objects', () => {
@@ -257,19 +253,19 @@ describe('Autopilot delivery wire contracts', () => {
     }).success).toBe(false);
   });
 
-  it('wraps observations in a strict machine-command result', () => {
-    const observation = fixture('delivery-pending.json');
-    const value = {
-      schemaVersion: 1,
-      generatedAt: '2026-07-24T12:00:00.000Z',
-      verb: 'tasks observe-autopilot-delivery',
-      observation,
-    };
-    expect(AutopilotDeliveryCommandResultV1Schema.parse(value)).toEqual(value);
-    expect(AutopilotDeliveryCommandResultV1Schema.safeParse({
-      ...value,
-      generatedAt: new Date(),
-    }).success).toBe(false);
+  // One-swap R3b (issue #2494) retired `tasks observe-autopilot-delivery` and
+  // the `AutopilotDeliveryCommandResultV1Schema` envelope that named it. The
+  // boundary must no longer publish that export — a consumer pinned to it gets
+  // a build error, not a schema that parses results nothing can produce.
+  it('no longer publishes the retired delivery command-result envelope', async () => {
+    const autopilotModule: Record<string, unknown> =
+      await import('../src/autopilot.js');
+    expect(autopilotModule['AutopilotDeliveryCommandResultV1Schema'])
+      .toBeUndefined();
+    const jinnRepoModule: Record<string, unknown> =
+      await import('../src/solvernets/jinn-repo.js');
+    expect(jinnRepoModule['AutopilotDeliveryCommandResultV1Schema'])
+      .toBeUndefined();
   });
 });
 

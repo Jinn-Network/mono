@@ -212,71 +212,26 @@ export interface InstanceClaimCount {
   maxClaims: number;
 }
 
-/**
- * Exact indexer candidates used to recover an Autopilot marketplace delivery.
- *
- * This read is intentionally narrower than the ordinary discovery surfaces:
- * one chain, one marketplace task id, one role.  A successful result preserves
- * every on-chain/indexed join key needed by the delivery observer; absence is
- * pending and ambiguity is a contradiction.
- */
-export type AutopilotDeliveryRole = 'solution' | 'verdict';
+// ── Autopilot delivery candidates ────────────────────────────────────────────
+//
+// The exact-delivery recovery shapes moved to the neutral
+// `discovery-client/types.ts` under one-swap R3b (issue #2494, DR-2026-08-05
+// addendum 2026-08-10 Decision 2) so `cli/commands/evidence.ts` and the
+// `jinn tasks watch` verb keep reading the HTTP indexer after the D-wave
+// deletes `discovery/`. Re-exported here so the `DiscoveryAPI` interface below
+// and its HTTP / on-chain backings keep compiling unchanged.
+export type {
+  AutopilotDeliveryRole,
+  AutopilotDeliveryTaskCandidate,
+  AutopilotDeliveryAttemptCandidate,
+  AutopilotDeliveryEnvelopeCandidate,
+  AutopilotDeliveryCandidateLookup,
+} from '../discovery-client/types.js';
 
-export interface AutopilotDeliveryTaskCandidate {
-  taskId: string;
-  taskCidDigest: `0x${string}`;
-  createdAtBlock: number;
-  createdAtTx: `0x${string}`;
-}
-
-export interface AutopilotDeliveryAttemptCandidate {
-  taskId: string;
-  attemptIndex: number;
-  requestId: `0x${string}`;
-  operator: `0x${string}`;
-  /** Indexed attempt/delivery block when present; null for pre-adoption verdict metadata. */
-  createdAtBlock: number | null;
-}
-
-export interface AutopilotDeliveryEnvelopeCandidate {
-  requestId: `0x${string}`;
-  manifestCid: string;
-  publisherAgentId: string;
-  manifestHash: `0x${string}`;
-  enrichedAtBlock: number;
-}
-
-export type AutopilotDeliveryCandidateLookup =
-  | {
-      status: 'pending';
-      reason:
-        | 'task-not-indexed'
-        | 'attempt-not-indexed'
-        | 'envelope-not-indexed'
-        | 'exact-indexer-required';
-      taskId: string;
-      role: AutopilotDeliveryRole;
-    }
-  | {
-      status: 'contradiction';
-      reason:
-        | 'multiple-tasks'
-        | 'multiple-attempts'
-        | 'multiple-verdicts'
-        | 'multiple-envelopes'
-        | 'inconsistent-indexer-data';
-      taskId: string;
-      role: AutopilotDeliveryRole;
-    }
-  | {
-      status: 'ready';
-      role: AutopilotDeliveryRole;
-      task: AutopilotDeliveryTaskCandidate;
-      attempt: AutopilotDeliveryAttemptCandidate;
-      /** Safe that authored the solution attempt; distinct from a verdict evaluator. */
-      solutionOperator: `0x${string}`;
-      envelope: AutopilotDeliveryEnvelopeCandidate;
-    };
+import type {
+  AutopilotDeliveryRole,
+  AutopilotDeliveryCandidateLookup,
+} from '../discovery-client/types.js';
 
 // ── PublishedArtifact base (attd) ────────────────────────────────────────────
 //
@@ -385,24 +340,11 @@ export function bucketTaskPostCounts(
   return { chain, byCid };
 }
 
-export interface CodeDigestRewardRow {
-  /** The executor.codeDigest, e.g. "sha256:<hex>". */
-  codeDigest: string;
-  /** Count of distinct (requestId, chainId) attempts with a verdict, mode='train'. */
-  attempts: number;
-  /** Count where verdictEnvelopeMeta.actualPassed === true. */
-  passes: number;
-  /** passes / attempts; 0 when attempts === 0. */
-  passRate: number;
-  /** Mean of numeric actualScore over verdicts that carried one; 0 when none. */
-  avgScore: number;
-  /**
-   * Per-attempt graded score (passedCount/totalCount) for in-window verdicts
-   * that carried v2 counts (totalCount > 0). Empty / short when verdicts predate
-   * verdict.v2. Consumed by the learner's Mann-Whitney sensitivity tier (#1019).
-   */
-  gradedScores: number[];
-}
+// Relocated to `discovery-client/types.ts` under one-swap R3b (issue #2494);
+// re-exported so the interface below and its importers compile unchanged.
+export type { CodeDigestRewardRow } from '../discovery-client/types.js';
+
+import type { CodeDigestRewardRow } from '../discovery-client/types.js';
 
 export interface DiscoveryAPI {
   /**
@@ -734,28 +676,10 @@ export interface DiscoveryAPI {
  * The `withFallback` wrapper catches this class (plus network-shaped errors)
  * and routes to the floor implementation for the duration of the outage.
  */
-/**
- * Machine-readable reason a discovery read failed. `rpc_rate_limited` is the
- * one branch callers act on distinctly: it means the configured RPC endpoint
- * returned a 429 (or otherwise rate-limited the daemon), which — on the shared
- * default RPC — is an operator-actionable condition ("add your own key"), not
- * an indexer outage. Any other transport failure is left untyped (`undefined`).
- */
-export type DiscoveryUnavailableCode = 'rpc_rate_limited';
-
-export class DiscoveryUnavailableError extends Error {
-  override readonly cause?: unknown;
-  /**
-   * Typed reason, when one can be classified — currently only
-   * `rpc_rate_limited`, surfaced end-to-end so the operator UI can render a
-   * distinct "your RPC is throttled" message instead of a generic failure.
-   */
-  readonly code?: DiscoveryUnavailableCode;
-
-  constructor(message: string, cause?: unknown, code?: DiscoveryUnavailableCode) {
-    super(message);
-    this.name = 'DiscoveryUnavailableError';
-    this.cause = cause;
-    this.code = code;
-  }
-}
+// The outage error moved to the neutral `discovery-client/types.ts` under
+// one-swap R3b (issue #2494). It is re-exported — not re-declared — so every
+// `instanceof DiscoveryUnavailableError` check across the daemon, the CLI, the
+// MCP tools, and the surviving read slice keeps testing ONE class identity
+// after the D-wave deletes `discovery/`.
+export { DiscoveryUnavailableError } from '../discovery-client/types.js';
+export type { DiscoveryUnavailableCode } from '../discovery-client/types.js';

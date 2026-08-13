@@ -288,13 +288,10 @@ export type AutopilotDeliveryObservation = z.infer<
   typeof AutopilotDeliveryObservationSchema
 >;
 
-export const AutopilotDeliveryCommandResultV1Schema = z.object({
-  schemaVersion: z.literal(1),
-  generatedAt: z.string().datetime({ offset: true }),
-  verb: z.literal('tasks observe-autopilot-delivery'),
-  observation: AutopilotDeliveryObservationSchema,
-}).strict();
-
-export type AutopilotDeliveryCommandResultV1 = z.infer<
-  typeof AutopilotDeliveryCommandResultV1Schema
->;
+// `AutopilotDeliveryCommandResultV1Schema` — the machine-command envelope whose
+// `verb` literal was `'tasks observe-autopilot-delivery'` — was removed by
+// one-swap R3b (issue #2494) together with that CLI verb. Both of its producers
+// (the verb itself and the Autopilot lifecycle client that shelled out to it)
+// are gone, and the published `Jinn-Network/autopilot` engine never referenced
+// it. The delivery expectation and observation schemas above are unchanged:
+// they describe the delivery, not the retired command that carried it.

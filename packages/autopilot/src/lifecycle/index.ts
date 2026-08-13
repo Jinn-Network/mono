@@ -50,4 +50,4 @@ export * from './marketplace-mutation-git.js';
 export * from './marketplace-mutation-manifest.js';
 export * from './marketplace-mutation-adoption.js';
 export * from './marketplace-mutation-adoption-production.js';
-export * from './marketplace-delivery-client.js';
+export * from './marketplace-delivery-observation.js';

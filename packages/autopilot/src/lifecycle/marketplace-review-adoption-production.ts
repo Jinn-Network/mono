@@ -20,7 +20,7 @@ import {
 } from './marketplace-review-adoption.js';
 import type {
   VerifiedMarketplaceVerdictDelivery,
-} from './marketplace-delivery-client.js';
+} from './marketplace-delivery-observation.js';
 import {
   makeReviewSessionProtocol,
   type ReviewSessionPort,

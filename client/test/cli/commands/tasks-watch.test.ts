@@ -238,13 +238,17 @@ describe('tasks watch', () => {
     expect(made.exits).toEqual([40]);
   });
 
-  it('leaves observe-autopilot-delivery routing untouched', async () => {
+  // One-swap R3b (issue #2494) retired `observe-autopilot-delivery`: its only
+  // consumer was the canary-only Autopilot marketplace execution backend, and
+  // the verb could not survive the D-wave deletion of the legacy HTTP indexer
+  // it hard-required. The verb must now be UNROUTED, not silently accepted.
+  it('no longer routes the retired observe-autopilot-delivery subverb', async () => {
     const made = makeCommandCtx({ argv: ['observe-autopilot-delivery', '--json'] });
     await tasksCommand.run(made.ctx);
     expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
       code: 'invalid_invocation',
-      message: '--expectation-file is required',
+      message: 'Unknown tasks subverb: observe-autopilot-delivery',
+      details: { expected: 'submit|watch|list|show|close|cancel|release' },
     });
-    expect(made.exits).toEqual([11]);
   });
 });

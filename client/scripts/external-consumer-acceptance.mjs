@@ -90,7 +90,6 @@ export function resolveFixtureSchema(schemaName, autopilot, jinnRepo) {
     'jinn-task-submit-result.v1': 'TaskSubmitResultV1Schema',
     'jinn-autopilot-delivery-expectation.v1': 'AutopilotDeliveryExpectationSchema',
     'jinn-autopilot-delivery-observation.v1': 'AutopilotDeliveryObservationSchema',
-    'jinn-autopilot-delivery-command-result.v1': 'AutopilotDeliveryCommandResultV1Schema',
     'jinn-repo-task.v1': 'JinnRepoTaskSchema',
     'jinn-repo-solution.v1': 'JinnRepoSolutionPayloadSchema',
     'jinn-repo-verdict.v1': 'JinnRepoVerdictPayloadSchema',
@@ -285,10 +284,15 @@ function runRegistryYarnConsumerAcceptance(options, consumerRoot) {
       timeout: 30_000,
     },
   ).stdout;
-  for (const command of ['submit', 'observe-autopilot-delivery']) {
+  for (const command of ['submit']) {
     if (!help.includes(command)) {
       throw new Error(`registry Yarn consumer tasks --help is missing ${command}`);
     }
+  }
+  // `observe-autopilot-delivery` was retired by one-swap R3b (issue #2494); the
+  // published surface must no longer advertise it.
+  if (help.includes('observe-autopilot-delivery')) {
+    throw new Error('registry Yarn consumer tasks --help still advertises the retired observe-autopilot-delivery');
   }
 }
 
@@ -337,17 +341,18 @@ export function runAcceptance(options) {
       env: probeEnv(env),
       timeout: 30_000,
     }).stdout;
-    for (const command of ['submit', 'observe-autopilot-delivery']) {
+    for (const command of ['submit']) {
       if (!help.includes(command)) {
         throw new Error(`installed jinn tasks --help is missing ${command}`);
       }
     }
+    if (help.includes('observe-autopilot-delivery')) {
+      throw new Error('installed jinn tasks --help still advertises the retired observe-autopilot-delivery');
+    }
 
     const malformedRequest = join(consumerRoot, 'malformed-submit.json');
-    const malformedExpectation = join(consumerRoot, 'malformed-observation.json');
     const malformedConfig = join(consumerRoot, 'malformed-config.json');
     writeFileSync(malformedRequest, '{}\n');
-    writeFileSync(malformedExpectation, '{}\n');
     writeFileSync(malformedConfig, '{not-json\n');
     const machineEnv = probeEnv(env);
     assertInvalidInvocation(
@@ -363,17 +368,19 @@ export function runAcceptance(options) {
       ], { cwd: consumerRoot, env: machineEnv, timeout: 30_000 }),
       'malformed submit',
     );
+    // One-swap R3b (issue #2494) retired `observe-autopilot-delivery`. The
+    // published binary must reject it as an unknown subverb rather than route
+    // it — an external consumer still invoking it gets a machine-readable
+    // `invalid_invocation`, not a silent success or a crash.
     assertInvalidInvocation(
       run(bin, [
         'tasks',
         'observe-autopilot-delivery',
-        '--expectation-file',
-        malformedExpectation,
         '--json',
         '--config',
         malformedConfig,
       ], { cwd: consumerRoot, env: machineEnv, timeout: 30_000 }),
-      'malformed observation',
+      'retired observe-autopilot-delivery subverb',
     );
 
     if (options.mode === 'registry') {
@@ -385,7 +392,7 @@ export function runAcceptance(options) {
       sdk: { name: sdkPackage.name, version: sdkPackage.version },
       client: { name: clientPackage.name, version: clientPackage.version },
       fixtureCount: fixtureSummary.fixtureCount,
-      commands: ['tasks submit', 'tasks observe-autopilot-delivery'],
+      commands: ['tasks submit'],
     };
   } finally {
     rmSync(consumerRoot, { recursive: true, force: true });
