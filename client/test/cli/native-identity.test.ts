@@ -76,16 +76,18 @@ const TSX_BIN = join(CLIENT_ROOT, 'node_modules', '.bin', 'tsx');
 const JINN_ENTRY = join(CLIENT_ROOT, 'src', 'bin', 'jinn.ts');
 
 /** Spawns a real `jinn native-vertical identity ...` child process (genuine OS concurrency). */
-function runIdentityCli(args: readonly string[], env: NodeJS.ProcessEnv): Promise<{ readonly stdout: string; readonly exitCode: number | null }> {
+function runIdentityCli(args: readonly string[], env: NodeJS.ProcessEnv): Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number | null }> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(TSX_BIN, [JINN_ENTRY, 'native-vertical', 'identity', ...args], {
       cwd: CLIENT_ROOT,
       env: { ...process.env, ...env },
     });
     let stdout = '';
+    let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
     child.on('error', reject);
-    child.on('close', (code) => resolvePromise({ stdout, exitCode: code }));
+    child.on('close', (code) => resolvePromise({ stdout, stderr, exitCode: code }));
   });
 }
 
@@ -456,14 +458,18 @@ describe('native-vertical identity CLI surface', () => {
         // eslint-disable-next-line no-await-in-loop -- see above.
         const truth = await runIdentityCli(['--store', store, '--roles', 'admission'], env);
 
-        expect(truth.exitCode).toBe(0);
+        // Creators first: when a creator dies, the truth read fails DOWNSTREAM (no store on
+        // disk), so asserting truth first would mask the creator's own stderr.
+        for (const creator of [a, b]) {
+          expect(creator.exitCode, `creator stderr: ${creator.stderr}`).toBe(0);
+        }
+        expect(truth.exitCode, `truth stdout: ${truth.stdout} stderr: ${truth.stderr}`).toBe(0);
         const truthKeyId = (JSON.parse(truth.stdout) as { identities: { keyId: string }[] }).identities[0]?.keyId;
         expect(truthKeyId).toMatch(/^did:key:z/);
 
         for (const result of [a, b]) {
           // Fall-through-to-load design (createExclusive loses -> reread the winner): both
           // concurrent creators always exit 0 and report the winner's keyId, never a phantom.
-          expect(result.exitCode).toBe(0);
           const parsed = JSON.parse(result.stdout) as { identities: { keyId: string }[] };
           expect(parsed.identities[0]?.keyId).toBe(truthKeyId);
         }
