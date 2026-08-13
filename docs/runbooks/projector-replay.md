@@ -124,13 +124,24 @@ publish because it can finally see the events — which is the point of the proc
 
    ```bash
    cast call <coordinator> 'getRequestRef(bytes32)(uint256,uint32,bool)' <requestId> --rpc-url <rpc>
-   cast call <coordinator> 'getAttempt(uint256,uint32)' <taskId> <attemptIndex> --rpc-url <rpc>
+   cast call <coordinator> \
+     'getAttempt(uint256,uint32)((uint256,uint32,address,bytes32,bytes32,uint256,uint32,uint8))' \
+     <taskId> <attemptIndex> --rpc-url <rpc>
    ```
 
+   Both signatures carry their **output** types on purpose. `cast call` prints raw returndata when
+   the return signature is omitted, and `getAttempt` returns a struct — without the tuple you get an
+   undecoded blob and have to count 32-byte words to find the field you came for. The tuple is
+   `AttemptRecord` as declared in `client/src/daemon/composition-root.ts`'s `GET_ATTEMPT_VIEW_ABI`:
+   `(taskId, attemptIndex, operator, requestId, solutionCidDigest, solutionWeight, verdictCount,
+   status)`.
+
    `getRequestRef` must return `exists = true` with your `(taskId, attemptIndex)`, and `getAttempt`'s
-   `solutionCidDigest` must be the non-zero anchor you are hunting the record for. A revert, a
-   timeout or a 429 here means **do not apply yet** — the replay is one-shot, and a flaky read spends
-   it. See the PR-body follow-up on gate 1's chain-read leg for the structural fix.
+   **5th field**, `solutionCidDigest`, must be the non-zero anchor you are hunting the record for —
+   decoded output looks like
+   `(1236, 0, 0xc679BD…, 0x594af10a…, 0x743a947f…, 1000000000000000000, 1, 4)`. A revert, a timeout
+   or a 429 here means **do not apply yet** — the replay is one-shot, and a flaky read spends it. See
+   PR #2644's body follow-up 9 on gate 1's chain-read leg for the structural fix.
 
    The delivery digest is not on the coordinator (today generation anchors only its keccak), so read
    it off the counterparty's catalog. If the daemon already tried and dropped, its log names both the
