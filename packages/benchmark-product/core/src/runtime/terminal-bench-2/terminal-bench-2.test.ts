@@ -1,17 +1,21 @@
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { readRunPublicationExtension } from "@jinn-network/benchmarking-records";
+import { parseBenchmarkAccounting, parseMatrix, readRunPublicationExtension } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
 import { createDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
+import { publicationAccounting } from "../../operations/publication-accounting.js";
+import { publicationConfigure, publicationRegister } from "../../operations/publication-register.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { sampleInit } from "../../operations/sample.js";
 import { migrateTerminalBenchLegacyTask, selectTerminalBench2Runtime } from "../../operations/terminal-bench-2.js";
 import { readRunJournalEntries } from "../../run/journal.js";
+import { createWorkspacePublicationHttpHandler, publicArchiveUrl, recordPath } from "../../run/publication-source.js";
 import { readHarborDispatchArchive } from "../harbor/venue.js";
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
 import { artifactsDir } from "../../workspace/layout.js";
@@ -58,6 +62,7 @@ const source = config.datasets[0];
 if (source.path !== ".jinn-harbor/dataset" || source.n_tasks !== 1 || source.task_names.length !== 1 || source.task_names[0] !== "echo") throw new Error("TB2 must filter exactly one selected task");
 if (!existsSync(join(process.cwd(), source.path, "echo", "task.toml"))) throw new Error("selected task package was not staged");
 if (config.n_attempts !== 1 || config.n_concurrent_trials !== 1 || config.retry.max_retries !== 0) throw new Error("hidden attempts/retries");
+writeFileSync(${JSON.stringify(join(root, "harbor-runs.ndjson"))}, JSON.stringify({ job_name: config.job_name, datasets: config.datasets, agents: config.agents.length, n_attempts: config.n_attempts, n_concurrent_trials: config.n_concurrent_trials, max_retries: config.retry.max_retries }) + "\\n", { flag: "a" });
 const job = join(config.jobs_dir, config.job_name); const trial = join(job, "trial-1");
 mkdirSync(join(trial, "verifier"), { recursive: true }); mkdirSync(join(trial, "artifacts"), { recursive: true });
 writeFileSync(join(job, "config.json"), JSON.stringify(config));
@@ -83,6 +88,51 @@ function request() {
     environment: { type: "docker" as const, image, configuration: {} },
     outputs,
   };
+}
+
+function clock(): () => string {
+  let tick = 0;
+  const epoch = Date.parse("2026-08-13T12:00:00Z");
+  return () => new Date(epoch + tick++ * 1_000).toISOString();
+}
+
+function harborRunBytes(): string {
+  try { return readFileSync(join(root, "harbor-runs.ndjson"), "utf8"); }
+  catch { return ""; }
+}
+
+function parseHarborRuns(bytes = harborRunBytes()): Array<Record<string, unknown>> {
+  return bytes.trim() === "" ? [] : bytes.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+async function startPublicationSource(): Promise<{ readonly base: string; readonly close: () => Promise<void> }> {
+  const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+  const server = createServer(async (request, response) => {
+    const result = await handler(new Request(`http://127.0.0.1${request.url ?? "/"}`, { method: request.method }));
+    response.writeHead(result.status, Object.fromEntries(result.headers));
+    response.end(Buffer.from(await result.arrayBuffer()));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("loopback source has no address");
+  return { base: `http://127.0.0.1:${address.port}`, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+}
+
+async function expectExactPublicBytes(base: string, path: string, expected: Uint8Array): Promise<void> {
+  const response = await fetch(publicArchiveUrl(base, path));
+  expect(response.ok, `${path} returned ${response.status}`).toBe(true);
+  expect(new Uint8Array(await response.arrayBuffer())).toEqual(expected);
+}
+
+function expectOneFilteredTrialPerDispatch(invocations: readonly Record<string, unknown>[], dispatchCount: number): void {
+  expect(invocations).toHaveLength(dispatchCount);
+  for (const invocation of invocations) expect(invocation).toMatchObject({
+    datasets: [{ path: ".jinn-harbor/dataset", task_names: ["echo"], n_tasks: 1 }],
+    agents: 1,
+    n_attempts: 1,
+    n_concurrent_trials: 1,
+    max_retries: 0,
+  });
 }
 
 beforeEach(() => {
@@ -158,7 +208,7 @@ describe("Terminal-Bench 2 product profile", () => {
   });
 
   test("one Jinn dispatch creates one filtered Harbor Trial through the normal lifecycle", async () => {
-    const context = { workspaceDir, principal: "sponsor-1", clock: () => new Date().toISOString() };
+    const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
     expect(initWorkspace(context).ok).toBe(true);
     expect(createDraft(context, { draftId: "tb2", name: "TB2" }).ok).toBe(true);
     expect((await sampleInit(context, { draftId: "tb2" })).ok).toBe(true);
@@ -171,24 +221,61 @@ describe("Terminal-Bench 2 product profile", () => {
     expect(TerminalBench2SelectionManifestSchema.parse(outer.profiles[TERMINAL_BENCH_2_PROFILE]).execution).toEqual({ source: "dataset", nTasks: 1, nAttempts: 1, nConcurrent: 1, maxRetries: 0 });
     const quoted = await runQuote(context, { draftId: "tb2" });
     expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
-    expect(runLock(context, { draftId: "tb2" }).ok).toBe(true);
-    const launch = await runLaunch(context, { draftId: "tb2" });
-    expect(launch.ok, JSON.stringify(launch)).toBe(true);
-    const journal = readRunJournalEntries(workspaceDir, "tb2");
-    const deliveries = journal.filter((entry) => entry.kind === "delivery");
-    expect(deliveries.length).toBeGreaterThan(0);
-    const indexes = readdirSync(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch"));
-    expect(indexes).toHaveLength(deliveries.length);
-    for (const indexName of indexes) {
-      const index = JSON.parse(readFileSync(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch", indexName), "utf8")) as { archiveSha256: string };
-      const archive = readHarborDispatchArchive(workspaceDir, index.archiveSha256);
-      expect(archive.harbor.trialId).toMatch(/:trial-1$/u);
-      expect(archive.nativeArtifacts.filter((entry) => /^[^/]+\/config\.json$/u.test(entry.path))).toHaveLength(1);
+    const locked = runLock(context, { draftId: "tb2" });
+    expect(locked.ok, JSON.stringify(locked)).toBe(true);
+    if (!locked.ok) return;
+    const runBytes = getSealedBytes(workspaceDir, locked.result.runSha256);
+    const registration = readRunPublicationExtension(JSON.parse(new TextDecoder().decode(runBytes)) as Record<string, unknown>)!.registrationArtifacts;
+    expect(registration.map((entry) => entry.role)).toEqual([HARBOR_SELECTION_ROLE, TERMINAL_BENCH_2_SELECTION_ROLE].sort());
+    expect(registration).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: HARBOR_SELECTION_ROLE, artifact: expect.objectContaining({ digest: { sha256: selected.result.selectionManifestSha256 } }) }),
+      expect.objectContaining({ role: TERMINAL_BENCH_2_SELECTION_ROLE, artifact: expect.objectContaining({ digest: { sha256: selected.result.terminalBench2ProfileSha256 } }) }),
+    ]));
+    const source = await startPublicationSource();
+    try {
+      expect((await publicationConfigure(context, { draftId: "tb2", publicBaseUrl: source.base })).ok).toBe(true);
+      expect((await publicationRegister(context, { draftId: "tb2" })).ok).toBe(true);
+      await expectExactPublicBytes(source.base, recordPath(`sha256:${locked.result.runSha256}`), runBytes);
+      for (const entry of registration) await expectExactPublicBytes(
+        source.base,
+        `/publication-artifacts/sha256/${entry.artifact.digest.sha256}`,
+        getSealedBytes(workspaceDir, entry.artifact.digest.sha256),
+      );
+
+      const launch = await runLaunch(context, { draftId: "tb2" });
+      expect(launch.ok, JSON.stringify(launch)).toBe(true);
+      const journal = readRunJournalEntries(workspaceDir, "tb2");
+      const deliveries = journal.filter((entry) => entry.kind === "delivery");
+      expect(deliveries.length).toBeGreaterThan(0);
+      const indexes = readdirSync(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch"));
+      expect(indexes).toHaveLength(deliveries.length);
+      for (const indexName of indexes) {
+        const index = JSON.parse(readFileSync(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch", indexName), "utf8")) as { archiveSha256: string };
+        const archive = readHarborDispatchArchive(workspaceDir, index.archiveSha256);
+        expect(archive.harbor.trialId).toMatch(/:trial-1$/u);
+        expect(archive.nativeArtifacts.filter((entry) => /^[^/]+\/config\.json$/u.test(entry.path))).toHaveLength(1);
+      }
+      const invocationBytes = harborRunBytes();
+      expectOneFilteredTrialPerDispatch(parseHarborRuns(invocationBytes), deliveries.length);
+      const published = await publicationAccounting(context, { draftId: "tb2" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+      expect(published.result.runtimeChecks.every((check) => check.status === "pass")).toBe(true);
+      const accountingBytes = getSealedBytes(workspaceDir, published.result.accountingSha256);
+      const matrixBytes = getSealedBytes(workspaceDir, published.result.matrixV2Sha256);
+      expect(parseBenchmarkAccounting(accountingBytes).publicRegistration.status).toBe("pre-dispatch");
+      expect(parseBenchmarkAccounting(accountingBytes).cells.flatMap((cell) => cell.dispatches)).toHaveLength(deliveries.length);
+      expect(parseMatrix(matrixBytes).cells).toHaveLength(deliveries.length);
+      await expectExactPublicBytes(source.base, recordPath(`sha256:${published.result.accountingSha256}`), accountingBytes);
+      await expectExactPublicBytes(source.base, recordPath(`sha256:${published.result.matrixV2Sha256}`), matrixBytes);
+      expect(harborRunBytes()).toBe(invocationBytes);
+    } finally {
+      await source.close();
     }
   }, 120_000);
 
   test("legacy migration uses official argv and discloses distinct source/transformed bytes", async () => {
-    const context = { workspaceDir, principal: "sponsor-1", clock: () => "2026-08-13T00:00:00.000Z" };
+    const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
     expect(initWorkspace(context).ok).toBe(true);
     const legacy = join(root, "legacy"); mkdirSync(legacy); writeFileSync(join(legacy, "instruction.md"), "legacy task\n");
     const migrated = await migrateTerminalBenchLegacyTask(context, { executable, sourcePath: legacy, manualAdjustment: { status: "none" } });
@@ -198,7 +285,7 @@ describe("Terminal-Bench 2 product profile", () => {
     expect(migrated.result.manifest.relationship).toBe("source-transformed-by-harbor-mapper");
     expect(migrated.result.manifest.source.checksum).not.toBe(migrated.result.manifest.transformed.checksum);
     expect(migrated.result.manifest.manualAdjustment).toEqual({ status: "none" });
-    for (const entry of [...migrated.result.manifest.source.files, ...migrated.result.manifest.transformed.files]) {
+    for (const entry of [...migrated.result.manifest.source.files, ...migrated.result.manifest.transformed.files, ...migrated.result.manifest.runnable.files]) {
       expect(getSealedBytes(workspaceDir, entry.sha256)).toHaveLength(entry.bytes);
     }
 
@@ -221,13 +308,19 @@ describe("Terminal-Bench 2 product profile", () => {
     const locked = runLock(context, { draftId: "migrated" });
     expect(locked.ok, JSON.stringify(locked)).toBe(true);
     if (!locked.ok) return;
-    const run = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, locked.result.runSha256))) as Record<string, unknown>;
+    const runBytes = getSealedBytes(workspaceDir, locked.result.runSha256);
+    const run = JSON.parse(new TextDecoder().decode(runBytes)) as Record<string, unknown>;
     const registration = readRunPublicationExtension(run)!.registrationArtifacts;
     expect(registration.map((entry) => entry.role)).toEqual([
       HARBOR_SELECTION_ROLE,
       TERMINAL_BENCH_MIGRATION_ROLE,
       TERMINAL_BENCH_2_SELECTION_ROLE,
     ].sort());
+    expect(registration).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: HARBOR_SELECTION_ROLE, artifact: expect.objectContaining({ digest: { sha256: selected.result.selectionManifestSha256 } }) }),
+      expect.objectContaining({ role: TERMINAL_BENCH_MIGRATION_ROLE, artifact: expect.objectContaining({ digest: { sha256: migrated.result.manifestSha256 } }) }),
+      expect.objectContaining({ role: TERMINAL_BENCH_2_SELECTION_ROLE, artifact: expect.objectContaining({ digest: { sha256: selected.result.terminalBench2ProfileSha256 } }) }),
+    ]));
     const adapter = createRuntimeEvidenceAdapter(
       { adapterId: "harbor", selectionManifestSha256: selected.result.selectionManifestSha256 },
       { registrationArtifacts: registration.map((entry, index) => ({
@@ -235,6 +328,47 @@ describe("Terminal-Bench 2 product profile", () => {
         bytes: getSealedBytes(workspaceDir, entry.artifact.digest.sha256), mediaType: "application/json", actions: ["store"],
       })) },
     );
-    await expect(adapter.registration({ runDigest: `sha256:${locked.result.runSha256}` })).resolves.toHaveLength(3);
-  });
+    expect(adapter.registrationArtifacts()).toHaveLength(3);
+    const source = await startPublicationSource();
+    try {
+      expect((await publicationConfigure(context, { draftId: "migrated", publicBaseUrl: source.base })).ok).toBe(true);
+      expect((await publicationRegister(context, { draftId: "migrated" })).ok).toBe(true);
+      await expectExactPublicBytes(source.base, recordPath(`sha256:${locked.result.runSha256}`), runBytes);
+      for (const entry of registration) await expectExactPublicBytes(
+        source.base,
+        `/publication-artifacts/sha256/${entry.artifact.digest.sha256}`,
+        getSealedBytes(workspaceDir, entry.artifact.digest.sha256),
+      );
+
+      const launch = await runLaunch(context, { draftId: "migrated" });
+      expect(launch.ok, JSON.stringify(launch)).toBe(true);
+      const journal = readRunJournalEntries(workspaceDir, "migrated");
+      const deliveries = journal.filter((entry) => entry.kind === "delivery");
+      expect(deliveries.length).toBeGreaterThan(0);
+      const indexes = readdirSync(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch"));
+      expect(indexes).toHaveLength(deliveries.length);
+      for (const indexName of indexes) {
+        const index = JSON.parse(readFileSync(join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch", indexName), "utf8")) as { archiveSha256: string };
+        const archive = readHarborDispatchArchive(workspaceDir, index.archiveSha256);
+        expect(archive.harbor.trialId).toMatch(/:trial-1$/u);
+        expect(archive.nativeArtifacts.filter((entry) => /^[^/]+\/config\.json$/u.test(entry.path))).toHaveLength(1);
+      }
+      const invocationBytes = harborRunBytes();
+      expectOneFilteredTrialPerDispatch(parseHarborRuns(invocationBytes), deliveries.length);
+      const published = await publicationAccounting(context, { draftId: "migrated" });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      if (!published.ok) return;
+      expect(published.result.runtimeChecks.every((check) => check.status === "pass")).toBe(true);
+      const accountingBytes = getSealedBytes(workspaceDir, published.result.accountingSha256);
+      const matrixBytes = getSealedBytes(workspaceDir, published.result.matrixV2Sha256);
+      expect(parseBenchmarkAccounting(accountingBytes).publicRegistration.status).toBe("pre-dispatch");
+      expect(parseBenchmarkAccounting(accountingBytes).cells.flatMap((cell) => cell.dispatches)).toHaveLength(deliveries.length);
+      expect(parseMatrix(matrixBytes).cells).toHaveLength(deliveries.length);
+      await expectExactPublicBytes(source.base, recordPath(`sha256:${published.result.accountingSha256}`), accountingBytes);
+      await expectExactPublicBytes(source.base, recordPath(`sha256:${published.result.matrixV2Sha256}`), matrixBytes);
+      expect(harborRunBytes()).toBe(invocationBytes);
+    } finally {
+      await source.close();
+    }
+  }, 120_000);
 });
