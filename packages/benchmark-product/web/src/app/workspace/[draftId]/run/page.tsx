@@ -19,11 +19,17 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   const publication = view.ok && view.publication?.ok ? view.publication.result : undefined;
   const publicationConfiguration = view.ok ? view.publicationConfiguration : undefined;
   const postHoc = state === "closed" || state === "reported" || state === "published-bundle";
-  const reportReady = publication?.stages.find((stage) => stage.name === "report")?.state;
+  const reportStage = publication?.stages.find((stage) => stage.name === "report");
   const accountingStage = publication?.stages.find((stage) => stage.name === "accounting");
   const matrixStage = publication?.stages.find((stage) => stage.name === "matrix");
   const accountingReady = accountingStage?.state === "complete" && accountingStage.receipt !== undefined
     && matrixStage?.state === "complete" && matrixStage.receipt !== undefined;
+  const reportPublished = reportStage?.state === "complete"
+    && reportStage.receipt !== undefined
+    && reportStage.digests.payload !== undefined
+    && reportStage.digests.record !== undefined;
+  const reportNeedsRecovery = reportStage?.state === "in-progress"
+    || (reportStage?.state === "complete" && !reportPublished);
   const cancellationPending = status?.cancelRequested === true && state === "running";
   const poll = status?.driver?.status === "active" || cancellationPending;
 
@@ -68,7 +74,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
           <ActionForm action={GUI_SERVER_ACTIONS["publication.configure"]} submitLabel={postHoc ? "Configure post-hoc public source (does not rerun)" : "Configure prospective public source"} gated disabled={!publicationConfiguration?.available || (state !== "locked" && !postHoc)}><HiddenDraft draftId={draftId} /></ActionForm>
           <ActionForm action={GUI_SERVER_ACTIONS["publication.register"]} submitLabel={postHoc ? "Register post-hoc (does not rerun)" : "Register before dispatch"} gated disabled={!publicationConfiguration?.available || (state !== "locked" && !postHoc)}><HiddenDraft draftId={draftId} /></ActionForm>
           <ActionForm action={GUI_SERVER_ACTIONS["publication.accounting"]} submitLabel="Publish accounting and Matrix (does not rerun)" gated disabled={!postHoc || publication?.postHocPublicationAvailable === false}><HiddenDraft draftId={draftId} /></ActionForm>
-          <ActionForm action={GUI_SERVER_ACTIONS["publication.report"]} submitLabel={reportReady === "complete" ? "Signed Report v2 published" : "Publish signed Report v2 (does not rerun)"} gated disabled={!postHoc || !publicationConfiguration?.available || !accountingReady || reportReady === "complete"} notice="Requires authority and explicit consent"><HiddenDraft draftId={draftId} /><input type="hidden" name="consent" value="publish-signed-report-v2" /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.report"]} submitLabel={reportPublished ? "Signed Report v2 published" : reportNeedsRecovery ? "Retry / resume signed Report v2" : "Publish signed Report v2 (does not rerun)"} gated disabled={!postHoc || !publicationConfiguration?.available || !accountingReady || reportPublished} notice="Requires authority and explicit consent"><HiddenDraft draftId={draftId} /><input type="hidden" name="consent" value="publish-signed-report-v2" /></ActionForm>
           <p className="text-sm text-muted-foreground">Accounting can close a partial or cancelled managed run. It does not require a Report; signed Report v2 publication is optional, separately consented, and uses retained records without rerunning work.</p>
         </CardContent></Card>
       </section>

@@ -108,6 +108,28 @@ describe("durable run monitor cancellation language", () => {
     expect(markup).toContain("<button disabled=\"\">Publish signed Report v2");
   });
 
+  test("keeps a complete-but-unreceipted or identity-incomplete Report retryable", async () => {
+    const value = status("closed", false);
+    value.publication.result.stages[1] = { name: "accounting", state: "complete", receipt: { sourceSequence: "0002", entrySha256: "a".repeat(64) }, digests: { accounting: "b".repeat(64) } } as never;
+    value.publication.result.stages[2] = { name: "matrix", state: "complete", receipt: { sourceSequence: "0003", entrySha256: "c".repeat(64) }, digests: { matrixV2: "d".repeat(64) } } as never;
+    value.publication.result.stages[3] = { name: "report", state: "complete", digests: { payload: "e".repeat(64) } } as never;
+    loadRunViewMock.mockReturnValue(value);
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain("Retry / resume signed Report v2");
+    expect(markup).not.toContain("Signed Report v2 published");
+    expect(markup).not.toContain("<button disabled=\"\">Retry / resume signed Report v2");
+  });
+
+  test("calls a Report published only when its receipt and both v2 identities are durable", async () => {
+    const value = status("closed", false);
+    value.publication.result.stages[1] = { name: "accounting", state: "complete", receipt: { sourceSequence: "0002", entrySha256: "a".repeat(64) }, digests: { accounting: "b".repeat(64) } } as never;
+    value.publication.result.stages[2] = { name: "matrix", state: "complete", receipt: { sourceSequence: "0003", entrySha256: "c".repeat(64) }, digests: { matrixV2: "d".repeat(64) } } as never;
+    value.publication.result.stages[3] = { name: "report", state: "complete", receipt: { sourceSequence: "0004", entrySha256: "e".repeat(64) }, digests: { payload: "f".repeat(64), record: "0".repeat(64) } } as never;
+    loadRunViewMock.mockReturnValue(value);
+    const markup = renderToStaticMarkup(await RunMonitorPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain("<button disabled=\"\">Signed Report v2 published");
+  });
+
   test("renders a typed durable failure without serializing its sensitive detail", async () => {
     const sentinel = "/private/workspace/report-signing-key-VERY_SECRET.pem";
     const projected = projectRunStatusForGui({
