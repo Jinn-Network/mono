@@ -387,7 +387,37 @@ export class NativeEvaluatorCoordinator {
       this.input.state.recordEvaluationOperationOrphaned(operation.operationId, status.reason);
       return true;
     }
+    // `pending` / `canonical`: the chain read found no canonical fact and the transaction is either
+    // still in flight or invisible to whichever slot the multi-provider fallback transport happened
+    // to poll. Neither is evidence of a reorg, so the operation is HELD — transaction identity
+    // intact — and the next tick re-reads. Because the infrastructure classifier no longer
+    // manufactures an `orphaned` out of absence (see `transactionStatus` in
+    // `native-base-sepolia-infrastructure.ts`), the destructive rollback above —
+    // `recordEvaluationOperationOrphaned`, which NULLs `evaluation_attempt_uri` and
+    // `evaluation_request_id` — is now reachable only on positive evidence, and may stand as is.
+    //
+    // Holding forever would trade a false orphan for an immortal zombie, so the give-up is an
+    // explicit clock rather than a provider's memory: once the evaluation's admission deadline has
+    // passed and the chain still will not confirm a broadcast transaction, this raises a retryable
+    // failure, which the catch in `reconcileEvaluation` hands to `recordEvaluationPaused` — whose
+    // next attempt lies beyond the deadline and therefore terminalizes as `evaluator-retry-deadline`.
+    if (status.kind === "pending" && this.pastDeadline(operation.evaluationId)) {
+      throw new EvaluatorCoordinatorFailure(
+        "evaluation-transaction-unconfirmed-past-deadline",
+        `${operation.kind} ${operation.txHash}`,
+        true,
+      );
+    }
     return true;
+  }
+
+  /** True once the evaluation's admission deadline is behind us. */
+  private pastDeadline(evaluationId: NativeOperationId): boolean {
+    const evaluation = this.input.state.getEvaluation(evaluationId);
+    if (evaluation === undefined) return false;
+    const deadline = Date.parse(this.input.deadline(evaluation));
+    if (!Number.isFinite(deadline)) return false;
+    return (this.input.retry?.now?.() ?? new Date()).getTime() > deadline;
   }
 
   private async claim(evaluation: NativeEvaluationRow): Promise<NativeEvaluatorCoordinatorResult> {
