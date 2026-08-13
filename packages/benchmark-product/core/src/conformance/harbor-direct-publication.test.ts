@@ -114,7 +114,9 @@ describe("PUB-15 direct Harbor public-before-dispatch", () => {
       expect(accounting.cells.flatMap((cell) => cell.dispatches)).toHaveLength(captured.length);
       const publicBytes = new Uint8Array(await (await fetch(publicArchiveUrl(source.base, recordPath(`sha256:${published.result.accountingSha256}`)))).arrayBuffer());
       expect(publicBytes).toEqual(accountingBytes);
-      expect(readRunState(workspaceDir, "direct")?.publication?.registration.receipt?.sourceSequence).toBeLessThan(captured[0]!.publicationSourceSequence!);
+      const registrationSequence = readRunState(workspaceDir, "direct")?.publication?.registration.receipt?.sourceSequence;
+      expect(registrationSequence).toMatch(/^\d{16}$/u);
+      expect(BigInt(registrationSequence!)).toBeLessThan(BigInt(captured[0]!.publicationSourceSequence!));
       expect((await readFile(join(workspaceDir, "invocations.ndjson"), "utf8")).trim().split("\\n")).toHaveLength(invocations.length);
     } finally {
       await source?.close();
