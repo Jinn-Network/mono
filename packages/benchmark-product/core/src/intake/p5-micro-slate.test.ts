@@ -238,9 +238,9 @@ describe("P5 micro-slate fixture", () => {
       expect(cluster.value).not.toContain("@");
     }
     expect(clusters.map((cluster) => cluster.value).sort()).toEqual([
+      "https://github.com/conan-io/conan",
       "https://github.com/gerlero/foamlib",
-      "https://github.com/python-wheel-build/fromager",
-      "https://github.com/qBraid/pyqasm",
+      "https://github.com/nesquena/hermes-webui",
     ]);
   });
 });

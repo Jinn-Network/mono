@@ -42,7 +42,14 @@ export const SPLIT = "test";
 
 /**
  * The R5-selected micro-slate: three tasks across three distinct source repos, chosen for the
- * smallest test surface available (all F2P = 1, P2P <= 6) so the grade legs are fast.
+ * smallest test surface available so the grade legs are fast. The 2026-08-13 recovery screening
+ * excluded qBraid__pyqasm-120 because its pinned image cannot collect the sealed test command
+ * (`typer` is absent), then considered F2P=1/P2P=0 rows with file-scoped test commands in
+ * case-folded repository/instance order. con__nwb2bids-347_interface was ineligible because its
+ * gold and empty controls failed identically; conan-io__conan-19604 was the first row to prove
+ * gold PASS and empty FAIL. The same screen rejected python-wheel-build__fromager-626 and
+ * spdx__tools-python-855 before selecting the smallest digest-resolved P2P=1 file-scoped image,
+ * nesquena__hermes-webui-1818. No model cell had run when these replacements were frozen.
  *
  * Three distinct repos is a binding constraint, not a coincidence. The clustered bootstrap groups
  * by provenance source; a one-repo slate would pull one image instead of three and collapse
@@ -50,8 +57,8 @@ export const SPLIT = "test";
  */
 export const INSTANCES = [
   "gerlero__foamlib-329",
-  "qBraid__pyqasm-120",
-  "python-wheel-build__fromager-626",
+  "conan-io__conan-19604",
+  "nesquena__hermes-webui-1818",
 ];
 
 /**

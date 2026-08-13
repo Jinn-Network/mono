@@ -1,0 +1,202 @@
+{
+  "schema": "demo1.p5-gold-control-recovery/1",
+  "recordedAt": "2026-08-13T08:36:17Z",
+  "purpose": "pre-model task eligibility recovery after the original qBraid gold control failed",
+  "source": {
+    "dataset": "nebius/SWE-rebench-leaderboard",
+    "config": "default",
+    "split": "test"
+  },
+  "selection": {
+    "modelCellsDispatchedBeforeFreeze": 0,
+    "requiredOutcome": "gold PASS and empty FAIL through the exact pinned OCI grader",
+    "firstReplacementFilter": {
+      "failToPassCount": 1,
+      "passToPassCount": 0,
+      "testCommand": "file-scoped",
+      "repository": "distinct from gerlero/foamlib and python-wheel-build/fromager",
+      "tieBreak": "case-folded repository path, then case-folded instance id"
+    },
+    "secondReplacementFallback": {
+      "after": "remaining failToPass=1/passToPass=0 file-scoped candidates were ineligible",
+      "failToPassCount": 1,
+      "passToPassCount": 1,
+      "testCommand": "file-scoped",
+      "repository": "distinct from every already eligible row",
+      "tieBreak": "smallest registry-reported immutable image size, then case-folded repository path and instance id"
+    },
+    "replacementOrderObserved": [
+      "con__nwb2bids-347_interface",
+      "conan-io__conan-19604",
+      "spdx__tools-python-855",
+      "nesquena__hermes-webui-1818"
+    ],
+    "selected": [
+      "conan-io__conan-19604",
+      "nesquena__hermes-webui-1818"
+    ]
+  },
+  "screening": [
+    {
+      "instanceId": "qBraid__pyqasm-120",
+      "role": "rejected original fixture row",
+      "image": "swerebench/sweb.eval.x86_64.qbraid_1776_pyqasm-120@sha256:ef37b17fad833433dcf6a5e2fbc2aab10579120f13eca0edaf43296430d29d56",
+      "goldPatchSha256": "c0e3a21e44d06a902ce6620446fad0eff8a106208e2875aa72680de0456f30fc",
+      "goldReport": {
+        "exitCode": 2,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 4,
+        "passToPassExpected": 4,
+        "verdict": "fail"
+      },
+      "reason": "pytest collection stopped on ModuleNotFoundError: No module named 'typer'; the target test never ran"
+    },
+    {
+      "instanceId": "aiidateam__aiida-quantumespresso-1142",
+      "role": "rejected preliminary smallest-transition candidate before the file-scoped refinement",
+      "image": "swerebench/sweb.eval.x86_64.aiidateam_1776_aiida-quantumespresso-1142@sha256:709d2b9862e243603cab63ce29f4168201f1c6aafc4ce14691113024c082c551",
+      "goldPatchSha256": "77af5b26117084d4d3ca5ed162bece03f05e63d21b1a235d73aced4076cfcfe2",
+      "goldReport": {
+        "exitCode": 1,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 0,
+        "verdict": "fail",
+        "elapsedMs": 302864
+      },
+      "emptyReport": {
+        "exitCode": 1,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 0,
+        "verdict": "fail",
+        "elapsedMs": 303829
+      },
+      "reason": "gold and empty controls were outcome-identical under the sealed full-suite command"
+    },
+    {
+      "instanceId": "con__nwb2bids-347_interface",
+      "role": "rejected first file-scoped replacement candidate",
+      "image": "swerebench/sweb.eval.x86_64.con_1776_nwb2bids-347_interface@sha256:69c4cbb9a5bcae8b2ce1c8c0301e0dffa3e636d94211bdaf5858d2d28c2dca4e",
+      "goldPatchSha256": "92bc240a9b3f79bee9ca37174b0537c4df795d7ff582378e0e32d37b84f9d2d6",
+      "goldReport": {
+        "exitCode": 1,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 0,
+        "verdict": "fail",
+        "elapsedMs": 4411
+      },
+      "emptyReport": {
+        "exitCode": 1,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 0,
+        "verdict": "fail",
+        "elapsedMs": 3295
+      },
+      "reason": "gold and empty controls both failed the one declared test with IndexError"
+    },
+    {
+      "instanceId": "conan-io__conan-19604",
+      "role": "selected first replacement",
+      "repositoryLicenseSpdxReportedByGitHub": "MIT",
+      "image": "swerebench/sweb.eval.x86_64.conan-io_1776_conan-19604@sha256:a79eb716bef039cf4b3fa094ea7aca74067fcc3730412c90377a8501569a7b7b",
+      "goldPatchSha256": "bdf7a63adc1092c7300da0039caceb2b2e3b602a9545ada78b09e401c38cff79",
+      "goldReport": {
+        "exitCode": 0,
+        "failToPassSatisfied": 1,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 0,
+        "verdict": "pass",
+        "elapsedMs": 3330
+      },
+      "emptyReport": {
+        "exitCode": 1,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 0,
+        "verdict": "fail",
+        "elapsedMs": 2864
+      }
+    },
+    {
+      "instanceId": "python-wheel-build__fromager-626",
+      "role": "rejected original fixture row",
+      "image": "swerebench/sweb.eval.x86_64.python-wheel-build_1776_fromager-626@sha256:1b9202875beb639a86f59c20764ba9ac8e2418d88d0703d6a68116f5f8268f25",
+      "goldPatchSha256": "d5a9572ce5c2101f306feda3fa272e19424f3aedf8373d510ad26e2c81bb5817",
+      "goldReport": {
+        "exitCode": 2,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 6,
+        "passToPassExpected": 6,
+        "verdict": "fail",
+        "elapsedMs": 2907
+      },
+      "reason": "pytest collection stopped because requests_mock and wheel.cli were absent; the target test never ran"
+    },
+    {
+      "instanceId": "spdx__tools-python-855",
+      "role": "rejected remaining file-scoped failToPass=1/passToPass=0 candidate",
+      "image": "swerebench/sweb.eval.x86_64.spdx_1776_tools-python-855@sha256:2048b13c2d5672f6947d1111fc5d6edf476168384f08e6004724f30350b5987c",
+      "goldPatchSha256": "c4215b690b7bc1043fa1f374eaf0d118c94b38a46e32f29d003d71f5e06e69b3",
+      "goldReport": {
+        "exitCode": 1,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 0,
+        "verdict": "fail",
+        "elapsedMs": 1978
+      },
+      "emptyReport": {
+        "exitCode": 1,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 0,
+        "verdict": "fail",
+        "elapsedMs": 1602
+      },
+      "reason": "gold and empty controls both failed the one declared parser test"
+    },
+    {
+      "instanceId": "nesquena__hermes-webui-1818",
+      "role": "selected second replacement",
+      "repositoryLicenseSpdxReportedByGitHub": "MIT",
+      "image": "swerebench/sweb.eval.x86_64.nesquena_1776_hermes-webui-1818@sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6",
+      "goldPatchSha256": "73a17d5fea923131b51a8437f99a8ad283d425b8ef818cdee3ab864b6e56e630",
+      "goldReport": {
+        "exitCode": 0,
+        "failToPassSatisfied": 1,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 1,
+        "verdict": "pass",
+        "elapsedMs": 3585
+      },
+      "emptyReport": {
+        "exitCode": 1,
+        "failToPassSatisfied": 0,
+        "failToPassExpected": 1,
+        "passToPassBroken": 0,
+        "passToPassExpected": 1,
+        "verdict": "fail",
+        "elapsedMs": 2902
+      }
+    }
+  ],
+  "boundary": {
+    "modelCellsDispatched": false,
+    "benchmarkCapabilityClaimed": false,
+    "publicationClaimed": false
+  }
+}

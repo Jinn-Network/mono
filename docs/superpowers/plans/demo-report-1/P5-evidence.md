@@ -6,9 +6,26 @@
 
 **Exact base:** `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`
 
-**Integrated through:** `97e49c43d09f0e56bb0f5ecb82c1d3365078c350`, including P4 draw correction `834f3436dc5991098addc9177f4652d81d6cbfb6`
+**Integrated through:** `b91bd0679`, including the merged P2/P2b/P3b/P4/E2/preregistration packets
 
-## Current outcome: stopped at the digest-pinned image pre-stage
+## Current outcome: recovered green baseline; fresh run authorized
+
+The operator authorized a fresh P5 run after the exact images became locally available. The
+original qBraid and Fromager rows then failed their mandatory gold controls before any Claude cell
+ran: their immutable images lacked dependencies required to collect the sealed upstream test
+commands. The outcome-blind recovery screen also rejected three candidates whose gold and empty
+controls failed identically. The complete screening evidence is sealed in
+`p5-artifacts/gold-control-recovery-2026-08-13.json`.
+
+The replacement slate is Foamlib, Conan, and Hermes WebUI across three repositories. The final
+real grader control ran from `2026-08-13T08:44:06.338Z` through
+`2026-08-13T08:44:25.925Z`, with 55.32 GiB available at its initial disk gate. All three exact
+digest-pinned gold patches passed and all three empty patches failed; grader networking was
+disabled. The transcript is `p5-artifacts/green-baseline-recovery-pass.json`, digest
+`sha256:f5bec9dcf80da5a312724167351ab4496e2f2e9e6627d093e3a0b6cf59c00e83`.
+No Claude cell had been dispatched when this recovered slate was frozen.
+
+## Historical outcome: stopped at the digest-pinned image pre-stage
 
 P5 is not complete. The disk precondition later recovered, so the fixture was legally minted and
 the real OCI green-baseline control began. The operator attests that the configured 1,800-second
@@ -81,8 +98,8 @@ event, while declaring that private history is not a retention dependency.
   stop output and attempt identity, so every future image-prestage stop takes this v2 path.
   Validation rejects missing, contradictory, or elapsed-before-child-bound timeout evidence.
 
-The final fixture was minted at `2026-08-13T01:06:45.511Z` after an immediate
-47,323,076-KiB (45.13-GiB) disk pass. It contains three rows from three repositories and seals:
+The recovered final fixture was minted at `2026-08-13T08:43:46.163Z` after the disk gate had
+recovered above 40 GiB. It contains three rows from three repositories and seals:
 
 - parser `network.jinn.parser.swe-rebench-v2@1.0.0`, digest
   `sha256:5b859d500777a1370bdadcee098ce9449f92772b7c9572709b502d9ee3be9e7a`;
@@ -90,8 +107,8 @@ The final fixture was minted at `2026-08-13T01:06:45.511Z` after an immediate
   `sha256:8194eb47ad010d8e1ce2f5f4a5becd3354102f80c138aad836cfd3b0e8b2ab11`;
 - a 1,800-second timeout and the exact canonical P3b material for every row.
 
-The fixture bytes are `sha256:121dda614c63ea204c1d2cfb5054692c0751afd9d51c366a5bbcc395d4e4b06a`
-for `rows.json` and `sha256:ff67450c05b6f3b8a1f41f3c224273ddf5a85a648765f01c11ccccc791bcb60c`
+The fixture bytes are `sha256:365cbfa8218501cfb804dcb0555fbb63b563060e1aafadd68513ebbc28627f87`
+for `rows.json` and `sha256:0e09dbfa994730101c53510060838eca23380533aad5b7aeaa601288b85e4973`
 for `provenance.json`. The strict post-P3b fixture suite passes all 11 assertions.
 
 Final non-Docker reruns on Node 22 passed:
@@ -106,12 +123,11 @@ Final non-Docker reruns on Node 22 passed:
 
 ## Required continuation
 
-The two permitted pre-dispatch image attempts are exhausted under the recorded retry policy.
-Continuation requires operator action
-outside this packet to make the exact digest-pinned image available without changing the frozen
-contract, followed by a fresh authorized run. Only then may the real three-task gold-PASS/
-empty-FAIL control, Claude readiness probe, 12 cells, and local cold bundle verification run.
-The stop evidence is a terminal handoff, not permission to improvise a substitute.
+The exact images are now locally available and the operator authorized the fresh run. The
+recovered green baseline has passed under the frozen grader. The remaining P5 work is the
+readiness probe, exact 12-cell execution, all-cell/per-axis accounting, sealed Report and local
+immutable bundle, builder-workspace deletion, and cold verification. Any new failure remains a
+terminal stop for that fresh run; there is no task replacement or cell top-up after dispatch.
 
 ## Publication boundary
 

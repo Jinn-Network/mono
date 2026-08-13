@@ -3,7 +3,7 @@
   "dataset": "nebius/SWE-rebench-leaderboard",
   "config": "default",
   "split": "test",
-  "mintedAt": "2026-08-13T01:06:45.511Z",
+  "mintedAt": "2026-08-13T08:43:46.163Z",
   "parser": {
     "id": "network.jinn.parser.swe-rebench-v2",
     "version": "1.0.0",
@@ -28,24 +28,24 @@
       "imageDigest": "sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781"
     },
     {
-      "instance_id": "qBraid__pyqasm-120",
-      "repo": "qBraid/pyqasm",
-      "base_commit": "3405be900238678687aac7a2a2decc449358f431",
-      "createdAt": "2025-01-09 01:15:29",
+      "instance_id": "conan-io__conan-19604",
+      "repo": "conan-io/conan",
+      "base_commit": "ad7f30275329c63c924d3201463a1143ba1a739c",
+      "createdAt": "2026-02-11 16:04:19",
       "sourceUrl": "https://huggingface.co/datasets/nebius/SWE-rebench-leaderboard",
-      "imageName": "swerebench/sweb.eval.x86_64.qbraid_1776_pyqasm-120:latest",
-      "imageUri": "docker://swerebench/sweb.eval.x86_64.qbraid_1776_pyqasm-120@sha256:ef37b17fad833433dcf6a5e2fbc2aab10579120f13eca0edaf43296430d29d56",
-      "imageDigest": "sha256:ef37b17fad833433dcf6a5e2fbc2aab10579120f13eca0edaf43296430d29d56"
+      "imageName": "swerebench/sweb.eval.x86_64.conan-io_1776_conan-19604:latest",
+      "imageUri": "docker://swerebench/sweb.eval.x86_64.conan-io_1776_conan-19604@sha256:a79eb716bef039cf4b3fa094ea7aca74067fcc3730412c90377a8501569a7b7b",
+      "imageDigest": "sha256:a79eb716bef039cf4b3fa094ea7aca74067fcc3730412c90377a8501569a7b7b"
     },
     {
-      "instance_id": "python-wheel-build__fromager-626",
-      "repo": "python-wheel-build/fromager",
-      "base_commit": "0a696b967862bfc81b423bd3e0d0fac393d6652c",
-      "createdAt": "2025-06-03 19:16:37",
+      "instance_id": "nesquena__hermes-webui-1818",
+      "repo": "nesquena/hermes-webui",
+      "base_commit": "a8de4e7c0a29750fc9a2e83e2ad8eed324b0467e",
+      "createdAt": "2026-05-07 13:43:28",
       "sourceUrl": "https://huggingface.co/datasets/nebius/SWE-rebench-leaderboard",
-      "imageName": "swerebench/sweb.eval.x86_64.python-wheel-build_1776_fromager-626:latest",
-      "imageUri": "docker://swerebench/sweb.eval.x86_64.python-wheel-build_1776_fromager-626@sha256:1b9202875beb639a86f59c20764ba9ac8e2418d88d0703d6a68116f5f8268f25",
-      "imageDigest": "sha256:1b9202875beb639a86f59c20764ba9ac8e2418d88d0703d6a68116f5f8268f25"
+      "imageName": "swerebench/sweb.eval.x86_64.nesquena_1776_hermes-webui-1818:latest",
+      "imageUri": "docker://swerebench/sweb.eval.x86_64.nesquena_1776_hermes-webui-1818@sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6",
+      "imageDigest": "sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6"
     }
   ]
 }
