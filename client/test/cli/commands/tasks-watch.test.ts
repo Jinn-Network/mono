@@ -238,17 +238,18 @@ describe('tasks watch', () => {
     expect(made.exits).toEqual([40]);
   });
 
-  // One-swap R3b (issue #2494) retired `observe-autopilot-delivery`: its only
-  // consumer was the canary-only Autopilot marketplace execution backend, and
-  // the verb could not survive the D-wave deletion of the legacy HTTP indexer
-  // it hard-required. The verb must now be UNROUTED, not silently accepted.
-  it('no longer routes the retired observe-autopilot-delivery subverb', async () => {
+  // `observe-autopilot-delivery` is a published external boundary
+  // (`Jinn-Network/autopilot` shells out to it). One-swap R3b (issue #2494)
+  // RELOCATES its indexer read onto `discovery-client/` rather than retiring
+  // the verb, so routing here must stay exactly as it was — reaching the verb's
+  // own argument validation, and exiting 11 on a missing expectation file.
+  it('leaves observe-autopilot-delivery routing untouched', async () => {
     const made = makeCommandCtx({ argv: ['observe-autopilot-delivery', '--json'] });
     await tasksCommand.run(made.ctx);
     expect(JSON.parse(made.writes.at(-1)!)).toMatchObject({
       code: 'invalid_invocation',
-      message: 'Unknown tasks subverb: observe-autopilot-delivery',
-      details: { expected: 'submit|watch|list|show|close|cancel|release' },
+      message: '--expectation-file is required',
     });
+    expect(made.exits).toEqual([11]);
   });
 });

@@ -59,8 +59,22 @@ function moduleFiles(directory: string): string[] {
   });
 }
 
+/**
+ * Drop `import type` / `export type` statements. Those edges are erased by the
+ * compiler, so they do not decide whether a module still *runs* after
+ * `discovery/` is deleted — only whether it still typechecks.
+ */
+function stripTypeOnlyStatements(source: string): string {
+  return source
+    .replace(/\bimport\s+type\s+[\s\S]*?from\s*['"][^'"]+['"]/gu, '')
+    .replace(/\bexport\s+type\s+[\s\S]*?from\s*['"][^'"]+['"]/gu, '');
+}
+
 /** Breadth-first closure over relative imports, with the path that reached each file. */
-function importClosure(entryPoints: string[]): Map<string, string[]> {
+function importClosure(
+  entryPoints: string[],
+  options: { valueOnly?: boolean } = {},
+): Map<string, string[]> {
   const reachedVia = new Map<string, string[]>();
   const queue: Array<{ file: string; trail: string[] }> = entryPoints.map(
     (file) => ({ file, trail: [relative(SRC, file)] }),
@@ -69,7 +83,11 @@ function importClosure(entryPoints: string[]): Map<string, string[]> {
     const { file, trail } = queue.shift()!;
     if (reachedVia.has(file)) continue;
     reachedVia.set(file, trail);
-    for (const specifier of relativeImports(readFileSync(file, 'utf-8'))) {
+    const source = readFileSync(file, 'utf-8');
+    const scanned = options.valueOnly
+      ? stripTypeOnlyStatements(source)
+      : source;
+    for (const specifier of relativeImports(scanned)) {
       const target = resolveSource(file, specifier);
       if (target && !reachedVia.has(target)) {
         queue.push({ file: target, trail: [...trail, relative(SRC, target)] });
@@ -77,6 +95,14 @@ function importClosure(entryPoints: string[]): Map<string, string[]> {
     }
   }
   return reachedVia;
+}
+
+/** Trails from `entryPoints` that land anywhere under `src/discovery/`. */
+function leaksInto(closure: Map<string, string[]>): string[] {
+  return [...closure.entries()]
+    .filter(([file]) => file.startsWith(`${FORBIDDEN_DIR}/`))
+    .map(([, trail]) => trail.join(' -> '))
+    .sort();
 }
 
 describe('discovery-client survives the discovery/ deletion', () => {
@@ -90,22 +116,59 @@ describe('discovery-client survives the discovery/ deletion', () => {
   });
 
   it('reaches no module under src/discovery/, directly or transitively', () => {
-    const closure = importClosure(moduleFiles(MODULE_DIR));
-    const leaks = [...closure.entries()]
-      .filter(([file]) => file.startsWith(`${FORBIDDEN_DIR}/`))
-      .map(([, trail]) => trail.join(' -> '))
-      .sort();
-    expect(leaks).toEqual([]);
+    expect(leaksInto(importClosure(moduleFiles(MODULE_DIR)))).toEqual([]);
   });
 
   it('detects a leak when one is introduced', () => {
-    // Guard the guard: the closure walker must actually follow a relative
-    // import into discovery/, otherwise the assertion above is decorative.
-    const probe = join(SRC, 'discovery/types.ts');
+    // Guard the guard. The seed must sit OUTSIDE discovery/ and import into it,
+    // or the walker is never exercised: seeding from a file already inside the
+    // forbidden directory makes the assertion pass on the entry point itself.
+    // `adapters/mech/types.ts` is that real edge — it takes `DiscoveryAPI` as
+    // the Mech adapter's optional task-discovery port.
+    const probe = join(SRC, 'adapters/mech/types.ts');
     expect(existsSync(probe)).toBe(true);
-    const closure = importClosure([probe]);
-    expect([...closure.keys()].some((file) => file.startsWith(`${FORBIDDEN_DIR}/`)))
-      .toBe(true);
+    expect(relativeImports(readFileSync(probe, 'utf-8')))
+      .toContain('../../discovery/types.js');
+    expect(leaksInto(importClosure([probe]))).not.toEqual([]);
+  });
+
+  /**
+   * `jinn tasks observe-autopilot-delivery` is a PUBLISHED EXTERNAL BOUNDARY:
+   * `Jinn-Network/autopilot` shells out to it and capability-probes for it.
+   * R3b first retired the verb on a finding that it had no consumer; that
+   * finding was wrong, so the verb is RELOCATED onto `discovery-client/`
+   * instead. These pin the relocation that makes both things true at once —
+   * the verb keeps working, and `discovery/` stays deletable.
+   */
+  const VERB = join(SRC, 'cli/commands/tasks-observe-autopilot.ts');
+  const OBSERVER = join(SRC, 'autopilot/marketplace-delivery-observer.ts');
+
+  it('routes the delivery verb and its observer at discovery-client only', () => {
+    for (const file of [VERB, OBSERVER]) {
+      const source = readFileSync(file, 'utf-8');
+      expect(source, relative(SRC, file)).toMatch(/discovery-client\//u);
+      // No import specifier may name the legacy tree. `discovery-client/...`
+      // must not register as a match, hence the negative lookahead.
+      expect(relativeImports(source).filter((s) => /(^|\/)discovery(?!-client)\//u.test(s)))
+        .toEqual([]);
+    }
+  });
+
+  it('gives the delivery verb no runtime path into src/discovery/', () => {
+    expect(leaksInto(importClosure([VERB], { valueOnly: true }))).toEqual([]);
+  });
+
+  it('holds the verb type-only residue to the known Mech-adapter edge', () => {
+    // The verb pulls `fetchRawBytesFromIpfs`, and `adapters/mech/ipfs.ts` takes
+    // its types from `adapters/mech/types.ts`, which types the Mech adapter's
+    // optional task-discovery port as `DiscoveryAPI`. That edge is erased at
+    // runtime (hence the value-only assertion above is the load-bearing one),
+    // predates R3b, and belongs to the daemon adapter the D-wave repoints on
+    // its own schedule. Pinned exactly so a NEW coupling fails this guard.
+    expect(leaksInto(importClosure([VERB]))).toEqual([
+      'cli/commands/tasks-observe-autopilot.ts -> adapters/mech/ipfs.ts'
+      + ' -> adapters/mech/types.ts -> discovery/types.ts',
+    ]);
   });
 
   it('keeps the legacy DiscoveryAPI on one relocated error class', () => {

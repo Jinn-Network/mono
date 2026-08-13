@@ -288,10 +288,32 @@ export type AutopilotDeliveryObservation = z.infer<
   typeof AutopilotDeliveryObservationSchema
 >;
 
-// `AutopilotDeliveryCommandResultV1Schema` — the machine-command envelope whose
-// `verb` literal was `'tasks observe-autopilot-delivery'` — was removed by
-// one-swap R3b (issue #2494) together with that CLI verb. Both of its producers
-// (the verb itself and the Autopilot lifecycle client that shelled out to it)
-// are gone, and the published `Jinn-Network/autopilot` engine never referenced
-// it. The delivery expectation and observation schemas above are unchanged:
-// they describe the delivery, not the retired command that carried it.
+/**
+ * Machine-command envelope for `jinn tasks observe-autopilot-delivery`.
+ *
+ * PUBLISHED EXTERNAL BOUNDARY — do not remove without a paired cross-repo
+ * change. `Jinn-Network/autopilot` (a separate, live, unarchived repo) is a
+ * consumer: `src/lifecycle/marketplace-delivery.ts:18` value-imports this
+ * schema from `@jinn-network/sdk/autopilot` and `:317` parses the verb's
+ * stdout with it. That repo pins `@jinn-network/sdk` at `0.1.1`, which
+ * publishes this export, so the pin is all that defers the break — deleting
+ * the symbol here breaks the consumer's compile on its next SDK bump.
+ *
+ * One-swap R3b (issue #2494) first retired this envelope on the finding that
+ * the verb had no external consumer. That finding was wrong: `gh search code`
+ * has zero index coverage of `Jinn-Network/autopilot`, so the search that
+ * sourced it returned `[]` for every query against that repo, including bare
+ * `import`. The design that introduced this surface
+ * (`docs/superpowers/specs/2026-07-24-marketplace-external-consumer-boundary-design.md`
+ * §2.1 goal 3, §4.2) documents it as the intended public boundary.
+ */
+export const AutopilotDeliveryCommandResultV1Schema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: z.string().datetime({ offset: true }),
+  verb: z.literal('tasks observe-autopilot-delivery'),
+  observation: AutopilotDeliveryObservationSchema,
+}).strict();
+
+export type AutopilotDeliveryCommandResultV1 = z.infer<
+  typeof AutopilotDeliveryCommandResultV1Schema
+>;

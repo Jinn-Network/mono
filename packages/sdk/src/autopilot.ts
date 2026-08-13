@@ -45,12 +45,14 @@ export type {
 } from './task-submit.js';
 
 export {
+  AutopilotDeliveryCommandResultV1Schema,
   AutopilotDeliveryContradictionReasonSchema,
   AutopilotDeliveryExpectationSchema,
   AutopilotDeliveryObservationSchema,
   AutopilotDeliveryPendingReasonSchema,
 } from './autopilot-delivery.js';
 export type {
+  AutopilotDeliveryCommandResultV1,
   AutopilotDeliveryContradictionReason,
   AutopilotDeliveryExpectation,
   AutopilotDeliveryObservation,

@@ -6,6 +6,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   AutopilotAdoptionReceiptSchema,
   AutopilotCorrelationSchema,
+  AutopilotDeliveryCommandResultV1Schema,
   AutopilotDeliveryExpectationSchema,
   AutopilotDeliveryObservationSchema,
   AutopilotMutationResultSchema,
@@ -15,6 +16,7 @@ import {
   TaskSubmitResultV1Schema,
   parseAutopilotAdoptionReceiptComment,
   type AcceptedSolutionAdoptionReceipt,
+  type AutopilotDeliveryCommandResultV1,
   type AutopilotDeliveryContradictionReason,
   type AutopilotDeliveryExpectation,
   type AutopilotDeliveryObservation,
@@ -73,6 +75,7 @@ describe('@jinn-network/sdk/autopilot public boundary', () => {
     expect(TaskSubmitResultV1Schema).toBeDefined();
     expect(AutopilotDeliveryExpectationSchema).toBeDefined();
     expect(AutopilotDeliveryObservationSchema).toBeDefined();
+    expect(AutopilotDeliveryCommandResultV1Schema).toBeDefined();
 
     expectTypeOf<TaskSubmitRequestV1>().not.toBeAny();
     expectTypeOf<TaskSubmitResultV1>().not.toBeAny();
@@ -83,6 +86,7 @@ describe('@jinn-network/sdk/autopilot public boundary', () => {
     expectTypeOf<AutopilotDeliveryPendingReason>().not.toBeAny();
     expectTypeOf<AutopilotDeliveryContradictionReason>().not.toBeAny();
     expectTypeOf<AutopilotDeliveryObservation>().not.toBeAny();
+    expectTypeOf<AutopilotDeliveryCommandResultV1>().not.toBeAny();
   });
 
   it('keeps the SolverNet barrel on the identical schema objects', () => {
@@ -253,19 +257,42 @@ describe('Autopilot delivery wire contracts', () => {
     }).success).toBe(false);
   });
 
-  // One-swap R3b (issue #2494) retired `tasks observe-autopilot-delivery` and
-  // the `AutopilotDeliveryCommandResultV1Schema` envelope that named it. The
-  // boundary must no longer publish that export — a consumer pinned to it gets
-  // a build error, not a schema that parses results nothing can produce.
-  it('no longer publishes the retired delivery command-result envelope', async () => {
+  // PUBLISHED EXTERNAL BOUNDARY. `Jinn-Network/autopilot` value-imports
+  // `AutopilotDeliveryCommandResultV1Schema` from `@jinn-network/sdk/autopilot`
+  // (`src/lifecycle/marketplace-delivery.ts:18`) and parses the verb's stdout
+  // with it (`:317`). Dropping the export breaks that consumer's compile on its
+  // next SDK bump, so this pin asserts PRESENCE from both barrels.
+  it('publishes the delivery command-result envelope from both barrels', async () => {
     const autopilotModule: Record<string, unknown> =
       await import('../src/autopilot.js');
-    expect(autopilotModule['AutopilotDeliveryCommandResultV1Schema'])
-      .toBeUndefined();
     const jinnRepoModule: Record<string, unknown> =
       await import('../src/solvernets/jinn-repo.js');
+    expect(autopilotModule['AutopilotDeliveryCommandResultV1Schema'])
+      .toBeDefined();
     expect(jinnRepoModule['AutopilotDeliveryCommandResultV1Schema'])
-      .toBeUndefined();
+      .toBe(autopilotModule['AutopilotDeliveryCommandResultV1Schema']);
+  });
+
+  it('parses the verb envelope the external consumer sends and rejects drift', () => {
+    const observation = fixture('verified-solution.json');
+    const envelope = {
+      schemaVersion: 1,
+      generatedAt: '2026-07-27T12:00:00.000Z',
+      verb: 'tasks observe-autopilot-delivery',
+      observation,
+    };
+    expect(AutopilotDeliveryCommandResultV1Schema.parse(envelope))
+      .toEqual(envelope);
+    // The `verb` literal is the contract the consumer keys on; a renamed verb
+    // must fail loudly here rather than parse into a stale shape.
+    expect(AutopilotDeliveryCommandResultV1Schema.safeParse({
+      ...envelope,
+      verb: 'tasks observe-delivery',
+    }).success).toBe(false);
+    expect(AutopilotDeliveryCommandResultV1Schema.safeParse({
+      ...envelope,
+      unexpected: true,
+    }).success).toBe(false);
   });
 });
 

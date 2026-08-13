@@ -80,10 +80,11 @@ import {
   type MarketplaceSessionBackend,
 } from './marketplace-session-backend.js';
 import {
-  retiredDeliveryObserver,
+  observeMarketplaceSolutionDelivery,
+  observeMarketplaceVerdictDelivery,
   type MarketplaceSolutionObservation,
   type MarketplaceVerdictObservation,
-} from './marketplace-delivery-observation.js';
+} from './marketplace-delivery-client.js';
 import {
   makeProductionMarketplaceMutationAdoptionCoordinator,
   makeProductionMarketplaceVerificationPort,
@@ -389,15 +390,28 @@ export function makeProductionActiveRuntime(
     now().getTime() + MARKETPLACE_AGENT_SOFT_DEADLINE_MS,
   ).toISOString();
   const receiptAuthors = options.credentials.logins();
-  // One-swap R3b (issue #2494) retired the production observers with the
-  // `jinn tasks observe-autopilot-delivery` verb they shelled out to. The
-  // injected-observer seam below is unchanged (production-recovery tests still
-  // drive it); the default is now a loud failure, and `autopilotExecutionBackend`
-  // refuses to select this backend at all, so no run reaches it holding escrow.
   const observeSolution = options.marketplaceSolutionObserver
-    ?? retiredDeliveryObserver('Solution');
+    ?? ((manifestPath: string) => observeMarketplaceSolutionDelivery(
+      manifestPath,
+      {
+        runner,
+        environment: ambient,
+        now,
+      },
+    ));
   const observeVerdict = options.marketplaceVerdictObserver
-    ?? retiredDeliveryObserver('Verdict');
+    ?? ((
+      originManifestPath: string,
+      reviewManifestPath: string,
+    ) => observeMarketplaceVerdictDelivery(
+      originManifestPath,
+      reviewManifestPath,
+      {
+        runner,
+        environment: ambient,
+        now,
+      },
+    ));
   const confirmedReviewClaim = (
     manifest: ReturnType<typeof readAttemptManifest>,
   ): ConfirmedMarketplaceReviewClaim | undefined => {

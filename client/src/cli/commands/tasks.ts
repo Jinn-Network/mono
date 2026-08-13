@@ -54,6 +54,7 @@ import {
   getMechDeliveryRate,
   getTimeoutBounds,
 } from '../../adapters/mech/contracts.js';
+import { runObserveAutopilotDelivery } from './tasks-observe-autopilot.js';
 import { runTasksLifecycle } from './tasks-lifecycle.js';
 
 function findNamedErrorCause(
@@ -1214,6 +1215,9 @@ async function run(ctx: CommandContext): Promise<void> {
   if (subverb === 'submit') {
     return runSubmit({ ...ctx, argv: rest });
   }
+  if (subverb === 'observe-autopilot-delivery') {
+    return runObserveAutopilotDelivery({ ...ctx, argv: rest });
+  }
   if (subverb === 'watch') {
     return runTasksWatch({ ...ctx, argv: rest });
   }
@@ -1272,7 +1276,7 @@ async function run(ctx: CommandContext): Promise<void> {
       exampleCli: 'jinn tasks submit --id my-task --description "..." --solver-net prediction',
       details: {
         field: 'subverb',
-        expected: 'submit|watch|list|show|close|cancel|release',
+        expected: 'submit|watch|observe-autopilot-delivery|list|show|close|cancel|release',
       },
     },
     { writer: ctx.writer, exit: ctx.exit },
@@ -1286,6 +1290,7 @@ const command: CommandModule = {
   jinn tasks submit --id <id> --description <text> (--solver-net <name> | --solver-type <type>) [--spec-file <path>] [--dry-run] [--yes] [--human]
   jinn tasks submit --request-file <path> [--dry-run] --yes --json
   jinn tasks watch <id> [--timeout <seconds>] [--json|--human]
+  jinn tasks observe-autopilot-delivery --expectation-file <path> --json
   jinn tasks list
   jinn tasks show <id>
   jinn tasks close --task-id <id>
