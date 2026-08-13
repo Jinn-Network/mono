@@ -231,6 +231,16 @@ export {
 export type { PublicationSource, PublicationStage, PublicationState, RunState } from "./run/state.js";
 export { assessPublicationCompatibility } from "./run/publication-compatibility.js";
 export type { PublicationCompatibilityAssessment } from "./run/publication-compatibility.js";
+export {
+  createWorkspacePublicationHttpHandler,
+  createWorkspacePublicationSource,
+  BENCHMARK_PUBLICATION_AUTHORIZATION_ROLE,
+  BENCHMARK_PUBLICATION_AUTHORIZATION_SCOPE,
+} from "./run/publication-source.js";
+export {
+  createPublisherAuthorizationArtifact,
+  verifyPublisherAuthorizationArtifact,
+} from "./run/publication-authorization.js";
 export { foldRunJournalLineage } from "./run/journal.js";
 export type { DispatchLineageFold } from "./run/journal.js";
 

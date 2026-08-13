@@ -100,6 +100,9 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     replicate: z.number().int(),
     dispatch: z.number().int().positive(),
     submissionSha256: Sha256HexSchema,
+    /** Public-source receipt, required only for PUB-12 prospective public runs. */
+    publicationSourceSequence: z.string().regex(/^\d{16}$/).optional(),
+    publicationEntrySha256: Sha256HexSchema.optional(),
   }),
   z.object({
     kind: z.literal("submission-accepted"),

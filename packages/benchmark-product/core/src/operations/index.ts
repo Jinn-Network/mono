@@ -80,6 +80,13 @@ export {
 } from "./run-quote.js";
 export { runLock, type RunLockInput, type RunLockResult } from "./run-lock.js";
 export {
+  publicationConfigure,
+  publicationRegister,
+  type PublicationConfigureInput,
+  type PublicationRegisterInput,
+  type PublicationRegistrationResult,
+} from "./publication-register.js";
+export {
   runLaunch,
   runResume,
   type RunLaunchDeps,

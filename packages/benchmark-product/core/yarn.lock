@@ -63,6 +63,10 @@ __metadata:
     "@jinn-network/benchmarking-publication": "npm:0.1.0"
     "@jinn-network/benchmarking-records": "npm:0.1.0"
     "@jinn-network/benchmarking-run": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
+    "@jinn-network/record-discovery-transport-http": "npm:0.1.0"
+    "@jinn-network/record-publication": "npm:0.1.0"
     "@jinn-network/task-admission": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-backend-local": "npm:0.1.0"
@@ -209,6 +213,16 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/record-discovery-client@portal:../../discovery/client::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-client@portal:../../discovery/client::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
 "@jinn-network/record-discovery-protocol@portal:../../discovery/protocol::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/record-discovery-protocol@portal:../../discovery/protocol::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A."
@@ -225,6 +239,16 @@ __metadata:
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-transport-http@portal:../../discovery/transport-http::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-transport-http@portal:../../discovery/transport-http::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-client": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
   languageName: node
   linkType: soft
 

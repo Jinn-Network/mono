@@ -46,6 +46,8 @@ import {
   type DriveDeps,
 } from "../run/drive.js";
 import { createProductLaunchCapture } from "../run/publication-capture.js";
+import { createWorkspacePublicationSource } from "../run/publication-source.js";
+import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
   appendRunJournalEntry,
   evaluationGaps,
@@ -200,6 +202,10 @@ export function runLaunch(
     inputs: input,
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
+      const registration = requireRunState(clockedContext.workspaceDir, input.draftId).publication?.registration;
+      if (registration?.state !== "complete") {
+        refuse("conflict", `runs.${input.draftId}.publication.registration`, "public registration must be complete and retrievable before launch");
+      }
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 
@@ -257,7 +263,37 @@ export function runLaunch(
                 liveClock: context.clock,
                 recordSolveSubmissions: false,
               });
-              const capture = createProductLaunchCapture({ workspaceDir: clockedContext.workspaceDir, draftId: input.draftId, liveClock: context.clock });
+              const currentState = requireRunState(clockedContext.workspaceDir, input.draftId);
+              const publication = currentState.publication;
+              if (publication === undefined || publication.source.publicBaseUrl === undefined) {
+                refuse("conflict", `runs.${input.draftId}.publication`, "public source location is required before launch");
+              }
+              const source = createWorkspacePublicationSource(clockedContext.workspaceDir, publication.source.name);
+              if (source.source.agent !== publication.source.agentKeyRef) {
+                refuse("conflict", `runs.${input.draftId}.publication.source`, "workspace signing key changed; refusing source re-attribution");
+              }
+              await source.writer.recover();
+              const capture = createProductLaunchCapture({
+                workspaceDir: clockedContext.workspaceDir,
+                draftId: input.draftId,
+                liveClock: context.clock,
+                announceSubmission: async ({ bytes, digest, at }) => {
+                  const receipt = await source.writer.append({
+                    timestamp: at,
+                    announcement: {
+                      announcementId: `submission:${digest}`,
+                      action: "available",
+                      record: {
+                        kind: "https://spec.jinn.network/records/submission/v1",
+                        digest,
+                        mediaType: SUBMISSION_MEDIA_TYPE,
+                      },
+                    },
+                    record: { bytes, contentType: SUBMISSION_MEDIA_TYPE },
+                  });
+                  return { sequence: receipt.sequence, entrySha256: receipt.entryDigest.slice("sha256:".length) };
+                },
+              });
               const driveDeps: DriveDeps = {
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,

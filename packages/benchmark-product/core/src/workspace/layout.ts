@@ -18,6 +18,7 @@ export const AUTHORITY_FILENAME = "authority.json";
 export const RUNS_DIRNAME = "runs";
 export const PREVIEWS_DIRNAME = "previews";
 export const RUNTIME_HOSTS_DIRNAME = "runtime-hosts";
+export const PUBLICATION_DIRNAME = "publication";
 
 export function workspaceMetadataPath(workspaceDir: string): string {
   return join(workspaceDir, WORKSPACE_METADATA_FILENAME);
@@ -159,4 +160,22 @@ export function runtimeHostsDir(workspaceDir: string): string {
 
 export function runtimeHostPath(workspaceDir: string, selectionManifestSha256: string): string {
   return join(runtimeHostsDir(workspaceDir), `${selectionManifestSha256}.json`);
+}
+
+/** Private durable state and public static root for this workspace's Record Discovery source. */
+export function publicationDir(workspaceDir: string): string {
+  return join(workspaceDir, PUBLICATION_DIRNAME);
+}
+
+export function publicationServeRoot(workspaceDir: string): string {
+  return join(publicationDir(workspaceDir), "public");
+}
+
+export function publicationStatePath(workspaceDir: string, sourceId: string, kind: "state" | "intent"): string {
+  // Source ids contain IRIs and are deliberately never used as path components.
+  return join(publicationDir(workspaceDir), "sources", `${sourceId}.${kind}.json`);
+}
+
+export function publicationJournalPath(workspaceDir: string, draftId: string): string {
+  return join(publicationDir(workspaceDir), "journals", `${draftId}.json`);
 }

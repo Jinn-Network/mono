@@ -44,6 +44,10 @@ export const PublicationSourceSchema = z.object({
 
 export const PublicationStageSchema = z.object({
   state: z.enum(["not-started", "in-progress", "complete"]),
+  /** Frozen before the first executor attempt, so a crash retry has the identical plan. */
+  announcedAt: Rfc3339Schema.optional(),
+  /** A completed run registered later is explicitly distinguished from prospective registration. */
+  postHoc: z.boolean().optional(),
   /** A durable source append position. Its presence freezes source identity, never its URL. */
   receipt: z.object({
     sourceSequence: z.string().min(1),

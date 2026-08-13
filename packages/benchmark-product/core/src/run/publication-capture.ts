@@ -16,22 +16,36 @@ export interface ProductLaunchCaptureDeps {
   readonly workspaceDir: string;
   readonly draftId: string;
   readonly liveClock: () => string;
+  /** The source append is deliberately before the backend submission. */
+  readonly announceSubmission?: (input: {
+    readonly bytes: Uint8Array;
+    readonly digest: `sha256:${string}`;
+    readonly at: string;
+  }) => Promise<{ readonly sequence: string; readonly entrySha256: string }>;
 }
 
 export function createProductLaunchCapture(deps: ProductLaunchCaptureDeps): LaunchCapturePort {
   const capturedSubmissions = new Map<string, string>();
   return {
-    captureSubmission(input) {
+    async captureSubmission(input) {
       const submissionSha256 = putSealedBytes(deps.workspaceDir, input.bytes);
+      const at = deps.liveClock();
+      const announcement = deps.announceSubmission === undefined
+        ? undefined
+        : await deps.announceSubmission({ bytes: new Uint8Array(input.bytes), digest: `sha256:${submissionSha256}`, at });
       capturedSubmissions.set(`${input.cellKey}::${input.dispatch}`, submissionSha256);
       appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
         kind: "submission-captured",
-        at: deps.liveClock(),
+        at,
         cellKey: input.cellKey,
         armId: input.armId,
         replicate: input.replicate,
         dispatch: input.dispatch,
         submissionSha256,
+        ...(announcement === undefined ? {} : {
+          publicationSourceSequence: announcement.sequence,
+          publicationEntrySha256: announcement.entrySha256,
+        }),
       });
     },
     captureObservation(input) {

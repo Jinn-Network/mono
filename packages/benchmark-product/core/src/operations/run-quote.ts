@@ -41,6 +41,7 @@ import { assertWorkspace } from "../workspace/workspace.js";
 import { compileDraft, type CompiledRun } from "../run/compile.js";
 import { readPreviewLog, type PreviewLog } from "../run/preview-log.js";
 import { createPublicationState, deriveRunOwner, specDigest, writeRunState } from "../run/state.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -291,7 +292,10 @@ export function runQuote(
         owner,
         quote,
         quotedAt: at,
-        publication: createPublicationState(),
+        // The source agent is the durable workspace report-signing did:key, never the mutable
+        // workspace principal or a URL.  This is created at quote time so it is stable before
+        // any later registration receipt makes the identity immutable.
+        publication: createPublicationState({ agentKeyRef: loadOrCreateReportSigningKey(clockedContext.workspaceDir).keyId }),
       });
 
       let draft = document;

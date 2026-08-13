@@ -16,7 +16,7 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
-import { sealRun } from "@jinn-network/benchmarking-records";
+import { sealRun, withRunPublicationExtension } from "@jinn-network/benchmarking-records";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -25,6 +25,8 @@ import { compileDraft } from "../run/compile.js";
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
+import { createPublisherAuthorizationArtifact, AUTHORIZATION_MEDIA_TYPE } from "../run/publication-authorization.js";
+import { BENCHMARK_PUBLICATION_AUTHORIZATION_ROLE } from "../run/publication-source.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
@@ -81,7 +83,22 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         closeAt,
       });
 
-      const sealed = sealRun(compiled.plannedRun.record);
+      const authorization = createPublisherAuthorizationArtifact({
+        workspaceDir: clockedContext.workspaceDir,
+        owner: runState.owner,
+        effectiveAt: at,
+      });
+      const authorizationSha256 = putSealedBytes(clockedContext.workspaceDir, authorization.bytes);
+      const runWithPublicationAuthorization = withRunPublicationExtension(
+        compiled.plannedRun.record as unknown as Record<string, unknown>,
+        {
+          registrationArtifacts: [{
+            role: BENCHMARK_PUBLICATION_AUTHORIZATION_ROLE,
+            artifact: { digest: { sha256: authorizationSha256 }, mediaType: AUTHORIZATION_MEDIA_TYPE },
+          }],
+        },
+      );
+      const sealed = sealRun(runWithPublicationAuthorization);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
 
       const transitioned = transition("quoted", "lock");
