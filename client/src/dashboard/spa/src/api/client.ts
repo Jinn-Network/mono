@@ -297,6 +297,18 @@ export const api = {
     ),
 
   /**
+   * Composed readiness snapshot across every harness this daemon build
+   * registers (`GET /v1/harnesses/readiness`). The onboarding readiness step
+   * reads this rather than probing one harness at a time — it asks no
+   * question, so it has no selected harness to probe. A pre-flip call returns
+   * 503 (`subsystem_not_ready`), which callers treat as "checking".
+   */
+  harnessReadinessSnapshot: () =>
+    jfetch<{ lastRefreshedAt: string; harnesses: HarnessReadinessEntry[] }>(
+      '/v1/harnesses/readiness',
+    ),
+
+  /**
    * Per-harness auth-source status (#564) — auth source path, masked last-4
    * key suffix, credential mtime, and a loaded/missing/unknown badge. The
    * endpoint NEVER returns full key bytes.
@@ -430,8 +442,26 @@ export const api = {
   // ---- Operator surfaces ----
   // The join/leave lifecycle retired in Wave-4 D1 (DR-2026-08-05) with the
   // `joinedSolverNets` claim gate; what remains here is read plus the
-  // non-membership operator mutations.
+  // non-membership operator mutations. `listJoined` is the surviving READ —
+  // OPERATOR-APP-SPEC §2.4 keeps Memberships as a read-only legacy view until
+  // cutover stage 5.
   operator: {
+    listJoined: () =>
+      jfetch<{
+        joinedSolverNets: Record<
+          string,
+          {
+            manifestCid: string;
+            name?: string;
+            contract?: { id: string; version: string };
+            roles: Array<'solver' | 'evaluator'>;
+            harness?: string;
+            model?: string;
+            plugins?: string[];
+            disabledDefaultPlugins?: string[];
+          }
+        >;
+      }>('/v1/operator/joined'),
     listArtifacts: (opts: { source?: OperatorArtifactSource; artifactType?: string; limit?: number } = {}) => {
       const q = new URLSearchParams();
       if (opts.source) q.set('source', opts.source);

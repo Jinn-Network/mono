@@ -427,6 +427,14 @@ export async function mockDaemonApi(page: Page, _opts: MockDaemonApiOptions = {}
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) }),
   );
   // Specific exact routes registered AFTER catch-all so they win (checked first).
+  // The read that backs the (read-only, post-Wave-4-D1) Memberships view. Needs
+  // its own route because the catch-all's `{ ok: true }` is not a valid
+  // `{ joinedSolverNets }` payload.
+  await page.route(
+    (url) => url.pathname === '/v1/operator/joined',
+    (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify(DEFAULT_JOINED_SOLVER_NETS) }),
+  );
   // execution-data accepts query params (source, limit); match by pathname.
   await page.route(
     (url) => url.pathname === '/v1/operator/execution-data',

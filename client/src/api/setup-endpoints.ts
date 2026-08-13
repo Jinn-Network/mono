@@ -619,11 +619,64 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     });
   });
 
+  // The legacy POST /v1/setup/solvernets/:name route persisted into the
+  // now-removed `solverNets` config field. Issue #421 retired the route and
+  // left this tombstone so a stale caller gets 410 Gone (an explicit
+  // "retired") rather than a bare 404 ("never existed"). Headless design §4.2
+  // files it under "retire with the legacy shape" — i.e. it outlives the join
+  // lifecycle Wave-4 D1 removed and goes at cutover stage 5, with the rest of
+  // the legacy `joinedSolverNets` shape.
+  app.post('/v1/setup/solvernets/:name', (c) =>
+    c.json({
+      error: 'route_retired',
+      detail:
+        'POST /v1/setup/solvernets/:name was retired in issue #421. ' +
+        'SolverNet membership is operator config: edit `joinedSolverNets` in ' +
+        '~/.jinn-client/config.json and restart the daemon. ' +
+        '`jinn solver-nets list` prints the resulting entries, and ' +
+        'Settings > Memberships renders them read-only.',
+    }, 410),
+  );
+
+  // GET /v1/operator/joined — list the operator's joined SolverNets.
+  //
+  // Read-only projection of the manifest-keyed `joinedSolverNets` dict in the
+  // operator config. Wave-4 D1 (DR-2026-08-05) retired the join/leave WRITE
+  // routes with the claim gate; this read survives because
+  // `client/OPERATOR-APP-SPEC.md` §2.4 keeps Memberships as the legacy view
+  // until cutover stage 5 — the SPA still has to render which SolverNets the
+  // config declares. There is deliberately no write counterpart: memberships
+  // are edited in the config file, not through this API.
+  app.get('/v1/operator/joined', async (c) => {
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    let current: Record<string, unknown> = {};
+    try {
+      if (existsSync(cfgPath)) {
+        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
+      }
+    } catch (err) {
+      return c.json({
+        error: 'config_unreadable',
+        detail: errorMessage(err),
+      }, 500);
+    }
+    const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
+    const joinedSolverNets: Record<string, Record<string, unknown>> = {};
+    for (const [k, v] of Object.entries(rawJoined)) {
+      if (isRecord(v)) joinedSolverNets[k] = { ...v };
+    }
+    return c.json({ joinedSolverNets });
+  });
+
   // POST /v1/operator/onboarding-complete — #983. The operator clicked
-  // "Enter dashboard" at the end of the guided onboarding takeover (gated SPA-
-  // side on ≥1 join AND a ready solver harness AND a selected model). Persists
+  // "Enter dashboard" at the end of the guided onboarding takeover. Persists
   // the flag to disk and mutates the in-memory config so GET /v1/bootstrap
   // reflects it live; App.tsx then drops the takeover for <Operating>.
+  //
+  // The SPA-side gate is no longer "≥1 join AND a ready solver harness AND a
+  // selected model": Wave-4 D1 removed the join write path, and with it the
+  // only thing the takeover could persist. The takeover's last step now
+  // confirms harness readiness and nothing more (OPERATOR-APP-SPEC §2.8).
   //
   // Thin front-end over `intents/onboarding-complete.ts` per spec §4.1/§11 —
   // the CLI verb (`cli/commands/onboarding-complete.ts`) is the other

@@ -10,15 +10,17 @@
  * There is also a stale-`daemonStartedAt` edge in setup mode. See the PR #2424 review.
  *
  * **Ruling: the mechanism changes; the semantic stays.** This is an explicit, in-memory flag
- * set ONLY by the three write paths that the daemon has never hot-applied — exactly what the
+ * set ONLY by the write paths that the daemon has never hot-applied — exactly what the
  * pre-#2408 browser `RestartPendingContext` / `onRestartPending` callback tracked:
  *   - `claim-policy-endpoints.ts`'s two PUT handlers (claim policy / execution wiring) — always
  *     restart-required, no hot-apply path exists.
- *   - `setup-endpoints.ts`'s join-SolverNet endpoint, but only on the branch where hot-apply via
- *     a hot-apply path is unavailable (mirrors that endpoint's own
- *     `restartRequired` response field exactly).
- *   - `setup-endpoints.ts`'s leave-SolverNet and rpcUrl (network config) endpoints — always
- *     restart-required, no hot-apply path exists.
+ *   - `setup-endpoints.ts`'s rpcUrl (network config) endpoint — always restart-required, no
+ *     hot-apply path exists.
+ *
+ * The join- and leave-SolverNet endpoints were the third and fourth writers until Wave-4 D1
+ * (DR-2026-08-05) retired them with the `joinedSolverNets` claim gate. Join was the one caller
+ * that set the flag conditionally (only when its #1037 hot-apply was unavailable); with the
+ * applier and both routes gone, every remaining writer is unconditional.
  *
  * This deliberately diverges from spec §6.5's parenthetical; the spec-side amendment is
  * tracked separately (see PR #2424's description). Out-of-band manual edits to the config file

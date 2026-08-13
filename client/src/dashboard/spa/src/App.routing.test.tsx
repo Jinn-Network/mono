@@ -14,6 +14,7 @@ import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { getFeatures } from './lib/features.js';
 import { OperatorShell } from './pages/operator/OperatorShell.js';
+import { MembershipsTab } from './pages/operator/MembershipsTab.js';
 import { RegistryTab } from './pages/operator/RegistryTab.js';
 import { NetworkTab } from './pages/operator/NetworkTab.js';
 import { SecurityTab } from './pages/operator/SecurityTab.js';
@@ -89,9 +90,9 @@ vi.mock('./api/client.js', () => ({
         artifacts: [],
       }),
       updatePricing: async () => ({ ok: true, restartRequired: true }),
+      // `join` / `leave` are gone with Wave-4 D1; `listJoined` is the surviving
+      // read that MembershipsTab renders.
       listJoined: async () => ({ joinedSolverNets: {} }),
-      join: async () => ({ ok: true, restartRequired: true, manifestCid: '', config: { manifestCid: '', roles: [] } }),
-      leave: async () => ({ ok: true, restartRequired: true, manifestCid: '' }),
     },
     solvernets: {
       listDrafts: async () => ({ drafts: [] }),
@@ -293,12 +294,18 @@ describe('App routes', () => {
 
   // ── Operator sub-routes (Task 5.1) ──
   // The sub-routes resolve to their tabs wrapped in OperatorShell. Bare
-  // /operator redirects to /operator/claim-policy since Wave-4 D1 retired the
-  // memberships tab with the joinedSolverNets join lifecycle.
+  // /operator redirects to /operator/claim-policy, which has been the claim
+  // authority since the stage-1 cutover. Memberships stays routed: Wave-4 D1
+  // retired its join/leave lifecycle, but OPERATOR-APP-SPEC §2.4 keeps the tab
+  // as a read-only view until cutover stage 5, and OperatorSubNav still links
+  // to it.
 
   function OperatorSubSwitch(): JSX.Element {
     return (
       <Switch>
+        <Route path="/operator/memberships">
+          <OperatorShell><MembershipsTab /></OperatorShell>
+        </Route>
         <Route path="/operator/registry">
           <OperatorShell><RegistryTab /></OperatorShell>
         </Route>
@@ -315,6 +322,12 @@ describe('App routes', () => {
       </Switch>
     );
   }
+
+  it('renders MembershipsTab on /operator/memberships', () => {
+    render(withProviders(<OperatorSubSwitch />, '/operator/memberships'));
+    expect(screen.getByTestId('memberships-tab')).toBeTruthy();
+    expect(screen.getByTestId('operator-shell')).toBeTruthy();
+  });
 
   it('renders RegistryTab on /operator/registry', () => {
     render(withProviders(<OperatorSubSwitch />, '/operator/registry'));
@@ -353,8 +366,8 @@ describe('App routes', () => {
   // production routing table from App.tsx — not the local OperatorSubSwitch
   // fixture above, which rebuilds its own Switch.
   //
-  // Contract being locked in: the `/operator/{claim-policy,registry,
-  // network,security}` sub-routes must be listed BEFORE the bare-`/operator`
+  // Contract being locked in: the `/operator/{claim-policy,memberships,
+  // registry,network,security}` sub-routes must be listed BEFORE the bare-`/operator`
   // redirect in App.tsx's Switch. If a future refactor reorders the Switch
   // so the bare-`/operator` redirect catches first, /operator/network would
   // wrongly redirect to /operator/claim-policy and this test would fail.

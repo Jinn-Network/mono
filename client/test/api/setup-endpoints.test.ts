@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addSetupRoutes } from '../../src/api/setup-endpoints.js';
@@ -1001,6 +1001,98 @@ describe('POST /v1/setup/drip', () => {
     expect(body.dailyCap).toBe(4);
     expect(body.callsRemaining).toBe(4);
     expect(body.cooldownExpiresAt).toBeNull();
+  });
+});
+
+describe('POST /v1/setup/solvernets/:name (retired in issue #421)', () => {
+  it('returns 410 Gone with a route_retired envelope', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-solvernet-cfg-'));
+    const configPath = join(dir, 'config.json');
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/setup/solvernets/prediction', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    });
+
+    expect(res.status).toBe(410);
+    const body = await res.json() as { error?: string; detail?: string };
+    expect(body.error).toBe('route_retired');
+    // The tombstone used to redirect callers at POST /v1/operator/join/:cid.
+    // Wave-4 D1 retired that route too, so the detail now names the surviving
+    // surface: the config key plus its read-only CLI/SPA views. 410 (retired)
+    // rather than 404 (never existed) is the point of keeping the route.
+    expect(body.detail).toMatch(/joinedSolverNets/);
+    expect(body.detail).not.toMatch(/operator\/join/);
+  });
+});
+
+describe('GET /v1/operator/joined', () => {
+  it('projects the config joinedSolverNets map', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-joined-read-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        joinedSolverNets: {
+          bafyone: {
+            manifestCid: 'bafyone',
+            name: 'Prediction Markets',
+            contract: { id: 'prediction', version: 'v1' },
+            roles: ['solver'],
+            harness: 'claude-code-learner',
+            model: 'claude-haiku-4-5-20251001',
+            plugins: ['jinn-prediction-plugin'],
+          },
+          'legacy:prediction': { manifestCid: 'legacy:prediction', roles: ['solver'] },
+        },
+      }),
+    );
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/joined');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      joinedSolverNets: Record<string, { name?: string; harness?: string }>;
+    };
+    expect(Object.keys(body.joinedSolverNets).sort()).toEqual(['bafyone', 'legacy:prediction']);
+    expect(body.joinedSolverNets['bafyone']?.name).toBe('Prediction Markets');
+    expect(body.joinedSolverNets['bafyone']?.harness).toBe('claude-code-learner');
+  });
+
+  it('returns an empty map when the config has no joinedSolverNets', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-joined-read-empty-'));
+    const configPath = join(dir, 'config.json');
+    writeFileSync(configPath, JSON.stringify({ network: 'testnet' }));
+
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const res = await app.request('/v1/operator/joined');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ joinedSolverNets: {} });
+  });
+
+  it('has no write counterpart — join and leave are 404 after Wave-4 D1', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-joined-nowrite-'));
+    const configPath = join(dir, 'config.json');
+    const app = new Hono();
+    addSetupRoutes(app, { configPath });
+
+    const post = await app.request('/v1/operator/join/bafyone', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roles: ['solver'] }),
+    });
+    expect(post.status).toBe(404);
+
+    const del = await app.request('/v1/operator/join/bafyone', { method: 'DELETE' });
+    expect(del.status).toBe(404);
   });
 });
 

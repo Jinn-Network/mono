@@ -979,11 +979,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             resolve();
           });
         },
-        // #1037: hot-apply a join to the running daemon. Populated after the
         // #983: mutate the in-memory config so GET /v1/bootstrap reflects the
         // completion flag live (the endpoint persists to disk; this keeps the
-        // configReader's in-memory read consistent — same pattern as the
-        // join-applier's config write). Cast: JinnConfig has the optional field.
+        // configReader's in-memory read consistent).
+        // Cast: JinnConfig has the optional field.
         markOnboardingComplete: () => {
           (config as { onboardingComplete?: boolean }).onboardingComplete = true;
         },

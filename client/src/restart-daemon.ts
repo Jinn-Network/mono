@@ -13,9 +13,15 @@
  *
  * Every restart-required config change funnels through the same handler:
  *
- *   - POST /v1/setup/network              — RPC URL change
- *   - POST /v1/setup/change-password      — keystore password rotation
- *   - POST /v1/setup/solvernets/:name     — SolverNet enable/disable
+ *   - POST /v1/setup/network                — RPC URL change
+ *   - POST /v1/setup/change-password        — keystore password rotation
+ *   - PUT  /v1/operator/claim-policy        — claim predicate + per-claim caps
+ *   - PUT  /v1/operator/execution-wiring    — per-work-kind harness / model
+ *
+ * (`POST /v1/setup/solvernets/:name` was on this list until issue #421
+ * retired it; it is a 410 tombstone now and writes nothing. The join/leave
+ * routes that replaced it retired in turn with Wave-4 D1 — SolverNet
+ * membership is a hand-edited config key until cutover stage 5.)
  *
  * Headless gate: `JINN_NO_UI=1` (already the established headless flag in
  * main.ts) skips the respawn — operators running `jinn run --no-ui` from a
