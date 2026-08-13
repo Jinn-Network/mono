@@ -42,7 +42,7 @@
 | PUB-12 | Colophon public source, authorization, registration | PUB-09, PUB-07 | complete |
 | PUB-13 | Accounting/report publication and bundle v3 | PUB-10..12 | complete (accounting/Matrix v2 and bundle v3) |
 | PUB-14 | CLI, HTTP, and web UX | PUB-13 | complete (including Report recovery) |
-| PUB-15 | Conformance, architecture, final review and handoff | PUB-14 | in progress (profile manifest, combined Harbor/source post-hoc harness, final gates) |
+| PUB-15 | Conformance, architecture, final review and handoff | PUB-14 | complete (covered application fixtures plus explicit marketplace/history deferrals) |
 
 ## Verification baseline
 
@@ -69,4 +69,4 @@ The repository pins Node 22 and Yarn 4.13.0 (`.nvmrc`, `.node-version`, package 
 | PUB-13a | `272385753` | `12ae6ff53`, `9dae7fc7d`, `96161d8c1` | 65 focused product tests; 6 reusable publication tests; typecheck; build; pack smoke; cutoff tamper regressions | APPROVE after runtime/archive, provenance, exact source enumeration, strict tri-state, operation coverage, and cutoff-entry blockers fixed | `5683e95e8`, `4db2f9a7b`, `3531a22ee` |
 | PUB-13c | `3531a22ee` | `f5c1a04f9`, `64c496472` | Report v2 publication and legacy-v1 identity regressions | APPROVE | `f5c1a04f9`, `64c496472` |
 | PUB-14 | `64c496472` | `6ccf86e8b`, `54a1578a7`, `d357898d6`, `a9e133dcd`, `4bcc13943`, `5dfd023c3` | publication status/UX, mount, receipt-before-launch, Report recovery, and resumed report checkpoint regressions | APPROVE | `6ccf86e8b`, `54a1578a7`, `d357898d6`, `a9e133dcd`, `4bcc13943`, `5dfd023c3` |
-| PUB-15 | `a9e133dcd` | pending local conformance commit | profile manifest, combined fake-Harbor/loopback post-hoc test, catalog/CI guards, final gates | pending final review and integration | pending |
+| PUB-15 | `a9e133dcd` | `fb07efedb` | profile manifest; 45 combined Harbor/TB2/capture/conformance tests; 6 parity/manifest tests; typecheck; build; parity; 14 inventory/boundary guards; architecture check | APPROVE after registration-closure, replacement, managed-provenance, and executable-fixture blockers fixed | `fb07efedb` |
