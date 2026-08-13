@@ -124,6 +124,31 @@ describe("NativeEvaluatorStateRepository", () => {
     }
   });
 
+  it("self-heals a schedule-less pause at tick time, and still refuses a pause it did not write", () => {
+    const store = new Store(":memory:");
+    const state = new NativeEvaluatorStateRepository(store, {
+      now: () => new Date("2026-08-02T00:00:00.000Z"),
+    });
+    const admitted = state.admitOpportunity({
+      opportunity,
+      evaluatorAgent: "urn:jinn:evaluator:golden",
+      coordinator: `0x${"f".repeat(40)}`,
+      material,
+    });
+    // The shape `retractOpportunity` writes: `paused`, no retry row. Refusing it threw a
+    // `NativeEvaluatorStateConflictError`, which the coordinator buckets as non-retryable — so the
+    // next tick terminal-failed the evaluation instead of resuming it.
+    store.db.prepare("UPDATE native_evaluations SET state = 'paused' WHERE evaluation_id = ?")
+      .run(admitted.evaluationId);
+
+    expect(state.resumeEvaluationRetry(admitted.evaluationId, "2026-08-02T00:00:01.000Z")).toBe("resumed");
+    expect(state.getEvaluation(admitted.evaluationId)).toMatchObject({ state: "evaluation-pending" });
+
+    // The contract for a caller that is NOT resuming a paused evaluation is unchanged.
+    expect(() => state.resumeEvaluationRetry(admitted.evaluationId, "2026-08-02T00:00:02.000Z"))
+      .toThrow(/paused evaluation has no retry schedule/u);
+  });
+
   it("atomically advances the source cursor with one exact durable evaluation aggregate", () => {
     const store = new Store(":memory:");
     const state = new NativeEvaluatorStateRepository(store, {

@@ -165,6 +165,9 @@ export type NativeEvaluationState =
   | "lost"
   | "failed";
 
+/** Closed evaluations: the coordinator never reconciles them and nothing may reopen them. */
+const TERMINAL_EVALUATION_STATES: readonly string[] = ["complete", "withdrawn", "lost", "failed"];
+
 export interface NativeEvaluationRow {
   readonly evaluationId: NativeOperationId;
   readonly chainId: number;
@@ -372,6 +375,35 @@ export class NativeEvaluatorStateRepository {
     ).get() as { schema_version: number }).schema_version;
   }
 
+  /**
+   * The phase a `paused` evaluation must resume into, read off its durable operation graph rather
+   * than off a retry row.
+   *
+   * The retry schedule is the ordinary carrier of `resume_state`, but it is not the only way an
+   * evaluation reaches `paused`: the v3 migration found schedule-less paused rows on disk, and
+   * `retractOpportunity` writes `paused` directly. Deriving the phase from what is durably recorded
+   * — which operations exist and which are finalized, whether verdict artifacts are on disk,
+   * whether their publications are still pending — makes every one of those shapes resumable from
+   * the same rule, so no writer of `paused` has to remember to carry a resume state with it.
+   */
+  private deriveResumeState(evaluation: NativeOperationId): NativeEvaluationState {
+    const operations = this.listEvaluationOperations(evaluation);
+    const claim = operations.find(({ kind }) => kind === "evaluation-claim");
+    const backend = operations.find(({ kind }) => kind === "evaluation-backend-submit");
+    const delivery = operations.find(({ kind }) => kind === "evaluation-marketplace-delivery");
+    const settlement = operations.find(({ kind }) => kind === "verdict-settlement");
+    const artifacts = this.listEvaluationArtifacts(evaluation);
+    const pendingPublications = this.listPendingEvaluationPublications()
+      .some(({ evaluationId }) => evaluationId === evaluation);
+    if (settlement?.status === "finalized") return "complete";
+    if (delivery?.status === "finalized" || settlement !== undefined) return "verdict-settlement-pending";
+    if (artifacts.length > 0 && !pendingPublications) return "verdict-published";
+    if (artifacts.length > 0) return "verdict-ready";
+    if (backend !== undefined || claim?.status === "finalized") return "evaluating";
+    if (claim !== undefined) return "evaluation-claim-pending";
+    return "evaluation-pending";
+  }
+
   private reconcileLegacyPausedRows(): void {
     const now = this.timestamp();
     const paused = this.store.db.prepare(
@@ -379,22 +411,7 @@ export class NativeEvaluatorStateRepository {
        AND evaluation_id NOT IN (SELECT evaluation_id FROM native_evaluation_retries)`,
     ).all() as Array<{ evaluation_id: NativeOperationId; updated_at: string }>;
     for (const row of paused) {
-      const operations = this.listEvaluationOperations(row.evaluation_id);
-      const claim = operations.find(({ kind }) => kind === "evaluation-claim");
-      const backend = operations.find(({ kind }) => kind === "evaluation-backend-submit");
-      const delivery = operations.find(({ kind }) => kind === "evaluation-marketplace-delivery");
-      const settlement = operations.find(({ kind }) => kind === "verdict-settlement");
-      const artifacts = this.listEvaluationArtifacts(row.evaluation_id);
-      const pendingPublications = this.listPendingEvaluationPublications()
-        .some(({ evaluationId }) => evaluationId === row.evaluation_id);
-      let resumeState: NativeEvaluationState;
-      if (settlement?.status === "finalized") resumeState = "complete";
-      else if (delivery?.status === "finalized" || settlement !== undefined) resumeState = "verdict-settlement-pending";
-      else if (artifacts.length > 0 && !pendingPublications) resumeState = "verdict-published";
-      else if (artifacts.length > 0) resumeState = "verdict-ready";
-      else if (backend !== undefined || claim?.status === "finalized") resumeState = "evaluating";
-      else if (claim !== undefined) resumeState = "evaluation-claim-pending";
-      else resumeState = "evaluation-pending";
+      const resumeState = this.deriveResumeState(row.evaluation_id);
       if (resumeState === "complete") {
         this.store.db.prepare("UPDATE native_evaluations SET state = 'complete', updated_at = ? WHERE evaluation_id = ?")
           .run(now, row.evaluation_id);
@@ -560,6 +577,20 @@ export class NativeEvaluatorStateRepository {
       const checkpoint = this.sourceCheckpoint(input.source);
       if (checkpoint !== undefined && BigInt(input.sourceSequence) <= BigInt(checkpoint.sequence)) {
         throw new NativeEvaluatorStateConflictError("retraction source sequence did not advance");
+      }
+      // A retraction that arrives after the evaluation is already closed changes nothing about the
+      // closed outcome, so it must not reopen it. Demoting a `complete` evaluation to `paused`
+      // un-settles a verdict that is already delivered and settled on chain, and demoting `failed`
+      // or `lost` resurrects work whose terminal answer is recorded. The checkpoint still advances
+      // and the retraction is still audited, so the source is not replayed and the event is not
+      // lost — only the closed aggregate is left alone.
+      if (TERMINAL_EVALUATION_STATES.includes(current.state)) {
+        this.upsertCheckpoint(input.source, input.sourceSequence, input.sourceEntryDigest, now);
+        this.audit(current.evaluation_id, "evaluation-retraction-ignored", {
+          reason: input.reason,
+          state: current.state,
+        }, now);
+        return;
       }
       const nextState: NativeEvaluationState = ["evaluation-pending", "evaluation-claim-pending"]
         .includes(current.state) ? "withdrawn" : "paused";
@@ -1321,8 +1352,28 @@ export class NativeEvaluatorStateRepository {
       next_attempt_at: string;
       retry_deadline: string;
     } | undefined;
-    if (retry === undefined) throw new NativeEvaluatorStateConflictError("paused evaluation has no retry schedule");
     const now = this.timestamp();
+    if (retry === undefined) {
+      // A `paused` row with no schedule is a resumable evaluation, not a corrupt one. Refusing it
+      // here was fatal, because the coordinator buckets a `NativeEvaluatorStateConflictError` as
+      // non-retryable: the very next tick terminal-failed the evaluation as
+      // `evaluator-dependency-failed: … paused evaluation has no retry schedule`. Live round 26
+      // produced exactly that shape — a mined settlement misclassified as orphaned made the solver
+      // publish a signed withdrawal, and `retractOpportunity` paused a healthy evaluation without a
+      // schedule. `reconcileLegacyPausedRows` already resumed this shape, but only at repository
+      // construction, so an evaluation paused mid-run died long before the next daemon restart.
+      // Healing it here makes the derivation the single rule for every schedule-less pause,
+      // whenever it happens.
+      const current = this.getEvaluation(evaluation);
+      if (current?.state !== "paused") {
+        throw new NativeEvaluatorStateConflictError("paused evaluation has no retry schedule");
+      }
+      const resumeState = this.deriveResumeState(evaluation);
+      this.store.db.prepare("UPDATE native_evaluations SET state = ?, updated_at = ? WHERE evaluation_id = ?")
+        .run(resumeState, now, evaluation);
+      this.audit(evaluation, "evaluation-retry-self-healed", { resumeState }, now);
+      return "resumed";
+    }
     if (effective > Date.parse(retry.retry_deadline)) {
       this.store.db.prepare("UPDATE native_evaluations SET state = 'failed', updated_at = ? WHERE evaluation_id = ?")
         .run(now, evaluation);
