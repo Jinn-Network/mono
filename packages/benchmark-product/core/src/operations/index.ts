@@ -45,6 +45,7 @@ export {
   type SelectInspectEvaluationInput,
   type SelectInspectEvaluationResult,
 } from "./inspect-runtime.js";
+export { selectHarborRuntime, type SelectHarborRuntimeInput, type SelectHarborRuntimeResult } from "./harbor-runtime.js";
 
 export {
   armAdd,

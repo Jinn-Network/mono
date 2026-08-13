@@ -6,7 +6,6 @@ import { describe, expect, test } from "vitest";
 import { createRuntimeEvidenceAdapter } from "../adapter.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { harborSelectionManifestBytes, harborSelectionManifestSha256, type HarborSelectionManifest } from "./manifest.js";
-import { resolveHarborSelection } from "./host.js";
 import {
   HARBOR_ATIF_ROLE, HARBOR_CORRELATION_ROLE, HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE,
   HARBOR_REWARD_ROLE, HARBOR_SELECTION_ROLE, HARBOR_TRIAL_CONFIG_ROLE, HARBOR_TRIAL_RESULT_ROLE,
@@ -48,13 +47,10 @@ function fakeRunner(result: unknown, calls: string[][], code = 0): HarborCommand
 function lineage(index = 1) { return { jinnManaged: true as const, submissionSha256: `${index}`.repeat(64), attemptUri: `urn:jinn:attempt:${index}`, runSha256: "d".repeat(64), cellKey: "task/arm/0", dispatchIndex: index }; }
 
 describe("managed direct Harbor 0.21 venue", () => {
-  test("resolves only Harbor 0.21.x and seals the immutable no-retry selection", async () => {
-    const calls: string[][] = [];
-    const selected = await resolveHarborSelection({ executable: "fake-harbor", executableSha256: "a".repeat(64), dataset: manifest.dataset, task: manifest.task, agent: manifest.agent, model: manifest.model, environment: manifest.environment, runner: fakeRunner({}, calls) });
-    expect(selected.manifest.retryPolicy).toEqual({ nAttempts: 1, nConcurrent: 1, maxRetries: 0 });
-    expect(calls).toEqual([["--version"]]);
+  test("seals only Harbor 0.21.x and immutable no-retry selection", async () => {
+    expect(manifest.retryPolicy).toEqual({ nAttempts: 1, nConcurrent: 1, maxRetries: 0 });
     expect(() => harborSelectionManifestBytes({ ...manifest, retryPolicy: { nAttempts: 2, nConcurrent: 1, maxRetries: 0 } } as unknown as HarborSelectionManifest)).toThrow();
-    await expect(resolveHarborSelection({ executable: "fake", executableSha256: "a".repeat(64), dataset: manifest.dataset, task: manifest.task, agent: manifest.agent, model: manifest.model, environment: manifest.environment, runner: { async run() { return { code: 0, stdout: encode.encode("harbor 0.22.0"), stderr: new Uint8Array() }; } } })).rejects.toThrow("0.21.x");
+    expect(() => harborSelectionManifestBytes({ ...manifest, harbor: { ...manifest.harbor, version: "0.22.0" } })).toThrow();
   });
 
   test("uses argv, archives exact bytes before Delivery, and post-hoc reads CAS without rerunning", async () => {

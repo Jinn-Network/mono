@@ -41,6 +41,7 @@ import {
   HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE,
 } from "./harbor/venue.js";
+import { HarborSelectionManifestSchema } from "./harbor/manifest.js";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
 export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";
@@ -291,6 +292,42 @@ function harborRoleChecks(expectedSelectionManifestSha256: string, correlations:
   ];
 }
 
+async function harborStructureCheck(
+  correlations: readonly RuntimeCorrelation[],
+  artifacts: readonly RuntimeNativeArtifact[],
+  references: ReferenceBytesResolver | undefined,
+): Promise<PublicationCheck> {
+  if (references === undefined) return { name: "harbor-job-trial-structure", status: "indeterminate", detail: "no exact-byte resolver was supplied" };
+  const selection = correlations.find((value) => value.role === HARBOR_SELECTION_ROLE);
+  const correlation = correlations.find((value) => value.role === HARBOR_CORRELATION_ROLE);
+  const find = (role: string) => artifacts.find((value) => value.role === role)?.artifact;
+  if (selection === undefined || correlation === undefined || HARBOR_REQUIRED_NATIVE_ROLES.some((role) => find(role) === undefined)) {
+    return { name: "harbor-job-trial-structure", status: "fail", detail: "required Harbor descriptors are absent" };
+  }
+  try {
+    const exact = async (descriptor: DigestBearingResourceDescriptor) => {
+      const bytes = await references.getExact({ digest: `sha256:${descriptor.digest.sha256}` as Parameters<ReferenceBytesResolver["getExact"]>[0]["digest"] });
+      if (bytes === undefined || !digestMatches(bytes, descriptor)) throw new Error("missing or digest-mismatched Harbor bytes");
+      return JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes)) as Record<string, unknown>;
+    };
+    const selected = HarborSelectionManifestSchema.parse(await exact(selection.artifact));
+    const joined = await exact(correlation.artifact);
+    const harbor = joined.harbor as { jobId?: unknown; trialId?: unknown } | undefined;
+    const lineage = joined.lineage as { submissionSha256?: unknown; attemptUri?: unknown; runSha256?: unknown; cellKey?: unknown; dispatchIndex?: unknown } | undefined;
+    if (typeof harbor?.jobId !== "string" || typeof harbor.trialId !== "string" || typeof lineage?.submissionSha256 !== "string" || typeof lineage.attemptUri !== "string" || typeof lineage.runSha256 !== "string" || typeof lineage.cellKey !== "string" || !Number.isInteger(lineage.dispatchIndex)) throw new Error("correlation lacks complete Jinn/Harbor identity binding");
+    const job = await exact(find(HARBOR_JOB_CONFIG_ROLE)!);
+    const trial = await exact(find(HARBOR_TRIAL_CONFIG_ROLE)!);
+    const jobAttempts = job.n_attempts;
+    const concurrency = (job.orchestrator as { n_concurrent_trials?: unknown } | undefined)?.n_concurrent_trials;
+    const retries = (job.retry as { max_retries?: unknown } | undefined)?.max_retries;
+    if (jobAttempts !== 1 || concurrency !== 1 || retries !== 0 || trial.attempt_number === undefined && trial.attempt !== undefined && trial.attempt !== 1) throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+    if (job.job_name !== `jinn-${lineage.submissionSha256.slice(0, 24)}-d${lineage.dispatchIndex}` || selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1 || selected.retryPolicy.maxRetries !== 0) throw new Error("Harbor Job identity or retry policy does not match sealed Jinn selection");
+    return { name: "harbor-job-trial-structure", status: "pass" };
+  } catch (cause) {
+    return { name: "harbor-job-trial-structure", status: "fail", detail: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
+
 function createPublicationAdapter(
   definition: AdapterDefinition,
   binding: EvaluationRuntimeBinding | undefined,
@@ -329,6 +366,7 @@ function createPublicationAdapter(
         disclosureCheck(nativeArtifacts),
         ...(adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? inspectRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
         ...(adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? harborRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
+        ...(adapterId === HARBOR_ADAPTER_ID ? [await harborStructureCheck(correlations, nativeArtifacts, input.references)] : []),
         await exactEvidenceCheck(`${prefix}-exact-native-evidence`, correlations, nativeArtifacts, input.references),
       ];
     },
