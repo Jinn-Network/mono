@@ -8,6 +8,7 @@ import { runJournalPath } from "../workspace/layout.js";
 import {
   appendRunJournalEntry,
   evaluationGaps,
+  foldRunJournalLineage,
   foldRunJournal,
   outstandingCells,
   readRunJournalEntries,
@@ -173,6 +174,26 @@ describe("append / read round trip", () => {
       expect(cause).toBeInstanceOf(BenchmarkProductError);
       expect((cause as BenchmarkProductError).code).toBe("journal-integrity");
     }
+  });
+});
+
+describe("publication dispatch lineage", () => {
+  test("preserves initial, replacement, and resumed dispatch captures while legacy fold selects current", () => {
+    const entries: RunJournalEntry[] = [
+      { kind: "submission-captured", at: "2026-08-13T00:00:00Z", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, submissionSha256: HEX("1") },
+      { kind: "submission-accepted", at: "2026-08-13T00:00:01Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("1"), leg: "solve" },
+      { kind: "observation-accepted", at: "2026-08-13T00:00:02Z", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, submissionSha256: HEX("1"), observationArchiveSha256: HEX("a"), attempt: "urn:uuid:attempt-1" },
+      { kind: "cell-event", at: "2026-08-13T00:00:03Z", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: true, replaceableReason: "expired" } },
+      { kind: "submission-captured", at: "2026-08-13T00:01:00Z", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 2, submissionSha256: HEX("2") },
+      { kind: "submission-accepted", at: "2026-08-13T00:01:01Z", cellKey: CELL_A, dispatch: 2, submissionSha256: HEX("2"), leg: "solve" },
+      { kind: "observation-accepted", at: "2026-08-13T00:01:02Z", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 2, submissionSha256: HEX("2"), observationArchiveSha256: HEX("b"), attempt: "urn:uuid:attempt-2" },
+      // A resumed generator reports the same durable dispatch rather than creating a third one.
+      { kind: "cell-event", at: "2026-08-13T00:01:03Z", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 2, kind: "delivered", attempt: "urn:uuid:attempt-2" } },
+    ];
+    const lineage = foldRunJournalLineage(entries).get(CELL_A);
+    expect(lineage).toHaveLength(2);
+    expect(lineage?.map((dispatch) => dispatch.observationArchiveSha256)).toEqual([HEX("a"), HEX("b")]);
+    expect(foldRunJournal(entries).get(CELL_A)?.lastDispatch).toBe(2);
   });
 });
 

@@ -217,6 +217,23 @@ export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/
 export type { WorkspaceMetadata } from "./workspace/workspace.js";
 export { getSealedBytes, hasSealedBytes, putSealedBytes, sha256Hex } from "./workspace/sealed-store.js";
 
+// Publication readiness is an explicit projection over durable state/journal capture. It does
+// not alter legacy workspaces or synthesize execution history.
+export {
+  DEFAULT_PUBLICATION_AGENT_KEY_REF,
+  DEFAULT_PUBLICATION_SOURCE_NAME,
+  PublicationSourceSchema,
+  PublicationStageSchema,
+  PublicationStateSchema,
+  RunStateSchema,
+  createPublicationState,
+} from "./run/state.js";
+export type { PublicationSource, PublicationStage, PublicationState, RunState } from "./run/state.js";
+export { assessPublicationCompatibility } from "./run/publication-compatibility.js";
+export type { PublicationCompatibilityAssessment } from "./run/publication-compatibility.js";
+export { foldRunJournalLineage } from "./run/journal.js";
+export type { DispatchLineageFold } from "./run/journal.js";
+
 // Audit journal read surface (spec §4.4): appends happen only as a side effect of operations.
 export { readAuditEntries } from "./audit/journal.js";
 export type { AuditEntry } from "./audit/journal.js";

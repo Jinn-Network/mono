@@ -45,6 +45,7 @@ import {
   driveEvaluationCatchUp,
   type DriveDeps,
 } from "../run/drive.js";
+import { createProductLaunchCapture } from "../run/publication-capture.js";
 import {
   appendRunJournalEntry,
   evaluationGaps,
@@ -254,7 +255,9 @@ export function runLaunch(
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
                 liveClock: context.clock,
+                recordSolveSubmissions: false,
               });
+              const capture = createProductLaunchCapture({ workspaceDir: clockedContext.workspaceDir, draftId: input.draftId, liveClock: context.clock });
               const driveDeps: DriveDeps = {
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
@@ -281,6 +284,7 @@ export function runLaunch(
                 get earlyClose() {
                   return cancellation!.earlyClose;
                 },
+                capture,
               });
               await driveCellEvents(driveDeps, events);
               return { draft };
@@ -339,7 +343,12 @@ export function runResume(
 
       const journaledSubmissions = new Map<string, string>();
       for (const entry of entries) {
-        if (entry.kind === "submission-accepted") {
+        // Pre-submit capture is the crash boundary. An interruption after backend acceptance but
+        // before the accepted observation archive still resumes with these exact bytes rather
+        // than sealing a new deadline under the same idempotency key.
+        if (entry.kind === "submission-captured") {
+          journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
+        } else if (entry.kind === "submission-accepted" && entry.leg !== "evaluation") {
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
         }
       }
@@ -382,7 +391,9 @@ export function runResume(
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
                 liveClock: context.clock,
+                recordSolveSubmissions: false,
               });
+              const capture = createProductLaunchCapture({ workspaceDir: clockedContext.workspaceDir, draftId: input.draftId, liveClock: context.clock });
               const driveDeps: DriveDeps = {
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
@@ -417,6 +428,7 @@ export function runResume(
                       return sha256 === undefined ? undefined : getSealedBytes(clockedContext.workspaceDir, sha256);
                     },
                   },
+                  capture,
                 });
                 await driveCellEvents(driveDeps, events);
               }

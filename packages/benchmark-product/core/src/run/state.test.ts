@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { AgentIriSchema } from "@jinn-network/benchmarking-records";
 import { runStatePath } from "../workspace/layout.js";
 import {
+  createPublicationState,
   deriveRunOwner,
   deterministicUuidUri,
   readRunState,
@@ -74,6 +75,50 @@ describe("readRunState / writeRunState round trip", () => {
     writeRunState(workspaceDir, "draft-1", minimalState());
     writeFileSync(runStatePath(workspaceDir, "draft-1"), "not json");
     expect(() => readRunState(workspaceDir, "draft-1")).toThrowError();
+  });
+});
+
+describe("publication state migration", () => {
+  test("reads a legacy report state without rewriting it and exposes profile digest names", () => {
+    const path = runStatePath(workspaceDir, "draft-legacy");
+    const legacy = {
+      ...minimalState({ reportSha256: "b".repeat(64), reportEnvelopeSha256: "c".repeat(64) }),
+    };
+    const exact = JSON.stringify(legacy, null, 2);
+    writeRunState(workspaceDir, "draft-legacy", minimalState());
+    writeFileSync(path, exact);
+
+    const read = readRunState(workspaceDir, "draft-legacy");
+    expect(read?.reportPayloadSha256).toBe("b".repeat(64));
+    expect(read?.reportRecordSha256).toBe("c".repeat(64));
+    expect(read?.publication).toBeUndefined();
+    expect(new TextDecoder().decode(readFileSync(path))).toBe(exact);
+  });
+
+  test("refuses conflicting legacy and profile report digest aliases", () => {
+    writeRunState(workspaceDir, "draft-conflict", minimalState());
+    writeFileSync(runStatePath(workspaceDir, "draft-conflict"), JSON.stringify({
+      ...minimalState(), reportSha256: "b".repeat(64), reportPayloadSha256: "c".repeat(64),
+    }));
+    expect(() => readRunState(workspaceDir, "draft-conflict")).toThrow(/conflicts/);
+  });
+
+  test("makes source identity immutable after a receipt while leaving public URL mutable", () => {
+    const publication = createPublicationState({ publicBaseUrl: "https://old.example/reports" });
+    publication.registration = {
+      state: "complete",
+      receipt: { sourceSequence: "0001", entrySha256: "d".repeat(64) },
+      digests: { run: "e".repeat(64) },
+    };
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication }));
+    const movedUrl = createPublicationState({ publicBaseUrl: "https://new.example/reports" });
+    movedUrl.registration = publication.registration;
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication: movedUrl }));
+    expect(readRunState(workspaceDir, "draft-1")?.publication?.source.publicBaseUrl).toBe("https://new.example/reports");
+
+    const renamed = createPublicationState({ name: "another-source", publicBaseUrl: "https://new.example/reports" });
+    renamed.registration = publication.registration;
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: renamed }))).toThrow(/immutable/);
   });
 });
 

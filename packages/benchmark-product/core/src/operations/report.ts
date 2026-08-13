@@ -67,8 +67,11 @@ export interface RunReportInput {
 
 export interface RunReportResult {
   readonly draft: DraftDocument;
+  /** Legacy aliases retained for callers that still consume Report v1 payload/envelope names. */
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
+  readonly reportPayloadSha256: string;
+  readonly reportRecordSha256: string;
   readonly preregistered: boolean;
   readonly claimPackage: ClaimPackage;
 }
@@ -207,8 +210,8 @@ export function runReport(
       // transition, so a retried `report` after a crash here simply rewrites it identically.
       writeRunState(clockedContext.workspaceDir, input.draftId, {
         ...runState,
-        reportSha256,
-        reportEnvelopeSha256,
+        reportPayloadSha256: reportSha256,
+        reportRecordSha256: reportEnvelopeSha256,
         reportedAt: at,
       });
 
@@ -229,6 +232,8 @@ export function runReport(
         draft,
         reportSha256,
         reportEnvelopeSha256,
+        reportPayloadSha256: reportSha256,
+        reportRecordSha256: reportEnvelopeSha256,
         preregistered: produced.record.preregistered ?? false,
         claimPackage,
       };

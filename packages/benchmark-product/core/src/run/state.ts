@@ -34,6 +34,53 @@ const Rfc3339Schema = z.string().regex(
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
+/** Product policy, rather than a discovery identity. The stable key reference can be resolved
+ * by a product host without making a rotating public key part of every RunState. */
+export const PublicationSourceSchema = z.object({
+  agentKeyRef: z.string().min(1),
+  name: z.string().min(1),
+  publicBaseUrl: z.string().url().optional(),
+});
+
+export const PublicationStageSchema = z.object({
+  state: z.enum(["not-started", "in-progress", "complete"]),
+  /** A durable source append position. Its presence freezes source identity, never its URL. */
+  receipt: z.object({
+    sourceSequence: z.string().min(1),
+    entrySha256: Sha256HexSchema,
+  }).optional(),
+  /** Exact record/artifact bytes made durable by this stage, keyed by their product role. */
+  digests: z.record(z.string(), Sha256HexSchema).optional(),
+});
+
+export const PublicationStateSchema = z.object({
+  source: PublicationSourceSchema,
+  registration: PublicationStageSchema,
+  accounting: PublicationStageSchema,
+  report: PublicationStageSchema,
+});
+
+export type PublicationSource = z.infer<typeof PublicationSourceSchema>;
+export type PublicationStage = z.infer<typeof PublicationStageSchema>;
+export type PublicationState = z.infer<typeof PublicationStateSchema>;
+
+export const DEFAULT_PUBLICATION_SOURCE_NAME = "colophon-benchmarks";
+export const DEFAULT_PUBLICATION_AGENT_KEY_REF = "workspace-owner";
+
+/** New managed runs always receive this state at quote time. No stage is implied complete. */
+export function createPublicationState(source: Partial<PublicationSource> = {}): PublicationState {
+  return {
+    source: {
+      agentKeyRef: source.agentKeyRef ?? DEFAULT_PUBLICATION_AGENT_KEY_REF,
+      name: source.name ?? DEFAULT_PUBLICATION_SOURCE_NAME,
+      ...(source.publicBaseUrl === undefined ? {} : { publicBaseUrl: source.publicBaseUrl }),
+    },
+    registration: { state: "not-started" },
+    accounting: { state: "not-started" },
+    report: { state: "not-started" },
+  };
+}
+
 /** Mirrors `@jinn-network/benchmarking-run`'s `QuoteReport` (quote.ts) — not re-exported by that package as a schema. */
 const QuoteReportSchema = z.object({
   ok: z.boolean(),
@@ -66,7 +113,12 @@ export const RunStateSchema = z.object({
   reportSha256: Sha256HexSchema.optional(),
   /** sha256 hex of the sealed Report's DSSE ENVELOPE bytes, set at `report` (BP-13). */
   reportEnvelopeSha256: Sha256HexSchema.optional(),
+  /** Profile names. The legacy aliases above remain readable indefinitely. */
+  reportPayloadSha256: Sha256HexSchema.optional(),
+  reportRecordSha256: Sha256HexSchema.optional(),
   reportedAt: Rfc3339Schema.optional(),
+  /** Absent only on historical workspaces created before prospective publication capture. */
+  publication: PublicationStateSchema.optional(),
   /** SHA-256 of the exact canonical public bundle manifest bytes (BP-40). */
   bundleIdentity: Sha256HexSchema.optional(),
   /** Workspace-relative digest-addressed immutable target, never an absolute path. */
@@ -80,7 +132,24 @@ export const RunStateSchema = z.object({
     "claim-consistency",
   ])).optional(),
   publishedAt: Rfc3339Schema.optional(),
-});
+}).superRefine((state, context) => {
+  if (state.reportSha256 !== undefined && state.reportPayloadSha256 !== undefined
+    && state.reportSha256 !== state.reportPayloadSha256) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["reportPayloadSha256"], message: "conflicts with legacy reportSha256" });
+  }
+  if (state.reportEnvelopeSha256 !== undefined && state.reportRecordSha256 !== undefined
+    && state.reportEnvelopeSha256 !== state.reportRecordSha256) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["reportRecordSha256"], message: "conflicts with legacy reportEnvelopeSha256" });
+  }
+}).transform((state) => ({
+  ...state,
+  ...(state.reportPayloadSha256 === undefined && state.reportSha256 !== undefined
+    ? { reportPayloadSha256: state.reportSha256 }
+    : {}),
+  ...(state.reportRecordSha256 === undefined && state.reportEnvelopeSha256 !== undefined
+    ? { reportRecordSha256: state.reportEnvelopeSha256 }
+    : {}),
+}));
 
 export type RunState = z.infer<typeof RunStateSchema>;
 
@@ -124,6 +193,23 @@ export function requireRunState(workspaceDir: string, draftId: string): RunState
 
 /** Validates and atomically writes the RunState for `draftId`. */
 export function writeRunState(workspaceDir: string, draftId: string, state: RunState): void {
+  // Source name/key identify an announcement chain. Once any append receipt is durable, changing
+  // either would falsely make old positions appear to belong to a new source. A public URL is a
+  // locator only and deliberately remains mutable.
+  const currentBytes = readFileIfExistsSync(runStatePath(workspaceDir, draftId));
+  if (currentBytes !== undefined) {
+    const current = readRunState(workspaceDir, draftId);
+    if (current?.publication !== undefined) {
+      const stages = [current.publication.registration, current.publication.accounting, current.publication.report];
+      const hasReceipt = stages.some((stage) => stage.receipt !== undefined);
+      if (hasReceipt && state.publication !== undefined && (
+        current.publication.source.name !== state.publication.source.name
+        || current.publication.source.agentKeyRef !== state.publication.source.agentKeyRef
+      )) {
+        refuse("conflict", `runs.${draftId}.publication.source`, "source name and agent key reference are immutable after a durable source append receipt");
+      }
+    }
+  }
   const result = RunStateSchema.safeParse(state);
   if (!result.success) {
     refuseWithIssues("validation", issuesFromZodError(result.error));

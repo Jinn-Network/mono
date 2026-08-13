@@ -40,7 +40,7 @@ import { draftPath } from "../workspace/layout.js";
 import { assertWorkspace } from "../workspace/workspace.js";
 import { compileDraft, type CompiledRun } from "../run/compile.js";
 import { readPreviewLog, type PreviewLog } from "../run/preview-log.js";
-import { deriveRunOwner, specDigest, writeRunState } from "../run/state.js";
+import { createPublicationState, deriveRunOwner, specDigest, writeRunState } from "../run/state.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -291,6 +291,7 @@ export function runQuote(
         owner,
         quote,
         quotedAt: at,
+        publication: createPublicationState(),
       });
 
       let draft = document;

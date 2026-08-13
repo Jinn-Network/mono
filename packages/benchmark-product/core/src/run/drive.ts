@@ -83,6 +83,8 @@ export interface RecordingProxyDeps {
   readonly draftId: string;
   /** The live, unfrozen clock (see run-quote.ts's own note on why). */
   readonly liveClock: () => string;
+  /** Solve dispatches captured by LaunchCapturePort must not be post-ack duplicated here. */
+  readonly recordSolveSubmissions?: boolean;
 }
 
 /**
@@ -131,6 +133,7 @@ export function createRecordingProxy(
       if (ack.accepted && coord !== undefined && nonce !== undefined) {
         const submissionSha256 = putSealedBytes(deps.workspaceDir, submissionBytes);
         const leg = nonce.startsWith("eval:") ? "evaluation" : "solve";
+        if (leg === "solve" && deps.recordSolveSubmissions === false) return ack;
         const pinningEvidence = leg === "solve"
           ? backend.pinningEvidenceForSubmission?.(ack.submission)
           : undefined;
