@@ -829,6 +829,9 @@ export function verifyDemo1PreRunFreeze(freeze: Demo1PreRunFreeze): void {
   assertExactKeys(freeze, ["schema", "inputs", "derived", "execution"], "pre-run freeze");
   if (freeze.schema !== DEMO1_PRE_RUN_FREEZE_SCHEMA) throw new TypeError("pre-run freeze schema mismatch");
   const rebuilt = buildDemo1PreRunFreeze(freeze.inputs);
+  if (!canonicalEqual(rebuilt.inputs, freeze.inputs)) {
+    throw new TypeError("pre-run freeze inputs are not in canonical normalized form");
+  }
   if (!canonicalEqual(rebuilt.derived, freeze.derived)) {
     throw new TypeError("pre-run freeze derived fields do not recompute from canonical inputs");
   }

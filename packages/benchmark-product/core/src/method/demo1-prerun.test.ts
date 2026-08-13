@@ -141,6 +141,12 @@ describe("Demo-1 canonical STOP artifact", () => {
     changedExecution.execution.modelArms = 1;
     expect(() => verifyDemo1PreRunFreeze(changedExecution as unknown as Demo1PreRunFreeze)).toThrow(/zero-execution/u);
   });
+
+  it("refuses a semantically equivalent artifact whose input arrays are not canonical", () => {
+    const changed = clone(readStoppedFreeze()) as unknown as { inputs: { candidates: unknown[] } };
+    changed.inputs.candidates.reverse();
+    expect(() => verifyDemo1PreRunFreeze(changed as unknown as Demo1PreRunFreeze)).toThrow(/canonical normalized form/u);
+  });
 });
 
 describe("Demo-1 authenticated source and license boundary", () => {
