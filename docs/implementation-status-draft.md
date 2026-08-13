@@ -112,22 +112,30 @@ Entry: [`client/src/main.ts`](client/src/main.ts). Long-running orchestrator:
 
 ### 3.1 Loops started by `Daemon.start()`
 
+Every loop is conditional — none is unconditional. The started set is computed in
+`Daemon.start()` (search `started.add(`); `LOOP_REGISTRY` in
+[`daemon/loop-heartbeat.ts`](client/src/daemon/loop-heartbeat.ts) is the single source of
+loop names, heartbeat intervals, and admission class.
+
 | Loop | File | Conditional? |
 |---|---|---|
-| `CreatorLoop` | [`daemon/creator.ts`](client/src/daemon/creator.ts) | always |
-| Engine watcher | [`daemon/daemon.ts`](client/src/daemon/daemon.ts) `_runEngineWatcherLoop` | always |
-| Engine tick | [`harnesses/engine/engine.ts`](client/src/harnesses/engine/engine.ts) `runTickLoop` | always |
-| `DeliveryWatcherLoop` | [`daemon/delivery-watcher.ts`](client/src/daemon/delivery-watcher.ts) | always |
+| `CreatorLoop` | [`daemon/creator.ts`](client/src/daemon/creator.ts) | legacy mode |
+| `DeliveryWatcherLoop` | [`daemon/delivery-watcher.ts`](client/src/daemon/delivery-watcher.ts) | legacy mode |
+| `WorkLoop` | [`daemon/work-loop.ts`](client/src/daemon/work-loop.ts) | `composition` + `work` configured |
+| `EvaluatorLoop` | [`daemon/evaluator-loop.ts`](client/src/daemon/evaluator-loop.ts) | `evaluator` configured |
+| `PostingLoop` | [`daemon/posting-loop.ts`](client/src/daemon/posting-loop.ts) | native mode + non-empty `posting[]` |
+| `ProjectorLoop` | [`daemon/projector-loop.ts`](client/src/daemon/projector-loop.ts) | `composition` configured |
+| `EvidenceDriverLoop` | [`daemon/evidence-driver.ts`](client/src/daemon/evidence-driver.ts) | `composition` configured |
 | `RewardClaimLoop` | [`daemon/reward-claim-loop.ts`](client/src/daemon/reward-claim-loop.ts) | `rewardClaimIntervalMs > 0` |
 | `BalanceTopupLoop` | [`daemon/balance-topup-loop.ts`](client/src/daemon/balance-topup-loop.ts) | testnet default on |
 | `EvictionLoop` | [`daemon/eviction-loop.ts`](client/src/daemon/eviction-loop.ts) | standard staking + distributor |
 | `CheckpointLoop` | [`daemon/checkpoint-loop.ts`](client/src/daemon/checkpoint-loop.ts) | standard staking |
-| `JinnClaimLoop` | [`daemon/jinn-claim-loop.ts`](client/src/daemon/jinn-claim-loop.ts) | L1 RPC + MVI artifacts |
-| `PeerSync` | [`api/peers.ts`](client/src/api/peers.ts) | `peers` configured |
-| Recovery (one-shot) | [`harnesses/engine/engine.ts`](client/src/harnesses/engine/engine.ts) `recoverInFlight` | always at startup |
+| `HarvestLoop` | [`daemon/harvest-loop.ts`](client/src/daemon/harvest-loop.ts) | `harvest` enabled with repos or `sessions` |
+| `PeerSync` | [`daemon/peer-sync.ts`](client/src/daemon/peer-sync.ts) | `peers` configured |
+| Recovery (one-shot) | [`daemon/native-operator-host.ts`](client/src/daemon/native-operator-host.ts) `start`, [`daemon/work-loop.ts`](client/src/daemon/work-loop.ts) `initialize` | at startup, before any loop takes work |
 
-The architecture narrative in [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) §6
-documents **eight** loops (missing `EvictionLoop` and `CheckpointLoop`). See gap §7.
+The loop table in [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) §6 carries the same set
+with per-loop job descriptions.
 
 ### 3.2 Adapters ([`client/src/adapters/`](client/src/adapters/))
 
@@ -348,12 +356,7 @@ Architectural disagreements between docs and code, and design-vs-deployed gaps. 
 persist until someone fixes them — short-lived counts have been pushed to §1 so this
 section is the one that needs maintenance.
 
-1. **Loop count drift.** [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) §6
-   documents 8 loops; the actual `Daemon.start()` constructs and supervises 10
-   (adds `EvictionLoop` and `CheckpointLoop`). One should be brought in line with the
-   other.
-
-2. **Plug-in + harness-checkpoint write paths are unexercised.** The "knowledge market"
+1. **Plug-in + harness-checkpoint write paths are unexercised.** The "knowledge market"
    framing in [`spec/2026-04-30-phase-a-umbrella.md`](spec/2026-04-30-phase-a-umbrella.md)
    and the plug-in builder design in
    [`spec/2026-05-13-plug-in-builder-entry-point-design.md`](spec/2026-05-13-plug-in-builder-entry-point-design.md)
@@ -361,33 +364,33 @@ section is the one that needs maintenance.
    explorer renders them — but no actor writes them on chain yet. Largest "designed
    vs deployed" gap.
 
-3. **On-chain verdict code is structurally lossy.** The daemon defaults
+2. **On-chain verdict code is structurally lossy.** The daemon defaults
    `JinnRouter.verdictCode` to `Pass(1)` when its evaluation pipeline fails; the
    off-chain `verdictEnvelopeMeta.actualPassed` holds the real outcome. This is
    documented in the schema and surfaced in the NetworkView (envelope-truth vs
    on-chain), but it changes how readers should interpret the `verdict` table.
    Deserves a first-class callout in canonical docs.
 
-4. **Envelope enrichment has no batch retry.** Failures during IPFS fetch produce no
+3. **Envelope enrichment has no batch retry.** Failures during IPFS fetch produce no
    row and no error marker; Ponder reprocesses on next sync. There is no
    `enrichmentStatus='failed'` worker that retries the long tail. Coverage is
    therefore "current sync state" rather than "best-effort floor."
 
-5. **Daemon does not yet stamp `executor.model` on all envelopes** (tracked as
+4. **Daemon does not yet stamp `executor.model` on all envelopes** (tracked as
    `jinn-mono-gbut` / [GitHub #191](https://github.com/Jinn-Network/mono/issues/191)).
    Explorer's `byModel` facet is gated on this; auto-lights when daemon catches up.
 
-6. **Mainnet Phase 0 framing is unclear.** CLAUDE.md still lists mainnet addresses as
+5. **Mainnet Phase 0 framing is unclear.** CLAUDE.md still lists mainnet addresses as
    "Phase 0 complete (Base mainnet)" and the daemon resolves them by default in
    `BASE_CONFIG`. Without an indexer there is no way to verify live activity, and the
    intended status (permanent legacy? dormant? to-be-deprecated?) is not written down.
 
-7. **Task.claimWindowStart / claimWindowEnd / refunded fields are structurally
+6. **Task.claimWindowStart / claimWindowEnd / refunded fields are structurally
    underpopulated.** Not emitted by JinnRouter V3 events at v0.1; require call-trace
    decoding (tracked as `jinn-mono-280n.4`). Daemon's `canClaimTask` simulation
    compensates at claim time, but the indexer columns stay null/false.
 
-8. **`SPEC.md` is a stub.** Canonical "read before reasoning about the protocol loop"
+7. **`SPEC.md` is a stub.** Canonical "read before reasoning about the protocol loop"
    per CLAUDE.md. Most operational truth currently lives in
    [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md),
    [`spec/2026-04-30-phase-a-umbrella.md`](spec/2026-04-30-phase-a-umbrella.md), and
