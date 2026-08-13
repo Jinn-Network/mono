@@ -45,6 +45,7 @@ export const DEMO1_ARMS = {
 type Demo1Arm = typeof DEMO1_ARMS[keyof typeof DEMO1_ARMS];
 type Demo1E2Arm = Demo1Arm;
 type Demo1SuitabilityArm = typeof DEMO1_ARMS.trueNoFile;
+type Demo1OfficialControl = typeof DEMO1_ARMS.trueNoFile | typeof DEMO1_ARMS.emptyLoadout;
 type Demo1ScoredOutcome = "pass" | "fail" | "timeout-fail";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -217,6 +218,7 @@ export interface Demo1E2Estimates {
     readonly reason: string | null;
   }[];
   readonly primaryVarianceModel: Demo1VarianceModel;
+  readonly secondaryManipulationControl: Demo1OfficialControl;
   readonly secondaryManipulationVarianceModel: Demo1VarianceModel;
 }
 
@@ -239,6 +241,7 @@ interface NumericE2Estimates {
     readonly reason: string | null;
   }[];
   readonly primaryVarianceModel: NumericVarianceModel;
+  readonly secondaryManipulationControl: Demo1OfficialControl;
   readonly secondaryManipulationVarianceModel: NumericVarianceModel;
 }
 
@@ -298,6 +301,11 @@ export interface Demo1E2DesignDecision {
     readonly targetPower: "0.80";
     readonly simulatedPowerAtTarget: string;
     readonly achievedMde: string | null;
+    readonly primaryPowerCurve: {
+      readonly seed: number;
+      readonly randomStream: "shared-across-target-power-and-mde";
+      readonly effectGrid: "0.0000-to-1.0000-by-0.0001";
+    };
     readonly limitation: null | "target-effect-unattainable-within-600-cells";
     readonly topUpPolicy: "forbidden-after-lock";
     readonly selectionInputs: readonly [
@@ -309,6 +317,7 @@ export interface Demo1E2DesignDecision {
     ];
     readonly excludedSelectionInputs: readonly ["secondary-manipulation-sensitivity"];
     readonly secondaryManipulationSensitivity: {
+      readonly control: Demo1OfficialControl;
       readonly achievedMde: string | null;
       readonly mayAlterPrimarySizing: false;
     };
@@ -759,7 +768,11 @@ function varianceModel(
   };
 }
 
-function estimateE2(plan: Demo1RehearsalPlan, results: readonly Demo1E2TaskResult[]): NumericE2Estimates {
+function estimateE2(
+  plan: Demo1RehearsalPlan,
+  results: readonly Demo1E2TaskResult[],
+  secondaryManipulationControl: Demo1OfficialControl,
+): NumericE2Estimates {
   const tasks = plan.inputs.e2Tasks;
   const rates = results.map((result) => Object.fromEntries(Object.values(DEMO1_ARMS).map((arm) => [
     arm,
@@ -776,9 +789,9 @@ function estimateE2(plan: Demo1RehearsalPlan, results: readonly Demo1E2TaskResul
   const primaryTaskValues = rates.map((entry) => entry[DEMO1_ARMS.skill] - entry[DEMO1_ARMS.claudeMd]);
   const primaryCoefficients = variances.map((entry) => entry[DEMO1_ARMS.skill] + entry[DEMO1_ARMS.claudeMd]);
   const secondaryTaskValues = rates.map((entry) =>
-    (entry[DEMO1_ARMS.skill] + entry[DEMO1_ARMS.claudeMd]) / 2 - entry[DEMO1_ARMS.trueNoFile]);
+    (entry[DEMO1_ARMS.skill] + entry[DEMO1_ARMS.claudeMd]) / 2 - entry[secondaryManipulationControl]);
   const secondaryCoefficients = variances.map((entry) =>
-    (entry[DEMO1_ARMS.skill] + entry[DEMO1_ARMS.claudeMd]) / 4 + entry[DEMO1_ARMS.trueNoFile]);
+    (entry[DEMO1_ARMS.skill] + entry[DEMO1_ARMS.claudeMd]) / 4 + entry[secondaryManipulationControl]);
   const repositories = tasks.map((task) => task.repository);
   const primaryVarianceModel = varianceModel(repositories, primaryTaskValues, primaryCoefficients);
   const secondaryManipulationVarianceModel = varianceModel(repositories, secondaryTaskValues, secondaryCoefficients);
@@ -816,6 +829,7 @@ function estimateE2(plan: Demo1RehearsalPlan, results: readonly Demo1E2TaskResul
     timeoutBehavior,
     taskCorrelation: correlations,
     primaryVarianceModel,
+    secondaryManipulationControl,
     secondaryManipulationVarianceModel,
   };
 }
@@ -843,6 +857,7 @@ function renderE2Estimates(estimates: NumericE2Estimates): Demo1E2Estimates {
       pearson: entry.pearson === null ? null : decimal(entry.pearson),
     })),
     primaryVarianceModel: renderVarianceModel(estimates.primaryVarianceModel),
+    secondaryManipulationControl: estimates.secondaryManipulationControl,
     secondaryManipulationVarianceModel: renderVarianceModel(estimates.secondaryManipulationVarianceModel),
   };
 }
@@ -940,6 +955,10 @@ function designSeed(seed: number, tasks: number, replicates: number, purpose: st
   return resolvedSeed(sha256(`${seed}\u0000${tasks}\u0000${replicates}`), purpose);
 }
 
+function powerCurveSeed(seed: number, tasks: number, replicates: number, comparison: "primary" | "secondary"): number {
+  return designSeed(seed, tasks, replicates, `${comparison}-power-curve`);
+}
+
 export function selectDemo1OfficialDesign(
   candidates: readonly Demo1SimulatedDesignCandidate[],
 ): Demo1SelectedDesign | null {
@@ -992,7 +1011,7 @@ function exhaustiveDesigns(
           selected,
           replicates,
           DEMO1_TARGET_EFFECT,
-          designSeed(seed, tasks, replicates, "primary-power"),
+          powerCurveSeed(seed, tasks, replicates, "primary"),
         ),
       });
     }
@@ -1008,14 +1027,17 @@ function achievedMde(
 ): number | "greater-than-1.0000" {
   const powerAtOne = simulatedPower(model, tasks, replicates, 1, seed);
   if (powerAtOne < DEMO1_TARGET_POWER) return "greater-than-1.0000";
-  let low = 0;
-  let high = 1;
-  for (let iteration = 0; iteration < 14; iteration += 1) {
-    const midpoint = (low + high) / 2;
-    if (simulatedPower(model, tasks, replicates, midpoint, seed) >= DEMO1_TARGET_POWER) high = midpoint;
-    else low = midpoint;
+  let lowGridPoint = 0;
+  let highGridPoint = 10_000;
+  while (lowGridPoint < highGridPoint) {
+    const midpoint = Math.floor((lowGridPoint + highGridPoint) / 2);
+    if (simulatedPower(model, tasks, replicates, midpoint / 10_000, seed) >= DEMO1_TARGET_POWER) {
+      highGridPoint = midpoint;
+    } else {
+      lowGridPoint = midpoint + 1;
+    }
   }
-  return Math.ceil(high * 10_000) / 10_000;
+  return highGridPoint / 10_000;
 }
 
 function stoppedDecision(
@@ -1055,7 +1077,8 @@ export function deriveDemo1E2Design(
     results,
     emptyLoadoutEvidence: equivalence.structural,
   }));
-  const numericEstimates = estimateE2(plan, results);
+  const control = equivalence.primaryControl;
+  const numericEstimates = estimateE2(plan, results, control);
   const estimates = renderE2Estimates(numericEstimates);
   if (numericEstimates.primaryVarianceModel.repositoryIcc === null) {
     return {
@@ -1076,21 +1099,32 @@ export function deriveDemo1E2Design(
     };
   }
   const chosenTasks = plan.inputs.officialTaskOrder.slice(0, selected.candidate.tasks);
+  const primaryCurveSeed = powerCurveSeed(
+    plan.derived.seeds.powerSimulation,
+    selected.candidate.tasks,
+    selected.candidate.replicates,
+    "primary",
+  );
   const primaryMde = achievedMde(
     numericEstimates.primaryVarianceModel,
     chosenTasks,
     selected.candidate.replicates,
-    designSeed(plan.derived.seeds.powerSimulation, selected.candidate.tasks, selected.candidate.replicates, "primary-mde"),
+    primaryCurveSeed,
   );
+  const targetEffectAttainable = selected.candidate.simulatedPower >= DEMO1_TARGET_POWER;
+  const mdeClassifiesTargetAttainable = typeof primaryMde !== "string" && primaryMde <= DEMO1_TARGET_EFFECT;
+  if ((selected.selection === "target-power") !== targetEffectAttainable
+    || mdeClassifiesTargetAttainable !== targetEffectAttainable) {
+    throw new TypeError("selected design target-power and achieved-MDE classifications disagree");
+  }
   const secondaryMde = numericEstimates.secondaryManipulationVarianceModel.repositoryIcc === null
     ? null
     : achievedMde(
         numericEstimates.secondaryManipulationVarianceModel,
         chosenTasks,
         selected.candidate.replicates,
-        designSeed(plan.derived.seeds.secondarySensitivity, selected.candidate.tasks, selected.candidate.replicates, "secondary-mde"),
+        powerCurveSeed(plan.derived.seeds.secondarySensitivity, selected.candidate.tasks, selected.candidate.replicates, "secondary"),
       );
-  const control = equivalence.primaryControl;
   const officialCells = scheduledCells(
     "official",
     chosenTasks,
@@ -1121,11 +1155,17 @@ export function deriveDemo1E2Design(
       targetPower: "0.80",
       simulatedPowerAtTarget: decimal(selected.candidate.simulatedPower, 4),
       achievedMde: typeof primaryMde === "string" ? primaryMde : decimal(primaryMde, 4),
-      limitation: selected.selection === "target-power" ? null : "target-effect-unattainable-within-600-cells",
+      primaryPowerCurve: {
+        seed: primaryCurveSeed,
+        randomStream: "shared-across-target-power-and-mde",
+        effectGrid: "0.0000-to-1.0000-by-0.0001",
+      },
+      limitation: targetEffectAttainable ? null : "target-effect-unattainable-within-600-cells",
       topUpPolicy: "forbidden-after-lock",
       selectionInputs: ["primary-variance-model", "target-effect", "target-power", "frozen-official-task-order", "cell-ceiling"],
       excludedSelectionInputs: ["secondary-manipulation-sensitivity"],
       secondaryManipulationSensitivity: {
+        control,
         achievedMde: secondaryMde === null
           ? null
           : typeof secondaryMde === "string" ? secondaryMde : decimal(secondaryMde, 4),

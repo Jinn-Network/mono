@@ -18,6 +18,7 @@ import {
   verifyDemo1HaikuSuitabilityAssessment,
   verifyDemo1RehearsalPlan,
   type Demo1DesignTask,
+  type Demo1E2DesignDecision,
   type Demo1E2TaskResult,
   type Demo1EmptyLoadoutEvidence,
   type Demo1HaikuSuitabilityAssessment,
@@ -37,6 +38,20 @@ const fixture = JSON.parse(readFileSync(
   new URL("./__fixtures__/demo1-e2-rehearsal.synthetic.v1.json", import.meta.url),
   "utf8",
 )) as SyntheticFixture;
+
+interface SyntheticControlRoutingFixture {
+  readonly schema: string;
+  readonly notice: string;
+  readonly overrides: readonly {
+    readonly taskId: string;
+    readonly outcomes: Readonly<Pick<Demo1E2TaskResult["outcomes"], "true-no-file" | "empty-loadout">>;
+  }[];
+}
+
+const controlRoutingFixture = JSON.parse(readFileSync(
+  new URL("./__fixtures__/demo1-e2-control-routing.synthetic.v1.json", import.meta.url),
+  "utf8",
+)) as SyntheticControlRoutingFixture;
 
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -83,6 +98,36 @@ function structural(status: "match" | "mismatch" | "unverifiable" = "match"): De
     evidence: status === "match" ? [{ uri: `urn:fixture:${name}`, sha256: digest(name) }] : [],
   });
   return { loaderBehavior: check("loader"), modelVisibleContext: check("context") };
+}
+
+function controlRoutingResults(): readonly Demo1E2TaskResult[] {
+  const overrides = new Map(controlRoutingFixture.overrides.map((override) => [override.taskId, override.outcomes]));
+  return fixture.results.map((result) => {
+    const override = overrides.get(result.taskId);
+    return override === undefined ? result : { ...result, outcomes: { ...result.outcomes, ...override } };
+  });
+}
+
+function expectCoherentPrimaryPowerClassification(decision: Demo1E2DesignDecision): void {
+  const design = decision.officialDesign;
+  expect(design).not.toBeNull();
+  const power = Number(design!.simulatedPowerAtTarget);
+  expect(design!.primaryPowerCurve).toMatchObject({
+    randomStream: "shared-across-target-power-and-mde",
+    effectGrid: "0.0000-to-1.0000-by-0.0001",
+  });
+  expect(design!.primaryPowerCurve.seed).toBeGreaterThan(0);
+  if (power >= 0.8) {
+    expect(design).toMatchObject({ selection: "target-power", limitation: null });
+    expect(design!.achievedMde).toMatch(/^0\.[0-9]{4}$|^1\.0000$/u);
+    expect(Number(design!.achievedMde)).toBeLessThanOrEqual(0.21);
+  } else {
+    expect(design).toMatchObject({
+      selection: "strongest-within-ceiling",
+      limitation: "target-effect-unattainable-within-600-cells",
+    });
+    expect(design!.achievedMde === "greater-than-1.0000" || Number(design!.achievedMde) > 0.21).toBe(true);
+  }
 }
 
 describe("Demo-1 deterministic rehearsal planning", () => {
@@ -235,6 +280,7 @@ describe("Demo-1 E2 evidence and official sizing", () => {
     expect(decision.officialDesign?.cellsInSeededOrder).toHaveLength(decision.officialDesign?.cells ?? -1);
     expect(decision.officialDesign?.topUpPolicy).toBe("forbidden-after-lock");
     expect(decision.officialDesign?.secondaryManipulationSensitivity.mayAlterPrimarySizing).toBe(false);
+    expectCoherentPrimaryPowerClassification(decision);
     expect(decision.powerClaim?.evaluatedDesigns).toBeGreaterThan(0);
     expect(demo1E2DesignDigest(decision)).toMatch(/^sha256:[0-9a-f]{64}$/u);
     verifyDemo1E2Design(decision, rehearsalPlan, suitability(rehearsalPlan), {
@@ -248,6 +294,35 @@ describe("Demo-1 E2 evidence and official sizing", () => {
       results: fixture.results,
       emptyLoadoutEvidence: structural("match"),
     })).toThrow(/does not recompute/u);
+  }, 30_000);
+
+  it("routes secondary variance and sensitivity through the accepted official control", () => {
+    expect(controlRoutingFixture.schema).toBe("jinn.demo1.e2-control-routing.synthetic.v1");
+    expect(controlRoutingFixture.notice).toMatch(/Synthetic routing fixture only/u);
+    const rehearsalPlan = plan({ officialTaskOrder: tasks("official", 5, 2) });
+    const results = controlRoutingResults();
+    expect(results.some((result) =>
+      JSON.stringify(result.outcomes[DEMO1_ARMS.trueNoFile])
+      !== JSON.stringify(result.outcomes[DEMO1_ARMS.emptyLoadout]))).toBe(true);
+
+    const accepted = deriveDemo1E2Design(rehearsalPlan, suitability(rehearsalPlan), {
+      results,
+      emptyLoadoutEvidence: structural("match"),
+    });
+    const fallback = deriveDemo1E2Design(rehearsalPlan, suitability(rehearsalPlan), {
+      results,
+      emptyLoadoutEvidence: structural("mismatch"),
+    });
+
+    expect(accepted.emptyLoadoutEquivalence).toMatchObject({ accepted: true, primaryControl: "empty-loadout" });
+    expect(fallback.emptyLoadoutEquivalence).toMatchObject({ accepted: false, primaryControl: "true-no-file" });
+    expect(accepted.estimates?.secondaryManipulationControl).toBe("empty-loadout");
+    expect(fallback.estimates?.secondaryManipulationControl).toBe("true-no-file");
+    expect(accepted.officialDesign?.secondaryManipulationSensitivity.control).toBe("empty-loadout");
+    expect(fallback.officialDesign?.secondaryManipulationSensitivity.control).toBe("true-no-file");
+    expect(accepted.estimates?.primaryVarianceModel).toEqual(fallback.estimates?.primaryVarianceModel);
+    expect(accepted.estimates?.secondaryManipulationVarianceModel)
+      .not.toEqual(fallback.estimates?.secondaryManipulationVarianceModel);
   }, 30_000);
 
   it("falls back to true no-file and marks the loadout axis unverifiable when structure fails", () => {
@@ -342,6 +417,7 @@ describe("Demo-1 E2 evidence and official sizing", () => {
     expect(decision.officialDesign?.achievedMde)
       .toMatch(/^0\.[0-9]{4}$|^1\.0000$|^greater-than-1\.0000$/u);
     expect(Number(decision.officialDesign?.simulatedPowerAtTarget)).toBeLessThan(0.8);
+    expectCoherentPrimaryPowerClassification(decision);
   }, 30_000);
 });
 

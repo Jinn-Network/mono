@@ -87,6 +87,11 @@ and within-repository components using the ICC, and retains the observed replica
 coefficient. If every rehearsal repository is a singleton, repository clustering is not
 estimable and the method stops without a power claim.
 
+The secondary `(Skill ∪ CLAUDE.md) versus C` variance model uses the same C selected for the
+official design: empty loadout only when both equivalence gates pass, otherwise true no-file. The
+estimate and sensitivity each name that control explicitly; the alternate C cannot leak into the
+secondary calculation.
+
 ## Exhaustive official sizing
 
 For every feasible prefix of the pre-run-frozen official order with at least five tasks and two
@@ -105,9 +110,10 @@ Selection is mechanical:
 2. ties prefer more repositories, then more tasks, then fewer replicates;
 3. if none reaches `0.80`, choose the strongest simulated design within 600, with the same
    repository/task/replicate tie order; and
-4. binary-search the selected design's deterministic power curve to 0.0001 and seal its achieved
-   MDE. If even effect `1.0000` misses `0.80`, seal `greater-than-1.0000` rather than fabricating a
-   reachable MDE.
+4. search the selected design's deterministic 0.0001 effect grid and seal its achieved MDE. The
+   target-effect power and every MDE grid point restart the same candidate-specific random stream,
+   so the target/fallback classification and MDE cannot disagree. If even effect `1.0000` misses
+   `0.80`, seal `greater-than-1.0000` rather than fabricating a reachable MDE.
 
 The selected artifact freezes `topUpPolicy = forbidden-after-lock`. The secondary
 `(Skill ∪ CLAUDE.md) versus control` variance model is evaluated only after primary selection and
