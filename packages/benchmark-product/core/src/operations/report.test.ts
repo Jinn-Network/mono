@@ -585,7 +585,7 @@ describe("publication.report — signed Report v2", () => {
     expect(Date.parse(announcedAt)).toBeGreaterThan(Date.parse(before.issuedAt));
   }, 60_000);
 
-  test("recovers the same source receipt after a crash following append", async () => {
+  test("recovers the same source receipt after a crash-shaped complete Report checkpoint", async () => {
     const clock = makeClock();
     await setUpPublishedAccounting(clock);
     let crashed = false;
@@ -594,11 +594,25 @@ describe("publication.report — signed Report v2", () => {
     expect(crashed).toBe(true);
     const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
     const before = (await source.writer.readState())!.last!;
+    const partial = readRunState(workspaceDir, "draft-1")!;
+    expect(partial.publication!.report.state).toBe("in-progress");
+    writeRunState(workspaceDir, "draft-1", {
+      ...partial,
+      publication: { ...partial.publication!, report: {
+        state: "complete",
+        announcedAt: partial.publication!.report.announcedAt,
+      } },
+    });
     const retried = await publicationReport(contextFor(clock), { draftId: "draft-1" });
     expect(retried.ok, JSON.stringify(retried)).toBe(true);
     if (!retried.ok) return;
     expect(retried.result.receipt.entrySha256).toBe(before.entryDigest.slice(7));
-    expect(readRunState(workspaceDir, "draft-1")!.publication!.report.receipt!.entrySha256).toBe(before.entryDigest.slice(7));
+    const recovered = readRunState(workspaceDir, "draft-1")!;
+    expect(recovered.publication!.report.receipt!.entrySha256).toBe(before.entryDigest.slice(7));
+    expect(recovered.publication!.report.digests).toEqual({
+      payload: retried.result.reportPayloadSha256,
+      record: retried.result.reportRecordSha256,
+    });
   }, 60_000);
 });
 

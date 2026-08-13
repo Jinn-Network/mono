@@ -178,6 +178,19 @@ function requireDurableClosure(
   }
 }
 
+/** A complete stage is a trustworthy terminal checkpoint only when the source receipt and both
+ * distinct Report v2 identities were written together. Older/crash-shaped complete stages are
+ * recovery inputs, not a claim that publication finished. */
+function hasCompleteReportCheckpoint(state: RunState): boolean {
+  const report = state.publication?.report;
+  return report?.state === "complete"
+    && report.receipt !== undefined
+    && state.reportPayloadSha256 !== undefined
+    && state.reportRecordSha256 !== undefined
+    && report.digests?.payload === state.reportPayloadSha256
+    && report.digests?.record === state.reportRecordSha256;
+}
+
 function validateSemanticClosure(input: {
   readonly workspaceDir: string;
   readonly state: RunState;
@@ -255,8 +268,11 @@ export function publicationReport(
         await source.writer.recover();
         const durable = await source.writer.readState();
         if (durable === undefined) refuse("record-integrity", "publication.report.receipts", "publication source has no durable state");
+        const completeCheckpoint = hasCompleteReportCheckpoint(state);
         try {
-          requireDurableClosure(state, durable, publication.report.state === "complete");
+          // Always establish the retained registration/accounting closure first. A Report stage
+          // that says complete but lacks its checkpoint can then safely replay the same plan.
+          requireDurableClosure(state, durable, completeCheckpoint);
         } catch (cause) {
           refuse("record-integrity", "publication.report.receipts", cause instanceof Error ? cause.message : String(cause));
         }
@@ -264,19 +280,19 @@ export function publicationReport(
         if (head === undefined || durable.last === null || head.sequence !== durable.last.sequence || head.entry !== durable.last.entryDigest) {
           refuse("record-integrity", "publication.report.sourceHead", "signed source head does not match the durable source position");
         }
-        const stageAt = publication.report.announcedAt ?? timestampAfter(at, head.issuedAt);
-        if (publication.report.state === "complete") {
-          if (state.reportPayloadSha256 === undefined || state.reportRecordSha256 === undefined || publication.report.receipt === undefined) {
-            refuse("record-integrity", `runs.${input.draftId}.publication.report`, "completed report stage is missing its identities or durable receipt");
-          }
+        if (completeCheckpoint) {
           return {
-            reportPayloadSha256: state.reportPayloadSha256,
-            reportRecordSha256: state.reportRecordSha256,
+            reportPayloadSha256: state.reportPayloadSha256!,
+            reportRecordSha256: state.reportRecordSha256!,
             source: source.source,
-            receipt: publication.report.receipt,
-            preregistered: parseSignedReportRecord(getSealedBytes(context.workspaceDir, state.reportRecordSha256)).payload.preregistered ?? false,
+            receipt: publication.report.receipt!,
+            preregistered: parseSignedReportRecord(getSealedBytes(context.workspaceDir, state.reportRecordSha256!)).payload.preregistered ?? false,
           };
         }
+        if (publication.report.state === "complete" && publication.report.announcedAt === undefined) {
+          refuse("conflict", `runs.${input.draftId}.publication.report`, "a complete Report stage without a frozen announcement timestamp requires operator intervention");
+        }
+        const stageAt = publication.report.announcedAt ?? timestampAfter(at, head.issuedAt);
 
       // These exact-public probes are a report policy gate, not a best-effort presentation check.
       const accountingBytes = getSealedBytes(context.workspaceDir, accountingSha256);
@@ -333,6 +349,25 @@ export function publicationReport(
       if (!verified.ok) refuse("record-integrity", "publication.report.verify", `${verified.check}: ${verified.detail}`);
       if (verified.reportPayloadSha256 !== produced.reportPayloadSha256 || verified.reportRecordSha256 !== produced.reportRecordSha256) {
         refuse("record-integrity", "publication.report.verify", "independent v2 verification returned different payload or envelope identities");
+      }
+      for (const [key, expected] of [["payload", produced.reportPayloadSha256], ["record", produced.reportRecordSha256]] as const) {
+        const existing = publication.report.digests?.[key];
+        if (existing !== undefined && existing !== expected) {
+          refuse("conflict", `runs.${input.draftId}.publication.report.digests.${key}`, "partial Report v2 checkpoint identity does not match the recovered envelope");
+        }
+      }
+      if (publication.report.receipt !== undefined) {
+        try {
+          requireStageReceipt({
+            label: "partial signed Report v2",
+            stage: { ...publication.report, digests: { ...publication.report.digests, record: produced.reportRecordSha256 } },
+            digestKey: "record",
+            digest: produced.reportRecordSha256,
+            durable,
+          });
+        } catch (cause) {
+          refuse("record-integrity", "publication.report.receipts", cause instanceof Error ? cause.message : String(cause));
+        }
       }
       try {
         validateSemanticClosure({
