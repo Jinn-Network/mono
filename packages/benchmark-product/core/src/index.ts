@@ -388,6 +388,24 @@ export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
 export { verifyPublicBundle } from "./bundle/verify.js";
 export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./bundle/verify.js";
 
+// PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
+// v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.
+export { BUNDLE_V3_FORMAT } from "./bundle/manifest.js";
+export { materializeBundleV3 } from "./bundle/v3-materialize.js";
+export type {
+  BundleV3NativeArtifactInput,
+  MaterializeBundleV3Input,
+  MaterializedBundleV3,
+} from "./bundle/v3-materialize.js";
+export { verifyBundleV3 } from "./bundle/v3-verify.js";
+export type { BundleV3VerificationResult, VerifyBundleV3Deps } from "./bundle/v3-verify.js";
+export {
+  BUNDLE_V3_INDEX_FORMAT,
+  BundleV3IndexSchema,
+  BundleV3NativeDisclosureSchema,
+} from "./bundle/v3-schema.js";
+export type { BundleV3Index, BundleV3NativeDisclosure } from "./bundle/v3-schema.js";
+
 // The bundled sample benchmark (BP-11) and SWE-bench row intake, re-exported so a GUI
 // client can call them directly without a source dependency on ./intake/*.
 export { buildSampleBenchmark, SAMPLE_ISSUER } from "./intake/sample.js";
