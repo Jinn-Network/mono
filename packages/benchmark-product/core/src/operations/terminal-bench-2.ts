@@ -5,7 +5,7 @@ import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
 import { harborSelectionManifestBytes, harborSelectionManifestSha256 } from "../runtime/harbor/manifest.js";
-import { writeHarborHostBinding } from "../runtime/harbor/host.js";
+import { sealHarborSelectionDependencies, writeHarborHostBinding } from "../runtime/harbor/host.js";
 import {
   migrateTerminalBenchLegacyMaterial,
   resolveTerminalBench2Selection,
@@ -39,6 +39,7 @@ export function selectTerminalBench2Runtime(context: OperationContext, input: Se
       refuse("record-integrity", "terminalBench2.profile", "Terminal-Bench 2 profile bytes changed while storing");
     }
     const resolution = await (context.runtimeHost ?? createDefaultBenchmarkRuntimeHost()).resolveHarborSelection(selected.harbor);
+    sealHarborSelectionDependencies(context.workspaceDir, resolution);
     const embedded = TerminalBench2SelectionManifestSchema.parse(resolution.manifest.profiles?.[TERMINAL_BENCH_2_PROFILE]);
     if (sha256Hex(terminalBench2SelectionBytes(embedded)) !== selected.profileSha256) {
       refuse("record-integrity", "terminalBench2.profile", "Harbor host changed the sealed Terminal-Bench 2 selection profile");

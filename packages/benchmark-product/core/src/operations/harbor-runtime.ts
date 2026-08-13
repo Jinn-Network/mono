@@ -4,7 +4,7 @@ import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { harborSelectionManifestBytes, harborSelectionManifestSha256 } from "../runtime/harbor/manifest.js";
-import { writeHarborHostBinding, type HarborRuntimeSelectionRequest } from "../runtime/harbor/host.js";
+import { sealHarborSelectionDependencies, writeHarborHostBinding, type HarborRuntimeSelectionRequest } from "../runtime/harbor/host.js";
 import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
@@ -22,6 +22,7 @@ export function selectHarborRuntime(context: OperationContext, input: SelectHarb
     const current = readDraftDocument(context.workspaceDir, input.draftId);
     if (!isDraftMutable(current.state)) refuse("illegal-transition", `drafts.${input.draftId}.state`, "locked drafts refuse runtime selection");
     const resolution = await (context.runtimeHost ?? createDefaultBenchmarkRuntimeHost()).resolveHarborSelection(input);
+    sealHarborSelectionDependencies(context.workspaceDir, resolution);
     const bytes = harborSelectionManifestBytes(resolution.manifest);
     const selectionManifestSha256 = harborSelectionManifestSha256(resolution.manifest);
     if (putSealedBytes(context.workspaceDir, bytes) !== selectionManifestSha256) refuse("record-integrity", "harbor.selection", "selection bytes changed while storing");

@@ -27,7 +27,9 @@ import { createDefaultBenchmarkRuntimeHost, type BenchmarkRuntimeHost } from "./
 import { INSPECT_ADAPTER_ID } from "./inspect/manifest.js";
 import {
   HARBOR_ADAPTER_ID,
+  HARBOR_RUNTIME_EXECUTABLE_ROLE,
   HARBOR_RUNTIME_EVIDENCE_PROFILE,
+  HARBOR_SOURCE_MATERIAL_ROLE,
 } from "./harbor/manifest.js";
 import {
   HARBOR_ARTIFACT_MANIFEST_ROLE,
@@ -45,14 +47,25 @@ import {
   HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE,
 } from "./harbor/venue.js";
-import { HarborSelectionManifestSchema, harborJobSource, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
+import { HarborSelectionManifestSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
 import {
+  TERMINAL_BENCH_2_REGISTRY_ROLE,
   TERMINAL_BENCH_2_PROFILE,
   TERMINAL_BENCH_2_SELECTION_ROLE,
+  TERMINAL_BENCH_2_TASK_MATERIAL_ROLE,
+  TERMINAL_BENCH_MIGRATION_EXECUTABLE_ROLE,
   TERMINAL_BENCH_MIGRATION_ROLE,
+  TERMINAL_BENCH_MIGRATION_RUNNABLE_ROLE,
+  TERMINAL_BENCH_MIGRATION_SOURCE_ROLE,
+  TERMINAL_BENCH_MIGRATION_STDERR_ROLE,
+  TERMINAL_BENCH_MIGRATION_STDOUT_ROLE,
+  TERMINAL_BENCH_MIGRATION_TRANSFORMED_ROLE,
   TerminalBench2SelectionManifestSchema,
+  TerminalBenchRegistryMetadataSchema,
   TerminalBenchMigrationManifestSchema,
   terminalBench2SelectionBytes,
+  terminalBenchMigrationBytes,
+  type TerminalBenchMaterial,
 } from "./terminal-bench-2/manifest.js";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
@@ -277,6 +290,9 @@ function assertHarborRegistration(expectedSelectionManifestSha256: string, artif
     throw new TypeError("Harbor registration requires the exact sealed HarborSelectionManifest bytes");
   }
   const manifest = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selection[0]!.bytes)));
+  if (!Buffer.from(selection[0]!.bytes).equals(Buffer.from(harborSelectionManifestBytes(manifest)))) {
+    throw new TypeError("Harbor selection registration must use its exact canonical manifest encoding");
+  }
   const terminalBenchProfileValue = manifest.profiles?.[TERMINAL_BENCH_2_PROFILE];
   const terminalBenchArtifacts = artifacts.filter((artifact) => artifact.role === TERMINAL_BENCH_2_SELECTION_ROLE);
   const migrationArtifacts = artifacts.filter((artifact) => artifact.role === TERMINAL_BENCH_MIGRATION_ROLE);
@@ -298,7 +314,154 @@ function assertHarborRegistration(expectedSelectionManifestSha256: string, artif
   if (migrationArtifacts.length !== 1 || migrationArtifacts[0]!.digest !== `sha256:${profile.migrationManifestSha256}`
     || sha256Hex(migrationArtifacts[0]!.bytes) !== profile.migrationManifestSha256) throw new TypeError("Terminal-Bench migration registration does not match the selected profile");
   const migration = TerminalBenchMigrationManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(migrationArtifacts[0]!.bytes)));
-  if (migration.runnable.checksum !== profile.selectedTask.material.checksum) throw new TypeError("Terminal-Bench registered migration runnable bytes differ from selected task material");
+  if (!Buffer.from(migrationArtifacts[0]!.bytes).equals(Buffer.from(terminalBenchMigrationBytes(migration)))) throw new TypeError("Terminal-Bench migration registration must use its exact canonical manifest encoding");
+  if (!Buffer.from(canonicalJsonBytes(migration.runnable as never)).equals(Buffer.from(canonicalJsonBytes(profile.selectedTask.material as never)))) throw new TypeError("Terminal-Bench registered migration runnable bytes differ from selected task material");
+}
+
+export interface RuntimeRegistrationPublicationArtifact {
+  readonly id: string;
+  readonly role: string;
+  readonly digestHex: string;
+  readonly bytes: Uint8Array;
+  readonly mediaType: string;
+  readonly dependsOn: readonly string[];
+}
+
+export interface RuntimeRegistrationPublicationClosure {
+  readonly artifacts: readonly RuntimeRegistrationPublicationArtifact[];
+  /** Only sealed Run registration roots are direct Benchmark dependencies. */
+  readonly rootIds: readonly string[];
+}
+
+type MutableRuntimeRegistrationPublicationArtifact = Omit<RuntimeRegistrationPublicationArtifact, "dependsOn"> & { dependsOn: string[] };
+
+function runtimeRootId(role: string, digestHex: string): string {
+  return `runtime:${role}:${digestHex}`;
+}
+
+function exactMaterialArtifacts(
+  workspaceDir: string,
+  namespace: string,
+  role: string,
+  material: Pick<TerminalBenchMaterial, "checksum" | "files">,
+): RuntimeRegistrationPublicationArtifact[] {
+  const paths = new Set<string>();
+  let previous: string | undefined;
+  const artifacts: RuntimeRegistrationPublicationArtifact[] = [];
+  for (const file of material.files) {
+    if (file.path.startsWith("/") || file.path.includes("\\") || file.path.includes("\0")
+      || file.path.split("/").some((part) => part === "" || part === "." || part === "..")) {
+      throw new TypeError(`runtime registration material has unsafe path ${file.path}`);
+    }
+    if (paths.has(file.path)) throw new TypeError(`runtime registration material repeats path ${file.path}`);
+    if (previous !== undefined && previous.localeCompare(file.path) >= 0) throw new TypeError("runtime registration material inventory is not in canonical path order");
+    paths.add(file.path); previous = file.path;
+    const bytes = getSealedBytes(workspaceDir, file.sha256);
+    if (bytes.byteLength !== file.bytes || sha256Hex(bytes) !== file.sha256) throw new TypeError(`runtime registration material does not match ${file.path}`);
+    artifacts.push({
+      id: `runtime-material:${namespace}:${encodeURIComponent(file.path)}:${file.sha256}`,
+      role, digestHex: file.sha256, bytes, mediaType: "application/octet-stream", dependsOn: [],
+    });
+  }
+  if (sha256Hex(canonicalJsonBytes(material.files as never)) !== material.checksum) throw new TypeError("runtime registration material inventory checksum does not match its files");
+  return artifacts;
+}
+
+/** Expand only product-owned runtime roles. Generic record publication receives an already
+ * validated dependency graph and never needs to parse Harbor or Terminal-Bench manifests. */
+export function runtimeRegistrationPublicationClosure(
+  workspaceDir: string,
+  registrationArtifacts: readonly RegistrationArtifact[],
+): RuntimeRegistrationPublicationClosure {
+  const roots = registrationArtifacts.map((entry, index): RuntimeRegistrationArtifact => {
+    const digestHex = entry.artifact.digest.sha256;
+    return {
+      id: `run-registration-${index}`,
+      role: entry.role,
+      digest: `sha256:${digestHex}`,
+      bytes: getSealedBytes(workspaceDir, digestHex),
+      mediaType: entry.artifact.mediaType ?? "application/octet-stream",
+      actions: ["store"],
+    };
+  });
+  const rootIds = registrationArtifacts.map((entry) => runtimeRootId(entry.role, entry.artifact.digest.sha256));
+  if (new Set(rootIds).size !== rootIds.length) throw new TypeError("runtime registration has duplicate role/digest roots");
+  const rootMembers = registrationArtifacts.map((entry): MutableRuntimeRegistrationPublicationArtifact => ({
+    id: runtimeRootId(entry.role, entry.artifact.digest.sha256), role: entry.role,
+    digestHex: entry.artifact.digest.sha256, bytes: getSealedBytes(workspaceDir, entry.artifact.digest.sha256),
+    mediaType: entry.artifact.mediaType ?? "application/octet-stream", dependsOn: [],
+  }));
+  const harborRootIndex = registrationArtifacts.findIndex((entry) => entry.role === HARBOR_SELECTION_ROLE);
+  if (harborRootIndex < 0) return { artifacts: rootMembers, rootIds };
+  if (registrationArtifacts.filter((entry) => entry.role === HARBOR_SELECTION_ROLE).length !== 1) throw new TypeError("runtime registration requires one Harbor selection root");
+  const harborDigest = registrationArtifacts[harborRootIndex]!.artifact.digest.sha256;
+  assertHarborRegistration(harborDigest, roots);
+  const harbor = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(rootMembers[harborRootIndex]!.bytes)));
+  const nested: MutableRuntimeRegistrationPublicationArtifact[] = [];
+  const ids = new Set(rootIds);
+  const addNested = (artifact: RuntimeRegistrationPublicationArtifact): string => {
+    if (ids.has(artifact.id)) throw new TypeError(`runtime registration closure has duplicate artifact id ${artifact.id}`);
+    ids.add(artifact.id); nested.push({ ...artifact, dependsOn: [...artifact.dependsOn] }); return artifact.id;
+  };
+  const addExact = (namespace: string, role: string, digestHex: string, mediaType = "application/octet-stream"): string => {
+    const bytes = getSealedBytes(workspaceDir, digestHex);
+    return addNested({ id: `runtime-material:${namespace}:${digestHex}`, role, digestHex, bytes, mediaType, dependsOn: [] });
+  };
+  const addMaterial = (namespace: string, role: string, material: Pick<TerminalBenchMaterial, "checksum" | "files">): string[] =>
+    exactMaterialArtifacts(workspaceDir, namespace, role, material).map(addNested);
+
+  const harborDependencies = [
+    addExact("harbor-executable", HARBOR_RUNTIME_EXECUTABLE_ROLE, harbor.harbor.executableSha256),
+    ...addMaterial("harbor-source", HARBOR_SOURCE_MATERIAL_ROLE, harbor.source.resolved),
+  ];
+  const profileValue = harbor.profiles?.[TERMINAL_BENCH_2_PROFILE];
+  if (profileValue !== undefined) {
+    const profile = TerminalBench2SelectionManifestSchema.parse(profileValue);
+    const profileSha256 = sha256Hex(terminalBench2SelectionBytes(profile));
+    const profileRoot = rootMembers.find((entry) => entry.role === TERMINAL_BENCH_2_SELECTION_ROLE && entry.digestHex === profileSha256);
+    if (profileRoot === undefined) throw new TypeError("Terminal-Bench selection root is absent from runtime registration");
+    harborDependencies.push(profileRoot.id);
+    if (harbor.source.resolved.checksum !== profile.selectedTask.datasetProjectionChecksum) throw new TypeError("Harbor source material differs from the Terminal-Bench dataset projection");
+    if (profile.selectedTask.package.name !== `terminal-bench/${profile.selectedTask.filter}`) throw new TypeError("Terminal-Bench selected package and filter disagree");
+    const selectedFromHarbor = harbor.source.resolved.files
+      .filter((file) => file.path.startsWith(`${profile.selectedTask.filter}/`))
+      .map((file) => ({ ...file, path: file.path.slice(profile.selectedTask.filter.length + 1) }));
+    if (!Buffer.from(canonicalJsonBytes(selectedFromHarbor as never)).equals(Buffer.from(canonicalJsonBytes(profile.selectedTask.material.files as never)))) {
+      throw new TypeError("Terminal-Bench selected task inventory differs from Harbor source material");
+    }
+    const registryBytes = getSealedBytes(workspaceDir, profile.dataset.registrySnapshotSha256);
+    if (registryBytes.byteLength !== profile.dataset.registrySnapshotBytes) throw new TypeError("Terminal-Bench registry snapshot byte count does not match its profile");
+    const registry = TerminalBenchRegistryMetadataSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(registryBytes)));
+    if (`sha256:${registry.dataset_version_content_hash.replace(/^sha256:/u, "")}` !== profile.dataset.revision) throw new TypeError("Terminal-Bench registry snapshot revision differs from the profile");
+    const registryMatches = registry.task_ids.filter((task) => task.name === profile.selectedTask.filter && task.ref === profile.selectedTask.package.ref);
+    if (registryMatches.length !== 1) throw new TypeError("Terminal-Bench registry snapshot must contain the selected task/ref exactly once");
+    const profileDependencies = [
+      addNested({ id: `runtime-material:tb2-registry:${profile.dataset.registrySnapshotSha256}`, role: TERMINAL_BENCH_2_REGISTRY_ROLE, digestHex: profile.dataset.registrySnapshotSha256, bytes: registryBytes, mediaType: "application/json", dependsOn: [] }),
+      ...addMaterial("tb2-selected-task", TERMINAL_BENCH_2_TASK_MATERIAL_ROLE, profile.selectedTask.material),
+    ];
+    if (profile.migrationManifestSha256 !== undefined) {
+      const migrationRoot = rootMembers.find((entry) => entry.role === TERMINAL_BENCH_MIGRATION_ROLE && entry.digestHex === profile.migrationManifestSha256);
+      if (migrationRoot === undefined) throw new TypeError("Terminal-Bench migration root is absent from runtime registration");
+      profileDependencies.push(migrationRoot.id);
+      const migration = TerminalBenchMigrationManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(migrationRoot.bytes)));
+      if (!Buffer.from(migrationRoot.bytes).equals(Buffer.from(terminalBenchMigrationBytes(migration)))) throw new TypeError("Terminal-Bench migration manifest is not canonical exact bytes");
+      if (migration.harbor.version !== harbor.harbor.version || migration.harbor.executableSha256 !== harbor.harbor.executableSha256) throw new TypeError("Terminal-Bench migration and execution Harbor pins differ");
+      if (!Buffer.from(canonicalJsonBytes(migration.runnable as never)).equals(Buffer.from(canonicalJsonBytes(profile.selectedTask.material as never)))) throw new TypeError("Terminal-Bench migration runnable inventory differs from selected task material");
+      const migrationDependencies = [
+        addExact("tb-migration-executable", TERMINAL_BENCH_MIGRATION_EXECUTABLE_ROLE, migration.harbor.executableSha256),
+        addExact("tb-migration-stdout", TERMINAL_BENCH_MIGRATION_STDOUT_ROLE, migration.command.stdoutSha256, "text/plain"),
+        addExact("tb-migration-stderr", TERMINAL_BENCH_MIGRATION_STDERR_ROLE, migration.command.stderrSha256, "text/plain"),
+        ...addMaterial("tb-migration-source", TERMINAL_BENCH_MIGRATION_SOURCE_ROLE, migration.source),
+        ...addMaterial("tb-migration-transformed", TERMINAL_BENCH_MIGRATION_TRANSFORMED_ROLE, migration.transformed),
+        ...addMaterial("tb-migration-runnable", TERMINAL_BENCH_MIGRATION_RUNNABLE_ROLE, migration.runnable),
+      ];
+      migrationRoot.dependsOn = [...migrationDependencies].sort();
+    }
+    profileRoot.dependsOn = [...profileDependencies].sort();
+  }
+  rootMembers[harborRootIndex]!.dependsOn = [...harborDependencies].sort();
+  nested.sort((left, right) => left.id.localeCompare(right.id));
+  return { artifacts: [...nested, ...rootMembers], rootIds };
 }
 
 /** Adapter-owned registration closure used by run-lock. Every byte descriptor is read back

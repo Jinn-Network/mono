@@ -6,6 +6,7 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../../fs/atomic.js";
 import { runtimeHostPath } from "../../workspace/layout.js";
+import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import { HarborSelectionManifestSchema, assertSupportedHarborVersion, type HarborDatasetInput, type HarborSelectionManifest, type HarborTaskInput } from "./manifest.js";
 
 export interface HarborRuntimeSelectionRequest {
@@ -25,6 +26,23 @@ export interface HarborRuntimeSelectionResolution {
   readonly manifest: HarborSelectionManifest;
   /** Private host binding: never part of the sealed selection or a public bundle. */
   readonly binding: HarborHostBinding;
+}
+
+/** Seal every host byte explicitly referenced by a Harbor selection before the mutable source
+ * path can drift. Publication later expands only this digest-addressed closure. */
+export function sealHarborSelectionDependencies(workspaceDir: string, resolution: HarborRuntimeSelectionResolution): void {
+  const executableBytes = new Uint8Array(readFileSync(realpathSync(resolution.binding.executable)));
+  if (sha256Hex(executableBytes) !== resolution.manifest.harbor.executableSha256
+    || putSealedBytes(workspaceDir, executableBytes) !== resolution.manifest.harbor.executableSha256) {
+    throw new TypeError("Harbor executable bytes do not match the sealed selection");
+  }
+  const root = realpathSync(resolution.binding.sourceMaterialPath);
+  for (const file of resolution.manifest.source.resolved.files) {
+    const bytes = new Uint8Array(readFileSync(join(root, file.path)));
+    if (bytes.byteLength !== file.bytes || sha256Hex(bytes) !== file.sha256 || putSealedBytes(workspaceDir, bytes) !== file.sha256) {
+      throw new TypeError(`Harbor source material changed while sealing ${file.path}`);
+    }
+  }
 }
 
 export function resolveHarborMaterial(input: { readonly input: { readonly path?: string; readonly name?: string; readonly version?: string; readonly ref?: string }; readonly materialPath: string; readonly revision: string }): HarborSelectionManifest["source"]["resolved"] {
