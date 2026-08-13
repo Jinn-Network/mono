@@ -13,6 +13,8 @@ on:
       - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
       - "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md"
       - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
+      - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
+      - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
   push:
     branches: [next]
     paths:
@@ -26,6 +28,8 @@ on:
       - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
       - "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md"
       - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
+      - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
+      - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
 
 permissions:
   contents: read
@@ -116,6 +120,10 @@ jobs:
           yarn install --immutable
           yarn typecheck
           yarn test
+          # The profile kit is intentionally product-local application acceptance coverage, not
+          # a shipped protocol claim. Run its manifest and the actual combined Harbor/source
+          # post-hoc case explicitly so future broad test filtering cannot silently omit it.
+          yarn vitest run src/conformance/publication-profile.test.ts src/runtime/harbor/harbor.test.ts
           yarn build
           yarn check:parity
           yarn pack:smoke

@@ -1,0 +1,26 @@
+{
+  "profile": "https://spec.jinn.network/profiles/benchmark-publication/v1",
+  "version": 1,
+  "owner": "@jinn-network/benchmark-product-core",
+  "scope": "application acceptance; this is not a protocol or backend-contract conformance claim",
+  "cases": [
+    { "id": "1-direct-harbor-pre-dispatch", "status": "partial", "remaining": "Registration and direct Harbor lifecycle are individually executable, but no single fixture yet proves their combined pre-dispatch ordering and full accounting closure.", "tests": ["src/operations/publication-register.test.ts", "src/runtime/harbor/harbor.test.ts"] },
+    { "id": "2-terminal-bench-2-harbor", "status": "partial", "remaining": "The filtered Terminal-Bench 2 Harbor lifecycle is executable; source/accounting/Matrix loopback closure is not combined in this fixture.", "tests": ["src/runtime/terminal-bench-2/terminal-bench-2.test.ts"] },
+    { "id": "3-terminal-bench-legacy-migration", "status": "partial", "remaining": "Migration material and single-runner registration artifacts are executable; publication closure is not joined to a source fixture.", "tests": ["src/runtime/terminal-bench-2/terminal-bench-2.test.ts"] },
+    { "id": "4-managed-harbor-post-hoc-no-rerun", "status": "covered", "tests": ["src/runtime/harbor/harbor.test.ts"] },
+    { "id": "5-arbitrary-completed-harbor-history", "status": "deferred", "disposition": "Retrospective import is deferred: the product refuses a legacy run without prospective capture and never synthesizes TEP history.", "tests": ["src/run/publication-compatibility.test.ts"] },
+    { "id": "6-marketplace-operator-harbor", "status": "deferred", "disposition": "Marketplace execution/product wiring is deferred; no fixture may imply an implemented marketplace Harbor runner.", "tests": [] },
+    { "id": "7-visible-replacement-no-harbor-retry", "status": "partial", "remaining": "Replacement lineage and Harbor's zero-retry configuration are separately executable; an end-to-end failed Harbor replacement fixture is still absent.", "tests": ["src/runtime/harbor/harbor.test.ts", "../../benchmarking/run/src/launch.test.ts"] },
+    { "id": "8-cancelled-partial-accounting-without-report", "status": "partial", "remaining": "Accounting-only cancellation and partial Matrix behavior are executable, but not as an independent public-source conformance fixture.", "tests": ["src/operations/publication-accounting.test.ts"] },
+    { "id": "9-independent-analysis-and-public-registration", "status": "partial", "remaining": "The two assurances have component coverage; the full truth table is not yet a shared profile fixture.", "tests": ["src/operations/publication-accounting.test.ts", "../../benchmarking/records/src/publication-contracts.test.ts"] },
+    { "id": "10-legacy-report-v1-and-signed-v2", "status": "partial", "remaining": "Record-level legacy/v2 identity and facts are covered; source publication is not joined as a full application fixture.", "tests": ["../../benchmarking/records/src/fixtures.test.ts"] },
+    { "id": "11-native-disclosure-states", "status": "partial", "remaining": "Bundle disclosure states are executable, but this is not yet a public-source accounting fixture.", "tests": ["src/bundle/v3.test.ts"] },
+    { "id": "12-byte-exact-atif-and-reward", "status": "partial", "remaining": "Harbor archive retention is executable; an independent source-to-bundle byte closure fixture is still absent.", "tests": ["src/runtime/harbor/harbor.test.ts"] },
+    { "id": "13-equal-benchmark-identity-across-venues", "status": "partial", "disposition": "Direct identity coverage is implemented; the marketplace half remains deferred with marketplace execution/product wiring.", "tests": ["../../benchmarking/records/src/equivalence.test.ts"] },
+    { "id": "14-public-timing-ordering", "status": "partial", "remaining": "Ordering checks cover comparable anchors; the profile truth table's incomparable and unverifiable source cases are not one executable fixture.", "tests": ["../../benchmarking/run/src/checks.test.ts"] },
+    { "id": "15-omitted-in-scope-dispatch-fails", "status": "partial", "remaining": "Accounting refuses missing exact capture; independent discovery of an omitted authoritative stream is not yet exercised end-to-end.", "tests": ["src/operations/publication-accounting.test.ts"] },
+    { "id": "16-unavailable-authoritative-stream-indeterminate", "status": "partial", "remaining": "Missing Harbor archive is reported indeterminate before publication; an unavailable declared authoritative stream fixture remains absent.", "tests": ["src/operations/publication-accounting.test.ts"] },
+    { "id": "17-observation-conflicts-and-gaps", "status": "partial", "remaining": "Ordering components cover observation handling; overlapping multi-source duplicate/conflict/gap fixture is not yet combined.", "tests": ["../../benchmarking/run/src/ordering-conformance.test.ts"] },
+    { "id": "18-stage-crash-and-idempotency", "status": "partial", "remaining": "Registration and accounting crash recovery are executable; Matrix and Report-stage crash recovery are not both represented in one matrix.", "tests": ["src/operations/publication-accounting.test.ts", "src/operations/publication-register.test.ts"] }
+  ]
+}

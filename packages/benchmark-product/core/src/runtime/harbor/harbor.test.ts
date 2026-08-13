@@ -1,4 +1,5 @@
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -10,13 +11,18 @@ import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { sampleInit } from "../../operations/sample.js";
+import { publicationAccounting } from "../../operations/publication-accounting.js";
+import { publicationConfigure, publicationRegister } from "../../operations/publication-register.js";
 import { readRunJournalEntries } from "../../run/journal.js";
+import { createWorkspacePublicationHttpHandler, publicArchiveUrl, recordPath } from "../../run/publication-source.js";
+import { readRunState } from "../../run/state.js";
 import { createRuntimeEvidenceAdapter } from "../adapter.js";
 import { artifactsDir } from "../../workspace/layout.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { recordHarborDispatchMapping } from "../../venue/provisioner.js";
 import { HarborJobConfigSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "./manifest.js";
 import { HARBOR_ATIF_ROLE, HARBOR_LOGS_ROLE, HARBOR_SELECTION_ROLE, harborEvidenceContributionFromArchive, readHarborDispatchArchive } from "./venue.js";
+import { parseBenchmarkAccounting } from "@jinn-network/benchmarking-records";
 
 const manifest: HarborSelectionManifest = {
   schema: "jinn.network/benchmark-product/harbor-selection/1", adapter: { id: "harbor", version: "1" },
@@ -38,6 +44,7 @@ import { dirname, join } from "node:path";
 const args = process.argv.slice(2);
 if (args[0] === "--version") { process.stdout.write("harbor 0.21.4\\n"); process.exit(0); }
 if (args[0] !== "run" || args[1] !== "-c" || args.length !== 3) process.exit(64);
+writeFileSync(${JSON.stringify(join(root, "harbor-invocations.log"))}, "run\\n", { flag: "a" });
 const config = JSON.parse(readFileSync(args[2], "utf8"));
 const exactKeys = (value, keys, label) => { const actual = Object.keys(value).sort(); const expected = [...keys].sort(); if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(label + " keys: " + actual.join(",")); };
 const isTask = Array.isArray(config.tasks); const isDataset = Array.isArray(config.datasets); if (isTask === isDataset) throw new Error("exactly one Job source required");
@@ -154,6 +161,37 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       expect(runLock(context, { draftId: "harbor-run" }).ok).toBe(true);
       const launched = await runLaunch(context, { draftId: "harbor-run" });
       expect(launched.ok, JSON.stringify(launched)).toBe(true);
+
+      // This is deliberately post-hoc: the fake executable has completed before the product
+      // configures its source. Registration/accounting must only read retained exact bytes; a
+      // second Harbor invocation would be a hidden rerun and violate the profile.
+      const invocationPath = join(workspaceDir, "harbor-invocations.log");
+      const invocationsBeforePublication = await readFile(invocationPath, "utf8");
+      let publicationServer: Server | undefined;
+      try {
+        const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+        publicationServer = createServer(async (request, response) => {
+          const result = await handler(new Request(`http://127.0.0.1${request.url ?? "/"}`, { method: request.method }));
+          response.writeHead(result.status, Object.fromEntries(result.headers));
+          response.end(Buffer.from(await result.arrayBuffer()));
+        });
+        await new Promise<void>((resolve) => publicationServer!.listen(0, "127.0.0.1", resolve));
+        const address = publicationServer.address();
+        if (address === null || typeof address === "string") throw new Error("loopback source has no TCP address");
+        const publicBaseUrl = `http://127.0.0.1:${address.port}`;
+        expect((await publicationConfigure(context, { draftId: "harbor-run", publicBaseUrl })).ok).toBe(true);
+        expect((await publicationRegister(context, { draftId: "harbor-run" })).ok).toBe(true);
+        const published = await publicationAccounting(context, { draftId: "harbor-run" });
+        expect(published.ok, JSON.stringify(published)).toBe(true);
+        if (!published.ok) throw new Error("post-hoc accounting unexpectedly failed");
+        expect(parseBenchmarkAccounting(getSealedBytes(workspaceDir, published.result.accountingSha256)).publicRegistration.status).toBe("post-hoc");
+        const response = await fetch(publicArchiveUrl(publicBaseUrl, recordPath(`sha256:${published.result.accountingSha256}`)));
+        expect(new Uint8Array(await response.arrayBuffer())).toEqual(getSealedBytes(workspaceDir, published.result.accountingSha256));
+        expect(await readFile(invocationPath, "utf8")).toBe(invocationsBeforePublication);
+        expect(readRunState(workspaceDir, "harbor-run")?.publication?.accounting.state).toBe("complete");
+      } finally {
+        if (publicationServer !== undefined) await new Promise<void>((resolve) => publicationServer!.close(() => resolve()));
+      }
 
       const journal = readRunJournalEntries(workspaceDir, "harbor-run");
       const deliveries = journal.filter((entry) => entry.kind === "delivery");

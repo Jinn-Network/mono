@@ -1871,7 +1871,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 3005,
+      "discoveredFirstPartySurfaces": 3009,
       "generatedOutputSources": 1330,
       "generatorSources": 623,
       "marketplaceControl": 2,
@@ -20068,6 +20068,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/src/conformance"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance/publication-profile.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/test"
       },
       {
@@ -20079,6 +20099,26 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/test/fixtures"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures/benchmark-publication-conformance"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures/benchmark-publication-conformance/manifest.json"
       },
       {
         "categories": [

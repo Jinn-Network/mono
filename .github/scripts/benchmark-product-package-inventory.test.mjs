@@ -256,6 +256,19 @@ test('the product never publishes', () => {
   }
 });
 
+test('the benchmark-publication profile kit is product-local acceptance coverage, not a shipped protocol surface', () => {
+  const fixture = join(packageRoot, 'core', 'test', 'fixtures', 'benchmark-publication-conformance', 'manifest.json');
+  assert.ok(existsSync(fixture), 'missing benchmark-publication conformance manifest');
+  const manifest = JSON.parse(readFileSync(fixture, 'utf8'));
+  assert.equal(manifest.profile, 'https://spec.jinn.network/profiles/benchmark-publication/v1');
+  assert.equal(manifest.owner, '@jinn-network/benchmark-product-core');
+  assert.match(manifest.scope, /application acceptance/i);
+  assert.equal(manifest.cases.length, 18);
+  const catalog = JSON.parse(readFileSync(join(root, 'architecture', 'platform-packages.v1.json'), 'utf8'));
+  const core = catalog.packages.find((entry) => entry.name === '@jinn-network/benchmark-product-core');
+  assert.deepEqual(core.publicSurface.conformance, [], 'private product acceptance coverage must not masquerade as a public conformance export');
+});
+
 test('no other package in the repository depends on the product', () => {
   // The tier boundary, from the other side (product design §2: "nothing in tiers 1-3 imports it").
   // Stated as a repository-wide sweep rather than as trust in the tier-4 packages' own restraint.

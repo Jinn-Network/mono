@@ -40,9 +40,9 @@
 | PUB-10 | Harbor selection, execution, archive, verification | PUB-08 | complete |
 | PUB-11 | Terminal-Bench 2 selection, migration, smoke | PUB-10 | complete |
 | PUB-12 | Colophon public source, authorization, registration | PUB-09, PUB-07 | complete |
-| PUB-13 | Accounting/report publication and bundle v3 | PUB-10..12 | in progress (accounting/Matrix v2 and bundle v3 complete) |
-| PUB-14 | CLI, HTTP, and web UX | PUB-13 | pending |
-| PUB-15 | Conformance, architecture, final review and handoff | PUB-14 | pending |
+| PUB-13 | Accounting/report publication and bundle v3 | PUB-10..12 | complete (accounting/Matrix v2 and bundle v3) |
+| PUB-14 | CLI, HTTP, and web UX | PUB-13 | complete (including Report recovery) |
+| PUB-15 | Conformance, architecture, final review and handoff | PUB-14 | in progress (profile manifest, combined Harbor/source post-hoc harness, final gates) |
 
 ## Verification baseline
 
@@ -67,3 +67,6 @@ The repository pins Node 22 and Yarn 4.13.0 (`.nvmrc`, `.node-version`, package 
 | PUB-13b | `272385753` | `b69084cea`, `c019fe0a9`, `d653bc9c1`, `4d38d2ee1` | 21 focused v3/manifest tests; legacy relabel regression; scoped TypeScript; architecture; diff check | APPROVE after receipt/descriptor closure, atomicity, close-boundary, shared-artifact, and legacy-format blockers fixed | `0b8df709f`, `0c4eb647a`, `cef08d3e6`, `4d7f375c2` |
 | PUB-11 | `272385753` | `9682b2ec9`, `90513b311`, `24f71c545` | 33 focused Harbor/TB2/parity tests plus opt-in smoke skip; typecheck; build; parity | APPROVE after package-digest, migration-closure, adapter-role, smoke, and exact Harbor Packager parity blockers fixed | `3d030f384`, `1e17d35cf`, `d02e5fcea` |
 | PUB-13a | `272385753` | `12ae6ff53`, `9dae7fc7d`, `96161d8c1` | 65 focused product tests; 6 reusable publication tests; typecheck; build; pack smoke; cutoff tamper regressions | APPROVE after runtime/archive, provenance, exact source enumeration, strict tri-state, operation coverage, and cutoff-entry blockers fixed | `5683e95e8`, `4db2f9a7b`, `3531a22ee` |
+| PUB-13c | `3531a22ee` | `f5c1a04f9`, `64c496472` | Report v2 publication and legacy-v1 identity regressions | integrated report closure | `f5c1a04f9`, `64c496472` |
+| PUB-14 | `64c496472` | `6ccf86e8b`, `54a1578a7`, `d357898d6`, `a9e133dcd` | publication status/UX, mount, receipt-before-launch, and Report recovery regressions | integrated UX hardening | `6ccf86e8b`, `54a1578a7`, `d357898d6`, `a9e133dcd` |
+| PUB-15 | `a9e133dcd` | pending local conformance commit | profile manifest, combined fake-Harbor/loopback post-hoc test, catalog/CI guards, final gates | pending final review and integration | pending |
