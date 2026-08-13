@@ -1778,7 +1778,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2976,
       "generatedOutputSources": 1314,
-      "generatorSources": 615,
+      "generatorSources": 616,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -20054,6 +20054,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/aggregate/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/aggregate/scripts/generate-paired-delta-oracles.py"
       },
       {
         "categories": [
