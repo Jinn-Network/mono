@@ -50,6 +50,10 @@ import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { requireRunState, writeRunState } from "../run/state.js";
@@ -71,6 +75,7 @@ export interface RunReportResult {
   readonly reportEnvelopeSha256: string;
   readonly preregistered: boolean;
   readonly claimPackage: ClaimPackage;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 /** The report's verb string for the claim package's `verification.command`. */
@@ -103,6 +108,10 @@ export function runReport(
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
       }
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        clockedContext.workspaceDir,
+        document.spec.evaluationRuntime,
+      );
 
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
       if (runState.runSha256 === undefined || runState.matrixSha256 === undefined) {
@@ -232,6 +241,7 @@ export function runReport(
         reportEnvelopeSha256,
         preregistered: produced.record.preregistered ?? false,
         claimPackage,
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       };
     },
   });

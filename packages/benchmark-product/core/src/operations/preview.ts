@@ -42,6 +42,10 @@ import {
 import { deriveRunOwner } from "../run/state.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { draftPreviewsDir, previewArtifactPath, previewDir, previewJournalPath, previewScratchDir } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
@@ -78,6 +82,7 @@ export interface RunPreviewResult {
   readonly draft: DraftDocument;
   readonly preview: PreviewArtifact;
   readonly previewCount: number;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 function computeCloseAt(at: string, closeAfterMs: number): string {
@@ -157,6 +162,10 @@ export function runPreview(
     inputs: input,
     run: async () => {
       const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        clockedContext.workspaceDir,
+        document.spec.evaluationRuntime,
+      );
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
 
@@ -268,7 +277,12 @@ export function runPreview(
       );
       const updatedLog = appendPreviewLogEntry(clockedContext.workspaceDir, input.draftId, logEntry);
 
-      return { draft: document, preview: artifact, previewCount: updatedLog.count };
+      return {
+        draft: document,
+        preview: artifact,
+        previewCount: updatedLog.count,
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+      };
     },
   });
 }

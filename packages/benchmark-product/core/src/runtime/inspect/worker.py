@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -220,17 +221,25 @@ def resolved_selection_components(
     reference: str,
     task_args: dict[str, Any],
     spec: Any,
-    scorer_name: str,
+    requested_scorer_names: list[str],
+    legacy_single_scorer: bool,
     selected_sample_id: str | int | None = None,
     samples: list[Any] | None = None,
     declared_sandbox: Any | None = None,
     sandbox_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if len(spec.scorers) != 1 or spec.scorers[0].name != scorer_name:
-        resolved = [scorer.name for scorer in spec.scorers]
+    scorers = list(spec.scorers or [])
+    resolved = [scorer.name for scorer in scorers]
+    if not scorers:
+        raise ValueError("selected Inspect task resolves no scorers")
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("selected Inspect task has duplicate resolved scorer names")
+    if legacy_single_scorer and (len(scorers) != 1 or resolved != requested_scorer_names):
         raise ValueError(
-            f"first-slice selection requires exactly the named scorer {scorer_name!r}; resolved {resolved!r}"
+            f"legacy selection requires exactly the named scorer {requested_scorer_names!r}; resolved {resolved!r}"
         )
+    if not legacy_single_scorer and any(name not in resolved for name in requested_scorer_names):
+        raise ValueError(f"scoring projection names an unresolved scorer; resolved {resolved!r}")
     if sandbox_config is None and spec.sandbox is not None:
         raise ValueError(
             "first-slice selection refuses task-defined sandboxes until their provider/config/image identity can be pinned"
@@ -249,8 +258,17 @@ def resolved_selection_components(
     resolved_version = str(attrib_version) if attrib_version is not None else (
         str(spec.task_version) if spec.task_version is not None else None
     )
+    scoring_components = (
+        {"scorer": scorers[0].model_dump(mode="json")}
+        if legacy_single_scorer
+        else {
+            "scorers": [scorer.model_dump(mode="json") for scorer in scorers],
+            "inspectMetrics": spec.model_dump(mode="json").get("metrics"),
+            "inspectEpochReducers": spec.config.epochs_reducer,
+        }
+    )
     return {
-        "scorer": spec.scorers[0].model_dump(mode="json"),
+        **scoring_components,
         "task": {
             "reference": reference,
             "args": task_args,
@@ -347,7 +365,8 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
                 reference,
                 task_args,
                 log.eval,
-                config["scorerName"],
+                [config["scorerName"]] if "scorerName" in config else list(config["scorerNames"]),
+                "scorerName" in config,
                 selected_sample_id,
                 list(log.samples or []),
                 declared_sandbox,
@@ -363,6 +382,97 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
 
 def scalar_equal(left: Any, right: Any) -> bool:
     return type(left) is type(right) and left == right
+
+
+def projected_scalar_equal(left: Any, right: Any) -> bool:
+    """Compare in the sealed JSON scalar type system (where integers and floats are numbers)."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    return type(left) is type(right) and left == right
+
+
+def is_projectable_scalar(value: Any) -> bool:
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return value is None or isinstance(value, (bool, int, str))
+
+
+def score_value_shape(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "list"
+    return "object"
+
+
+def project_multiple_scorer_observations(
+    manifest: dict[str, Any], samples: list[Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Bounded observations only; the TypeScript host owns the Jinn verdict."""
+    scorer_inventory = []
+    for declared in manifest["scorers"]:
+        scorer_name = declared["name"]
+        present_scores = [
+            sample.scores[scorer_name]
+            for sample in samples
+            if sample.scores is not None and scorer_name in sample.scores
+        ]
+        shapes = {score_value_shape(score.value) for score in present_scores}
+        scorer_inventory.append({
+            "name": scorer_name,
+            "presentSamples": len(present_scores),
+            "missingSamples": len(samples) - len(present_scores),
+            "valueShapes": [
+                shape for shape in ("null", "boolean", "number", "string", "list", "object")
+                if shape in shapes
+            ],
+        })
+
+    measurements = []
+    selected_unscorable = False
+    for projection in manifest["scoring"]["projections"]:
+        projected_values: list[Any] = []
+        missing = 0
+        invalid = 0
+        for sample in samples:
+            score = (sample.scores or {}).get(projection["scorerName"])
+            if score is None:
+                missing += 1
+                continue
+            value = score.value
+            if "subScoreKey" in projection:
+                if not isinstance(value, dict):
+                    invalid += 1
+                    continue
+                if projection["subScoreKey"] not in value:
+                    missing += 1
+                    continue
+                value = value[projection["subScoreKey"]]
+            if not is_projectable_scalar(value):
+                invalid += 1
+                continue
+            projected_values.append(value)
+        projection_unscorable = missing > 0 or invalid > 0 or not projected_values
+        selected_unscorable = selected_unscorable or projection_unscorable
+        measurements.append({
+            "measurementName": projection["measurementName"],
+            "scorerName": projection["scorerName"],
+            **({"subScoreKey": projection["subScoreKey"]} if "subScoreKey" in projection else {}),
+            "missingSamples": missing,
+            "invalidValueSamples": invalid,
+            "value": None if projection_unscorable else all(
+                projected_scalar_equal(value, projection["passValue"]) for value in projected_values
+            ),
+        })
+    return scorer_inventory, measurements, selected_unscorable
 
 
 def run(config: dict[str, Any]) -> dict[str, Any]:
@@ -479,16 +589,25 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         manifest["task"]["reference"],
         manifest["task"]["args"],
         log.eval,
-        manifest["scorer"]["name"],
+        [manifest["scorer"]["name"]] if "scorer" in manifest else [
+            projection["scorerName"] for projection in manifest["scoring"]["projections"]
+        ],
+        "scorer" in manifest,
         manifest.get("runOptions", {}).get("sampleId"),
         log.samples,
         declared_sandbox,
         sandbox_config,
     )
-    if actual_runtime != manifest["runtime"] or actual_components != {
-        "task": manifest["task"],
-        "scorer": manifest["scorer"]["definition"],
-    }:
+    expected_components = {"task": manifest["task"]}
+    if "scorer" in manifest:
+        expected_components["scorer"] = manifest["scorer"]["definition"]
+    else:
+        expected_components.update({
+            "scorers": [scorer["definition"] for scorer in manifest["scorers"]],
+            "inspectMetrics": manifest["scoring"]["inspectMetrics"],
+            "inspectEpochReducers": manifest["scoring"]["inspectEpochReducers"],
+        })
+    if actual_runtime != manifest["runtime"] or actual_components != expected_components:
         raise ValueError("Inspect runtime, task, source, scorer, dataset, or environment drifted during execution")
     native_log = output_dir / "inspect.eval"
     shutil.copyfile(source_log, native_log)
@@ -502,44 +621,74 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     expected = 1 if options.get("sampleId") is not None else log.eval.dataset.samples
     samples = log.samples or []
     errors = sum(1 for sample in samples if sample.error is not None)
-    scorer_name = manifest["scorer"]["name"]
-    pass_value = manifest["scorer"]["passValue"]
-    score_values: list[Any] = []
-    missing_scores = 0
-    for sample in samples:
-        score = (sample.scores or {}).get(scorer_name)
-        value = None if score is None else score.value
-        if score is None or isinstance(value, (list, dict)):
-            missing_scores += 1
-        else:
-            score_values.append(value)
     incomplete = expected is None or len(samples) != expected
-    unscorable = (
-        log.status != "success"
-        or bool(log.invalidated)
-        or errors > 0
-        or incomplete
-        or missing_scores > 0
-        or len(score_values) == 0
-    )
-    passed = (not unscorable) and all(scalar_equal(value, pass_value) for value in score_values)
-    summary = {
-        "schema": "jinn.network/benchmark-product/inspect-cell-summary/1",
-        "terminal": "unscorable" if unscorable else "scored",
-        "inspectStatus": log.status,
-        "expectedSamples": expected,
-        "observedSamples": len(samples),
-        "erroredSamples": errors,
-        "missingScoreSamples": missing_scores,
-        "invalidated": bool(log.invalidated),
-        "scorer": scorer_name,
-        "verdict": None if unscorable else ("pass" if passed else "fail"),
-        "measurement": None if unscorable else passed,
-        "evaluatedAt": __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-        .isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        "nativeLogSha256": sha256_file(native_log),
-        "nativeLogBytes": native_log.stat().st_size,
-    }
+    evaluated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc) \
+        .isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    if "scorer" in manifest:
+        scorer_name = manifest["scorer"]["name"]
+        pass_value = manifest["scorer"]["passValue"]
+        score_values: list[Any] = []
+        missing_scores = 0
+        for sample in samples:
+            score = (sample.scores or {}).get(scorer_name)
+            value = None if score is None else score.value
+            if score is None or isinstance(value, (list, dict)):
+                missing_scores += 1
+            else:
+                score_values.append(value)
+        unscorable = (
+            log.status != "success"
+            or bool(log.invalidated)
+            or errors > 0
+            or incomplete
+            or missing_scores > 0
+            or len(score_values) == 0
+        )
+        passed = (not unscorable) and all(scalar_equal(value, pass_value) for value in score_values)
+        summary = {
+            "schema": "jinn.network/benchmark-product/inspect-cell-summary/1",
+            "terminal": "unscorable" if unscorable else "scored",
+            "inspectStatus": log.status,
+            "expectedSamples": expected,
+            "observedSamples": len(samples),
+            "erroredSamples": errors,
+            "missingScoreSamples": missing_scores,
+            "invalidated": bool(log.invalidated),
+            "scorer": scorer_name,
+            "verdict": None if unscorable else ("pass" if passed else "fail"),
+            "measurement": None if unscorable else passed,
+            "evaluatedAt": evaluated_at,
+            "nativeLogSha256": sha256_file(native_log),
+            "nativeLogBytes": native_log.stat().st_size,
+        }
+    else:
+        scorer_inventory, measurements, selected_unscorable = project_multiple_scorer_observations(
+            manifest, samples
+        )
+        unscorable = (
+            log.status != "success"
+            or bool(log.invalidated)
+            or errors > 0
+            or incomplete
+            or selected_unscorable
+        )
+        if unscorable:
+            measurements = [{**measurement, "value": None} for measurement in measurements]
+        summary = {
+            "schema": "jinn.network/benchmark-product/inspect-cell-summary/2",
+            "terminal": "unscorable" if unscorable else "scored",
+            "inspectStatus": log.status,
+            "expectedSamples": expected,
+            "observedSamples": len(samples),
+            "erroredSamples": errors,
+            "invalidated": bool(log.invalidated),
+            "scorers": scorer_inventory,
+            "measurements": measurements,
+            "verdict": None,
+            "evaluatedAt": evaluated_at,
+            "nativeLogSha256": sha256_file(native_log),
+            "nativeLogBytes": native_log.stat().st_size,
+        }
     if provider_records is not None:
         records = provider_records()
         summary["provider"] = {

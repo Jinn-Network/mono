@@ -47,6 +47,7 @@ import { sha256Hex } from "../workspace/sealed-store.js";
 import {
   INSPECT_EMBEDDED_EVALUATOR_ID,
   InspectCellSummarySchema,
+  projectInspectCellVerdict,
   INSPECT_NATIVE_LOG_MEDIA_TYPE,
   INSPECT_SUMMARY_MEDIA_TYPE,
   INSPECT_TASK_PROFILE_URI,
@@ -619,7 +620,16 @@ function inspectProvisionerContract(
       const summarySource = join(paths.out, "inspect-summary.json");
       const nativeBytes = new Uint8Array(await readFile(nativeSource));
       const summaryBytes = new Uint8Array(await readFile(summarySource));
-      const summary = InspectCellSummarySchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(summaryBytes)));
+      const observedSummary = InspectCellSummarySchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(summaryBytes)));
+      const summary = observedSummary.schema === "jinn.network/benchmark-product/inspect-cell-summary/2"
+        ? {
+          ...observedSummary,
+          verdict: projectInspectCellVerdict(observedSummary, options.manifest),
+        }
+        : observedSummary;
+      if (observedSummary.schema === "jinn.network/benchmark-product/inspect-cell-summary/2") {
+        await writeFile(summarySource, canonicalJsonBytes(summary));
+      }
       if (summary.nativeLogSha256 !== sha256Hex(nativeBytes) || summary.nativeLogBytes !== nativeBytes.length) {
         throw new Error("Inspect summary does not bind the exact native EvalLog bytes");
       }
@@ -627,8 +637,16 @@ function inspectProvisionerContract(
       await rename(summarySource, join(paths.out, "inspect-summary"));
 
       if (summary.terminal === "scored") {
-        if (summary.verdict === null || summary.measurement === null) {
-          throw new Error("Inspect scored terminal carries no verdict/measurement");
+        if (summary.verdict === null) throw new Error("Inspect scored terminal carries no verdict");
+        let measurements: Array<{ readonly name: string; readonly value: boolean }>;
+        if (summary.schema === "jinn.network/benchmark-product/inspect-cell-summary/1") {
+          if (summary.measurement === null) throw new Error("Inspect scored terminal carries no measurement");
+          measurements = [{ name: "inspect-score-pass", value: summary.measurement }];
+        } else {
+          measurements = summary.measurements.map((measurement) => {
+            if (measurement.value === null) throw new Error("Inspect scored terminal carries no projected measurement");
+            return { name: measurement.measurementName, value: measurement.value };
+          });
         }
         const taskSha256 = sha256Hex(input.sealedTaskBytes);
         const evaluationSpecSha256 = input.task.evaluation?.digest?.sha256;
@@ -656,10 +674,12 @@ function inspectProvisionerContract(
             digest: `sha256:${options.manifest.runtime.workerSha256}`,
             annotations: {
               "jinn.network/inspect-version": options.manifest.runtime.inspectVersion,
-              "jinn.network/scorer": summary.scorer,
+              ...(summary.schema === "jinn.network/benchmark-product/inspect-cell-summary/1"
+                ? { "jinn.network/scorer": summary.scorer }
+                : { "jinn.network/scorers": summary.scorers.map((scorer) => scorer.name) }),
             },
           },
-          measurements: [{ name: "inspect-score-pass", value: summary.measurement }],
+          measurements,
           evidence: [{
             name: "inspect.eval",
             digest: `sha256:${summary.nativeLogSha256}`,

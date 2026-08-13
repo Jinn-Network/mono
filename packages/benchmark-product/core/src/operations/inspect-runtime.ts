@@ -5,9 +5,14 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import {
   INSPECT_ADAPTER_ID,
   INSPECT_ARM_REQUIREMENT_KEY,
+  InspectScoringRequestSchema,
   assertNoSecretLikeConfiguration,
 } from "../runtime/inspect/manifest.js";
 import { buildInspectSelectionArtifacts } from "../runtime/inspect/artifacts.js";
+import {
+  describeInspectRuntimeMethod,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { writeInspectHostBinding } from "../runtime/inspect/host.js";
 import {
   createDefaultBenchmarkRuntimeHost,
@@ -32,6 +37,7 @@ export interface SelectInspectEvaluationResult {
   readonly benchmarkSha256: string;
   readonly taskSha256: string;
   readonly evaluationSpecSha256: string;
+  readonly runtimeMethod: InspectRuntimeMethodDisclosure;
 }
 
 export function selectInspectEvaluation(
@@ -56,8 +62,19 @@ export function selectInspectEvaluation(
       if (current.spec.assurance.preset !== "direct-check" || current.spec.assurance.overrides !== undefined) {
         refuse("validation", `drafts.${input.draftId}.assurance`, "the first Inspect slice supports direct-check only; same-execution Inspect scoring is not independent evaluation");
       }
+      if ((input.scorer === undefined) === (input.scoring === undefined)) {
+        refuse("validation", "inspect.selection", "select exactly one of scorer or scoring");
+      }
+      if (input.scoring !== undefined && !InspectScoringRequestSchema.safeParse(input.scoring).success) {
+        refuse("validation", "inspect.selection.scoring", "Inspect scoring projections or verdictRule are invalid");
+      }
       try {
-        assertNoSecretLikeConfiguration({ taskArgs: input.taskArgs ?? {}, arms: input.arms, runOptions: input.runOptions ?? {} });
+        assertNoSecretLikeConfiguration({
+          taskArgs: input.taskArgs ?? {},
+          arms: input.arms,
+          runOptions: input.runOptions ?? {},
+          ...(input.scoring === undefined ? {} : { scoring: input.scoring }),
+        });
       } catch (cause) {
         refuse("validation", "inspect.selection", cause instanceof Error ? cause.message : String(cause));
       }
@@ -107,6 +124,7 @@ export function selectInspectEvaluation(
         benchmarkSha256: artifacts.benchmarkSha256,
         taskSha256: artifacts.taskSha256,
         evaluationSpecSha256: artifacts.evaluationSpecSha256,
+        runtimeMethod: describeInspectRuntimeMethod(manifest, artifacts.manifestSha256),
       };
     },
   });

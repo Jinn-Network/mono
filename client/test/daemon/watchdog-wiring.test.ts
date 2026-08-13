@@ -71,13 +71,15 @@ describe('#1043 Daemon watchdog wiring', () => {
     daemon = makeDaemon(store, tmp, { autoRestart: false });
     await daemon.start();
 
-    // Loops that always start: creator, engine-tick, engine-watcher,
-    // delivery-watcher. With LocalAdapter the for-await loops do not heartbeat,
-    // but start() seeds every started loop so the watchdog never trips on boot.
+    // Loops that always start in legacy mode after Wave-4 D1 retired the
+    // engine: creator, delivery-watcher. With LocalAdapter the for-await loops
+    // do not heartbeat, but start() seeds every started loop so the watchdog
+    // never trips on boot. `engine-tick` / `engine-watcher` stay declared in
+    // LOOP_REGISTRY (D6 narrows it) but are never started, so never seeded.
     expect(getLoopTick(store, 'creator')).not.toBeNull();
-    expect(getLoopTick(store, 'engine-tick')).not.toBeNull();
-    expect(getLoopTick(store, 'engine-watcher')).not.toBeNull();
     expect(getLoopTick(store, 'delivery-watcher')).not.toBeNull();
+    expect(getLoopTick(store, 'engine-tick')).toBeNull();
+    expect(getLoopTick(store, 'engine-watcher')).toBeNull();
 
     expect(daemon.getShutdownState()).toBe('running');
 
@@ -93,9 +95,9 @@ describe('#1043 Daemon watchdog wiring', () => {
     // Omitted watchdog config now defaults to armed — same boot-seed
     // behavior as passing `{ autoRestart: false }` explicitly.
     expect(getLoopTick(store, 'creator')).not.toBeNull();
-    expect(getLoopTick(store, 'engine-tick')).not.toBeNull();
-    expect(getLoopTick(store, 'engine-watcher')).not.toBeNull();
     expect(getLoopTick(store, 'delivery-watcher')).not.toBeNull();
+    expect(getLoopTick(store, 'engine-tick')).toBeNull();
+    expect(getLoopTick(store, 'engine-watcher')).toBeNull();
 
     expect(daemon.getShutdownState()).toBe('running');
 

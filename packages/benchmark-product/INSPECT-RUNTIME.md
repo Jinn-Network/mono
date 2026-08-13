@@ -14,7 +14,8 @@ The supported first slice is deliberately narrow:
   an installed evaluation package;
 - at least two Jinn arms, each selecting an Inspect model or agent model
   reference;
-- one named scalar scorer and an explicit pass value;
+- one or more distinctly named task scorers, with selected scalar outputs projected into
+  pre-registered Boolean Jinn measurements;
 - one Inspect execution per Jinn cell with `epochs=1`; Jinn `replicates` owns
   the repetition axis;
 - local native `.eval` logs produced and accepted by Inspect's official
@@ -191,6 +192,47 @@ benchmark-product runtime inspect select \
 The web product exposes the same `selectInspectEvaluation` operation as a raw
 selection form. It does not provide a task, solver, scorer, or sandbox editor.
 
+An unmodified task with parallel Inspect scorers uses the mutually exclusive
+`scoring` form. Each projection selects one scorer value, or one exact top-level
+key from a dictionary-valued score. The Jinn rule names every declared
+measurement exactly:
+
+```json
+{
+  "pythonPath": "/absolute/path/to/venv/bin/python",
+  "projectDir": "/absolute/path/to/existing-inspect-project",
+  "taskReference": "evals/hermetic.py@two_scorers",
+  "arms": [
+    { "armId": "control", "model": "mockllm/model" },
+    { "armId": "candidate", "model": "mockllm/model" }
+  ],
+  "scoring": {
+    "projections": [
+      {
+        "measurementName": "correct",
+        "scorerName": "correctness",
+        "passValue": "C"
+      },
+      {
+        "measurementName": "safe",
+        "scorerName": "policy",
+        "subScoreKey": "safe",
+        "passValue": true
+      }
+    ],
+    "verdictRule": {
+      "all": [
+        { "threshold": { "measurement": "correct", "op": "eq", "value": true } },
+        { "threshold": { "measurement": "safe", "op": "eq", "value": true } }
+      ]
+    }
+  }
+}
+```
+
+The existing singular `scorer` form remains supported and continues to produce
+the historical selection and summary bytes. Supplying both forms is refused.
+
 To run task code in the product-owned OCI boundary, first build the local
 worker image for the supported platform, prefetch any selected dataset into a
 dedicated cache, and select the immutable local image ID rather than its tag:
@@ -255,7 +297,8 @@ the separately sealed installed-distribution digest identifies the bytes that
 actually execute. The environment fingerprint hashes installed distribution
 files rather than trusting version or `RECORD` metadata alone. Launch re-probes
 the same selection before dispatch, and the
-worker revalidates the runtime, worker, resolved task/scorer metadata, dataset,
+worker revalidates the runtime, worker, complete ordered scorer definitions,
+Inspect metric and epoch-reducer configuration, dataset,
 and source/environment fingerprints after Inspect returns but before artifacts
 are accepted. Drift therefore fails the attempt instead of silently entering a
 Matrix or Report.
@@ -290,10 +333,28 @@ sandbox cannot opt into it merely through selection JSON.
 Inspect epochs are intentionally not configurable. One Jinn repetition is one
 expected cell and invokes Inspect with one epoch. This prevents one sample from
 being counted once as an Inspect epoch and again as a Jinn repetition.
-Multiple scorers, score reducers, deferred rescoring, eval-set orchestration,
-resume/reuse, and ingestion of already-completed logs are explicit follow-up
-capabilities. The first slice refuses or leaves them unconfigured rather than
-coercing them into one score.
+Parallel Inspect scorers are supported when their resolved public names are
+distinct. Inspect executes them unchanged and retains their raw values,
+answers, explanations, metrics, and reductions only in the native log. An
+Inspect `multi_scorer()` remains one native scorer: its own reduction runs once
+inside Inspect and Jinn never reapplies it. Inspect metrics and epoch reducers
+are pinned native analysis configuration, not per-cell Jinn measurements.
+
+Jinn projections are narrower. Each selected output becomes one Boolean
+measurement by type-strict comparison with its sealed `passValue`; the sealed
+EvaluationSpec `verdictRule` then computes the one attributable Result
+Evaluation verdict. A missing selected score or dictionary key, a list or
+nested object selected as a value, an incomplete sample set, scorer error,
+invalidated log, or unsuccessful log makes the cell unscorable. Missing
+non-selected scorer output remains disclosed in the bounded scorer inventory
+but does not alter the selected claim. Duplicate resolved scorer names are
+refused because Inspect's suffixed output-key allocation is not a stable public
+identity API.
+
+Deferred rescoring, configurable epochs, multi-epoch reduction, eval-set
+orchestration, resume/reuse, and ingestion of already-completed logs remain
+follow-up capabilities rather than being silently coerced into this execution
+claim.
 
 The worker invokes Inspect once for a cell. A `success` log is scored only when
 the observed sample count equals Inspect's expected count, no sample has an
@@ -310,7 +371,8 @@ equals `passValue`; otherwise it is fail.
 | Inspect internal `retryOnError` | one Jinn attempt with one final native log; no extra Jinn cell |
 | a later Jinn retry or resume | a new attempt for the same expected cell; journal identity prevents double counting |
 
-Inspect's same-run scorer is represented by
+All scorers from one Inspect run still produce exactly one Result Evaluation.
+They are represented by
 `urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer`. It is an
 attributable evaluation claim, but it is not called independent and cannot
 satisfy a distinct-evaluator quorum. A future external evaluator can append a

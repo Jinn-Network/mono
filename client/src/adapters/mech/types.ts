@@ -70,7 +70,7 @@ export interface MechAdapterConfig {
    * Whether this operator holds the `evaluator` role in a joined SolverNet.
    * Omitted ⇒ enabled (opt-out default): a bare construction site keeps the
    * historical scan-everything behaviour. Production callers (main.ts,
-   * join-applier.ts) always pass an explicit boolean. Gates three surfaces:
+   * production wiring) always passes an explicit boolean. Gates three surfaces:
    * ingest of delivery-claimed logs into the pending-evaluation set, the boot
    * rehydrate of that set, and the per-cycle scan of evaluation opportunities.
    * Ref #547.

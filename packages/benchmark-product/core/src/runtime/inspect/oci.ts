@@ -6,17 +6,21 @@ import { fileURLToPath } from "node:url";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
+  INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA,
+  INSPECT_MULTI_SCORER_SELECTION_SCHEMA,
   INSPECT_SELECTION_SCHEMA,
   INSPECT_SANDBOX_PACKAGE_VERSION,
   INSPECT_SANDBOX_PROTOCOL,
   INSPECT_SANDBOX_PROVIDER,
   INSPECT_SANDBOX_SELECTION_SCHEMA,
+  InspectScoringRequestSchema,
   InspectSelectionManifestSchema,
   SUPPORTED_INSPECT_EVALS_VERSION,
   SUPPORTED_OPENAI_SDK_VERSION,
   SUPPORTED_OCI_PLATFORM,
   type InspectArmConfiguration,
   type InspectRunOptions,
+  type InspectScoringSelectionRequest,
   type InspectSelectionManifest,
 } from "./manifest.js";
 
@@ -106,7 +110,7 @@ export const InspectOciHostBindingSchema = z.object({
 }).strict();
 export type InspectOciHostBinding = z.infer<typeof InspectOciHostBindingSchema>;
 
-export interface ProbeInspectOciSelectionInput {
+export type ProbeInspectOciSelectionInput = InspectScoringSelectionRequest & {
   readonly dockerPath: string;
   readonly imageDigest: string;
   readonly projectDir: string;
@@ -114,10 +118,9 @@ export interface ProbeInspectOciSelectionInput {
   readonly taskReference: string;
   readonly taskArgs?: Readonly<Record<string, unknown>>;
   readonly arms: readonly InspectArmConfiguration[];
-  readonly scorer: { readonly name: string; readonly passValue: string | number | boolean | null };
   readonly runOptions: InspectRunOptions & { readonly sampleId: string | number };
   readonly sandboxExecution?: InspectSandboxExecutionRequest;
-}
+};
 
 export interface InspectOciSelectionResolution {
   readonly manifest: InspectSelectionManifest;
@@ -276,7 +279,17 @@ const DockerImageSchema = z.object({
 });
 
 const WorkerEnvelopeSchema = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), value: z.object({ runtime: z.record(z.string(), z.unknown()), task: z.unknown(), scorer: z.unknown() }) }),
+  z.object({
+    ok: z.literal(true),
+    value: z.object({
+      runtime: z.record(z.string(), z.unknown()),
+      task: z.unknown(),
+      scorer: z.unknown().optional(),
+      scorers: z.unknown().optional(),
+      inspectMetrics: z.unknown().optional(),
+      inspectEpochReducers: z.unknown().optional(),
+    }),
+  }),
   z.object({ ok: z.literal(false), error: z.string() }),
 ]);
 
@@ -305,6 +318,8 @@ export async function probeInspectOciSelection(
   input: ProbeInspectOciSelectionInput,
   signal?: AbortSignal,
 ): Promise<InspectOciSelectionResolution> {
+  const scoring = input.scoring === undefined ? undefined : InspectScoringRequestSchema.parse(input.scoring);
+  if ((input.scorer === undefined) === (scoring === undefined)) throw new TypeError("select exactly one of scorer or scoring");
   const binding = InspectOciHostBindingSchema.parse({
     kind: "oci",
     dockerPath: resolve(input.dockerPath),
@@ -341,7 +356,7 @@ export async function probeInspectOciSelection(
     projectDir: "/jinn/project",
     taskReference: input.taskReference,
     taskArgs: input.taskArgs ?? {},
-    scorerName: input.scorer.name,
+    ...(scoring === undefined ? { scorerName: input.scorer!.name } : { scorerNames: scoring.projections.map((projection) => projection.scorerName) }),
     runOptions: input.runOptions,
     ...(binding.sandboxExecution === undefined ? {} : {
       sandboxExecution: {
@@ -382,7 +397,9 @@ export async function probeInspectOciSelection(
   }
 
   const manifest = InspectSelectionManifestSchema.parse({
-    schema: binding.sandboxExecution === undefined ? INSPECT_SELECTION_SCHEMA : INSPECT_SANDBOX_SELECTION_SCHEMA,
+    schema: scoring === undefined
+      ? (binding.sandboxExecution === undefined ? INSPECT_SELECTION_SCHEMA : INSPECT_SANDBOX_SELECTION_SCHEMA)
+      : (binding.sandboxExecution === undefined ? INSPECT_MULTI_SCORER_SELECTION_SCHEMA : INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA),
     runtime: {
       ...runtime,
       adapterVersion: "1",
@@ -428,7 +445,21 @@ export async function probeInspectOciSelection(
     },
     task: envelope.value.task,
     arms: input.arms,
-    scorer: { ...input.scorer, definition: envelope.value.scorer },
+    ...(scoring === undefined
+      ? { scorer: { ...input.scorer, definition: envelope.value.scorer } }
+      : {
+        scorers: Array.isArray(envelope.value.scorers)
+          ? envelope.value.scorers.map((definition) => ({
+            name: (definition as { readonly name?: unknown }).name,
+            definition,
+          }))
+          : envelope.value.scorers,
+        scoring: {
+          ...scoring,
+          inspectMetrics: envelope.value.inspectMetrics ?? null,
+          inspectEpochReducers: envelope.value.inspectEpochReducers ?? null,
+        },
+      }),
     runOptions: input.runOptions,
   });
   return { manifest, binding };
