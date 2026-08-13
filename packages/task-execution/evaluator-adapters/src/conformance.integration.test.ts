@@ -21,6 +21,7 @@ import { join } from "node:path";
 import {
   EVALUATION_HARNESS_EXIT_INVALID_INPUT,
   EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE,
+  EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE,
   defineEvaluatorRegistration,
   runEvaluationHarness,
   type EvaluationHarnessDeployment,
@@ -323,7 +324,7 @@ describe("evaluator adapters conform to the real evaluation harness", () => {
     expect(statement.predicate.verdict).toBe("fail");
   });
 
-  test("case 3 — swe-rebench ungradeable is an operational failure and writes no verdict (unscorable is never a silent zero)", async () => {
+  test("case 3 — swe-rebench provider unavailability gets its retryable exit and writes no verdict (unscorable is never a silent zero)", async () => {
     const fixture = sweRebenchFixture("ungradeable-docker-unavailable");
     const { paths } = await buildWorkspace({
       specification: sweRebenchSpec(fixture.transitions),
@@ -333,7 +334,7 @@ describe("evaluator adapters conform to the real evaluation harness", () => {
     });
 
     const exitCode = await runEvaluationHarness(paths, BOTH_ADAPTERS);
-    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE);
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE);
     await expect(readFile(join(paths.out, "verdict"))).rejects.toThrow();
   });
 
