@@ -56,7 +56,9 @@ function parseSummary(bytes) {
   return value;
 }
 
-async function spawnBounded(executable, args, env, signal) {
+/** Product-private process boundary. Exported only so cancellation/reaping remains directly
+ * regression-testable without requiring a Python or OCI runtime. */
+export async function spawnBounded(executable, args, env, signal) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       env,
