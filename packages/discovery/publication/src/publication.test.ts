@@ -13,7 +13,7 @@ class MemoryJournal implements PublicationJournalStore {
 const bytes = new TextEncoder().encode("exact public record");
 const digest = sha256(bytes);
 function plan(mode: "owner" | "origin-reference" = "owner"): PublicationPlan {
-  return { id: "plan-1", stages: [{ stage: "registration", members: [{ id: "record", kind: "https://example.test/kind", digest, bytes, mediaType: "application/json", authority: mode === "owner" ? { mode } : { mode, origin: { source: { agent: "did:example:origin", name: "source" }, sequence: "0000000000000001", entryDigest: digest } }, actions: mode === "owner" ? ["store", "announce"] : ["mirror", "verify-origin"] }] }] };
+  return { id: "plan-1", stages: [{ stage: "registration", members: [{ id: "record", kind: "https://example.test/kind", digest, bytes, mediaType: "application/json", ...(mode === "owner" ? { announcementTimestamp: "2026-08-13T00:00:00.000Z" } : {}), authority: mode === "owner" ? { mode } : { mode, origin: { source: { agent: "did:example:origin", name: "source" }, sequence: "0000000000000001", entryDigest: digest } }, actions: mode === "owner" ? ["store", "announce"] : ["mirror", "verify-origin"] }] }] };
 }
 
 describe("record publication", () => {

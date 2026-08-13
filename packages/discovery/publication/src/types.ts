@@ -15,6 +15,8 @@ export interface PublicationRecord {
   readonly digest: Sha256Digest;
   readonly bytes: Uint8Array;
   readonly mediaType: string;
+  /** Exact timestamp frozen by the plan for an owned/delegated source append. */
+  readonly announcementTimestamp?: string;
   readonly authority: { readonly mode: AuthorityMode; readonly origin?: OriginReference };
   readonly actions: readonly PublicationAction[];
   readonly dependsOn?: readonly string[];

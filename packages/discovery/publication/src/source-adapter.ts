@@ -8,7 +8,6 @@ import type { PublicationAnnouncementPort, PublicationRecord } from "./types.js"
  */
 export function createDiscoverySourceAnnouncementPort(input: {
   readonly writer: DurableSourceWriter;
-  readonly timestamp: (record: PublicationRecord) => string;
   readonly facts?: (record: PublicationRecord) => unknown;
 }): PublicationAnnouncementPort {
   return {
@@ -16,8 +15,11 @@ export function createDiscoverySourceAnnouncementPort(input: {
       if (record.authority.mode === "origin-reference") {
         throw new Error("An origin-reference record must never be reannounced through a local source.");
       }
+      if (record.announcementTimestamp === undefined) {
+        throw new Error("An announced record needs its immutable plan timestamp.");
+      }
       return input.writer.append({
-        timestamp: input.timestamp(record),
+        timestamp: record.announcementTimestamp,
         announcement: {
           announcementId: idempotencyKey,
           action: "available",

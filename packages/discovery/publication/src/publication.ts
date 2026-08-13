@@ -20,7 +20,7 @@ function isAbsoluteIri(value: unknown): value is string {
 function key(member: Member, action: PublicationAction): Sha256Digest {
   return sha256(encoder.encode(JSON.stringify({
     v: 1, id: member.id, digest: member.digest, action,
-    ...(isRecord(member) ? { kind: member.kind, authority: member.authority.mode, origin: member.authority.origin ?? null } : { role: member.role }),
+    ...(isRecord(member) ? { kind: member.kind, announcementTimestamp: member.announcementTimestamp ?? null, authority: member.authority.mode, origin: member.authority.origin ?? null } : { role: member.role }),
   })));
 }
 
@@ -30,7 +30,7 @@ function planFingerprint(plan: PublicationPlan, members: readonly Member[]): Sha
     stages: plan.stages.map(({ stage, members: stageMembers }) => ({ stage, members: stageMembers.map((member) => ({
       id: member.id, digest: member.digest, bytes: Buffer.from(member.bytes).toString("base64"), mediaType: member.mediaType,
       actions: member.actions, dependsOn: member.dependsOn ?? [],
-      ...(isRecord(member) ? { kind: member.kind, authority: member.authority } : { role: member.role }),
+      ...(isRecord(member) ? { kind: member.kind, announcementTimestamp: member.announcementTimestamp ?? null, authority: member.authority } : { role: member.role }),
     })) })),
     actionKeys: members.flatMap((member) => member.actions.map((action) => key(member, action))),
   })));
@@ -70,6 +70,9 @@ function validate(plan: PublicationPlan): Member[] {
         }
         if (!originMode && (member.actions.includes("verify-origin") || (member.actions.includes("announce") && !["owner", "delegate"].includes(member.authority.mode)))) {
           throw new PublicationPlanError("INVALID_PLAN", "Only owner/delegate records may be announced.");
+        }
+        if (member.actions.includes("announce") && (typeof member.announcementTimestamp !== "string" || !Number.isFinite(new Date(member.announcementTimestamp).getTime()))) {
+          throw new PublicationPlanError("INVALID_PLAN", "An announced record needs a valid immutable announcement timestamp.");
         }
       }
       ids.add(member.id); members.push(member);
