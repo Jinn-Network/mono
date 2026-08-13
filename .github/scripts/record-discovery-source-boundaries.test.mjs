@@ -116,14 +116,15 @@ const FACTS_TASK_EXECUTION_FORBIDDEN_PACKAGES = [
 // facts/benchmarking carries the one sanctioned edge between the discovery
 // tree and the Benchmarking Application record-kind tree (design §11/§15;
 // plan M6; program §6 confirmation item 4 / §7.128–§7.130): protocol +
-// benchmarking-records are allowed; no serve/client, no other facts/* leaf,
-// no TEP/trust/evidence/marketplace.
+// benchmarking-records plus trust-core's structural Authorization parser are
+// allowed; no serve/client, no other facts/* leaf, no TEP/trust resolution,
+// evidence, or marketplace.
 const FACTS_BENCHMARKING_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-client',
   '@jinn-network/record-discovery-facts-evidence', '@jinn-network/record-discovery-facts-trust',
   '@jinn-network/record-discovery-facts-task-execution',
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles',
-  '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
+  '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
   '@jinn-network/marketplace-binding', '@jinn-network/marketplace-projector',
   '@jinn-network/marketplace-pipeline', '@jinn-network/marketplace-testing',

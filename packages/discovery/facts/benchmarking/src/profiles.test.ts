@@ -27,7 +27,7 @@ const EXPECTED_DIGESTS: Record<string, string> = {
   matrix: "sha256:80458de1c987bb7a68a73b3a0e0673cbbeb4106abe610ef916e4d09e99bdb76a",
   report: "sha256:85c7392b237da814e4dbdfdee1b4c7d9eb71663237d585e41320c3fb547f0b35",
   reportV2: "sha256:23e0de1dc0b30dc1cf8fa3eac8941fb9235240cc46c139b64b91eda4968a984f",
-  accounting: "sha256:6f37b7e9dea41ea17760f62c31ea834334fea1963eaff065a27cdb239a3734e1",
+  accounting: "sha256:05344dba20f0ad2b229ce45b1d15a77e3982b396ccad5b592c690f0e2cc0ec50",
 };
 
 function expectPinnedDigest(name: string, digest: string) {
@@ -158,8 +158,7 @@ describe("facts/benchmarking profile documents (program §7.128)", () => {
       "closeAnchorBlockNumber",
       "closeAnchorBlockHash",
       "scopeStreamCount",
-      "scopeRoles",
-      "scopeKinds",
+      "scopeStreams",
       "publicRegistrationStatus",
       "publisherAuthorityKind",
       "publisherAuthorizationDigest",

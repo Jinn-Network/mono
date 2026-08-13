@@ -7,3 +7,7 @@
 
 The JSON text files carry a trailing source-control newline; tests remove only that newline before
 passing the exact sealed bytes to a parser.
+
+Accounting scope facts preserve streams as canonical JSON strings in their sealed stream order.
+Each array position is a deterministic index, retaining source or substrate authority plus exact
+cutoff without adding high-cardinality CloudEvents fields.

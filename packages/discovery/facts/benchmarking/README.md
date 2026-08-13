@@ -17,6 +17,12 @@ structural envelope parsing does not claim signature validity or signer trust. B
 facts expose the publisher's declared scope size, registration status, and authority form without
 asserting scope completeness or authorization trust.
 
+`scopeStreams` is an ordered array of canonical JSON scalar strings. Array position is the
+deterministic stream index; each string preserves the full declared stream, including its source
+or substrate profile/authority and exact kind-specific `through` cutoff. The delegate
+authorization digest is emitted only after its exact bytes rehash and structurally validate as a
+Trust Authorization DSSE record; cryptographic validity and signer trust remain separate checks.
+
 ## Development
 
 Use Node 22 and Yarn 4.13.0:

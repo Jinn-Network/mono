@@ -8,8 +8,10 @@ import {
   parseReport,
   parseRun,
   parseSignedReportRecord,
+  serializeCanonicalJson,
 } from "@jinn-network/benchmarking-records";
 import { recordDigest } from "@jinn-network/record-discovery-protocol";
+import { validateAuthorization } from "@jinn-network/trust-core";
 import type {
   FactsRecompute,
   RecordFactRecompute,
@@ -61,17 +63,27 @@ async function referencedKindOk(
 }
 
 /**
- * Validates an exact referenced byte identity without inferring signer or
- * author trust. This is deliberately used for the declared authorization
- * reference: its kind is already schema-bound by BenchmarkAccounting, while
- * authority and trust resolution are separate verification layers.
+ * Validates an exact referenced authorization record without inferring
+ * signature validity or author trust. The Accounting schema pins its declared
+ * kind; trust-core validates only the DSSE envelope and authorization payload
+ * structure here.
  */
-async function referencedDigestOk(
+async function referencedAuthorizationOk(
   refs: ReferencedBytes,
   digest: `sha256:${string}`,
 ): Promise<boolean> {
   const bytes = await refs.fetch(digest);
-  return bytes !== undefined && recordDigest(bytes) === digest;
+  return bytes !== undefined && recordDigest(bytes) === digest && validateAuthorization(bytes).conforms;
+}
+
+/**
+ * Facts profiles can carry only scalars or scalar arrays. Preserve each
+ * declared scope stream as one canonical JSON string; its position in this
+ * ordered array is its deterministic stream index and retains the complete
+ * kind-specific `through` object without lossy projection.
+ */
+function scopeStreamFacts(streams: readonly unknown[]): string[] {
+  return streams.map((stream) => new TextDecoder().decode(serializeCanonicalJson(stream as never)));
 }
 
 export const benchmarkRecompute: RecordFactRecompute = async (bytes) => {
@@ -199,8 +211,7 @@ export const benchmarkAccountingRecompute: RecordFactRecompute = async (bytes, r
       procedureVersion: record.procedure.version,
       closeAt: record.closeBoundary.at,
       scopeStreamCount: record.scope.streams.length,
-      scopeRoles: record.scope.streams.map((stream) => stream.role),
-      scopeKinds: record.scope.streams.map((stream) => stream.kind),
+      scopeStreams: scopeStreamFacts(record.scope.streams),
       publicRegistrationStatus: record.publicRegistration.status,
       publisherAuthorityKind: record.publisherAuthority.kind,
       cellCount: record.cells.length,
@@ -219,7 +230,7 @@ export const benchmarkAccountingRecompute: RecordFactRecompute = async (bytes, r
 
     if (record.publisherAuthority.kind === "authorization") {
       const authorizationDigest = asPrefixedDigest(record.publisherAuthority.authorization.record.digest.sha256);
-      if (authorizationDigest !== undefined && (await referencedDigestOk(refs, authorizationDigest))) {
+      if (authorizationDigest !== undefined && (await referencedAuthorizationOk(refs, authorizationDigest))) {
         facts.publisherAuthorizationDigest = authorizationDigest;
       }
     }
