@@ -353,6 +353,111 @@ flip.
 > `config.watchdog` by default and wiring the exclusion list) is tracked separately (not
 > in this record's scope).
 
+> **Addendum 2026-08-13 — three operator rulings: deploy reframe, three-gate close-out
+> ledger, D5/D6 scope (Wave-4 unlock).** Rulings given in-session (Ritsu, 2026-08-13);
+> ratification is approval of this PR.
+>
+> **Decision 1 — the one-swap deploy is discharged by the local two-operator gate run.**
+> The Railway-hosted operator is retired; there is no hosted fleet left to roll a deploy
+> out to. The "one deploy PR" milestone (decisions 1 and 2) is therefore discharged by the
+> **local** two-operator run on Base Sepolia 84532 — operator A = service 72 (requester +
+> evaluator), operator B = service 75 (solver) — whose closure is gate artifact (i)
+> (decision 2 below). What retires is the hosted rollout event, not the checklist: the
+> combined drain, step 7's boot assertions, and the rollback pin still bind, and now bind
+> against the operator homes that actually run the swapped daemon.
+> [`docs/runbooks/cutover-one-swap-drain.md`](../../docs/runbooks/cutover-one-swap-drain.md)'s
+> "After deploy" unlock reads against that closure and carries a dated preamble quoting and
+> retiring the hosted-fleet framing in place. Decision 8 is untouched:
+> `assertNativeDeployment` still admits only 84532 with the pinned generation, and nothing
+> here charters a mainnet native deployment.
+>
+> **Decision 2 — three-gate close-out ledger.** The Wave-4 bar is three green artifacts —
+> (i), (ii), and G-archive — as set by decision 3, decoupled 2026-08-07, tightened
+> 2026-08-10. Their standing at this record's date:
+>
+> - **(i) G-loop — green, 2026-08-13.** Task **1236**, chain 84532, two distinct live
+>   operators (A = service 72, agent 5474, Safe `0xf11eDAF5330852bd77c79e3e30af6248c64f963b`;
+>   B = service 75, agent 8865, Safe `0xc679BD172f6c6bA0f6437d26361E92BD9b7995C3`):
+>   - creation (A) `0xee6b04b53b8ee84f059fb8e21b5ad7cc3505a46c84fa6040293f30a43e26849f`, block 45415191
+>   - claim (B) `0x507e6c07a47312738db3ebe23642abafdc2ee73c3ce94f9c180762d329663878`, block 45415994
+>   - solution delivery + settlement (B) `0xc2ff317e2e5de756e5cd38dc4b4c2367df177b6168dca7ef4fd5261b79132a76`, block 45416858
+>   - `openVerdictAttempt` (A) `0x8d09ce3f869a463a581bfe20d410005ad90dc8f99906e6df27adc18f3e8bf0c8`, block 45417527
+>   - verdict delivery (A) `0x46e8e72c457d60d5ae1f21ef01881fb9a2a06a446d6f96885e24c6c53e9c2048`, block 45419404
+>   - verdict settlement / `claimVerdictDelivery` (A) `0xa8a04b662337ac11497abd025403654b749e7ec161710e01a1680ac6135b0f5d`, block 45420025
+>   - announcement `ann-84532-21ef61b6f188d31411281546bd6557f2fec5f04b57583a47bde16a75e42bfe95-a8a04b662337ac11497abd025403654b749e7ec161710e01a1680ac6135b0f5d-60-evaluation-delivery-available`
+>   - adoption receipt `adoptions/1236.json` — `disposition: accepted`, delivery digest
+>     `sha256:ed1ba7ab…908c`, `decidedAt 2026-08-13T12:38:02.284Z`
+>
+>   Decision 3's `decisionGrade: true` clause is met by construction: the announce leg
+>   breaks out pre-persist when the gate is false, and the persisted availability journal
+>   carries the marketplace-verdict-correspondence fact (`onChainVerdictCode: 4`,
+>   `statementVerdict: "inconclusive"`). An `inconclusive` statement verdict **is**
+>   decision-grade — the honest outcome for a prediction task whose market did not resolve —
+>   and does not weaken the clause. Solver and evaluator are distinct operators on chain.
+>   Evidence: `.local/gate-evidence/artifact-i-EVIDENCE.md`.
+> - **(ii) Container-grade proof — green, 2026-08-10**, under this record's 2026-08-10
+>   addendum decision 1 (a real grader image, not the minimal-image mechanism proof). A real,
+>   digest-pinned grader image (`localhost:5001/jinn-swe-grader-sqlglot-4661@sha256:e33b3381…`,
+>   built FROM the pinned instance image
+>   `swerebench/sweb.eval.x86_64.tobymao_1776_sqlglot-4661@sha256:14dc53fe…`) graded the real
+>   instance `tobymao__sqlglot-4661` through the M4c Docker path
+>   (`client/src/daemon/native-evaluator-container-runtime.ts` with
+>   `client/deployments/evaluator/swe-rebench-v2-deployment.mjs`) in both directions — gold
+>   patch → `pass`, empty patch → **graded** `fail`, not `ungradeable` — plus a refused
+>   tampered subject digest (PR [#2558](https://github.com/Jinn-Network/mono/pull/2558)). The
+>   same grade was then reproduced **byte-identically through the shipped daemon spawn** (the
+>   F1 follow-on run, which changed no product source): `evaluation-harness/dist/bin.js`
+>   spawned with production's closed `executionEnv` (no `PATH`), resolving Docker via the
+>   operator sidecar's absolute `dockerPath` from PR
+>   [#2545](https://github.com/Jinn-Network/mono/pull/2545); with `dockerPath` absent the same
+>   spawn fails `spawn docker ENOENT`, exit 70, no verdict. The `grader-output.json` digests
+>   `sha256:59787b38…` (pass) and `sha256:5079318c…` (graded fail) are identical across both
+>   runs. Evidence: `.local/gate-evidence/artifact-ii-REAL-grader-EVIDENCE.md`,
+>   `.local/gate-evidence/artifact-ii-DAEMON-SPAWN-grade-EVIDENCE.md`. Scope carried forward
+>   from those files: the host is arm64 and the amd64 instance image runs under emulation, so
+>   emulation-crash instances, realistic grade durations, cold multi-GB pulls, and disk-floor
+>   pressure across a slate stay unexercised — a bigger-host run, not a gate precondition.
+> - **G-archive — `.local/gate-evidence/artifact-G-archive-EVIDENCE.md`.**
+>   **[PENDING — being banked by the parallel G-archive run; this PR stays draft until the
+>   file exists.]** Decision 3's G-archive bar is unchanged (second-daemon cold sync → digest
+>   retrieval → resume → live tail, plus `runServingPlaneConformance` green against the live
+>   surface), and Wave 4 does not proceed until it is green.
+>
+> Stated honestly: `.local/gate-evidence/` is gitignored, so those files are **local
+> receipts, not published artifacts**. The durable, independently checkable anchors are the
+> transaction hashes quoted above, resolvable by anyone on Base Sepolia. The grader-image
+> digest is a genuine registry repo-digest but was pushed to a throwaway local registry, so
+> it is reproducible from `client/deployments/evaluator/swe-rebench-v2-grader/` rather than
+> pullable from a public one. Publishing the receipt files is follow-up work.
+>
+> **Decision 3 — D5/D6 scope correction (a wave-table label error, not a change of plan).**
+> The out-of-repo Wave-4 table labels D5 as retiring the native parallel entry point. That
+> contradicts this record. Restated and binding:
+> - **D5 is not Wave-4 scope.** The parallel entry point — `native-main.ts`,
+>   `NativeProductFileSchema`, the per-role file leases, and the `Daemon`'s `native-v1`
+>   compatibility branch — retires at **stage 5**, per decision 1 above (:46-53) and decision
+>   7 (:150-151), which keeps `legacy-operator-composition`, `legacy-wiring-config`, and
+>   `legacy-task-run-store-coupling` unflipped through the swap. DR-2026-08-04-b decision 1
+>   ("retires when the stages complete") and headless §13(e) (the `verticalMode` manifest-row
+>   flips ride the stage-5 branch-deletion PR) put it in the same place. The swap makes the
+>   parallel entry redundant; stage 5 deletes it. A Wave-4 PR that deletes it is out of scope.
+> - **D6 is the narrowing that follows D1–D4's deletions, and nothing more.** It removes from
+>   `LOOP_REGISTRY` (`client/src/daemon/loop-heartbeat.ts:41`) — and from the watchdog
+>   registrations, metrics rows, and harness variants derived from it — exactly the loops
+>   D1–D4 delete: `creator`, `engine-tick`, `engine-watcher`, `delivery-watcher`,
+>   `peer-sync`. The support/earning loops (`reward-claim`, `balance-topup`,
+>   `eviction-check`, `checkpoint`, `harvest`) stay registered; their re-derivation is
+>   stage-6 scope (decision 1 above; headless design §1), so D6 must not touch them.
+>
+> **Context, not a new decision — the per-flip conditionals already ruled.** Decision 7
+> stands unchanged and governs Wave 4's manifest edits: `legacy-task-submission-synthesis`
+> flips only if the synthesis is first split out of `client/src/daemon/projector-enrich.ts`
+> in-train **and** the straggler table is empty at closure; `marketplace-pipeline` flips only
+> if `config/shape-v2.ts` is de-pipelined and the pipeline package deletes with zero
+> remaining client imports; otherwise each row stays `migrating`. The three stage-5 rows are
+> not flipped in Wave 4. This addendum edits no transition manifest: a row flips in the PR
+> that deletes its machinery, never in advance.
+
 ## Provenance
 
 In-session ruling (Ritsu, 2026-08-05) following: the #2350 disposition and salvage; the
