@@ -262,16 +262,6 @@ function assertInspectRegistration(
   }
 }
 
-function assertInspectContribution(
-  expectedSelectionManifestSha256: string,
-  correlations: readonly RuntimeCorrelation[],
-): void {
-  const selection = selectionCorrelation(correlations);
-  if (selection === undefined || selection.artifact.digest.sha256 !== expectedSelectionManifestSha256) {
-    throw new TypeError("Inspect dispatch contribution requires the sealed selection-manifest correlation descriptor");
-  }
-}
-
 const HARBOR_REQUIRED_NATIVE_ROLES = [
   HARBOR_INVOCATION_CONFIG_ROLE, HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE, HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE, HARBOR_REWARD_ROLE,
@@ -339,14 +329,6 @@ export function runtimeRegistrationArtifacts(workspaceDir: string, binding: Eval
     const rightKey = `${right.role}\u001f${right.artifact.digest.sha256}`;
     return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
   });
-}
-
-function assertHarborContribution(expectedSelectionManifestSha256: string, correlations: readonly RuntimeCorrelation[]): void {
-  const selection = correlations.filter((correlation) => correlation.role === HARBOR_SELECTION_ROLE);
-  const jobTrial = correlations.filter((correlation) => correlation.role === HARBOR_CORRELATION_ROLE);
-  if (selection.length !== 1 || selection[0]!.artifact.digest.sha256 !== expectedSelectionManifestSha256 || jobTrial.length !== 1) {
-    throw new TypeError("Harbor dispatch requires one selection correlation and one Job/Trial correlation");
-  }
 }
 
 function harborRoleChecks(expectedSelectionManifestSha256: string, correlations: readonly RuntimeCorrelation[], artifacts: readonly RuntimeNativeArtifact[]): PublicationCheck[] {
@@ -458,8 +440,9 @@ function createPublicationAdapter(
     async dispatch(input: RuntimeEvidenceDispatchInput) {
       // A native source can be absent or collection can fail. Preserve those facts rather than inventing a blob.
       const correlations = input.correlations ?? [];
-      if (adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertInspectContribution(expectedSelectionManifestSha256, correlations);
-      if (adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertHarborContribution(expectedSelectionManifestSha256, correlations);
+      // Contribution is a lossless projection, including incomplete capture. Profile validity
+      // belongs to `verify`, where it can remain tri-state instead of being collapsed into an
+      // exception before the caller can preserve the named checks.
       return { correlations, nativeArtifacts: input.nativeArtifacts ?? [] };
     },
     async verify(input) {

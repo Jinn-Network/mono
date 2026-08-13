@@ -1,6 +1,9 @@
 import type { BenchmarkAccountingDispatch, DigestBearingResourceDescriptor } from "@jinn-network/benchmarking-records";
+import { join } from "node:path";
 import { z } from "zod";
-import { getSealedBytes } from "../../workspace/sealed-store.js";
+import { artifactsDir } from "../../workspace/layout.js";
+import { readFileIfExistsSync } from "../../fs/atomic.js";
+import { getSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 
 export const HARBOR_SELECTION_ROLE = "https://harborframework.com/artifact-roles/selection-manifest/v1";
 export const HARBOR_CORRELATION_ROLE = "https://harborframework.com/artifact-roles/job-trial-correlation/v1";
@@ -32,6 +35,36 @@ export const HarborDispatchArchiveSchema = z.object({
 }).strict();
 export type HarborDispatchArchive = z.infer<typeof HarborDispatchArchiveSchema>;
 
+const HarborArchiveIndexSchema = z.object({
+  schema: z.literal("jinn.network/benchmark-product/harbor-archive-index/1"),
+  runSha256: DigestSchema,
+  cellKey: z.string().min(1),
+  dispatchIndex: z.number().int().positive(),
+  submissionSha256: DigestSchema,
+  attemptUri: z.string().min(1),
+  archiveSha256: DigestSchema,
+}).strict();
+
+/** Resolves only the immutable by-dispatch index written by the Harbor provisioner. */
+export function readHarborDispatchArchiveFor(
+  workspaceDir: string,
+  input: { readonly runSha256: string; readonly cellKey: string; readonly dispatchIndex: number; readonly submissionSha256: string },
+): { readonly archiveSha256: string; readonly archive: HarborDispatchArchive } {
+  const identity = `${input.runSha256}:${input.cellKey}:${input.dispatchIndex}`;
+  const path = join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch", `${sha256Hex(new TextEncoder().encode(identity))}.json`);
+  const bytes = readFileIfExistsSync(path);
+  if (bytes === undefined) throw new Error(`Harbor dispatch archive index is missing for ${input.cellKey}/${input.dispatchIndex}`);
+  const index = HarborArchiveIndexSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes)));
+  if (index.runSha256 !== input.runSha256 || index.cellKey !== input.cellKey || index.dispatchIndex !== input.dispatchIndex || index.submissionSha256 !== input.submissionSha256) {
+    throw new Error(`Harbor dispatch archive index does not bind ${input.cellKey}/${input.dispatchIndex}`);
+  }
+  const archive = readHarborDispatchArchive(workspaceDir, index.archiveSha256);
+  if (archive.lineage.runSha256 !== input.runSha256 || archive.lineage.cellKey !== input.cellKey || archive.lineage.dispatchIndex !== input.dispatchIndex || archive.lineage.submissionSha256 !== input.submissionSha256 || archive.lineage.attemptUri !== index.attemptUri) {
+    throw new Error(`Harbor dispatch archive lineage does not bind ${input.cellKey}/${input.dispatchIndex}`);
+  }
+  return { archiveSha256: index.archiveSha256, archive };
+}
+
 export function readHarborDispatchArchive(workspaceDir: string, digest: string): HarborDispatchArchive {
   return HarborDispatchArchiveSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, digest))));
 }
@@ -51,7 +84,7 @@ export function harborEvidenceContributionFromArchive(workspaceDir: string, arch
       role: item.role,
       availability: item.availability,
       ...(item.availability === "public" || item.availability === "digest-only" ? { artifact: { name: item.path, mediaType: item.path.endsWith(".json") ? "application/json" : "application/octet-stream", digest: { sha256: item.sha256 } } } : {}),
-      ...(item.reason === undefined ? {} : { reason: item.reason }),
+      ...(item.availability === "public" ? {} : { reason: item.reason ?? `Harbor declared ${item.path} ${item.availability}` }),
     })) as BenchmarkAccountingDispatch["nativeArtifacts"],
   };
 }

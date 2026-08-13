@@ -112,6 +112,8 @@ describe("benchmark publication", () => {
     expect(wrongIndex.status).toBe("fail");
     const omitted = await verifyBenchmarkAccounting({ runOwner: "did:example:publisher", expectedCellKeys: [cell], accounting: value, scope: { async enumerate() { return { status: "complete", dispatches: [{ cellKey: `${hex}/arm/2`, submissionDigest: `sha256:${hex}` }] }; } } });
     expect(omitted.status).toBe("fail");
+    const absent = await verifyBenchmarkAccounting({ runOwner: "did:example:publisher", expectedCellKeys: [cell], accounting: value, scope: { async enumerate() { return { status: "complete", dispatches: [] }; } } });
+    expect(absent.checks).toContainEqual(expect.objectContaining({ name: "scope-cutoff-dispatch-completeness", status: "fail", detail: expect.stringContaining("absent from the authoritative scope") }));
     const unavailable = await verifyBenchmarkAccounting({ runOwner: "did:example:publisher", expectedCellKeys: [cell], accounting: value, scope: { async enumerate() { return { status: "unavailable", detail: "offline" }; } } });
     expect(unavailable.status).toBe("indeterminate");
   });

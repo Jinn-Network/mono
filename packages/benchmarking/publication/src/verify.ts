@@ -77,11 +77,18 @@ async function scopeChecks(input: BenchmarkAccountingVerificationInput): Promise
   if (input.scope === undefined) return [{ name: "scope-cutoff-dispatch-completeness", status: "indeterminate", detail: "no authoritative scope enumerator was supplied" }];
   const expected = new Set(input.accounting.cells.flatMap((cell) => cell.dispatches.map((dispatch) => `${cell.cellKey}\u001fsha256:${dispatch.submission.record.digest.sha256}`)));
   const checks: PublicationCheck[] = [];
+  const observed = new Set<string>();
   for (const stream of input.accounting.scope.streams) {
     const result = await input.scope.enumerate({ stream, through: stream.through });
     if (result.status !== "complete" || result.dispatches === undefined) { checks.push({ name: "scope-cutoff-dispatch-completeness", status: "indeterminate", detail: result.detail ?? "authoritative stream is unavailable or incomplete" }); continue; }
-    const extra = result.dispatches.find((dispatch) => !expected.has(`${dispatch.cellKey}\u001f${dispatch.submissionDigest}`));
-    checks.push(extra === undefined ? { name: "scope-cutoff-dispatch-completeness", status: "pass" } : { name: "scope-cutoff-dispatch-completeness", status: "fail", detail: `in-scope dispatch ${extra.cellKey}/${extra.submissionDigest} is omitted from accounting` });
+    for (const dispatch of result.dispatches) observed.add(`${dispatch.cellKey}\u001f${dispatch.submissionDigest}`);
+  }
+  if (!checks.some((value) => value.status === "indeterminate")) {
+    const extra = [...observed].find((dispatch) => !expected.has(dispatch));
+    const missing = [...expected].find((dispatch) => !observed.has(dispatch));
+    checks.push(extra === undefined && missing === undefined
+      ? { name: "scope-cutoff-dispatch-completeness", status: "pass" }
+      : { name: "scope-cutoff-dispatch-completeness", status: "fail", detail: extra !== undefined ? `in-scope dispatch ${extra} is omitted from accounting` : `accounted dispatch ${missing} is absent from the authoritative scope` });
   }
   return checks;
 }

@@ -89,6 +89,10 @@ export interface WorkspacePublicationSource {
     putExact(input: { readonly digest: `sha256:${string}`; readonly bytes: Uint8Array; readonly mediaType: string }): Promise<void>;
     getExact(digest: `sha256:${string}`): Promise<Uint8Array | undefined>;
   };
+  /** Exact records owned by the source writer live under Record Discovery's recordPath. */
+  readonly recordStore: {
+    getExact(digest: `sha256:${string}`): Promise<Uint8Array | undefined>;
+  };
 }
 
 /** Creates/reopens the one stable source for this workspace. */
@@ -124,6 +128,14 @@ export function createWorkspacePublicationSource(workspaceDir: string, sourceNam
       async getExact(digest) {
         const stored = await blobs.get(`/publication-artifacts/sha256/${digest.slice("sha256:".length)}`);
         return stored === undefined ? undefined : stored.bytes;
+      },
+    },
+    recordStore: {
+      async getExact(digest) {
+        const stored = await blobs.get(recordPath(digest));
+        if (stored === undefined) return undefined;
+        if (publicationSha256(stored.bytes) !== digest) throw new Error(`source record ${digest} fails its recordPath digest`);
+        return stored.bytes;
       },
     },
   };

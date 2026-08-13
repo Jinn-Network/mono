@@ -17,36 +17,54 @@ import {
   expectedCellSet,
   parseBenchmark,
   parseRun,
+  type BenchmarkAccountingDispatch,
+  type TypedRecordReference,
 } from "@jinn-network/benchmarking-records";
-import { buildBenchmarkAccounting, verifyBenchmarkAccounting } from "@jinn-network/benchmarking-publication";
+import { buildBenchmarkAccounting, verifyBenchmarkAccounting, type PublicationCheck } from "@jinn-network/benchmarking-publication";
 import { assembleMatrixV2, verifyMatrixV2 } from "@jinn-network/benchmarking-run";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { createDiscoverySourceAnnouncementPort } from "@jinn-network/record-publication";
-import { executePublicationPlan, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
-import { DELIVERY_MEDIA_TYPE, SUBMISSION_MEDIA_TYPE, SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
+import { executePublicationPlan, type OriginVerificationPort, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
+import { DELIVERY_MEDIA_TYPE, SUBMISSION_MEDIA_TYPE, DeliveryRecordSchema, SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
 import { refuse } from "../errors.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { foldRunJournal, foldRunJournalLineage, readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
-import { requireWorkspaceAuthorship, recordWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
+import { readPublicationOrigin, requireWorkspaceAuthorship, recordWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
 import { assessPublicationCompatibility } from "../run/publication-compatibility.js";
 import { createWorkspacePublicationJournal, createWorkspacePublicationSource, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
+import {
+  createRuntimeEvidenceAdapter,
+  INSPECT_EVAL_LOG_ARTIFACT_ROLE,
+  INSPECT_SELECTION_CORRELATION_ROLE,
+} from "../runtime/adapter.js";
+import { harborEvidenceContributionFromArchive, readHarborDispatchArchiveFor } from "../runtime/harbor/venue.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 
 export interface PublicationAccountingInput { readonly draftId: string; }
+export interface PublicationAccountingDeps {
+  /** Required for every Delivery/evaluation record whose durable origin is not this source. */
+  readonly verifyOrigin?: OriginVerificationPort;
+  /** Test-only crash seam after input appends/probes and before cutoff checkpoint. */
+  readonly afterInputsBeforeCutoff?: () => Promise<void>;
+}
 export interface PublicationAccountingResult {
   readonly accountingSha256: string;
   readonly matrixV2Sha256: string;
   readonly source: { readonly agent: string; readonly name: string };
+  readonly runtimeChecks: readonly PublicationCheck[];
 }
 
 type Receipt = { readonly sequence: string; readonly entryDigest: `sha256:${string}` };
+type PublicationMember = PublicationArtifact | PublicationRecord;
+const ACCOUNTING_REFERENCE_AUTHORITY_ROLE = "https://product.jinn.network/artifact-roles/accounting-reference-authority/v1";
 const authorship = (id: string, digest: string, bytes: Uint8Array): PublicationArtifact => ({
   id, role: WORKSPACE_AUTHORSHIP_ROLE, digest: `sha256:${digest}`, bytes, mediaType: "application/vnd.jinn.colophon.workspace-authorship.v1+json", actions: ["store"],
 });
@@ -61,48 +79,112 @@ async function probeExact(base: string, digest: `sha256:${string}`, bytes: Uint8
     throw new Error("public accounting input probe did not return the exact Submission bytes");
   }
 }
+async function probeArtifactExact(base: string, digest: `sha256:${string}`, bytes: Uint8Array): Promise<void> {
+  const response = await fetch(publicUrl(base, `/publication-artifacts/sha256/${digest.slice(7)}`));
+  if (!response.ok) throw new Error(`public accounting artifact probe returned ${response.status}`);
+  const observed = new Uint8Array(await response.arrayBuffer());
+  if (observed.length !== bytes.length || !observed.every((value, index) => value === bytes[index])) {
+    throw new Error(`public accounting artifact probe did not return exact bytes for ${digest}`);
+  }
+}
 function receiptPosition(source: { agent: string; name: string }, receipt: Receipt) {
   return { kind: "record-discovery" as const, source, position: { sequence: receipt.sequence, entry: receipt.entryDigest } };
+}
+
+async function probePublishedInputs(input: {
+  workspaceDir: string; publicBaseUrl: string;
+  dispatches: readonly { submissionSha256: string; supporting: readonly { digest: string }[] }[];
+  supportMembers: readonly PublicationMember[];
+}): Promise<void> {
+  for (const member of input.supportMembers) {
+    if ("kind" in member && member.actions.includes("announce")) await probeExact(input.publicBaseUrl, member.digest, member.bytes);
+    else await probeArtifactExact(input.publicBaseUrl, member.digest, member.bytes);
+  }
+  for (const dispatch of input.dispatches) {
+    for (const supporting of dispatch.supporting) {
+      const bytes = getSealedBytes(input.workspaceDir, supporting.digest);
+      await probeArtifactExact(input.publicBaseUrl, `sha256:${supporting.digest}`, bytes);
+    }
+    const bytes = getSealedBytes(input.workspaceDir, dispatch.submissionSha256);
+    await probeExact(input.publicBaseUrl, `sha256:${dispatch.submissionSha256}`, bytes);
+  }
 }
 
 /** Store all non-record closure bytes and append every Submission before fixing the scope cutoff. */
 async function publishInputs(input: {
   workspaceDir: string; draftId: string; at: string; sourceName: string; publicBaseUrl: string;
   dispatches: readonly { cellKey: string; index: number; submissionSha256: string; supporting: readonly { digest: string; mediaType: string }[] }[];
+  supportMembers: readonly PublicationMember[];
+  verifyOrigin?: OriginVerificationPort;
+  owner: string;
 }): Promise<{ source: { agent: string; name: string }; cutoff: Receipt }> {
   return withWorkspacePublicationSourceLock(input.workspaceDir, async () => {
     const source = createWorkspacePublicationSource(input.workspaceDir, input.sourceName);
     await source.writer.recover();
     let ordinal = 0;
+    if (input.supportMembers.length > 0) {
+      const members = [...input.supportMembers]
+        .sort((left, right) => compareCodeUnitStrings(left.id, right.id))
+        .map((member) => "kind" in member && member.actions.includes("announce")
+          ? { ...member, announcementTimestamp: timestamp(input.at, ordinal++) }
+          : member);
+      const plan: PublicationPlan = { id: `benchmark-accounting-input-authority:${input.draftId}`, stages: [{ stage: "accounting", members }] };
+      // Registration has already sealed its independent receipt. Reusing the neutral executor
+      // here gives support provenance its own durable journal without replaying registration or
+      // coupling either receipt to the later Accounting/Matrix product stage.
+      await executePublicationPlan(plan, {
+        objects: source.artifactStore,
+        journal: createWorkspacePublicationJournal(input.workspaceDir, input.draftId, "accounting-inputs"),
+        verifyOrigin: input.verifyOrigin,
+        authority: { async authorizeAnnouncement({ record }) {
+          requireWorkspaceAuthorship({ workspaceDir: input.workspaceDir, recordSha256: record.digest.slice(7), recordKind: record.kind, author: input.owner });
+        } },
+        announce: createDiscoverySourceAnnouncementPort({ writer: source.writer }),
+      });
+      for (const member of members) {
+        if ("kind" in member && member.actions.includes("announce")) await probeExact(input.publicBaseUrl, member.digest, member.bytes);
+        else await probeArtifactExact(input.publicBaseUrl, member.digest, member.bytes);
+      }
+    }
+    let cutoff: Receipt | undefined;
     for (const dispatch of input.dispatches) {
       for (const supporting of dispatch.supporting) {
-        await source.artifactStore.putExact({ digest: `sha256:${supporting.digest}`, bytes: getSealedBytes(input.workspaceDir, supporting.digest), mediaType: supporting.mediaType });
+        const bytes = getSealedBytes(input.workspaceDir, supporting.digest);
+        await source.artifactStore.putExact({ digest: `sha256:${supporting.digest}`, bytes, mediaType: supporting.mediaType });
+        await probeArtifactExact(input.publicBaseUrl, `sha256:${supporting.digest}`, bytes);
       }
       const bytes = getSealedBytes(input.workspaceDir, dispatch.submissionSha256);
-      await source.writer.append({
-        timestamp: timestamp(input.at, ordinal++),
-        announcement: {
-          announcementId: `accounting-input:${input.draftId}:${dispatch.submissionSha256}`,
-          action: "available",
-          record: { kind: RECORD_KINDS.submission, digest: `sha256:${dispatch.submissionSha256}`, mediaType: SUBMISSION_MEDIA_TYPE },
-        },
-        record: { bytes, contentType: SUBMISSION_MEDIA_TYPE },
-      });
+      const digest = `sha256:${dispatch.submissionSha256}` as const;
+      const durable = await source.writer.readState();
+      const existing = Object.values(durable?.announcements ?? {}).find((entry) => entry.receipt.record?.digest === digest);
+      const receipt = existing?.receipt ?? await source.writer.append({
+          timestamp: timestamp(input.at, ordinal++),
+          announcement: {
+            announcementId: `accounting-input:${input.draftId}:${dispatch.submissionSha256}`,
+            action: "available",
+            record: { kind: RECORD_KINDS.submission, digest, mediaType: SUBMISSION_MEDIA_TYPE },
+          },
+          record: { bytes, contentType: SUBMISSION_MEDIA_TYPE },
+        });
+      if (cutoff === undefined || receipt.sequence > cutoff.sequence) cutoff = { sequence: receipt.sequence, entryDigest: receipt.entryDigest };
       // A stored/announced input is not part of the accounting scope until it has passed the
       // same public exact-byte retrieval check used by registration.  A failure leaves the stage
       // recoverably in-progress and refuses before the cutoff is frozen.
-      await probeExact(input.publicBaseUrl, `sha256:${dispatch.submissionSha256}`, bytes);
+      await probeExact(input.publicBaseUrl, digest, bytes);
     }
-    const state = await source.writer.readState();
-    const last = state?.last;
-    if (last === null || last === undefined) throw new Error("accounting input publication produced no durable source cutoff");
-    return { source: source.source, cutoff: { sequence: last.sequence, entryDigest: last.entryDigest } };
+    if (cutoff === undefined) {
+      const state = await source.writer.readState();
+      if (state?.last === null || state?.last === undefined) throw new Error("accounting input publication produced no durable source cutoff");
+      cutoff = { sequence: state.last.sequence, entryDigest: state.last.entryDigest };
+    }
+    return { source: source.source, cutoff };
   });
 }
 
 export function publicationAccounting(
   context: OperationContext,
   input: PublicationAccountingInput,
+  deps: PublicationAccountingDeps = {},
 ): Promise<OperationResult<PublicationAccountingResult>> {
   const at = context.clock();
   const clocked = { ...context, clock: () => at };
@@ -115,10 +197,9 @@ export function publicationAccounting(
         refuse("conflict", `runs.${input.draftId}`, "a closed managed run with publication state is required before accounting publication");
       }
       const runSha256 = state.runSha256;
-      const closedAt = state.closedAt;
       if (publication.accounting.state === "complete" && publication.matrixV2.state === "complete" && state.accountingSha256 !== undefined && state.matrixV2Sha256 !== undefined) {
         const source = createWorkspacePublicationSource(context.workspaceDir, publication.source.name);
-        return { accountingSha256: state.accountingSha256, matrixV2Sha256: state.matrixV2Sha256, source: source.source };
+        return { accountingSha256: state.accountingSha256, matrixV2Sha256: state.matrixV2Sha256, source: source.source, runtimeChecks: [] };
       }
       const publicBaseUrl = publication.source.publicBaseUrl;
       if (publicBaseUrl === undefined) refuse("validation", "publicBaseUrl", "configure a publicBaseUrl before accounting publication");
@@ -137,18 +218,126 @@ export function publicationAccounting(
       const benchmark = parseBenchmark(getSealedBytes(context.workspaceDir, document.spec.taskSet.benchmarkSha256));
       const expected = expectedCellSet(benchmark, run);
       const lineage = foldRunJournalLineage(readRunJournalEntries(context.workspaceDir, input.draftId));
-      const dispatches = [...lineage.values()].flat().map((line) => {
+      const binding = document.spec.evaluationRuntime;
+      const selectionBytes = binding === undefined ? undefined : getSealedBytes(context.workspaceDir, binding.selectionManifestSha256);
+      const runtime = createRuntimeEvidenceAdapter(binding, selectionBytes === undefined ? {} : {
+        selectionManifest: { digest: `sha256:${binding!.selectionManifestSha256}`, bytes: selectionBytes, mediaType: "application/json" },
+      });
+      const runtimeChecks: PublicationCheck[] = [];
+      const supportMembers = new Map<string, PublicationMember>();
+      const dispatches = [] as Array<{
+        cellKey: string; index: number; submissionSha256: string;
+        supporting: { digest: string; mediaType: string }[];
+        attempt?: string; observations?: BenchmarkAccountingDispatch["observations"];
+        delivery?: TypedRecordReference; evidence: TypedRecordReference[]; evaluations: TypedRecordReference[];
+        correlations: BenchmarkAccountingDispatch["correlations"];
+        nativeArtifacts: BenchmarkAccountingDispatch["nativeArtifacts"];
+      }>;
+      for (const line of [...lineage.values()].flat()) {
         if (line.submissionSha256 === undefined) refuse("record-integrity", `runs.${input.draftId}.${line.cellKey}.${line.dispatch}`, "dispatch has no pre-submit exact Submission capture");
         if (line.acceptedSubmissionSha256 !== undefined && line.acceptedSubmissionSha256 !== line.submissionSha256) {
           refuse("record-integrity", `runs.${input.draftId}.${line.cellKey}.${line.dispatch}`, "accepted Submission differs from the pre-submit captured Submission");
         }
-        const supporting = [
+        const supporting: { digest: string; mediaType: string }[] = [
           ...(line.observationArchiveSha256 === undefined ? [] : [{ digest: line.observationArchiveSha256, mediaType: BENCHMARK_OBSERVATION_ARCHIVE_MEDIA_TYPE }]),
-          ...(line.deliverySha256 === undefined ? [] : [{ digest: line.deliverySha256, mediaType: DELIVERY_MEDIA_TYPE }]),
-          ...line.verdicts.map((value) => ({ digest: value.sha256, mediaType: "application/vnd.dsse.envelope.v1+json" })),
         ];
-        return { cellKey: line.cellKey, index: line.dispatch, submissionSha256: line.submissionSha256, supporting };
-      }).sort((left, right) => compareCodeUnitStrings(left.cellKey, right.cellKey) || left.index - right.index);
+        const authorityEntries: Array<Record<string, unknown>> = [];
+        const publicationReference = (kind: string, digestHex: string, mediaType: string, name: string): TypedRecordReference => {
+          const bytes = getSealedBytes(context.workspaceDir, digestHex);
+          try {
+            const proof = requireWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256: digestHex, recordKind: kind, author: state.owner });
+            const proofId = `input-authorship:${digestHex}`;
+            supportMembers.set(proofId, { ...authorship(proofId, proof.digestHex, proof.bytes) });
+            supportMembers.set(`input-owned:${kind}:${digestHex}`, {
+              id: `input-owned:${kind}:${digestHex}`, kind, digest: `sha256:${digestHex}`, bytes, mediaType,
+              authority: { mode: "owner" }, actions: ["store", "announce"], dependsOn: [proofId],
+            });
+            authorityEntries.push({ record: { kind, digest: `sha256:${digestHex}` }, authority: { mode: "owner", author: state.owner, authorship: { digest: `sha256:${proof.digestHex}` } } });
+          } catch {
+            const origin = readPublicationOrigin(context.workspaceDir, `sha256:${digestHex}`);
+            if (origin === undefined) refuse("record-integrity", `runs.${input.draftId}.${line.cellKey}.${line.dispatch}.${name}`, `${name} has neither valid workspace authorship nor a durable origin position`);
+            supportMembers.set(`input-origin:${kind}:${digestHex}`, {
+              id: `input-origin:${kind}:${digestHex}`, kind, digest: `sha256:${digestHex}`, bytes, mediaType,
+              authority: { mode: "origin-reference", origin }, actions: ["verify-origin", "mirror"],
+            });
+            authorityEntries.push({ record: { kind, digest: `sha256:${digestHex}` }, authority: { mode: "origin-reference", origin } });
+          }
+          return { kind, record: { name, mediaType, digest: { sha256: digestHex } } };
+        };
+        const parsedDelivery = line.deliverySha256 === undefined ? undefined : DeliveryRecordSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, line.deliverySha256))));
+        const delivery = line.deliverySha256 === undefined ? undefined : publicationReference(RECORD_KINDS.delivery, line.deliverySha256, DELIVERY_MEDIA_TYPE, "delivery");
+        const evidence = (parsedDelivery?.evidenceRecords ?? []).filter((reference) => reference.family !== "result-evaluation").map((reference) => {
+          const digestHex = reference.digest.slice("sha256:".length);
+          const kind = reference.family === "execution-evidence" ? RECORD_KINDS.executionEvidence : RECORD_KINDS.executionVerification;
+          return publicationReference(kind, digestHex, "application/vnd.dsse.envelope.v1+json", reference.family);
+        });
+        const evaluations = line.verdicts.map((value) => publicationReference(RECORD_KINDS.resultEvaluation, value.sha256, "application/vnd.dsse.envelope.v1+json", "evaluation"));
+        const submission: TypedRecordReference = { kind: RECORD_KINDS.submission, record: { name: "submission", mediaType: SUBMISSION_MEDIA_TYPE, digest: { sha256: line.submissionSha256 } } };
+
+        const authorityCorrelation = authorityEntries.length === 0 ? undefined : (() => {
+          const bytes = canonicalJsonBytes({
+            schema: "jinn.network/benchmark-product/accounting-reference-authority/1",
+            references: authorityEntries.sort((left, right) => compareCodeUnitStrings(JSON.stringify(left.record), JSON.stringify(right.record))),
+          });
+          const digest = putSealedBytes(context.workspaceDir, bytes);
+          return { role: ACCOUNTING_REFERENCE_AUTHORITY_ROLE, artifact: { name: "reference-authority.json", mediaType: "application/vnd.jinn.benchmark-accounting-reference-authority.v1+json", digest: { sha256: digest } } };
+        })();
+
+        let contributed: Pick<BenchmarkAccountingDispatch, "correlations" | "nativeArtifacts"> = { correlations: [], nativeArtifacts: [] };
+        let captureCheck: PublicationCheck | undefined;
+        if (binding?.adapterId === "harbor") {
+          try {
+            const indexed = readHarborDispatchArchiveFor(context.workspaceDir, { runSha256, cellKey: line.cellKey, dispatchIndex: line.dispatch, submissionSha256: line.submissionSha256 });
+            if (line.attempt !== indexed.archive.lineage.attemptUri) throw new Error("journal Attempt does not match the Harbor archive");
+            const harbor = harborEvidenceContributionFromArchive(context.workspaceDir, indexed.archiveSha256);
+            contributed = await runtime.dispatch({ submission, attempt: line.attempt, correlations: [...harbor.correlations, ...(authorityCorrelation === undefined ? [] : [authorityCorrelation])], nativeArtifacts: harbor.nativeArtifacts });
+            captureCheck = { name: "harbor-durable-dispatch-archive", status: "pass" };
+          } catch (cause) {
+            // Still run the selected adapter over the incomplete contribution so its required
+            // profile checks remain visible as fail/indeterminate facts. Never silently omit a
+            // dispatch merely because its durable archive is missing or tampered.
+            contributed = await runtime.dispatch({ submission, attempt: line.attempt, correlations: authorityCorrelation === undefined ? [] : [authorityCorrelation], nativeArtifacts: [] });
+            captureCheck = { name: "harbor-durable-dispatch-archive", status: "indeterminate", detail: cause instanceof Error ? cause.message : String(cause) };
+          }
+        } else if (binding?.adapterId === "inspect") {
+          let evalLog: BenchmarkAccountingDispatch["nativeArtifacts"][number] = { role: INSPECT_EVAL_LOG_ARTIFACT_ROLE, availability: "collection-failed", reason: "sealed Delivery carries no inspect-log output" };
+          if (parsedDelivery !== undefined) {
+            const output = parsedDelivery.outputs.find((candidate) => candidate.name === "inspect-log" && candidate.digest?.sha256 !== undefined);
+            if (output?.digest?.sha256 !== undefined) evalLog = { role: INSPECT_EVAL_LOG_ARTIFACT_ROLE, availability: "public", artifact: { name: output.name, mediaType: output.mediaType ?? "application/vnd.inspect-ai.eval", digest: { sha256: output.digest.sha256 } } };
+          }
+          contributed = await runtime.dispatch({
+            submission, attempt: line.attempt,
+            correlations: [{ role: INSPECT_SELECTION_CORRELATION_ROLE, artifact: { name: "inspect-selection-manifest.json", mediaType: "application/json", digest: { sha256: binding.selectionManifestSha256 } } }, ...(authorityCorrelation === undefined ? [] : [authorityCorrelation])],
+            nativeArtifacts: [evalLog],
+          });
+        } else {
+          contributed = await runtime.dispatch({ submission, attempt: line.attempt, correlations: authorityCorrelation === undefined ? [] : [authorityCorrelation] });
+        }
+        for (const correlation of contributed.correlations) supporting.push({ digest: correlation.artifact.digest.sha256, mediaType: correlation.artifact.mediaType ?? "application/octet-stream" });
+        for (const artifact of contributed.nativeArtifacts) if (artifact.availability === "public" && artifact.artifact !== undefined) supporting.push({ digest: artifact.artifact.digest.sha256, mediaType: artifact.artifact.mediaType ?? "application/octet-stream" });
+        const runtimeDispatch: BenchmarkAccountingDispatch = {
+          index: line.dispatch, submission, ...(line.attempt === undefined ? {} : { attempt: line.attempt }),
+          ...(line.observationArchiveSha256 === undefined ? {} : { observations: { name: "observations", mediaType: BENCHMARK_OBSERVATION_ARCHIVE_MEDIA_TYPE, digest: { sha256: line.observationArchiveSha256 } } }),
+          ...(delivery === undefined ? {} : { delivery }), evidence, evaluations,
+          correlations: contributed.correlations, nativeArtifacts: contributed.nativeArtifacts,
+        };
+        const checks = await runtime.verify({ dispatch: runtimeDispatch, references: { async getExact({ digest }) { try { return getSealedBytes(context.workspaceDir, digest.slice(7)); } catch { return undefined; } } } });
+        const dispatchChecks = [...(captureCheck === undefined ? [] : [captureCheck]), ...checks];
+        runtimeChecks.push(...dispatchChecks);
+        const blocked = dispatchChecks.find((check) => check.status !== "pass");
+        if (blocked !== undefined) refuse("record-integrity", `runs.${input.draftId}.${line.cellKey}.${line.dispatch}.runtime`, `${blocked.name} is ${blocked.status}: ${blocked.detail ?? "runtime evidence is incomplete"}`);
+        dispatches.push({
+          cellKey: line.cellKey, index: line.dispatch, submissionSha256: line.submissionSha256, supporting,
+          ...(line.attempt === undefined ? {} : { attempt: line.attempt }),
+          ...(line.observationArchiveSha256 === undefined ? {} : { observations: runtimeDispatch.observations }),
+          ...(delivery === undefined ? {} : { delivery }), evidence, evaluations,
+          correlations: contributed.correlations, nativeArtifacts: contributed.nativeArtifacts,
+        });
+      }
+      dispatches.sort((left, right) => compareCodeUnitStrings(left.cellKey, right.cellKey) || left.index - right.index);
+      if ([...supportMembers.values()].some((member) => "kind" in member && member.authority.mode === "origin-reference") && deps.verifyOrigin === undefined) {
+        refuse("record-integrity", `runs.${input.draftId}.publication.origin`, "Delivery/evaluation/evidence references require an injected exact origin verifier");
+      }
 
       // Phase one is replay-safe: source announcement ids are exact/deterministic.  Only after
       // every input is durable do we persist the immutable scope cutoff used to seal accounting.
@@ -158,10 +347,17 @@ export function publicationAccounting(
         publication = state.publication!;
       }
       const inputStageAt = publication.accounting.announcedAt ?? at;
-      const frozen = publication.accounting.sourceCutoff === undefined
-        ? await publishInputs({ workspaceDir: context.workspaceDir, draftId: input.draftId, at: inputStageAt, sourceName: publication.source.name, publicBaseUrl, dispatches })
-        : { source: createWorkspacePublicationSource(context.workspaceDir, publication.source.name).source, cutoff: { sequence: publication.accounting.sourceCutoff.sourceSequence, entryDigest: `sha256:${publication.accounting.sourceCutoff.entrySha256}` as const } };
+      const hadFrozenCutoff = publication.accounting.sourceCutoff !== undefined;
+      const frozen = !hadFrozenCutoff
+        ? await publishInputs({ workspaceDir: context.workspaceDir, draftId: input.draftId, at: inputStageAt, sourceName: publication.source.name, publicBaseUrl, dispatches, supportMembers: [...supportMembers.values()], verifyOrigin: deps.verifyOrigin, owner: state.owner })
+        : { source: createWorkspacePublicationSource(context.workspaceDir, publication.source.name).source, cutoff: { sequence: publication.accounting.sourceCutoff!.sourceSequence, entryDigest: `sha256:${publication.accounting.sourceCutoff!.entrySha256}` as const } };
+      if (hadFrozenCutoff) {
+        // A cutoff freezes membership, not availability. A retry re-probes every referenced
+        // public input and remains in-progress if any byte has disappeared or changed.
+        await probePublishedInputs({ workspaceDir: context.workspaceDir, publicBaseUrl, dispatches, supportMembers: [...supportMembers.values()] });
+      }
       if (publication.accounting.sourceCutoff === undefined) {
+        await deps.afterInputsBeforeCutoff?.();
         state = { ...state, publication: { ...publication, accounting: { ...publication.accounting, state: "in-progress", announcedAt: publication.accounting.announcedAt ?? at, sourceCutoff: { sourceSequence: frozen.cutoff.sequence, entrySha256: frozen.cutoff.entryDigest.slice(7) } } } };
         writeRunState(context.workspaceDir, input.draftId, state);
         publication = state.publication!;
@@ -187,19 +383,20 @@ export function publicationAccounting(
         publicRegistration: prospective
           ? { status: "pre-dispatch", runBoundary: receiptPosition(frozen.source, { sequence: registrationReceipt.sourceSequence, entryDigest: `sha256:${registrationReceipt.entrySha256}` }), firstDispatchBoundary: receiptPosition(frozen.source, { sequence: firstSubmission.publicationSourceSequence!, entryDigest: `sha256:${firstSubmission.publicationEntrySha256!}` }) }
           : { status: "post-hoc" },
-        closeBoundary: { at: closedAt }, expectedCellKeys: expected.map((cell) => cell.cellKey).sort(compareCodeUnitStrings),
+        // Matrix assembly resolves the effective boundary from the sealed Run. `closedAt` is a
+        // product checkpoint and may be later; publishing it here would make v2 unverifiable.
+        closeBoundary: { at: run.closeAt }, expectedCellKeys: expected.map((cell) => cell.cellKey).sort(compareCodeUnitStrings),
         dispatches: dispatches.map((line) => ({
           cellKey: line.cellKey, index: line.index,
           submission: { kind: RECORD_KINDS.submission, record: { name: "submission", mediaType: SUBMISSION_MEDIA_TYPE, digest: { sha256: line.submissionSha256 } } },
           submissionBytes: getSealedBytes(context.workspaceDir, line.submissionSha256),
-          ...(line.supporting.find((item) => item.mediaType === BENCHMARK_OBSERVATION_ARCHIVE_MEDIA_TYPE) === undefined ? {} : { observations: { name: "observations", mediaType: BENCHMARK_OBSERVATION_ARCHIVE_MEDIA_TYPE, digest: { sha256: line.supporting.find((item) => item.mediaType === BENCHMARK_OBSERVATION_ARCHIVE_MEDIA_TYPE)!.digest } } }),
-          ...(line.supporting.find((item) => item.mediaType === DELIVERY_MEDIA_TYPE) === undefined ? {} : {
-            delivery: {
-              kind: RECORD_KINDS.delivery,
-              record: { name: "delivery", mediaType: DELIVERY_MEDIA_TYPE, digest: { sha256: line.supporting.find((item) => item.mediaType === DELIVERY_MEDIA_TYPE)!.digest } },
-            },
-          }),
-          evaluations: line.supporting.filter((item) => item.mediaType === "application/vnd.dsse.envelope.v1+json").map((item) => ({ kind: RECORD_KINDS.resultEvaluation, record: { name: "evaluation", mediaType: item.mediaType, digest: { sha256: item.digest } } })),
+          ...(line.attempt === undefined ? {} : { attempt: line.attempt }),
+          ...(line.observations === undefined ? {} : { observations: line.observations }),
+          ...(line.delivery === undefined ? {} : { delivery: line.delivery }),
+          evidence: line.evidence,
+          evaluations: line.evaluations,
+          correlations: line.correlations,
+          nativeArtifacts: line.nativeArtifacts,
         })),
       });
       const accountingSha256 = putSealedBytes(context.workspaceDir, sealedAccounting.bytes);
@@ -222,9 +419,14 @@ export function publicationAccounting(
           for (const announcement of Object.values(durable?.announcements ?? {})) {
             const receipt = announcement.receipt;
             if (receipt.sequence > through.sequence || receipt.record?.digest === undefined || receipt.record.digest === `sha256:${state.runSha256}`) continue;
+            let bytes: Uint8Array | undefined;
             try {
-              const bytes = await source.artifactStore.getExact(receipt.record.digest);
-              if (bytes === undefined) return { status: "incomplete" as const, detail: `source record ${receipt.record.digest} is unavailable` };
+              bytes = await source.recordStore.getExact(receipt.record.digest);
+            } catch (cause) {
+              return { status: "incomplete" as const, detail: `source record ${receipt.record.digest} failed exact retrieval: ${cause instanceof Error ? cause.message : String(cause)}` };
+            }
+            if (bytes === undefined) return { status: "incomplete" as const, detail: `source record ${receipt.record.digest} is unavailable` };
+            try {
               const submission = SubmissionRecordSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
               if (submission.annotations?.run === `sha256:${state.runSha256}` && typeof submission.annotations.cellKey === "string") {
                 discovered.push({ cellKey: submission.annotations.cellKey, submissionDigest: receipt.record.digest });
@@ -240,8 +442,16 @@ export function publicationAccounting(
       });
       const v2Ports = {
         ...basePorts,
-        accountingVerification: { async verifyAccounting() { const verified = await accountingChecks(); return verified.status === "fail" ? { ok: false as const, detail: "BenchmarkAccounting validation failed" } : { ok: true as const }; } },
-        accountingCompleteness: { async verifyCompleteness() { const verified = await accountingChecks(); return verified.status === "fail" ? { ok: false as const, detail: "BenchmarkAccounting scope completeness failed" } : { ok: true as const }; } },
+        accountingVerification: { async verifyAccounting() {
+          const verified = await accountingChecks();
+          const blocked = verified.checks.find((check) => check.status !== "pass");
+          return verified.status === "pass" ? { ok: true as const } : { ok: false as const, detail: `${blocked?.name ?? "benchmark-accounting"} is ${blocked?.status ?? verified.status}: ${blocked?.detail ?? "verification was not conclusive"}` };
+        } },
+        accountingCompleteness: { async verifyCompleteness() {
+          const verified = await accountingChecks();
+          const scope = verified.checks.find((check) => check.name === "scope-cutoff-dispatch-completeness");
+          return scope?.status === "pass" ? { ok: true as const } : { ok: false as const, detail: `scope-cutoff-dispatch-completeness is ${scope?.status ?? "indeterminate"}: ${scope?.detail ?? "scope was not conclusively enumerated"}` };
+        } },
       };
       const assembled = await assembleMatrixV2(benchmark, run, v2Ports, accountingInput);
       const verifiedMatrix = await verifyMatrixV2(assembled.record, benchmark, run, v2Ports, accountingInput, assembled.bytes);
@@ -250,8 +460,9 @@ export function publicationAccounting(
 
       const accountingProof = recordWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256: accountingSha256, recordKind: BENCHMARK_ACCOUNTING_RECORD_KIND, authoredAt: stageAt });
       const matrixProof = recordWorkspaceAuthorship({ workspaceDir: context.workspaceDir, recordSha256: matrixV2Sha256, recordKind: MATRIX_RECORD_KIND, authoredAt: stageAt });
-      const accountingRecord: PublicationRecord = { id: "benchmark-accounting", kind: BENCHMARK_ACCOUNTING_RECORD_KIND, digest: `sha256:${accountingSha256}`, bytes: sealedAccounting.bytes, mediaType: BENCHMARK_ACCOUNTING_MEDIA_TYPE, authority: { mode: "owner" }, actions: ["store", "announce"], announcementTimestamp: timestamp(stageAt, dispatches.length + 1), dependsOn: ["accounting-authorship"] };
-      const matrixRecord: PublicationRecord = { id: "matrix-v2", kind: MATRIX_RECORD_KIND, digest: `sha256:${matrixV2Sha256}`, bytes: assembled.bytes, mediaType: MATRIX_MEDIA_TYPE, authority: { mode: "owner" }, actions: ["store", "announce"], announcementTimestamp: timestamp(stageAt, dispatches.length + 2), dependsOn: ["benchmark-accounting", "matrix-authorship"] };
+      const inputTimestampUpperBound = dispatches.length + [...supportMembers.values()].filter((member) => "kind" in member && member.actions.includes("announce")).length;
+      const accountingRecord: PublicationRecord = { id: "benchmark-accounting", kind: BENCHMARK_ACCOUNTING_RECORD_KIND, digest: `sha256:${accountingSha256}`, bytes: sealedAccounting.bytes, mediaType: BENCHMARK_ACCOUNTING_MEDIA_TYPE, authority: { mode: "owner" }, actions: ["store", "announce"], announcementTimestamp: timestamp(stageAt, inputTimestampUpperBound + 1), dependsOn: ["accounting-authorship"] };
+      const matrixRecord: PublicationRecord = { id: "matrix-v2", kind: MATRIX_RECORD_KIND, digest: `sha256:${matrixV2Sha256}`, bytes: assembled.bytes, mediaType: MATRIX_MEDIA_TYPE, authority: { mode: "owner" }, actions: ["store", "announce"], announcementTimestamp: timestamp(stageAt, inputTimestampUpperBound + 2), dependsOn: ["benchmark-accounting", "matrix-authorship"] };
       const plan: PublicationPlan = { id: `benchmark-accounting:${input.draftId}:${accountingSha256}:${matrixV2Sha256}`, stages: [{ stage: "accounting", members: [authorship("accounting-authorship", accountingProof.digestHex, accountingProof.bytes), accountingRecord, authorship("matrix-authorship", matrixProof.digestHex, matrixProof.bytes), matrixRecord] }] };
       const receipts = new Map<string, Receipt>();
       await withWorkspacePublicationSourceLock(context.workspaceDir, async () => {
@@ -278,7 +489,7 @@ export function publicationAccounting(
         accounting: { ...publication.accounting, state: "complete", announcedAt: publication.accounting.announcedAt ?? at, sourceCutoff: publication.accounting.sourceCutoff, receipt: { sourceSequence: accountingReceipt.sequence, entrySha256: accountingReceipt.entryDigest.slice(7) }, digests: { accounting: accountingSha256 } },
         matrixV2: { ...publication.matrixV2, state: "complete", announcedAt: publication.matrixV2.announcedAt ?? stageAt, receipt: { sourceSequence: matrixReceipt.sequence, entrySha256: matrixReceipt.entryDigest.slice(7) }, digests: { matrixV2: matrixV2Sha256 } },
       } });
-      return { accountingSha256, matrixV2Sha256, source: source.source };
+      return { accountingSha256, matrixV2Sha256, source: source.source, runtimeChecks };
     } finally { lock.release(); }
   } });
 }

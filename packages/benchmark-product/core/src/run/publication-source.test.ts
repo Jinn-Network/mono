@@ -65,4 +65,19 @@ describe("workspace public source composition", () => {
     expect(response.status).toBe(200);
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
   });
+
+  test("reads source-writer records from their exact recordPath namespace", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "publication-record-reader-"));
+    createWorkspaceLayout(workspaceDir, "2026-08-13T12:00:00Z");
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    const bytes = new TextEncoder().encode("writer-owned record bytes");
+    const digest = `sha256:${sha256Hex(bytes)}` as const;
+    await source.writer.append({
+      timestamp: "2026-08-13T12:00:00Z",
+      announcement: { announcementId: "writer-record", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest, mediaType: "application/json" } },
+      record: { bytes, contentType: "application/json" },
+    });
+    expect(await source.recordStore.getExact(digest)).toEqual(bytes);
+    expect(await source.artifactStore.getExact(digest)).toBeUndefined();
+  });
 });

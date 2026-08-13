@@ -105,6 +105,7 @@ export {
   HARBOR_ARTIFACT_MANIFEST_ROLE,
   HARBOR_COLLECTED_ARTIFACTS_ROLE,
   readHarborDispatchArchive,
+  readHarborDispatchArchiveFor,
   harborEvidenceContributionFromArchive,
 } from "./runtime/harbor/venue.js";
 export { resolveHarborSelection } from "./runtime/harbor/host.js";
