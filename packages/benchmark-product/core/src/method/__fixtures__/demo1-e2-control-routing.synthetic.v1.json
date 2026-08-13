@@ -1,0 +1,20 @@
+{
+  "schema": "jinn.demo1.e2-control-routing.synthetic.v1",
+  "notice": "Synthetic routing fixture only; no model or Docker execution produced these outcomes.",
+  "overrides": [
+    {
+      "taskId": "e2-0",
+      "outcomes": {
+        "true-no-file": ["fail", "fail", "fail", "fail", "fail"],
+        "empty-loadout": ["pass", "fail", "fail", "fail", "fail"]
+      }
+    },
+    {
+      "taskId": "e2-1",
+      "outcomes": {
+        "true-no-file": ["pass", "pass", "fail", "fail", "fail"],
+        "empty-loadout": ["pass", "fail", "fail", "fail", "fail"]
+      }
+    }
+  ]
+}

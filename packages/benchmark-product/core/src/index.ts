@@ -146,6 +146,56 @@ export type {
   Demo1TaskEligibilityInput,
   Demo1TaskInventory,
 } from "./method/demo1-prerun.js";
+
+// Demo-1 suitability and E2 sizing are local method artifacts, not new evidence record kinds.
+// They schedule only task identities already frozen by the pre-run method and cannot execute
+// Docker/model cells or claim power without complete rehearsal observations.
+export {
+  DEMO1_ARMS,
+  DEMO1_DESIGN_ARTIFACT_KIND,
+  DEMO1_E2_DECISION_SCHEMA,
+  DEMO1_E2_MIN_REPOSITORIES,
+  DEMO1_E2_REPLICATES,
+  DEMO1_E2_TASKS,
+  DEMO1_EQUIVALENCE_MARGIN,
+  DEMO1_HAIKU_EFFORT,
+  DEMO1_HAIKU_MODEL,
+  DEMO1_OFFICIAL_ARMS,
+  DEMO1_OFFICIAL_CELL_CEILING,
+  DEMO1_POWER_SIMULATIONS,
+  DEMO1_REHEARSAL_PLAN_SCHEMA,
+  DEMO1_SUITABILITY_REPLICATES,
+  DEMO1_SUITABILITY_TASKS,
+  DEMO1_TARGET_EFFECT,
+  DEMO1_TARGET_POWER,
+  assessDemo1HaikuSuitability,
+  buildDemo1RehearsalPlan,
+  buildDemo1RehearsalPlanFromFreeze,
+  canonicalDemo1E2DesignBytes,
+  demo1E2DesignDigest,
+  demo1RehearsalPlanDigest,
+  deriveDemo1E2Design,
+  selectDemo1OfficialDesign,
+  verifyDemo1E2Design,
+  verifyDemo1HaikuSuitabilityAssessment,
+  verifyDemo1RehearsalPlan,
+} from "./method/demo1-e2-design.js";
+export type {
+  Demo1DesignTask,
+  Demo1E2DesignDecision,
+  Demo1E2Estimates,
+  Demo1E2RehearsalInput,
+  Demo1E2TaskResult,
+  Demo1EmptyLoadoutEvidence,
+  Demo1HaikuSuitabilityAssessment,
+  Demo1PlannedCell,
+  Demo1RehearsalPlan,
+  Demo1RehearsalPlanInput,
+  Demo1SelectedDesign,
+  Demo1SimulatedDesignCandidate,
+  Demo1SuitabilityAttemptOutcome,
+  Demo1SuitabilityCellObservation,
+} from "./method/demo1-e2-design.js";
 export type {
   Demo1ClaudeArm,
   Demo1ClaudeCommand,
