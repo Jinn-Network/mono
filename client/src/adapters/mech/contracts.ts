@@ -495,54 +495,6 @@ export async function canClaimTask(
   }
 }
 
-const DUMMY_EVALUATION_TASK_CID_DIGEST =
-  '0x1111111111111111111111111111111111111111111111111111111111111111' as Hex;
-
-/**
- * Result of a failed `canClaimEvaluation` simulation.
- *
- * `reason` is the operator-facing formatted revert string (kept for log lines).
- * `revertName` is the *structured* bare revert name decoded straight from the
- * inner revert data — `null` when no known selector could be extracted. Callers
- * deciding whether an opportunity is permanently unclaimable should classify on
- * `revertName` (via `isNonRecoverableInnerRevert`), never by regex-unformatting
- * `reason`.
- */
-export interface CanClaimEvaluationFailure {
-  ok: false;
-  reason: string;
-  revertName: string | null;
-}
-
-export async function canClaimEvaluation(
-  publicClient: PublicClient,
-  safeAddress: Address,
-  routerAddress: Address,
-  taskId: string | bigint,
-  attemptIndex: number,
-  evaluatorMech: Address,
-  evaluationTaskCidDigest: Hex = DUMMY_EVALUATION_TASK_CID_DIGEST,
-): Promise<{ ok: true } | CanClaimEvaluationFailure> {
-  const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
-  try {
-    await publicClient.simulateContract({
-      account: safeAddress,
-      address: routerAddress,
-      abi: JINN_ROUTER_ABI,
-      functionName: 'claimEvaluation',
-      args: [taskIdBigInt, attemptIndex, evaluatorMech, evaluationTaskCidDigest],
-    });
-    return { ok: true };
-  } catch (err) {
-    const detail = formatKnownRevertDetail(err);
-    return {
-      ok: false,
-      reason: detail?.reason ?? flattenErrorMessage(err),
-      revertName: detail?.name ?? null,
-    };
-  }
-}
-
 const CLAIM_RETRY_ATTEMPTS = 6;
 const CLAIM_RETRY_DELAY_MS = 2000;
 
@@ -679,74 +631,6 @@ export async function claimDelivery(
   }
 
   throw new Error(`claimDelivery failed after ${CLAIM_RETRY_ATTEMPTS} attempts for ${requestId}`);
-}
-
-export async function claimEvaluation(
-  publicClient: PublicClient,
-  walletClient: WalletClient,
-  broadcaster: VenueBroadcaster | undefined,
-  safeAddress: Address,
-  routerAddress: Address,
-  taskId: string | bigint,
-  attemptIndex: number,
-  evaluatorMech: Address,
-  evaluationTaskCidDigest: Hex,
-  evictionRecovery?: EvictionRecoveryConfig,
-): Promise<{ taskId: string; attemptIndex: number; verdictIndex: number; requestId: string; txHash: Hex; blockNumber?: number }> {
-  const taskIdBigInt = typeof taskId === 'bigint' ? taskId : BigInt(taskId);
-  const calldata = encodeFunctionData({
-    abi: JINN_ROUTER_ABI,
-    functionName: 'claimEvaluation',
-    args: [taskIdBigInt, attemptIndex, evaluatorMech, evaluationTaskCidDigest],
-  });
-
-  const txHash = await withEvictionRecovery(
-    publicClient,
-    evictionRecovery,
-    'claimEvaluation',
-    () => executeSafeTransaction(publicClient, walletClient, {
-      safeAddress,
-      to: routerAddress,
-      value: 0n,
-      data: calldata,
-    }, broadcaster),
-  );
-
-  const receipt = await waitForTransactionReceiptWithRetry(publicClient, txHash, {
-    onRetry: ({ attempt, message }) => {
-      console.error(`[router] wait claim evaluation receipt retry ${attempt}: ${message}`);
-    },
-  });
-
-  for (const log of receipt.logs) {
-    try {
-      const decoded = decodeEventLog({
-        abi: JINN_ROUTER_ABI,
-        data: log.data,
-        topics: log.topics,
-      });
-      if (decoded.eventName === 'EvaluationAttemptCreated') {
-        const args = decoded.args as {
-          taskId: bigint;
-          attemptIndex: number;
-          verdictIndex: number;
-          requestId: Hex;
-        };
-        return {
-          taskId: String(args.taskId),
-          attemptIndex: Number(args.attemptIndex),
-          verdictIndex: Number(args.verdictIndex),
-          requestId: String(args.requestId),
-          txHash,
-          blockNumber: log.blockNumber != null ? Number(log.blockNumber) : undefined,
-        };
-      }
-    } catch {
-      // Not our event
-    }
-  }
-
-  throw new Error(`No EvaluationAttemptCreated event returned from router tx=${txHash}`);
 }
 
 export async function getTaskCidDigest(

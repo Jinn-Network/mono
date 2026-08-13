@@ -26,11 +26,16 @@ import { base, baseSepolia } from 'viem/chains';
 import {
   callDeliverToMarketplace,
   claimDelivery,
-  claimEvaluation,
   claimTask,
   getMechDeliveryRate,
   getTimeoutBounds,
 } from '../../src/adapters/mech/contracts.js';
+// Wave-4 D2 retired the mech adapter's evaluation half, and with it
+// `contracts.ts`'s `claimEvaluation`. The surviving verdict transaction path is
+// venue-base's verdict port (`packages/marketplace/venue-base/src/verdict.ts`) —
+// Task 15's "exactly one verdict transaction path".
+import { createVerdictPorts } from '@jinn-network/marketplace-venue-base';
+import { createDirectSafeBroadcaster } from '../../src/adapters/mech/direct-safe-broadcaster.js';
 import { JINN_ROUTER_ABI, MECH_ABI } from '../../src/adapters/mech/types.js';
 import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';
@@ -1691,16 +1696,22 @@ export async function runBaseSepoliaForkTaskFirstFullLoop(): Promise<AnvilTaskFi
       { variant: 'v3', kind: 'solution', evidenceHash: solutionEnvelope.signature.hash },
     );
 
-    const verdictClaim = await claimEvaluation(
+    const verdictClaim = await createVerdictPorts({
       publicClient,
-      evaluatorWallet,
-      evaluatorOperator.safeAddress,
-      deployment.router,
-      taskId,
-      claim.attemptIndex,
-      evaluatorOperator.mechAddress,
-      keccak256(toBytes(`evaluation:${taskCid}:${requestId}`)),
-    );
+      broadcaster: createDirectSafeBroadcaster(
+        publicClient,
+        evaluatorWallet,
+        evaluatorOperator.safeAddress as Address,
+      ) as never,
+      safeAddress: evaluatorOperator.safeAddress as Address,
+      routerAddress: deployment.router as Address,
+      mechAddress: evaluatorOperator.mechAddress as Address,
+    }).openVerdictAttempt({
+      operationId: `e2e-open-verdict:${requestId}`,
+      taskId: BigInt(taskId),
+      attemptIndex: claim.attemptIndex,
+      evaluationTaskCidDigest: keccak256(toBytes(`evaluation:${taskCid}:${requestId}`)),
+    });
     const verdictRequestId = verdictClaim.requestId as Hex;
 
     const evaluatorHarness = new PredictionV1Evaluator({
@@ -2170,16 +2181,22 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       { variant: 'v3', kind: 'solution', evidenceHash: solutionEnvelope.signature.hash },
     );
 
-    const verdictClaim = await claimEvaluation(
+    const verdictClaim = await createVerdictPorts({
       publicClient,
-      evaluatorWallet,
-      evaluatorOperator.safeAddress,
-      deployment.router,
-      taskId,
-      claim.attemptIndex,
-      evaluatorOperator.mechAddress,
-      keccak256(toBytes(`evaluation:${taskCid}:${requestId}`)),
-    );
+      broadcaster: createDirectSafeBroadcaster(
+        publicClient,
+        evaluatorWallet,
+        evaluatorOperator.safeAddress as Address,
+      ) as never,
+      safeAddress: evaluatorOperator.safeAddress as Address,
+      routerAddress: deployment.router as Address,
+      mechAddress: evaluatorOperator.mechAddress as Address,
+    }).openVerdictAttempt({
+      operationId: `e2e-open-verdict:${requestId}`,
+      taskId: BigInt(taskId),
+      attemptIndex: claim.attemptIndex,
+      evaluationTaskCidDigest: keccak256(toBytes(`evaluation:${taskCid}:${requestId}`)),
+    });
     const verdictRequestId = verdictClaim.requestId as Hex;
 
     const evaluatorHarness = new PredictionV1Evaluator({
