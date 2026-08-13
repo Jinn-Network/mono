@@ -1,10 +1,12 @@
 import {
   checkPublicRegistrationOrder,
+  cellIdempotencyKey,
   compareCodeUnitStrings,
   documentDigest,
+  parseCellKey,
   type BenchmarkAccountingRecord,
 } from "@jinn-network/benchmarking-records";
-import { SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
+import { SubmissionRecordSchema, sealSubmission } from "@jinn-network/task-execution-protocol";
 import type { BenchmarkAccountingVerificationInput, NamedPublicationVerification, PublicationCheck, TriState } from "./types.js";
 
 function aggregate(checks: readonly PublicationCheck[]): TriState {
@@ -49,14 +51,24 @@ function submissionChecks(input: BenchmarkAccountingVerificationInput): Publicat
     if (supplied === undefined) { checks.push({ name: "submission-run-cell-arm-replicate-dispatch-consistency", status: "indeterminate", detail: `Submission ${digest} is unavailable` }); continue; }
     if (documentDigest(supplied.bytes) !== digest) { checks.push({ name: "submission-reference-digest", status: "fail", detail: `Submission ${digest} bytes do not match their descriptor` }); continue; }
     let submission;
-    try { submission = supplied.record ?? SubmissionRecordSchema.parse(JSON.parse(new TextDecoder().decode(supplied.bytes))); }
+    try {
+      submission = SubmissionRecordSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(supplied.bytes)));
+      const canonical = sealSubmission(submission);
+      if (canonical.length !== supplied.bytes.length || !canonical.every((byte, index) => byte === supplied.bytes[index])) throw new Error("not exact canonical bytes");
+    }
     catch { checks.push({ name: "submission-run-cell-arm-replicate-dispatch-consistency", status: "fail", detail: `Submission ${digest} is not structurally valid` }); continue; }
-    const [, armId, replicate] = cell.cellKey.split("/");
     const annotations = submission.annotations;
-    const valid = submission.attempts?.maxTotal === 1 && submission.attempts.maxConcurrent === 1
-      && annotations?.run === `sha256:${input.accounting.run.digest.sha256}` && annotations.cellKey === cell.cellKey
-      && annotations.armId === armId && /^\d+$/u.test(replicate);
-    checks.push(check("submission-run-cell-arm-replicate-dispatch-consistency", valid, `Submission ${digest} does not bind one attempt, Run, cell, arm, and replicate`));
+    let valid = false;
+    try {
+      const coordinate = parseCellKey(cell.cellKey);
+      const annotatedCoordinate = parseCellKey(String(annotations?.cellKey));
+      valid = submission.attempts?.maxTotal === 1 && submission.attempts.maxConcurrent === 1
+        && annotations?.run === `sha256:${input.accounting.run.digest.sha256}` && annotations.cellKey === cell.cellKey
+        && annotations.armId === coordinate.armId && annotatedCoordinate.armId === coordinate.armId
+        && annotatedCoordinate.replicate === coordinate.replicate
+        && submission.idempotencyKey === cellIdempotencyKey(`sha256:${input.accounting.run.digest.sha256}`, cell.cellKey, dispatch.index);
+    } catch { valid = false; }
+    checks.push(check("submission-run-cell-arm-replicate-dispatch-consistency", valid, `Submission ${digest} does not bind one attempt, Run, cell, arm, replicate, and dispatch index`));
   }
   return checks;
 }

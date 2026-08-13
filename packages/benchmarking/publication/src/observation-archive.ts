@@ -17,10 +17,13 @@ function observationKey(snapshot: AcceptedObservationSnapshot): string {
 }
 function canonicalKey(value: unknown): string { return decoder.decode(serializeCanonicalJson(value as never)); }
 function sortedDescriptors<T extends { readonly digest: { readonly sha256: string }; readonly name?: string }>(values: readonly T[]): T[] {
-  return [...values].sort((left, right) => compare(
-    `${left.digest.sha256}\u001f${left.name ?? ""}`,
-    `${right.digest.sha256}\u001f${right.name ?? ""}`,
-  ));
+  const selected = new Map<string, T>();
+  for (const value of values) {
+    const key = `${value.digest.sha256}\u001f${value.name ?? ""}`;
+    const current = selected.get(key);
+    if (current === undefined || compare(canonicalKey(value), canonicalKey(current)) < 0) selected.set(key, value);
+  }
+  return [...selected.entries()].sort(([left], [right]) => compare(left, right)).map(([, value]) => value);
 }
 
 /**

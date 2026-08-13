@@ -2,30 +2,49 @@ import {
   BENCHMARK_ACCOUNTING_PROCEDURE,
   BENCHMARK_ACCOUNTING_PROCEDURE_VERSION,
   BENCHMARKING_PROTOCOL,
+  cellIdempotencyKey,
   compareCodeUnitStrings,
+  documentDigest,
+  parseCellKey,
   sealBenchmarkAccounting,
   type BenchmarkAccountingRecord,
   type SealedRecord,
 } from "@jinn-network/benchmarking-records";
-import { SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
+import { SubmissionRecordSchema, sealSubmission } from "@jinn-network/task-execution-protocol";
 import type { AccountingDispatchInput, BenchmarkAccountingBuildInput } from "./types.js";
 
 function decodeSubmission(bytes: Uint8Array) {
   let value: unknown;
   try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { throw new Error("submission bytes are not UTF-8 JSON"); }
-  return SubmissionRecordSchema.parse(value);
+  const submission = SubmissionRecordSchema.parse(value);
+  const canonical = sealSubmission(submission);
+  if (canonical.length !== bytes.length || !canonical.every((byte, index) => byte === bytes[index])) {
+    throw new Error("submission bytes are not the exact canonical encoding");
+  }
+  return submission;
 }
 function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 function validateDispatch(input: BenchmarkAccountingBuildInput, dispatch: AccountingDispatchInput): void {
+  const expectedDigest = `sha256:${dispatch.submission.record.digest.sha256}`;
+  if (documentDigest(dispatch.submissionBytes) !== expectedDigest) {
+    throw new Error(`submission ${dispatch.cellKey}/${dispatch.index} exact bytes do not match their descriptor`);
+  }
   const submission = decodeSubmission(dispatch.submissionBytes);
   if (submission.attempts?.maxTotal !== 1 || submission.attempts.maxConcurrent !== 1) throw new Error(`submission ${dispatch.cellKey}/${dispatch.index} must seal one-attempt bounds`);
   const annotations = submission.annotations;
   const runDigest = input.run.digest.sha256;
   if (annotations?.run !== `sha256:${runDigest}` || annotations.cellKey !== dispatch.cellKey) throw new Error(`submission ${dispatch.cellKey}/${dispatch.index} does not bind the Run and cell`);
-  const [, armId] = dispatch.cellKey.split("/");
-  if (annotations.armId !== armId) throw new Error(`submission ${dispatch.cellKey}/${dispatch.index} arm annotation does not match its cell`);
+  const coordinate = parseCellKey(dispatch.cellKey);
+  const annotatedCoordinate = parseCellKey(String(annotations.cellKey));
+  if (annotations.armId !== coordinate.armId || annotatedCoordinate.armId !== coordinate.armId || annotatedCoordinate.replicate !== coordinate.replicate) {
+    throw new Error(`submission ${dispatch.cellKey}/${dispatch.index} arm/replicate annotations do not match its cell`);
+  }
+  const expectedIdempotencyKey = cellIdempotencyKey(`sha256:${runDigest}`, coordinate.cellKey, dispatch.index);
+  if (submission.idempotencyKey !== expectedIdempotencyKey) {
+    throw new Error(`submission ${dispatch.cellKey}/${dispatch.index} idempotencyKey does not bind its dispatch index`);
+  }
 }
 
 /** Builds and seals exactly one accounting record, while refusing missing expected cells or hidden dispatch identities. */
