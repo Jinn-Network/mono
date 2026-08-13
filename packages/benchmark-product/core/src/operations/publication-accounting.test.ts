@@ -262,6 +262,26 @@ describe("publication.accounting operation", () => {
     expect(state.matrixV2Sha256).toBeUndefined();
   }, 30_000);
 
+  test.each(["entry", "source"] as const)("refuses a sealed accounting cutoff with a tampered %s", async (tamper) => {
+    const now = clock();
+    const fixture = await registeredClosed(now);
+    capture(fixture.runSha256, fixture.cells[0]!);
+    const result = await publicationAccounting(context(now), { draftId: "draft-1" }, {
+      transformAccountingScope(stream) {
+        if (stream.kind !== "record-discovery") return stream;
+        return tamper === "entry"
+          ? { ...stream, through: { ...stream.through, entry: `sha256:${"0".repeat(64)}` } }
+          : { ...stream, source: { ...stream.source, agent: "did:key:zWrongAccountingSource" } };
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.detail).toMatch(/scope-cutoff-dispatch-completeness|declared accounting scope source|declared cutoff entry/);
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(state.publication!.accounting.state).toBe("in-progress");
+    expect(state.publication!.matrixV2.state).toBe("in-progress");
+    expect(state.matrixV2Sha256).toBeUndefined();
+  }, 30_000);
+
   test("refuses unproven third-party Delivery before append, then verifies its exact origin; workspace-authored Delivery needs no origin verifier", async () => {
     const now = clock();
     const fixture = await registeredClosed(now);

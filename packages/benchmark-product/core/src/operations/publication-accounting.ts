@@ -17,6 +17,7 @@ import {
   expectedCellSet,
   parseBenchmark,
   parseRun,
+  type AccountingScopeStream,
   type BenchmarkAccountingDispatch,
   type TypedRecordReference,
 } from "@jinn-network/benchmarking-records";
@@ -54,6 +55,8 @@ export interface PublicationAccountingDeps {
   readonly verifyOrigin?: OriginVerificationPort;
   /** Test-only crash seam after input appends/probes and before cutoff checkpoint. */
   readonly afterInputsBeforeCutoff?: () => Promise<void>;
+  /** Test-only sealed-scope tampering seam; production callers always omit it. */
+  readonly transformAccountingScope?: (stream: AccountingScopeStream) => AccountingScopeStream;
 }
 export interface PublicationAccountingResult {
   readonly accountingSha256: string;
@@ -376,10 +379,14 @@ export function publicationAccounting(
         .filter((entry): entry is Extract<RunJournalEntry, { kind: "submission-captured" }> => entry.kind === "submission-captured" && entry.publicationSourceSequence !== undefined)
         .sort((left, right) => left.publicationSourceSequence!.localeCompare(right.publicationSourceSequence!))[0];
       const prospective = publication.mode === "prospective" && publication.registration.postHoc !== true && registrationReceipt !== undefined && firstSubmission?.publicationSourceSequence !== undefined && firstSubmission.publicationEntrySha256 !== undefined;
+      const managedScope: AccountingScopeStream = {
+        role: "https://spec.jinn.network/accounting-scopes/managed-submissions/v1", kind: "record-discovery", source: frozen.source,
+        through: { sequence: frozen.cutoff.sequence, entry: frozen.cutoff.entryDigest },
+      };
       const { record: accounting, sealed: sealedAccounting } = buildBenchmarkAccounting({
         run: { name: "run", mediaType: RUN_MEDIA_TYPE, digest: { sha256: runSha256 } }, runOwner: state.owner, publisher: state.owner,
         publisherAuthority: { kind: "run-owner" },
-        scope: [{ role: "https://spec.jinn.network/accounting-scopes/managed-submissions/v1", kind: "record-discovery", source: frozen.source, through: { sequence: frozen.cutoff.sequence, entry: frozen.cutoff.entryDigest } }],
+        scope: [deps.transformAccountingScope?.(managedScope) ?? managedScope],
         publicRegistration: prospective
           ? { status: "pre-dispatch", runBoundary: receiptPosition(frozen.source, { sequence: registrationReceipt.sourceSequence, entryDigest: `sha256:${registrationReceipt.entrySha256}` }), firstDispatchBoundary: receiptPosition(frozen.source, { sequence: firstSubmission.publicationSourceSequence!, entryDigest: `sha256:${firstSubmission.publicationEntrySha256!}` }) }
           : { status: "post-hoc" },
@@ -409,14 +416,31 @@ export function publicationAccounting(
         // The durable source state is the authoritative local projection.  It is deliberately
         // filtered by the sealed Run annotation, not by a backend/venue query, so one workspace
         // source may safely carry multiple runs without widening this Run's accounting scope.
-        scope: { async enumerate({ through }) {
-          if (through === null || typeof through !== "object" || !("sequence" in through) || typeof through.sequence !== "string") {
-            return { status: "incomplete" as const, detail: "managed Submission scope requires a record-discovery source cutoff" };
-          }
+        scope: { async enumerate({ stream, through }) {
           const source = createWorkspacePublicationSource(context.workspaceDir, publication.source.name);
+          if (stream.kind !== "record-discovery") return { status: "incomplete" as const, detail: "managed Submission scope requires a record-discovery stream" };
+          if (stream.source.agent !== source.source.agent || stream.source.name !== source.source.name) {
+            return { status: "unavailable" as const, detail: "declared accounting scope source does not equal the configured workspace publication source" };
+          }
+          if (through === null || typeof through !== "object" || !("sequence" in through) || typeof through.sequence !== "string" || !("entry" in through) || typeof through.entry !== "string") {
+            return { status: "incomplete" as const, detail: "managed Submission scope requires an exact record-discovery sequence and entry digest" };
+          }
+          if (stream.through.sequence !== through.sequence || stream.through.entry !== through.entry) {
+            return { status: "incomplete" as const, detail: "scope verifier cutoff does not equal the declared record-discovery cutoff" };
+          }
           const durable = await source.writer.readState();
+          if (durable === undefined || durable.source.agent !== source.source.agent || durable.source.name !== source.source.name) {
+            return { status: "unavailable" as const, detail: "configured workspace publication source state is unavailable or belongs to another source" };
+          }
+          const cutoffReceipts = Object.values(durable.announcements).filter((announcement) => announcement.receipt.sequence === through.sequence);
+          if (cutoffReceipts.length !== 1) {
+            return { status: "incomplete" as const, detail: `declared cutoff sequence ${through.sequence} resolves to ${cutoffReceipts.length} durable receipts` };
+          }
+          if (cutoffReceipts[0]!.receipt.entryDigest !== through.entry) {
+            return { status: "incomplete" as const, detail: `declared cutoff entry ${through.entry} does not match durable receipt ${cutoffReceipts[0]!.receipt.entryDigest}` };
+          }
           const discovered: { cellKey: string; submissionDigest: `sha256:${string}` }[] = [];
-          for (const announcement of Object.values(durable?.announcements ?? {})) {
+          for (const announcement of Object.values(durable.announcements)) {
             const receipt = announcement.receipt;
             if (receipt.sequence > through.sequence || receipt.record?.digest === undefined || receipt.record.digest === `sha256:${state.runSha256}`) continue;
             let bytes: Uint8Array | undefined;
