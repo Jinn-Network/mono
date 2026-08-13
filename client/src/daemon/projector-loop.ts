@@ -236,6 +236,25 @@ export class ProjectorLoop {
       );
       result = { announcements: [], entries: [], pages: [], refusals: [] };
     }
+    // `announce.ts` now scopes a `resolveRecord` throw to the record that threw it, so the tick's
+    // other announcements survive (`AnnouncementRecordUnresolvedRefusal`). That must not make the
+    // refusal QUIET -- refusals are otherwise only counted, and defect #45's whole point is that a
+    // dropped announcement names its cause. This is the same loss the catch above reports, one
+    // record at a time: the event is journalled below regardless, so `hasCanonicalEvent` suppresses
+    // it from here on for good. A rewind replays the identical event_key and is filtered right back
+    // out -- it is not a recovery path. Recovery needs this event's `projector_canonical_events` row
+    // cleared or orphaned BEFORE the rewind, which no shipped tool does yet (follow-up filed).
+    for (const refusal of result.refusals) {
+      if (refusal.kind !== 'announcement-record-unresolved') continue;
+      this.config.logger?.warn(
+        `[projector] announcement record unresolved (non-fatal): role=${refusal.role} `
+          + `${refusal.reason}; dropped the "${refusal.role}" announcement for `
+          + `${refusal.derivation.event} at block ${refusal.derivation.blockNumber} `
+          + '-- the event is journalled and the drop is permanent; recovery needs its '
+          + 'projector_canonical_events row cleared/orphaned by event_key before a rewind '
+          + '(no shipped tool does this yet)',
+      );
+    }
     // `writeArchivePages` is the genesis/full-history primitive and deliberately knows nothing
     // about this daemon's continuation counter. Seed that counter exactly once after genesis so
     // every later correction/normal incremental page appends instead of reusing page one.

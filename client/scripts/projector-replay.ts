@@ -34,9 +34,14 @@
  * resolves the counterparty's published Delivery record off the record plane and binds it to the
  * coordinator's own keccak anchor, so `SolutionDeliveryClaimed` yields a real `delivery-recorded`;
  * a requester that cannot resolve the record DROPS the event, leaving it replayable, instead of
- * emitting `rejected`/`invalid-reference`. Since a drop is only recoverable by spending another
- * rewind, run the runbook's step-2 pre-flight — both serving planes up and hashing to their own
- * digests, both coordinator reads round-tripping — BEFORE `--apply`.
+ * emitting `rejected`/`invalid-reference`. The ANNOUNCE leg resolves the same record the same
+ * digest-verified way, so the fold and the announcement now succeed together — before that parity
+ * a requester folded the attempt correctly and then refused to publish it. An announce-leg drop is
+ * PERMANENT once journalled — a rewind replays the identical event_key and is filtered right back
+ * out by `hasCanonicalEvent`, it is not a retry path (see the runbook's "What the replay it causes
+ * writes"). So run the runbook's step-2 pre-flight BEFORE `--apply` — both serving planes up and
+ * hashing to their own digests, both coordinator reads round-tripping — rather than spend this
+ * rewind on a drop it cannot undo.
  */
 import { createPublicClient, http, type Hex } from 'viem';
 import { openVenueState } from '@jinn-network/marketplace-venue-base';
