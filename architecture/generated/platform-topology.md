@@ -1207,6 +1207,9 @@ The exact 54-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/correlation-mismatch.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/delivery-contradiction.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/delivery-pending.json | — | — | — |
+| fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/issue-relay-adoption.v1.json | — | — | — |
+| fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/issue-relay-assurance.v1.md | — | — | — |
+| fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/issue-relay-round.v1.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/malformed-submit-request.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/manifest.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/mutation-complete.json | — | — | — |
@@ -1534,7 +1537,7 @@ The exact 54-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3777 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3795 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1542,13 +1545,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 29 |
 | boundaryPolicies | 23 |
 | catalogManifests | 87 |
-| catalogPublicSurfaces | 1274 |
+| catalogPublicSurfaces | 1277 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 3010 |
-| generatedOutputSources | 1330 |
+| discoveredFirstPartySurfaces | 3028 |
+| generatedOutputSources | 1333 |
 | generatorSources | 623 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
