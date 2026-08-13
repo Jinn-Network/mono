@@ -28,7 +28,11 @@ export function selectHarborRuntime(context: OperationContext, input: SelectHarb
     writeHarborHostBinding(context.workspaceDir, selectionManifestSha256, resolution.binding);
     const draft: DraftDocument = { ...current, updatedAt: at, spec: parseDraftSpec({
       ...current.spec,
-      arms: current.spec.arms.map((arm) => ({ ...arm, pinning: { ...arm.pinning, harness: { id: "harbor", version: resolution.manifest.harbor.version }, model: { id: resolution.manifest.model.id } } })),
+      arms: current.spec.arms.map((arm) => {
+        const selected = resolution.manifest.arms.find((candidate) => candidate.armId === arm.armId);
+        if (selected === undefined) refuse("validation", `spec.arms.${arm.armId}`, "Harbor selection has no exact AgentConfig mapping for this Run arm");
+        return { ...arm, pinning: { ...arm.pinning, harness: { id: "harbor", version: resolution.manifest.harbor.version }, agent: { id: selected.agent.id }, model: { id: selected.model.id } } };
+      }),
       evaluationRuntime: { adapterId: "harbor", selectionManifestSha256, isolationPolicy: "unrestricted" },
     }) };
     atomicWriteFileSync(draftPath(context.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));

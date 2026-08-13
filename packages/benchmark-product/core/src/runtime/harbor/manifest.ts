@@ -9,21 +9,94 @@ export const HARBOR_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/pro
 export const SUPPORTED_HARBOR_VERSION_RANGE = "0.21.x" as const;
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/);
+const LogicalPath = z.string().min(1).regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u);
 const Json: z.ZodType<unknown> = z.lazy(() => z.union([z.string(), z.number().finite(), z.boolean(), z.null(), z.array(Json), z.record(z.string(), Json)]));
-const RevisionedReference = z.object({ reference: z.string().min(1), revision: z.string().min(1), checksum: Sha256 }).strict();
+const MaterialFile = z.object({ path: z.string().min(1), sha256: Sha256, bytes: z.number().int().nonnegative() }).strict();
+const ResolvedMaterial = z.object({
+  reference: z.string().min(1), revision: z.string().min(1), checksum: Sha256,
+  files: z.array(MaterialFile).min(1),
+}).strict();
+const DatasetInput = z.union([
+  z.object({ path: LogicalPath }).strict(),
+  z.object({ name: z.string().min(1), version: z.string().min(1), ref: z.never().optional() }).strict(),
+  z.object({ name: z.string().min(1), ref: z.string().min(1), version: z.never().optional() }).strict(),
+]);
+const TaskInput = z.union([
+  z.object({ path: LogicalPath }).strict(),
+  z.object({ name: z.string().regex(/^[^/]+\/[^/]+$/u), ref: z.string().min(1) }).strict(),
+]);
+export type HarborDatasetInput = z.infer<typeof DatasetInput>;
+export type HarborTaskInput = z.infer<typeof TaskInput>;
+const ArtifactConfig = z.object({ source: z.string().min(1).refine((value) => !value.split("/").includes("..")), destination: z.string().min(1).regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u).optional(), exclude: z.array(z.string()).optional(), service: z.string().min(1).optional() }).strict();
+const EnvironmentType = z.enum(["docker", "daytona", "e2b", "modal", "runloop", "langsmith", "ec2", "gke", "ack", "openshift", "novita", "apple-container", "singularity", "islo", "tensorlake", "cwsandbox", "wandb", "use-computer", "cua-cloud", "blaxel", "opensandbox", "beam", "skypilot", "hf-sandbox"]);
+const ResourceMode = z.enum(["auto", "limit", "request", "guarantee", "ignore"]);
+const ServiceVolume = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("bind"), source: z.string().min(1), target: z.string().min(1), read_only: z.literal(true).optional(), bind: z.object({ create_host_path: z.literal(false).optional() }).strict().optional() }).strict(),
+  z.object({ type: z.literal("volume"), source: z.string().min(1), target: z.string().min(1), read_only: z.literal(true).optional(), volume: z.object({ subpath: z.string().min(1).optional() }).strict().optional() }).strict(),
+  z.object({ type: z.literal("image"), source: z.string().min(1), target: z.string().min(1), read_only: z.literal(true).optional(), image: z.object({ subpath: z.string().min(1).optional() }).strict().optional() }).strict(),
+]);
+/** Strict Harbor 0.21 EnvironmentConfig fields, excluding the separately-required `type`. */
+export const HarborEnvironmentConfigurationSchema = z.object({
+  import_path: z.string().min(1).optional(), force_build: z.boolean().optional(), delete: z.boolean().optional(),
+  cpu_enforcement_policy: ResourceMode.optional(), memory_enforcement_policy: ResourceMode.optional(),
+  override_cpus: z.number().int().positive().nullable().optional(), override_memory_mb: z.number().int().positive().nullable().optional(),
+  override_storage_mb: z.number().int().positive().nullable().optional(), override_gpus: z.number().int().nonnegative().nullable().optional(),
+  override_tpu: z.object({ type: z.string().min(1), topology: z.string().min(1).optional() }).strict().nullable().optional(), mounts: z.array(ServiceVolume).nullable().optional(), extra_docker_compose: z.array(z.string().min(1)).optional(),
+  env: z.record(z.string(), z.string()).optional(), kwargs: z.record(z.string(), Json).optional(), extra_allowed_hosts: z.array(z.string().min(1)).optional(),
+}).strict();
+const JobAgentConfig = z.object({ name: z.string().min(1), model_name: z.string().min(1), kwargs: z.record(z.string(), Json).optional() }).strict();
+const ArmSelection = z.object({
+  armId: z.string().min(1),
+  agent: z.object({ id: z.string().min(1), configuration: z.record(z.string(), Json) }).strict(),
+  model: z.object({ id: z.string().min(1), configuration: z.record(z.string(), Json) }).strict(),
+  /** Exact official Harbor 0.21 AgentConfig subset emitted for this arm. */
+  jobAgent: JobAgentConfig,
+}).strict().superRefine((arm, context) => {
+  if (arm.jobAgent.name !== arm.agent.id) context.addIssue({ code: "custom", path: ["jobAgent", "name"], message: "must equal resolved agent id" });
+  if (arm.jobAgent.model_name !== arm.model.id) context.addIssue({ code: "custom", path: ["jobAgent", "model_name"], message: "must equal resolved model id" });
+});
 
 /** Harbor 0.21 is deliberately constrained to one Job / one Trial / one execution. */
 export const HarborSelectionManifestSchema = z.object({
   schema: z.literal(HARBOR_SELECTION_SCHEMA),
   adapter: z.object({ id: z.literal(HARBOR_ADAPTER_ID), version: z.literal("1") }).strict(),
   harbor: z.object({ version: z.string().regex(/^0\.21\.\d+(?:[-+][0-9A-Za-z.-]+)?$/), executableSha256: Sha256 }).strict(),
-  dataset: RevisionedReference,
-  task: RevisionedReference,
-  agent: z.object({ id: z.string().min(1), configuration: z.record(z.string(), Json) }).strict(),
-  model: z.object({ id: z.string().min(1), configuration: z.record(z.string(), Json) }).strict(),
-  environment: z.object({ image: z.string().min(1), configuration: z.record(z.string(), Json) }).strict(),
+  source: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("task"), input: TaskInput, jobInput: z.object({ path: z.literal(".jinn-harbor/task") }).strict(), resolved: ResolvedMaterial }).strict(),
+    z.object({ kind: z.literal("dataset"), input: DatasetInput, jobInput: z.object({ path: z.literal(".jinn-harbor/dataset") }).strict(), resolved: ResolvedMaterial, taskName: z.string().min(1) }).strict(),
+  ]),
+  arms: z.array(ArmSelection).min(1).superRefine((arms, context) => {
+    const ids = arms.map((arm) => arm.armId);
+    if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "Harbor arm mappings must be unique" });
+  }),
+  /** `image` is immutable task/environment material evidence, never EnvironmentConfig.type. */
+  environment: z.object({ type: EnvironmentType, image: z.string().regex(/@sha256:[a-f0-9]{64}$/u), configuration: HarborEnvironmentConfigurationSchema }).strict(),
+  outputs: z.array(z.object({ name: z.string().min(1), mediaType: z.string().min(1), artifact: ArtifactConfig, nativePath: z.string().regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u) }).strict()).min(1),
   retryPolicy: z.object({ nAttempts: z.literal(1), nConcurrent: z.literal(1), maxRetries: z.literal(0) }).strict(),
 }).strict();
+
+/** The exact non-deprecated Harbor 0.21 JobConfig subset emitted by this adapter. */
+const HarborJobConfigBase = z.object({
+  job_name: z.string().min(1), jobs_dir: z.string().min(1), n_attempts: z.literal(1), n_concurrent_trials: z.literal(1),
+  retry: z.object({ max_retries: z.literal(0) }).strict(),
+  environment: HarborEnvironmentConfigurationSchema.extend({ type: EnvironmentType }),
+  agents: z.tuple([JobAgentConfig]), artifacts: z.array(ArtifactConfig).min(1),
+});
+const DatasetExecutionInput = z.union([
+  z.object({ path: LogicalPath, task_names: z.tuple([z.string().min(1)]), n_tasks: z.literal(1) }).strict(),
+  z.object({ name: z.string().min(1), version: z.string().min(1), task_names: z.tuple([z.string().min(1)]), n_tasks: z.literal(1) }).strict(),
+  z.object({ name: z.string().min(1), ref: z.string().min(1), task_names: z.tuple([z.string().min(1)]), n_tasks: z.literal(1) }).strict(),
+]);
+export const HarborJobConfigSchema = z.union([
+  HarborJobConfigBase.extend({ tasks: z.tuple([TaskInput]) }).strict(),
+  HarborJobConfigBase.extend({ datasets: z.tuple([DatasetExecutionInput]) }).strict(),
+]);
+
+export function harborJobSource(manifest: HarborSelectionManifest): { readonly tasks: readonly [z.infer<typeof TaskInput>] } | { readonly datasets: readonly [z.infer<typeof DatasetExecutionInput>] } {
+  return manifest.source.kind === "task"
+    ? { tasks: [manifest.source.jobInput] }
+    : { datasets: [{ ...manifest.source.jobInput, task_names: [manifest.source.taskName], n_tasks: 1 }] as [z.infer<typeof DatasetExecutionInput>] };
+}
 
 export type HarborSelectionManifest = z.infer<typeof HarborSelectionManifestSchema>;
 

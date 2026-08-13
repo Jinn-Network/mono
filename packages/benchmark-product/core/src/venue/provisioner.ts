@@ -18,7 +18,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseCellKey } from "@jinn-network/benchmarking-records";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
@@ -53,8 +53,9 @@ import {
   INSPECT_TASK_PROFILE_URI,
 } from "../runtime/inspect/artifacts.js";
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
+import { resolveHarborMaterial, type HarborHostBinding } from "../runtime/harbor/host.js";
 import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
-import type { HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { HarborJobConfigSchema, harborJobSource, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { harborJobName } from "../runtime/harbor/launcher.js";
 import {
   HARBOR_ARTIFACT_MANIFEST_ROLE,
@@ -600,6 +601,7 @@ export interface HarborProvisionerOptions {
   readonly workspaceDir: string;
   readonly selectionManifestSha256: string;
   readonly manifest: HarborSelectionManifest;
+  readonly host: HarborHostBinding;
 }
 
 function harborRole(relativePath: string): string {
@@ -621,10 +623,17 @@ async function withHarborMappingLock<T>(workspaceDir: string, action: () => Prom
   const root = join(artifactsDir(workspaceDir), "harbor", "mappings");
   await mkdir(root, { recursive: true });
   const lock = join(root, ".lock");
+  const deadline = Date.now() + 5_000;
   for (;;) {
     try { await mkdir(lock); break; }
     catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+      try {
+        if (Date.now() - (await stat(lock)).mtimeMs > 30_000) await rmdir(lock);
+      } catch (recoveryCause) {
+        if (!new Set(["ENOENT", "ENOTEMPTY"]).has((recoveryCause as NodeJS.ErrnoException).code ?? "")) throw recoveryCause;
+      }
+      if (Date.now() >= deadline) throw new Error("timed out acquiring Harbor mapping lock");
       await new Promise((resolve) => setTimeout(resolve, 2));
     }
   }
@@ -655,16 +664,23 @@ export async function recordHarborDispatchMapping(workspaceDir: string, jinnIden
   });
 }
 
-async function harborFiles(root: string, current = ""): Promise<readonly string[]> {
+async function harborFiles(root: string, current = ""): Promise<{ readonly files: readonly string[]; readonly failures: readonly { path: string; reason: string }[] }> {
   const directory = join(root, current);
-  const entries = await readdir(directory, { withFileTypes: true });
+  let entries;
+  try { entries = await readdir(directory, { withFileTypes: true }); }
+  catch (cause) { return { files: [], failures: [{ path: current || ".", reason: cause instanceof Error ? cause.message : String(cause) }] }; }
   const values: string[] = [];
+  const failures: { path: string; reason: string }[] = [];
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const relative = current === "" ? entry.name : `${current}/${entry.name}`;
-    if (entry.isDirectory()) values.push(...await harborFiles(root, relative));
+    if (entry.isDirectory()) {
+      const nested = await harborFiles(root, relative);
+      values.push(...nested.files); failures.push(...nested.failures);
+    }
     else if (entry.isFile()) values.push(relative);
+    else failures.push({ path: relative, reason: entry.isSymbolicLink() ? "symlink refused during Harbor evidence collection" : "non-regular Harbor artifact refused" });
   }
-  return values;
+  return { files: values, failures };
 }
 
 function harborProvisionerContract(input: LocalProvisionerInput, options: HarborProvisionerOptions): ProvisionerContract {
@@ -684,27 +700,29 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
       const runReference = input.submission.annotations?.run;
       runSha256 = typeof runReference === "string" && runReference.startsWith("sha256:") ? runReference.slice("sha256:".length) : "";
       if (!/^[a-f0-9]{64}$/u.test(runSha256) || !Number.isInteger(dispatch) || dispatch < 1) throw new Error("Harbor requires contemporaneous Jinn Run/cell/dispatch lineage");
+      const armId = parseCellKey(cellKey).armId;
+      const arm = options.manifest.arms.find((candidate) => candidate.armId === armId);
+      if (arm === undefined) throw new Error(`Harbor selection has no exact AgentConfig mapping for arm ${armId}`);
+      const declared = input.task.outputs.map((output) => ({ name: output.name, mediaType: output.mediaType }));
+      const mapped = options.manifest.outputs.map((output) => ({ name: output.name, mediaType: output.mediaType }));
+      if (!Buffer.from(canonicalJsonBytes(declared as never)).equals(Buffer.from(canonicalJsonBytes(mapped as never)))) throw new Error("Harbor selection must map every declared Task output exactly before execution");
+      const currentMaterial = resolveHarborMaterial({ input: options.manifest.source.input, materialPath: options.host.sourceMaterialPath, revision: options.manifest.source.resolved.revision });
+      if (!Buffer.from(canonicalJsonBytes(currentMaterial as never)).equals(Buffer.from(canonicalJsonBytes(options.manifest.source.resolved as never)))) throw new Error("Harbor source material drifted from the sealed selection");
+      const stagedMaterial = join(paths.work, options.manifest.source.jobInput.path);
+      await mkdir(dirname(stagedMaterial), { recursive: true });
+      await cp(options.host.sourceMaterialPath, stagedMaterial, { recursive: true, errorOnExist: true, force: false });
       jobName = harborJobName(submissionSha256, dispatch);
-      const config = {
+      const config = HarborJobConfigSchema.parse({
         job_name: jobName,
         jobs_dir: join(paths.out, "harbor-jobs"),
         n_attempts: 1,
         n_concurrent_trials: 1,
-        orchestrator: { type: "local", n_concurrent_trials: 1 },
         retry: { max_retries: 0 },
-        environment: { type: options.manifest.environment.image, ...options.manifest.environment.configuration },
-        agents: [{ name: options.manifest.agent.id, model_name: options.manifest.model.id, kwargs: { ...options.manifest.agent.configuration, jinn_arm: (input.submission.requirements as Record<string, unknown>).harborArm } }],
-        datasets: [{ path: options.manifest.dataset.reference, revision: options.manifest.dataset.revision, checksum: options.manifest.dataset.checksum }],
-        tasks: [{ path: options.manifest.task.reference, revision: options.manifest.task.revision, checksum: options.manifest.task.checksum }],
-        metadata: {
-          "jinn.run": runSha256,
-          "jinn.cell": cellKey,
-          "jinn.dispatch": dispatch,
-          "jinn.submission_sha256": submissionSha256,
-          "jinn.attempt": input.attempt.attemptUri,
-          "jinn.selection_manifest_sha256": options.selectionManifestSha256,
-        },
-      };
+        environment: { type: options.manifest.environment.type, ...options.manifest.environment.configuration },
+        agents: [{ ...arm.jobAgent, ...(arm.jobAgent.kwargs === undefined ? {} : { kwargs: arm.jobAgent.kwargs }) }],
+        artifacts: options.manifest.outputs.map((output) => output.artifact),
+        ...harborJobSource(options.manifest),
+      });
       await Promise.all([
         writeFile(join(paths.input, "task.sealed"), input.sealedTaskBytes),
         writeFile(join(paths.input, "harbor-job.json"), canonicalJsonBytes(config as never), { mode: 0o600 }),
@@ -720,7 +738,13 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
       let collectionError: string | undefined;
       let files: readonly string[] = [];
       try {
-        files = await harborFiles(jobRoot);
+        const collected = await harborFiles(jobRoot);
+        files = collected.files;
+        for (const failure of collected.failures) {
+          collectionError ??= failure.reason;
+          const bytes = new TextEncoder().encode(failure.reason);
+          native.push({ role: harborRole(failure.path), path: failure.path, sha256: putSealedBytes(options.workspaceDir, bytes), bytes: bytes.length, availability: "collection-failed", reason: failure.reason });
+        }
       } catch (cause) { collectionError = cause instanceof Error ? cause.message : String(cause); }
       // Archive every safe regular native file before interpreting the directory. Interpretation
       // failures therefore cannot erase partial Harbor evidence.
@@ -728,7 +752,12 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
         try {
           const bytes = new Uint8Array(await readFile(join(jobRoot, relative)));
           native.push({ role: harborRole(relative), path: relative, sha256: putSealedBytes(options.workspaceDir, bytes), bytes: bytes.length, availability: "public" });
-        } catch (cause) { collectionError ??= cause instanceof Error ? cause.message : String(cause); }
+        } catch (cause) {
+          const reason = cause instanceof Error ? cause.message : String(cause);
+          collectionError ??= reason;
+          const bytes = new TextEncoder().encode(reason);
+          native.push({ role: harborRole(relative), path: relative, sha256: putSealedBytes(options.workspaceDir, bytes), bytes: bytes.length, availability: "collection-failed", reason });
+        }
       }
       try {
         if (collectionError !== undefined) throw new Error(collectionError);
@@ -746,6 +775,13 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
         jobId = typeof jobResult.id === "string" ? jobResult.id : typeof jobResult.job_id === "string" ? jobResult.job_id : jobName;
         trialId = typeof trialResult.id === "string" ? trialResult.id : typeof trialResult.trial_id === "string" ? trialResult.trial_id : trialDirectory;
         await recordHarborDispatchMapping(options.workspaceDir, `${options.selectionManifestSha256}:${runSha256}:${cellKey}:${dispatch}:${submissionSha256}`, jobId, trialId);
+        for (const output of declaredOutputs) {
+          const mapping = options.manifest.outputs.find((candidate) => candidate.name === output.name && candidate.mediaType === output.mediaType);
+          if (mapping === undefined) throw new Error(`Harbor selection has no exact native mapping for declared output ${output.name}`);
+          const source = join(jobRoot, trialDirectory, mapping.nativePath);
+          const bytes = new Uint8Array(await readFile(source));
+          await writeFile(join(paths.out, output.name), bytes, { flag: "wx", mode: 0o600 });
+        }
       } catch (cause) {
         status = "collection-failed";
         collectionError = cause instanceof Error ? cause.message : String(cause);
@@ -759,12 +795,17 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
           try {
             const bytes = new Uint8Array(await readFile(source));
             native.push({ role: relative.includes("stdout") || relative.includes("stderr") ? HARBOR_LOGS_ROLE : harborRole(relative), path: relative, sha256: putSealedBytes(options.workspaceDir, bytes), bytes: bytes.length, availability: "public" });
-          } catch { /* absence is represented by the collection status below */ }
+          } catch {
+            const reason = `Harbor invocation evidence was not collected: ${relative}`;
+            collectionError ??= reason;
+            const bytes = new TextEncoder().encode(reason);
+            native.push({ role: relative.includes("stdout") || relative.includes("stderr") ? HARBOR_LOGS_ROLE : harborRole(relative), path: relative, sha256: putSealedBytes(options.workspaceDir, bytes), bytes: bytes.length, availability: "collection-failed", reason });
+          }
       }
       try {
         const outcome = JSON.parse(await readFile(join(paths.meta, "outcome.json"), "utf8")) as { exitCode?: unknown; termSignal?: unknown };
-        if (status === "completed" && typeof outcome.termSignal === "string") status = "cancelled";
-        else if (status === "completed" && typeof outcome.exitCode === "number" && outcome.exitCode !== 0) status = "failed";
+        if (typeof outcome.termSignal === "string") status = "cancelled";
+        else if (typeof outcome.exitCode === "number" && outcome.exitCode !== 0) status = "failed";
       } catch { /* the archive's native invocation entry records absence */ }
       const required = [HARBOR_JOB_CONFIG_ROLE, HARBOR_JOB_RESULT_ROLE, HARBOR_TRIAL_CONFIG_ROLE, HARBOR_TRIAL_RESULT_ROLE, HARBOR_REWARD_ROLE];
       for (const role of required) if (!native.some((entry) => entry.role === role)) {
@@ -791,7 +832,7 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
         if ((cause as NodeJS.ErrnoException).code !== "EEXIST" || !Buffer.from(await readFile(archiveIndexPath)).equals(Buffer.from(archiveIndex))) throw cause;
       }
       await writeFile(join(paths.out, "harbor-archive"), archive, { mode: 0o600 });
-      if (status === "collection-failed") throw new Error(collectionError ?? "Harbor evidence collection failed after archival");
+      if (collectionError !== undefined) throw new Error(collectionError);
       const result = await workspaceHarvest(paths, declaredOutputs);
       return { ...result, manifest: result.manifest.filter((entry) => entry.path === "harbor-archive" || declaredOutputs.some((slot) => slot.name === entry.path)).map((entry) => entry.path === "harbor-archive" ? { ...entry, mediaType: "application/json" } : entry) };
     },

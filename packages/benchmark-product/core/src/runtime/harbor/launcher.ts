@@ -23,7 +23,9 @@ function requirePinnedHarbor(view: TaskView, manifest: HarborSelectionManifest):
     throw new TypeError("Harbor Submission does not carry the exact selected Harbor harness/version pin");
   }
   const model = requirements.model as { id?: unknown } | undefined;
-  if (model?.id !== manifest.model.id) throw new TypeError("Harbor Submission does not carry the selected model pin");
+  const agent = requirements.agent as { id?: unknown } | undefined;
+  const arm = manifest.arms.find((candidate) => candidate.agent.id === agent?.id && candidate.model.id === model?.id);
+  if (arm === undefined) throw new TypeError("Harbor Submission does not carry an exact selected arm AgentConfig/model pin");
 }
 
 export function makeHarborLauncher(input: { readonly manifest: HarborSelectionManifest; readonly host: HarborHostBinding }): LauncherContract {
@@ -38,8 +40,8 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
       resume: false, interruptionBehaviorDefault: "nonrepeatable", secretForwards: [],
       runPinning: { keys: [
         { key: "harness", inventory: [HARBOR_LAUNCHER_ID], posture: "enforced" },
-        { key: "model", inventory: [input.manifest.model.id], posture: "enforced" },
-        { key: "harborArm", inventory: ["*"], posture: "enforced" },
+        { key: "agent", inventory: input.manifest.arms.map((arm) => arm.agent.id), posture: "enforced" },
+        { key: "model", inventory: input.manifest.arms.map((arm) => arm.model.id), posture: "enforced" },
         { key: "isolationPolicy", inventory: ["unrestricted"], posture: "enforced" },
       ] },
     }),

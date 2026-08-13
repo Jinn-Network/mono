@@ -7,7 +7,8 @@
  */
 
 import { createHash } from "node:crypto";
-import type { BenchmarkAccountingDispatch, DigestBearingResourceDescriptor } from "@jinn-network/benchmarking-records";
+import { parseCellKey, type BenchmarkAccountingDispatch, type DigestBearingResourceDescriptor } from "@jinn-network/benchmarking-records";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import type {
   PublicationCheck,
   ReferenceBytesResolver,
@@ -42,7 +43,7 @@ import {
   HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE,
 } from "./harbor/venue.js";
-import { HarborSelectionManifestSchema } from "./harbor/manifest.js";
+import { HarborSelectionManifestSchema, harborJobSource } from "./harbor/manifest.js";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
 export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";
@@ -327,12 +328,16 @@ async function harborStructureCheck(
     const trialAttempt = trial.attempt_number ?? trial.attempt;
     if (jobAttempts !== 1 || concurrency !== 1 || retries !== 0 || trialAttempt !== 1) throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
     const expectedJobName = `jinn-${lineage.submissionSha256.slice(0, 24)}-d${lineage.dispatchIndex}`;
-    const metadata = job.metadata as Record<string, unknown> | undefined;
     const effectiveJobId = jobResult.id ?? jobResult.job_id;
     const effectiveTrialId = trialResult.id ?? trialResult.trial_id;
+    const selectedArm = selected.arms.find((arm) => arm.armId === parseCellKey(lineage.cellKey as string).armId);
+    const sameJson = (left: unknown, right: unknown): boolean => Buffer.from(canonicalJsonBytes(left as never)).equals(Buffer.from(canonicalJsonBytes(right as never)));
+    const expectedSource = harborJobSource(selected);
     if (job.job_name !== expectedJobName || harbor.jobName !== expectedJobName || effectiveJobId !== harbor.jobId || effectiveTrialId !== harbor.trialId
-      || metadata?.["jinn.run"] !== lineage.runSha256 || metadata?.["jinn.cell"] !== lineage.cellKey || metadata?.["jinn.dispatch"] !== lineage.dispatchIndex
-      || metadata?.["jinn.submission_sha256"] !== lineage.submissionSha256 || metadata?.["jinn.attempt"] !== lineage.attemptUri || metadata?.["jinn.selection_manifest_sha256"] !== expectedSelectionManifestSha256
+      || selectedArm === undefined || !sameJson(job.environment, { type: selected.environment.type, ...selected.environment.configuration })
+      || !sameJson(job.agents, [selectedArm.jobAgent]) || !sameJson(job.artifacts, selected.outputs.map((output) => output.artifact))
+      || (!("tasks" in expectedSource) ? job.tasks !== undefined : !sameJson(job.tasks, expectedSource.tasks))
+      || (!("datasets" in expectedSource) ? job.datasets !== undefined : !sameJson(job.datasets, expectedSource.datasets))
       || selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1 || selected.retryPolicy.maxRetries !== 0) throw new Error("Harbor Job identity, lineage, or retry policy does not match sealed Jinn selection");
     return { name: "harbor-job-trial-structure", status: "pass" };
   } catch (cause) {

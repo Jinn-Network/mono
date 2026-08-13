@@ -1,26 +1,54 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { join } from "node:path";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../../fs/atomic.js";
 import { runtimeHostPath } from "../../workspace/layout.js";
-import { HarborSelectionManifestSchema, assertSupportedHarborVersion, type HarborSelectionManifest } from "./manifest.js";
+import { HarborSelectionManifestSchema, assertSupportedHarborVersion, type HarborDatasetInput, type HarborSelectionManifest, type HarborTaskInput } from "./manifest.js";
 
 export interface HarborRuntimeSelectionRequest {
   readonly executable: string;
-  readonly dataset: HarborSelectionManifest["dataset"];
-  readonly task: HarborSelectionManifest["task"];
-  readonly agent: HarborSelectionManifest["agent"];
-  readonly model: HarborSelectionManifest["model"];
+  readonly source:
+    | { readonly kind: "task"; readonly input: HarborTaskInput; readonly materialPath: string; readonly revision: string }
+    | { readonly kind: "dataset"; readonly input: HarborDatasetInput; readonly materialPath: string; readonly revision: string; readonly taskName: string };
+  readonly arms: HarborSelectionManifest["arms"];
   readonly environment: HarborSelectionManifest["environment"];
+  readonly outputs: HarborSelectionManifest["outputs"];
 }
 
-export const HarborHostBindingSchema = z.object({ executable: z.string().min(1) }).strict();
+export const HarborHostBindingSchema = z.object({ executable: z.string().min(1), sourceMaterialPath: z.string().min(1) }).strict();
 export type HarborHostBinding = z.infer<typeof HarborHostBindingSchema>;
 export interface HarborRuntimeSelectionResolution {
   readonly manifest: HarborSelectionManifest;
   /** Private host binding: never part of the sealed selection or a public bundle. */
   readonly binding: HarborHostBinding;
+}
+
+export function resolveHarborMaterial(input: { readonly input: { readonly path?: string; readonly name?: string; readonly version?: string; readonly ref?: string }; readonly materialPath: string; readonly revision: string }): HarborSelectionManifest["source"]["resolved"] {
+  const root = realpathSync(input.materialPath);
+  if (!lstatSync(root).isDirectory()) throw new TypeError("Harbor resolved material must be a directory");
+  const entries: Array<{ path: string; sha256: string; bytes: number }> = [];
+  const visit = (directory: string, relative = "") => {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const path = relative === "" ? entry.name : `${relative}/${entry.name}`;
+      const source = join(directory, entry.name);
+      if (entry.isSymbolicLink()) throw new TypeError(`Harbor material refuses symlink ${path}`);
+      if (entry.isDirectory()) visit(source, path);
+      else if (entry.isFile()) {
+        const bytes = readFileSync(source);
+        entries.push({ path, sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length });
+      }
+      else throw new TypeError(`Harbor material refuses non-regular entry ${path}`);
+    }
+  };
+  visit(root);
+  if (entries.length === 0) throw new TypeError("Harbor resolved material must contain at least one regular file");
+  const checksum = createHash("sha256").update(canonicalJsonBytes(entries as never)).digest("hex");
+  const sourceRevision = input.input.ref ?? input.input.version;
+  if (sourceRevision !== undefined && sourceRevision !== input.revision) throw new TypeError("Harbor source ref/version must equal the resolved material revision");
+  return { reference: input.input.path ?? input.input.name ?? root, revision: input.revision, checksum, files: entries };
 }
 
 export async function resolveHarborSelection(input: HarborRuntimeSelectionRequest, signal?: AbortSignal): Promise<HarborRuntimeSelectionResolution> {
@@ -34,14 +62,24 @@ export async function resolveHarborSelection(input: HarborRuntimeSelectionReques
     });
   });
   assertSupportedHarborVersion(resolvedVersion);
+  const resolved = resolveHarborMaterial(input.source);
+  const materialRoot = realpathSync(input.source.materialPath);
+  const taskTomlPaths = resolved.files.filter((file) => file.path === "task.toml" || file.path.endsWith("/task.toml"));
+  if (taskTomlPaths.length !== 1) throw new TypeError("selected Harbor source must contain exactly one executable task.toml");
+  const taskToml = readFileSync(join(materialRoot, taskTomlPaths[0]!.path), "utf8");
+  const image = /^\s*docker_image\s*=\s*["']([^"']+)["']/mu.exec(taskToml)?.[1];
+  if (image !== input.environment.image) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
+  const source = input.source.kind === "task"
+    ? { kind: "task" as const, input: input.source.input, jobInput: { path: ".jinn-harbor/task" as const }, resolved }
+    : { kind: "dataset" as const, input: input.source.input, jobInput: { path: ".jinn-harbor/dataset" as const }, resolved, taskName: input.source.taskName };
   const manifest = HarborSelectionManifestSchema.parse({
     schema: "jinn.network/benchmark-product/harbor-selection/1",
     adapter: { id: "harbor", version: "1" },
     harbor: { version: resolvedVersion, executableSha256 },
-    dataset: input.dataset, task: input.task, agent: input.agent, model: input.model, environment: input.environment,
+    source, arms: input.arms, environment: input.environment, outputs: input.outputs,
     retryPolicy: { nAttempts: 1, nConcurrent: 1, maxRetries: 0 },
   });
-  return { manifest, binding: { executable } };
+  return { manifest, binding: { executable, sourceMaterialPath: materialRoot } };
 }
 
 export function writeHarborHostBinding(workspaceDir: string, selectionManifestSha256: string, binding: HarborHostBinding): void {

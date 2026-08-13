@@ -574,13 +574,14 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           evaluator: evaluators[0]!,
         },
       }),
-    ...(harborSelection === undefined
+    ...(harborSelection === undefined || harborHost === undefined
       ? {}
       : {
         harbor: {
           workspaceDir,
           selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
           manifest: harborSelection,
+          host: harborHost,
         },
       }),
   });
@@ -837,7 +838,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           ...(ready?.detail === undefined ? {} : { detail: ready.detail }),
           executable: { path: harborHost.executable, digest: harborSelection.harbor.executableSha256 },
           harnessVersions: [harborSelection.harbor.version],
-          models: [harborSelection.model.id],
+          models: harborSelection.arms.map((arm) => arm.model.id),
         };
       },
     };
