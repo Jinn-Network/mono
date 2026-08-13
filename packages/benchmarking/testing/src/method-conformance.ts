@@ -105,10 +105,21 @@ async function loadJson<T>(name: string): Promise<T> {
 
 async function computeFixtureNames(): Promise<string[]> {
   const names = await fixtureNames();
+  const manifest = await loadBenchmarkingManifest();
+  const superseded = new Set((manifest.errata ?? []).map((erratum) => erratum.id));
   const fixtures = await Promise.all(names.map(async (name) => [name, await loadJson<Record<string, unknown>>(name)] as const));
   return fixtures
-    .filter(([, fixture]) => Array.isArray(fixture["matrices"]) && Object.hasOwn(fixture, "expectedResults"))
+    .filter(([name, fixture]) => !superseded.has(`methods/${name}`)
+      && Array.isArray(fixture["matrices"])
+      && Object.hasOwn(fixture, "expectedResults"))
     .map(([name]) => name);
+}
+
+async function loadBenchmarkingManifest(): Promise<{
+  readonly errata?: readonly { readonly id: string; readonly supersededBy: string }[];
+}> {
+  const url = new URL("../fixtures/manifest.sha256.json", import.meta.url);
+  return JSON.parse(await readFile(fileURLToPath(url), "utf8"));
 }
 
 /** Validates + parses each fixture's raw matrix documents through the real records schema, so a
@@ -1041,7 +1052,7 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
     });
 
     test("paired-delta reports one shared bootstrap ensemble's cluster draws", async () => {
-      const fixture = await loadFixture("paired-delta.json");
+      const fixture = await loadFixture("paired-delta-shared-ensemble.v2.json");
       const prepared = prepareFixture(fixture);
       const method = registry.get(fixture.methodId, fixture.methodVersion)!;
       const results = onlySubjectResults(method.compute!({

@@ -748,7 +748,7 @@
       "basis": "task-provenance-source-family",
       "count": 6,
       "unit": "source-cluster",
-      "draws": 12000,
+      "draws": 6000,
       "clusters": [
         {
           "key": [

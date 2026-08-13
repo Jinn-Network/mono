@@ -718,7 +718,9 @@ const fixtures = {
   "avg-at-k": avgAtKFixture,
   "paired-mcnemar": mcnemarFixture,
   "provenance-cluster-sign": clusterSignFixture,
-  "paired-delta": pairedDeltaFixture,
+  // `paired-delta.json` is the immutable pre-correction fixture. Current conformance uses this
+  // append-only successor; the manifest erratum preserves and supersedes the historical bytes.
+  "paired-delta-shared-ensemble.v2": pairedDeltaFixture,
   "paired-delta-withheld": pairedDeltaWithheldFixture,
   "clean-subset": cleanSubsetFixture,
   "noninferiority-pass": noninferiorityPassFixture,
