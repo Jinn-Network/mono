@@ -121,12 +121,14 @@ export {
   verifyDemo1PreregistrationRunOrdering,
 } from "./method/demo1-preregistration.js";
 export type {
+  Demo1OfficialDispatchEvidenceIdentity,
   Demo1PreregistrationAnchorBoundary,
   Demo1PreregistrationCommitment,
   Demo1PreregistrationExternalBlock,
   Demo1PreregistrationOrderingResult,
   Demo1PreregistrationPreDispatchResult,
   Demo1PreregistrationReadBack,
+  Demo1PreregistrationRunOrderingResult,
   Demo1PreregistrationWitness,
 } from "./method/demo1-preregistration.js";
 export { DEMO1_PINNED_SKILLS_SOURCE } from "./method/demo1-prerun-source.js";

@@ -113,6 +113,20 @@ export interface Demo1PreregistrationOrderingResult {
   readonly firstOfficialDispatchAt: string;
 }
 
+export interface Demo1OfficialDispatchEvidenceIdentity {
+  /** Position of the exact evidence entry in the supplied append-only journal. */
+  readonly journalIndex: number;
+  /** Digest of the complete canonical journal entry, including its timestamp and sealed fields. */
+  readonly entrySha256: string;
+  readonly kind: "solve-submission-accepted" | "cell-event-dispatch";
+  readonly cellKey: string;
+  readonly dispatch: number;
+}
+
+export interface Demo1PreregistrationRunOrderingResult extends Demo1PreregistrationOrderingResult {
+  readonly firstOfficialDispatchEvidence: Demo1OfficialDispatchEvidenceIdentity;
+}
+
 function issues(error: z.ZodError): ProductIssue[] {
   return error.issues.map((issue) => ({
     path: issue.path.length === 0 ? "(root)" : issue.path.join("."),
@@ -332,16 +346,38 @@ export function verifyDemo1PreregistrationRunOrdering(input: {
   readonly commitment: unknown;
   readonly witness: unknown;
   readonly journal: readonly RunJournalEntry[];
-}): Demo1PreregistrationOrderingResult {
-  const firstOfficialDispatchAt = input.journal.find((entry) =>
-    (entry.kind === "submission-accepted" && entry.leg === "solve")
-    || (entry.kind === "cell-event" && entry.event.kind === "dispatch"))?.at;
-  if (firstOfficialDispatchAt === undefined) {
+}): Demo1PreregistrationRunOrderingResult {
+  const qualifying = input.journal.flatMap((entry, journalIndex) => {
+    const isSolveSubmission = entry.kind === "submission-accepted" && entry.leg === "solve";
+    const isDispatchEvent = entry.kind === "cell-event" && entry.event.kind === "dispatch";
+    if (!isSolveSubmission && !isDispatchEvent) return [];
+    const atMs = assertCanonicalUtcTimestamp(entry.at, `runJournal.${journalIndex}.at`, "venue-unverifiable");
+    const cellKey = entry.kind === "submission-accepted" ? entry.cellKey : entry.event.cellKey;
+    const dispatch = entry.kind === "submission-accepted" ? entry.dispatch : entry.event.dispatch;
+    return [{
+      at: entry.at,
+      atMs,
+      identity: {
+        journalIndex,
+        entrySha256: sha256(canonicalJsonBytes(entry)),
+        kind: isSolveSubmission ? "solve-submission-accepted" as const : "cell-event-dispatch" as const,
+        cellKey,
+        dispatch,
+      },
+    }];
+  });
+  if (qualifying.length === 0) {
     refuse("venue-unverifiable", "runJournal", "run journal does not contain a first official solve dispatch");
   }
-  return verifyDemo1PreregistrationOrdering({
+  const first = qualifying.reduce((earliest, candidate) =>
+    candidate.atMs < earliest.atMs
+      || (candidate.atMs === earliest.atMs && candidate.identity.journalIndex < earliest.identity.journalIndex)
+      ? candidate
+      : earliest);
+  const ordering = verifyDemo1PreregistrationOrdering({
     commitment: input.commitment,
     witness: input.witness,
-    firstOfficialDispatchAt,
+    firstOfficialDispatchAt: first.at,
   });
+  return { ...ordering, firstOfficialDispatchEvidence: first.identity };
 }

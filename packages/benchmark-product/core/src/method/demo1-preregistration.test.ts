@@ -262,6 +262,13 @@ describe("Demo-1 preregistration dispatch gates", () => {
       ordered: true,
       externalTimestamp: external.timestamp,
       firstOfficialDispatchAt: "2026-08-13T10:00:00.100Z",
+      firstOfficialDispatchEvidence: {
+        journalIndex: 1,
+        entrySha256: digest(canonicalJsonBytes(journal[1])),
+        kind: "solve-submission-accepted",
+        cellKey: "task-1:arm-a:1",
+        dispatch: 1,
+      },
     });
     expect(() => verifyDemo1PreregistrationRunOrdering({ commitment, witness, journal: journal.slice(0, 1) }))
       .toThrowError();
@@ -277,5 +284,105 @@ describe("Demo-1 preregistration dispatch gates", () => {
         leg: "evaluation",
       }],
     })).toThrowError();
+  });
+
+  it("uses the earliest qualifying timestamp across the full journal and binds its exact evidence identity", async () => {
+    const boundary = new FakeManifestAnchorBoundary();
+    boundary.readBack = {
+      manifestCid: "bafy-demo1-preregistration",
+      transactionHash: txHash,
+      body: canonicalJsonBytes(commitment),
+      bodySha256: digest(canonicalJsonBytes(commitment)),
+      external: { ...external, timestamp: "2026-08-13T10:00:00.150Z" },
+    };
+    const witness = await anchorDemo1Preregistration(commitment, boundary);
+    const journal: RunJournalEntry[] = [
+      {
+        kind: "cell-event",
+        at: "2026-08-13T10:00:00.200Z",
+        event: { cellKey: "task-later", armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch" },
+      },
+      {
+        kind: "submission-accepted",
+        at: "2026-08-13T10:00:00.100Z",
+        cellKey: "task-earlier",
+        dispatch: 1,
+        submissionSha256: digest("earlier submission"),
+        leg: "solve",
+      },
+    ];
+    expect(() => verifyDemo1PreregistrationRunOrdering({ commitment, witness, journal }))
+      .toThrowError(/strictly precede/u);
+
+    boundary.readBack = {
+      ...boundary.readBack,
+      external: { ...external, timestamp: "2026-08-13T10:00:00.050Z" },
+    };
+    const orderedWitness = await anchorDemo1Preregistration(commitment, boundary);
+    expect(verifyDemo1PreregistrationRunOrdering({ commitment, witness: orderedWitness, journal }))
+      .toMatchObject({
+        firstOfficialDispatchAt: "2026-08-13T10:00:00.100Z",
+        firstOfficialDispatchEvidence: {
+          journalIndex: 1,
+          entrySha256: digest(canonicalJsonBytes(journal[1])),
+          kind: "solve-submission-accepted",
+          cellKey: "task-earlier",
+          dispatch: 1,
+        },
+      });
+  });
+
+  it("binds the first journal identity when multiple qualifiers have the same earliest timestamp", async () => {
+    const witness = await anchorDemo1Preregistration(commitment, new FakeManifestAnchorBoundary());
+    const journal: RunJournalEntry[] = [
+      {
+        kind: "cell-event",
+        at: "2026-08-13T10:00:00.100Z",
+        event: { cellKey: "task-event", armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch" },
+      },
+      {
+        kind: "submission-accepted",
+        at: "2026-08-13T10:00:00.100Z",
+        cellKey: "task-submission",
+        dispatch: 1,
+        submissionSha256: digest("same-time submission"),
+        leg: "solve",
+      },
+    ];
+    expect(verifyDemo1PreregistrationRunOrdering({ commitment, witness, journal }))
+      .toMatchObject({
+        firstOfficialDispatchAt: "2026-08-13T10:00:00.100Z",
+        firstOfficialDispatchEvidence: {
+          journalIndex: 0,
+          entrySha256: digest(canonicalJsonBytes(journal[0])),
+          kind: "cell-event-dispatch",
+          cellKey: "task-event",
+          dispatch: 1,
+        },
+      });
+  });
+
+  it("fails closed when the external timestamp equals the journal-derived earliest dispatch", async () => {
+    const boundary = new FakeManifestAnchorBoundary();
+    boundary.readBack = {
+      manifestCid: "bafy-demo1-preregistration",
+      transactionHash: txHash,
+      body: canonicalJsonBytes(commitment),
+      bodySha256: digest(canonicalJsonBytes(commitment)),
+      external: { ...external, timestamp: "2026-08-13T10:00:00.100Z" },
+    };
+    const witness = await anchorDemo1Preregistration(commitment, boundary);
+    expect(() => verifyDemo1PreregistrationRunOrdering({
+      commitment,
+      witness,
+      journal: [{
+        kind: "submission-accepted",
+        at: "2026-08-13T10:00:00.100Z",
+        cellKey: "task-equal",
+        dispatch: 1,
+        submissionSha256: digest("equal submission"),
+        leg: "solve",
+      }],
+    })).toThrowError(/strictly precede/u);
   });
 });

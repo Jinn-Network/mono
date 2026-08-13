@@ -53,8 +53,10 @@ does not change Tier 1-3 semantics, and does not mean Demo-1 or its report is pu
 5. Only after a successful command may the first official cell dispatch.
 6. Once that dispatch is durably journaled, run
    `verifyDemo1PreregistrationRunOrdering` over the append-only journal. It derives the first real
-   solve dispatch from the earliest solve `submission-accepted`/`cell-event:dispatch` fact and
-   requires the external block timestamp to be strictly earlier. Equal, late, missing, or
+   solve dispatch by examining every solve `submission-accepted`/`cell-event:dispatch` fact and
+   taking the minimum canonical timestamp, independent of journal array position. The result binds
+   the exact winning journal index, entry digest, kind, cell identity, and dispatch number. The
+   external block timestamp must be strictly earlier. Equal, late, missing, non-canonical, or
    evaluation-only evidence fails closed.
 
 The one-command pre-dispatch gate is:
