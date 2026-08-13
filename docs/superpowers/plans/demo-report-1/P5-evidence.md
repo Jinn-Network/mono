@@ -6,27 +6,45 @@
 
 **Exact base:** `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`
 
-## Current outcome: stopped at the disk gate
+**Integrated through:** `0427833e9e7e62cf9fc86c1194ed01688354f1db`, including P4 draw correction `834f3436dc5991098addc9177f4652d81d6cbfb6`
 
-P5 is not complete and the real container/Claude chain has not started. The host-space precondition
-failed after implementation began:
+## Current outcome: stopped at the digest-pinned image pre-stage
+
+P5 is not complete. The disk precondition later recovered, so the fixture was legally minted and
+the real OCI green-baseline control began. The first exact digest-pinned image did not become
+locally available within its sealed 1,800-second timeout. One recorded infrastructure-only retry
+was authorized under the identical digest, platform, timeout, and grader contract; it timed out in
+the same pre-dispatch stage. Both attempts failed closed as:
 
 ```text
-/dev/disk3s1s1 482797652 12275624 25980720 33% /
-P5 disk gate refused recorded P5 evidence: 24.78 GiB free; at least 40.00 GiB is required.
-No caches or user data were deleted.
+EvaluationOperationalError: oci grader unavailable: pinned grader image is unavailable
+canonicalCode: UNAVAILABLE
+reason: provider-unavailable
+recoveryAdvice: new-attempt-required
 ```
 
-The latest exact available value was 25,980,720 KiB (24.7771 GiB). An earlier blocked snapshot in
-this same work session recorded 33,352,736 KiB (31.8077 GiB); neither qualified. No fixture mint, image inspection,
-image pull, Docker grader, gold/empty control, or Claude cell was run below the threshold. No cache
-or user-data deletion was attempted. Earlier measurements above the threshold were not reused:
-the gate is intentionally evaluated again immediately before every image and container phase.
+The exact attempted image was
+`swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781`
+for `linux/amd64`. Attempt 1 began with 47,299,448 KiB (45.1083 GiB) available and ended
+with 44,970,404 KiB (42.8871 GiB). Attempt 2 began with 44,939,716 KiB (42.8579 GiB)
+available and ended with 44,297,640 KiB (42.2455 GiB). The exact digest was absent after
+each timeout. No tag fallback, unpinned substitute, timeout change, cache deletion, or third
+attempt occurred. No gold/empty grade or Claude cell was dispatched.
+
+The append-only stop records are:
+
+- `p5-artifacts/green-baseline-attempt-1-stop.json`,
+  `sha256:6d4be7076689440453ed14da24c4149dfbedca29b35793b2d8e1dad697e3b6dc`;
+- `p5-artifacts/green-baseline-attempt-2-stop.json`,
+  `sha256:eb0e385b95530206968c6cdefe25f4ef23562d0c39fa193bde2e2a47fd896287`.
 
 ## Offline implementation evidence
 
 - The current-source dependency closure (26 packages) builds through the OCI-grader package on
   Node 22; benchmark-product core builds and typechecks.
+- P4's shared-ensemble correction is merged. The old paired-delta fixture remains byte-immutable,
+  its manifest erratum routes current conformance to the append-only v2 successor, and P5 asserts
+  the corrected public identity `draws = resamples × clusterCount` without product-side statistics.
 - The CI-safe P5 assertions cover the exact 40-GiB boundary and fail-closed lower boundary; exact
   12-cell accounting; one dispatch per cell; all four verification axes; three source clusters;
   no interval with the `minN=5` reason; and raw `draws = resamples × clusterCount` accounting.
@@ -39,27 +57,40 @@ the gate is intentionally evaluated again immediately before every image and con
 - The Docker executable is wrapped by a host-space guard. P3b remains responsible for digest
   pre-stage followed by child-local-only `--pull never`; grader network stays disabled.
 
-The committed fixture is deliberately still the pre-P3b mint while this stop is active. Therefore
-the focused fixture suite presently reports exactly three expected stale-fixture failures: old
-image name, empty `testMaterial`, and missing parser/provenance identity. Those are not waived. A
-passing P5 packet requires a legal re-mint and a green rerun.
+The final fixture was minted at `2026-08-13T01:06:45.511Z` after an immediate
+47,323,076-KiB (45.13-GiB) disk pass. It contains three rows from three repositories and seals:
+
+- parser `network.jinn.parser.swe-rebench-v2@1.0.0`, digest
+  `sha256:5b859d500777a1370bdadcee098ce9449f92772b7c9572709b502d9ee3be9e7a`;
+- grader program
+  `sha256:8194eb47ad010d8e1ce2f5f4a5becd3354102f80c138aad836cfd3b0e8b2ab11`;
+- a 1,800-second timeout and the exact canonical P3b material for every row.
+
+The fixture bytes are `sha256:121dda614c63ea204c1d2cfb5054692c0751afd9d51c366a5bbcc395d4e4b06a`
+for `rows.json` and `sha256:ff67450c05b6f3b8a1f41f3c224273ddf5a85a648765f01c11ccccc791bcb60c`
+for `provenance.json`. The strict post-P3b fixture suite passes all 11 assertions.
+
+Final non-Docker reruns on Node 22 passed:
+
+- P5 pure/injected tests: 10/10;
+- strict final-fixture tests: 11/11;
+- benchmark-product core full suite: 78 files passed, 3 skipped; 819 tests passed,
+  13 skipped;
+- benchmark-product typecheck, build, parity check, and packed-consumer smoke;
+- package inventory, source boundaries, and architecture generator: 28/28, followed by an exact
+  generated-topology check.
 
 ## Required continuation
 
-Once an immediate measurement again reports at least 40 GiB available:
-
-1. re-mint the fixture and run all CI-safe fixture/package/architecture checks;
-2. run the real three-task gold-PASS/empty-FAIL OCI control;
-3. merge the P4 draw-accounting correction and retain the exact raw-draw assertion;
-4. prove the real Claude readiness inventory, then run all 12 cells without manual intervention;
-5. record the sealed Benchmark, Run, Matrix, Report, bundle, per-axis, timing, and cold-recompute
-   evidence here.
-
-Any missing image, credential/readiness failure, grader-control failure, or required platform seam
-change remains a terminal evidence handoff, not permission to improvise a substitute.
+The two permitted pre-dispatch image attempts are exhausted. Continuation requires operator action
+outside this packet to make the exact digest-pinned image available without changing the frozen
+contract, followed by a fresh authorized run. Only then may the real three-task gold-PASS/
+empty-FAIL control, Claude readiness probe, 12 cells, and local cold bundle verification run.
+The stop evidence is a terminal handoff, not permission to improvise a substitute.
 
 ## Publication boundary
 
-This packet may emit only a local immutable bundle. It does not create a public report URL, signed
-Record Discovery source, archive mirror, Explorer view, or publication claim. This evidence is a
-blocked implementation checkpoint, not a published benchmark and not a capability result.
+This packet may emit only a local immutable bundle. It did not create a public report URL, signed
+Record Discovery source, archive mirror, Explorer view, local report bundle, or publication claim.
+This evidence is a blocked implementation checkpoint, not a published benchmark and not a
+capability result.

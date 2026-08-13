@@ -28,6 +28,22 @@ test("mint parser structurally excludes the upstream gold patch", () => {
   assert.equal(parsed.test_patch, "PUBLIC TEST PATCH");
 });
 
+test("mint parser preserves upstream single-command install fields as one exact command", () => {
+  const parsed = parseHfRow({
+    ...upstream,
+    install_config: {
+      install: "pip install -e .[dev]",
+      test_cmd: "pytest --no-header -rA",
+      log_parser: "parse_log_pytest",
+    },
+  });
+  assert.deepEqual(parsed.install_config, {
+    install: ["pip install -e .[dev]"],
+    test_cmd: ["pytest --no-header -rA"],
+    log_parser: "parse_log_pytest",
+  });
+});
+
 test("mint mapper emits the exact canonical P3b material and matching image pin", () => {
   const parsed = parseHfRow(upstream);
   const hex = "b".repeat(64);

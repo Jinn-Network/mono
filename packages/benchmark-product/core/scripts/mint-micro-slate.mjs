@@ -95,6 +95,19 @@ function stringArray(value, key) {
   return [...parsed];
 }
 
+/** Mirrors the shipped SWE-rebench path: one shell command string is one exact command. */
+function commandArray(value, key) {
+  if (typeof value === "string") {
+    if (value.trim() === "") fail(`row has an invalid ${key}`);
+    return [value];
+  }
+  if (!Array.isArray(value) || value.length === 0
+    || value.some((entry) => typeof entry !== "string" || entry.trim() === "")) {
+    fail(`row has an invalid ${key}`);
+  }
+  return [...value];
+}
+
 /**
  * Narrows an untyped HF row to exactly the fields that may promote into sealed bytes.
  *
@@ -119,8 +132,8 @@ export function parseHfRow(value) {
   if (typeof installConfig !== "object" || installConfig === null || Array.isArray(installConfig)) {
     fail(`row ${instanceId} has no install configuration`);
   }
-  const install = stringArray(installConfig.install, "install_config.install");
-  const testCmd = stringArray(installConfig.test_cmd, "install_config.test_cmd");
+  const install = commandArray(installConfig.install, "install_config.install");
+  const testCmd = commandArray(installConfig.test_cmd, "install_config.test_cmd");
   const logParser = exactString(installConfig, "log_parser");
   return {
     instance_id: instanceId,

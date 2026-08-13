@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| **Status** | Implementation in progress; real execution is host-gated |
+| **Status** | Implementation complete; real execution stopped at exact-image pre-stage |
 | **Version** | 1.0 |
 | **Updated** | 2026-08-13 |
 | **Lane** | C4 |
 | **Packet** | P5 |
-| **Base** | `integration/evidence-v1` at `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba` |
+| **Base** | Started at `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`; merged through `0427833e9e7e62cf9fc86c1194ed01688354f1db` |
 
 ## Purpose and boundary
 
@@ -32,8 +32,10 @@ URL or discovery source, mint an archive mirror, or claim that Demo-1 is publish
   unless both sealed material and host policy declare it.
 - P4b supplies paired-delta presentation. The report must have three pairs and three source-repo
   clusters, withhold the interval because `minN=5`, and preserve number-free compact artifacts.
-- The P4 draw-accounting correction is a merge prerequisite. P5 asserts the public report field
-  exactly: `draws = resamples × clusterCount`.
+- P4's shared-ensemble draw-accounting correction is integrated. P5 asserts the public report
+  field exactly: `draws = resamples × clusterCount`. The pre-correction fixture remains immutable;
+  current conformance is routed through its append-only `paired-delta-shared-ensemble.v2.json`
+  successor and manifest erratum.
 
 No new record kind or tier-1–3 publication semantic is introduced.
 
@@ -123,3 +125,8 @@ digests, all-12 accounting, per-axis match counts, cluster/draw accounting, with
 reason, builder-workspace deletion, cold verification checks, package/architecture gates, and the
 explicit no-publication boundary. If a terminal stop occurs, it records the stop evidence instead
 of manufacturing a passing result.
+
+The current run stopped before dispatch after two exact-image pre-stage attempts (the original and
+the single authorized infrastructure retry) each exhausted the unchanged 1,800-second bound. The
+append-only stop records preserve both attempts. No third attempt, alternate image, gold/empty
+grade, or Claude cell is permitted in this packet without new operator action.
