@@ -21,7 +21,7 @@ import { artifactsDir } from "../../workspace/layout.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { recordHarborDispatchMapping } from "../../venue/provisioner.js";
 import { HarborJobConfigSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "./manifest.js";
-import { HARBOR_ATIF_ROLE, HARBOR_LOGS_ROLE, HARBOR_SELECTION_ROLE, harborEvidenceContributionFromArchive, readHarborDispatchArchive } from "./venue.js";
+import { HARBOR_ATIF_ROLE, HARBOR_LOGS_ROLE, HARBOR_REWARD_ROLE, HARBOR_SELECTION_ROLE, harborEvidenceContributionFromArchive, readHarborDispatchArchive } from "./venue.js";
 import { parseBenchmarkAccounting } from "@jinn-network/benchmarking-records";
 
 const manifest: HarborSelectionManifest = {
@@ -219,6 +219,15 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       expect(effectiveJobConfig).not.toHaveProperty("datasets");
       const unknown = archive.nativeArtifacts.find((item) => item.path.endsWith("unknown.bin"))!;
       expect(getSealedBytes(workspaceDir, unknown.sha256)).toEqual(new Uint8Array([7, 8, 9]));
+      const recording = archive.nativeArtifacts.find((item) => item.path === "trial-1/agent/recording.cast")!;
+      const trajectory = archive.nativeArtifacts.find((item) => item.path === "trial-1/agent/trajectory.json")!;
+      const reward = archive.nativeArtifacts.find((item) => item.path === "trial-1/verifier/reward.txt")!;
+      expect(recording.role).toBe(HARBOR_ATIF_ROLE);
+      expect(getSealedBytes(workspaceDir, recording.sha256)).toEqual(new Uint8Array([0, 255, 1]));
+      expect(trajectory.role).toBe(HARBOR_ATIF_ROLE);
+      expect(getSealedBytes(workspaceDir, trajectory.sha256)).toEqual(new TextEncoder().encode(JSON.stringify({ schema: "ATIF" })));
+      expect(reward.role).toBe(HARBOR_REWARD_ROLE);
+      expect(getSealedBytes(workspaceDir, reward.sha256)).toEqual(new TextEncoder().encode("1\n"));
       const before = indexes.length;
       const contribution = harborEvidenceContributionFromArchive(workspaceDir, index.archiveSha256);
       expect(contribution.correlations).toHaveLength(2);

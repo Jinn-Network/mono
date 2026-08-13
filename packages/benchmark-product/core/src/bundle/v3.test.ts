@@ -94,7 +94,7 @@ function reportedFixture(): { accountingBytes: Uint8Array; matrixBytes: Uint8Arr
   return { accountingBytes, matrixBytes, payloadBytes, envelopeBytes };
 }
 
-function nativeFixture(availability: "public" | "digest-only" | "collection-failed", nativeArtifactCount = 1) {
+function nativeFixture(availability: "public" | "digest-only" | "source-absent" | "collection-failed", nativeArtifactCount = 1) {
   const taskDigest = "a".repeat(64);
   const run = "4e65d3fbe8ad6535681b021b30785b12b6c0e3f8878859a4148b3f58b8835db0";
   const cellKey = `${taskDigest}/arm/1`;
@@ -112,7 +112,9 @@ function nativeFixture(availability: "public" | "digest-only" | "collection-fail
       delivery: { kind: "https://spec.jinn.network/records/delivery/v1", record: { digest: { sha256: "e".repeat(64) } } },
       evidence: [], evaluations: [], correlations: [],
       nativeArtifacts: Array.from({ length: nativeArtifactCount }, () => ({
-        role: "https://example.test/log", availability, artifact: source, reason: "source retained privately",
+        role: "https://example.test/log", availability,
+        ...(availability === "source-absent" ? {} : { artifact: source }),
+        ...(availability === "public" ? {} : { reason: "source retained privately" }),
       })),
     }] }],
   }).bytes;
@@ -155,6 +157,29 @@ describe("portable benchmark bundle v3", () => {
       ...base, state: "scrub-derived", artifact: { digest: { sha256: "c".repeat(64) } }, path: `native/${"c".repeat(64)}.bin`,
       derivation: { procedure: "redact", version: "1", responsible: "did:example:publisher", producedAt: "2026-08-13T00:00:00Z" },
     }).success).toBe(false);
+  });
+
+  test("materializes and verifies digest-only, source-absent, and collection-failed disclosures", () => {
+    const root = mkdtempSync(join(tmpdir(), "bp-pub-v3-states-"));
+    try {
+      for (const state of ["digest-only", "source-absent", "collection-failed"] as const) {
+        const input = nativeFixture(state);
+        const common = { cellKey: input.cellKey, dispatch: 1, ordinal: 1, role: "https://example.test/log", reason: "source retained privately" };
+        const disclosure = state === "source-absent"
+          ? { ...common, state }
+          : { ...common, state, artifact: input.source };
+        const bundleDir = join(root, state);
+        materializeBundleV3({
+          bundleDir,
+          accountingBytes: input.accountingBytes,
+          matrixBytes: input.matrixBytes,
+          nativeArtifacts: [{ disclosure }],
+        });
+        expect(verifyBundleV3(bundleDir).checks).toContain("native-disclosures");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("materializes and verifies an accounting-only static/human bundle", () => {

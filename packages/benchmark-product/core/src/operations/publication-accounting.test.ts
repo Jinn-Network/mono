@@ -194,6 +194,9 @@ describe("publication.accounting operation", () => {
     expect(state.matrixSha256).toBe("f".repeat(64));
     expect(parseMatrix(getSealedBytes(workspaceDir, result.result.matrixV2Sha256)).completeness.runOutcome).toBe("partial");
     expect(parseBenchmarkAccounting(getSealedBytes(workspaceDir, result.result.accountingSha256)).publicRegistration.status).toBe("post-hoc");
+    expect(state.reportPayloadSha256).toBeUndefined();
+    expect(state.reportRecordSha256).toBeUndefined();
+    expect(state.publication!.report.state).toBe("not-started");
   }, 30_000);
 
   test("publishes accounting-only cancellation with no runtime execution", async () => {
@@ -202,7 +205,13 @@ describe("publication.accounting operation", () => {
     writeCancelMarker(workspaceDir, "draft-1", { requestedAt: "2026-08-13T13:00:00Z", principal: "sponsor-1" });
     const result = await publicationAccounting(context(now), { draftId: "draft-1" });
     expect(result.ok, JSON.stringify(result)).toBe(true);
-    if (result.ok) expect(parseMatrix(getSealedBytes(workspaceDir, result.result.matrixV2Sha256)).completeness.runOutcome).toBe("cancelled");
+    if (result.ok) {
+      expect(parseMatrix(getSealedBytes(workspaceDir, result.result.matrixV2Sha256)).completeness.runOutcome).toBe("cancelled");
+      const state = readRunState(workspaceDir, "draft-1")!;
+      expect(state.reportPayloadSha256).toBeUndefined();
+      expect(state.reportRecordSha256).toBeUndefined();
+      expect(state.publication!.report.state).toBe("not-started");
+    }
   }, 30_000);
 
   test("retains every replacement dispatch in Accounting lineage", async () => {
