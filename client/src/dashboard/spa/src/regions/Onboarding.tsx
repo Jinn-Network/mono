@@ -6,23 +6,36 @@
  *   01 · Provisioning your wallet      (wallet, safe_predicted)
  *   02 · Fund your wallet              (awaiting_funding)
  *   03 · Joining Jinn                  (everything else through mech_deployed)
- *   04 · Set up harness + model        (post-terminal; HarnessSelectStep)
+ *   04 · Check your harness            (post-terminal; HarnessReadinessStep)
  *
  * Each row shows status (done · active · queued). The active row expands
  * inline with whatever the operator needs at that moment — the funding
  * address card in step 2, a current sub-state line in step 3, the harness
- * picker in step 4. Done rows collapse to a thin checkmark line. Queued rows
- * are dim.
+ * readiness list in step 4. Done rows collapse to a thin checkmark line.
+ * Queued rows are dim.
  *
  * Step 4 stays `queued` (label-only) while the bootstrap state machine is
- * still running. It must NOT mount HarnessSelectStep before
+ * still running. It must NOT mount HarnessReadinessStep before
  * `bootstrapIsTerminal()` — that step fetches live harness readiness, which
  * 503s before the running flip.
  *
  * Wave-4 D1 (DR-2026-08-05) removed the former step 4 ("Pick your first
  * SolverNet"): the `joinedSolverNets` claim gate and its join lifecycle
- * retired with the legacy TaskEngine, so there is no join to make here.
- * SolverNet membership is operator config plus the `jinn solver-nets` CLI.
+ * retired with the legacy TaskEngine, so there is no join to make here. It
+ * also emptied the harness + model picker that had been step 5 — its
+ * selection was persisted by re-joining, and with the join route gone the
+ * picker collected a choice and discarded it. Harness and model are
+ * configuration (`executionWiring`, surfaced in Settings > Claim policy &
+ * wiring); SolverNet membership is configuration too (`joinedSolverNets`,
+ * read back by `jinn solver-nets list` and Settings > Memberships). So the
+ * takeover's last step reports readiness and asks nothing — nothing it could
+ * ask would be saved. See OPERATOR-APP-SPEC §2.8/§2.9.
+ *
+ * Consequently the completion gate is unconditional once step 4 is active:
+ * "Enter dashboard" latches `onboardingComplete` and nothing else. Harness
+ * readiness is shown, not enforced — an operator whose harness needs setup is
+ * better served inside the dashboard than held at a takeover that cannot fix
+ * it.
  *
  * Once bootstrap reaches 'complete' the daemon flips mode to 'running'; the
  * App-level overlay keeps the takeover mounted until onboarding is marked
@@ -52,9 +65,9 @@ import { NetworkBadge } from './onboarding/NetworkBadge.js';
 import { PhaseRow, type Phase } from './onboarding/PhaseRow.js';
 import { type PhaseStatus } from './onboarding/PhaseStatusTag.js';
 import { SubStateLine } from './onboarding/SubStateLine.js';
-import { HarnessSelectStep, type HarnessSelection } from './onboarding/HarnessSelectStep.js';
+import { HarnessReadinessStep } from './onboarding/HarnessReadinessStep.js';
 
-import { useCallback, useState, type JSX } from 'react';
+import { type JSX } from 'react';
 
 /** Bootstrap steps that mean the earning state machine has reached terminal. */
 const TERMINAL_STEPS = new Set(['complete', 'safe_binding_pending']);
@@ -136,16 +149,13 @@ export function Onboarding(): JSX.Element {
     refetchInterval: 2000,
   });
 
-  // #983 action-step selection state. `harnessSel` is captured from
-  // HarnessSelectStep; the completion gate reads it alongside the joined set.
-  const [harnessSel, setHarnessSel] = useState<HarnessSelection | null>(null);
-  const onSelectionChange = useCallback((sel: HarnessSelection) => setHarnessSel(sel), []);
-
   // Mark onboarding complete so App.tsx drops the takeover for <Operating>.
   // The App-level overlay closes the takeover once mode===running AND
   // onboardingComplete — set by completeOnboarding() below. Wave-4 D1 dropped
   // the harness/model upsert that used to ride this mutation: it wrote into
-  // `joinedSolverNets`, whose write path retired with the claim gate.
+  // `joinedSolverNets`, whose write path retired with the claim gate. Nothing
+  // replaced it, so this mutation now latches the flag and nothing else — and
+  // the button below has no selection to gate on.
   const enterMutation = useMutation({
     mutationFn: async () => {
       await api.operator.completeOnboarding();
@@ -154,8 +164,6 @@ export function Onboarding(): JSX.Element {
       void queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
     },
   });
-
-  const completionReady = harnessSel?.ready === true && Boolean(harnessSel?.model);
 
   if (isLoading || !bootstrap) {
     return (
@@ -261,13 +269,14 @@ export function Onboarding(): JSX.Element {
                       contractRevertReason={activeService?.error_revert_reason ?? null}
                     />
                   )}
-                  {/* Step 4 — harness + model. Mounts the live readiness card
+                  {/* Step 4 — harness readiness. Mounts the live readiness card
                       only once the bootstrap is terminal (queued rows are
                       label-only; the readiness endpoint 503s before the running
-                      flip). Hosts the completion gate (Enter dashboard). */}
+                      flip). Hosts the completion latch (Enter dashboard), which
+                      readiness does NOT gate — see this file's docstring. */}
                   {p === 4 && status === 'active' && (
                     <div className="flex flex-col gap-6">
-                      <HarnessSelectStep onSelectionChange={onSelectionChange} />
+                      <HarnessReadinessStep />
                       {enterMutation.isError && (
                         <Alert variant="blocking" data-testid="onboarding-enter-error">
                           <AlertTitle>Could not enter the dashboard.</AlertTitle>
@@ -279,7 +288,7 @@ export function Onboarding(): JSX.Element {
                       )}
                       <Button
                         data-testid="onboarding-enter-dashboard"
-                        disabled={!completionReady || enterMutation.isPending}
+                        disabled={enterMutation.isPending}
                         onClick={() => enterMutation.mutate()}
                         className="self-start"
                       >

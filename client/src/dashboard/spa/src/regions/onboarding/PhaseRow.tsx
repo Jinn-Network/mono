@@ -8,7 +8,10 @@ const PHASE_TITLES: Record<Phase, string> = {
   1: 'Provisioning your wallet',
   2: 'Fund your wallet',
   3: 'Joining Jinn',
-  4: 'Set up harness + model',
+  // Step 4 confirms readiness; it does not "set up" anything. Wave-4 D1
+  // removed the harness/model picker that used to live here — that choice is
+  // configuration now (see regions/Onboarding.tsx).
+  4: 'Check your harness',
 };
 
 /**
