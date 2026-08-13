@@ -4,10 +4,11 @@
 
 **Branch:** `codex/demo1-p5-plumbing`
 
-**Exact base:** `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`
+**Original implementation base:** `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`
 
-**Integrated through:** `342f5725c57d7f198d173dd707f5b9fda7ae5d3f`, including the merged
-P2/P2b/P3b/P4/E2/preregistration and current integration packets
+**Current integration base:** `465adf76f93951f784e639734ca2e3b4fe7ed07a`
+
+**Recovery implementation commit:** `76a9857db`
 
 ## Current outcome: authenticated fresh run stopped at the disk gate
 
