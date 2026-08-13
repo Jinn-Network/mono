@@ -1604,6 +1604,11 @@ export function buildRecordPlaneCounterpartyDeliveryResolver(input: {
           `[record-plane-delivery] ${digest} matches the on-chain anchor for attempt ${attempt} but `
             + `names attempt ${candidate.attempt} / task ${candidate.task} -- refusing`,
         );
+        // Deliberately `continue` rather than `buildRecordPlaneSolutionDeliveryPort`'s (enrich's)
+        // immediate `unwitnessed` return on the same collision: this resolver never settles a role
+        // the way that leg's gate 3 does, so there is no "answer" to commit to yet. Either way is
+        // inert under keccak collision resistance — no other candidate will hash to this exact
+        // anchor for a genuinely different attempt.
         continue;
       }
       // Re-fetch the bytes the inspector deliberately did not retain (caching them would hold the

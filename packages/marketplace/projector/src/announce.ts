@@ -136,7 +136,9 @@ export interface AnnouncementMaterialRefusal {
  * propagate straight out of `projectAnnouncements`, which made it say everything about the others:
  * `projector-loop.ts` catches that throw as non-fatal and advances the cursor regardless, and
  * `hasCanonicalEvent` then filters every event in the tick out of later `publicationEvents`. The
- * whole tick's announcements were dropped for good, recoverable only by spending another rewind.
+ * whole tick's announcements are dropped for good -- a rewind replays the identical event_keys and
+ * is filtered right back out. Recovery needs each event's `projector_canonical_events` row cleared
+ * or orphaned BEFORE the rewind, which no shipped tool does yet (follow-up filed).
  *
  * Observed live on Base Sepolia during the DR-2026-08-05 gate endgame: a requester replaying a
  * counterparty's settlement could not anchor the solution Delivery, and lost the other four

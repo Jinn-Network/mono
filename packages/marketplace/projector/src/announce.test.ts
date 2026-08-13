@@ -865,9 +865,10 @@ describe("projectAnnouncements", () => {
   // outcome for one record, not a statement about the others. But it propagated straight out of
   // `projectAnnouncements`, and `projector-loop.ts` catches that as non-fatal and advances the
   // cursor anyway: `hasCanonicalEvent` then filters every event in the tick out of later
-  // `publicationEvents`, so all of them are dropped for good. Observed live on Base Sepolia during
-  // the DR-2026-08-05 gate endgame -- one unanchorable counterparty Delivery dropped the other
-  // four announcements in the same tick, and recovering them costs another rewind.
+  // `publicationEvents`, so all of them are dropped for good -- permanently, since a rewind replays
+  // the identical event_keys and `hasCanonicalEvent` filters them right back out. Observed live on
+  // Base Sepolia during the DR-2026-08-05 gate endgame -- one unanchorable counterparty Delivery
+  // dropped the other four announcements in the same tick with it.
   //
   // Fail-closed is unchanged for the record that could not be resolved: no announcement, and a
   // named refusal. It just no longer speaks for its neighbours.

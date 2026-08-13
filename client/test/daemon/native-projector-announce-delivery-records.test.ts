@@ -939,8 +939,10 @@ describe('native announce path — TODAY generation (V3) delivery records (#45)'
 //   operator holds no single durable solution-delivery record for task=1236 attempt=0
 //
 // The five canonical events journalled and the observations emitted, so the range is SPENT
-// (`docs/runbooks/projector-replay.md`) — recovering the announcements costs another rewind, and
-// the same failure repeats, because the cause is not transient.
+// (`docs/runbooks/projector-replay.md`): the drop is permanent, and a rewind cannot republish it --
+// `hasCanonicalEvent` suppresses the identical event_key again. Recovery would need those rows
+// cleared/orphaned first, which no shipped tool does yet. The cause is not transient either, so the
+// same failure would repeat on the next task to hit this path -- which is what this fix prevents.
 
 /** keccak256 over the exact sealed Delivery — `getAttempt(...).solutionCidDigest`. */
 const SOLUTION_ON_CHAIN_KECCAK = keccakEvidenceHash(SOLUTION_DELIVERY_BYTES);

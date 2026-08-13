@@ -566,6 +566,6 @@ describe('projector loop', () => {
     // permanent, which is the fact an operator has to act on.
     expect(logged).toContain('dropped the "submission" announcement for TaskCreated');
     expect(logged).toContain('120');
-    expect(logged).toContain('another rewind');
+    expect(logged).toContain('projector_canonical_events row cleared/orphaned by event_key');
   });
 });
