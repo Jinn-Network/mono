@@ -457,10 +457,9 @@ const pairedDeltaFixture = {
     conflicted: { count: 0, cellKeys: [] },
     bootstrap: {
       procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
-      // 2000 = 2 x 1000 resamples: this method runs two bootstrap passes (alpha/2 and
-      // 1-alpha/2), and `sourceClusters` multiplies its second argument by the cluster count
-      // to derive `draws`.
-      ...sourceClusters(pairedDeltaTasks, 2000),
+      // Both endpoint passes replay one seed-identical bootstrap ensemble. `draws` counts the
+      // unique variates in that shared ensemble, not the implementation's repeated evaluation.
+      ...sourceClusters(pairedDeltaTasks, 1000),
     },
   },
 };
@@ -719,7 +718,9 @@ const fixtures = {
   "avg-at-k": avgAtKFixture,
   "paired-mcnemar": mcnemarFixture,
   "provenance-cluster-sign": clusterSignFixture,
-  "paired-delta": pairedDeltaFixture,
+  // `paired-delta.json` is the immutable pre-correction fixture. Current conformance uses this
+  // append-only successor; the manifest erratum preserves and supersedes the historical bytes.
+  "paired-delta-shared-ensemble.v2": pairedDeltaFixture,
   "paired-delta-withheld": pairedDeltaWithheldFixture,
   "clean-subset": cleanSubsetFixture,
   "noninferiority-pass": noninferiorityPassFixture,

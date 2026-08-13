@@ -267,7 +267,7 @@ describe("NativeEvaluatorCoordinator", () => {
     });
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
       kind: "paused",
-      reason: "evaluator-dependency-failed",
+      reason: "evaluator-dependency-failed: Error: trusted authority unavailable",
     });
     expect(authority).toHaveBeenCalledOnce();
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
@@ -278,7 +278,7 @@ describe("NativeEvaluatorCoordinator", () => {
     nowMs += 1_001;
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
       kind: "paused",
-      reason: "evaluator-dependency-failed",
+      reason: "evaluator-dependency-failed: Error: trusted authority unavailable",
     });
     nowMs += 1_001;
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
@@ -313,13 +313,13 @@ describe("NativeEvaluatorCoordinator", () => {
     });
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
       kind: "paused",
-      reason: "evaluator-dependency-failed",
+      reason: "evaluator-dependency-failed: Error: trusted authority unavailable",
     });
     for (let attempt = 2; attempt <= 8; attempt++) {
       nowMs += 1_001;
       await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
         kind: "paused",
-        reason: "evaluator-dependency-failed",
+        reason: "evaluator-dependency-failed: Error: trusted authority unavailable",
       });
     }
     expect(state.getEvaluation(id)).toMatchObject({ state: "paused" });
@@ -546,6 +546,92 @@ describe("NativeEvaluatorCoordinator", () => {
     });
     await expect(coordinator.reconcileEvaluation(id)).resolves.toMatchObject({ kind: "paused" });
     expect(opened).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Round 26 (CP6 live gate): the multi-provider RPC fallback chain served `finalized` heads that
+   * disagreed by 130-500 blocks between consecutive polls, and a transaction that was mined,
+   * successful, and finalized read as absent to whichever slot answered. The infrastructure
+   * classifier used to call that `orphaned`, and this leg's `recordEvaluationOperationOrphaned`
+   * NULLs `evaluation_attempt_uri` / `evaluation_request_id` and rolls the aggregate back — a
+   * destructive rollback driven by nothing but provider lag.
+   */
+  function claimLegSetup(options: {
+    readonly status: () => { readonly kind: "pending" } | { readonly kind: "orphaned"; readonly reason: string };
+    readonly now?: string;
+  }) {
+    const { state, id } = setup();
+    const claimTx = { hash: `0x${"3".repeat(64)}`, blockNumber: 101n, blockHash: `0x${"4".repeat(64)}` };
+    const opened = vi.fn(async ({ operationId }: { operationId: string }) =>
+      ({ operationId, requestId, verdictIndex: 0, transaction: claimTx }));
+    const coordinator = new NativeEvaluatorCoordinator({
+      state,
+      backend: {} as never,
+      authority: { claim: async () => { throw new Error("authority already persisted"); }, dependencies: {} as never },
+      deadline: () => "2026-08-03T00:00:00Z",
+      evaluatorAddress,
+      verdictPorts: {
+        canOpenVerdictAttempt: async () => ({ ok: true }),
+        openVerdictAttempt: opened,
+        // The polled slot never shows the claim — exactly what a lagging replica returns.
+        readCanonicalVerdictAttempt: async () => undefined,
+      } as never,
+      chain: { isFinalized: async () => true, transactionStatus: async () => options.status() },
+      deliverySignature: {} as never,
+      evidence: {} as never,
+      publisher: {} as never,
+      verification: {} as never,
+      retry: { now: () => new Date(options.now ?? "2026-08-02T12:00:00Z") },
+    });
+    return { state, id, coordinator, opened, claimTx };
+  }
+
+  it("holds a broadcast claim the chain has not confirmed instead of orphaning and re-broadcasting it", async () => {
+    const { state, id, coordinator, opened, claimTx } = claimLegSetup({ status: () => ({ kind: "pending" }) });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluation-claim-pending" });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluation-claim-pending" });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluation-claim-pending" });
+    // One broadcast, not one per tick: the operation kept its transaction identity rather than
+    // being rolled back to intent and re-opened.
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(state.listEvaluationOperations(id).map(({ kind, status, txHash }) => [kind, status, txHash]))
+      .toEqual([["evaluation-claim", "broadcast", claimTx.hash]]);
+    expect(state.getEvaluation(id)).toMatchObject({ state: "evaluation-claim-pending" });
+  });
+
+  it("still rolls a claim back when the chain gives positive evidence of a reorg", async () => {
+    const { state, id, coordinator, opened } = claimLegSetup({
+      status: () => ({ kind: "orphaned", reason: "transaction receipt is reverted or non-canonical" }),
+    });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluation-claim-pending" });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluation-claim-pending" });
+    expect(state.listEvaluationOperations(id).map(({ kind, status }) => [kind, status]))
+      .toEqual([["evaluation-claim", "orphaned"]]);
+    expect(state.getEvaluation(id)).toMatchObject({ state: "evaluation-pending" });
+    // The rollback is the point: the next tick re-opens the claim.
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluation-claim-pending" });
+    expect(opened).toHaveBeenCalledTimes(2);
+  });
+
+  it("terminalizes an unconfirmed claim on the admission deadline, not on provider lag", async () => {
+    const { state, id, coordinator } = claimLegSetup({ status: () => ({ kind: "pending" }) });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluation-claim-pending" });
+    const { state: _state, id: lateId, coordinator: late } = claimLegSetup({
+      status: () => ({ kind: "pending" }),
+      // Past the 2026-08-03T00:00:00Z admission deadline the coordinator is handed.
+      now: "2026-08-03T01:00:00Z",
+    });
+    // First tick broadcasts the claim; the second finds the chain still silent past the deadline.
+    await expect(late.reconcileEvaluation(lateId)).resolves.toEqual({ kind: "evaluation-claim-pending" });
+    // The retry schedule's own next attempt lies beyond the deadline, so the pause terminalizes
+    // immediately rather than parking the evaluation for another provider poll.
+    await expect(late.reconcileEvaluation(lateId)).resolves.toEqual({
+      kind: "failed",
+      reason: "evaluator-retry-exhausted",
+    });
+    expect(_state.getEvaluation(lateId)).toMatchObject({ state: "failed" });
+    // The pre-deadline evaluation is untouched — lag alone never terminalizes.
+    expect(state.getEvaluation(id)).toMatchObject({ state: "evaluation-claim-pending" });
   });
 });
 

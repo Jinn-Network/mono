@@ -679,6 +679,7 @@ The exact 52-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/noninferiority-inconclusive.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/noninferiority-pass.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-contract.json | — | — | — |
+| fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-delta-shared-ensemble.v2.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-delta-withheld.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-delta.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-testing | packages/benchmarking/testing/fixtures/methods/paired-exclusion-r1.json | — | — | — |
@@ -1496,7 +1497,7 @@ The exact 52-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3728 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3732 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1504,13 +1505,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 28 |
 | boundaryPolicies | 23 |
 | catalogManifests | 85 |
-| catalogPublicSurfaces | 1257 |
+| catalogPublicSurfaces | 1258 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 2972 |
-| generatedOutputSources | 1313 |
+| discoveredFirstPartySurfaces | 2976 |
+| generatedOutputSources | 1314 |
 | generatorSources | 615 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
