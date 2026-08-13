@@ -1866,13 +1866,13 @@
       "authorityDocuments": 29,
       "boundaryPolicies": 23,
       "catalogManifests": 87,
-      "catalogPublicSurfaces": 1277,
+      "catalogPublicSurfaces": 1274,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2984,
-      "generatedOutputSources": 1333,
+      "discoveredFirstPartySurfaces": 2966,
+      "generatedOutputSources": 1330,
       "generatorSources": 622,
       "marketplaceControl": 2,
       "requiredGates": 22,
@@ -7076,36 +7076,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/application-delivery"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/application-delivery/delivery-observer.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/application-delivery/projection.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/architecture"
       },
       {
@@ -8106,16 +8076,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/cli/commands/tasks-issue-relay-spend.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/cli/commands/tasks-lifecycle.test.ts"
       },
       {
@@ -8137,16 +8097,6 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/commands/tasks-observe-autopilot.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/cli/commands/tasks-observe-issue-relay.test.ts"
       },
       {
         "categories": [
@@ -8407,16 +8357,6 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/task-native-readiness.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/cli/tasks-observe-application.test.ts"
       },
       {
         "categories": [
@@ -13595,26 +13535,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/jinn-repo-evaluator/issue-relay-context.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/jinn-repo-evaluator/issue-relay-semantic.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/jinn-repo-evaluator/live-eval-runner.integration.test.ts"
       },
       {
@@ -13946,46 +13866,6 @@
           "@ritsukai"
         ],
         "path": "client/test/intents/wiring.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/issue-relay"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/issue-relay/delivery-observer.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/issue-relay/evaluation-context-resolver.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/issue-relay/github-receipt-observer.test.ts"
       },
       {
         "categories": [
@@ -14756,16 +14636,6 @@
           "@ritsukai"
         ],
         "path": "client/test/plugins"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/plugins/jinn-repo-runtime-session-start.test.ts"
       },
       {
         "categories": [
@@ -35376,42 +35246,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/sdk/fixtures/autopilot/issue-relay-adoption.v1.json"
-      },
-      {
-        "categories": [
-          "catalogPublicSurfaces",
-          "discoveredFirstPartySurfaces",
-          "generatedOutputSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "packages/sdk/fixtures/autopilot/issue-relay-assurance.v1.md"
-      },
-      {
-        "categories": [
-          "catalogPublicSurfaces",
-          "discoveredFirstPartySurfaces",
-          "generatedOutputSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "packages/sdk/fixtures/autopilot/issue-relay-round.v1.json"
-      },
-      {
-        "categories": [
-          "catalogPublicSurfaces",
-          "discoveredFirstPartySurfaces",
-          "generatedOutputSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "packages/sdk/fixtures/autopilot/malformed-submit-request.json"
       },
       {
@@ -35807,26 +35641,6 @@
           "@ritsukai"
         ],
         "path": "packages/sdk/test/contracts.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "packages/sdk/test/issue-relay-comment.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "packages/sdk/test/issue-relay.test.ts"
       },
       {
         "categories": [
@@ -51515,33 +51329,6 @@
         "packedTargets": [],
         "path": "packages/sdk/fixtures/autopilot/delivery-pending.json",
         "relativeSource": "fixtures/autopilot/delivery-pending.json"
-      },
-      {
-        "claim": null,
-        "export": null,
-        "kind": "fixtures",
-        "package": "@jinn-network/sdk",
-        "packedTargets": [],
-        "path": "packages/sdk/fixtures/autopilot/issue-relay-adoption.v1.json",
-        "relativeSource": "fixtures/autopilot/issue-relay-adoption.v1.json"
-      },
-      {
-        "claim": null,
-        "export": null,
-        "kind": "fixtures",
-        "package": "@jinn-network/sdk",
-        "packedTargets": [],
-        "path": "packages/sdk/fixtures/autopilot/issue-relay-assurance.v1.md",
-        "relativeSource": "fixtures/autopilot/issue-relay-assurance.v1.md"
-      },
-      {
-        "claim": null,
-        "export": null,
-        "kind": "fixtures",
-        "package": "@jinn-network/sdk",
-        "packedTargets": [],
-        "path": "packages/sdk/fixtures/autopilot/issue-relay-round.v1.json",
-        "relativeSource": "fixtures/autopilot/issue-relay-round.v1.json"
       },
       {
         "claim": null,
