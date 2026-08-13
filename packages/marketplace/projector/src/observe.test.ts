@@ -332,6 +332,99 @@ describe("projectObservations", () => {
     ).toBe(false);
   });
 
+  // Defect #48. A REQUESTER never subscribes to the counterparty's mech, so it never holds the
+  // `Deliver` fact -- and must not therefore reject a delivery the coordinator settled.
+  describe("requester-side today delivery without a Mech Deliver fact (#48)", () => {
+    const RECORD_SHA = `sha256:${"a".repeat(64)}` as const;
+    const RECORD_KECCAK = `0x${"b".repeat(64)}` satisfies Hex;
+
+    function claimedWithRecordPlane(
+      overrides: Partial<NonNullable<ObservationProjectionContext["recordPlaneDelivery"]>> = {},
+    ): ObservationMarketplaceEvent {
+      return projectable({
+        event: "SolutionDeliveryClaimed",
+        facts: { operator: OPERATOR, requestId: REQUEST_ID, taskId: 42n, attemptIndex: 3 },
+        derivation: derivation("SolutionDeliveryClaimed", 3),
+      }, {
+        recordPlaneDelivery: {
+          sha256Digest: RECORD_SHA,
+          keccakEvidenceHash: RECORD_KECCAK,
+          onChainKeccak: RECORD_KECCAK,
+          ...overrides,
+        },
+      });
+    }
+
+    test("SOLVER path is unchanged: no mech fact and no record-plane witness still rejects", () => {
+      const observed = projectObservations([todayTaskCreated, claim, solutionClaimed]);
+      expect(observed.at(-1)).toEqual({
+        ...base("network.jinn.task-execution.attempt-terminal.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
+        data: {
+          state: "rejected",
+          category: "invalid-reference",
+          detail: "no external Mech Deliver fact for router requestId",
+        },
+      });
+    });
+
+    test("an anchored record-plane Delivery records the delivery instead of rejecting it", () => {
+      const observed = projectObservations([todayTaskCreated, claim, claimedWithRecordPlane()]);
+      expect(observed.at(-1)).toEqual({
+        ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
+        data: { digest: RECORD_SHA },
+      });
+      expect(
+        observed.some(({ type }) => type === "network.jinn.task-execution.attempt-terminal.v1"),
+      ).toBe(false);
+    });
+
+    test("record-plane bytes that do not hash to the coordinator anchor are refused, never adopted", () => {
+      const observed = projectObservations([
+        todayTaskCreated,
+        claim,
+        claimedWithRecordPlane({ onChainKeccak: `0x${"c".repeat(64)}` }),
+      ]);
+      expect(observed.at(-1)).toEqual({
+        ...base("network.jinn.task-execution.attempt-terminal.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
+        data: {
+          state: "rejected",
+          category: "content-corruption",
+          detail: "record-plane Delivery does not hash to the coordinator's solution anchor",
+        },
+      });
+      expect(
+        observed.some(({ type }) => type === "network.jinn.task-execution.delivery-recorded.v1"),
+      ).toBe(false);
+    });
+
+    test("an all-zero coordinator anchor never matches an all-zero recomputed hash", () => {
+      const zero = `0x${"0".repeat(64)}` satisfies Hex;
+      const observed = projectObservations([
+        todayTaskCreated,
+        claim,
+        claimedWithRecordPlane({ keccakEvidenceHash: zero, onChainKeccak: zero }),
+      ]);
+      expect(observed.at(-1)?.type).toBe("network.jinn.task-execution.attempt-terminal.v1");
+      expect(
+        observed.some(({ type }) => type === "network.jinn.task-execution.delivery-recorded.v1"),
+      ).toBe(false);
+    });
+
+    test("a mech fact still takes the mech branch when both witnesses are present", () => {
+      const observed = projectObservations([
+        todayTaskCreated,
+        claim,
+        deliver(),
+        claimedWithRecordPlane({ sha256Digest: `sha256:${"f".repeat(64)}` }),
+      ]);
+      // The mech branch's correspondence sha256 ("a"*64) wins over the record-plane one ("f"*64).
+      expect(observed.at(-1)).toEqual({
+        ...base("network.jinn.task-execution.delivery-recorded.v1", ATTEMPT, 2n, 3, "SolutionDeliveryClaimed"),
+        data: { digest: `sha256:${"a".repeat(64)}` },
+      });
+    });
+  });
+
   test("today mode refuses unknown-task and regressing attempt identity without observations", () => {
     const unknown = reduceMarketplaceProjection([claim], createMarketplaceProjectionState());
     expect(unknown).toEqual({
