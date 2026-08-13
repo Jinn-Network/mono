@@ -6,10 +6,12 @@
  * what makes it testable, so it is tested here: the withdraw-on-orphan and re-announce-on-return
  * legs, their idempotence, and the tee that feeds it without a second chain cursor.
  */
+import { createHash, generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { archivePagePath } from '@jinn-network/record-discovery-protocol';
 import { Store } from '../../src/store/store.js';
 import { NativeMarketplaceEventRepository } from '../../src/daemon/native-canonical-observations.js';
 import {
@@ -17,6 +19,7 @@ import {
   buildNativeSolutionCorrections,
   teeNativeMarketplaceEvents,
 } from '../../src/daemon/native-solution-corrections.js';
+import { openNativeSolutionPublisher } from '../../src/daemon/native-solution-publisher.js';
 
 const CHAIN = {
   chainId: 84532,
@@ -45,16 +48,27 @@ afterEach(() => {
 });
 
 /** A published delivery the reconciler can find: engagement + artifact + published outbox row. */
-function seedPublishedDelivery(): void {
+function seedPublishedDelivery(overrides: {
+  readonly engagement?: `sha256:${string}`;
+  readonly taskId?: string;
+  readonly deliveryDigest?: `sha256:${string}`;
+  readonly deliveryBytes?: Buffer;
+  readonly publicationKey?: `sha256:${string}`;
+} = {}): void {
+  const engagement = overrides.engagement ?? ENGAGEMENT;
+  const taskId = overrides.taskId ?? '7';
+  const deliveryDigest = overrides.deliveryDigest ?? DELIVERY_DIGEST;
+  const deliveryBytes = overrides.deliveryBytes ?? Buffer.from('{"ok":true}');
+  const publicationKey = overrides.publicationKey ?? (`sha256:${'5'.repeat(64)}` as const);
   store.db.prepare(
     `INSERT INTO native_engagements
        (engagement_id, chain_id, coordinator, task_id, role, operator_agent, task_digest,
         submission_uri, submission_digest, state, attempt_index, policy_json, capability_json,
         created_at, updated_at)
-     VALUES (?, '84532', ?, '7', 'solver', 'urn:jinn:operator:a', ?, ?, ?, 'delivered', 0,
+     VALUES (?, '84532', ?, ?, 'solver', 'urn:jinn:operator:a', ?, ?, ?, 'delivered', 0,
              '{}', '{}', ?, ?)`,
   ).run(
-    ENGAGEMENT, CHAIN.taskCoordinator, `sha256:${'3'.repeat(64)}`,
+    engagement, CHAIN.taskCoordinator, taskId, `sha256:${'3'.repeat(64)}`,
     'urn:uuid:33333333-3333-4333-8333-333333333333', `sha256:${'4'.repeat(64)}`,
     '2026-08-06T00:00:00.000Z', '2026-08-06T00:00:00.000Z',
   );
@@ -62,7 +76,7 @@ function seedPublishedDelivery(): void {
     `INSERT INTO native_solution_artifacts
        (engagement_id, role, family, media_type, name, record_digest, exact_bytes, created_at)
      VALUES (?, 'delivery', 'delivery', 'application/json', 'delivery', ?, ?, ?)`,
-  ).run(ENGAGEMENT, DELIVERY_DIGEST, Buffer.from('{"ok":true}'), '2026-08-06T00:00:00.000Z');
+  ).run(engagement, deliveryDigest, deliveryBytes, '2026-08-06T00:00:00.000Z');
   store.db.prepare(
     `INSERT INTO native_publication_outbox
        (publication_key, engagement_id, source_id, role, record_digest, availability, status,
@@ -70,22 +84,25 @@ function seedPublishedDelivery(): void {
      VALUES (?, ?, 'urn:jinn:operator:a/solver-records', 'delivery', ?, 'available', 'published',
              '{}', ?, ?)`,
   ).run(
-    `sha256:${'5'.repeat(64)}`, ENGAGEMENT, DELIVERY_DIGEST,
+    publicationKey, engagement, deliveryDigest,
     '2026-08-06T00:00:00.000Z', '2026-08-06T00:00:00.000Z',
   );
 }
 
-function settlementEvent(blockHash = BLOCK_HASH) {
+function settlementEvent(blockHash = BLOCK_HASH, overrides: {
+  readonly taskId?: bigint;
+  readonly logIndex?: number;
+} = {}) {
   return {
     event: 'SolutionDeliveryClaimed' as const,
-    facts: { taskId: 7n, attemptIndex: 0 },
+    facts: { taskId: overrides.taskId ?? 7n, attemptIndex: 0 },
     derivation: {
       chainId: 84532,
       contract: CHAIN.jinnRouter,
       blockHash,
       blockNumber: 100n,
       txHash: TX_HASH,
-      logIndex: 0,
+      logIndex: overrides.logIndex ?? 0,
       finalityTier: 'observed-safe',
     },
   };
@@ -167,6 +184,192 @@ describe('buildNativeSolutionCorrections', () => {
 
     expect(sink.publish).not.toHaveBeenCalled();
     expect(sink.withdraw).not.toHaveBeenCalled();
+  });
+});
+
+// TWO published deliveries settled in ONE block that is then orphaned. A reorg stamps every event
+// of the orphaned block with ONE `orphaned_at` (`NativeMarketplaceEventRepository.apply` computes a
+// single `now` per batch), and each withdrawal is announced into ONE append-only signed source
+// whose head must strictly advance per announcement
+// (packages/discovery/serve/src/source-writer.ts). Regression for the corrections-side sibling of
+// solver defect #24 (#2560) and evaluator defect #46 (#2634): withdrawing both deliveries at the
+// shared `orphaned_at` instant commits the first and wedges the second on
+// `SourceWriterIntegrityError` forever, because the retry re-reads the same fixed base.
+describe('buildNativeSolutionCorrections on the real signed source', () => {
+  const ENGAGEMENT_B = `sha256:${'9'.repeat(64)}` as const;
+  const PUBLICATION_KEY_A = `sha256:${'5'.repeat(64)}` as const;
+  const PUBLICATION_KEY_B = `sha256:${'8'.repeat(64)}` as const;
+  const closers: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    await Promise.all(closers.splice(0).map((close) => close().catch(() => undefined)));
+  });
+
+  function digestOf(bytes: Uint8Array): `sha256:${string}` {
+    return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+  }
+
+  async function realPublisher() {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const opened = await openNativeSolutionPublisher({
+      rootDir: mkdtempSync(join(root, 'source-')),
+      publicBaseUrl: 'https://operator.example/native',
+      source: { agent: 'urn:jinn:operator:a', name: 'solver-records' },
+      signer: {
+        keyId: 'did:key:z6MkCorrectionsRegression',
+        sign: (payload: Uint8Array) => new Uint8Array(cryptoSign(null, payload, privateKey)),
+        verify: (payload: Uint8Array, signature: Uint8Array) =>
+          cryptoVerify(null, payload, publicKey, signature),
+      },
+      settlementDeclarationKey: 'did:key:z6MkSolverSettlement',
+    });
+    closers.push(() => opened.close());
+    return opened;
+  }
+
+  async function announcementTimestamps(
+    opened: Awaited<ReturnType<typeof realPublisher>>,
+    count: number,
+  ): Promise<string[]> {
+    const timestamps: string[] = [];
+    for (let sequence = 1; sequence <= count; sequence += 1) {
+      const page = String(sequence).padStart(16, '0');
+      const response = await opened.handler(new Request(
+        `https://operator.example/native${archivePagePath('solver-records', page)}`,
+      ));
+      expect(response.status).toBe(200);
+      const parsed = JSON.parse(await response.text()) as {
+        entries: Array<{ entry: { timestamp: string } }>;
+      };
+      timestamps.push(parsed.entries[0]!.entry.timestamp);
+    }
+    return timestamps;
+  }
+
+  /** Seed one delivery end-to-end: DB rows plus its available announcement on the signed source. */
+  async function seedAnnouncedDelivery(
+    opened: Awaited<ReturnType<typeof realPublisher>>,
+    input: {
+      readonly engagement: `sha256:${string}`;
+      readonly taskId: string;
+      readonly bytes: Uint8Array;
+      readonly publicationKey: `sha256:${string}`;
+      readonly createdAt: string;
+    },
+  ): Promise<void> {
+    const digest = digestOf(input.bytes);
+    seedPublishedDelivery({
+      engagement: input.engagement,
+      taskId: input.taskId,
+      deliveryDigest: digest,
+      deliveryBytes: Buffer.from(input.bytes),
+      publicationKey: input.publicationKey,
+    });
+    await opened.publish({
+      publication: {
+        publicationKey: input.publicationKey,
+        engagementId: input.engagement,
+        sourceId: opened.sourceId,
+        role: 'delivery',
+        recordDigest: digest,
+        availability: 'available',
+        status: 'intent',
+        detail: {},
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+      artifact: {
+        engagementId: input.engagement,
+        role: 'delivery',
+        family: 'delivery',
+        mediaType: 'application/json',
+        name: 'delivery',
+        digest,
+        bytes: input.bytes,
+        createdAt: input.createdAt,
+      },
+      bytes: input.bytes,
+    });
+  }
+
+  async function seedTwoOrphanedDeliveries(opened: Awaited<ReturnType<typeof realPublisher>>) {
+    await seedAnnouncedDelivery(opened, {
+      engagement: ENGAGEMENT,
+      taskId: '7',
+      bytes: new TextEncoder().encode('{"ok":"a"}'),
+      publicationKey: PUBLICATION_KEY_A,
+      createdAt: '2026-08-06T00:00:00.000Z',
+    });
+    await seedAnnouncedDelivery(opened, {
+      engagement: ENGAGEMENT_B,
+      taskId: '8',
+      bytes: new TextEncoder().encode('{"ok":"b"}'),
+      publicationKey: PUBLICATION_KEY_B,
+      createdAt: '2026-08-06T00:00:00.001Z',
+    });
+    const events = new NativeMarketplaceEventRepository(store);
+    events.apply({
+      events: [
+        settlementEvent(BLOCK_HASH),
+        settlementEvent(BLOCK_HASH, { taskId: 8n, logIndex: 1 }),
+      ] as never,
+    });
+    events.apply({ events: [], orphanedBlockHashes: [BLOCK_HASH] });
+    // The precondition that makes naive timestamps collide: one shared base for the whole block.
+    expect(store.db.prepare(
+      `SELECT DISTINCT orphaned_at FROM native_marketplace_events WHERE orphaned_at IS NOT NULL`,
+    ).all()).toHaveLength(1);
+    return events;
+  }
+
+  it('withdraws every published delivery of one reorged block with strictly-advancing timestamps', async () => {
+    const opened = await realPublisher();
+    const events = await seedTwoOrphanedDeliveries(opened);
+
+    await buildNativeSolutionCorrections({ store, publisher: opened, marketplaceEvents: events })
+      .reconcile();
+
+    expect(store.db.prepare(
+      `SELECT action FROM native_solution_discovery_corrections ORDER BY rowid`,
+    ).all()).toEqual([{ action: 'withdrawn' }, { action: 'withdrawn' }]);
+    // Both withdrawals committed to the one signed source (sequences 3 and 4), which the
+    // source-writer would have refused had any two announcements shared a timestamp.
+    const timestamps = await announcementTimestamps(opened, 4);
+    for (let index = 1; index < timestamps.length; index += 1) {
+      expect(Date.parse(timestamps[index]!)).toBeGreaterThan(Date.parse(timestamps[index - 1]!));
+    }
+  });
+
+  it('re-announces every returned delivery in one pass with strictly-advancing timestamps', async () => {
+    const opened = await realPublisher();
+    const events = await seedTwoOrphanedDeliveries(opened);
+    const corrections = buildNativeSolutionCorrections({
+      store, publisher: opened, marketplaceEvents: events,
+    });
+    await corrections.reconcile();
+
+    // Both deliveries return in one new canonical block. The signed head now sits 1ms past the
+    // shared `orphaned_at`; give the re-announce pass's wall-clock base room to advance past it.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const returned = `0x${'f'.repeat(64)}` as const;
+    events.apply({
+      events: [
+        settlementEvent(returned),
+        settlementEvent(returned, { taskId: 8n, logIndex: 1 }),
+      ] as never,
+    });
+    await corrections.reconcile();
+
+    expect(store.db.prepare(
+      `SELECT action FROM native_solution_discovery_corrections ORDER BY rowid`,
+    ).all()).toEqual([
+      { action: 'withdrawn' }, { action: 'withdrawn' },
+      { action: 'available' }, { action: 'available' },
+    ]);
+    const timestamps = await announcementTimestamps(opened, 6);
+    for (let index = 1; index < timestamps.length; index += 1) {
+      expect(Date.parse(timestamps[index]!)).toBeGreaterThan(Date.parse(timestamps[index - 1]!));
+    }
   });
 });
 
