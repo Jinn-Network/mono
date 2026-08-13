@@ -263,14 +263,17 @@ function recordClosure(input: MaterializeBundleInput): {
         } catch {
           refuse("record-integrity", "evidence-closure", `evaluation Submission ${entry.submissionSha256} is not a valid sealed Submission`);
         }
-        const match = /^eval:[a-f0-9]{64}:e([1-9][0-9]*):/u.exec(submission.nonce);
+        const match = /^eval:[a-f0-9]{64}:e([1-9][0-9]*)(?::r([2-9][0-9]*))?:/u.exec(submission.nonce);
         const evalIndex = match === null ? undefined : Number(match[1]);
+        const evaluationAttempt = match?.[2] === undefined ? 1 : Number(match[2]);
         const evaluator = submission.requirements?.[EVALUATOR_REQUIREMENT_KEY];
         const evalTaskSha256 = submission.task.digest?.sha256;
         if (
           evalIndex === undefined || !Number.isSafeInteger(evalIndex)
           || typeof evaluator !== "string" || typeof evalTaskSha256 !== "string"
           || !submission.nonce.endsWith(`:${entry.cellKey}:${entry.dispatch}`)
+          || (entry.evalIndex !== undefined && entry.evalIndex !== evalIndex)
+          || (entry.evaluationAttempt !== undefined && entry.evaluationAttempt !== evaluationAttempt)
         ) {
           refuse("record-integrity", "evidence-closure", `evaluation Submission ${entry.submissionSha256} lacks its exact journal/evaluator/task binding`);
         }
@@ -278,6 +281,7 @@ function recordClosure(input: MaterializeBundleInput): {
           cellKey: entry.cellKey,
           dispatch: entry.dispatch,
           evalIndex,
+          ...(evaluationAttempt === 1 ? {} : { evaluationAttempt }),
           evaluator,
           evalTaskSha256,
           sha256: entry.submissionSha256,
@@ -302,8 +306,10 @@ function recordClosure(input: MaterializeBundleInput): {
       });
     } else if (entry.kind === "evaluation") {
       const evalIndex = entry.evalIndex ?? 1;
+      const evaluationAttempt = entry.evaluationAttempt ?? 1;
       const submission = [...graph.evaluationSubmissions].reverse().find(
-        (candidate) => candidate.cellKey === entry.cellKey && candidate.evalIndex === evalIndex,
+        (candidate) => candidate.cellKey === entry.cellKey && candidate.evalIndex === evalIndex
+          && (candidate.evaluationAttempt ?? 1) === evaluationAttempt,
       );
       const hasSeparateLineage = entry.evalTaskSha256 !== undefined
         && entry.evalDeliverySha256 !== undefined
@@ -331,6 +337,7 @@ function recordClosure(input: MaterializeBundleInput): {
       graph.evaluations.push({
         cellKey: entry.cellKey,
         evalIndex,
+        ...(evaluationAttempt === 1 ? {} : { evaluationAttempt }),
         ...(hasEmbeddedLineage ? { relationship: "same-execution-scorer" as const } : {}),
         ...(entry.evaluator !== undefined ? { evaluator: entry.evaluator } : {}),
         ...(entry.evalTaskSha256 !== undefined ? { evalTaskSha256: entry.evalTaskSha256 } : {}),
@@ -351,9 +358,30 @@ function recordClosure(input: MaterializeBundleInput): {
               evalDeliverySha256: entry.evalDeliverySha256!,
               evalAttempt: entry.evalAttempt!,
               evalIndex,
-            },
+          },
         );
       }
+    } else if (entry.kind === "evaluation-retryable-failure") {
+      const submission = [...graph.evaluationSubmissions].reverse().find(
+        (candidate) => candidate.cellKey === entry.cellKey && candidate.evalIndex === entry.evalIndex
+          && (candidate.evaluationAttempt ?? 1) === entry.evaluationAttempt,
+      );
+      const retries = graph.evaluationRetries ?? [];
+      if (entry.evalTaskSha256 !== undefined) addRole(evidenceRecords, entry.evalTaskSha256, "evaluation-task");
+      retries.push({
+        cellKey: entry.cellKey,
+        dispatch: entry.dispatch,
+        evalIndex: entry.evalIndex,
+        evaluationAttempt: entry.evaluationAttempt,
+        evaluator: entry.evaluator,
+        ...(entry.evalTaskSha256 === undefined ? {} : { evalTaskSha256: entry.evalTaskSha256 }),
+        ...(submission === undefined ? {} : { evalSubmissionSha256: submission.sha256 }),
+        ...(entry.evalAttempt === undefined ? {} : { evalAttempt: entry.evalAttempt }),
+        failureCategory: entry.category,
+        recoveryAdvice: entry.recoveryAdvice,
+        detail: entry.detail,
+      });
+      graph.evaluationRetries = retries;
     }
   }
   for (const cell of matrix.cells) {
@@ -366,12 +394,17 @@ function recordClosure(input: MaterializeBundleInput): {
     left.cellKey.localeCompare(right.cellKey) || left.dispatch - right.dispatch || left.sha256.localeCompare(right.sha256));
   graph.evaluationSubmissions.sort((left, right) =>
     left.cellKey.localeCompare(right.cellKey) || left.evalIndex - right.evalIndex
+    || (left.evaluationAttempt ?? 1) - (right.evaluationAttempt ?? 1)
     || left.dispatch - right.dispatch || left.sha256.localeCompare(right.sha256));
   graph.solveDeliveries.sort((left, right) =>
     left.cellKey.localeCompare(right.cellKey) || left.dispatch - right.dispatch || left.sha256.localeCompare(right.sha256));
   graph.evaluations.sort((left, right) =>
     left.cellKey.localeCompare(right.cellKey) || left.evalIndex - right.evalIndex
+    || (left.evaluationAttempt ?? 1) - (right.evaluationAttempt ?? 1)
     || (left.verdictSha256 ?? "").localeCompare(right.verdictSha256 ?? ""));
+  graph.evaluationRetries?.sort((left, right) =>
+    left.cellKey.localeCompare(right.cellKey) || left.evalIndex - right.evalIndex
+    || left.evaluationAttempt - right.evaluationAttempt);
 
   const fold = foldRunJournal(journal);
   const assemblyCells: BundleAssemblyCell[] = expectedCellSet(benchmark, run).map((coord) => {

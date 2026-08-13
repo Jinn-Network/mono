@@ -8,7 +8,7 @@
  * `running --resume--> running`: "crash-safe resumption via the records' cell idempotency
  * keys"). One journal per draftId (`runJournalPath`), JSON Lines, entries never rewritten.
  *
- * Seven entry kinds:
+ * Eleven entry kinds (driver start/terminals included):
  * - `launched` — the run driver started (one per `runLaunch` call).
  * - `cell-event` — a solve-side `CellStatusEvent` from `launchAndWatch`/`resumeRun`, verbatim.
  *   Optionally carries `blame` (BP-22): for an "error" terminal, the platform-derived
@@ -18,6 +18,8 @@
  * - `submission-accepted` — the exact sealed Submission bytes were stored, keyed by dispatch.
  * - `delivery` — the exact sealed Delivery bytes were stored for a dispatch's accounted attempt.
  * - `evaluation` — the evaluation leg reached a terminal (a verdict, or a could-not-grade fact).
+ * - `evaluation-retryable-failure` — one typed provider/transport outage left the exact
+ *   evaluation leg open without changing solve dispatch or patch identity.
  * - `cancel-requested` (BP-22) — `run.cancel` recorded a cancellation request. Written exactly
  *   once per run, alongside (never instead of) the durable cancel marker
  *   (`./cancel-marker.ts`) — the marker is the fact other operations gate on; this entry is the
@@ -26,6 +28,7 @@
  */
 
 import { z } from "zod";
+import { TASK_EXECUTION_ERROR_CATEGORIES } from "@jinn-network/task-execution-protocol";
 import { PRODUCT_ERROR_CODES, refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { appendFsyncedLineSync, readTextIfExistsSync } from "../fs/atomic.js";
 import { runJournalPath } from "../workspace/layout.js";
@@ -102,6 +105,8 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     pinningEvidenceSha256: Sha256HexSchema.optional(),
     /** Which leg's Submission this is (BP-21). Optional: legacy entries carry no leg. */
     leg: z.enum(["solve", "evaluation"]).optional(),
+    evalIndex: z.number().int().positive().optional(),
+    evaluationAttempt: z.number().int().positive().optional(),
   }),
   z.object({
     kind: z.literal("delivery"),
@@ -134,6 +139,22 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     /** 1-based evaluation-leg index within `policy.evaluation.minVerdicts` (BP-21). A fold
      * treats an entry without one as leg 1 (the only leg a legacy journal ever ran). */
     evalIndex: z.number().int().min(1).optional(),
+    evaluationAttempt: z.number().int().positive().optional(),
+    failureCategory: z.enum(TASK_EXECUTION_ERROR_CATEGORIES).optional(),
+  }),
+  z.object({
+    kind: z.literal("evaluation-retryable-failure"),
+    at: Rfc3339Schema,
+    cellKey: z.string(),
+    dispatch: z.number().int().positive(),
+    evalIndex: z.number().int().positive(),
+    evaluationAttempt: z.number().int().positive(),
+    evaluator: z.string(),
+    evalTaskSha256: Sha256HexSchema.optional(),
+    evalAttempt: z.string().optional(),
+    category: z.enum(["backend-unavailable", "dependency-unavailable", "transport-failure"]),
+    recoveryAdvice: z.literal("new-attempt-required"),
+    detail: z.string(),
   }),
   /** `run.cancel` recorded a cancellation request (BP-22) — written once per run, alongside the
    * durable cancel marker (`./cancel-marker.ts`). Carries no per-cell accounting; the fold below
@@ -238,6 +259,12 @@ export interface CellJournalFold {
   /** Ascending, deduplicated 1-based leg indexes with a terminal (a verdict OR a
    * could-not-grade entry). Entries without an evalIndex count as index 1 (legacy folds). */
   readonly completedEvalIndexes: readonly number[];
+  readonly evaluationLegs: readonly {
+    readonly evalIndex: number;
+    readonly attempts: number;
+    readonly retryableFailures: number;
+    readonly lastFailureCategory?: typeof TASK_EXECUTION_ERROR_CATEGORIES[number];
+  }[];
   readonly detail?: string;
   /** The most recent task-vs-infrastructure attribution journaled for this cell's CURRENT
    * dispatch (BP-22) — set from a cell-event entry's `blame`, reset (to absent) on a fresh
@@ -264,6 +291,11 @@ interface MutableFold {
   verdicts: CellVerdictFold[];
   evaluationTerminal?: "could-not-grade";
   completedEvalIndexes: Set<number>;
+  evaluationLegs: Map<number, {
+    attempts: number;
+    retryableFailures: number;
+    lastFailureCategory?: typeof TASK_EXECUTION_ERROR_CATEGORIES[number];
+  }>;
   blame?: "task" | "infrastructure";
 }
 
@@ -305,6 +337,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       lastDispatch: 0,
       verdicts: [],
       completedEvalIndexes: new Set(),
+      evaluationLegs: new Map(),
     };
     byCell.set(cellKey, fresh);
     return fresh;
@@ -328,6 +361,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
         fold.verdicts = [];
         fold.evaluationTerminal = undefined;
         fold.completedEvalIndexes = new Set();
+        fold.evaluationLegs = new Map();
         fold.blame = undefined;
       } else {
         fold.replaceableReason = event.replaceableReason;
@@ -354,6 +388,14 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
         // A fresh solve acceptance without proof must clear any earlier dispatch's proof. This
         // makes missing evidence stay missing instead of inheriting a prior match.
         fold.pinningEvidenceSha256 = entry.pinningEvidenceSha256;
+      } else if (entry.evalIndex !== undefined) {
+        const leg = fold.evaluationLegs.get(entry.evalIndex) ?? { attempts: 0, retryableFailures: 0 };
+        const evaluationAttempt = entry.evaluationAttempt ?? 1;
+        if (evaluationAttempt !== leg.retryableFailures + 1) {
+          refuse("journal-integrity", entry.cellKey, "evaluation Submission attempt is outside its contiguous retry lineage");
+        }
+        leg.attempts = Math.max(leg.attempts, evaluationAttempt);
+        fold.evaluationLegs.set(entry.evalIndex, leg);
       }
     } else if (entry.kind === "delivery") {
       const fold = ensure(entry.cellKey, "", 0);
@@ -372,8 +414,29 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       if (entry.evaluationTerminal !== undefined) fold.evaluationTerminal = entry.evaluationTerminal;
       // Either terminal (verdict or could-not-grade) completes its leg. Legacy entries without
       // an evalIndex count as leg 1 — the only leg a pre-BP-21 journal ever ran.
-      fold.completedEvalIndexes.add(entry.evalIndex ?? 1);
+      const evalIndex = entry.evalIndex ?? 1;
+      const leg = fold.evaluationLegs.get(evalIndex) ?? { attempts: 0, retryableFailures: 0 };
+      const evaluationAttempt = entry.evaluationAttempt ?? 1;
+      if (fold.completedEvalIndexes.has(evalIndex) || evaluationAttempt !== leg.retryableFailures + 1) {
+        refuse("journal-integrity", entry.cellKey, "evaluation terminal is duplicate or outside its contiguous retry lineage");
+      }
+      fold.completedEvalIndexes.add(evalIndex);
+      leg.attempts = Math.max(leg.attempts, evaluationAttempt);
+      if (entry.failureCategory !== undefined) leg.lastFailureCategory = entry.failureCategory;
+      fold.evaluationLegs.set(evalIndex, leg);
       if (entry.detail !== undefined) fold.detail = entry.detail;
+    } else if (entry.kind === "evaluation-retryable-failure") {
+      const fold = ensure(entry.cellKey, "", 0);
+      const leg = fold.evaluationLegs.get(entry.evalIndex) ?? { attempts: 0, retryableFailures: 0 };
+      if (fold.completedEvalIndexes.has(entry.evalIndex)
+        || entry.evaluationAttempt !== leg.retryableFailures + 1) {
+        refuse("journal-integrity", entry.cellKey, "evaluation retry failure is duplicate or non-contiguous");
+      }
+      leg.attempts = Math.max(leg.attempts, entry.evaluationAttempt);
+      leg.retryableFailures += 1;
+      leg.lastFailureCategory = entry.category;
+      fold.evaluationLegs.set(entry.evalIndex, leg);
+      fold.detail = entry.detail;
     }
     // "launched", "cancel-requested", and "closed" carry no per-cell accounting.
   }
@@ -398,6 +461,9 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       ...(fold.verdicts[0] !== undefined ? { verdictSha256: fold.verdicts[0].sha256 } : {}),
       ...(fold.evaluationTerminal !== undefined ? { evaluationTerminal: fold.evaluationTerminal } : {}),
       completedEvalIndexes: [...fold.completedEvalIndexes].sort((a, b) => a - b),
+      evaluationLegs: [...fold.evaluationLegs.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([evalIndex, leg]) => ({ evalIndex, ...leg })),
       ...(fold.detail !== undefined ? { detail: fold.detail } : {}),
       ...(fold.blame !== undefined ? { blame: fold.blame } : {}),
     });
@@ -478,16 +544,25 @@ export function outstandingCells(
 export function evaluationGaps(
   fold: ReadonlyMap<string, CellJournalFold>,
   minVerdicts: number,
-): { cell: CellJournalFold; missingEvalIndexes: number[] }[] {
-  const gaps: { cell: CellJournalFold; missingEvalIndexes: number[] }[] = [];
+  maxInfrastructureRetries = 0,
+): { cell: CellJournalFold; missingEvalIndexes: number[]; nextEvaluationAttempts: Readonly<Record<number, number>> }[] {
+  const gaps: { cell: CellJournalFold; missingEvalIndexes: number[]; nextEvaluationAttempts: Readonly<Record<number, number>> }[] = [];
   for (const cell of fold.values()) {
     if (cell.status !== "delivered" && cell.status !== "judged") continue;
     const completed = new Set(cell.completedEvalIndexes);
     const missingEvalIndexes: number[] = [];
+    const nextEvaluationAttempts: Record<number, number> = {};
     for (let evalIndex = 1; evalIndex <= minVerdicts; evalIndex += 1) {
-      if (!completed.has(evalIndex)) missingEvalIndexes.push(evalIndex);
+      if (completed.has(evalIndex)) continue;
+      const leg = cell.evaluationLegs.find((candidate) => candidate.evalIndex === evalIndex);
+      const retryableFailures = leg?.retryableFailures ?? 0;
+      if (retryableFailures > maxInfrastructureRetries) continue;
+      missingEvalIndexes.push(evalIndex);
+      // An accepted evaluation Submission with no terminal is resumed under the SAME attempt
+      // identity. Only a durable retryable failure advances the attempt number.
+      nextEvaluationAttempts[evalIndex] = retryableFailures + 1;
     }
-    if (missingEvalIndexes.length > 0) gaps.push({ cell, missingEvalIndexes });
+    if (missingEvalIndexes.length > 0) gaps.push({ cell, missingEvalIndexes, nextEvaluationAttempts });
   }
   return gaps;
 }

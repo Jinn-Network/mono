@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TASK_EXECUTION_ERROR_CATEGORIES } from "@jinn-network/task-execution-protocol";
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const Rfc3339Schema = z.string().datetime({ offset: true });
@@ -99,6 +100,7 @@ export const BundleAssemblyHeaderSchema = z.object({
       cellKey: z.string().min(1),
       dispatch: z.number().int().positive(),
       evalIndex: z.number().int().positive(),
+      evaluationAttempt: z.number().int().positive().optional(),
       evaluator: z.string().min(1),
       evalTaskSha256: Sha256HexSchema,
       sha256: Sha256HexSchema,
@@ -113,6 +115,7 @@ export const BundleAssemblyHeaderSchema = z.object({
     evaluations: z.array(z.object({
       cellKey: z.string().min(1),
       evalIndex: z.number().int().positive(),
+      evaluationAttempt: z.number().int().positive().optional(),
       relationship: z.literal("same-execution-scorer").optional(),
       evaluator: z.string().optional(),
       evalTaskSha256: Sha256HexSchema.optional(),
@@ -122,6 +125,19 @@ export const BundleAssemblyHeaderSchema = z.object({
       verdictSha256: Sha256HexSchema.optional(),
       evaluationTerminal: z.literal("could-not-grade").optional(),
     })),
+    evaluationRetries: z.array(z.object({
+      cellKey: z.string().min(1),
+      dispatch: z.number().int().positive(),
+      evalIndex: z.number().int().positive(),
+      evaluationAttempt: z.number().int().positive(),
+      evaluator: z.string().min(1),
+      evalTaskSha256: Sha256HexSchema.optional(),
+      evalSubmissionSha256: Sha256HexSchema.optional(),
+      evalAttempt: z.string().min(1).optional(),
+      failureCategory: z.enum(TASK_EXECUTION_ERROR_CATEGORIES),
+      recoveryAdvice: z.literal("new-attempt-required"),
+      detail: z.string().min(1),
+    })).optional(),
   }),
 });
 export type BundleAssemblyHeader = z.infer<typeof BundleAssemblyHeaderSchema>;

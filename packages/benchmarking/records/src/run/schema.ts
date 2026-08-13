@@ -33,6 +33,10 @@ const ReplacementPolicySchema = z.object({
 const EvaluationPolicySchema = z.object({
   minVerdicts: z.number().int().positive().optional(),
   distinctEvaluator: z.boolean().optional(),
+  /** Number of same-cell evaluation retries permitted after a machine-classified provider
+   * outage. Absence is the legacy zero-retry contract. Kept deliberately bounded to one: this
+   * is crash/infrastructure recovery, never an open-ended attempt budget. */
+  maxInfrastructureRetries: z.union([z.literal(0), z.literal(1)]).optional(),
 });
 
 const RunPolicySchema = z.object({

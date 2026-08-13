@@ -408,7 +408,7 @@ export async function verifyPublicBundle(
     solveDeliveryByCell.set(edge.cellKey, edge);
   }
 
-  unique(assembly.header.graph.evaluationSubmissions.map((edge) => `${edge.cellKey}:${edge.evalIndex}`), "verification.graph.evaluationSubmissions.coordinates");
+  unique(assembly.header.graph.evaluationSubmissions.map((edge) => `${edge.cellKey}:${edge.evalIndex}:${edge.evaluationAttempt ?? 1}`), "verification.graph.evaluationSubmissions.coordinates");
   const evaluationSubmissionByDigest = new Map<string, (typeof assembly.header.graph.evaluationSubmissions)[number]>();
   for (const edge of assembly.header.graph.evaluationSubmissions) {
     const cell = cellsByKey.get(edge.cellKey);
@@ -419,7 +419,10 @@ export async function verifyPublicBundle(
     const bytes = records.get(edge.sha256);
     if (bytes === undefined) refuse("record-integrity", "evidence-closure", `evaluation Submission ${edge.sha256} bytes are missing`);
     const submission = parseRecord(bytes, SubmissionRecordSchema, `records/${edge.sha256}.bin`);
-    const expectedNonce = `eval:${identities.runSha256}:e${edge.evalIndex}:${edge.cellKey}:${edge.dispatch}`;
+    const evaluationAttempt = edge.evaluationAttempt ?? 1;
+    const expectedNonce = evaluationAttempt === 1
+      ? `eval:${identities.runSha256}:e${edge.evalIndex}:${edge.cellKey}:${edge.dispatch}`
+      : `eval:${identities.runSha256}:e${edge.evalIndex}:r${evaluationAttempt}:${edge.cellKey}:${edge.dispatch}`;
     if (
       submission.task.digest?.sha256 !== edge.evalTaskSha256
       || submission.nonce !== expectedNonce || submission.idempotencyKey !== expectedNonce
@@ -428,7 +431,7 @@ export async function verifyPublicBundle(
     evaluationSubmissionByDigest.set(edge.sha256, edge);
   }
 
-  unique(assembly.header.graph.evaluations.map((edge) => `${edge.cellKey}:${edge.evalIndex}`), "verification.graph.evaluations.coordinates");
+  unique(assembly.header.graph.evaluations.map((edge) => `${edge.cellKey}:${edge.evalIndex}:${edge.evaluationAttempt ?? 1}`), "verification.graph.evaluations.coordinates");
   const evaluationsByVerdict = new Map<string, Array<(typeof assembly.header.graph.evaluations)[number]>>();
   const consumedEvaluationSubmissions = new Set<string>();
   for (const edge of assembly.header.graph.evaluations) {
@@ -528,6 +531,7 @@ export async function verifyPublicBundle(
     if (submission !== undefined) {
       if (
         submission.cellKey !== edge.cellKey || submission.evalIndex !== edge.evalIndex
+        || (submission.evaluationAttempt ?? 1) !== (edge.evaluationAttempt ?? 1)
         || submission.evalTaskSha256 !== edge.evalTaskSha256 || submission.evaluator !== edge.evaluator
       ) refuse("record-integrity", "evidence-closure", "evaluation graph and Submission linkage disagree");
       consumedEvaluationSubmissions.add(submission.sha256);
@@ -566,6 +570,92 @@ export async function verifyPublicBundle(
       const edges = evaluationsByVerdict.get(edge.verdictSha256) ?? [];
       edges.push(edge);
       evaluationsByVerdict.set(edge.verdictSha256, edges);
+    }
+  }
+
+  const maxInfrastructureRetries = run.policy.evaluation.maxInfrastructureRetries ?? 0;
+  const retriesByLeg = new Map<string, number[]>();
+  const evaluationTaskByLeg = new Map<string, string>();
+  for (const retry of assembly.header.graph.evaluationRetries ?? []) {
+    const cell = cellsByKey.get(retry.cellKey);
+    if (cell === undefined || retry.dispatch < 1 || retry.dispatch > cell.dispatches
+      || retry.evalIndex < 1 || retry.evalIndex > minVerdicts) {
+      refuse("record-integrity", "evidence-closure", "evaluation retry names an unknown or out-of-domain leg");
+    }
+    if (retry.evaluationAttempt < 1 || retry.evaluationAttempt > maxInfrastructureRetries) {
+      refuse("record-integrity", "evidence-closure", "evaluation retry exceeds the sealed infrastructure retry policy");
+    }
+    if (retry.failureCategory !== "backend-unavailable"
+      && retry.failureCategory !== "dependency-unavailable"
+      && retry.failureCategory !== "transport-failure") {
+      refuse("record-integrity", "evidence-closure", "evaluation retry carries an ineligible failure category");
+    }
+    const key = `${retry.cellKey}:${retry.evalIndex}`;
+    const attempts = retriesByLeg.get(key) ?? [];
+    attempts.push(retry.evaluationAttempt);
+    retriesByLeg.set(key, attempts);
+    const submission = retry.evalSubmissionSha256 === undefined
+      ? undefined
+      : evaluationSubmissionByDigest.get(retry.evalSubmissionSha256);
+    if (retry.evalSubmissionSha256 !== undefined && submission === undefined) {
+      refuse("record-integrity", "evidence-closure", "evaluation retry names an unknown accepted Submission");
+    }
+    if (submission !== undefined) {
+      if (submission.cellKey !== retry.cellKey || submission.dispatch !== retry.dispatch
+        || submission.evalIndex !== retry.evalIndex
+        || (submission.evaluationAttempt ?? 1) !== retry.evaluationAttempt
+        || submission.evaluator !== retry.evaluator
+        || submission.evalTaskSha256 !== retry.evalTaskSha256) {
+        refuse("record-integrity", "evidence-closure", "evaluation retry and Submission lineage disagree");
+      }
+      consumedEvaluationSubmissions.add(submission.sha256);
+      addRole(expectedRoles, submission.sha256, "evaluation-submission");
+    }
+    if (retry.evalTaskSha256 !== undefined) {
+      const priorTask = evaluationTaskByLeg.get(key);
+      if (priorTask !== undefined && priorTask !== retry.evalTaskSha256) {
+        refuse("record-integrity", "evidence-closure", "evaluation retry substituted a different derived Task");
+      }
+      evaluationTaskByLeg.set(key, retry.evalTaskSha256);
+      addRole(expectedRoles, retry.evalTaskSha256, "evaluation-task");
+      const solveDelivery = solveDeliveryByCell.get(retry.cellKey);
+      if (solveDelivery === undefined || cell.evaluationSpecSha256 === undefined) {
+        refuse("record-integrity", "evidence-closure", "evaluation retry Task has no solve artifacts/spec source");
+      }
+      const derived = deriveEvaluationTask({
+        subjectTask: { name: "subject-task.json", digest: `sha256:${cell.taskDigest}` },
+        subjectDelivery: { name: "subject-delivery.json", digest: `sha256:${solveDelivery.sha256}` },
+        subjectResults: solveDelivery.outputs.map((output) => ({ name: output.name, digest: `sha256:${output.sha256}` as const })),
+        evaluationSpecDigest: `sha256:${cell.evaluationSpecSha256}`,
+      });
+      const carried = records.get(retry.evalTaskSha256);
+      if (carried === undefined || !equalBytes(carried, derived.bytes) || derived.digest !== `sha256:${retry.evalTaskSha256}`) {
+        refuse("record-integrity", "evidence-closure", "evaluation retry Task is not the exact solve-derived Task");
+      }
+    }
+  }
+  for (const [key, attempts] of retriesByLeg) {
+    const ordered = [...attempts].sort((left, right) => left - right);
+    if (ordered.some((attempt, index) => attempt !== index + 1)) {
+      refuse("record-integrity", "evidence-closure", `evaluation retry sequence is non-contiguous for ${key}`);
+    }
+  }
+  for (const edge of assembly.header.graph.evaluations) {
+    const evaluationAttempt = edge.evaluationAttempt ?? 1;
+    if (evaluationAttempt > maxInfrastructureRetries + 1) {
+      refuse("record-integrity", "evidence-closure", "evaluation terminal exceeds the sealed infrastructure retry policy");
+    }
+    if (evaluationAttempt > 1) {
+      const key = `${edge.cellKey}:${edge.evalIndex}`;
+      const attempts = [...(retriesByLeg.get(key) ?? [])].sort((left, right) => left - right);
+      if (attempts.length !== evaluationAttempt - 1
+        || attempts.some((attempt, index) => attempt !== index + 1)) {
+        refuse("record-integrity", "evidence-closure", "evaluation retry terminal lacks its complete failed-attempt lineage");
+      }
+      const priorTask = evaluationTaskByLeg.get(key);
+      if (priorTask !== undefined && edge.evalTaskSha256 !== undefined && priorTask !== edge.evalTaskSha256) {
+        refuse("record-integrity", "evidence-closure", "evaluation retry terminal substituted a different derived Task");
+      }
     }
   }
   if (consumedEvaluationSubmissions.size !== evaluationSubmissionByDigest.size) {

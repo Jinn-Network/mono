@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
+import type { TaskExecutionErrorCategory } from "@jinn-network/task-execution-protocol";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 
 /**
@@ -21,6 +22,9 @@ export interface BlameRule {
   readonly match: { readonly exitCode?: number; readonly signal?: string };
   readonly blame: "task" | "infrastructure";
   readonly reasonCode: string;
+  /** Optional typed operation category propagated to the terminal observation. This is used by
+   * recovery policy; callers must never infer retryability from reasonCode or stderr text. */
+  readonly category?: TaskExecutionErrorCategory;
 }
 
 /**

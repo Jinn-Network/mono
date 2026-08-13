@@ -1778,7 +1778,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2985,
       "generatedOutputSources": 1314,
-      "generatorSources": 629,
+      "generatorSources": 631,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -20084,6 +20084,26 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/p5-disk-gate.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/p5-disk-reserve.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/p5-disk-reserve.test.mjs"
       },
       {
         "categories": [

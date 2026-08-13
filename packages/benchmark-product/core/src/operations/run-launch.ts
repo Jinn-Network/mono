@@ -218,6 +218,7 @@ export function runLaunch(
       // The product's compile always sets policy.evaluation, but the platform schema leaves
       // minVerdicts optional, so default defensively.
       const minVerdicts = loaded.runRecord.policy.evaluation?.minVerdicts ?? 1;
+      const maxInfrastructureRetries = loaded.runRecord.policy.evaluation?.maxInfrastructureRetries ?? 0;
 
       let venue: LocalVenue;
       try {
@@ -264,6 +265,7 @@ export function runLaunch(
                 owner: loaded.owner,
                 cellWindowMs: loaded.runRecord.policy.cellWindow,
                 minVerdicts,
+                maxInfrastructureRetries,
                 liveClock: context.clock,
                 onProgress: deps.onProgress,
               };
@@ -349,6 +351,7 @@ export function runResume(
 
       // From the SEALED Run record, never the draft (BP-21) — same reasoning as runLaunch.
       const minVerdicts = loaded.runRecord.policy.evaluation?.minVerdicts ?? 1;
+      const maxInfrastructureRetries = loaded.runRecord.policy.evaluation?.maxInfrastructureRetries ?? 0;
 
       let venue: LocalVenue;
       try {
@@ -395,6 +398,7 @@ export function runResume(
                 owner: loaded.owner,
                 cellWindowMs: loaded.runRecord.policy.cellWindow,
                 minVerdicts,
+                maxInfrastructureRetries,
                 liveClock: context.clock,
                 onProgress: deps.onProgress,
               };
@@ -432,7 +436,7 @@ export function runResume(
               const freshFold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
               const gaps = (cancelRequested(clockedContext.workspaceDir, input.draftId)
                 ? []
-                : evaluationGaps(freshFold, minVerdicts)).filter(
+                : evaluationGaps(freshFold, minVerdicts, maxInfrastructureRetries)).filter(
                 (gap): gap is typeof gap & { cell: typeof gap.cell & { deliverySha256: string } } =>
                   gap.cell.deliverySha256 !== undefined,
               );
@@ -445,6 +449,7 @@ export function runResume(
                     deliverySha256: gap.cell.deliverySha256,
                     ...(gap.cell.deliveryOutputs !== undefined ? { deliveryOutputs: gap.cell.deliveryOutputs } : {}),
                     missingEvalIndexes: gap.missingEvalIndexes,
+                    nextEvaluationAttempts: gap.nextEvaluationAttempts,
                   })),
                 );
               }

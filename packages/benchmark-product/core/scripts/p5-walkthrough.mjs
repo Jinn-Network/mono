@@ -9,11 +9,15 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
   cpSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -21,7 +25,13 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { auditP5Accounting } from "./p5-accounting.mjs";
-import { assertP5DiskGate } from "./p5-disk-gate.mjs";
+import {
+  createP5DiskReserve,
+  inspectP5DiskReserve,
+  P5_RECOVERY_LOG,
+  recoverP5DiskCapacity,
+  releaseP5DiskReserve,
+} from "./p5-disk-reserve.mjs";
 import { runP5GreenBaseline } from "./p5-green-baseline.mjs";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,6 +42,7 @@ const SEED = 2_026_081_3;
 const DRAFT_ID = "demo1-p5-plumbing";
 const BASELINE_ARM = "claude-md-baseline";
 const CANDIDATE_ARM = "skill-candidate";
+const WALKTHROUGH_STATE = "p5-walkthrough-state.json";
 
 function fail(message) {
   throw new Error(`P5 walkthrough: ${message}`);
@@ -62,27 +73,28 @@ function ensureBuilt() {
   if (built.status !== 0) fail(`clean build exited ${String(built.status)}`);
 }
 
-function createDockerGateWrapper(root, dockerPath) {
+export function createDockerGateWrapper(root, dockerPath) {
   const wrapper = join(root, "p5-docker-gate.mjs");
+  const recoveryModule = pathToFileURL(join(packageRoot, "scripts", "p5-disk-reserve.mjs")).href;
   const source = `#!${process.execPath}
-import { statfsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-const minimum = 40n * 1024n * 1024n * 1024n;
-function gate(phase) {
-  const stats = statfsSync("/", { bigint: true });
-  const available = stats.bavail * stats.bsize;
-  if (available < minimum) {
-    console.error("P5 disk gate refused Docker " + phase + ": " +
-      (Number(available) / 1024 ** 3).toFixed(2) + " GiB free; 40.00 GiB required. " +
-      "No caches or user data were deleted.");
-    process.exit(78);
-  }
+import { recoverP5DiskCapacity } from ${JSON.stringify(recoveryModule)};
+const runRoot = ${JSON.stringify(root)};
+try {
+  recoverP5DiskCapacity(runRoot, "before Docker " + (process.argv[2] ?? "command"));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(78);
 }
-gate("before " + (process.argv[2] ?? "command"));
 const result = spawnSync(${JSON.stringify(dockerPath)}, process.argv.slice(2), {
   stdio: "inherit", env: process.env,
 });
-gate("after " + (process.argv[2] ?? "command"));
+try {
+  recoverP5DiskCapacity(runRoot, "after Docker " + (process.argv[2] ?? "command"));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(78);
+}
 if (result.error !== undefined) {
   console.error(result.error.message);
   process.exit(127);
@@ -90,9 +102,52 @@ if (result.error !== undefined) {
 if (result.signal !== null) process.kill(process.pid, result.signal);
 process.exit(result.status ?? 1);
 `;
+  if (existsSync(wrapper)) {
+    if (readFileSync(wrapper, "utf8") !== source) fail("run-owned Docker gate wrapper changed; refusing resume");
+    return wrapper;
+  }
   writeFileSync(wrapper, source, { encoding: "utf8", mode: 0o700, flag: "wx" });
   chmodSync(wrapper, 0o700);
   return wrapper;
+}
+
+function writeWalkthroughState(runRoot, state) {
+  const destination = join(runRoot, WALKTHROUGH_STATE);
+  const temporary = `${destination}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  const fileFd = openSync(temporary, "r");
+  try {
+    fsyncSync(fileFd);
+  } finally {
+    closeSync(fileFd);
+  }
+  renameSync(temporary, destination);
+  const directoryFd = openSync(runRoot, "r");
+  try {
+    fsyncSync(directoryFd);
+  } finally {
+    closeSync(directoryFd);
+  }
+}
+
+function replaceWalkthroughState(runRoot, state) {
+  const destination = join(runRoot, WALKTHROUGH_STATE);
+  const temporary = `${destination}.tmp`;
+  rmSync(temporary, { force: true });
+  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  const fileFd = openSync(temporary, "r");
+  try {
+    fsyncSync(fileFd);
+  } finally {
+    closeSync(fileFd);
+  }
+  renameSync(temporary, destination);
+  const directoryFd = openSync(runRoot, "r");
+  try {
+    fsyncSync(directoryFd);
+  } finally {
+    closeSync(directoryFd);
+  }
 }
 
 function rfc3339(value) {
@@ -134,6 +189,31 @@ export function p5ArmPinning(effectiveRequirements) {
   return armPinning;
 }
 
+export function p5ResumeNeeded(status) {
+  return (status?.evaluationRecovery?.pendingCells ?? 0) > 0
+    || status?.counts?.judged < status?.counts?.expected;
+}
+
+export function p5CheckpointAction(status) {
+  if (status?.state === "locked") return "launch";
+  if (status?.state === "running") return p5ResumeNeeded(status) ? "resume" : "collect";
+  if (status?.state === "closed") return "report";
+  if (status?.state === "reported") return "verify";
+  fail(`cannot resume from lifecycle state ${String(status?.state)}`);
+}
+
+export function assertP5ReadyToCollect(status) {
+  if ((status?.evaluationRecovery?.pendingCells ?? 0) > 0) {
+    fail("evaluation retry remains pending; checkpoint is resumable and collect was not attempted");
+  }
+  if ((status?.evaluationRecovery?.exhaustedCells ?? 0) > 0) {
+    fail("the single sealed evaluation retry was exhausted; P5 remains incomplete");
+  }
+  if (status?.counts?.judged !== status?.counts?.expected) {
+    fail("not all cells reached a grader outcome; checkpoint remains resumable");
+  }
+}
+
 async function main() {
   const claudePath = resolve(option("--claude", "JINN_P5_CLAUDE_PATH"));
   const claudeVersion = option("--claude-version", "JINN_P5_CLAUDE_VERSION");
@@ -147,15 +227,53 @@ async function main() {
     if (!isAbsolute(path) || !existsSync(path)) fail(`${label} is not an existing absolute path`);
   }
   const requestedOutput = option("--output-dir", "JINN_P5_OUTPUT_DIR", { required: false });
-  const runRoot = requestedOutput === undefined
-    ? mkdtempSync(join(tmpdir(), "demo1-p5-output-"))
-    : resolve(requestedOutput);
+  const requestedResume = option("--resume-output-dir", "JINN_P5_RESUME_OUTPUT_DIR", { required: false });
+  if (requestedOutput !== undefined && requestedResume !== undefined) {
+    fail("--output-dir and --resume-output-dir are mutually exclusive");
+  }
+  const resuming = requestedResume !== undefined;
+  const runRoot = resuming
+    ? resolve(requestedResume)
+    : requestedOutput === undefined
+      ? mkdtempSync(join(tmpdir(), "demo1-p5-output-"))
+      : resolve(requestedOutput);
   if (requestedOutput !== undefined) mkdirSync(runRoot, { recursive: false });
+  if (resuming && !existsSync(runRoot)) fail("--resume-output-dir does not exist");
   const workspaceDir = join(runRoot, "builder-workspace");
   const bundleDir = join(runRoot, "bundle");
   const transcriptPath = join(runRoot, "transcript.json");
-  const startedAt = new Date();
-  const diskAtStart = assertP5DiskGate("walkthrough start");
+  let checkpoint;
+  if (resuming) {
+    const statePath = join(runRoot, WALKTHROUGH_STATE);
+    if (!existsSync(statePath)) fail("resume output has no durable walkthrough checkpoint");
+    checkpoint = JSON.parse(readFileSync(statePath, "utf8"));
+    if (checkpoint?.schema !== "demo1.p5-walkthrough-state/1" || checkpoint.draftId !== DRAFT_ID
+      || checkpoint.completed === true || checkpoint.claudePath !== claudePath
+      || checkpoint.claudeVersion !== claudeVersion || checkpoint.dockerPath !== dockerPath) {
+      fail("resume checkpoint is completed, invalid, or bound to different runtime paths");
+    }
+    inspectP5DiskReserve(runRoot);
+    checkpoint.resumeInvocations += 1;
+    replaceWalkthroughState(runRoot, checkpoint);
+  } else {
+    const reserveAtStart = createP5DiskReserve(runRoot);
+    checkpoint = {
+      schema: "demo1.p5-walkthrough-state/1",
+      draftId: DRAFT_ID,
+      startedAt: new Date().toISOString(),
+      phase: "initialized",
+      completed: false,
+      claudePath,
+      claudeVersion,
+      dockerPath,
+      reserveAtStart,
+      resumeInvocations: 0,
+      steps: [],
+    };
+    writeWalkthroughState(runRoot, checkpoint);
+  }
+  const startedAt = new Date(checkpoint.startedAt);
+  const diskAtStart = checkpoint.reserveAtStart.before;
 
   ensureBuilt();
   const core = await import(pathToFileURL(join(distRoot, "index.js")).href);
@@ -191,11 +309,20 @@ async function main() {
   }
 
   const dockerGatePath = createDockerGateWrapper(runRoot, dockerPath);
-  const { transcript: greenBaseline } = await runCanonicalP5GreenBaseline({
-    runRoot,
-    dockerPath: dockerGatePath,
-  });
-  if (!greenBaseline.passed) fail("gold/empty grader control did not pass for all three tasks");
+  let greenBaseline = checkpoint.greenBaseline;
+  if (!resuming) {
+    ({ transcript: greenBaseline } = await runCanonicalP5GreenBaseline({
+      runRoot,
+      dockerPath: dockerGatePath,
+    }));
+    if (!greenBaseline.passed) fail("gold/empty grader control did not pass for all three tasks");
+    checkpoint.greenBaseline = greenBaseline;
+    checkpoint.readiness = readiness;
+    checkpoint.phase = "baseline-passed";
+    replaceWalkthroughState(runRoot, checkpoint);
+  } else if (greenBaseline?.passed !== true) {
+    fail("resume checkpoint has no completed gold/empty grader control");
+  }
   const createVenue = (options) => createLocalVenue({
     ...options,
     demo1ClaudeRuntime: runtime,
@@ -210,11 +337,12 @@ async function main() {
     principal: "p5-operator",
     clock: () => new Date().toISOString(),
   };
-  const steps = [];
+  const steps = checkpoint.steps;
   const step = async (label, operation) => {
     const before = Date.now();
     const result = await operation();
     steps.push({ label, elapsedMs: Date.now() - before });
+    replaceWalkthroughState(runRoot, checkpoint);
     return expectOk(label, result);
   };
 
@@ -224,64 +352,134 @@ async function main() {
     provenance.rows.map((row) => [row.instance_id, rfc3339(row.createdAt)]),
   );
 
-  await step("init", () => core.initWorkspace(context));
-  await step("draft.create", () => core.createDraft(context, {
-    draftId: DRAFT_ID,
-    name: "Demo-1 P5 plumbing gate",
-    description: "Disposable three-task plumbing proof; not a capability measurement.",
-  }));
-  const imported = await step("import.swebench", () => core.importSweBenchRows(context, {
-    draftId: DRAFT_ID,
-    rows,
-    name: "Demo-1 P5 micro-slate",
-    description: "Three repositories; plumbing-only and below paired-delta minN.",
-    version: "1.0.0",
-    provenanceTimestamps: timestamps,
-  }));
-  await step("arm.add baseline", () => core.armAdd(context, {
-    draftId: DRAFT_ID,
-    armId: BASELINE_ARM,
-    pinning: p5ArmPinning(core.demo1ClaudeArmRequirements(runtime, "claude-md")),
-    notes: "Native root CLAUDE.md baseline B.",
-  }));
-  await step("arm.add candidate", () => core.armAdd(context, {
-    draftId: DRAFT_ID,
-    armId: CANDIDATE_ARM,
-    pinning: p5ArmPinning(core.demo1ClaudeArmRequirements(runtime, "skill")),
-    notes: "Native Claude Code skill arm A.",
-  }));
-  await step("draft.update", () => core.updateDraft(context, {
-    draftId: DRAFT_ID,
-    patch: {
-      replicates: 2,
-      analysis: {
-        method: "jinn.benchmarking.method/paired-delta",
-        version: "1",
-        baseline: BASELINE_ARM,
-        candidate: CANDIDATE_ARM,
-        parameters: { seed: SEED, resamples: RESAMPLES, alpha: "0.05" },
+  let benchmarkSha256;
+  let runSha256;
+  let diskBeforeLaunch;
+  let launchElapsedMs = 0;
+  if (!resuming) {
+    await step("init", () => core.initWorkspace(context));
+    await step("draft.create", () => core.createDraft(context, {
+      draftId: DRAFT_ID,
+      name: "Demo-1 P5 plumbing gate",
+      description: "Disposable three-task plumbing proof; not a capability measurement.",
+    }));
+    const imported = await step("import.swebench", () => core.importSweBenchRows(context, {
+      draftId: DRAFT_ID,
+      rows,
+      name: "Demo-1 P5 micro-slate",
+      description: "Three repositories; plumbing-only and below paired-delta minN.",
+      version: "1.0.0",
+      provenanceTimestamps: timestamps,
+    }));
+    benchmarkSha256 = imported.benchmarkSha256;
+    await step("arm.add baseline", () => core.armAdd(context, {
+      draftId: DRAFT_ID,
+      armId: BASELINE_ARM,
+      pinning: p5ArmPinning(core.demo1ClaudeArmRequirements(runtime, "claude-md")),
+      notes: "Native root CLAUDE.md baseline B.",
+    }));
+    await step("arm.add candidate", () => core.armAdd(context, {
+      draftId: DRAFT_ID,
+      armId: CANDIDATE_ARM,
+      pinning: p5ArmPinning(core.demo1ClaudeArmRequirements(runtime, "skill")),
+      notes: "Native Claude Code skill arm A.",
+    }));
+    await step("draft.update", () => core.updateDraft(context, {
+      draftId: DRAFT_ID,
+      patch: {
+        replicates: 2,
+        assurance: { preset: "direct-check", overrides: { maxInfrastructureRetries: 1 } },
+        analysis: {
+          method: "jinn.benchmarking.method/paired-delta",
+          version: "1",
+          baseline: BASELINE_ARM,
+          candidate: CANDIDATE_ARM,
+          parameters: { seed: SEED, resamples: RESAMPLES, alpha: "0.05" },
+        },
       },
-    },
-  }));
-  const quoted = await step("quote", () => core.runQuote(context, { draftId: DRAFT_ID }, { createVenue }));
-  if (!quoted.quote.ok || quoted.quote.expectedCellCount !== 12
-    || quoted.presentation.coverage.refusals.length !== 0) {
-    fail(`quote did not admit exactly 12 cells: ${JSON.stringify(quoted)}`);
+    }));
+    const quoted = await step("quote", () => core.runQuote(context, { draftId: DRAFT_ID }, { createVenue }));
+    if (!quoted.quote.ok || quoted.quote.expectedCellCount !== 12
+      || quoted.presentation.coverage.refusals.length !== 0) {
+      fail(`quote did not admit exactly 12 cells: ${JSON.stringify(quoted)}`);
+    }
+    const locked = await step("lock", () => core.runLock(context, { draftId: DRAFT_ID }));
+    runSha256 = locked.runSha256;
+    checkpoint.benchmarkSha256 = benchmarkSha256;
+    checkpoint.runSha256 = runSha256;
+    checkpoint.phase = "locked";
+    replaceWalkthroughState(runRoot, checkpoint);
+    diskBeforeLaunch = recoverP5DiskCapacity(runRoot, "official P5 launch");
+    const launchStarted = Date.now();
+    await step("launch", () => core.runLaunch(context, { draftId: DRAFT_ID }, { createVenue }));
+    launchElapsedMs = Date.now() - launchStarted;
+    checkpoint.phase = "launched";
+    replaceWalkthroughState(runRoot, checkpoint);
+  } else {
+    benchmarkSha256 = checkpoint.benchmarkSha256;
+    runSha256 = checkpoint.runSha256;
+    if (typeof benchmarkSha256 !== "string" || typeof runSha256 !== "string") {
+      fail("resume checkpoint predates the sealed Benchmark/Run boundary");
+    }
+    diskBeforeLaunch = recoverP5DiskCapacity(runRoot, "resume preflight");
   }
-  const locked = await step("lock", () => core.runLock(context, { draftId: DRAFT_ID }));
 
-  const diskBeforeLaunch = assertP5DiskGate("official P5 launch");
-  const launchStarted = Date.now();
-  await step("launch", () => core.runLaunch(context, { draftId: DRAFT_ID }, { createVenue }));
-  const launchElapsedMs = Date.now() - launchStarted;
-  const status = await step("status", () => core.runStatus(context, { draftId: DRAFT_ID }));
-  const collected = await step("collect", () => core.runCollect(context, { draftId: DRAFT_ID }));
-  await step("results", () => core.runResults(context, { draftId: DRAFT_ID }));
-  const reported = await step("report", () => core.runReport(context, { draftId: DRAFT_ID }));
+  let status = await step("status", () => core.runStatus(context, { draftId: DRAFT_ID }));
+  if (p5CheckpointAction(status) === "launch") {
+    recoverP5DiskCapacity(runRoot, "before same-Run launch");
+    const resumeStarted = Date.now();
+    await step("launch.from-lock", () => core.runLaunch(context, { draftId: DRAFT_ID }, { createVenue }));
+    launchElapsedMs += Date.now() - resumeStarted;
+    checkpoint.phase = "launched";
+    replaceWalkthroughState(runRoot, checkpoint);
+    status = await step("status.after-launch", () => core.runStatus(context, { draftId: DRAFT_ID }));
+  }
+  if (p5CheckpointAction(status) === "resume") {
+    recoverP5DiskCapacity(runRoot, "before same-cell resume");
+    const resumeStarted = Date.now();
+    await step("resume", () => core.runResume(context, { draftId: DRAFT_ID }, { createVenue }));
+    launchElapsedMs += Date.now() - resumeStarted;
+    checkpoint.phase = "resumed";
+    replaceWalkthroughState(runRoot, checkpoint);
+    status = await step("status.after-resume", () => core.runStatus(context, { draftId: DRAFT_ID }));
+  }
+  assertP5ReadyToCollect(status);
+  let lifecycleState = status.state;
+  let collected;
+  if (lifecycleState === "running") {
+    collected = await step("collect", () => core.runCollect(context, { draftId: DRAFT_ID }));
+    checkpoint.matrixSha256 = collected.matrixSha256;
+    checkpoint.phase = "closed";
+    replaceWalkthroughState(runRoot, checkpoint);
+    lifecycleState = "closed";
+  } else if (lifecycleState === "closed" || lifecycleState === "reported") {
+    const existing = requireRunState(workspaceDir, DRAFT_ID);
+    if (existing.matrixSha256 === undefined) fail(`${lifecycleState} checkpoint has no sealed Matrix`);
+    collected = { matrixSha256: existing.matrixSha256 };
+  } else {
+    fail(`cannot resume from lifecycle state ${String(lifecycleState)}`);
+  }
+
+  const results = await step("results", () => core.runResults(context, { draftId: DRAFT_ID }));
+  let reported;
+  if (lifecycleState === "closed") {
+    reported = await step("report", () => core.runReport(context, { draftId: DRAFT_ID }));
+    checkpoint.reportSha256 = reported.reportSha256;
+    checkpoint.reportEnvelopeSha256 = reported.reportEnvelopeSha256;
+    checkpoint.phase = "reported";
+    replaceWalkthroughState(runRoot, checkpoint);
+  } else {
+    if (results.report === undefined) fail("reported checkpoint has no readable Report projection");
+    reported = {
+      reportSha256: results.report.reportSha256,
+      reportEnvelopeSha256: results.report.reportEnvelopeSha256,
+      claimPackage: results.report.claimPackage,
+    };
+  }
   const verified = await step("verify", () => core.runVerify(context, { draftId: DRAFT_ID }));
 
   const matrix = records.parseMatrix(core.getSealedBytes(workspaceDir, collected.matrixSha256));
-  const run = records.parseRun(core.getSealedBytes(workspaceDir, locked.runSha256));
+  const run = records.parseRun(core.getSealedBytes(workspaceDir, runSha256));
   const report = records.parseReport(core.getSealedBytes(workspaceDir, reported.reportSha256));
   if (run.replicates !== 2 || run.arms.map((arm) => arm.armId).sort().join(",")
     !== [BASELINE_ARM, CANDIDATE_ARM].sort().join(",")) {
@@ -310,13 +508,14 @@ async function main() {
   const materialized = materializePublicBundle({
     workspaceDir,
     draftId: DRAFT_ID,
-    benchmarkSha256: imported.benchmarkSha256,
+    benchmarkSha256,
     runState,
   });
   cpSync(materialized.bundleDir, bundleDir, { recursive: true, errorOnExist: true, force: false });
   rmSync(workspaceDir, { recursive: true, force: true });
   if (existsSync(workspaceDir)) fail("builder workspace survived deletion-portability cut");
   const coldVerification = await core.verifyPublicBundle(bundleDir);
+  const reserveRelease = releaseP5DiskReserve(runRoot, "cold bundle verified");
 
   const transcript = {
     schema: "demo1.p5-plumbing/1",
@@ -332,7 +531,12 @@ async function main() {
     },
     readiness,
     greenBaseline,
-    disk: { atStart: diskAtStart, beforeLaunch: diskBeforeLaunch },
+    disk: {
+      atStart: diskAtStart,
+      beforeLaunch: diskBeforeLaunch,
+      reserveRelease,
+      recoveryLog: P5_RECOVERY_LOG,
+    },
     fixture: {
       rows: provenance.rows.map((row) => ({
         instanceId: row.instance_id,
@@ -344,8 +548,8 @@ async function main() {
       timeoutSeconds: provenance.timeoutSeconds,
     },
     digests: {
-      benchmarkSha256: imported.benchmarkSha256,
-      runSha256: locked.runSha256,
+      benchmarkSha256,
+      runSha256,
       matrixSha256: collected.matrixSha256,
       reportSha256: reported.reportSha256,
       reportEnvelopeSha256: reported.reportEnvelopeSha256,
@@ -353,6 +557,7 @@ async function main() {
     },
     accounting: {
       status: status.counts,
+      evaluationRecovery: status.evaluationRecovery,
       matrix: matrix.completeness,
       perAxis: Object.fromEntries(["harness", "model", "loadout", "isolation"].map((axis) => [
         axis,
@@ -391,6 +596,10 @@ async function main() {
     encoding: "utf8",
     flag: "wx",
   });
+  checkpoint.phase = "complete";
+  checkpoint.completed = true;
+  checkpoint.completedAt = transcript.completedAt;
+  replaceWalkthroughState(runRoot, checkpoint);
   process.stdout.write(`${JSON.stringify(transcript, null, 2)}\n`);
 }
 

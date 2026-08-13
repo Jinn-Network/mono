@@ -24,6 +24,7 @@ import type {
   SubmissionAck,
   SubmissionUri,
 } from "@jinn-network/task-execution-backend";
+import { TaskExecutionError } from "@jinn-network/task-execution-backend";
 import { deriveEvaluationTask } from "@jinn-network/task-execution-profiles";
 import { sealDelivery, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, parseDsseEnvelope } from "@jinn-network/trust-core";
@@ -37,7 +38,7 @@ import { importSweBenchRows } from "../operations/import.js";
 import { initWorkspace } from "../operations/init.js";
 import { runPublish } from "../operations/publish.js";
 import { runCollect } from "../operations/run-collect.js";
-import { runLaunch } from "../operations/run-launch.js";
+import { runLaunch, runResume } from "../operations/run-launch.js";
 import { runLock } from "../operations/run-lock.js";
 import { runQuote } from "../operations/run-quote.js";
 import { runReport } from "../operations/report.js";
@@ -106,6 +107,7 @@ interface PairedScenario {
   readonly draftId: string;
   readonly rows: readonly ReturnType<typeof pairedRow>[];
   readonly verdictFor: (instanceId: string, armId: "baseline" | "candidate") => FixtureVerdict;
+  readonly providerOutageOnce?: boolean;
 }
 
 function utf8(value: unknown): Uint8Array {
@@ -205,6 +207,7 @@ function pairedFixtureVenue(scenario: PairedScenario): LocalVenue {
     readonly verdict: FixtureVerdict;
   }>();
   let sequence = 0;
+  let providerOutageInjected = false;
 
   function store(bytes: Uint8Array): string {
     const digest = sha256Hex(bytes);
@@ -230,6 +233,15 @@ function pairedFixtureVenue(scenario: PairedScenario): LocalVenue {
       const attempt = `urn:uuid:00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
       const harnessId = submission.requirements?.harness?.id;
       const isEvaluation = harnessId === "evaluation-harness";
+      if (isEvaluation && scenario.providerOutageOnce === true && !providerOutageInjected) {
+        providerOutageInjected = true;
+        return {
+          accepted: false,
+          error: new TaskExecutionError("dependency-unavailable", {
+            detail: "fixture provider temporarily unavailable",
+          }),
+        };
+      }
       let outputName: string;
       let outputBytes: Uint8Array;
       if (isEvaluation) {
@@ -357,6 +369,11 @@ function pairedFixtureVenue(scenario: PairedScenario): LocalVenue {
 async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   readonly comparison: PairedComparison;
   readonly bundleDir: string;
+  readonly evaluationRecovery?: {
+    readonly retryableFailures: number;
+    readonly recoveredCells: number;
+    readonly exhaustedCells: number;
+  };
 }> {
   const clock = makeClock();
   const context = contextFor(clock);
@@ -383,6 +400,9 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   expect(updateDraft(context, {
     draftId: scenario.draftId,
     patch: {
+      ...(scenario.providerOutageOnce === true
+        ? { assurance: { preset: "direct-check", overrides: { maxInfrastructureRetries: 1 } } }
+        : {}),
       analysis: {
         method: "jinn.benchmarking.method/paired-delta",
         version: "1",
@@ -393,12 +413,22 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
     },
   }).ok).toBe(true);
 
-  const createVenue = () => pairedFixtureVenue(scenario);
+  const venue = pairedFixtureVenue(scenario);
+  const createVenue = () => venue;
   const quoted = await runQuote(context, { draftId: scenario.draftId }, { createVenue });
   expect(quoted.ok && quoted.result.quote.ok, JSON.stringify(quoted)).toBe(true);
   expect(runLock(context, { draftId: scenario.draftId }).ok).toBe(true);
   const launched = await runLaunch(context, { draftId: scenario.draftId }, { createVenue });
   expect(launched.ok, JSON.stringify(launched)).toBe(true);
+  if (scenario.providerOutageOnce === true) {
+    const pending = runStatus(context, { draftId: scenario.draftId });
+    expect(pending.ok && pending.result.evaluationRecovery?.pendingCells).toBe(1);
+    const resumed = await runResume(context, { draftId: scenario.draftId }, { createVenue });
+    expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
+  }
+  const finalStatus = runStatus(context, { draftId: scenario.draftId });
+  expect(finalStatus.ok, JSON.stringify(finalStatus)).toBe(true);
+  if (!finalStatus.ok) throw new Error("unreachable");
   const collected = await runCollect(context, { draftId: scenario.draftId });
   expect(collected.ok, JSON.stringify(collected)).toBe(true);
   expect(runResults(context, { draftId: scenario.draftId }).ok).toBe(true);
@@ -438,6 +468,9 @@ async function runPairedLifecycle(scenario: PairedScenario): Promise<{
   return {
     comparison: perSubject![0]!.results as PairedComparison,
     bundleDir,
+    ...(finalStatus.result.evaluationRecovery === undefined
+      ? {}
+      : { evaluationRecovery: finalStatus.result.evaluationRecovery }),
   };
 }
 
@@ -699,6 +732,40 @@ describe("paired-delta public lifecycle — P4b Task 8b", () => {
           expect(compact, `${path} leaked result number ${resultNumber}`).not.toContain(resultNumber);
         }
       }
+    },
+    60_000,
+  );
+
+  test(
+    "one typed provider outage resumes the same patch and remains independently bundle-verifiable",
+    async () => {
+      const rows = [pairedRow(1, "example/retry-a"), pairedRow(2, "example/retry-b")];
+      const outcome = await runPairedLifecycle({
+        draftId: "paired-provider-retry",
+        rows,
+        providerOutageOnce: true,
+        verdictFor: () => "pass",
+      });
+      expect(outcome.evaluationRecovery).toMatchObject({
+        retryableFailures: 1,
+        recoveredCells: 1,
+        exhaustedCells: 0,
+      });
+      const [headerLine] = readFileSync(
+        join(outcome.bundleDir, "verification", "assembly.jsonl"),
+        "utf8",
+      ).trim().split("\n");
+      const header = JSON.parse(headerLine!);
+      expect(header.graph.evaluationRetries).toEqual([
+        expect.objectContaining({
+          evaluationAttempt: 1,
+          failureCategory: "dependency-unavailable",
+          recoveryAdvice: "new-attempt-required",
+        }),
+      ]);
+      expect(header.graph.evaluations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ evaluationAttempt: 2, verdictSha256: expect.any(String) }),
+      ]));
     },
     60_000,
   );

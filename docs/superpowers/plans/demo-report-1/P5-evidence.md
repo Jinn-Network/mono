@@ -40,6 +40,30 @@ The normalized evidence is
 `sha256:f6d13f11928fb3d0972a2bcb2aaf9cb4989a0e691d4ff23775eb25c876f29fcd`.
 This remains a plumbing stop, not a capability result or publication artifact.
 
+### Recovery implementation after the immutable stop
+
+The closed Run and its stop evidence above remain unchanged. The next fresh P5 Run uses an
+append-only recovery contract rather than altering or topping up that Run:
+
+- a 60-GiB start gate establishes a 16-GiB reserve owned by the new output directory; only this
+  authenticated file may be released automatically, toward a 44-GiB target and never below the
+  existing 40-GiB hard floor;
+- the sealed Run opts into one evaluation-only infrastructure retry; absence of the new policy
+  field still means zero and preserves legacy bytes;
+- only typed backend/dependency/transport unavailability is eligible. Grader timeouts, test
+  failures, model failures, and unclassified text are not;
+- the first outage is a nonterminal append-only journal fact. Resume reuses the already delivered
+  patch and solve dispatch, and attempt 2 grades the same derived evaluation Task bytes;
+- process interruption resumes the same accepted evaluation attempt rather than spending another
+  retry; insufficient run-owned recovery space stops before attempt 2 and leaves the checkpoint
+  open;
+- status and the deletion-portable bundle expose and authenticate the complete failed/recovered or
+  failed/exhausted lineage.
+
+No shared Docker cache, package cache, worktree, or user data is automatically deleted. Those
+resources are not owned by one Run and may be active or costly to reconstruct, so any broader
+pre-run cleanup remains an explicit operator decision.
+
 ## Earlier outcome: fresh run stopped on isolated Claude authentication
 
 The operator authorized a fresh P5 run after the exact images became locally available. The
@@ -175,12 +199,12 @@ for `provenance.json`. The strict post-P3b fixture suite passes all 11 assertion
 
 Final non-Docker reruns on Node 22 passed:
 
-- P5 pure/injected tests: 19/19;
+- P5 pure/injected tests: 26/26;
 - strict final-fixture tests: 11/11;
-- benchmark-product core full suite: 78 files passed, 3 skipped; 819 tests passed,
+- benchmark-product core full suite: 83 files passed, 3 skipped; 892 tests passed,
   13 skipped;
 - benchmark-product typecheck, build, parity check, and packed-consumer smoke;
-- package inventory, source boundaries, and architecture generator: 28/28, followed by an exact
+- package inventory, source boundaries, and architecture generator: 39/39, followed by an exact
   generated-topology check.
 
 ## Authorized recovery path

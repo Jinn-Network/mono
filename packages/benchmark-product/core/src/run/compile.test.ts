@@ -189,6 +189,30 @@ describe("compileDraft — success path", () => {
     expect(compiled.plannedRun.record.policy.evaluation).toEqual({ minVerdicts: 1, distinctEvaluator: false });
   });
 
+  test("seals one infrastructure retry only when the draft explicitly opts in", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+    const compiled = compileDraft({
+      workspaceDir,
+      draft: {
+        ...document,
+        spec: {
+          ...document.spec,
+          assurance: { preset: "direct-check", overrides: { maxInfrastructureRetries: 1 } },
+        },
+      },
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+    });
+    expect(compiled.plannedRun.record.policy.evaluation).toEqual({
+      minVerdicts: 1,
+      distinctEvaluator: false,
+      maxInfrastructureRetries: 1,
+    });
+  });
+
   test("carries the draft's budget through when set", async () => {
     const clock = makeClock();
     const draftId = await setUpDraftWithSample(clock);

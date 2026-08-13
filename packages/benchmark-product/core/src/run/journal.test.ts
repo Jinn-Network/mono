@@ -553,4 +553,58 @@ describe("evaluationGaps", () => {
     ]);
     expect(evaluationGaps(fold, 2)).toEqual([]);
   });
+
+  test("a sealed retryable provider failure leaves the exact leg open at attempt 2", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "solve-1" } },
+      {
+        kind: "evaluation-retryable-failure",
+        at: "t1",
+        cellKey: CELL_A,
+        dispatch: 1,
+        evalIndex: 1,
+        evaluationAttempt: 1,
+        evaluator: "urn:e:1",
+        category: "dependency-unavailable",
+        recoveryAdvice: "new-attempt-required",
+        detail: "pinned image unavailable",
+      },
+    ]);
+    expect(evaluationGaps(fold, 1, 1)).toEqual([
+      expect.objectContaining({
+        missingEvalIndexes: [1],
+        nextEvaluationAttempts: { 1: 2 },
+      }),
+    ]);
+    expect(evaluationGaps(fold, 1, 0)).toEqual([]);
+  });
+
+  test("an interrupted accepted retry resumes the same attempt rather than spending another", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "solve-1" } },
+      {
+        kind: "evaluation-retryable-failure",
+        at: "t1",
+        cellKey: CELL_A,
+        dispatch: 1,
+        evalIndex: 1,
+        evaluationAttempt: 1,
+        evaluator: "urn:e:1",
+        category: "transport-failure",
+        recoveryAdvice: "new-attempt-required",
+        detail: "connection reset",
+      },
+      {
+        kind: "submission-accepted",
+        at: "t2",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("9"),
+        leg: "evaluation",
+        evalIndex: 1,
+        evaluationAttempt: 2,
+      },
+    ]);
+    expect(evaluationGaps(fold, 1, 1)[0]?.nextEvaluationAttempts).toEqual({ 1: 2 });
+  });
 });

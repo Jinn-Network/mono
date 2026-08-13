@@ -33,19 +33,26 @@
 
 import { parseCellKey } from "@jinn-network/benchmarking-records";
 import type { CellStatusEvent } from "@jinn-network/benchmarking-run";
-import type {
-  AttemptUri,
-  BackendCapabilities,
-  CancelAck,
-  DeliveryRef,
-  ObservationCursor,
-  ObservationSnapshot,
-  ReconciliationReport,
-  SubmissionAck,
-  SubmissionUri,
-  TwoPartyEngagement,
+import {
+  TaskExecutionError,
+  type AttemptUri,
+  type BackendCapabilities,
+  type CancelAck,
+  type DeliveryRef,
+  type ObservationCursor,
+  type ObservationSnapshot,
+  type ReconciliationReport,
+  type SubmissionAck,
+  type SubmissionUri,
+  type TwoPartyEngagement,
 } from "@jinn-network/task-execution-backend";
-import { sealSubmission, type ProtocolObservation, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
+import {
+  sealSubmission,
+  type ProtocolObservation,
+  type ResourceDescriptor,
+  type TaskExecutionErrorCategory,
+} from "@jinn-network/task-execution-protocol";
+import { isEvaluationOperationalError } from "@jinn-network/task-execution-evaluation-harness";
 import { refuse } from "../errors.js";
 import {
   EVALUATION_HARNESS_PIN,
@@ -105,6 +112,18 @@ function cellKeyAndDispatchFromNonce(nonce: string): { cellKey: string; dispatch
   return { cellKey, dispatch };
 }
 
+function evaluationCoordinateFromNonce(nonce: string): {
+  evalIndex: number;
+  evaluationAttempt: number;
+} | undefined {
+  const match = /^eval:[a-f0-9]{64}:e([1-9][0-9]*)(?::r([1-9][0-9]*))?:/u.exec(nonce);
+  if (match === null) return undefined;
+  return {
+    evalIndex: Number(match[1]),
+    evaluationAttempt: match[2] === undefined ? 1 : Number(match[2]),
+  };
+}
+
 /**
  * Wraps a backend so every accepted Submission is durably recorded (module header). Typed over
  * the minimal `ProxiedBackend` shape rather than `LocalVenue["backend"]`'s concrete class so a
@@ -131,6 +150,9 @@ export function createRecordingProxy(
       if (ack.accepted && coord !== undefined && nonce !== undefined) {
         const submissionSha256 = putSealedBytes(deps.workspaceDir, submissionBytes);
         const leg = nonce.startsWith("eval:") ? "evaluation" : "solve";
+        const evaluationCoordinate = leg === "evaluation"
+          ? evaluationCoordinateFromNonce(nonce)
+          : undefined;
         const pinningEvidence = leg === "solve"
           ? backend.pinningEvidenceForSubmission?.(ack.submission)
           : undefined;
@@ -149,6 +171,7 @@ export function createRecordingProxy(
           // The `eval:` prefix is this driver's own evaluation-nonce marker (see
           // `cellKeyAndDispatchFromNonce`'s doc comment); everything else is a solve dispatch.
           leg,
+          ...(evaluationCoordinate === undefined ? {} : evaluationCoordinate),
           ...(pinningEvidenceSha256 === undefined ? {} : { pinningEvidenceSha256 }),
         });
       }
@@ -181,6 +204,8 @@ export interface DriveDeps {
    * evaluation legs each delivered solve cell gets, one per distinct venue evaluator identity
    * (BP-21). The venue must have been created with `evaluatorCount >= minVerdicts`. */
   readonly minVerdicts: number;
+  /** Sealed provider-outage retry allowance. Legacy runs omit it and callers pass zero. */
+  readonly maxInfrastructureRetries?: 0 | 1;
   /** The live, unfrozen clock — journal timestamps reflect when each event actually happened. */
   readonly liveClock: () => string;
   /** Live diagnostic stream (BP-13, CLI `launch`/`resume`) — one short line per journaled
@@ -210,7 +235,15 @@ function journalCouldNotGrade(
   deps: DriveDeps,
   cellKey: string,
   detail: string,
-  extra: { evalTaskSha256?: string; evalDeliverySha256?: string; evalAttempt?: string; evaluator?: string; evalIndex?: number } = {},
+  extra: {
+    evalTaskSha256?: string;
+    evalDeliverySha256?: string;
+    evalAttempt?: string;
+    evaluator?: string;
+    evalIndex?: number;
+    evaluationAttempt?: number;
+    failureCategory?: TaskExecutionErrorCategory;
+  } = {},
 ): void {
   appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
     kind: "evaluation",
@@ -223,8 +256,103 @@ function journalCouldNotGrade(
     ...(extra.evalAttempt !== undefined ? { evalAttempt: extra.evalAttempt } : {}),
     ...(extra.evaluator !== undefined ? { evaluator: extra.evaluator } : {}),
     ...(extra.evalIndex !== undefined ? { evalIndex: extra.evalIndex } : {}),
+    ...(extra.evaluationAttempt !== undefined && extra.evaluationAttempt > 1
+      ? { evaluationAttempt: extra.evaluationAttempt }
+      : {}),
+    ...(extra.failureCategory !== undefined ? { failureCategory: extra.failureCategory } : {}),
   });
   emitProgress(deps, `${cellKey} could-not-grade${legSuffix(deps, extra.evalIndex)}`);
+}
+
+const RETRYABLE_EVALUATION_CATEGORY_VALUES = [
+  "backend-unavailable",
+  "dependency-unavailable",
+  "transport-failure",
+] as const;
+type RetryableEvaluationCategory = (typeof RETRYABLE_EVALUATION_CATEGORY_VALUES)[number];
+const RETRYABLE_EVALUATION_CATEGORIES = new Set<TaskExecutionErrorCategory>(RETRYABLE_EVALUATION_CATEGORY_VALUES);
+
+function isRetryableEvaluationCategory(category: TaskExecutionErrorCategory): category is RetryableEvaluationCategory {
+  return RETRYABLE_EVALUATION_CATEGORIES.has(category);
+}
+
+interface RetryableEvaluationFailure {
+  readonly category: RetryableEvaluationCategory;
+  readonly detail: string;
+}
+
+function retryableFailureFromCause(cause: unknown): RetryableEvaluationFailure | undefined {
+  if (cause instanceof TaskExecutionError && isRetryableEvaluationCategory(cause.category)) {
+    return { category: cause.category, detail: cause.detail ?? cause.message };
+  }
+  if (
+    isEvaluationOperationalError(cause)
+    && cause.canonicalCode === "UNAVAILABLE"
+    && cause.reason === "provider-unavailable"
+    && cause.recoveryAdvice === "new-attempt-required"
+  ) {
+    return { category: "dependency-unavailable", detail: cause.safeDetail };
+  }
+  return undefined;
+}
+
+function retryableFailureFromSnapshot(snapshot: ObservationSnapshot): RetryableEvaluationFailure | undefined {
+  const terminal = [...snapshot.observations].reverse().find((observation) =>
+    observation.type === "network.jinn.task-execution.attempt-terminal.v1");
+  if (
+    terminal?.type !== "network.jinn.task-execution.attempt-terminal.v1"
+    || terminal.data.blame !== "infrastructure"
+    || !isRetryableEvaluationCategory(terminal.data.category as TaskExecutionErrorCategory)
+  ) return undefined;
+  return {
+    category: terminal.data.category as RetryableEvaluationCategory,
+    detail: terminal.data.detail ?? terminal.data.category!,
+  };
+}
+
+function journalEvaluationFailure(
+  deps: DriveDeps,
+  input: {
+    readonly cellKey: string;
+    readonly dispatch: number;
+    readonly evalIndex: number;
+    readonly evaluationAttempt: number;
+    readonly evaluator: string;
+    readonly detail: string;
+    readonly retryable?: RetryableEvaluationFailure;
+    readonly evalTaskSha256?: string;
+    readonly evalAttempt?: string;
+  },
+): void {
+  if (
+    input.retryable !== undefined
+    && input.evaluationAttempt <= (deps.maxInfrastructureRetries ?? 0)
+  ) {
+    appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+      kind: "evaluation-retryable-failure",
+      at: deps.liveClock(),
+      cellKey: input.cellKey,
+      dispatch: input.dispatch,
+      evalIndex: input.evalIndex,
+      evaluationAttempt: input.evaluationAttempt,
+      evaluator: input.evaluator,
+      ...(input.evalTaskSha256 === undefined ? {} : { evalTaskSha256: input.evalTaskSha256 }),
+      ...(input.evalAttempt === undefined ? {} : { evalAttempt: input.evalAttempt }),
+      category: input.retryable.category,
+      recoveryAdvice: "new-attempt-required",
+      detail: input.retryable.detail,
+    });
+    emitProgress(deps, `${input.cellKey} evaluation-retry-pending${legSuffix(deps, input.evalIndex)}`);
+    return;
+  }
+  journalCouldNotGrade(deps, input.cellKey, input.detail, {
+    ...(input.evalTaskSha256 === undefined ? {} : { evalTaskSha256: input.evalTaskSha256 }),
+    ...(input.evalAttempt === undefined ? {} : { evalAttempt: input.evalAttempt }),
+    evaluator: input.evaluator,
+    evalIndex: input.evalIndex,
+    evaluationAttempt: input.evaluationAttempt,
+    ...(input.retryable === undefined ? {} : { failureCategory: input.retryable.category }),
+  });
 }
 
 /**
@@ -282,11 +410,19 @@ async function dispatchEvaluation(
   dispatch: number,
   prepared: { readonly taskBytes: Uint8Array; readonly taskSha256: string },
   evalIndex: number,
+  evaluationAttempt: number,
 ): Promise<void> {
   // `requireEvaluatorCoverage` already refused a venue too small for minVerdicts at drive entry.
   const evaluator = deps.venue.evaluators[evalIndex - 1]!;
-  const legExtra = { evalTaskSha256: prepared.taskSha256, evaluator: evaluator.id, evalIndex };
-  const idempotencyKey = `eval:${deps.runSha256}:e${evalIndex}:${cellKey}:${dispatch}`;
+  const legExtra = {
+    evalTaskSha256: prepared.taskSha256,
+    evaluator: evaluator.id,
+    evalIndex,
+    evaluationAttempt,
+  };
+  const idempotencyKey = evaluationAttempt === 1
+    ? `eval:${deps.runSha256}:e${evalIndex}:${cellKey}:${dispatch}`
+    : `eval:${deps.runSha256}:e${evalIndex}:r${evaluationAttempt}:${cellKey}:${dispatch}`;
   const submissionUri = deterministicUuidUri(idempotencyKey);
   const deadline = new Date(Date.parse(deps.liveClock()) + deps.cellWindowMs).toISOString();
   const evalSubmissionBytes = sealSubmission({
@@ -302,19 +438,31 @@ async function dispatchEvaluation(
 
   const ack = await deps.backend.submit(prepared.taskBytes, evalSubmissionBytes);
   if (!ack.accepted) {
-    journalCouldNotGrade(deps, cellKey, ack.error.detail ?? ack.error.category, legExtra);
+    const retryable = isRetryableEvaluationCategory(ack.error.category)
+      ? { category: ack.error.category, detail: ack.error.detail ?? ack.error.category }
+      : undefined;
+    journalEvaluationFailure(deps, {
+      cellKey,
+      dispatch,
+      ...legExtra,
+      detail: ack.error.detail ?? ack.error.category,
+      ...(retryable === undefined ? {} : { retryable }),
+    });
     return;
   }
   await deps.backend.drain();
   const snapshot = await deps.backend.observe(ack.submission);
   const evalAttempt = snapshot.descriptor.attempt;
   if (snapshot.descriptor.derived.state !== "delivered") {
-    journalCouldNotGrade(
-      deps,
+    const retryable = retryableFailureFromSnapshot(snapshot);
+    journalEvaluationFailure(deps, {
       cellKey,
-      `evaluation attempt terminal state: ${snapshot.descriptor.derived.state}`,
-      { ...legExtra, ...(evalAttempt !== undefined ? { evalAttempt } : {}) },
-    );
+      dispatch,
+      ...legExtra,
+      detail: retryable?.detail ?? `evaluation attempt terminal state: ${snapshot.descriptor.derived.state}`,
+      ...(evalAttempt === undefined ? {} : { evalAttempt }),
+      ...(retryable === undefined ? {} : { retryable }),
+    });
     return;
   }
 
@@ -362,6 +510,7 @@ async function dispatchEvaluation(
     verdictSha256,
     evaluator: evaluator.id,
     evalIndex,
+    ...(evaluationAttempt === 1 ? {} : { evaluationAttempt }),
   });
   emitProgress(deps, `${cellKey} judged${legSuffix(deps, evalIndex)}`);
 }
@@ -381,6 +530,7 @@ async function prepareAndDispatchEvaluation(
   subjectDeliveryBytes: Uint8Array,
   resultArtifacts: readonly { readonly name: string; readonly bytes: Uint8Array }[],
   evalIndexes: readonly number[],
+  evaluationAttempts: Readonly<Record<number, number>>,
 ): Promise<void> {
   if (deps.venue.evaluationMode === "embedded") {
     if (evalIndexes.some((index) => index !== 1) || deps.minVerdicts !== 1) {
@@ -436,12 +586,23 @@ async function prepareAndDispatchEvaluation(
       evaluationSpecBytes,
     });
   } catch (cause) {
-    journalCouldNotGradeLegs(
-      deps,
-      cellKey,
-      cause instanceof Error ? cause.message : String(cause),
-      evalIndexes,
-    );
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    const retryable = retryableFailureFromCause(cause);
+    if (retryable === undefined) {
+      journalCouldNotGradeLegs(deps, cellKey, detail, evalIndexes);
+      return;
+    }
+    for (const evalIndex of evalIndexes) {
+      journalEvaluationFailure(deps, {
+        cellKey,
+        dispatch,
+        evalIndex,
+        evaluationAttempt: evaluationAttempts[evalIndex] ?? 1,
+        evaluator: deps.venue.evaluators[evalIndex - 1]!.id,
+        detail,
+        retryable,
+      });
+    }
     return;
   }
   const storedTaskSha256 = putSealedBytes(deps.workspaceDir, prepared.taskBytes);
@@ -454,14 +615,22 @@ async function prepareAndDispatchEvaluation(
   }
 
   for (const evalIndex of evalIndexes) {
+    const evaluationAttempt = evaluationAttempts[evalIndex] ?? 1;
     try {
-      await dispatchEvaluation(deps, cellKey, dispatch, prepared, evalIndex);
+      await dispatchEvaluation(deps, cellKey, dispatch, prepared, evalIndex, evaluationAttempt);
     } catch (cause) {
       const evaluator = deps.venue.evaluators[evalIndex - 1];
-      journalCouldNotGrade(deps, cellKey, cause instanceof Error ? cause.message : String(cause), {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      const retryable = retryableFailureFromCause(cause);
+      journalEvaluationFailure(deps, {
+        cellKey,
+        dispatch,
         evalTaskSha256: prepared.taskSha256,
-        ...(evaluator !== undefined ? { evaluator: evaluator.id } : {}),
+        evaluator: evaluator!.id,
         evalIndex,
+        evaluationAttempt,
+        detail,
+        ...(retryable === undefined ? {} : { retryable }),
       });
     }
   }
@@ -513,7 +682,16 @@ async function driveEvaluationForDelivery(deps: DriveDeps, event: CellStatusEven
       outputs: journaledOutputs,
     });
 
-    await prepareAndDispatchEvaluation(deps, cellKey, dispatch, deliveryBytes, resultArtifacts, allEvalIndexes(deps));
+    const evalIndexes = allEvalIndexes(deps);
+    await prepareAndDispatchEvaluation(
+      deps,
+      cellKey,
+      dispatch,
+      deliveryBytes,
+      resultArtifacts,
+      evalIndexes,
+      Object.fromEntries(evalIndexes.map((evalIndex) => [evalIndex, 1])),
+    );
   } catch (cause) {
     // Reached only from pre-leg work (delivery fetch/journal, spec resolution, prepare) — the
     // per-leg loop inside prepareAndDispatchEvaluation catches its own legs' failures.
@@ -580,6 +758,7 @@ export interface DeliveredCellGap {
   readonly deliveryOutputs?: readonly { readonly name: string; readonly sha256: string }[];
   /** The uncovered 1-based leg indexes (ascending) — ONLY these legs are re-run. */
   readonly missingEvalIndexes: readonly number[];
+  readonly nextEvaluationAttempts?: Readonly<Record<number, number>>;
 }
 
 /**
@@ -600,7 +779,16 @@ export async function driveEvaluationCatchUp(
         name: output.name,
         bytes: getSealedBytes(deps.workspaceDir, output.sha256),
       }));
-      await prepareAndDispatchEvaluation(deps, gap.cellKey, gap.lastDispatch, deliveryBytes, resultArtifacts, gap.missingEvalIndexes);
+      await prepareAndDispatchEvaluation(
+        deps,
+        gap.cellKey,
+        gap.lastDispatch,
+        deliveryBytes,
+        resultArtifacts,
+        gap.missingEvalIndexes,
+        gap.nextEvaluationAttempts
+          ?? Object.fromEntries(gap.missingEvalIndexes.map((evalIndex) => [evalIndex, 1])),
+      );
     } catch (cause) {
       // Pre-leg failure (stored bytes unreadable) — fan out so every missing leg terminates.
       journalCouldNotGradeLegs(deps, gap.cellKey, cause instanceof Error ? cause.message : String(cause), gap.missingEvalIndexes);

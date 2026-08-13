@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Status** | Implementation complete; real execution stopped at exact-image pre-stage |
-| **Version** | 1.0 |
+| **Status** | Recovery implementation complete; fresh execution requires the 60-GiB reserve start gate |
+| **Version** | 1.1 |
 | **Updated** | 2026-08-13 |
 | **Lane** | C4 |
 | **Packet** | P5 |
@@ -39,6 +39,13 @@ URL or discovery source, mint an archive mirror, or claim that Demo-1 is publish
 
 No new record kind or tier-1–3 publication semantic is introduced.
 
+The generic Run policy has one optional, bounded field:
+`policy.evaluation.maxInfrastructureRetries: 0 | 1`. Absence means zero and preserves legacy
+Run/bundle bytes. P5 explicitly seals `1`; official runs must make their own pre-lock decision.
+This is not a replicate top-up or task replacement: it permits only the same cell's same derived
+evaluation Task to be graded again after a typed provider/transport outage. The solve Submission,
+Claude patch, task, arm, replicate, and solve dispatch remain unchanged.
+
 ## Frozen fixture
 
 The fixture is minted only after P3b's final material contract. Each row must contain:
@@ -55,13 +62,34 @@ workspace, and evidence transcript. The local green-baseline control fetches it 
 keeps it only in the grader's private temporary input, and proves gold PASS plus empty FAIL for all
 three tasks.
 
-## Safety gate
+## Safety gate and run-owned recovery
 
-Before every image or Docker phase, `/` must have at least 40 GiB available. The gate is rechecked
+P5 starts only when `/` has at least 60 GiB available. It then creates an exact 16-GiB regular
+file inside the new P5 output directory as a run-owned recovery reserve. The target operating
+margin is 44 GiB and the hard floor remains 40 GiB. Before and after every Docker subprocess, P5
+may truncate only that identity-checked reserve, in whole-GiB increments and only far enough to
+restore the 44-GiB target. Every release is durably recorded with the before/after readings,
+released bytes, remaining reserve, and cleanup scope. The unused remainder is returned after cold
+bundle verification.
+
+Before every image or Docker phase, `/` must still have at least 40 GiB available. The gate is rechecked
 at mint start, before any mint Docker fallback, before every image pre-stage and grader attempt,
-at walkthrough start, before launch, and around every Docker subprocess. A failed gate stops with
-the exact observed bytes/GiB and never deletes caches or user data. Docker work is local-only and
-never required by CI.
+at walkthrough start, before launch, and around every Docker subprocess. If the run-owned reserve
+cannot restore the hard floor, the checkpoint stays open and the command stops before consuming
+the retry. It never deletes shared Docker cache, package cache, worktrees, or user data. Broader
+cleanup remains an explicit pre-run operator action because shared caches can be in use, can be
+expensive or impossible to reconstruct, and are not attributable to this Run. Docker work is
+local-only and never required by CI.
+
+One post-dispatch retry is eligible only for machine-typed `backend-unavailable`,
+`dependency-unavailable`, or `transport-failure` on the evaluation leg, including the exact
+`UNAVAILABLE/provider-unavailable/new-attempt-required` OCI contract. A grader/test timeout,
+test FAIL, model failure, protocol failure, task failure, or unclassified text is never eligible.
+The append-only journal records the failed evaluation attempt before retry; attempt 2 has a new
+evaluation nonce but the same solve dispatch and exact derived Task bytes. Status exposes pending,
+recovered, and exhausted retry counts. The deletion-portable bundle authenticates both attempts,
+and its verifier rejects gaps, substitutions, non-contiguous attempts, ineligible categories, or
+work beyond the sealed allowance.
 
 Other terminal stops are a missing/non-ready Claude binding, missing credentials, unavailable
 digest-pinned image, a failed gold/empty control, or a required platform-semantics change. There is
@@ -84,6 +112,7 @@ From `packages/benchmark-product/core`, on Node 22 with portal symlink preservat
 yarn p5:walkthrough \
   --claude /absolute/path/to/claude \
   --claude-version <exact-version> \
+  --claude-token-file /absolute/path/to/existing/setup-token \
   --docker /absolute/path/to/docker \
   --output-dir /new/immutable/output/directory
 ```
@@ -101,6 +130,25 @@ The output directory must not already exist. The command:
    newly created builder workspace, and cold-verifies the copied bundle;
 8. writes a transcript that says explicitly that the result proves plumbing, not capability, and
    that the publication boundary was not crossed.
+
+If the process stops after lock, resume it without re-importing, re-locking, or re-running any
+completed Claude cell. Durable `locked`, `running`, `closed`, and `reported` lifecycle boundaries
+continue with launch, the missing same-cell work, report production, or verification respectively:
+
+```sh
+yarn p5:walkthrough \
+  --claude /absolute/path/to/claude \
+  --claude-version <exact-version> \
+  --claude-token-file /absolute/path/to/existing/setup-token \
+  --docker /absolute/path/to/docker \
+  --resume-output-dir /existing/p5/output/directory
+```
+
+The token is not recreated or copied; the runtime reuses the already configured product-owned
+secret-forwarding file. A readiness probe revalidates that same binding. Accepted in-flight
+evaluation attempts resume under the same attempt identity; only a durable eligible outage
+advances to attempt 2. If disk recovery cannot restore the hard floor, the command exits before
+that attempt and the same output directory remains resumable.
 
 The operations facade is intentional: the real Claude binding is a host-owned injected runtime,
 and the CLI does not infer it from ambient executable or credential state.
