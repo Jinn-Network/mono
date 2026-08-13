@@ -18,6 +18,10 @@ const webReadmePath = resolve(productRoot, "web/README.md");
 const bundleReadmePath = resolve(productRoot, "PUBLIC-BUNDLE.md");
 const inspectRuntimePath = resolve(productRoot, "INSPECT-RUNTIME.md");
 const securityPath = resolve(productRoot, "SECURITY.md");
+const productDesignPath = resolve(
+  repoRoot,
+  "docs/superpowers/specs/2026-08-05-benchmark-product-design.md",
+);
 const extractionPath = resolve(
   repoRoot,
   "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md",
@@ -100,6 +104,8 @@ describe("product documentation consistency", () => {
 
   it("documents the pinned optional Inspect boundary without independence or EvalLog overclaiming", () => {
     const guide = read(inspectRuntimePath);
+    const security = read(securityPath);
+    const design = read(productDesignPath);
     expect(guide).toContain("`inspect-ai==0.3.255`");
     expect(guide).toContain("`read_eval_log`");
     expect(guide).toContain("inspect view --log-dir");
@@ -108,6 +114,13 @@ describe("product documentation consistency", () => {
     expect(guide).toMatch(/summary.*not an EvalLog/is);
     expect(guide).toMatch(/no ambient credential variables/i);
     expect(guide).toMatch(/not .*hostile-code sandbox/i);
+    expect(guide).toMatch(/private Tier 4 product adapter.*not a Jinn protocol or\s+Tier 3 platform API/is);
+    expect(guide).toMatch(/second independent product or evaluation\s+runtime consumer.*separate Tier 3 design.*conformance kit/is);
+    expect(security).toMatch(/private Tier 4 adapter machinery.*not a task-execution\s+backend.*reusable platform sandbox/is);
+    expect(security).toMatch(/second consumer.*trigger/is);
+    expect(design).toContain("**Addendum — 2026-08-13, private Inspect runtime-host boundary");
+    expect(design).toMatch(/Private interfaces.*neither Jinn protocol records nor Tier 3 platform APIs/is);
+    expect(design).toMatch(/Promotion trigger.*second independent product or\s+evaluation-runtime consumer.*conformance kit before its implementation/is);
   });
 
   it("pins the public-bundle guide to the frozen format, file roles, and six checks", () => {

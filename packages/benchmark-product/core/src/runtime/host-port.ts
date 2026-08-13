@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createLocalVenue, type LocalVenue, type LocalVenueOptions } from "../venue/venue.js";
 import { probeInspectSelection, type InspectHostBinding } from "./inspect/host.js";
 import { probeInspectOciSelection } from "./inspect/oci.js";
+import type { InspectSandboxExecutionRequest } from "./inspect/oci.js";
 import type {
   InspectArmConfiguration,
   InspectRunOptions,
@@ -30,6 +31,7 @@ export type InspectRuntimeSelectionRequest = InspectRuntimeSelectionBase & ({
   readonly dockerPath: string;
   readonly imageDigest: string;
   readonly datasetCacheDir: string;
+  readonly sandboxExecution?: InspectSandboxExecutionRequest;
   readonly runOptions: InspectRunOptions & { readonly sampleId: string | number };
 });
 
@@ -132,6 +134,7 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
           imageDigest: input.imageDigest,
           projectDir: resolve(input.projectDir),
           datasetCacheDir: resolve(input.datasetCacheDir),
+          sandboxExecution: input.sandboxExecution,
           taskReference: input.taskReference,
           taskArgs: input.taskArgs,
           arms: input.arms,

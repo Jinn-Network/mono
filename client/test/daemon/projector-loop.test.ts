@@ -167,6 +167,7 @@ function loop(input: {
   archiveRoot?: string;
   logger?: { info(m: string): void; warn(m: string): void };
   resolveRecord?: ProjectorLoopConfig['ports']['resolveRecord'];
+  signer?: ProjectorLoopConfig['ports']['signer'];
   overrides?: Partial<ProjectorLoopConfig>;
 }): {
   readonly projector: ProjectorLoop;
@@ -190,7 +191,7 @@ function loop(input: {
     cursorStore,
     ports: {
       source: { agent: 'urn:jinn:operator:test', name: 'test-operator' },
-      signer: fakeDiscoverySigner(),
+      signer: input.signer ?? fakeDiscoverySigner(),
       archiveRoot,
       resolveRecord: input.resolveRecord ?? (async () => ({
         kind: RECORD_KINDS.submission,
@@ -468,7 +469,40 @@ describe('projector loop', () => {
     expect(cursorStore.readObservations()).toHaveLength(1);
   });
 
+  // A `resolveRecord` throw is now scoped per record, so it no longer reaches this catch. Signing
+  // is not scoped and never should be — a signer that cannot sign fails the whole publication —
+  // so it drives the whole-call path the catch still exists for.
   it('persists observations when announcement publication throws', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(120);
+    chain.setFinalized(120n);
+    chain.addLog(120n, taskCreatedLog());
+
+    const warn = vi.fn();
+    const { projector, cursorStore } = loop({
+      chain,
+      state,
+      logger: { info: vi.fn(), warn },
+      signer: {
+        scope: DISCOVERY_SIGNING_SCOPE,
+        async sign() {
+          throw new Error('discovery signing key is unavailable');
+        },
+      },
+    });
+
+    const result = await projector.tick();
+
+    expect(result.announcements).toBe(0);
+    expect(warn.mock.calls.flat().join('\n')).toContain('announcement publication failed');
+    expect(cursorStore.readObservations()).toHaveLength(1);
+    expect(cursorStore.read()!.liveBlockNumber).toBe(120n);
+  });
+
+  // The per-record scoping (`AnnouncementRecordUnresolvedRefusal`) must not cost the tick its other
+  // announcements OR the operator its signal. Observations and cursor still advance; the refusal is
+  // recorded rather than thrown; and the warn below keeps it loud.
+  it('scopes an unresolvable record to itself instead of failing the whole publication', async () => {
     const chain = buildScriptedChain();
     chain.mine(120);
     chain.setFinalized(120n);
@@ -487,7 +521,11 @@ describe('projector loop', () => {
     const result = await projector.tick();
 
     expect(result.announcements).toBe(0);
-    expect(warn.mock.calls.flat().join('\n')).toContain('announcement publication failed');
+    expect(result.refusals).toBe(1);
+    const logged = warn.mock.calls.flat().join('\n');
+    // NOT the whole-tick message: this record failed alone.
+    expect(logged).not.toContain('announcement publication failed');
+    expect(logged).toContain('announcement record unresolved');
     expect(cursorStore.readObservations()).toHaveLength(1);
     expect(cursorStore.read()!.liveBlockNumber).toBe(120n);
   });
@@ -524,8 +562,10 @@ describe('projector loop', () => {
     expect(logged).toContain('evaluation-delivery'); // the role
     expect(logged).toContain(digest); // the on-chain anchor
     expect(logged).toContain('serving plane'); // the cause
-    expect(logged).toContain('dropped announcements for 1 publication event(s)'); // the loss
-    expect(logged).toContain('[TaskCreated]');
+    // The loss, now stated per record rather than per tick — and still stating that it is
+    // permanent, which is the fact an operator has to act on.
+    expect(logged).toContain('dropped the "submission" announcement for TaskCreated');
     expect(logged).toContain('120');
+    expect(logged).toContain('projector_canonical_events row cleared/orphaned by event_key');
   });
 });

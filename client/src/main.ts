@@ -2563,6 +2563,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           stateRoot: join(config.earningDir, '..', 'native'),
           password: PASSWORD,
           workerOwnerId: cryptoRandomUUID(),
+          logger: { warn: (message) => console.warn(message) },
         })
       : undefined;
     composition = await buildOperatorComposition({

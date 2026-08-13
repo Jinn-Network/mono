@@ -59,14 +59,25 @@ export function makeInspectLauncher(options: InspectLauncherOptions): LauncherCo
       requirePinning(view, options.manifest);
       if (options.host.kind === "oci") {
         const suffix = createHash("sha256").update(attempt.attemptUri).digest("hex").slice(0, 24);
+        const workerArgs = buildInspectOciRunArgs(options.host, {
+          name: `jinn-inspect-${suffix}`,
+          operation: "run",
+          inputDir: paths.input,
+          outputDir: paths.out,
+          network: "none",
+        });
+        const sandbox = options.manifest.runtime.execution?.sandbox;
         return {
-          argv: [process.execPath, inspectOciRunnerPath(), options.host.dockerPath, ...buildInspectOciRunArgs(options.host, {
-            name: `jinn-inspect-${suffix}`,
-            operation: "run",
-            inputDir: paths.input,
-            outputDir: paths.out,
-            network: "none",
-          })],
+          argv: sandbox === undefined
+            ? [process.execPath, inspectOciRunnerPath(), options.host.dockerPath, ...workerArgs]
+            : [
+              process.execPath,
+              inspectOciRunnerPath(),
+              "sandbox",
+              options.host.dockerPath,
+              sandbox.imageDigest,
+              ...workerArgs,
+            ],
           cwd: paths.work,
           env: {
             LANG: "C.UTF-8",

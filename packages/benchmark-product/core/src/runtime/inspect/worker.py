@@ -135,7 +135,7 @@ def selected_samples_sha256(samples: list[Any]) -> str:
         dumped = sample.model_dump(mode="json")
         material.append({
             key: dumped.get(key)
-            for key in ("id", "input", "target", "choices", "metadata", "setup")
+            for key in ("id", "input", "target", "choices", "metadata", "setup", "sandbox", "files")
             if key in dumped
         })
     encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -223,16 +223,27 @@ def resolved_selection_components(
     scorer_name: str,
     selected_sample_id: str | int | None = None,
     samples: list[Any] | None = None,
+    declared_sandbox: Any | None = None,
+    sandbox_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if len(spec.scorers) != 1 or spec.scorers[0].name != scorer_name:
         resolved = [scorer.name for scorer in spec.scorers]
         raise ValueError(
             f"first-slice selection requires exactly the named scorer {scorer_name!r}; resolved {resolved!r}"
         )
-    if spec.sandbox is not None:
+    if sandbox_config is None and spec.sandbox is not None:
         raise ValueError(
             "first-slice selection refuses task-defined sandboxes until their provider/config/image identity can be pinned"
         )
+    if sandbox_config is not None:
+        if declared_sandbox is None or declared_sandbox.type != "docker" or declared_sandbox.config is not None:
+            raise ValueError("the first hosted-sandbox slice requires one task-level docker sandbox with no config")
+        expected_effective = {"type": "jinn-oci", "config": sandbox_config}
+        if spec.sandbox is None or spec.sandbox.model_dump(mode="json") != expected_effective:
+            raise ValueError("Inspect did not resolve the sealed jinn-oci sandbox override")
+        for sample in samples or []:
+            if sample.sandbox is not None or sample.files or sample.setup:
+                raise ValueError("the first hosted-sandbox slice refuses per-sample sandbox, files, and setup")
     dataset = spec.dataset
     attrib_version = spec.task_attribs.get("version") if spec.task_attribs else None
     resolved_version = str(attrib_version) if attrib_version is not None else (
@@ -245,7 +256,10 @@ def resolved_selection_components(
             "args": task_args,
             "resolvedName": spec.task,
             "resolvedVersion": resolved_version,
-            "resolvedSandbox": None,
+            **({
+                "declaredSandbox": declared_sandbox.model_dump(mode="json"),
+                "resolvedSandbox": spec.sandbox.model_dump(mode="json"),
+            } if sandbox_config is not None else {"resolvedSandbox": None}),
             "source": resolve_source(project_dir, reference, spec.task_file),
             "dataset": {
                 "name": dataset.name,
@@ -260,6 +274,34 @@ def resolved_selection_components(
     }
 
 
+def configure_sandbox(sandbox_config: dict[str, Any] | None) -> Any | None:
+    if sandbox_config is None:
+        return None
+    from inspect_ai.util import SandboxEnvironmentSpec
+    from jinn_inspect_sandbox import JinnOciSandboxConfig
+
+    return SandboxEnvironmentSpec("jinn-oci", JinnOciSandboxConfig.model_validate(sandbox_config))
+
+
+def declared_sandbox_for_task(
+    reference: str,
+    task_args: dict[str, Any],
+    log_dir: str,
+) -> Any | None:
+    logs = inspect_eval(
+        reference,
+        task_args=task_args,
+        model="mockllm/jinn-sandbox-metadata",
+        run_samples=False,
+        log_dir=log_dir,
+        log_format="eval",
+        display="none",
+    )
+    if len(logs) != 1:
+        raise ValueError("sandbox metadata probe did not resolve exactly one task")
+    return read_eval_log(local_path(logs[0].location)).eval.sandbox
+
+
 def probe(config: dict[str, Any]) -> dict[str, Any]:
     runtime = {
         **require_runtime(),
@@ -267,6 +309,7 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
         "workerSha256": sha256_file(Path(__file__).resolve()),
         "brokerSha256": sha256_file(Path("/opt/jinn/broker.py")) if Path("/opt/jinn/broker.py").is_file() else None,
         "modelProviderSha256": sha256_file(Path("/opt/jinn/model_provider.py")) if Path("/opt/jinn/model_provider.py").is_file() else None,
+        "sandboxProviderSha256": project_tree_sha256(Path("/opt/jinn/sandbox_extension")) if Path("/opt/jinn/sandbox_extension").is_dir() else None,
     }
     project_dir = Path(config["projectDir"]).resolve()
     if not project_dir.is_dir():
@@ -278,6 +321,10 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
         os.chdir(project_dir)
         with tempfile.TemporaryDirectory(prefix="jinn-inspect-probe-") as log_dir:
             selected_sample_id = config.get("runOptions", {}).get("sampleId")
+            sandbox_config = config.get("sandboxExecution")
+            declared_sandbox = declared_sandbox_for_task(
+                reference, task_args, str(Path(log_dir) / "declared")
+            ) if sandbox_config is not None else None
             logs = inspect_eval(
                 reference,
                 task_args=task_args,
@@ -287,6 +334,7 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
                 log_dir=log_dir,
                 log_format="eval",
                 display="none",
+                sandbox=configure_sandbox(sandbox_config),
             )
             if len(logs) != 1:
                 raise ValueError(f"one task reference must resolve to exactly one EvalLog, got {len(logs)}")
@@ -302,6 +350,8 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
                 config["scorerName"],
                 selected_sample_id,
                 list(log.samples or []),
+                declared_sandbox,
+                sandbox_config,
             )
     finally:
         os.chdir(prior_cwd)
@@ -330,6 +380,14 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         import model_provider
         model_provider.configure(config["cellKey"])
         provider_records = model_provider.records
+    execution = manifest["runtime"].get("execution")
+    sandbox_runtime = execution.get("sandbox") if execution is not None else None
+    sandbox_config = None if sandbox_runtime is None else {
+        "schema": "jinn.network/benchmark-product/inspect-sandbox/1",
+        "imageDigest": sandbox_runtime["imageDigest"],
+        "platform": sandbox_runtime["platform"],
+        "policySha256": sandbox_runtime["policySha256"],
+    }
     kwargs: dict[str, Any] = {
         "task_args": manifest["task"]["args"],
         "model": arm["model"],
@@ -346,6 +404,7 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             "jinn.arm_id": arm["armId"],
             "jinn.repetition": config["repetition"],
         },
+        "sandbox": configure_sandbox(sandbox_config),
     }
     if provider is not None:
         # These are Inspect GenerateConfig fields (eval **kwargs), not ModelAPI constructor
@@ -374,6 +433,10 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     prior_cwd = Path.cwd()
     try:
         os.chdir(project_dir)
+        with tempfile.TemporaryDirectory(prefix="jinn-inspect-declared-") as declared_log_dir:
+            declared_sandbox = declared_sandbox_for_task(
+                manifest["task"]["reference"], manifest["task"]["args"], declared_log_dir
+            ) if sandbox_config is not None else None
         logs = inspect_eval(manifest["task"]["reference"], **kwargs)
     finally:
         os.chdir(prior_cwd)
@@ -396,7 +459,6 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         "adapterVersion": "1",
         "workerSha256": sha256_file(Path(__file__).resolve()),
     }
-    execution = manifest["runtime"].get("execution")
     if execution is not None:
         if runtime_now.get("inspectEvalsVersion") != execution["inspectEvalsVersion"]:
             raise ValueError("Inspect Evals package drifted during OCI execution")
@@ -408,6 +470,9 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("OCI broker source drifted from the sealed runtime identity")
         if sha256_file(Path("/opt/jinn/model_provider.py")) != execution["modelProviderSourceSha256"]:
             raise ValueError("OCI model provider source drifted from the sealed runtime identity")
+        if execution.get("sandbox") is not None:
+            if project_tree_sha256(Path("/opt/jinn/sandbox_extension")) != execution["sandbox"]["providerSourceSha256"]:
+                raise ValueError("OCI sandbox provider source drifted from the sealed runtime identity")
         actual_runtime["execution"] = execution
     actual_components = resolved_selection_components(
         project_dir,
@@ -417,6 +482,8 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         manifest["scorer"]["name"],
         manifest.get("runOptions", {}).get("sampleId"),
         log.samples,
+        declared_sandbox,
+        sandbox_config,
     )
     if actual_runtime != manifest["runtime"] or actual_components != {
         "task": manifest["task"],
@@ -484,6 +551,23 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             "eventDigest": records[-1].get("eventDigest") if records else None,
             "brokerProtocol": "jinn.network/model-broker/1",
             "brokerSourceSha256": manifest["runtime"]["execution"]["brokerSourceSha256"],
+        }
+    if sandbox_runtime is not None:
+        sandbox_events = [
+            event for sample in samples for event in (sample.events or [])
+            if getattr(event, "event", None) == "sandbox"
+        ]
+        event_material = json.dumps(
+            [event.model_dump(mode="json") for event in sandbox_events],
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+        summary["sandbox"] = {
+            "provider": sandbox_runtime["provider"],
+            "protocol": sandbox_runtime["protocol"],
+            "imageDigest": sandbox_runtime["imageDigest"],
+            "environmentCount": 1,
+            "operationCount": len(sandbox_events),
+            "eventDigest": hashlib.sha256(event_material).hexdigest(),
         }
     (output_dir / "inspect-summary.json").write_text(
         json.dumps(summary, sort_keys=True, separators=(",", ":")), encoding="utf-8"

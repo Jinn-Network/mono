@@ -1398,18 +1398,23 @@ describe('buildReadOnChainTaskDigest (defect #47: the native association key)', 
     expect(readContract).toHaveBeenCalledTimes(1);
   });
 
-  it('never memoizes a miss — a task created after the read must still resolve later', async () => {
+  // A THROW from `getTask` is never absence: the view is a plain mapping read
+  // (`contracts/src/tasks/TaskCoordinator.sol:437`) that returns an all-zero record for an unknown
+  // task and cannot revert. It is reported as `'unavailable'` (#2647) so the requester-side
+  // resolver can tell a dead RPC from "this operator is not the requester", and — as before — it
+  // is never memoized, so the read succeeds again the moment the RPC does.
+  it('reports a failed read as `unavailable`, and never memoizes it', async () => {
     const { buildReadOnChainTaskDigest } = await import('../../src/daemon/composition-root.js');
-    let posted = false;
+    let rpcUp = false;
     const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
       if (functionName !== 'getTask') throw new Error(`unexpected functionName ${functionName}`);
-      if (!posted) throw new Error('no such task');
+      if (!rpcUp) throw new Error('HTTP request failed: 503 Service Unavailable');
       return { creator: `0x${'1'.repeat(40)}`, taskCidDigest: TASK_CID_DIGEST };
     });
     const read = buildReadOnChainTaskDigest({ readContract } as never, TASK_COORDINATOR);
 
-    await expect(read(1236n)).resolves.toBeUndefined();
-    posted = true;
+    await expect(read(1236n)).resolves.toBe('unavailable');
+    rpcUp = true;
     await expect(read(1236n)).resolves.toBe(`sha256:${TASK_CID_DIGEST.slice(2)}`);
   });
 
