@@ -122,6 +122,46 @@ describe("publication registration authority and exact public chain", () => {
     expect(ordered.at(-1)?.receipt.record?.digest).toBe(`sha256:${runSha256}`);
   }, 30_000);
 
+  test("recovers the same Run receipt and registration digests after a completed-plan crash before its RunState checkpoint", async () => {
+    const now = clock();
+    const runSha256 = await lockedSample(now);
+    const base = await serveWorkspace();
+    expect((await publicationConfigure(context(now), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+
+    let crashed = false;
+    const first = await publicationRegister(context(now), { draftId: "draft-1" }, {
+      afterPlanBeforeCheckpoint: async () => { crashed = true; throw new Error("fixture crash"); },
+    });
+    expect(first.ok).toBe(false);
+    expect(crashed).toBe(true);
+
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    const writerState = (await source.writer.readState())!;
+    const receipt = Object.values(writerState.announcements)
+      .find((entry) => entry.receipt.record?.digest === `sha256:${runSha256}`)!.receipt;
+    const sourceHeadBeforeRetry = writerState.last;
+    const partial = readRunState(workspaceDir, "draft-1")!;
+    expect(partial.publication!.registration).toMatchObject({ state: "in-progress", announcedAt: expect.any(String) });
+    const frozenAt = partial.publication!.registration.announcedAt;
+    const expectedDigests = Object.fromEntries(
+      buildRegistrationClosure(workspaceDir, getSealedBytes(workspaceDir, runSha256), runSha256, frozenAt!)
+        .map((member) => [member.id, member.digest.slice(7)]),
+    );
+
+    const retried = await publicationRegister(context(now), { draftId: "draft-1" });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    if (!retried.ok) return;
+    expect(retried.result.sourceSequence).toBe(receipt.sequence);
+    const recovered = readRunState(workspaceDir, "draft-1")!;
+    expect(recovered.publication!.registration.receipt).toEqual({
+      sourceSequence: receipt.sequence,
+      entrySha256: receipt.entryDigest.slice(7),
+    });
+    expect(recovered.publication!.registration.announcedAt).toBe(frozenAt);
+    expect(recovered.publication!.registration.digests).toEqual(expectedDigests);
+    expect((await source.writer.readState())!.last).toEqual(sourceHeadBeforeRetry);
+  }, 30_000);
+
   test("refuses authorless source-absent records; durable origins become exact verify-origin records", async () => {
     const now = clock();
     const runSha256 = await lockedSample(now);

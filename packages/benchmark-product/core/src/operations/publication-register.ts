@@ -69,6 +69,8 @@ export interface PublicationRegistrationResult {
 export interface PublicationRegisterDeps {
   /** Required for every foreign Task/Benchmark carrying durable origin coordinates. */
   readonly verifyOrigin?: OriginVerificationPort;
+  /** Test-only crash seam after the completed registration plan is publicly probed, before its RunState checkpoint. */
+  readonly afterPlanBeforeCheckpoint?: () => Promise<void>;
 }
 
 async function probeExact(base: string, digest: `sha256:${string}`, bytes: Uint8Array): Promise<void> {
@@ -428,6 +430,10 @@ export function publicationRegister(
         if ("kind" in member && member.actions.includes("announce")) await probeExact(base, member.digest, member.bytes);
         else await probeArtifactExact(base, member.digest, member.bytes);
       }
+      // The neutral plan and every exact-byte probe have succeeded at this point, while the
+      // durable product checkpoint has not.  Retrying must replay the frozen plan and recover
+      // this very Run receipt from the source writer, not append a second registration chain.
+      await deps.afterPlanBeforeCheckpoint?.();
       const digests = Object.fromEntries(members.map((member) => [member.id, member.digest.slice(7)]));
       writeRunState(context.workspaceDir, input.draftId, {
         ...state,

@@ -21,6 +21,6 @@
     { "id": "15-omitted-in-scope-dispatch-fails", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
     { "id": "16-unavailable-authoritative-stream-indeterminate", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
     { "id": "17-observation-conflicts-and-gaps", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
-    { "id": "18-stage-crash-and-idempotency", "status": "partial", "remaining": "Registration, accounting, and Report recovery are executable; they are not yet represented in one cross-stage fault matrix.", "tests": ["src/operations/publication-accounting.test.ts", "src/operations/publication-register.test.ts", "src/operations/report.test.ts"] }
+    { "id": "18-stage-crash-and-idempotency", "status": "covered", "tests": ["src/operations/publication-register.test.ts", "src/operations/publication-accounting.test.ts", "src/operations/report.test.ts", "../../discovery/publication/src/source-adapter.test.ts"] }
   ]
 }
