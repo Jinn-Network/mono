@@ -177,8 +177,11 @@ export function dependencyFailureDetail(cause: unknown): {
   readonly cause: string;
   readonly causeStack?: string;
 } {
-  if (!(cause instanceof Error)) return { cause: String(cause) };
-  const summary = `${cause.name}: ${cause.message}`;
+  // Both halves are bounded to the same 400 characters. The message is schema-controlled — a
+  // `ZodError` names every failing path — so an unbounded summary turns one audit row into the very
+  // log dump the stack head is sliced to avoid.
+  if (!(cause instanceof Error)) return { cause: String(cause).slice(0, 400) };
+  const summary = `${cause.name}: ${cause.message}`.slice(0, 400);
   const frames = (cause.stack ?? "").split("\n")
     .slice(1, 4)
     .map((frame) => frame.trim())
@@ -274,7 +277,10 @@ export class NativeEvaluatorCoordinator {
       // below — but with its exact reason surfaced instead of the opaque bucket.
       if (cause instanceof NativeSubjectAuthorityError && !cause.transient) {
         const reason = `native-subject-authority-refused: ${cause.message}`;
-        this.input.state.recordEvaluationFailed(id, reason);
+        // This branch is terminal too, so its audit row gets the same bounded cause and stack head
+        // as the bucket below — without it, the one branch whose reason is already classified was
+        // also the one whose audit row named no throw site.
+        this.input.state.recordEvaluationFailed(id, reason, dependencyFailureDetail(cause));
         return { kind: "failed", reason };
       }
       // `.message`, not `.reason`: the code alone is the bucket that made #36's real cause

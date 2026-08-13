@@ -8,6 +8,7 @@ import {
   NativeEvaluatorStateConflictError,
 } from "../../src/daemon/native-evaluator-state.js";
 import { NativeEvaluatorCoordinator } from "../../src/daemon/native-evaluator-coordinator.js";
+import { NativeSubjectAuthorityError } from "../../src/evaluator/native-subject-authority.js";
 import { buildNativeEvaluatorVerdictVerification } from "../../src/evaluator/native-verdict-verification.js";
 
 /**
@@ -138,7 +139,9 @@ function coordinatorFor(state: NativeEvaluatorStateRepository, input: {
   const coordinator = new NativeEvaluatorCoordinator({
     state,
     backend: {
-      recover: async () => ({ classification: observation === 0 ? "absent" : "present" }),
+      // `matching`, not `present`: `ReconciliationReport.classification` is
+      // `matching | absent | contradictory`, and only `absent` re-submits.
+      recover: async () => ({ classification: observation === 0 ? "absent" : "matching" }),
       submit: async () => ({ accepted: true }),
       observe: async () => ({
         descriptor: {
@@ -270,6 +273,22 @@ describe("native evaluator verdict-ready (defect #43)", () => {
     expect(() => state.beginEvaluationExecution(id)).toThrow(NativeEvaluatorStateConflictError);
   });
 
+  it("refuses to begin a backend attempt from a post-execution phase that already holds an Attempt", async () => {
+    // The `evaluation-pending` case above is refused by the sealed-pair clause alone
+    // (`attemptUri === null`), so it passes with the STATE clause deleted. This case pins the state
+    // clause on its own: the Attempt is the real one minted by the finalized claim, and the phase
+    // is one the coordinator must never re-enter through `execute()`.
+    const { store, state, id } = seed();
+    const { coordinator } = coordinatorFor(state, {
+      observations: [{ terminal: false, state: "executing" }],
+    });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluating" });
+    expect(state.getDerivedEvaluation(id)?.attemptUri).not.toBeNull();
+
+    store.db.prepare("UPDATE native_evaluations SET state = 'verdict-ready' WHERE evaluation_id = ?").run(id);
+    expect(() => state.beginEvaluationExecution(id)).toThrow(NativeEvaluatorStateConflictError);
+  });
+
   it("names the throwing class, message and stack head on an unclassified terminal failure", async () => {
     const { store, state, id } = seed();
     const { coordinator } = coordinatorFor(state, {
@@ -301,5 +320,128 @@ describe("native evaluator verdict-ready (defect #43)", () => {
     expect(detail.cause).toBe("TypeError: Cannot read properties of undefined (reading 'attemptUri')");
     expect(detail.causeStack).toMatch(/^at /u);
     expect(detail.causeStack.length).toBeLessThanOrEqual(400);
+  });
+
+  it("bounds the cause string of an unclassified terminal failure", async () => {
+    const { store, state, id } = seed();
+    const { coordinator } = coordinatorFor(state, {
+      observations: [{ terminal: false, state: "executing" }],
+    });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluating" });
+
+    // `${name}: ${message}` was unbounded while `causeStack` was sliced to 400: a schema-validation
+    // message (a ZodError names every failing path) turned one audit row into a log dump.
+    const broken = coordinatorFor(state, { observations: [{ terminal: false, state: "executing" }] });
+    Object.defineProperty(state, "getDerivedEvaluation", {
+      value: () => { throw new TypeError("x".repeat(5_000)); },
+    });
+
+    const result = await broken.coordinator.reconcileEvaluation(id) as { kind: string; reason: string };
+    expect(result.kind).toBe("failed");
+    const audit = store.db.prepare(
+      "SELECT detail_json FROM native_evaluation_audit WHERE evaluation_id = ? AND kind = 'evaluation-failed-terminal'",
+    ).get(id) as { detail_json: string };
+    const detail = JSON.parse(audit.detail_json) as Record<string, string>;
+    expect(detail.cause.length).toBeLessThanOrEqual(400);
+    expect(detail.cause.startsWith("TypeError: xxx")).toBe(true);
+  });
+
+  it("carries the bounded cause detail on a refused subject authority", async () => {
+    const { store, state, id } = seed();
+    const broken = coordinatorFor(state, { observations: [{ terminal: false, state: "executing" }] });
+    Object.defineProperty(state, "getAdmissionAuthority", {
+      value: () => { throw new NativeSubjectAuthorityError("evaluator-not-safe-owner", "y".repeat(5_000)); },
+    });
+
+    const result = await broken.coordinator.reconcileEvaluation(id) as { kind: string; reason: string };
+    expect(result.kind).toBe("failed");
+    expect(result.reason.startsWith("native-subject-authority-refused: ")).toBe(true);
+    const audit = store.db.prepare(
+      "SELECT detail_json FROM native_evaluation_audit WHERE evaluation_id = ? AND kind = 'evaluation-failed-terminal'",
+    ).get(id) as { detail_json: string };
+    const detail = JSON.parse(audit.detail_json) as Record<string, string>;
+    expect(detail.cause.length).toBeLessThanOrEqual(400);
+    expect(detail.causeStack).toMatch(/^at /u);
+  });
+});
+
+/**
+ * A retraction pauses an admitted evaluation, and before this fix it wrote `paused` with NO retry
+ * schedule — a shape `resumeEvaluationRetry` refused, so the very next tick terminal-failed the
+ * evaluation with `evaluator-dependency-failed: NativeEvaluatorStateConflictError: paused
+ * evaluation has no retry schedule`.
+ *
+ * The live trigger chain that makes this round-27 critical: an orphan misclassification of a mined
+ * settlement makes the solver publish a signed WITHDRAWAL for a delivery that is in fact canonical;
+ * the evaluator ingests it as `solution-withdrawn`, retracts, pauses without a schedule, and
+ * discards an evaluation that was doing nothing wrong.
+ */
+describe("native evaluator retraction pause", () => {
+  const retract = (state: NativeEvaluatorStateRepository, sequence: string) => state.retractOpportunity({
+    source: fixture.opportunity.source,
+    sourceSequence: sequence,
+    sourceEntryDigest: `sha256:${"5".repeat(64)}`,
+    canonicalEventIdentity: fixture.opportunity.canonicalEventIdentity,
+    reason: "orphan-misclassified settlement withdrawal",
+  });
+
+  it("resumes an evaluation retracted while its backend attempt is running", async () => {
+    const { state, id } = seed();
+    const { coordinator } = coordinatorFor(state, {
+      observations: [{ terminal: false, state: "executing" }],
+    });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "evaluating" });
+
+    retract(state, "0000000000000900");
+    expect(state.getEvaluation(id)).toMatchObject({ state: "paused" });
+
+    const result = await coordinator.reconcileEvaluation(id) as { kind: string; reason?: string };
+    expect(String(result.reason)).not.toMatch(/paused evaluation has no retry schedule/u);
+    expect(result.kind).not.toBe("failed");
+    expect(state.getEvaluation(id)).toMatchObject({ state: "evaluating" });
+  });
+
+  it("resumes a retracted evaluation whose verdict graph is already durable", async () => {
+    const { store, state, id } = seed();
+    const { coordinator } = coordinatorFor(state, {
+      observations: [{ terminal: false, state: "executing" }, { terminal: true, state: "delivered" }],
+    });
+    await coordinator.reconcileEvaluation(id);
+    await coordinator.reconcileEvaluation(id);
+    // Pinned at `verdict-ready` — the phase whose durable artifacts a paused-then-discarded
+    // evaluation destroys.
+    store.db.prepare("UPDATE native_evaluations SET state = 'verdict-ready' WHERE evaluation_id = ?").run(id);
+
+    retract(state, "0000000000000901");
+    expect(state.getEvaluation(id)).toMatchObject({ state: "paused" });
+
+    const result = await coordinator.reconcileEvaluation(id) as { kind: string; reason?: string };
+    expect(result.kind).not.toBe("failed");
+    expect(state.getEvaluation(id)?.state).not.toBe("failed");
+    // The verdict graph survives the retraction untouched.
+    expect(state.listEvaluationArtifacts(id).map(({ role }) => role)).toContain("verdict");
+  });
+
+  it("leaves a settled evaluation complete when a withdrawal arrives late", async () => {
+    const { store, state, id } = seed();
+    const { coordinator } = coordinatorFor(state, {
+      observations: [{ terminal: false, state: "executing" }, { terminal: true, state: "delivered" }],
+    });
+    await coordinator.reconcileEvaluation(id);
+    await coordinator.reconcileEvaluation(id);
+    store.db.prepare("UPDATE native_evaluations SET state = 'complete' WHERE evaluation_id = ?").run(id);
+
+    retract(state, "0000000000000902");
+
+    expect(state.getEvaluation(id)).toMatchObject({ state: "complete" });
+    expect(state.sourceCheckpoint(fixture.opportunity.source)).toEqual({
+      sequence: "0000000000000902",
+      entryDigest: `sha256:${"5".repeat(64)}`,
+    });
+    const audit = store.db.prepare(
+      "SELECT detail_json FROM native_evaluation_audit WHERE evaluation_id = ? AND kind = 'evaluation-retraction-ignored'",
+    ).get(id) as { detail_json: string } | undefined;
+    expect(JSON.parse(audit!.detail_json)).toMatchObject({ state: "complete" });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "complete" });
   });
 });
