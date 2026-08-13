@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-// The Anvil-fork integration backbone (design §6.6). Spins up a throwaway `anvil --fork-url`
-// against Base Sepolia, deploys the today-generation TaskCoordinator + JinnRouterV3 + marketplace
-// mocks this tree's proven fixtures already exercise (`escrow-lifecycle.test.ts`), and hands the
-// deployment to a caller-supplied `run`. The well-known Anvil dev key is the one private-key
+// The historical Anvil-fork integration backbone (design §6.6), now backed by the repository's
+// committed Base state so PR verification has no live RPC dependency. It deploys the
+// today-generation TaskCoordinator + JinnRouterV3 + marketplace mocks and hands the deployment
+// to a caller-supplied `run`. The well-known Anvil dev key is the one private-key
 // literal this plan allows anywhere in this component -- it lives here, in `marketplace-testing`,
 // and must never appear in `@jinn-network/marketplace-venue-base`.
 import { randomBytes } from "node:crypto";
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,6 +31,7 @@ import {
   executeSafeTransaction,
   type MarketplaceChainConfig,
 } from "@jinn-network/marketplace-binding";
+import { anvilAvailable, startSnapshotAnvil } from "./anvil-state.js";
 
 const CONTRACTS_ROOT = new URL("../../../../contracts/", import.meta.url);
 
@@ -65,12 +65,6 @@ const MOCK_MECH_DELIVER_ABI = [
 const SAFE_SINGLETON = "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552" as Address;
 const SAFE_PROXY_FACTORY = "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2" as Address;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
-const DEFAULT_FORK_RPC_URL = "https://sepolia.base.org";
-
-export function resolveForkRpcUrl(configured = process.env.JINN_MARKETPLACE_FORK_RPC_URL): string {
-  return configured?.trim() || DEFAULT_FORK_RPC_URL;
-}
-
 const SAFE_SETUP_ABI = [
   {
     type: "function",
@@ -112,7 +106,7 @@ const SAFE_PROXY_FACTORY_ABI = [
   },
 ] as const satisfies Abi;
 
-/** A live venue deployed on an ephemeral Anvil fork, handed to `withForkVenue`'s `run`. */
+/** A live venue deployed on snapshot-backed Anvil, handed to `withForkVenue`'s `run`. */
 export interface ForkVenueDeployment {
   readonly rpcUrl: string;
   readonly chain: MarketplaceChainConfig;
@@ -134,6 +128,11 @@ export interface ForkVenueSubject {
   close(): void;
 }
 
+export interface ForkVenueSession {
+  readonly deployment: ForkVenueDeployment;
+  close(): Promise<void>;
+}
+
 interface ForkArtifact {
   readonly abi: Abi;
   readonly bytecode: Hex;
@@ -148,52 +147,12 @@ function randomDigest(): Hex {
   return `0x${randomBytes(32).toString("hex")}` as Hex;
 }
 
-/** True when `anvil` resolves on PATH and answers `--version`. Never throws or rejects. */
-export async function anvilAvailable(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const probe = spawn("anvil", ["--version"]);
-    probe.on("error", () => resolve(false));
-    probe.on("exit", (code) => resolve(code === 0));
-  });
-}
+export { anvilAvailable } from "./anvil-state.js";
 
 // Computed once at module load, exactly like the escrow-lifecycle/venue-fork test files' own
 // top-level `const hasAnvil = await anvilAvailable();` -- `describeForkVenueConformance` gates
 // its whole `describe` block on this so the suite skips cleanly (never fails) without Foundry.
 const hasAnvil = await anvilAvailable();
-
-// Polls readiness through a viem client (never ambient `fetch` -- production kit source may not
-// use ambient network APIs directly, per `.github/scripts/marketplace-source-boundaries.test.mjs`).
-async function waitForRpc(url: string, timeoutMs: number): Promise<boolean> {
-  const client = createPublicClient({ transport: http(url) });
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      await client.getChainId();
-      return true;
-    } catch {
-      // Anvil isn't answering yet; keep polling until the cap.
-    }
-    if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-}
-
-/** Kills the Anvil child and waits for it to actually exit, so its RPC port is free on return. */
-async function killAndWait(child: ChildProcessWithoutNullStreams, timeoutMs = 5000): Promise<void> {
-  return new Promise((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(() => resolve(), timeoutMs);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    child.kill();
-  });
-}
 
 type ForkPublicClient = ReturnType<typeof createPublicClient>;
 type ForkWalletClient = ReturnType<typeof createWalletClient>;
@@ -328,47 +287,60 @@ async function deployRevised(): Promise<{ chain: MarketplaceChainConfig; mech: A
 }
 
 /**
- * Deploys a today- or revised-generation venue on an ephemeral Anvil fork of Base Sepolia and
- * hands it to `run`, tearing the fork (and its state-dir mint) down afterward whether `run`
+ * Deploys a today- or revised-generation venue on an ephemeral Anvil loaded from committed state
+ * and hands it to `run`, tearing Anvil (and its state-dir mint) down afterward whether `run`
  * resolves or throws.
  */
-export async function withForkVenue<T>(options: {
-  readonly generation: "today" | "revised";
-  readonly run: (deployment: ForkVenueDeployment) => Promise<T>;
-}): Promise<T> {
-  const port = 9700 + (process.pid % 500);
-  const rpcUrl = `http://127.0.0.1:${port}`;
-  const anvil = spawn("anvil", [
-    "--fork-url",
-    // Base documents this as its archive-capable Sepolia endpoint. The prior publicnode fallback
-    // now rejects historical log reads without a personal token, which made the replay test
-    // depend on a provider-specific account despite using only public testnet state.
-    resolveForkRpcUrl(),
-    "--port",
-    String(port),
-    "--silent",
-  ]);
+export async function startForkVenue(
+  generation: "today" | "revised",
+): Promise<ForkVenueSession> {
+  const anvil = await startSnapshotAnvil();
   let stateDir: string | undefined;
   try {
-    const ready = await waitForRpc(rpcUrl, 12_000);
-    if (!ready) throw new Error("Anvil fork prerequisite unavailable; venue-fork backbone did not run");
-
     const account = privateKeyToAccount(DEV_KEY);
-    const publicClient = createPublicClient({ transport: http(rpcUrl) });
-    const wallet = createWalletClient({ account, transport: http(rpcUrl) });
+    const publicClient = createPublicClient({ transport: http(anvil.rpcUrl) });
+    const wallet = createWalletClient({ account, transport: http(anvil.rpcUrl) });
 
     const { chain, mech, safe } =
-      options.generation === "today"
+      generation === "today"
         ? await deployToday(publicClient, wallet, account.address)
         : await deployRevised();
 
     stateDir = mkdtempSync(join(tmpdir(), "venue-fork-state-"));
     const stateDbPath = join(stateDir, "venue.db");
-
-    return await options.run({ rpcUrl, chain, account: account.address, mech, safe, stateDbPath });
-  } finally {
-    await killAndWait(anvil);
+    let closed = false;
+    return {
+      deployment: {
+        rpcUrl: anvil.rpcUrl,
+        chain,
+        account: account.address,
+        mech,
+        safe,
+        stateDbPath,
+      },
+      async close() {
+        if (closed) return;
+        closed = true;
+        await anvil.stop();
+        rmSync(stateDir!, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    await anvil.stop();
     if (stateDir) rmSync(stateDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export async function withForkVenue<T>(options: {
+  readonly generation: "today" | "revised";
+  readonly run: (deployment: ForkVenueDeployment) => Promise<T>;
+}): Promise<T> {
+  const session = await startForkVenue(options.generation);
+  try {
+    return await options.run(session.deployment);
+  } finally {
+    await session.close();
   }
 }
 
@@ -459,7 +431,8 @@ async function deliverFixture(deployment: ForkVenueDeployment, requestId: Hex): 
 }
 
 /**
- * Runs, against a real Anvil fork, the end-to-end legs the fresh venue-base adapters must
+ * Runs, against a real Anvil loaded from committed state, the end-to-end legs the fresh
+ * venue-base adapters must
  * satisfy: a claim writes an attempt, a one-slot task's second claim surfaces the decoded
  * `TCMaxClaimsReached` revert, a delivered attempt settles idempotently, and two concurrent
  * writes through one sender land at consecutive nonces.
@@ -467,7 +440,7 @@ async function deliverFixture(deployment: ForkVenueDeployment, requestId: Hex): 
 export function describeForkVenueConformance(
   build: (deployment: ForkVenueDeployment) => Promise<ForkVenueSubject>,
 ): void {
-  describe.runIf(hasAnvil)("venue adapters against a forked chain", () => {
+  describe.runIf(hasAnvil)("venue adapters against committed Anvil state", () => {
     test("a claim writes a TaskAttemptCreated attempt and returns its index and requestId", async () => {
       await withForkVenue({
         generation: "today",

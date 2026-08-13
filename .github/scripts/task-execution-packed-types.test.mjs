@@ -22,6 +22,7 @@ const packages = [
   [join(taskExecutionRoot, 'backend-local', 'assembly'), '@jinn-network/task-execution-backend-local'],
   [join(taskExecutionRoot, 'evaluation-harness'), '@jinn-network/task-execution-evaluation-harness'],
   [join(taskExecutionRoot, 'evaluator-adapters'), '@jinn-network/task-execution-evaluator-adapters'],
+  [join(taskExecutionRoot, 'oci-grader'), '@jinn-network/task-execution-oci-grader'],
 ];
 
 // The assembly's production dependencies reach outside the task-execution tree into the
@@ -49,6 +50,7 @@ const codeEntrypoints = [
   '@jinn-network/task-execution-evaluation-harness',
   '@jinn-network/task-execution-evaluation-harness/launcher',
   '@jinn-network/task-execution-evaluator-adapters',
+  '@jinn-network/task-execution-oci-grader',
 ];
 
 function run(command, args, options = {}) {

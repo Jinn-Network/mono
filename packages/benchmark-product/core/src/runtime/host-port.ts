@@ -11,6 +11,7 @@ import type {
   InspectSelectionManifest,
 } from "./inspect/manifest.js";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
+import type { Demo1ClaudeRuntimeBinding } from "../venue/demo1-claude.js";
 
 interface InspectRuntimeSelectionBase {
   readonly projectDir: string;
@@ -57,6 +58,8 @@ export interface OpenAIHostConnection {
 export interface BenchmarkRuntimeHostOptions {
   readonly openAI?: OpenAIHostConnection;
   readonly repositoryRoot?: string;
+  /** Explicit real Claude Code deployment used by Demo-1 repository-work arms. */
+  readonly demo1ClaudeRuntime?: Demo1ClaudeRuntimeBinding;
 }
 
 function inside(path: string, root: string): boolean {
@@ -160,6 +163,9 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
       try {
         const venue = createLocalVenue({
           ...venueOptions,
+          ...(hostOptions.demo1ClaudeRuntime === undefined
+            ? {}
+            : { demo1ClaudeRuntime: hostOptions.demo1ClaudeRuntime }),
           ...(binding === undefined ? {} : { evaluationRuntime: binding }),
           ...(descriptor.path === undefined ? {} : { inspectHostConnectionDescriptor: descriptor.path }),
         });

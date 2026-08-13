@@ -20,6 +20,7 @@ const TASK_EXECUTION_PACKAGES = [
   ['backend-local/assembly', '@jinn-network/task-execution-backend-local'],
   ['evaluation-harness', '@jinn-network/task-execution-evaluation-harness'],
   ['evaluator-adapters', '@jinn-network/task-execution-evaluator-adapters'],
+  ['oci-grader', '@jinn-network/task-execution-oci-grader'],
 ];
 
 // Packages OUTSIDE the task-execution tree that a task-execution package may legitimately
@@ -134,6 +135,34 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [], peerDependencies: [],
   }],
+  // oci-grader: host-owned OCI grader execution. Production surface is the GraderReportSource
+  // port (evaluator-adapters), the EvaluationSpec vocabulary (profiles), and the operational
+  // error + exact-material types (evaluation-harness). Nothing else — no evidence, no trust,
+  // no backend, no chain or network client. The devDependencies below are transitive-only
+  // gap-fills (same pattern as evaluator-adapters/evaluation-harness): production dependencies
+  // of oci-grader's own production dependencies that must be portal-resolvable locally since
+  // they are not published to the registry.
+  ['oci-grader', {
+    dependencies: [
+      '@jinn-network/task-execution-evaluation-harness',
+      '@jinn-network/task-execution-evaluator-adapters',
+      '@jinn-network/task-execution-profiles',
+    ],
+    devDependencies: [
+      '@jinn-network/attestation-issuer',
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-workspace',
+    ],
+    optionalDependencies: [], peerDependencies: [],
+  }],
 ]);
 
 function readPackage(directory) {
@@ -174,7 +203,7 @@ test('the task-execution package inventory is explicit and has one manifest', ()
   // total, never a hardcoded guessed number) — TASK_EXECUTION_PACKAGES.length IS that live
   // total; this assertion documents the count this revision expects (4 pre-existing + the four
   // backend-local components, backend plan Task A1).
-  assert.equal(TASK_EXECUTION_PACKAGES.length, 10);
+  assert.equal(TASK_EXECUTION_PACKAGES.length, 11);
   for (const [directory, expectedName] of TASK_EXECUTION_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

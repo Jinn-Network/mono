@@ -155,6 +155,23 @@ export function materialFromState(
   };
 }
 
+/** Minimum representable ISO gap between two adjacent record announcements (1ms). */
+const RECORD_ANNOUNCEMENT_STEP_MS = 1;
+
+/**
+ * Announcement timestamp for the record at `ordinal` in an evaluation's publication set, based at
+ * the outbox-shared `createdAt`. Distinct ordinals yield strictly-increasing instants so each record
+ * advances the append-only signed source head; the value is a pure function of the persisted base
+ * and ordinal, so a resumed publish recomputes the identical timestamp.
+ */
+function advanceAnnouncementTimestamp(base: string, ordinal: number): string {
+  const baseMs = Date.parse(base);
+  if (!Number.isFinite(baseMs)) {
+    throw new EvaluatorCoordinatorFailure("evaluation-publication-timestamp-invalid", base);
+  }
+  return new Date(baseMs + ordinal * RECORD_ANNOUNCEMENT_STEP_MS).toISOString();
+}
+
 function sha256Bytes32(digest: `sha256:${string}`): `0x${string}` {
   const hex = digest.slice("sha256:".length);
   if (!/^[0-9a-f]{64}$/u.test(hex)) throw new EvaluatorCoordinatorFailure("invalid-sha256-digest");
@@ -165,6 +182,30 @@ function delivery(bytes: Uint8Array): DeliveryRecord {
   const parsed = DeliveryRecordSchema.safeParse(parseJson(bytes, "evaluation Delivery"));
   if (!parsed.success) throw new EvaluatorCoordinatorFailure("evaluation-delivery-invalid");
   return parsed.data;
+}
+
+/**
+ * The self-diagnosing payload for the opaque `evaluator-dependency-failed` bucket: the throwing
+ * class and its message (which go into the failure reason, so the daemon's one-line
+ * `[evaluator] evaluation failed: …` warning names them), plus a bounded head of the stack (audit
+ * row only — enough to name the throw site without turning an audit row into a log dump).
+ */
+export function dependencyFailureDetail(cause: unknown): {
+  readonly cause: string;
+  readonly causeStack?: string;
+} {
+  // Both halves are bounded to the same 400 characters. The message is schema-controlled — a
+  // `ZodError` names every failing path — so an unbounded summary turns one audit row into the very
+  // log dump the stack head is sliced to avoid.
+  if (!(cause instanceof Error)) return { cause: String(cause).slice(0, 400) };
+  const summary = `${cause.name}: ${cause.message}`.slice(0, 400);
+  const frames = (cause.stack ?? "").split("\n")
+    .slice(1, 4)
+    .map((frame) => frame.trim())
+    .filter((frame) => frame.length > 0)
+    .join(" | ")
+    .slice(0, 400);
+  return frames === "" ? { cause: summary } : { cause: summary, causeStack: frames };
 }
 
 function digestOfOutput(record: DeliveryRecord, name: string): `sha256:${string}` {
@@ -253,22 +294,34 @@ export class NativeEvaluatorCoordinator {
       // below — but with its exact reason surfaced instead of the opaque bucket.
       if (cause instanceof NativeSubjectAuthorityError && !cause.transient) {
         const reason = `native-subject-authority-refused: ${cause.message}`;
-        this.input.state.recordEvaluationFailed(id, reason);
+        // This branch is terminal too, so its audit row gets the same bounded cause and stack head
+        // as the bucket below — without it, the one branch whose reason is already classified was
+        // also the one whose audit row named no throw site.
+        this.input.state.recordEvaluationFailed(id, reason, dependencyFailureDetail(cause));
         return { kind: "failed", reason };
       }
       // `.message`, not `.reason`: the code alone is the bucket that made #36's real cause
       // ("evidence capture start failed: Graph identity ... is reused for incompatible
       // contextual roles") reachable only by reading the attempt journal off disk. The message
       // is the code when there is no detail, so codeless failures read exactly as before.
+      //
+      // Everything the coordinator does not recognise lands in `evaluator-dependency-failed`, and
+      // three separate defects (#33, #36, #43) have now been diagnosed by DB spelunking because
+      // that bucket carried no cause at all. #43's real cause — a
+      // `NativeEvaluatorStateConflictError: evaluation backend requires finalized claim and sealed
+      // pair` — was indistinguishable from an RPC outage in both the audit row and the daemon log.
+      // The bucket now always names the throwing class and its message (the same shape the
+      // subject-authority branches above use), so the code is never again the whole story.
+      const detail = dependencyFailureDetail(cause);
       const reason = cause instanceof NativeSubjectAuthorityError
         ? `native-subject-authority-unavailable: ${cause.message}`
         : cause instanceof EvaluatorCoordinatorFailure
           ? cause.message
-          : "evaluator-dependency-failed";
+          : `evaluator-dependency-failed: ${detail.cause}`;
       if ((cause instanceof EvaluatorCoordinatorFailure && !cause.retryable)
         || cause instanceof NativeEvaluatorStateConflictError
         || cause instanceof TypeError) {
-        this.input.state.recordEvaluationFailed(id, reason);
+        this.input.state.recordEvaluationFailed(id, reason, detail);
         return { kind: "failed", reason };
       }
       const evaluation = this.input.state.getEvaluation(id);
@@ -351,7 +404,37 @@ export class NativeEvaluatorCoordinator {
       this.input.state.recordEvaluationOperationOrphaned(operation.operationId, status.reason);
       return true;
     }
+    // `pending` / `canonical`: the chain read found no canonical fact and the transaction is either
+    // still in flight or invisible to whichever slot the multi-provider fallback transport happened
+    // to poll. Neither is evidence of a reorg, so the operation is HELD — transaction identity
+    // intact — and the next tick re-reads. Because the infrastructure classifier no longer
+    // manufactures an `orphaned` out of absence (see `transactionStatus` in
+    // `native-base-sepolia-infrastructure.ts`), the destructive rollback above —
+    // `recordEvaluationOperationOrphaned`, which NULLs `evaluation_attempt_uri` and
+    // `evaluation_request_id` — is now reachable only on positive evidence, and may stand as is.
+    //
+    // Holding forever would trade a false orphan for an immortal zombie, so the give-up is an
+    // explicit clock rather than a provider's memory: once the evaluation's admission deadline has
+    // passed and the chain still will not confirm a broadcast transaction, this raises a retryable
+    // failure, which the catch in `reconcileEvaluation` hands to `recordEvaluationPaused` — whose
+    // next attempt lies beyond the deadline and therefore terminalizes as `evaluator-retry-deadline`.
+    if (status.kind === "pending" && this.pastDeadline(operation.evaluationId)) {
+      throw new EvaluatorCoordinatorFailure(
+        "evaluation-transaction-unconfirmed-past-deadline",
+        `${operation.kind} ${operation.txHash}`,
+        true,
+      );
+    }
     return true;
+  }
+
+  /** True once the evaluation's admission deadline is behind us. */
+  private pastDeadline(evaluationId: NativeOperationId): boolean {
+    const evaluation = this.input.state.getEvaluation(evaluationId);
+    if (evaluation === undefined) return false;
+    const deadline = Date.parse(this.input.deadline(evaluation));
+    if (!Number.isFinite(deadline)) return false;
+    return (this.input.retry?.now?.() ?? new Date()).getTime() > deadline;
   }
 
   private async claim(evaluation: NativeEvaluationRow): Promise<NativeEvaluatorCoordinatorResult> {
@@ -543,13 +626,40 @@ export class NativeEvaluatorCoordinator {
 
   private async publish(id: NativeOperationId): Promise<void> {
     const artifacts = this.input.state.listEvaluationArtifacts(id);
+    // A verdict graph publishes SIX records (evaluation task, submission, verdict, Delivery,
+    // Delivery envelope, evidence) into ONE append-only signed source whose head must STRICTLY
+    // advance per announcement (see packages/discovery/serve/src/source-writer.ts).
+    // `recordVerdictReady` stamps every row of the graph with one shared `createdAt`, so announcing
+    // them all at that instant collides on record 2+: record 1 advances the head to the shared
+    // instant and the other five are refused with `SourceWriterIntegrityError` FOREVER, because the
+    // retry re-reads the same fixed `createdAt` (defect #46, live round 28 / task 1236 — the
+    // evaluator-side sibling of the solver-side defect #24 that #2560 fixed the same way).
+    //
+    // Derive each record's announcement timestamp from its stable ordinal over the FULL per-
+    // evaluation publication set — including rows already `published`. Distinct ordinals give
+    // strictly-increasing timestamps in drain order; because the already-published rows keep their
+    // ordinals, the still-pending records of a WEDGED evaluation advance PAST the head that its
+    // first record already set instead of restarting from the shared `createdAt`. The derivation is
+    // a pure function of persisted data, so a resumed publish recomputes the identical timestamp and
+    // any record already committed to the source reconciles idempotently rather than re-colliding.
+    const ordinals = new Map<string, number>(
+      this.input.state.listEvaluationPublications(id)
+        .map((publication, index) => [publication.publicationKey, index] as const),
+    );
     for (const publication of this.input.state.listPendingEvaluationPublications()
       .filter(({ evaluationId }) => evaluationId === id)) {
       const artifact = artifacts.find(({ role, digest }) =>
         role === publication.role && digest === publication.recordDigest,
       );
       if (artifact === undefined) throw new EvaluatorCoordinatorFailure("evaluation-publication-artifact-missing");
-      const receipt = await this.input.publisher.publish({ publication, artifact });
+      const createdAt = advanceAnnouncementTimestamp(
+        publication.createdAt,
+        ordinals.get(publication.publicationKey) ?? 0,
+      );
+      const receipt = await this.input.publisher.publish({
+        publication: { ...publication, createdAt },
+        artifact,
+      });
       this.input.state.recordEvaluationPublicationPublished(publication.publicationKey, receipt);
     }
     // A second evaluation whose byte-identical verdict graph a prior evaluation already announced

@@ -85,6 +85,40 @@ describe("ordering and export fixture oracles", () => {
 });
 
 describe("method fixture/spec completeness", () => {
+  test("retains the legacy paired-delta fixture and routes current conformance to its successor", async () => {
+    const [legacy, paired, withheld, manifest] = await Promise.all([
+      fixtureJson("methods/paired-delta.json"),
+      fixtureJson("methods/paired-delta-shared-ensemble.v2.json"),
+      fixtureJson("methods/paired-delta-withheld.json"),
+      fixtureJson("manifest.sha256.json"),
+    ]);
+
+    expect(legacy.expectedResults.bootstrap.draws).toBe(12_000);
+    expect(paired.expectedResults.bootstrap.draws).toBe(
+      paired.expectedResults.bootstrap.resamples * paired.expectedResults.bootstrap.count,
+    );
+    expect(withheld.expectedResults.bootstrap.draws).toBe(0);
+    expect(manifest.entries).toEqual(expect.arrayContaining([
+      {
+        id: "methods/paired-delta.json",
+        sha256: "ee87f4d240c373131edf81677209e4183c2032db7d015a1149cdcfcc2b5dc7fd",
+      },
+      {
+        id: "methods/paired-delta-shared-ensemble.v2.json",
+        sha256: "33a81c543ecd8b7bbf0fc99132e9cb3aca96d25365286ce09e5037ac33771c8b",
+      },
+    ]));
+    const erratum = manifest.errata.find((entry: any) => entry.id === "methods/paired-delta.json");
+    expect(erratum).toMatchObject({
+      id: "methods/paired-delta.json",
+      supersededBy: "methods/paired-delta-shared-ensemble.v2.json",
+      date: "2026-08-13",
+    });
+    expect(erratum.reason).toContain("draws=12000");
+    expect(erratum.reason).toContain("draws=6000");
+    expect(erratum.reason).toContain("exact pre-correction package artifact must be retained unchanged");
+  });
+
   test("declares every reference method and Bradley–Terry's registered/unavailable status", async () => {
     const specs = [
       ...await fixtureJson("methods/method-specs.json"),

@@ -467,9 +467,10 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
 // The mirror is only safe while it stays faithful. `local` re-declares the backend's
 // `RunPinningCheck` rather than importing it (the tree-wide evidence/backend ban, plus the
 // symbol is not on the backend's public surface), so a field added or retyped upstream would
-// otherwise drift silently. Extra mirror-only fields are allowlisted by name so *those* are
-// a deliberate act too.
-const MIRROR_ONLY_RUN_PINNING_FIELDS = ['checkedRequirementsDigest'];
+// otherwise drift silently. P2b moved `checkedRequirementsDigest` into the real backend result,
+// leaving no mirror-only fields; keep the explicit allowlist so any future extra remains a
+// deliberate act.
+const MIRROR_ONLY_RUN_PINNING_FIELDS = [];
 
 function interfaceFields(path, name) {
   const source = readFileSync(path, 'utf8');

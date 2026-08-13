@@ -24,6 +24,7 @@ import {
   parserAllowlistKey,
   ProfilesError,
   verifyEvaluationSubject,
+  type DeriveEvaluationTaskInput,
   type DeterministicProcessBlock,
   type EvaluationSpec,
   type MeasurementMap,
@@ -38,6 +39,7 @@ import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import { STAGED_SEALED_TASK_FILENAME } from "@jinn-network/task-execution-workspace";
 import {
   EvaluationOperationalError,
+  isEvaluationOperationalError,
   validateCompletedEvaluation,
   type ClaimEvidence,
   type CompletedEvaluation,
@@ -202,11 +204,96 @@ async function readExactMaterial(
   };
 }
 
+/**
+ * The one optional input the fixed derivation appends after every subject artifact (program §7.39,
+ * `buildEvaluationTaskProfile`'s `admission-receipt` slot). It lives ONLY in the sealed Task's
+ * `inputs` — never in `payload` — so a verifier that reads bindings out of `payload` alone
+ * re-derives the receipt-free shape and byte-compares it against a receipt-bearing document.
+ */
+const ADMISSION_RECEIPT_INPUT_NAME = "admission-receipt";
+
+type DeclaredAdmissionReceipt = NonNullable<
+  DeriveEvaluationTaskInput["admissionReceipt"]
+>;
+
 interface EvaluationTaskBindings {
   readonly subjectTask: SubjectReference;
   readonly subjectDelivery: SubjectReference;
   readonly subjectResults: readonly SubjectReference[];
   readonly evaluationSpec: `sha256:${string}`;
+  /**
+   * #40: present exactly when the sealed Task declares the receipt input. The producer
+   * (`deriveAndSealEvaluationSubmission`) supplies it from the subject Submission's annotation;
+   * every other verifier already passes it through. This binding is what lets the harness
+   * re-derive BOTH legal shapes instead of only the receipt-free one.
+   */
+  readonly admissionReceipt?: DeclaredAdmissionReceipt;
+}
+
+/**
+ * Reads the declared receipt positionally, exactly as `deriveEvaluationTask` emits it: the fixed
+ * `inputs` order is `[subjectTask, subjectDelivery, ...subjectResults, admissionReceipt?]`. Keying
+ * on position rather than on a name search is deliberate — a subject Result legitimately named
+ * `admission-receipt` would otherwise be mistaken for the receipt and break a Task that verifies
+ * today. Anything other than the two derivable lengths is refused here rather than left to the
+ * byte-compare, so the operator gets the specific reason.
+ */
+function declaredAdmissionReceipt(
+  task: Record<string, unknown>,
+  subjectCount: number,
+): DeclaredAdmissionReceipt | undefined {
+  const inputs = task["inputs"];
+  if (!Array.isArray(inputs)) {
+    throw new EvaluationHarnessInputError(
+      "evaluation Task inputs must be an array",
+    );
+  }
+  if (inputs.length === subjectCount) return undefined;
+  if (inputs.length !== subjectCount + 1) {
+    throw new EvaluationHarnessInputError(
+      "evaluation Task inputs do not match its bound subject artifacts",
+    );
+  }
+  const declared = object(
+    inputs[subjectCount],
+    "evaluation Task admission-receipt input",
+  );
+  if (declared["name"] !== ADMISSION_RECEIPT_INPUT_NAME) {
+    throw new EvaluationHarnessInputError(
+      `evaluation Task input after its subject artifacts must be named "${ADMISSION_RECEIPT_INPUT_NAME}"`,
+    );
+  }
+  return declared as DeclaredAdmissionReceipt;
+}
+
+/**
+ * The declared receipt is staged by the same `materializeInput` pass that stages every other
+ * declared input, so it earns the same post-staging digest re-check the subject materials already
+ * get through `readExactMaterial`. The `digest.sha256` guard mirrors the provisioner's own
+ * conditional (`materializeAt`): a descriptor that pins no sha256 binds the derivation without
+ * pinning staged bytes, and the profile's `admission-receipt` slot declares no
+ * `descriptorMustCarry`, so requiring one here would be stricter than the profile.
+ */
+async function verifyStagedAdmissionReceipt(
+  inputDir: string,
+  descriptor: DeclaredAdmissionReceipt,
+): Promise<void> {
+  const declared = (descriptor as { readonly digest?: unknown }).digest;
+  if (declared === undefined) return;
+  const sha256Value = object(
+    declared,
+    "evaluation Task admission-receipt digest",
+  )["sha256"];
+  if (sha256Value === undefined) return;
+  if (typeof sha256Value !== "string" || !SHA256_HEX.test(sha256Value)) {
+    throw new EvaluationHarnessInputError(
+      "evaluation Task admission-receipt digest.sha256 must be 64 lowercase hexadecimal characters",
+    );
+  }
+  await readExactMaterial(inputDir, {
+    name: ADMISSION_RECEIPT_INPUT_NAME,
+    digest: `sha256:${sha256Value}`,
+  });
 }
 
 async function readEvaluationTask(
@@ -242,6 +329,8 @@ async function readEvaluationTask(
       "evaluation Task subject Result names must be unique",
     );
   }
+  // The derivation emits one input per subject artifact, then the optional receipt.
+  const receipt = declaredAdmissionReceipt(task, 2 + subjectResults.length);
   return {
     subjectTask: subjectReference(
       payload["subjectTask"],
@@ -256,6 +345,7 @@ async function readEvaluationTask(
       payload["evaluationSpec"],
       "evaluation Task payload.evaluationSpec",
     ),
+    ...(receipt === undefined ? {} : { admissionReceipt: receipt }),
   };
 }
 
@@ -327,12 +417,30 @@ function validateEvaluationTaskDerivation(input: {
   readonly evaluationTaskBytes: Uint8Array;
   readonly bindings: EvaluationTaskBindings;
 }): void {
-  const rederived = deriveEvaluationTask({
-    subjectTask: input.bindings.subjectTask,
-    subjectDelivery: input.bindings.subjectDelivery,
-    subjectResults: [...input.bindings.subjectResults],
-    evaluationSpecDigest: input.bindings.evaluationSpec,
-  });
+  let rederived: ReturnType<typeof deriveEvaluationTask>;
+  try {
+    rederived = deriveEvaluationTask({
+      subjectTask: input.bindings.subjectTask,
+      subjectDelivery: input.bindings.subjectDelivery,
+      subjectResults: [...input.bindings.subjectResults],
+      evaluationSpecDigest: input.bindings.evaluationSpec,
+      // #40: the producer passes this whenever the subject carries an admission family, and so
+      // must every verifier. Omitting it re-derived the receipt-free 3-input template and
+      // byte-compared it against the sealed 4-input document.
+      ...(input.bindings.admissionReceipt === undefined
+        ? {}
+        : { admissionReceipt: input.bindings.admissionReceipt }),
+    });
+  } catch (cause) {
+    // A binding the profiles derivation cannot even accept (a receipt descriptor carrying no
+    // locator, say) is invalid input, not an operational failure — classify it as such rather
+    // than letting a raw schema throw fall through to exit 70.
+    if (cause instanceof ProfilesError) throw cause;
+    throw new EvaluationHarnessInputError(
+      "evaluation Task bindings are not a derivable profiles input",
+      { cause },
+    );
+  }
   if (!bytesEqual(rederived.bytes, input.evaluationTaskBytes)) {
     throw new EvaluationHarnessInputError("evaluation Task does not equal the profiles derivation");
   }
@@ -680,6 +788,39 @@ async function deploymentFromEnvironment(): Promise<EvaluationHarnessDeployment>
   return deployment;
 }
 
+/** Never let a pathological message flood the captured stderr log. */
+const MAX_REFUSAL_DETAIL_CHARS = 512;
+
+/**
+ * Emits one line naming why this Attempt produced no verdict (#39b).
+ *
+ * The live gate's first harness run refused its subject and exited 65 in 413ms with BOTH captured
+ * harness logs at 0 bytes: the reason existed, was exact, and was thrown away at the catch. A
+ * fully-diagnosed refusal that reports only a number costs the operator the whole diagnosis.
+ *
+ * Stderr is the channel because the backend already captures it into the attempt's harness-stderr
+ * log AND already tails that into the terminal detail it records, so one write carries the reason
+ * to the operator's audit row without any new plumbing.
+ *
+ * The bin.ts posture holds: exact inputs, provider diagnostics, and secrets never reach log
+ * output. Only two message sources are echoed, both safe by construction -- this package's own
+ * `EvaluationHarnessInputError`/`ProfilesError` structural messages (which name document and
+ * output NAMES from the already-public signed Task and Delivery, never their bytes) and
+ * `EvaluationOperationalError.safeDetail` (whose whole contract is to be safe). Anything else --
+ * an adapter throwing a raw `Error`, a provider SDK, a module-load failure -- contributes its
+ * classification only, never its message.
+ */
+function reportRefusal(reasonCode: string, safeDetail?: string): void {
+  const detail = safeDetail === undefined || safeDetail.length === 0
+    ? ""
+    : `: ${safeDetail.replaceAll(/\s+/gu, " ").slice(0, MAX_REFUSAL_DETAIL_CHARS)}`;
+  try {
+    process.stderr.write(`evaluation-harness: refused (${reasonCode})${detail}\n`);
+  } catch {
+    // A closed or broken stderr must never turn a classified refusal into an unclassified crash.
+  }
+}
+
 /**
  * Executes one evaluation Attempt. A deployment may be injected in-process for embedding/tests;
  * the spawned one-argument form loads only the host-selected deployment module from environment.
@@ -704,6 +845,12 @@ export async function runEvaluationHarness(
         readExactMaterial(paths.input, reference)
       ),
     ]);
+    // #40: a declared receipt is staged material like any other, so it gets the same digest
+    // re-check. The harness grades on (Task, Results) only — this consumes the bytes to verify
+    // them, never to feed the adapter.
+    if (bindings.admissionReceipt !== undefined) {
+      await verifyStagedAdmissionReceipt(paths.input, bindings.admissionReceipt);
+    }
     const specificationBytes = await readFile(
       join(paths.input, "evaluation-spec.json"),
     );
@@ -807,8 +954,19 @@ export async function runEvaluationHarness(
       cause instanceof EvaluationHarnessInputError ||
       cause instanceof ProfilesError
     ) {
+      reportRefusal("invalid-evaluation-input", cause.message);
       return EVALUATION_HARNESS_EXIT_INVALID_INPUT;
     }
+    // Brand, not `instanceof`: the throwing adapter comes from a separately-imported deployment
+    // module that resolves its own copy of this package, so the class objects differ and
+    // `instanceof` drops the one thing the operator needs -- see
+    // `EVALUATION_OPERATIONAL_ERROR_BRAND`. This line is the whole difference between a readable
+    // refusal and `refused (evaluation-operational-failure)` with no reason at all; the backend
+    // carries this stderr text into the attempt journal's terminal detail and the audit row.
+    reportRefusal(
+      "evaluation-operational-failure",
+      isEvaluationOperationalError(cause) ? cause.safeDetail : undefined,
+    );
     return EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE;
   }
 }

@@ -33,6 +33,7 @@ export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCoun
 /** Standalone filesystem helpers deliberately outside the workspace operations/audit boundary. */
 export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
   "bundle verify": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal",
+  "demo1 prereg verify": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access",
 };
 
 /**

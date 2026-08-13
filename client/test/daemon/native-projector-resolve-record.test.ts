@@ -39,7 +39,18 @@ describe('native projector submission resolution', () => {
     const lookup = vi.fn(async () => SUBMISSION);
     const resolveRecord = buildNativeResolveRecord(BASE_SEPOLIA_TODAY, lookup);
 
-    await expect(resolveRecord(event(), 'delivery')).rejects.toThrow(/no production implementation/i);
+    // Defect #45 implemented the delivery roles, so a `delivery` request no longer refuses "no
+    // production implementation" — but a composition with no durable record store wired in still
+    // refuses, and still never falls back to the submission association.
+    await expect(resolveRecord(event(), 'delivery'))
+      .rejects.toThrow(/no native durable record store is wired/i);
+    // And with a store wired in, a TaskCreated is still not a solution-delivery claim: the
+    // today-generation leg keys off the ENGAGEMENT, so it refuses an event that names none rather
+    // than reading one off the wrong event.
+    await expect(buildNativeResolveRecord(BASE_SEPOLIA_TODAY, lookup, undefined, {
+      solutionDelivery: async () => SUBMISSION,
+      evaluationDelivery: async () => SUBMISSION,
+    })(event(), 'delivery')).rejects.toThrow(/TaskCreated is not a solution-delivery claim/i);
     await expect(resolveRecord({
       ...event(),
       projection: { ...event().projection, taskCoordinator: '0x1111111111111111111111111111111111111111' },

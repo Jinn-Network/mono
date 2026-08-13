@@ -1,6 +1,7 @@
 import {
   EVALUATION_SPEC_FORMAT_URI,
   RESULT_EVALUATION_PREDICATE_TYPE,
+  ResultEvaluationStatementShape,
   canonicalJsonBytes,
   deriveEvaluationTask,
   sealEvaluationSpec,
@@ -418,6 +419,38 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     expect(() => decisionGradeVerdictCode(undefined)).toThrow(/conforming Result Evaluation/);
   });
 
+  // Defect #41: this reader's accepted domain must be EXACTLY the set `ResultEvaluationStatementShape`
+  // admits -- no narrower (a ratified verdict the reader refuses cannot settle: `inconclusive` reached
+  // the evaluator's own pre-settlement path through a second, wider-but-different reader that had no
+  // case for it, was refused as `evaluation-record-graph-invalid`, and `recordVerdict` never ran) and
+  // no wider (a spelling the shape refuses must never acquire a code here). Widening either side reds.
+  test("accepts exactly the verdict vocabulary the ratified Statement shape admits (§7.41)", () => {
+    const statement = (verdict: unknown) => ({
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [{ name: "result", digest: { sha256: "a".repeat(64) } }],
+      predicateType: RESULT_EVALUATION_PREDICATE_TYPE,
+      predicate: {
+        evaluatedAt: "2026-08-02T11:00:00Z",
+        evaluator: { id: "https://agents.example/evaluator" },
+        taskSubject: `sha256:${"b".repeat(64)}`,
+        resultSubjects: [`sha256:${"c".repeat(64)}`],
+        verdict,
+      },
+    });
+    for (const verdict of ["pass", "fail", "inconclusive"]) {
+      expect(ResultEvaluationStatementShape.safeParse(statement(verdict)).success).toBe(true);
+      expect(decisionGradeVerdictCode(verdict)).not.toBe(VerdictCode.None);
+    }
+    // The venue vocabulary (`verdictCodeFromValue`) and every case re-spelling are NOT this field's
+    // vocabulary: the shape refuses them, so the reader must refuse them too.
+    for (const verdict of [
+      "INCONCLUSIVE", "Pass", "unresolved", "indeterminate", "scored", "rejected", "invalid", "", undefined,
+    ]) {
+      expect(ResultEvaluationStatementShape.safeParse(statement(verdict)).success).toBe(false);
+      expect(() => decisionGradeVerdictCode(verdict)).toThrow(/conforming Result Evaluation/);
+    }
+  });
+
   test("accepts a fully pair-fixed, authenticated, consistent verdict as decision-grade", async () => {
     const fixture = makeFixture();
     await expect(gateVerdictObservation(fixture.input, makePorts())).resolves.toEqual({
@@ -752,6 +785,52 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     await expect(gateVerdictObservation(input, makePorts())).resolves.toEqual({
       decisionGrade: true,
       failures: [],
+    });
+  });
+
+  /**
+   * Defect #44, live round 27. The rule above is right and stays right; what broke live was the
+   * value the evaluator handed it as `claimBlockTime` while the claim it names was still in the
+   * FUTURE. It passed Base Sepolia's finalized head, which trails wall clock by two epochs, so an
+   * honest grade was measured against a time in its own past and `verdict-effective-time` refused
+   * every live evaluation. These are the instants round 27 measured, held against the real gate:
+   * the finalized head refuses the honest grade, the forward-looking bound the evaluator now
+   * derives (`preSettlementClaimTime` in `client/src/daemon/native-base-sepolia-infrastructure.ts`)
+   * admits it, and a grade dated past that bound still refuses. The last case is the one this
+   * check exists for, and it must survive any widening of the pre-settlement stand-in.
+   */
+  describe("live round-27 claim-time instants", () => {
+    const GRADE = "2026-08-13T02:51:55.896Z";
+    const FINALIZED_HEAD = "2026-08-13T02:30:02Z";
+    /** Live head 02:56:36Z plus the evaluator's five-minute skew allowance. */
+    const FORWARD_BOUND = "2026-08-13T03:01:36Z";
+
+    function gateInput(claimBlockTime: string, evaluatedAt: string): VerdictObservationGateInput {
+      const fixture = makeFixture();
+      const graded = withStatement(fixture, (statement) => {
+        (statement.predicate as Record<string, unknown>).evaluatedAt = evaluatedAt;
+      });
+      return { ...graded, verdict: { ...graded.verdict, claimBlockTime } };
+    }
+
+    test("refuses the honest grade against a claim time behind it", async () => {
+      expect(await gateVerdictObservation(gateInput(FINALIZED_HEAD, GRADE), makePorts())).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "verdict-effective-time", detail: expect.any(String) }],
+      });
+    });
+
+    test("accepts the honest grade against a forward-looking bound", async () => {
+      await expect(gateVerdictObservation(gateInput(FORWARD_BOUND, GRADE), makePorts()))
+        .resolves.toEqual({ decisionGrade: true, failures: [] });
+    });
+
+    test("still refuses a grade dated past the forward-looking bound", async () => {
+      const fabricated = gateInput(FORWARD_BOUND, "2026-08-13T04:01:36Z");
+      expect(await gateVerdictObservation(fabricated, makePorts())).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "verdict-effective-time", detail: expect.any(String) }],
+      });
     });
   });
 

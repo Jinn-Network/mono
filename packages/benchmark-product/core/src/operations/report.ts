@@ -42,7 +42,7 @@
  * the crash-safety ordering above.
  */
 
-import { parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { produceReport, type ProducedReport } from "@jinn-network/benchmarking-aggregate";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
@@ -75,6 +75,9 @@ export interface RunReportResult {
 
 /** The report's verb string for the claim package's `verification.command`. */
 const VERIFICATION_VERB = "verify";
+
+const PAIRED_ESTIMATE_LIMITATION =
+  "This method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered.";
 
 export function runReport(
   context: OperationContext,
@@ -120,17 +123,6 @@ export function runReport(
       const reportKey = loadOrCreateReportSigningKey(clockedContext.workspaceDir);
       const signer = createReportDsseSigner(reportKey);
 
-      // BP-20 (spec §7.2): a pure read of this draft's own preview log — every logged preview
-      // necessarily precedes this run's lock (module header). `previewed` is `undefined`'s own
-      // presence check narrowed alongside `count > 0`, so both branches below can trust
-      // `previewLog` is defined wherever they read it.
-      const previewLog = readPreviewLog(clockedContext.workspaceDir, input.draftId);
-      const venueLimits = localVenueLimitsForRun(runRecord);
-      const limitations =
-        previewLog !== undefined && previewLog.count > 0
-          ? [...venueLimits, previewDisclosureLine(previewLog)]
-          : venueLimits;
-
       // The sealed plan is [wilson] or [wilson, selected] (see run/compile.ts's buildAnalysisPlan).
       // The selected method is the last entry; passing its EXACT sealed parameters is what makes
       // derivePreregistered's exact-JSON comparison succeed.
@@ -139,6 +131,25 @@ export function runReport(
       if (selected === undefined) {
         refuse("record-integrity", "run", "sealed Run carries no analysisPlan entry to report from");
       }
+
+      // BP-20 (spec §7.2): a pure read of this draft's own preview log — every logged preview
+      // necessarily precedes this run's lock (module header). `previewed` is `undefined`'s own
+      // presence check narrowed alongside `count > 0`, so both branches below can trust
+      // `previewLog` is defined wherever they read it.
+      const previewLog = readPreviewLog(clockedContext.workspaceDir, input.draftId);
+      const previewLimitation = previewLog !== undefined && previewLog.count > 0
+        ? previewDisclosureLine(previewLog)
+        : undefined;
+      const venueLimits = localVenueLimitsForRun(runRecord);
+      const limitations = selected.method === BENCHMARKING_METHOD_IDS.pairedDelta
+        ? [
+            ...venueLimits,
+            PAIRED_ESTIMATE_LIMITATION,
+            ...(previewLimitation === undefined ? [] : [previewLimitation]),
+          ]
+        : previewLimitation === undefined
+          ? venueLimits
+          : [...venueLimits, previewLimitation];
 
       let produced: ProducedReport;
       try {

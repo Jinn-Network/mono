@@ -1,11 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { canonicalJsonBytes, parseDsseEnvelope, type DsseSigner } from "@jinn-network/trust-core";
-import { EVALUATION_TASK_PROFILE_URI } from "@jinn-network/task-execution-profiles";
+import {
+  EVALUATION_TASK_PROFILE_URI,
+  REPOSITORY_WORK_PROFILE_URI,
+} from "@jinn-network/task-execution-profiles";
 import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
-import type { DeclaredOutputSlot, WorkspacePaths } from "@jinn-network/task-execution-workspace";
+import type { TaskSpecification } from "@jinn-network/task-execution-protocol";
+import { ProvisioningRejectedError, type DeclaredOutputSlot, type WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
   createEvaluationCellRegistry,
@@ -14,7 +19,13 @@ import {
   type EvaluationCellMaterials,
   type EvaluationCellRegistry,
 } from "./provisioner.js";
+import { createGitRepositoryMirror } from "./repository-mirror.js";
 import { readVerdictEnvelope } from "./signing.js";
+import {
+  DEMO1_CLAUDE_MD_PATH,
+  DEMO1_SKILL_PATH,
+  generateDemo1InstructionArtifacts,
+} from "./demo1-claude.js";
 
 const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
 const EVALUATOR_2 = "urn:jinn:benchmark-product:local-venue:evaluator-2";
@@ -43,6 +54,25 @@ function workspacePathsUnder(root: string): WorkspacePaths {
     tmp: join(root, "tmp"),
     meta: join(root, "meta"),
   };
+}
+
+function gitIn(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  }).trim();
+}
+
+function makeUpstreamRepository(): { uri: string; oid: string } {
+  const dir = mkdtempSync(join(tmpdir(), "provisioner-upstream-"));
+  gitIn(dir, "init", "--quiet", "--initial-branch", "main");
+  gitIn(dir, "config", "user.email", "test@example.invalid");
+  gitIn(dir, "config", "user.name", "Test");
+  writeFileSync(join(dir, "README.md"), "upstream\n");
+  gitIn(dir, "add", "README.md");
+  gitIn(dir, "commit", "--quiet", "-m", "initial");
+  return { uri: `file://${dir}`, oid: gitIn(dir, "rev-parse", "HEAD") };
 }
 
 const SEALED_TASK_BYTES = encode(JSON.stringify({ profile: { uri: EVALUATION_TASK_PROFILE_URI } }));
@@ -198,5 +228,318 @@ describe("createLocalProvisioner evaluator selection", () => {
       readonly evaluatorId: string;
     };
     expect(written.evaluatorId).toBe(EVALUATOR_2);
+  });
+});
+
+describe("createLocalProvisioner — repository-work cells", () => {
+  function repositoryWorkTask(uri: string, oid: string) {
+    return {
+      profile: { uri: REPOSITORY_WORK_PROFILE_URI },
+      inputs: [{ name: "repository-state", uri, annotations: { ref: oid } }],
+      outputs: [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+        { name: "summary", mediaType: "text/markdown", required: false },
+      ],
+    } as unknown as TaskSpecification;
+  }
+
+  it("selects the repository-work provisioner for a repository-work Task", () => {
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: { ensure: async () => "/unused" },
+    })({
+      task: repositoryWorkTask("file:///upstream", "a".repeat(40)),
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    expect(selected.id).toBe("benchmark-product-repository-work-worktree-v1");
+    expect(selected.contract.workspaceKind({} as never)).toBe("worktree");
+  });
+
+  it("materializes a detached worktree at paths.work and stages the sealed Task", async () => {
+    const upstream = makeUpstreamRepository();
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-"));
+    const paths = workspacePathsUnder(root);
+    const sealed = new TextEncoder().encode(JSON.stringify({ profile: { uri: REPOSITORY_WORK_PROFILE_URI } }));
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
+    })({
+      task,
+      sealedTaskBytes: sealed,
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await selected.contract.setup({ task } as never, paths, []);
+
+    expect(readFileSync(join(paths.input, "task.sealed"))).toEqual(Buffer.from(sealed));
+    expect(existsSync(join(paths.work, "README.md"))).toBe(true);
+    expect(gitIn(paths.work, "rev-parse", "HEAD")).toBe(upstream.oid);
+    expect(() => gitIn(paths.work, "symbolic-ref", "-q", "HEAD")).toThrow();
+  });
+
+  it("places native Claude instructions and extracts byte-identical clean patches for A, B, and no-file C", async () => {
+    const upstream = makeUpstreamRepository();
+    const artifacts = generateDemo1InstructionArtifacts(
+      new TextEncoder().encode("# Frozen source\n\nApply the procedure.\n"),
+      { name: "demo1", description: "Use for repository implementation tasks." },
+    );
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+
+    async function run(loadout: unknown): Promise<string> {
+      const root = mkdtempSync(join(tmpdir(), "provisioner-demo1-arm-"));
+      const paths = workspacePathsUnder(root);
+      const requirements: Record<string, unknown> = {
+        harness: { id: "claude-code", version: "2.1.222" },
+        model: { id: "claude-haiku-4-5-20251001" },
+        effort: "high",
+        ...(loadout === undefined ? {} : { loadout }),
+      };
+      const selected = createLocalProvisioner({
+        registry: createEvaluationCellRegistry(),
+        evaluators: [],
+        repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
+        demo1Instructions: artifacts,
+      })({
+        task,
+        sealedTaskBytes: new TextEncoder().encode("{}"),
+        dispatchContextBytes: new TextEncoder().encode("{}"),
+        submission: { requirements },
+        attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+      } as never);
+
+      await selected.contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+      if (loadout === artifacts.skill) {
+        expect(readFileSync(join(paths.work, DEMO1_SKILL_PATH))).toEqual(Buffer.from(artifacts.skillMd));
+        expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(false);
+      } else if (loadout === artifacts.baseline) {
+        expect(readFileSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toEqual(Buffer.from(artifacts.claudeMd));
+        expect(existsSync(join(paths.work, DEMO1_SKILL_PATH))).toBe(false);
+      } else {
+        expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(false);
+        expect(existsSync(join(paths.work, DEMO1_SKILL_PATH))).toBe(false);
+      }
+      writeFileSync(join(paths.work, "README.md"), "upstream\nchanged\n");
+      await selected.contract.harvest(paths, [
+        { name: "patch", mediaType: "text/x-diff", required: true },
+      ] as never);
+      return readFileSync(join(paths.out, "patch"), "utf8");
+    }
+
+    const skillPatch = await run(artifacts.skill);
+    const claudeMdPatch = await run(artifacts.baseline);
+    const noFilePatch = await run(undefined);
+    expect(skillPatch).toBe(noFilePatch);
+    expect(claudeMdPatch).toBe(noFilePatch);
+    expect(noFilePatch).toContain("+changed");
+    expect(noFilePatch).not.toContain("CLAUDE.md");
+    expect(noFilePatch).not.toContain("SKILL.md");
+    expect(noFilePatch).not.toContain("jinn-demo1-skill-plugin");
+  });
+
+  it("refuses every Demo-1 arm when the task repository already carries an instruction path", async () => {
+    const upstreamDir = mkdtempSync(join(tmpdir(), "provisioner-demo1-conflict-"));
+    gitIn(upstreamDir, "init", "--quiet", "--initial-branch", "main");
+    gitIn(upstreamDir, "config", "user.email", "test@example.invalid");
+    gitIn(upstreamDir, "config", "user.name", "Test");
+    writeFileSync(join(upstreamDir, "README.md"), "upstream\n");
+    writeFileSync(join(upstreamDir, "CLAUDE.md"), "pre-existing\n");
+    gitIn(upstreamDir, "add", ".");
+    gitIn(upstreamDir, "commit", "--quiet", "-m", "initial");
+    const upstream = { uri: `file://${upstreamDir}`, oid: gitIn(upstreamDir, "rev-parse", "HEAD") };
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+    const root = mkdtempSync(join(tmpdir(), "provisioner-demo1-conflict-attempt-"));
+    const artifacts = generateDemo1InstructionArtifacts(new TextEncoder().encode("body\n"), {
+      name: "demo1",
+      description: "Use for repository tasks.",
+    });
+    const requirements = { harness: { id: "claude-code" } };
+    const paths = workspacePathsUnder(root);
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
+      demo1Instructions: artifacts,
+    })({
+      task,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await expect(selected.contract.setup(
+      { task, effectiveRequirements: requirements } as never,
+      paths,
+      [],
+    )).rejects.toThrow(/already contains experiment instruction path/u);
+    expect(existsSync(paths.work)).toBe(false);
+  });
+
+  it("refuses a Task with no repository-state input", async () => {
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-missing-"));
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: { ensure: async () => "/unused" },
+    })({
+      task: { profile: { uri: REPOSITORY_WORK_PROFILE_URI }, inputs: [], outputs: [] } as unknown as TaskSpecification,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await expect(selected.contract.setup({} as never, workspacePathsUnder(root), []))
+      .rejects.toThrow(/no "repository-state" input/u);
+  });
+
+  it("throws ProvisioningRejectedError (neverExecuted) for a Task with no repository-state input", async () => {
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-missing-typed-"));
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: { ensure: async () => "/unused" },
+    })({
+      task: { profile: { uri: REPOSITORY_WORK_PROFILE_URI }, inputs: [], outputs: [] } as unknown as TaskSpecification,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    const rejection = await selected.contract.setup({} as never, workspacePathsUnder(root), [])
+      .catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ProvisioningRejectedError);
+    expect((rejection as InstanceType<typeof ProvisioningRejectedError>).neverExecuted).toBe(true);
+  });
+
+  it("throws ProvisioningRejectedError (neverExecuted) for a non-40-hex annotations.ref", async () => {
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-badref-"));
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: { ensure: async () => "/unused" },
+    })({
+      task: repositoryWorkTask("file:///upstream", "not-a-valid-oid"),
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    const rejection = await selected.contract.setup({} as never, workspacePathsUnder(root), [])
+      .catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ProvisioningRejectedError);
+    expect((rejection as InstanceType<typeof ProvisioningRejectedError>).neverExecuted).toBe(true);
+    expect((rejection as Error).message).toMatch(/40 lowercase hex/u);
+  });
+
+  it("refuses when no repository mirror is configured", async () => {
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-nomirror-"));
+    const selected = createLocalProvisioner({ registry: createEvaluationCellRegistry(), evaluators: [] })({
+      task: repositoryWorkTask("file:///upstream", "a".repeat(40)),
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await expect(selected.contract.setup({} as never, workspacePathsUnder(root), []))
+      .rejects.toThrow(/no repository mirror is configured/u);
+  });
+
+  it("throws ProvisioningRejectedError (neverExecuted) when no repository mirror is configured", async () => {
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-nomirror-typed-"));
+    const selected = createLocalProvisioner({ registry: createEvaluationCellRegistry(), evaluators: [] })({
+      task: repositoryWorkTask("file:///upstream", "a".repeat(40)),
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    const rejection = await selected.contract.setup({} as never, workspacePathsUnder(root), [])
+      .catch((error: unknown) => error);
+    expect(rejection).toBeInstanceOf(ProvisioningRejectedError);
+    expect((rejection as InstanceType<typeof ProvisioningRejectedError>).neverExecuted).toBe(true);
+  });
+
+  it("normalizes harvest to the declared slots and moves the structured envelope to meta/", async () => {
+    const upstream = makeUpstreamRepository();
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-harvest-"));
+    const paths = workspacePathsUnder(root);
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
+    })({
+      task,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await selected.contract.setup({ task } as never, paths, []);
+
+    writeFileSync(join(paths.out, "patch.diff"), "--- a/x\n+++ b/x\n");
+    writeFileSync(join(paths.out, "structured-output.json"), "{}");
+    writeFileSync(join(paths.out, "scratch.txt"), "noise");
+
+    const result = await selected.contract.harvest(paths, [
+      { name: "patch", mediaType: "text/x-diff", required: true },
+      { name: "summary", mediaType: "text/markdown", required: false },
+    ] as never);
+
+    expect(result.manifest.map((entry) => entry.path)).toEqual(["patch"]);
+    expect(result.manifest[0]!.mediaType).toBe("text/x-diff");
+    expect(result.omissions).toEqual(["summary"]);
+    expect(existsSync(join(paths.meta, "structured-output.json"))).toBe(true);
+    expect(existsSync(join(paths.out, "structured-output.json"))).toBe(false);
+  });
+
+  it("removes the worktree registration after harvest tears it down", async () => {
+    const upstream = makeUpstreamRepository();
+    const root = mkdtempSync(join(tmpdir(), "provisioner-repository-work-teardown-"));
+    const paths = workspacePathsUnder(root);
+    const mirror = createGitRepositoryMirror(join(root, "mirrors"));
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: mirror,
+    })({
+      task,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements: {} },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await selected.contract.setup({ task } as never, paths, []);
+    expect(existsSync(paths.work)).toBe(true);
+
+    await selected.contract.harvest(paths, [
+      { name: "patch", mediaType: "text/x-diff", required: false },
+    ] as never);
+
+    expect(existsSync(paths.work)).toBe(false);
+
+    const mirrorDir = await mirror.ensure({ uri: upstream.uri, oid: upstream.oid });
+    const worktreeList = gitIn(mirrorDir, "worktree", "list");
+    expect(worktreeList).not.toContain(paths.work);
   });
 });

@@ -10,6 +10,7 @@ import {
   createSolverReads,
   createViemBaseSepoliaReadClients,
   mountBaseSepoliaPublicSource,
+  PRE_SETTLEMENT_CLAIM_SKEW_MS,
   verifyCanonicalTodayTaskCreated,
   inspectBaseSepoliaNativeTarget,
   type NativeBaseSepoliaAnchorReadClient,
@@ -504,7 +505,10 @@ describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
     updatedAt: '2026-08-10T19:00:00.000Z',
   } as unknown as NativeEngagementRow;
 
-  function fixture(options: { readonly httpBytes?: Uint8Array } = {}) {
+  function fixture(options: {
+    readonly httpBytes?: Uint8Array;
+    readonly correspondenceTransactionHash?: `0x${string}`;
+  } = {}) {
     // The IPFS plane always misses — the native delivery record was never pinned there.
     const byDigest = vi.fn(async () => { throw new Error('block was not found locally'); });
     const byLocation = vi.fn(async () => {
@@ -528,8 +532,20 @@ describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
         if (input.functionName === 'mapAgentMechFactories') return '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
         throw new Error(`unexpected read ${input.functionName}`);
       },
-      async getContractEvents(input: { eventName: string; address?: string }) {
-        if (input.eventName === 'SolutionDeliveryClaimed') return [routerEvent];
+      async getContractEvents(input: {
+        eventName: string;
+        address?: string;
+        args?: { readonly operator?: string };
+      }) {
+        if (input.eventName === 'SolutionDeliveryClaimed') {
+          // The settlement leg scans `SolutionDeliveryClaimed` by `(requestId, taskId)`; the exact
+          // Delivery correspondence (`readCanonicalSolutionDelivery`) scans the same event filtered
+          // ON `operator` as well. Keying the fixture on that argument lets a case bind the
+          // canonical exact Delivery to a DIFFERENT transaction than the settlement leg found.
+          return options.correspondenceTransactionHash !== undefined && input.args?.operator !== undefined
+            ? [{ ...routerEvent, transactionHash: options.correspondenceTransactionHash }]
+            : [routerEvent];
+        }
         expect(input.address!.toLowerCase()).toBe(deliveryMech.toLowerCase());
         return [{
           args: { requestId, mechServiceMultisig: operator, data: `0x${advertisedDeliveryDigest.slice(7)}` },
@@ -584,6 +600,292 @@ describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
       deliveryPublicLocations: [deliveryLocation],
     })).rejects.toThrow(/not found locally/u);
     expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+  });
+
+  // POSITIVE evidence, and the only orphan verdict this leg still draws after the finalized check:
+  // the canonical exact Delivery for this attempt is bound to a transaction that is not the one the
+  // settlement leg observed. This branch had no coverage.
+  it('orphans a settlement the canonical exact Delivery binds to a different transaction', async () => {
+    const otherTransaction = `0x${'5c'.repeat(32)}` as const;
+    const { reads } = fixture({
+      httpBytes: deliveryBytes,
+      correspondenceTransactionHash: otherTransaction,
+    });
+
+    await expect(reads.solutionSettlementCanonical({
+      operation,
+      engagement,
+      deliveryPublicLocations: [deliveryLocation],
+    })).resolves.toEqual({
+      kind: 'orphaned',
+      txHash: transactionHash,
+      reason: 'solution settlement does not bind the exact public Delivery',
+    });
+  });
+
+  // #2623: the absence of a digest in the operator's OWN local row is not evidence about the chain.
+  // Calling it `orphaned` rolled the engagement back to `solution-published`, and the reopen that
+  // followed re-entered this same branch on an operation whose detail the orphan notice had just
+  // destroyed — an unbounded loop with no deadline and no attempt ceiling, because the orphan
+  // recorder returns normally instead of raising. It must RAISE, so the coordinator's retry
+  // machinery (24h deadline, 5 attempts) owns the give-up decision.
+  it('raises rather than orphans when local state carries no exact Delivery digest', async () => {
+    const { reads } = fixture({ httpBytes: deliveryBytes });
+    const poisoned = {
+      ...operation,
+      // Operator B's live on-disk shape after the orphan notice overwrote the operation identity.
+      detail: {
+        kind: 'orphaned',
+        txHash: transactionHash,
+        reason: 'solution operation has no exact Delivery digest',
+      },
+    } as unknown as NativeOperationRow;
+
+    await expect(reads.solutionSettlementCanonical({
+      operation: poisoned,
+      engagement,
+      deliveryPublicLocations: [deliveryLocation],
+    })).rejects.toThrow(/carries no exact Delivery digest/u);
+  });
+});
+
+// Round 26 (CP6 live gate, Base Sepolia): the multi-provider RPC fallback chain served
+// `finalized` heads that disagreed by 130-500 blocks between consecutive polls, and operator B's
+// solution-settlement row was flipped to `status='orphaned'` with a NULL block number at
+// 2026-08-12T22:23:42.835Z even though its settlement transaction (0xc5d458e1…, block 45401836)
+// was mined, successful, and finalized. (That persisted flip fired exactly ONCE, on the
+// `does not bind the exact public Delivery` branch; the 48 that followed came from the unbounded
+// give-up loop fixed above.) Every classifier below must therefore treat ABSENCE — a lookup the
+// polled provider cannot answer — as "not yet", and reserve `orphaned` for POSITIVE evidence
+// (a receipt that reverted, or a block hash the canonical chain does not carry).
+describe('transaction classification under multi-provider replica lag', () => {
+  const txHash = `0x${'c5'.repeat(32)}` as const;
+  const minedBlockHash = `0x${'d1'.repeat(32)}` as const;
+  const displacedBlockHash = `0x${'e2'.repeat(32)}` as const;
+  const unusedRecords = {
+    async byDigest() { throw new Error('unused'); },
+    async byLocation() { throw new Error('unused'); },
+    async byRawCid() { throw new Error('unused'); },
+  };
+
+  function evaluatorChain(publicClient: unknown) {
+    return createBaseSepoliaEvaluatorReads({
+      config: {
+        ...requesterInput(),
+        role: 'evaluator',
+        marketplaceAgentAddress: '0x3333333333333333333333333333333333333333',
+      },
+      publicClient: publicClient as never,
+      records: unusedRecords,
+    }).chain;
+  }
+
+  it('classifies a transaction the polled provider cannot see as pending, never orphaned', async () => {
+    // Both lookups fail exactly as they do against a lagging replica in the fallback chain: the
+    // slot that answers has neither the receipt nor the transaction in its own view. That is
+    // indistinguishable from a genuinely dropped transaction, so it must NOT be classified as a
+    // reorg — the destructive rollback on the evaluator legs NULLs the attempt identity.
+    const chain = evaluatorChain({
+      async getTransactionReceipt() { throw new Error('Transaction receipt could not be found.'); },
+      async getTransaction() { throw new Error('Transaction could not be found.'); },
+      async getBlock() { throw new Error('the classifier must not need a block read to say pending'); },
+    });
+    await expect(chain.transactionStatus(txHash)).resolves.toEqual({ kind: 'pending' });
+  });
+
+  it('still classifies a reverted receipt as orphaned', async () => {
+    const chain = evaluatorChain({
+      async getTransactionReceipt() {
+        return { status: 'reverted', blockNumber: 90n, blockHash: minedBlockHash };
+      },
+      async getBlock() { return { number: 90n, hash: minedBlockHash, timestamp: 0n }; },
+    });
+    await expect(chain.transactionStatus(txHash)).resolves.toMatchObject({ kind: 'orphaned' });
+  });
+
+  it('still classifies a receipt whose block the canonical chain displaced as orphaned', async () => {
+    const chain = evaluatorChain({
+      async getTransactionReceipt() {
+        return { status: 'success', blockNumber: 90n, blockHash: displacedBlockHash };
+      },
+      async getBlock() { return { number: 90n, hash: minedBlockHash, timestamp: 0n }; },
+    });
+    await expect(chain.transactionStatus(txHash)).resolves.toMatchObject({ kind: 'orphaned' });
+  });
+
+  it('classifies a successful receipt in a canonical block as canonical', async () => {
+    const chain = evaluatorChain({
+      async getTransactionReceipt() {
+        return { status: 'success', blockNumber: 90n, blockHash: minedBlockHash };
+      },
+      async getBlock() { return { number: 90n, hash: minedBlockHash, timestamp: 0n }; },
+    });
+    await expect(chain.transactionStatus(txHash)).resolves.toEqual({ kind: 'canonical' });
+  });
+
+  const claimOperation = {
+    operationId: 'op-claim-1',
+    engagementId: 'eng-1',
+    kind: 'claim',
+    status: 'broadcast',
+    txHash,
+    priorTxHash: null,
+    blockHash: null,
+    blockNumber: null,
+    detail: {},
+    createdAt: '2026-08-10T19:00:00.000Z',
+    updatedAt: '2026-08-10T19:00:00.000Z',
+  } as unknown as NativeOperationRow;
+  const claimEngagement = {
+    engagementId: 'eng-1',
+    chainId: 84532,
+    coordinator: ADDRESSES.taskCoordinator,
+    taskId: 42n,
+    role: 'solver',
+    operatorAgent: 'did:key:solver',
+    taskDigest: `sha256:${'aa'.repeat(32)}`,
+    submissionUri: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+    submissionDigest: `sha256:${'bb'.repeat(32)}`,
+    state: 'claim-pending',
+    attemptIndex: null,
+    attemptUri: null,
+    requestId: null,
+    createdAt: '2026-08-10T19:00:00.000Z',
+    updatedAt: '2026-08-10T19:00:00.000Z',
+  } as unknown as NativeEngagementRow;
+
+  function solverReads(publicClient: unknown) {
+    return createSolverReads({
+      config: { safeAddress: SAFE, chain: { chainId: 84532, generation: 'today', contracts: ADDRESSES } },
+      publicClient: publicClient as never,
+      records: unusedRecords,
+    });
+  }
+
+  it('holds a claim the polled provider cannot see as broadcast, never orphaned', async () => {
+    // A false claim orphan is the most expensive misclassification in the stack:
+    // `recordClaimOrphaned` NULLs the engagement's attempt index, attempt URI, and request id and
+    // returns it to `eligible`, and the retry then broadcasts a SECOND claim for work the first
+    // claim may already own.
+    const reads = solverReads({
+      async getBlockNumber() { return 100n; },
+      async getBlock(input: { blockNumber?: bigint }) {
+        return { number: input.blockNumber ?? 100n, hash: minedBlockHash, timestamp: 0n };
+      },
+      async getContractEvents() { return []; },
+      async getTransactionReceipt() { throw new Error('Transaction receipt could not be found.'); },
+      async getTransaction() { throw new Error('Transaction could not be found.'); },
+    });
+    await expect(reads.claimCanonical.read({ operation: claimOperation, engagement: claimEngagement }))
+      .resolves.toEqual({ kind: 'broadcast', txHash });
+  });
+
+  it('still classifies a claim receipt in a displaced block as orphaned', async () => {
+    const reads = solverReads({
+      async getBlockNumber() { return 100n; },
+      async getBlock(input: { blockTag?: string; blockNumber?: bigint }) {
+        if (input.blockTag === 'finalized') return { number: 95n, hash: minedBlockHash, timestamp: 0n };
+        return { number: input.blockNumber!, hash: minedBlockHash, timestamp: 0n };
+      },
+      async getContractEvents() { return []; },
+      async getTransactionReceipt() {
+        return { status: 'success', blockNumber: 90n, blockHash: displacedBlockHash };
+      },
+    });
+    await expect(reads.claimCanonical.read({ operation: claimOperation, engagement: claimEngagement }))
+      .resolves.toMatchObject({ kind: 'orphaned', txHash });
+  });
+
+  const settlementRequestId = `0x${'12'.repeat(32)}` as const;
+  const settlementBlockHash = `0x${'56'.repeat(32)}` as const;
+  const settlementDeliveryBytes = new TextEncoder().encode('{"delivery":"exact"}');
+  const settlementDeliveryDigest =
+    `sha256:${createHash('sha256').update(settlementDeliveryBytes).digest('hex')}` as const;
+  const settlementInnerData = encodeFunctionData({
+    abi: JINN_ROUTER_V3_ABI,
+    functionName: 'claimSolutionDelivery',
+    args: [settlementRequestId, `0x${'ab'.repeat(32)}`],
+  });
+  const settlementCalldata = encodeFunctionData({
+    abi: SAFE_ABI,
+    functionName: 'execTransaction',
+    args: [ADDRESSES.jinnRouter, 0n, settlementInnerData, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, '0x'],
+  });
+  const settlementOperation = {
+    operationId: 'op-settlement-1',
+    engagementId: 'eng-1',
+    kind: 'solution-settlement',
+    status: 'broadcast',
+    txHash,
+    priorTxHash: null,
+    blockHash: null,
+    blockNumber: null,
+    detail: { attempt: 'urn:jinn:attempt:1', deliveryDigest: settlementDeliveryDigest },
+    createdAt: '2026-08-10T19:00:00.000Z',
+    updatedAt: '2026-08-10T19:00:00.000Z',
+  } as unknown as NativeOperationRow;
+  const settlementEngagement = {
+    ...(claimEngagement as unknown as Record<string, unknown>),
+    state: 'solution-settlement-pending',
+    attemptIndex: 3,
+    attemptUri: 'urn:jinn:attempt:1',
+    requestId: settlementRequestId,
+  } as unknown as NativeEngagementRow;
+
+  /**
+   * A settlement whose own event is canonical and finalized, polled through a fallback chain whose
+   * `finalized` head REGRESSES between reads — the live round-26 signature. The exact-Delivery
+   * re-fetch then reads a head below the settlement block and yields no correspondence, which is
+   * replica lag, not a reorg.
+   */
+  function flappingSettlementReads(options: { readonly displaced?: boolean } = {}) {
+    let finalizedReads = 0;
+    return solverReads({
+      async getBlockNumber() { return 100n; },
+      async getTransaction() { return { input: settlementCalldata }; },
+      async getContractEvents(input: { eventName: string }) {
+        if (input.eventName !== 'SolutionDeliveryClaimed') return [];
+        return [{
+          args: { operator: SAFE, requestId: settlementRequestId, taskId: 42n, attemptIndex: 3 },
+          transactionHash: txHash,
+          blockHash: options.displaced ? displacedBlockHash : settlementBlockHash,
+          blockNumber: 90n,
+        }];
+      },
+      async readContract(input: { functionName: string }) {
+        if (input.functionName === 'mapRequestIdInfos') {
+          return [SAFE, SAFE, SAFE, 60n, 1n, `0x${'00'.repeat(32)}`] as const;
+        }
+        if (input.functionName === 'getOperator') return SAFE;
+        if (input.functionName === 'mapAgentMechFactories') return '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        throw new Error(`unexpected read ${input.functionName}`);
+      },
+      async getBlock(input: { blockTag?: string; blockNumber?: bigint }) {
+        if (input.blockTag === 'finalized') {
+          finalizedReads += 1;
+          // First poll: the settlement block is finalized. Next poll rotates to a replica that is
+          // 35 blocks behind and reports a head BELOW it.
+          return { number: finalizedReads === 1 ? 95n : 60n, hash: minedBlockHash, timestamp: 0n };
+        }
+        return { number: input.blockNumber!, hash: settlementBlockHash, timestamp: 0n };
+      },
+    });
+  }
+
+  it('holds a settlement whose re-fetch loses to a regressing finalized head as broadcast', async () => {
+    await expect(flappingSettlementReads().solutionSettlementCanonical({
+      operation: settlementOperation,
+      engagement: settlementEngagement,
+      deliveryPublicLocations: [],
+    })).resolves.toEqual({ kind: 'broadcast', txHash });
+  });
+
+  it('still classifies a settlement event in a displaced block as orphaned', async () => {
+    await expect(flappingSettlementReads({ displaced: true }).solutionSettlementCanonical({
+      operation: settlementOperation,
+      engagement: settlementEngagement,
+      deliveryPublicLocations: [],
+    })).resolves.toMatchObject({ kind: 'orphaned', txHash });
   });
 });
 
@@ -820,5 +1122,83 @@ describe('first-party Base Sepolia finalized trust anchors', () => {
     });
 
     expect(result).toBeNull();
+  });
+});
+
+/**
+ * Defect #44, live round 27. `preSettlementClaimTime` is the stand-in the evaluator hands the
+ * `verdict-effective-time` named check for the on-chain claim that has NOT happened yet, and the
+ * check requires `evaluatedAt <= claimBlockTime`. Reading Base Sepolia's FINALIZED head for that
+ * stand-in made the requirement unsatisfiable for every live grade: the finalized head runs two
+ * epochs (20-30 min) behind wall clock, while `evaluatedAt` is the harness's wall-clock grade
+ * instant, so the comparison was `now <= now - 26min`. Round 27 measured the two heads together --
+ * latest 45410754 @ 02:56:36Z against finalized 45409957 @ 02:30:02Z -- with the grade at
+ * 02:51:55.896Z sitting between them: later than the finalized head (deterministic refusal),
+ * earlier than the live head (correctly bounded).
+ */
+describe('pre-settlement claim-time stand-in', () => {
+  const LIVE_HEAD = '2026-08-13T02:56:36.000Z';
+  const LIVE_FINALIZED_HEAD = '2026-08-13T02:30:02.000Z';
+  const ROUND_27_EVALUATED_AT = '2026-08-13T02:51:55.896Z';
+  const unusedRecords = {
+    async byDigest() { throw new Error('unused'); },
+    async byLocation() { throw new Error('unused'); },
+    async byRawCid() { throw new Error('unused'); },
+  };
+
+  function headClient() {
+    const tags: string[] = [];
+    return {
+      tags,
+      client: {
+        async getBlock(request: { readonly blockTag?: string } = {}) {
+          tags.push(request.blockTag ?? 'latest');
+          const iso = request.blockTag === 'finalized' ? LIVE_FINALIZED_HEAD : LIVE_HEAD;
+          return {
+            number: request.blockTag === 'finalized' ? 45_409_957n : 45_410_754n,
+            hash: `0x${'ab'.repeat(32)}` as const,
+            timestamp: BigInt(Date.parse(iso) / 1_000),
+          };
+        },
+      },
+    };
+  }
+
+  function claimTime(publicClient: unknown) {
+    return createBaseSepoliaEvaluatorReads({
+      config: {
+        ...requesterInput(),
+        role: 'evaluator',
+        marketplaceAgentAddress: '0x3333333333333333333333333333333333333333',
+      },
+      publicClient: publicClient as never,
+      records: unusedRecords,
+    }).preSettlementClaimTime;
+  }
+
+  it('bounds the live round-27 grade against the live head, never the finalized head behind it', async () => {
+    const head = headClient();
+    const bound = await claimTime(head.client)();
+
+    expect(Date.parse(bound)).toBeGreaterThanOrEqual(Date.parse(ROUND_27_EVALUATED_AT));
+    expect(Date.parse(bound)).toBeGreaterThan(Date.parse(LIVE_FINALIZED_HEAD));
+    expect(head.tags).toEqual(['latest']);
+  });
+
+  it('stays inside the bounded skew allowance, so a fabricated future grade still refuses', async () => {
+    const head = headClient();
+    const before = Date.now();
+    const bound = await claimTime(head.client)();
+    const after = Date.now();
+
+    // The stand-in is a bound, not an open window: it never reaches further than the later of the
+    // chain head and this host's clock, plus the named skew allowance. A grade dated an hour past
+    // that (the fabrication this check exists to refuse) therefore still exceeds it, and
+    // `verdict-effective-time` still fails closed.
+    expect(Date.parse(bound))
+      .toBeGreaterThanOrEqual(Math.max(Date.parse(LIVE_HEAD), before) + PRE_SETTLEMENT_CLAIM_SKEW_MS);
+    expect(Date.parse(bound))
+      .toBeLessThanOrEqual(Math.max(Date.parse(LIVE_HEAD), after) + PRE_SETTLEMENT_CLAIM_SKEW_MS);
+    expect(Date.parse(bound)).toBeLessThan(Math.max(Date.parse(LIVE_HEAD), after) + 3_600_000);
   });
 });

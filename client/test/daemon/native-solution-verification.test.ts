@@ -19,10 +19,30 @@ const EVALUATION_SPEC = new TextEncoder().encode('{"evaluation":"spec"}');
 const OUTPUT = new TextEncoder().encode('{"probability":0.62}');
 const EVIDENCE = new TextEncoder().encode('{"execution":"evidence"}');
 
+/**
+ * Names one Delivery output plus the persisted artifact row that backs it. Defaults to the one
+ * output the Task declares; #39 tests vary it to a name or cardinality the Task never declared.
+ */
+interface SubjectOutput {
+  readonly name: string;
+  readonly mediaType?: string;
+  readonly bytes?: Uint8Array;
+}
+
+const DEFAULT_SUBJECT_OUTPUTS: readonly SubjectOutput[] = [
+  { name: 'prediction', mediaType: 'application/json' },
+];
+
 function fixture(
   binding = { ok: true as const, bindingDigest: `sha256:${'9'.repeat(64)}` },
   resolveEvaluationSpecOverride?: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>,
+  subjectOutputs: readonly SubjectOutput[] = DEFAULT_SUBJECT_OUTPUTS,
 ) {
+  const resolved = subjectOutputs.map((output) => ({
+    name: output.name,
+    mediaType: output.mediaType ?? 'application/json',
+    bytes: output.bytes ?? OUTPUT,
+  }));
   const keys = generateKeyPairSync('ed25519');
   const keyId = 'did:key:z6MksolverDelivery';
   const evaluationDigest = documentDigest(EVALUATION_SPEC);
@@ -52,7 +72,11 @@ function fixture(
     protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     attempt: ATTEMPT,
     task: documentDigest(taskBytes),
-    outputs: [{ name: 'prediction', mediaType: 'application/json', digest: { sha256: documentDigest(OUTPUT).slice(7) } }],
+    outputs: resolved.map((output) => ({
+      name: output.name,
+      mediaType: output.mediaType,
+      digest: { sha256: documentDigest(output.bytes).slice(7) },
+    })),
     executionIds: ['urn:uuid:44444444-4444-4444-8444-444444444444'],
     evidenceRecords: [{ family: 'execution-evidence', digest: documentDigest(EVIDENCE) }],
     outcome: 'fulfilled',
@@ -105,16 +129,16 @@ function fixture(
       delivery: JSON.parse(new TextDecoder().decode(deliveryBytes)),
       deliveryBytes,
       deliveryEnvelopeBytes,
-      outputs: [{
+      outputs: resolved.map((output) => ({
         engagementId: `sha256:${'a'.repeat(64)}` as const,
         role: 'output' as const,
-        family: 'application/json',
-        mediaType: 'application/json',
-        name: 'prediction',
-        digest: documentDigest(OUTPUT),
-        bytes: OUTPUT,
+        family: output.mediaType,
+        mediaType: output.mediaType,
+        name: output.name,
+        digest: documentDigest(output.bytes),
+        bytes: output.bytes,
         createdAt: '2026-08-02T00:05:00.000Z',
-      }],
+      })),
       evidence: [{
         engagementId: `sha256:${'a'.repeat(64)}` as const,
         role: 'evidence' as const,
@@ -189,6 +213,75 @@ describe('native solution verification', () => {
     await expect(subject.verification.verify(subject.input)).resolves.toEqual({
       ok: false,
       reason: 'evaluation-spec-unavailable',
+    });
+  });
+
+  // Gate-round-23 defect #39 -- the loose/strict asymmetry, again (the #34 lesson).
+  //
+  // The solver's own settlement-grade self-verify passed eight consecutive deliveries whose
+  // declared outputs the requester's Task never declared (`prediction.json` and
+  // `structured-output.json` against a Task declaring exactly `prediction`). The evaluator's
+  // `verifyEvaluationSubject` refused the first one it saw, four hours later, with the verdict
+  // window already spent. The producer must be able to self-detect the same drift.
+  describe('#39 Task/Delivery output-declaration agreement', () => {
+    it('refuses a delivery whose output name the Task never declared', async () => {
+      const subject = fixture(undefined, undefined, [
+        { name: 'prediction.json', mediaType: 'application/json' },
+      ]);
+      await expect(subject.verification.verify(subject.input)).resolves.toEqual({
+        ok: false,
+        reason: 'output-not-declared-by-task',
+      });
+    });
+
+    it('refuses a delivery carrying an output the Task never declared alongside a declared one', async () => {
+      const subject = fixture(undefined, undefined, [
+        { name: 'prediction', mediaType: 'application/json' },
+        {
+          name: 'structured-output.json',
+          mediaType: 'application/json',
+          bytes: new TextEncoder().encode('{"structuredOutput":{}}'),
+        },
+      ]);
+      await expect(subject.verification.verify(subject.input)).resolves.toEqual({
+        ok: false,
+        reason: 'output-not-declared-by-task',
+      });
+    });
+
+    it('refuses a delivery whose output media type disagrees with the Task declaration', async () => {
+      const subject = fixture(undefined, undefined, [
+        { name: 'prediction', mediaType: 'text/plain' },
+      ]);
+      await expect(subject.verification.verify(subject.input)).resolves.toEqual({
+        ok: false,
+        reason: 'output-media-type-not-declared-by-task',
+      });
+    });
+
+    // Fail-closed: the produce side must also refuse the empty delivery the evaluator's
+    // subject check cannot reject on its own (it admits any SUBSET of the declarations).
+    it('refuses a delivery genuinely missing the Task\'s required output', async () => {
+      const subject = fixture(undefined, undefined, []);
+      await expect(subject.verification.verify(subject.input)).resolves.toEqual({
+        ok: false,
+        reason: 'required-task-output-missing',
+      });
+    });
+
+    it('refuses a delivery repeating one declared output name', async () => {
+      const subject = fixture(undefined, undefined, [
+        { name: 'prediction', mediaType: 'application/json' },
+        {
+          name: 'prediction',
+          mediaType: 'application/json',
+          bytes: new TextEncoder().encode('{"probability":0.99}'),
+        },
+      ]);
+      await expect(subject.verification.verify(subject.input)).resolves.toEqual({
+        ok: false,
+        reason: 'output-name-not-unique',
+      });
     });
   });
 });

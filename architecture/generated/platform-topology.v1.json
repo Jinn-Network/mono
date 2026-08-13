@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 84,
+    "inventory": 85,
     "otherPackagesRootEntries": 19,
-    "packagesRootEntries": 78,
-    "platformV1": 51
+    "packagesRootEntries": 79,
+    "platformV1": 52
   },
   "graph": {
     "edgeSections": {
@@ -88,6 +88,11 @@
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-launchers"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-oci-grader"
       },
       {
         "from": "@jinn-network/benchmark-product-core",
@@ -1190,6 +1195,21 @@
         "to": "@jinn-network/task-execution-workspace"
       },
       {
+        "from": "@jinn-network/task-execution-oci-grader",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluation-harness"
+      },
+      {
+        "from": "@jinn-network/task-execution-oci-grader",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluator-adapters"
+      },
+      {
+        "from": "@jinn-network/task-execution-oci-grader",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
         "from": "@jinn-network/task-execution-profiles",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-protocol"
@@ -1349,6 +1369,7 @@
       "@jinn-network/task-execution-evaluation-harness",
       "@jinn-network/task-execution-evaluator-adapters",
       "@jinn-network/task-execution-launchers",
+      "@jinn-network/task-execution-oci-grader",
       "@jinn-network/task-execution-profiles",
       "@jinn-network/task-execution-protocol",
       "@jinn-network/task-execution-supervisor",
@@ -1625,6 +1646,19 @@
           "@jinn-network/task-execution-supervisor",
           "@jinn-network/task-execution-workspace"
         ],
+        "@jinn-network/task-execution-oci-grader": [
+          "@jinn-network/attestation-issuer",
+          "@jinn-network/evidence-protocol",
+          "@jinn-network/evidence-repository",
+          "@jinn-network/task-execution-backend",
+          "@jinn-network/task-execution-evaluation-harness",
+          "@jinn-network/task-execution-evaluator-adapters",
+          "@jinn-network/task-execution-launchers",
+          "@jinn-network/task-execution-profiles",
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/task-execution-supervisor",
+          "@jinn-network/task-execution-workspace"
+        ],
         "@jinn-network/task-execution-profiles": [
           "@jinn-network/task-execution-protocol"
         ],
@@ -1726,7 +1760,8 @@
           "@jinn-network/task-execution-testing"
         ],
         [
-          "@jinn-network/marketplace-testing"
+          "@jinn-network/marketplace-testing",
+          "@jinn-network/task-execution-oci-grader"
         ]
       ]
     }
@@ -1735,15 +1770,15 @@
     "counts": {
       "authorityDocuments": 28,
       "boundaryPolicies": 23,
-      "catalogManifests": 84,
-      "catalogPublicSurfaces": 1257,
+      "catalogManifests": 85,
+      "catalogPublicSurfaces": 1258,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2968,
-      "generatedOutputSources": 1313,
-      "generatorSources": 613,
+      "discoveredFirstPartySurfaces": 2977,
+      "generatedOutputSources": 1314,
+      "generatorSources": 617,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -2203,6 +2238,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/layer-publish-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/marketplace-hermetic-anvil.test.mjs"
       },
       {
         "categories": [
@@ -6966,6 +7011,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/architecture/_support/source-text.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/_support/source-text.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/architecture/api-cli-boundary.test.ts"
       },
       {
@@ -9176,6 +9241,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/daemon/native-evaluator-verdict-ready.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/daemon/native-fleet-boot-path.test.ts"
       },
       {
@@ -9357,6 +9432,16 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/native-profile-documents.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-projector-announce-delivery-records.test.ts"
       },
       {
         "categories": [
@@ -11888,6 +11973,26 @@
           "@ritsukai"
         ],
         "path": "client/test/fixtures/jinn-repo/pool.sample.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-evaluator"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-evaluator/round-26-verdict-ready.json"
       },
       {
         "categories": [
@@ -19918,6 +20023,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/web/src/test/dynamic-response-audit.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/src/test/dynamic-response-audit.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/web/src/test/server-only.ts"
       },
       {
@@ -19949,6 +20074,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/aggregate/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/aggregate/scripts/generate-paired-delta-oracles.py"
       },
       {
         "categories": [
@@ -21293,6 +21428,18 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/testing/fixtures/methods/paired-contract.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/methods/paired-delta-shared-ensemble.v2.json"
       },
       {
         "categories": [
@@ -35980,6 +36127,36 @@
       },
       {
         "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/oci-grader/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/oci-grader/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/oci-grader/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
           "conformancePackedTargets",
           "generatedOutputSources"
         ],
@@ -41995,6 +42172,7 @@
           "@jinn-network/task-execution-evaluation-harness",
           "@jinn-network/task-execution-evaluator-adapters",
           "@jinn-network/task-execution-launchers",
+          "@jinn-network/task-execution-oci-grader",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
           "@jinn-network/task-execution-supervisor",
@@ -44733,6 +44911,44 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/task-execution-evaluation-harness",
+          "@jinn-network/task-execution-evaluator-adapters",
+          "@jinn-network/task-execution-profiles"
+        ]
+      },
+      "domain": "task-execution",
+      "name": "@jinn-network/task-execution-oci-grader",
+      "ownerGroup": "architecture-control",
+      "path": "packages/task-execution/oci-grader",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-only",
+      "releaseGroup": "platform-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "role": "host-owned OCI grader execution",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
           "@jinn-network/task-execution-protocol",
           "@noble/hashes",
           "ajv",
@@ -46138,6 +46354,15 @@
         "packedTargets": [],
         "path": "packages/benchmarking/testing/fixtures/methods/paired-contract.json",
         "relativeSource": "fixtures/methods/paired-contract.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/paired-delta-shared-ensemble.v2.json",
+        "relativeSource": "fixtures/methods/paired-delta-shared-ensemble.v2.json"
       },
       {
         "claim": null,
@@ -54068,6 +54293,15 @@
         "schemas": []
       },
       {
+        "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/task-execution-oci-grader",
+        "path": "packages/task-execution/oci-grader",
+        "profiles": [],
+        "releaseGroup": "platform-v1",
+        "schemas": []
+      },
+      {
         "conformance": [
           "./testing"
         ],
@@ -54587,6 +54821,7 @@
         "@jinn-network/task-execution-evaluation-harness",
         "@jinn-network/task-execution-evaluator-adapters",
         "@jinn-network/task-execution-launchers",
+        "@jinn-network/task-execution-oci-grader",
         "@jinn-network/task-execution-profiles",
         "@jinn-network/task-execution-protocol",
         "@jinn-network/task-execution-supervisor",
@@ -55075,6 +55310,17 @@
           ],
           "environment": "npm-publish",
           "organization": "Jinn-Network",
+          "package": "@jinn-network/task-execution-oci-grader",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-profiles",
           "provider": "GitHub Actions",
           "repository": "mono",
@@ -55299,7 +55545,7 @@
         "platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 51,
+      "expectedPackageCount": 52,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/benchmarking-aggregate",
@@ -55343,6 +55589,7 @@
         "@jinn-network/task-execution-evaluation-harness",
         "@jinn-network/task-execution-evaluator-adapters",
         "@jinn-network/task-execution-launchers",
+        "@jinn-network/task-execution-oci-grader",
         "@jinn-network/task-execution-profiles",
         "@jinn-network/task-execution-protocol",
         "@jinn-network/task-execution-supervisor",

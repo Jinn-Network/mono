@@ -11,7 +11,8 @@ internal compatibility alias while packages keep their established names.
 Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
 Start at the [product overview](../README.md); see the
 [public-bundle guide](../PUBLIC-BUNDLE.md), [Inspect runtime guide](../INSPECT-RUNTIME.md),
-and [threat model](../SECURITY.md).
+[threat model](../SECURITY.md), and
+[Demo-1 E4 adapter runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
 
 This package is `private: true`, unpublished, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
@@ -81,6 +82,19 @@ colophon bundle verify --bundle <dir> --json
 It reads only the caller-selected immutable bundle, needs no workspace or
 principal, and returns the six checks documented in the
 [public-bundle guide](../PUBLIC-BUNDLE.md).
+
+Demo-1's second read-only standalone verifier is the explicit post-lock/pre-dispatch E4 gate:
+
+```text
+colophon demo1 prereg verify --workspace <dir> --draft <draftId> \
+  --witness <witness.json> --method-summary-sha256 <sha256> \
+  --grader-program-sha256 <sha256> --source-commit <full-git-oid> --json
+```
+
+It reads the locked Run and empty run journal, verifies the exact external-anchor witness, and
+performs no network or credential access. It is an ordering gate, not publication; the exact
+contract and post-dispatch ordering check are in the
+[E4 runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
 
 Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 `--json`; command-specific flags are listed by `colophon help`.

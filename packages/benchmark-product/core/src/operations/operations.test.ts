@@ -304,6 +304,53 @@ describe("inspectDraft", () => {
       verdictRule: "majority",
     });
   });
+
+  test("surfaces wilson@1 as the selected method when the draft names no analysis block", () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(workspaceDir, clock));
+    const created = createDraft(contextFor(workspaceDir, clock), { name: "No Analysis" });
+    if (!created.ok) throw new Error("setup failed");
+
+    const outcome = inspectDraft(contextFor(workspaceDir, clock), { draftId: created.result.draft.draftId });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.inspection.analysis).toEqual({
+      method: "jinn.benchmarking.method/wilson",
+      version: "1",
+    });
+  });
+
+  test("surfaces the draft's explicitly named paired analysis method", () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(workspaceDir, clock));
+    const created = createDraft(contextFor(workspaceDir, clock), {
+      name: "Paired Analysis",
+      spec: {
+        arms: [
+          { armId: "arm-a", pinning: { harness: "prediction-v1-baseline" } },
+          { armId: "arm-b", pinning: { harness: "claude-code" } },
+        ],
+        analysis: {
+          method: "jinn.benchmarking.method/paired-delta",
+          version: "1",
+          baseline: "arm-a",
+          candidate: "arm-b",
+          parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+        },
+      },
+    });
+    if (!created.ok) throw new Error("setup failed");
+
+    const outcome = inspectDraft(contextFor(workspaceDir, clock), { draftId: created.result.draft.draftId });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.inspection.analysis).toEqual({
+      method: "jinn.benchmarking.method/paired-delta",
+      version: "1",
+    });
+  });
 });
 
 describe("AC4 — exactly one audit entry per operation, across a mixed sequence", () => {

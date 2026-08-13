@@ -16,7 +16,7 @@
 
 - **Wilson output is byte-frozen.** Every wilson-path artifact — claim package JSON and every published bundle asset — must serialize byte-identically to today. `bundle/verify.ts:637-651` recomputes assets and byte-compares, so any drift, even whitespace, invalidates every previously published bundle. Golden tests enforce this and land before any mutation (Task 4).
 - **Claim schema id stays `benchmark-product.claim-package/1`** (`report/claim.ts:38,106`). New fields are additive and optional only. Ratified §5.2.
-- **No publish-facing surface goes directional.** Build the entire paired path behind the product's existing neutral copy. `bundle/assets.ts:249` (HTML) and `:318` (Markdown) both carry "No comparative winner is stated" — neither changes in this packet. Ratified §5.3; a method-stream copy agent drafts replacements for operator sign-off, triggered when Task 5 begins.
+- **Editorial posture is ratified.** The full paired report states the candidate-minus-baseline estimate, interval or withheld state, exact alpha `0.0500`, and paired Task count. Compact badge/social/share surfaces contain no result number and link relatively to `index.html`. Wilson output remains byte-frozen. Ratified §5.3 on 2026-08-12; Task 8c lands this copy last.
 - **No product-implemented statistics.** Every number comes from a `BENCHMARKING_METHOD_REGISTRY` method. The product selects and presents; it never computes.
 - **Fractional method parameters are decimal strings.** Sealed records admit only exact I-JSON integers (`benchmarking/records/src/json.ts:93-95`). `paired-delta@1`'s `alpha` is the string `"0.05"`. A raw number crashes `sealRun`.
 - **Provenance is required and fails closed** (ratified §5.4). `paired-delta@1` calls `resolveTaskProvenance`. The bundled sample benchmark destroys provenance at `core/src/intake/sample.ts:154`, so no paired run works on the sample path — out of scope here, tracked in scoping §6.1.
@@ -520,18 +520,20 @@ git commit -m "test(benchmark-product): pin wilson claim and bundle asset bytes 
 
 ---
 
-### Tasks 5–8 — step detail written after PR A lands
+### Tasks 5–8 — acceptance criteria
 
-Tasks 5 through 8 modify files that PR A changes (`claim.ts` consumes the Report that Task 3 reshapes; `assets.ts` consumes the claim that Task 5 reshapes). Writing verbatim step-level code for them now would pin line numbers and shapes that PR A is about to move, and this plan does not fake precision it does not have.
+Task 5 shipped in PR A. Tasks 6–8 are PR B; their step-level detail follows the table, appended once PR A merged (`e9db60afa`) so it is written against real line numbers rather than predicted ones.
 
-Their **acceptance criteria are fixed and binding** — they are the contract PR B is reviewed against. Step-level detail is appended to this document when PR A merges, before Task 5 is dispatched.
+Their **acceptance criteria are fixed and binding** — they are the contract PR B is reviewed against.
 
 | # | Task | Est. | Acceptance criteria |
 |---|---|---|---|
 | **5** | Method-dispatching claim package. `claim.ts:49-54,129` (`headline` optional + sibling `comparison`), `:192-215` (`wilsonSubjectResults` becomes one branch of a dispatch on `reportRecord.method.id`), `:262` and `verification/claim-consistency.ts:67` (select the plan entry matching the produced method rather than `[0]`). | **2.0–3.0** | A paired Report builds a claim carrying `comparison`; **the wilson golden from Task 4 still passes byte-identically**; `assertClaimConsistency` round-trips both shapes; `CLAIM_PACKAGE_SCHEMA_ID` unchanged at `/1`; a claim missing both `headline` and `comparison` is refused. |
 | **6** | Method-dispatching bundle assets. `assets.ts:118-156` (`requireWilsonFacts` becomes a dispatch), `:446-447` (both call sites). All neutral copy **unchanged** — see the seven-surface list below. | **2.0** | A paired bundle materializes and `bundle verify` passes on it; **every wilson golden from Task 4 still passes byte-identically**; no directional language appears on any publish-facing surface. |
 | **7** | Web renders both claim shapes. `web/.../results/page.tsx:27,124` — the unguarded `headline.wilsonInterval.low` dereference must become shape-aware. `inspect` surfaces the selected method (`operations/inspect.ts`). Also `core/scripts/m1-walkthrough.mjs:222`, which emits `armHeadline: report.claimPackage.headline` and yields a silent `undefined` on the paired branch under §5.2's optional-headline shape. | **1.0** | RTL renders a paired claim and a wilson claim; no unguarded dereference; the existing stored-Report `role="alert"` degradation path preserved; the walkthrough transcript never emits `undefined` for either branch. |
-| **8** | End-to-end and docs. Extend `run-path.integration.test.ts`; update the documentation surfaces in the seven-surface list. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → `bundle verify` with zero manual intervention. Docs describe method selection accurately without asserting a comparative winner. All three render states pinned per surface (below). **As of the P4b-T3 fix pass, the paired report path is exercised end-to-end only at the zero-pairs state; the interval-present and interval-withheld states are not yet covered anywhere in-tree — their tests are Task 8's to write, not assumed already present.** |
+| **8a** | **Sample-benchmark provenance fix.** `core/src/intake/sample.ts:154` overwrites `payload` wholesale, destroying `payload.provenance`, which `resolveBenchmarkTaskProvenance` requires. No clustered paired method can run on the sample path until this lands, so it is a **prerequisite for 8b**, not a tidy-up. | **1.0** | A sample-benchmark task retains `payload.provenance`; a paired method runs on the sample path without a typed provenance refusal. Sample-benchmark digest changes — every fixture pinned to it updated deliberately, each called out in the PR body. |
+| **8b** | **Paired end-to-end coverage.** Extend `run-path.integration.test.ts` across all three render states. | **1.5** | A paired draft runs create → arms → lock → launch → collect → report → verify → publish → `bundle verify` with zero manual intervention. **All three states covered: interval-present, interval-withheld (both reason strings surfaced), and zero-pairs.** As of PR A only zero-pairs is exercised anywhere in-tree — the other two are 8b's to write, not assumed present. |
+| **8c** | **Copy surfaces — OPERATOR-GATED, LANDS LAST.** The seven neutrality surfaces plus `PUBLIC-BUNDLE.md` and `ADAPTATION.md`. | **0.5** | Blocked on the operator's §5.3 pick. Structured as the final commit of PR B so 6, 7, 8a and 8b can be reviewed and merged without it. **Nothing in 6–8b may pre-empt the wording.** |
 
 #### The neutrality promise ships on SEVEN surfaces, not three
 
@@ -570,6 +572,90 @@ The interval-withheld branch and the below-MDE branch are **different failures**
 ### PR B test blast radius
 
 Enumerated in scoping §9. The assertions that pin **exact literal strings** and will need deliberate updates: `bundle/assets.test.ts:219-222,232,236-238`; `web/.../results/page.test.tsx:97,103,115-116,161,171`; `report/claim.test.ts:294` (asserts `claim.headline` deep-equals the wilson `arms`). Every such change is called out in the PR body with rationale, per the program's blast-radius rule.
+
+---
+
+## PR B — step-level detail
+
+Written against `e9db60afa` (PR A merged). Branch `claude/demo1-p4b-prb`; one worktree per task chained off the previous tip, as in PR A.
+
+**Commit order is load-bearing.** `8c` is the copy commit and must be the last commit on the branch, so that 6 → 7 → 8a → 8b can be reviewed, and if necessary merged, while the operator's §5.3 decision is still outstanding. Nothing in 6–8b may pre-empt the wording: the paired branch renders **structure with no directional sentence**, and the sentence is added in 8c or not at all.
+
+### Task 6 — bundle assets dispatch
+
+**Files:** `core/src/bundle/assets.ts` · `core/src/bundle/assets.test.ts`
+
+`requireWilsonFacts` (`assets.ts:118-156`) currently throws for any results lacking wilson's `arms` shape, and is called twice at `:446-447` — once on `input.report.results`, once on `input.claim.results`. Both call sites must dispatch on the produced method instead.
+
+1. **Failing test first.** A paired claim + paired Report must produce assets without throwing, and the rendered HTML must contain the paired facts (pairs, delta, and — when present — the interval). Assert on *structure*, never on a directional sentence.
+2. Turn `requireWilsonFacts` into a dispatch keyed on `reportRecord.method.id`, mirroring `claim.ts`'s `methodProjection`. Reuse the same shape names so the two dispatches read as one pattern.
+3. **The three render states each get an assertion here**, not only in 8b: interval-present, interval-withheld (both reason strings visible), zero-pairs (no delta). Compact assets route through `boundedVisual` with roughly a 90-character budget — the withheld state is the one that silently truncates to nothing, so assert its rendered output is non-empty.
+4. **The Task 4 goldens must still pass byte-identically.** A wilson bundle is unchanged. If a golden fails, fix the code — never the golden.
+5. Neutral copy at `:249`, `:278`, `:288`, `:318`, `:440` **unchanged**.
+
+**Gate:** paired bundle materializes; `bundle verify` passes on it; all six goldens byte-identical; `git diff -- '*wilson-golden*'` empty.
+
+### Task 7 — web and walkthrough render both shapes
+
+**Files:** `web/src/app/workspace/[draftId]/results/page.tsx` · its test · `core/src/operations/inspect.ts` · `core/scripts/m1-walkthrough.mjs`
+
+PR A left `page.tsx:124` behind a minimal `claim.headline ? … : null` guard, so **a paired claim currently renders nothing at all**. That is correct under the deferral and wrong to ship.
+
+1. **Failing test first**, and note the acceptance is *"a paired claim renders something"* — not merely "no unguarded dereference". A test asserting absence would pass against the current stub.
+2. Render the `comparison` block: pairs, delta, interval or the withheld reasons. Structure only; no directional sentence.
+3. `m1-walkthrough.mjs:222` emits `armHeadline: report.claimPackage.headline`, which is a silent `undefined` on the paired branch. Branch it so the transcript never prints `undefined`.
+4. `inspect` surfaces the selected method.
+
+**Gate:** RTL renders paired and wilson claims; the wilson branch is visually unchanged; the stored-Report `role="alert"` degradation path preserved; walkthrough prints no `undefined` on either branch; `web` **`yarn typecheck` exit 0** — the leg PR A added after it caught a break `vitest` structurally could not.
+
+### Task 8a — DROPPED (2026-08-12). Superseded by a documented architectural constraint.
+
+**What it was:** make the bundled sample benchmark carry task provenance, so a clustered paired method could run on the sample path. Two successive stop-and-report findings retired it.
+
+**First finding — the plan's diagnosis was wrong.** This section originally read "`sample.ts:154` … discarding `payload.provenance`. Preserve provenance by merging rather than replacing." The upstream fixture (`task-supply/admission/fixtures/prediction-snapshot-v1/task.json`) carries **no `provenance` key at all**, so nothing was being discarded and the prescribed merge would have merged `{}` into `{}` — a silent no-op that a weaker test would have reported as a pass. Provenance had to be *synthesized*, not preserved.
+
+**Second finding — synthesis is impossible under the frozen contract.** Two contracts are mutually exclusive for the prediction-forecast profile:
+
+- `task-supply/admission/src/prediction-snapshot.ts:159-160` requires `Object.keys(payload).sort().join(",") === "forecast"` — the payload must be **exactly** `{forecast}`.
+- `benchmarking/records/src/benchmark/checks.ts:56-58` reads provenance from **exactly one location**, `task.data.payload["provenance"]`, with no fallback and no alternative accepted location.
+
+There is no third attachment point: `prediction-snapshot.ts:125` also closes the Task object to exactly `evaluation,instructions,outputs,payload,profile,protocol`, so provenance cannot be a top-level sibling either.
+
+**The recorded constraint:** *prediction-forecast tasks structurally cannot carry payload provenance under the frozen `PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1`, and therefore cannot be scored by any clustered paired method — `paired-delta@1`, `paired-mcnemar@1`, or `provenance-cluster-sign@1`. This is a contract conflict, not an oversight.* The bundled sample benchmark can never demo a paired method.
+
+**Why this costs nothing here.** The demo's real path is SWE-imported `repository-work/1.0` tasks, which carry provenance natively (`interop/src/import/swebench.ts`) and never pass through the prediction-specific admission policy. And the sample's only reachable paired state was interval-withheld anyway — it has three tasks against a `minN` of five — which Task 8b's purpose-built fixture now covers along with interval-present.
+
+**Rejected, deliberately:** amending `PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1` to admit a provenance key (a frozen, versioned, cross-package contract change to satisfy a test fixture — the tail wagging the dog), and weakening `sample.ts`'s admission sanity call (it exists to prove the frozen contract holds; neutering it would pass CI while destroying the property it guarantees).
+
+The open product question — *should prediction-forecast tasks be paired-scoreable?* — is filed as a `design` issue against whoever owns prediction admission. It is explicitly **not** scoped into this program.
+
+### Task 8b — paired end-to-end coverage
+
+**Files:** `core/src/run/run-path.integration.test.ts` · a new purpose-built test benchmark fixture
+
+**The bundled sample benchmark structurally cannot reach interval-present.** It has exactly three tasks (`sample-market-alpha`, `-bravo`, `-charlie`) and `paired-delta@1`'s floor is `minN = 5` paired tasks. No provenance decision changes this — it is a task-count fact. Recorded here so it is not rediscovered.
+
+So **8b builds its own test benchmark** for interval-present: ≥5 tasks across ≥2 provenance clusters. It is a test fixture, not a product surface, and ships no user-visible behavior. Task 8a's one-cluster synthesis already covers interval-withheld on the sample path without extra fixture work.
+
+If the fixture-builder pushes this task meaningfully past its 1.5-day budget, flag rather than trim coverage — interval-withheld is what the slate/e2e lane's gate asserts against, and interval-present is the state a reader of the demo report will actually look at.
+
+One paired draft, full lifecycle, **three states**:
+
+| State | Setup | Assert |
+|---|---|---|
+| interval-present | ≥5 paired tasks across ≥2 provenance clusters | `interval` non-null; delta and bounds render |
+| interval-withheld | <5 paired tasks, or 1 cluster | `interval: null`; **both reason strings surfaced**; delta still present |
+| zero-pairs | no task judged in both arms | no delta, no interval; no crash |
+
+Interval-withheld is the state the slate/e2e lane's gate asserts against, and the one most likely to be dropped, since it looks like a degenerate case rather than a supported outcome.
+
+**Gate:** all three run create → … → `bundle verify` with zero manual intervention.
+
+### Task 8c — copy surfaces (OPERATOR-GATED, LAST COMMIT)
+
+**Operator decision landed 2026-08-12.** The full report spells out the candidate-minus-baseline estimate, interval or withheld state, exact alpha `0.0500`, and paired Task count. Compact badge, social-card, and share surfaces carry no result number and point relatively to `index.html`. Wilson-branch strings stay byte-identical on all seven, which the Task 4 goldens enforce for the five in-code ones; the two documentation surfaces are not test-guarded and need manual care.
+
+Also in this commit: the distinct limitations entry (*"this method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered"*), kept separate from the MDE line, because an interval-withheld run and a below-MDE run are different failures and must not read as one caveat.
 
 ---
 

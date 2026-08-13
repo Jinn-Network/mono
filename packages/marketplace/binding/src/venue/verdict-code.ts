@@ -22,9 +22,15 @@ export const VerdictCode = {
 export type VerdictCode = (typeof VerdictCode)[keyof typeof VerdictCode];
 
 /**
- * Envelope-authoritative mapping (design §6.4): the Statement's verdict maps to
+ * Venue-level mapping (design §6.4): a venue-reported verdict maps to
  * `{Pass, Fail, Invalid, Unresolved}` with NO defaulting -- a missing or unrecognized verdict
  * value throws rather than being guessed as `Invalid(3)`.
+ *
+ * NOT the reader for a Result Evaluation Statement's `predicate.verdict`. That field has one
+ * ratified vocabulary (`pass|fail|inconclusive`, `ResultEvaluationStatementShape`) and one reader,
+ * `decisionGradeVerdictCode` in `../named-checks.js` -- the one the named gate itself applies. This
+ * function's vocabulary is wider yet has no `inconclusive` case, so reading a Statement with it
+ * refuses exactly the verdicts the gate expects to see (defect #41).
  */
 export function verdictCodeFromValue(raw: unknown): VerdictCode {
   const normalized = typeof raw === "string" ? raw.toUpperCase() : raw;

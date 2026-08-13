@@ -15,13 +15,19 @@
  * functions below for the exact manifest shape each produces.
  */
 
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseCellKey } from "@jinn-network/benchmarking-records";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import {
   harvest as workspaceHarvest,
+  makeWorktreeProvisioner,
+  canonicalLoadoutPath,
+  canonicalLoadoutPin,
+  ProvisioningRejectedError,
   STAGED_SEALED_TASK_FILENAME,
   type DeclaredOutputSlot,
   type HarvestResult,
@@ -29,12 +35,14 @@ import {
   type WorkspaceKind,
   type WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
-import type { DsseSigner } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, type DsseSigner } from "@jinn-network/trust-core";
 import {
   EVALUATION_TASK_PROFILE_URI,
   PREDICTION_FORECAST_PROFILE_URI,
+  REPOSITORY_WORK_PROFILE_URI,
 } from "@jinn-network/task-execution-profiles";
 import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
+import type { ResourceDescriptor, TaskSpecification } from "@jinn-network/task-execution-protocol";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import {
   INSPECT_EMBEDDED_EVALUATOR_ID,
@@ -45,7 +53,19 @@ import {
 } from "../runtime/inspect/artifacts.js";
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
+import type { RepositoryMirrorPort } from "./repository-mirror.js";
 import { sealVerdictStatement } from "./signing.js";
+import {
+  DEMO1_CLAUDE_HARNESS_ID,
+  DEMO1_CLAUDE_MD_LOADOUT_NAME,
+  DEMO1_CLAUDE_MD_PATH,
+  DEMO1_EXPERIMENT_PATHS,
+  DEMO1_SKILL_LOADOUT_NAME,
+  DEMO1_SKILL_PATH,
+  DEMO1_SKILL_PLUGIN_DIRECTORY,
+  DEMO1_SKILL_PLUGIN_MANIFEST_PATH,
+  type Demo1InstructionArtifacts,
+} from "./demo1-claude.js";
 
 /**
  * Structurally matches `@jinn-network/task-execution-backend-local`'s own `SelectedProvisioner`
@@ -129,14 +149,18 @@ function solveProvisionerContract(sealedTaskBytes: Uint8Array): ProvisionerContr
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
-      // Both solve launchers (prediction-v1-baseline, sample-uniform) write the Task's sole
-      // declared output to out/prediction.json and a structured-output envelope alongside it.
-      // Neither name is the Task's declared output name ("prediction"), and the structured
-      // envelope must not appear in the delivered manifest at all (it is backend/host metadata,
-      // never a Task output) -- so both are normalized before the platform's own `harvest()` walks
-      // out/. Moving structured-output.json out of out/ before `readResultEnvelope` runs is safe:
-      // with the file absent it returns `undefined`, and an exit-0 process still interprets as
-      // `delivered` (`@jinn-network/task-execution-launchers`'s `interpretResult`).
+      // This venue's own `sample-uniform` launcher writes the Task's sole declared output to
+      // out/prediction.json and a structured-output envelope alongside it. Neither name is the
+      // Task's declared output name ("prediction"), and the structured envelope must not appear in
+      // the delivered manifest at all (it is backend/host metadata, never a Task output) -- so both
+      // are normalized before the platform's own `harvest()` walks out/. Moving
+      // structured-output.json out of out/ before `readResultEnvelope` runs is safe: with the file
+      // absent it returns `undefined`, and an exit-0 process still interprets as `delivered`
+      // (`@jinn-network/task-execution-launchers`'s `interpretResult`).
+      //
+      // `prediction-v1-baseline` no longer needs the rename: since #39 it writes out/prediction
+      // directly, which is what every consumer of a signed Delivery already expected. Both guards
+      // below are existence-checked, so that launcher simply falls through them.
       const structuredOutputPath = join(paths.out, "structured-output.json");
       if (existsSync(structuredOutputPath)) {
         await rename(structuredOutputPath, join(paths.meta, "structured-output.json"));
@@ -218,6 +242,11 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
         throw new Error("benchmark-product local venue harvest ran before setup registered evaluation-cell materials");
       }
       const verdictPath = join(paths.out, "verdict");
+      // #39b(b): the same unconditional read the daemon's evaluator provisioner carried. A harness
+      // that refused its subject exits 65 having written no verdict, and that exit code already
+      // classifies the failure; letting the read's ENOENT escape harvest replaces that
+      // classification with an infrastructure blame. Nothing to seal means nothing to seal.
+      if (!existsSync(verdictPath)) return workspaceHarvest(paths, declaredOutputs);
       const statementBytes = new Uint8Array(await readFile(verdictPath));
       const envelopeBytes = await sealVerdictStatement({
         statementBytes,
@@ -235,6 +264,296 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
         .map((entry) => ({ ...entry, mediaType: "application/vnd.in-toto+json" }));
       await wipeScratch(paths);
       return { manifest, omissions: result.omissions, integrityViolations: result.integrityViolations };
+    },
+  };
+}
+
+// ── repository-work cells ────────────────────────────────────────────────────────────────────
+
+const REPOSITORY_OID_PATTERN = /^[0-9a-f]{40}$/u;
+
+/**
+ * Per-slot suffixes an agent's stray `out/` write is renamed FROM before harvest, so the declared
+ * slot name is what harvest actually sees. Deliberately narrow and keyed per slot rather than
+ * tried against every declared slot: a Task declaring "patch" should only pick up a stray
+ * `patch.diff`/`patch.patch`, never let e.g. a log written to `out/patch.txt` get delivered as the
+ * patch. Unknown slot names get no rename at all.
+ */
+const OUTPUT_SLOT_RENAME_SUFFIXES: Readonly<Record<string, readonly string[]>> = {
+  patch: [".diff", ".patch"],
+  summary: [".md"],
+  evidence: [".json"],
+};
+
+/**
+ * Runs `git <args>` for its exit code only -- worktree teardown needs no stdout. Mirrors
+ * `packages/policy-optimization/src/host-local/live-swe-rebench-runner.ts`'s `processExit` shape;
+ * redeclared here (rather than imported) because this package must not depend on
+ * `packages/policy-optimization/`.
+ */
+async function runGit(args: readonly string[]): Promise<void> {
+  const child = spawn("git", [...args], {
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+    stdio: "ignore",
+  });
+  const code = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (value) => resolve(value ?? 70));
+  });
+  if (code !== 0) throw new Error(`git ${args[0] ?? ""} exited ${code}`);
+}
+
+async function runGitOutput(args: readonly string[], env: NodeJS.ProcessEnv): Promise<string> {
+  const child = spawn("git", [...args], {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+  const code = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (value) => resolve(value ?? 70));
+  });
+  if (code !== 0) throw new Error(`git ${args[0] ?? ""} exited ${code}: ${stderr.trim()}`);
+  return stdout;
+}
+
+interface RepositoryWorkProvisionerOptions {
+  readonly sealedTaskBytes: Uint8Array;
+  readonly dispatchContextBytes: Uint8Array;
+  readonly task: TaskSpecification;
+  readonly mirror: RepositoryMirrorPort | undefined;
+  readonly demo1Instructions?: Demo1InstructionArtifacts;
+}
+
+function harnessId(view: { readonly effectiveRequirements?: Readonly<Record<string, unknown>> }): string | undefined {
+  const harness = view.effectiveRequirements?.["harness"];
+  if (typeof harness === "string") return harness;
+  if (typeof harness !== "object" || harness === null) return undefined;
+  const id = (harness as { readonly id?: unknown }).id;
+  return typeof id === "string" ? id : undefined;
+}
+
+function digest(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function installDemo1Instructions(
+  view: { readonly effectiveRequirements?: Readonly<Record<string, unknown>> },
+  paths: WorkspacePaths,
+  artifacts: Demo1InstructionArtifacts,
+): Promise<void> {
+  for (const path of DEMO1_EXPERIMENT_PATHS) {
+    if (existsSync(join(paths.work, path))) {
+      throw new ProvisioningRejectedError(
+        `Demo-1 task repository already contains experiment instruction path "${path}"`,
+      );
+    }
+  }
+  const rawLoadout = view.effectiveRequirements?.["loadout"];
+  if (rawLoadout === undefined) return;
+  const pin = canonicalLoadoutPin(rawLoadout);
+  const expected = pin.name === DEMO1_SKILL_LOADOUT_NAME
+    ? artifacts.skill
+    : pin.name === DEMO1_CLAUDE_MD_LOADOUT_NAME
+      ? artifacts.baseline
+      : undefined;
+  if (expected === undefined || canonicalLoadoutPin(expected).digest !== pin.digest) {
+    throw new ProvisioningRejectedError(`Demo-1 refuses unregistered loadout "${pin.name}"`);
+  }
+
+  // makeWorktreeProvisioner has already sent these bytes through materializeLoadout's digest
+  // verification at input/<pin.name>. Copying is product-owned placement, and the second hash
+  // check makes the loader-visible bytes identical to the verified staging bytes.
+  const stagedBytes = new Uint8Array(await readFile(canonicalLoadoutPath(paths.input, rawLoadout)));
+  if (digest(stagedBytes) !== pin.digest) {
+    throw new ProvisioningRejectedError(`Demo-1 staged loadout "${pin.name}" changed before placement`);
+  }
+  const destination = pin.name === DEMO1_SKILL_LOADOUT_NAME
+    ? join(paths.work, DEMO1_SKILL_PATH)
+    : join(paths.work, DEMO1_CLAUDE_MD_PATH);
+  await mkdir(dirname(destination), { recursive: true });
+  if (pin.name === DEMO1_SKILL_LOADOUT_NAME) {
+    const manifest = new TextEncoder().encode('{"name":"jinn-demo1-skill","version":"1.0.0"}\n');
+    const manifestPath = join(paths.work, DEMO1_SKILL_PLUGIN_MANIFEST_PATH);
+    await mkdir(dirname(manifestPath), { recursive: true });
+    await writeFile(manifestPath, manifest, { mode: 0o400, flag: "wx" });
+  }
+  await writeFile(destination, stagedBytes, { mode: 0o400, flag: "wx" });
+  if (digest(new Uint8Array(await readFile(destination))) !== pin.digest) {
+    throw new ProvisioningRejectedError(`Demo-1 loader-visible loadout "${pin.name}" failed its copy check`);
+  }
+}
+
+async function removeDemo1Instructions(paths: WorkspacePaths): Promise<void> {
+  await Promise.all([
+    rm(join(paths.work, DEMO1_SKILL_PLUGIN_DIRECTORY), { recursive: true, force: true }),
+    rm(join(paths.work, DEMO1_CLAUDE_MD_PATH), { force: true }),
+  ]);
+}
+
+/** Extracts repository changes without touching the real index and excludes both arms' files. */
+async function extractDemo1Patch(paths: WorkspacePaths): Promise<void> {
+  const indexPath = join(paths.meta, "demo1-patch.index");
+  await rm(indexPath, { force: true });
+  const env = {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_SYSTEM: "/dev/null",
+    GIT_INDEX_FILE: indexPath,
+  };
+  await runGitOutput(["-C", paths.work, "read-tree", "HEAD"], env);
+  await runGitOutput([
+    "-C", paths.work, "add", "-A", "--", ".",
+    `:(exclude)${DEMO1_CLAUDE_MD_PATH}`,
+    `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}`,
+    `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}/**`,
+  ], env);
+  const patch = await runGitOutput([
+    "-C", paths.work, "diff", "--cached", "--binary", "--full-index", "--no-color", "HEAD", "--",
+  ], env);
+  await writeFile(join(paths.out, "patch"), patch, { mode: 0o600 });
+  await rm(indexPath, { force: true });
+}
+
+/**
+ * The Task's declared repository descriptor (`repository-work/1.0` inputConventions). Product
+ * logic, not platform logic -- the platform's `ResourceDescriptor` carries no repository-specific
+ * shape, so extracting and validating the `uri` + `annotations.ref` convention this profile
+ * defines stays here even though the checkout itself now delegates to the platform below.
+ */
+function repositoryStateDescriptor(task: TaskSpecification): { uri: string; oid: string } {
+  const descriptor = (task.inputs ?? []).find(
+    (input: ResourceDescriptor) => input.name === "repository-state",
+  );
+  if (descriptor === undefined) {
+    throw new ProvisioningRejectedError(
+      'benchmark-product local venue: repository-work Task declares no "repository-state" input',
+    );
+  }
+  const uri = descriptor.uri;
+  const oid = (descriptor.annotations as { ref?: unknown } | undefined)?.ref;
+  if (typeof uri !== "string" || uri.length === 0) {
+    throw new ProvisioningRejectedError('benchmark-product local venue: "repository-state" input carries no uri');
+  }
+  if (typeof oid !== "string" || !REPOSITORY_OID_PATTERN.test(oid)) {
+    throw new ProvisioningRejectedError(
+      'benchmark-product local venue: "repository-state" annotations.ref must be exactly 40 lowercase hex characters',
+    );
+  }
+  return { uri, oid };
+}
+
+/**
+ * Delegates the checkout itself to the platform's `makeWorktreeProvisioner` (design-approved;
+ * see `packages/policy-optimization/src/host-local/live-swe-rebench-runner.ts`'s
+ * `solverProvisioner` for the shape this mirrors). `referenceRepository` is only known after
+ * `mirror.ensure(...)` resolves, so unlike that model the base provisioner is built INSIDE
+ * `setup`, once the mirror path is in hand, and retained in this closure for `harvest`'s teardown.
+ */
+function repositoryWorkProvisionerContract(
+  options: RepositoryWorkProvisionerOptions,
+): ProvisionerContract {
+  let resolved: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
+  let demo1Claude = false;
+  return {
+    workspaceKind: (): WorkspaceKind => "worktree",
+    async setup(view, paths, grants) {
+      const { uri, oid } = repositoryStateDescriptor(options.task);
+      if (options.mirror === undefined) {
+        throw new ProvisioningRejectedError(
+          "benchmark-product local venue cannot provision a repository-work cell: no repository mirror is configured",
+        );
+      }
+      let mirrorDir: string;
+      try {
+        mirrorDir = await options.mirror.ensure({ uri, oid });
+      } catch (error) {
+        throw new ProvisioningRejectedError(
+          error instanceof Error ? error.message : "repository mirror resolution failed",
+          error,
+        );
+      }
+      const base = makeWorktreeProvisioner({
+        sealedTaskBytes: options.sealedTaskBytes,
+        dispatchContextBytes: options.dispatchContextBytes,
+        referenceRepository: mirrorDir,
+        oid,
+        runtime: { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined },
+        fetchInput: async (descriptor) => {
+          // The Task's "repository-state" input has no bytes of its own to materialize verbatim
+          // -- it is a pointer to the mirror-resolved checkout. The checkout itself lands at
+          // paths.work via the worktree the platform cuts below; this canonical JSON pointer is
+          // what lands under input/ for the descriptor.
+          if (descriptor.name === "repository-state") {
+            return canonicalJsonBytes({ oid, repository: mirrorDir });
+          }
+          throw new Error(
+            `benchmark-product local venue repository-work provisioner refused unknown input "${descriptor.name ?? descriptor.uri ?? "<unnamed>"}"`,
+          );
+        },
+      });
+      await base.setup(view, paths, grants);
+      try {
+        demo1Claude = harnessId(view) === DEMO1_CLAUDE_HARNESS_ID;
+        if (demo1Claude) {
+          if (options.demo1Instructions === undefined) {
+            throw new ProvisioningRejectedError("Demo-1 Claude Code runtime has no instruction artifact inventory");
+          }
+          await installDemo1Instructions(view, paths, options.demo1Instructions);
+        }
+      } catch (error) {
+        // A product placement refusal happens after the platform has cut the worktree. Clean up
+        // that partial setup immediately; the backend correctly has no harvest phase for a
+        // never-executed attempt.
+        await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
+          .catch(() => rm(paths.work, { recursive: true, force: true }));
+        await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
+        throw error;
+      }
+      resolved = { base, mirrorDir };
+    },
+    executionEnv: ({ env }) => ({ ...env }),
+    async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
+      if (resolved === undefined) {
+        throw new Error("benchmark-product local venue repository-work harvest ran before setup");
+      }
+      const { base, mirrorDir } = resolved;
+      try {
+        if (demo1Claude) {
+          await removeDemo1Instructions(paths);
+          await extractDemo1Patch(paths);
+        }
+        // Same normalization contract as the solve path above, for this profile's declared slots.
+        // Renames run BEFORE the delegated harvest because harvest stamps each artifact's
+        // mediaType from the declared slot whose name equals its path -- an artifact still called
+        // "patch.diff" would be collected untyped.
+        const structuredOutputPath = join(paths.out, "structured-output.json");
+        if (existsSync(structuredOutputPath)) {
+          await rename(structuredOutputPath, join(paths.meta, "structured-output.json"));
+        }
+        for (const slot of declaredOutputs) {
+          for (const suffix of OUTPUT_SLOT_RENAME_SUFFIXES[slot.name] ?? []) {
+            const candidate = join(paths.out, `${slot.name}${suffix}`);
+            if (!existsSync(join(paths.out, slot.name)) && existsSync(candidate)) {
+              await rename(candidate, join(paths.out, slot.name));
+            }
+          }
+        }
+        const declared = new Set(declaredOutputs.map((slot) => slot.name));
+        const result = await base.harvest(paths, declaredOutputs);
+        const manifest = result.manifest.filter((entry) => declared.has(entry.path));
+        return { manifest, omissions: result.omissions, integrityViolations: result.integrityViolations };
+      } finally {
+        // Copies `solverProvisioner`'s teardown in the model referenced above, verbatim in shape:
+        // deregister the worktree, falling back to a forced directory removal, then prune.
+        await runGit(["-C", mirrorDir, "worktree", "remove", "--force", paths.work])
+          .catch(() => rm(paths.work, { recursive: true, force: true }));
+        await runGit(["-C", mirrorDir, "worktree", "prune"]).catch(() => undefined);
+      }
     },
   };
 }
@@ -388,6 +707,12 @@ export interface CreateLocalProvisionerOptions {
    */
   readonly evaluationContextVariationForTesting?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
   readonly inspect?: InspectProvisionerOptions;
+  /** Resolves a repository-work Task's `repository-state` descriptor to a local bare mirror.
+   * Absent on venues that serve no repository-work cells; a repository-work cell then refuses
+   * typed at setup rather than silently provisioning an empty work tree. */
+  readonly repositoryMirror?: RepositoryMirrorPort;
+  /** Demo-1's exact digest-bound skill/CLAUDE.md inventory. Absent keeps the venue unchanged. */
+  readonly demo1Instructions?: Demo1InstructionArtifacts;
 }
 
 export function createLocalProvisioner(
@@ -421,6 +746,20 @@ export function createLocalProvisioner(
       return {
         id: "benchmark-product-inspect-dir-v1",
         contract: inspectProvisionerContract(input, options.inspect),
+      };
+    }
+    if (profileUri === REPOSITORY_WORK_PROFILE_URI) {
+      return {
+        id: "benchmark-product-repository-work-worktree-v1",
+        contract: repositoryWorkProvisionerContract({
+          sealedTaskBytes: input.sealedTaskBytes,
+          dispatchContextBytes: input.dispatchContextBytes,
+          task: input.task,
+          mirror: options.repositoryMirror,
+          ...(options.demo1Instructions === undefined
+            ? {}
+            : { demo1Instructions: options.demo1Instructions }),
+        }),
       };
     }
     return {

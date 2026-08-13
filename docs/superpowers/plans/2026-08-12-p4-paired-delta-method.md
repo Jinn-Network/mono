@@ -6,6 +6,21 @@
 
 **Architecture:** The existing `clusteredPairedRateDiffBca` computes a one-sided BCa bound whose bootstrap distribution depends only on `seed`/`resamples` — `alpha` enters solely at the quantile-index step (`stats/noninferiority.ts:192`). Calling it twice with the same seed at `alpha/2` and `1 - alpha/2` therefore yields the two BCa endpoints of one central interval over an identical bootstrap distribution. A thin composition module (`stats/paired-delta.ts`) performs that composition; the registry method reuses `noninferiority-iut@1`'s replicate-aware pairing/exclusion logic with the cost leg and the verdict gate removed. **No new statistical mathematics is written.**
 
+**2026-08-13 draw-accounting correction:** `draws` counts the unique PRNG variates in that one
+shared bootstrap ensemble, so it equals `resamples × clusterCount`. The two endpoint calls replay
+the same ensemble and are not two statistical resample sets. The composition fails closed unless
+both calls agree on draw count, observed value, and cluster manifest. This correction predates the
+official Demo-1 run. The already-committed `methods/paired-delta.json` fixture is nevertheless an
+immutable compatibility artifact: its exact digest
+`ee87f4d240c373131edf81677209e4183c2032db7d015a1149cdcfcc2b5dc7fd` and old
+`2 × resamples × clusterCount` semantics remain retained. Current conformance uses its append-only
+successor `methods/paired-delta-shared-ensemble.v2.json`, digest
+`33a81c543ecd8b7bbf0fc99132e9cb3aca96d25365286ce09e5037ac33771c8b`, under a dated manifest
+erratum. No public npm release, repository tag, committed canary tarball, or sealed Demo-1 paired
+Report was found at correction time. If an untracked pre-correction artifact exists, retain its
+exact package bytes to verify its old result; never rewrite the sealed record. Wilson fixtures and
+public-bundle bytes have an independent byte-stability obligation and remain unchanged.
+
 **Tech Stack:** TypeScript (ESM, `.js` import specifiers), Vitest, Node 22, Yarn 4 workspaces. Packages: `@jinn-network/benchmarking-records` (identifiers), `@jinn-network/benchmarking-aggregate` (registry + statistics), `@jinn-network/benchmarking-testing` (conformance kit + golden fixtures).
 
 **Worked example to mirror:** commit `10fe0ebf1` (PR #2556) added `provenance-cluster-sign@1` and touched exactly the file set this plan touches. When in doubt about placement, ordering, or comment style, `git show 10fe0ebf1 -- packages/benchmarking/` is authoritative precedent.
@@ -197,9 +212,9 @@ describe("clusteredPairedDeltaInterval", () => {
     expect(result.delta).toBeCloseTo(1 / 3, 12);
   });
 
-  test("reports two bootstrap passes worth of draws over whole clusters", () => {
+  test("reports unique draws in the shared bootstrap ensemble over whole clusters", () => {
     const result = clusteredPairedDeltaInterval(mixed, { seed: 11, resamples: 250, alpha: 0.05 });
-    expect(result.draws).toBe(2 * 250 * 6);
+    expect(result.draws).toBe(250 * 6);
     expect(result.unit).toBe("source-cluster");
     expect(result.clusters).toHaveLength(6);
   });
@@ -212,7 +227,7 @@ describe("clusteredPairedDeltaInterval", () => {
     ];
     const result = clusteredPairedDeltaInterval(grouped, { seed: 3, resamples: 100, alpha: 0.05 });
     expect(result.clusters).toHaveLength(2);
-    expect(result.draws).toBe(2 * 100 * 2);
+    expect(result.draws).toBe(100 * 2);
   });
 
   test("computes at the two-cluster floor", () => {
@@ -274,12 +289,27 @@ export interface PairedDeltaIntervalResult {
   readonly low: number;
   readonly high: number;
   readonly unit: "source-cluster";
-  /** Total xorshift32-v1 draws across both bootstrap passes. */
+  /** Unique xorshift32-v1 draws in the shared bootstrap ensemble. */
   readonly draws: number;
   readonly clusters: readonly {
     readonly key: readonly ["source" | "sourceCommitment", string];
     readonly members: readonly string[];
   }[];
+}
+
+function sameClusterManifest(
+  lower: PairedDeltaIntervalResult["clusters"],
+  upper: PairedDeltaIntervalResult["clusters"],
+): boolean {
+  if (lower.length !== upper.length) return false;
+  return lower.every((cluster, clusterIndex) => {
+    const candidate = upper[clusterIndex];
+    if (candidate === undefined
+      || cluster.key[0] !== candidate.key[0]
+      || cluster.key[1] !== candidate.key[1]
+      || cluster.members.length !== candidate.members.length) return false;
+    return cluster.members.every((member, memberIndex) => member === candidate.members[memberIndex]);
+  });
 }
 
 export function clusteredPairedDeltaInterval(
@@ -299,12 +329,21 @@ export function clusteredPairedDeltaInterval(
     resamples: opts.resamples,
     alpha: 1 - opts.alpha / 2,
   });
+  if (lower.draws !== upper.draws) {
+    throw new Error("clusteredPairedDeltaInterval: endpoint passes disagree on draw count");
+  }
+  if (!Object.is(lower.observed, upper.observed)) {
+    throw new Error("clusteredPairedDeltaInterval: endpoint passes disagree on observed value");
+  }
+  if (!sameClusterManifest(lower.clusters, upper.clusters)) {
+    throw new Error("clusteredPairedDeltaInterval: endpoint passes disagree on cluster manifest");
+  }
   return {
     delta: lower.observed,
     low: lower.lowerBound,
     high: upper.lowerBound,
     unit: "source-cluster",
-    draws: lower.draws + upper.draws,
+    draws: lower.draws,
     clusters: lower.clusters,
   };
 }
@@ -678,18 +717,20 @@ const pairedDeltaFixture = {
     conflicted: { count: 0, cellKeys: [] },
     bootstrap: {
       procedure: "xorshift32-v1", seed: 123456789, resamples: 1000,
-      ...sourceClusters(pairedDeltaTasks, 2000),
+      ...sourceClusters(pairedDeltaTasks, 1000),
     },
   },
 };
 ```
 
-Note the `2000` passed to `sourceClusters`: `draws` is two bootstrap passes, so `2 * resamples * clusters`.
+Pass `1000` to `sourceClusters`: both endpoints replay one seed-identical bootstrap ensemble, so
+`draws` is `resamples * clusters`.
 
 Register it in the `fixtures` map after `"provenance-cluster-sign"`:
 
 ```js
-  "paired-delta": pairedDeltaFixture,
+  // `paired-delta.json` is immutable; current conformance uses its append-only successor.
+  "paired-delta-shared-ensemble.v2": pairedDeltaFixture,
 ```
 
 - [ ] **Step 4: Add the declarative spec entry**

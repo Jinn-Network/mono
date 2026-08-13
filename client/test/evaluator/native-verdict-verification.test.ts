@@ -10,6 +10,7 @@ import {
   sealDelivery,
 } from "@jinn-network/task-execution-protocol";
 import { buildNativeEvaluatorVerdictVerification } from "../../src/evaluator/native-verdict-verification.js";
+import { createBaseSepoliaEvaluatorReads } from "../../src/daemon/native-base-sepolia-infrastructure.js";
 
 const exact = (name: string, bytes: Uint8Array) => ({ name, bytes, digest: documentDigest(bytes) });
 const text = (value: string) => new TextEncoder().encode(value);
@@ -35,7 +36,11 @@ function nonCanonicalSpelling(envelopeBytes: Uint8Array): Uint8Array {
   }));
 }
 
-function fixture(options: { readonly respellVerdict?: (bytes: Uint8Array) => Uint8Array } = {}) {
+function fixture(options: {
+  readonly respellVerdict?: (bytes: Uint8Array) => Uint8Array;
+  readonly verdict?: "pass" | "fail" | "inconclusive";
+  readonly evaluatedAt?: string;
+} = {}) {
   const task = exact("task", text("exact-task"));
   const result = exact("prediction", text("exact-result"));
   const solutionEvidence = exact("solution-evidence", text("solution-evidence"));
@@ -67,11 +72,11 @@ function fixture(options: { readonly respellVerdict?: (bytes: Uint8Array) => Uin
     ],
     predicateType: RESULT_EVALUATION_PREDICATE_TYPE,
     predicate: {
-      evaluatedAt: "2026-08-02T11:00:00Z",
+      evaluatedAt: options.evaluatedAt ?? "2026-08-02T11:00:00Z",
       evaluator: { id: EVALUATOR },
       taskSubject: task.digest,
       resultSubjects: [result.digest],
-      verdict: "pass",
+      verdict: options.verdict ?? "pass",
     },
   }, [{ keyid: "did:key:evaluator", sig: "c2ln" }]);
   // The Delivery below binds whatever bytes come out of here, so a re-spelled verdict stays
@@ -175,6 +180,27 @@ describe("buildNativeEvaluatorVerdictVerification", () => {
     }));
   });
 
+  // Defect-#41 class: the harness's ratified verdict vocabulary is exactly `pass|fail|inconclusive`
+  // (`ResultEvaluationStatementShape`), and the named gate reads this same field with
+  // `decisionGradeVerdictCode` to derive its `verdict-correspondence` expectation. Reading it here
+  // with a second, wider-but-different vocabulary that had no `inconclusive` case meant the honest
+  // outcome for every prediction verdict this gate's task family can currently produce was refused
+  // as `evaluation-record-graph-invalid` before any gate call -- so `recordVerdict` never ran and
+  // settlement died `verdict-settlement-identity-missing`. Every ratified verdict must verify and
+  // carry its code into the gate as `onChainVerdictCode`.
+  it.each([
+    ["pass", 1],
+    ["fail", 2],
+    ["inconclusive", 4],
+  ] as const)("verifies a ratified %s verdict and carries code %i into the gate", async (verdict, code) => {
+    const deps = dependencies();
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(fixture({ verdict })))
+      .resolves.toEqual({ ok: true, verdictCode: code });
+    expect(deps.gate).toHaveBeenCalledWith(expect.objectContaining({
+      verdict: expect.objectContaining({ onChainVerdictCode: code }),
+    }));
+  });
+
   it("rejects a noncanonical evaluation Delivery before authority or named checks", async () => {
     const input = fixture() as ReturnType<typeof fixture>;
     const row = input.artifacts.find(({ role }: { role: string }) => role === "evaluation-delivery")!;
@@ -212,5 +238,98 @@ describe("buildNativeEvaluatorVerdictVerification", () => {
     const deps = dependencies({ gateOk: false });
     await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(fixture()))
       .resolves.toEqual({ ok: false, reason: "named-verdict-gate:settlement-join" });
+  });
+});
+
+/**
+ * Defect #44, live round 27. This is the seam the defect lived in: not the named check (its rule
+ * is correct and pinned in `packages/marketplace/binding`), but which time this path hands it as
+ * `claimBlockTime`. Pre-settlement the on-chain claim does not exist yet, so the value is a
+ * stand-in; it was read off Base Sepolia's FINALIZED head, which trails wall clock by two epochs,
+ * while `evaluatedAt` is the harness's wall-clock grade instant. Round 27's honest `inconclusive`
+ * grade at 02:51:55.896Z was therefore measured against 02:26:44Z and refused
+ * `named-verdict-gate:verdict-effective-time` -- a refusal no live grade could ever avoid.
+ *
+ * Both halves are wired here against the REAL reader, because the defect was a composition, not a
+ * rule: pre-settlement must bound the grade going forward, post-settlement must keep using the
+ * settlement transaction's own block, which is where the strict ordering is enforceable.
+ */
+describe("claim-time wiring across the settlement boundary", () => {
+  const LIVE_HEAD = "2026-08-13T02:56:36.000Z";
+  const LIVE_FINALIZED_HEAD = "2026-08-13T02:30:02.000Z";
+  const ROUND_27_EVALUATED_AT = "2026-08-13T02:51:55.896Z";
+  const SETTLEMENT_BLOCK_TIME = "2026-08-13T03:02:14.000Z";
+
+  function chainReads() {
+    return createBaseSepoliaEvaluatorReads({
+      config: {
+        safeAddress: `0x${"1".repeat(40)}`,
+        chain: {
+          chainId: 84532,
+          generation: "today",
+          contracts: {
+            taskCoordinator: `0x${"a1".repeat(20)}`,
+            jinnRouter: `0x${"a2".repeat(20)}`,
+            mechMarketplace: `0x${"a3".repeat(20)}`,
+            activityChecker: `0x${"a4".repeat(20)}`,
+          },
+        },
+      },
+      publicClient: {
+        // The live heads round 27 measured together, plus the settlement block a `blockNumber`
+        // read resolves. `finalized` is served 26 minutes behind `latest` exactly as Base Sepolia
+        // serves it, so reading the wrong head here is visible rather than absorbed.
+        async getBlock(request: { readonly blockTag?: string } = {}) {
+          const iso = request.blockTag === "latest"
+            ? LIVE_HEAD
+            : request.blockTag === "finalized" ? LIVE_FINALIZED_HEAD : SETTLEMENT_BLOCK_TIME;
+          return {
+            number: 45_410_754n,
+            hash: `0x${"ab".repeat(32)}`,
+            timestamp: BigInt(Date.parse(iso) / 1_000),
+          };
+        },
+      } as never,
+      records: {
+        async byDigest() { throw new Error("unused"); },
+        async byLocation() { throw new Error("unused"); },
+        async byRawCid() { throw new Error("unused"); },
+      },
+    });
+  }
+
+  it("hands the gate a bound the live round-27 grade sits inside, pre-settlement", async () => {
+    const reads = chainReads();
+    const deps = dependencies();
+    const verification = buildNativeEvaluatorVerdictVerification({
+      ...deps.value,
+      preSettlementClaimTime: reads.preSettlementClaimTime,
+      blockTime: reads.blockTime,
+    });
+
+    await expect(verification.verify(fixture({ evaluatedAt: ROUND_27_EVALUATED_AT })))
+      .resolves.toEqual({ ok: true, verdictCode: 1 });
+    const claimBlockTime = deps.gate.mock.calls[0]![0].verdict.claimBlockTime as string;
+    expect(Date.parse(claimBlockTime)).toBeGreaterThanOrEqual(Date.parse(ROUND_27_EVALUATED_AT));
+  });
+
+  it("keeps measuring a settled verdict against the settlement block's own time", async () => {
+    const reads = chainReads();
+    const deps = dependencies();
+    const verification = buildNativeEvaluatorVerdictVerification({
+      ...deps.value,
+      preSettlementClaimTime: reads.preSettlementClaimTime,
+      blockTime: reads.blockTime,
+    });
+
+    await expect(verification.verify({
+      ...fixture({ evaluatedAt: ROUND_27_EVALUATED_AT }),
+      canonical: {
+        transaction: { blockNumber: 45_410_900n },
+        verdictCode: 1,
+        evaluator: `0x${"2".repeat(40)}`,
+      },
+    } as never)).resolves.toEqual({ ok: true, verdictCode: 1 });
+    expect(deps.gate.mock.calls[0]![0].verdict.claimBlockTime).toBe(SETTLEMENT_BLOCK_TIME);
   });
 });

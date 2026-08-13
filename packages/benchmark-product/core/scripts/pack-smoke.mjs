@@ -34,6 +34,7 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/attestation-issuer", ["evidence", "attestation-issuer"]],
   ["@jinn-network/task-execution-evaluation-harness", ["task-execution", "evaluation-harness"]],
   ["@jinn-network/task-execution-evaluator-adapters", ["task-execution", "evaluator-adapters"]],
+  ["@jinn-network/task-execution-oci-grader", ["task-execution", "oci-grader"]],
   ["@jinn-network/task-execution-backend-local", ["task-execution", "backend-local", "assembly"]],
   ["@jinn-network/benchmarking-run", ["benchmarking", "run"]],
   ["@jinn-network/benchmarking-local", ["benchmarking", "local"]],
@@ -57,6 +58,16 @@ function run(command, args, options = {}) {
 }
 
 try {
+  const productManifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  const localArchiveNames = new Set(CROSS_TREE_DEPENDENCIES.map(([name]) => name));
+  const unpackedJinnDependencies = Object.keys(productManifest.dependencies ?? {})
+    .filter((name) => name.startsWith("@jinn-network/") && !localArchiveNames.has(name));
+  if (unpackedJinnDependencies.length > 0) {
+    throw new Error(
+      `pack smoke must install every Jinn runtime dependency from a local tarball: ${unpackedJinnDependencies.join(", ")}`,
+    );
+  }
+
   // Sequential, not Promise.all: a concurrent `yarn pack` on cross-tree dependencies races their
   // `dist` wipe-and-rebuild prepack steps against each other's type-resolution reads.
   const archives = new Map();
@@ -139,6 +150,7 @@ const expectedJinnDependencies = [
   "@jinn-network/task-execution-evaluation-harness",
   "@jinn-network/task-execution-evaluator-adapters",
   "@jinn-network/task-execution-launchers",
+  "@jinn-network/task-execution-oci-grader",
   "@jinn-network/task-execution-profiles",
   "@jinn-network/task-execution-protocol",
   "@jinn-network/task-execution-supervisor",

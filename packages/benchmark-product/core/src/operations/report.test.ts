@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { cellIdempotencyKey, parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
+import { requirementsDigest } from "@jinn-network/benchmarking-local";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import { sealDelivery, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
@@ -162,6 +163,10 @@ function makeStatefulFakeBackend(
   }>();
   const byIdempotencyKey = new Map<string, { bytesHash: string; ack: SubmissionAck }>();
   const bytesByHex = new Map<string, Uint8Array>();
+  const pinningBySubmission = new Map<SubmissionUri, {
+    ready: true;
+    checkedRequirementsDigest: `sha256:${string}`;
+  }>();
   let counter = 0;
   let evaluationCounter = 0;
 
@@ -180,7 +185,7 @@ function makeStatefulFakeBackend(
         idempotencyKey: string;
         submission: string;
         task: { digest: { sha256: string } };
-        requirements?: { harness?: { id?: string } };
+        requirements?: Record<string, unknown> & { harness?: { id?: string } };
       };
       const bytesHash = sha256Hex(submissionBytes);
       const prior = byIdempotencyKey.get(doc.idempotencyKey);
@@ -219,6 +224,10 @@ function makeStatefulFakeBackend(
       byUri.set(doc.submission, { attempt, submission: doc.submission, deliveryDigestHex: deliveryHex, evaluationMode });
       byUri.set(attempt, { attempt, submission: doc.submission, deliveryDigestHex: deliveryHex, evaluationMode });
       const ack: SubmissionAck = { accepted: true, submission: doc.submission as SubmissionUri, digest: `sha256:${bytesHash}` };
+      pinningBySubmission.set(ack.submission, {
+        ready: true,
+        checkedRequirementsDigest: requirementsDigest(doc.requirements ?? {}),
+      });
       byIdempotencyKey.set(doc.idempotencyKey, { bytesHash, ack });
       return ack;
     },
@@ -258,6 +267,10 @@ function makeStatefulFakeBackend(
       return bytes;
     },
     async drain() {},
+    pinningEvidenceForSubmission(ref) {
+      const evidence = pinningBySubmission.get(ref);
+      return evidence === undefined ? undefined : { ...evidence };
+    },
   };
   return { backend };
 }
@@ -415,6 +428,9 @@ describe("runReport — analysis method selection (P4b Task 3)", () => {
         baseline: "baseline",
         candidate: "sample",
       });
+      expect(reportRecord.limitations).toContain(
+        "This method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered.",
+      );
       // The whole point: the produced tuple must be exactly-JSON-equal to a sealed plan entry.
       expect(reportRecord.preregistered).toBe(true);
     },
@@ -557,6 +573,21 @@ describe("portable public bundle", () => {
         "report-verification",
         "claim-consistency",
       ]);
+      const evidenceCatalog = JSON.parse(readFileSync(join(copied, "evidence.json"), "utf8")) as {
+        records: Array<{ sha256: string; roles: string[] }>;
+      };
+      const pinningRecords = evidenceCatalog.records.filter((record) =>
+        record.roles.includes("run-pinning-evidence"));
+      // Every proof is bound to its exact accepted solve Submission, so six cells carry six
+      // independently reachable evidence identities even though there are only two arm maps.
+      expect(pinningRecords).toHaveLength(6);
+      for (const record of pinningRecords) {
+        expect(existsSync(join(copied, "records", `${record.sha256}.bin`))).toBe(true);
+      }
+      const assemblyCells = readAssemblyLines(copied).slice(1);
+      expect(assemblyCells).toHaveLength(6);
+      expect(assemblyCells.every((cell) => typeof cell["pinningEvidenceSha256"] === "string"))
+        .toBe(true);
       const cli = await runCli(["bundle", "verify", "--bundle", copied, "--json"], {
         cwd: copied,
         clock,
@@ -834,7 +865,12 @@ describe("portable public bundle", () => {
       runState: state,
     }).bundleDir;
 
-    for (const role of ["admission-receipt", "evaluation-submission", "solve-output"] as const) {
+    for (const role of [
+      "admission-receipt",
+      "run-pinning-evidence",
+      "evaluation-submission",
+      "solve-output",
+    ] as const) {
       const copy = mkdtempSync(join(tmpdir(), `bp40-missing-${role}-`));
       try {
         cpSync(base, copy, { recursive: true });
@@ -855,6 +891,33 @@ describe("portable public bundle", () => {
       } finally {
         rmSync(copy, { recursive: true, force: true });
       }
+    }
+
+    const swappedPinning = mkdtempSync(join(tmpdir(), "bp40-swapped-pinning-evidence-"));
+    try {
+      cpSync(base, swappedPinning, { recursive: true });
+      const lines = readAssemblyLines(swappedPinning);
+      const header = lines[0]! as {
+        graph: { solveSubmissions: Array<{ cellKey: string; pinningEvidenceSha256?: string }> };
+      };
+      const [left, right] = header.graph.solveSubmissions;
+      expect(left?.pinningEvidenceSha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(right?.pinningEvidenceSha256).toMatch(/^[a-f0-9]{64}$/u);
+      if (left?.pinningEvidenceSha256 !== undefined && right?.pinningEvidenceSha256 !== undefined) {
+        const leftEvidence = left.pinningEvidenceSha256;
+        left.pinningEvidenceSha256 = right.pinningEvidenceSha256;
+        right.pinningEvidenceSha256 = leftEvidence;
+        const cells = new Map(lines.slice(1).map((line) => [line["cellKey"], line]));
+        cells.get(left.cellKey)!["pinningEvidenceSha256"] = left.pinningEvidenceSha256;
+        cells.get(right.cellKey)!["pinningEvidenceSha256"] = right.pinningEvidenceSha256;
+      }
+      writeAssemblyLines(swappedPinning, lines);
+      rewriteBundleManifest(swappedPinning);
+      await expect(verifyPublicBundle(swappedPinning)).rejects.toMatchObject({
+        issues: [expect.objectContaining({ path: "evidence-closure" })],
+      });
+    } finally {
+      rmSync(swappedPinning, { recursive: true, force: true });
     }
 
     const unreachable = mkdtempSync(join(tmpdir(), "bp40-unreachable-record-"));

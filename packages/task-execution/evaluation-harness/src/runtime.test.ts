@@ -97,11 +97,32 @@ function validSpec(): EvaluationSpec {
   };
 }
 
+/**
+ * The live round-24 receipt shape, verbatim from the native requester's Submission annotation
+ * (`client/src/native-requester/requester.ts`): a named, media-typed, sha256-pinned descriptor.
+ */
+const ADMISSION_RECEIPT_MEDIA_TYPE = "application/vnd.in-toto+json";
+const admissionReceiptBytes = encoder.encode(
+  '{"payloadType":"application/vnd.in-toto+json","payload":"e30=","signatures":[]}',
+);
+
 interface Fixture {
   readonly paths: WorkspacePaths;
   readonly spec: EvaluationSpec;
   readonly specBytes: Uint8Array;
   readonly specDigest: `sha256:${string}`;
+  readonly evaluationTaskDigest: `sha256:${string}`;
+  readonly subjectTaskRef: { readonly name: string; readonly digest: `sha256:${string}` };
+  readonly subjectDeliveryRef: { readonly name: string; readonly digest: `sha256:${string}` };
+  readonly subjectResultRefs: readonly {
+    readonly name: string;
+    readonly digest: `sha256:${string}`;
+  }[];
+  readonly admissionReceiptDescriptor: {
+    readonly name: string;
+    readonly mediaType: string;
+    readonly digest: { readonly sha256: string };
+  };
 }
 
 async function makeFixture(options: {
@@ -113,6 +134,13 @@ async function makeFixture(options: {
     readonly mediaType: string;
     readonly required: boolean;
   }[];
+  /**
+   * #40. `true` reproduces the live requester-sealed shape: the sealed evaluation Task carries the
+   * fourth `admission-receipt` input descriptor and the provisioner stages its bytes under that
+   * name. Default `false` keeps the receipt-free 3-input shape the benchmark-product venue and the
+   * policy-optimization host still produce.
+   */
+  readonly admissionReceipt?: boolean;
 } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), "jinn-evaluation-runtime-"));
   temporaryRoots.push(root);
@@ -172,20 +200,31 @@ async function makeFixture(options: {
     outcome: "fulfilled",
     createdAt: "2026-07-29T12:00:00.000Z",
   });
+  const subjectTaskRef = {
+    name: "subject-task.json",
+    digest: digestString(subjectTaskBytes),
+  };
+  const subjectDeliveryRef = {
+    name: "subject-delivery.json",
+    digest: digestString(deliveryBytes),
+  };
+  const subjectResultRefs = [{
+    name: "result.patch",
+    digest: digestString(resultBytes),
+  }];
+  const admissionReceiptDescriptor = {
+    name: "admission-receipt",
+    mediaType: ADMISSION_RECEIPT_MEDIA_TYPE,
+    digest: { sha256: digestHex(admissionReceiptBytes) },
+  };
   const evaluationTask = deriveEvaluationTask({
-    subjectTask: {
-      name: "subject-task.json",
-      digest: digestString(subjectTaskBytes),
-    },
-    subjectDelivery: {
-      name: "subject-delivery.json",
-      digest: digestString(deliveryBytes),
-    },
-    subjectResults: [{
-      name: "result.patch",
-      digest: digestString(resultBytes),
-    }],
+    subjectTask: subjectTaskRef,
+    subjectDelivery: subjectDeliveryRef,
+    subjectResults: [...subjectResultRefs],
     evaluationSpecDigest: sealed.digest,
+    ...(options.admissionReceipt === true
+      ? { admissionReceipt: admissionReceiptDescriptor }
+      : {}),
   });
 
   await Promise.all([
@@ -193,6 +232,9 @@ async function makeFixture(options: {
     writeFile(join(paths.input, "subject-task.json"), subjectTaskBytes),
     writeFile(join(paths.input, "subject-delivery.json"), deliveryBytes),
     writeFile(join(paths.input, "result.patch"), resultBytes),
+    ...(options.admissionReceipt === true
+      ? [writeFile(join(paths.input, "admission-receipt"), admissionReceiptBytes)]
+      : []),
     writeFile(join(paths.input, "evaluation-spec.json"), sealed.bytes),
     writeFile(
       join(paths.input, "evaluation-context.json"),
@@ -216,7 +258,29 @@ async function makeFixture(options: {
     spec,
     specBytes: sealed.bytes,
     specDigest: sealed.digest,
+    evaluationTaskDigest: evaluationTask.digest,
+    subjectTaskRef,
+    subjectDeliveryRef,
+    subjectResultRefs,
+    admissionReceiptDescriptor,
   };
+}
+
+/**
+ * Rewrites the staged sealed Task's `inputs` in place. The rewritten bytes are deliberately NOT
+ * re-sealed canonically, so this is only ever used for refusals that fire in `readEvaluationTask`
+ * — strictly before the derivation byte-compare, which would otherwise mask which check refused.
+ */
+async function restageTaskInputs(
+  fixture: Fixture,
+  rewrite: (inputs: unknown[]) => unknown[],
+): Promise<void> {
+  const path = join(fixture.paths.input, "task.sealed");
+  const document = JSON.parse(await readFile(path, "utf8")) as {
+    inputs: unknown[];
+  };
+  document.inputs = rewrite(document.inputs);
+  await writeFile(path, encoder.encode(JSON.stringify(document)));
 }
 
 function registration(
@@ -591,6 +655,94 @@ describe("runEvaluationHarness", () => {
     await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
   });
 
+  /**
+   * #39b(a) -- diagnosability. The live gate's first harness run refused its subject and exited
+   * 65 in 413ms with BOTH captured harness logs at 0 bytes: the refusal was caught here and
+   * converted straight to an exit code, so the only artifact of a fully-diagnosed refusal was a
+   * bare number. The reason has to survive the exit.
+   *
+   * Stderr is the channel deliberately: the backend already captures it and already tails it into
+   * the terminal detail (`harnessLogTail` in the local backend's completion path), so one write
+   * carries the reason all the way to the operator's audit row. Only the refusal class and its own
+   * structural message go out -- never subject bytes, provider diagnostics, or secrets.
+   */
+  test("writes an input refusal's reason to stderr instead of exiting silently", async () => {
+    const fixture = await makeFixture();
+    const written: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+
+    // The live #39 shape, reconstructed: a Delivery declaring its output by FILENAME against a
+    // Task that declares the logical name. Everything else about the subject is exact, so the
+    // harness reaches `verifyEvaluationSubject` and refuses there -- the very refusal whose reason
+    // the live run lost.
+    const subjectTaskBytes = await readFile(join(fixture.paths.input, "subject-task.json"));
+    const resultBytes = await readFile(join(fixture.paths.input, "result.patch"));
+    const misnamedDelivery = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
+      task: documentDigest(subjectTaskBytes),
+      outputs: [{
+        name: "result.patch.json",
+        mediaType: "text/x-diff",
+        digest: { sha256: digestHex(resultBytes) },
+      }],
+      outcome: "fulfilled",
+      createdAt: "2026-07-29T12:00:00.000Z",
+    });
+    const evaluationTask = deriveEvaluationTask({
+      subjectTask: { name: "subject-task.json", digest: digestString(subjectTaskBytes) },
+      subjectDelivery: { name: "subject-delivery.json", digest: digestString(misnamedDelivery) },
+      subjectResults: [{ name: "result.patch.json", digest: digestString(resultBytes) }],
+      evaluationSpecDigest: fixture.specDigest,
+    });
+    await writeFile(join(fixture.paths.input, "subject-delivery.json"), misnamedDelivery);
+    await writeFile(join(fixture.paths.input, "result.patch.json"), resultBytes);
+    await writeFile(join(fixture.paths.input, "task.sealed"), evaluationTask.bytes);
+    const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    const stderr = written.join("");
+    expect(stderr).toContain("evaluation-harness: refused");
+    expect(stderr).toContain("invalid-evaluation-input");
+    // The structural reason itself, naming the offending output -- not just a category.
+    expect(stderr).toContain(
+      "subject Delivery output result.patch.json is not declared by the Task",
+    );
+  });
+
+  test("writes an operational failure's class to stderr", async () => {
+    const fixture = await makeFixture();
+    const written: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(
+      async () => { throw new Error("adapter blew up with a secret: hunter2"); },
+    );
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE);
+    const stderr = written.join("");
+    expect(stderr).toContain("evaluation-harness: refused");
+    expect(stderr).toContain("evaluation-operational-failure");
+    // An unclassified failure's message is never safe to echo.
+    expect(stderr).not.toContain("hunter2");
+  });
+
   test("rejects a CompletedEvaluation missing a spec-required measurement", async () => {
     const fixture = await makeFixture();
     const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(
@@ -632,5 +784,254 @@ describe("runEvaluationHarness", () => {
     expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE);
     expect(evaluate).toHaveBeenCalledOnce();
     await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
+  });
+});
+
+/**
+ * #40 -- the admission-receipt binding. The live gate's first-ever grade (round 24, task 1232)
+ * refused in 452ms with exit 65 and this on stderr:
+ *
+ *   evaluation-harness: refused (invalid-evaluation-input): evaluation Task does not equal the
+ *   profiles derivation
+ *
+ * The producer (`deriveAndSealEvaluationSubmission`) extracts the receipt descriptor from the
+ * subject Submission's annotation and passes it to `deriveEvaluationTask`, so the sealed Task
+ * carries FOUR input descriptors. The harness re-derived from `payload` alone -- which never
+ * carries the receipt -- produced the receipt-free 3-input template, and byte-compared. Every
+ * other verifier (marketplace named-checks, the CP7 consumer graph) already passed the receipt;
+ * the harness was the sole outlier. The byte-compare was right; its inputs were incomplete.
+ */
+describe("runEvaluationHarness admission-receipt binding (#40)", () => {
+  function passingEvaluate() {
+    return vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(async () => ({
+      detailedOutcome: {},
+      verdict: "pass" as const,
+      evaluatedAt: "2026-07-29T12:00:00.000Z",
+      measurements: [
+        { name: "passed", value: true },
+        { name: "tests", value: 1 },
+      ],
+      claimEvidence: [{
+        kind: "descriptor" as const,
+        descriptor: {
+          name: "evaluation-report.json",
+          digest: { sha256: "6".repeat(64) },
+        },
+      }],
+    }));
+  }
+
+  function captureStderr(): string[] {
+    const written: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    return written;
+  }
+
+  test("grades the live receipt-bearing sealed Task instead of refusing its derivation", async () => {
+    const fixture = await makeFixture({ admissionReceipt: true });
+    const staged = JSON.parse(
+      await readFile(join(fixture.paths.input, "task.sealed"), "utf8"),
+    ) as { inputs: { name: string }[] };
+    // The exact live shape: four inputs, the receipt last, and its bytes staged alongside.
+    expect(staged.inputs.map(({ name }) => name)).toEqual([
+      "subject-task.json",
+      "subject-delivery.json",
+      "result.patch",
+      "admission-receipt",
+    ]);
+    const written = captureStderr();
+    const evaluate = passingEvaluate();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(written.join("")).not.toContain(
+      "evaluation Task does not equal the profiles derivation",
+    );
+    expect(exitCode).toBe(0);
+    expect(evaluate).toHaveBeenCalledOnce();
+    await expect(readFile(join(fixture.paths.out, "verdict"))).resolves.toBeDefined();
+  });
+
+  test("still grades the receipt-free sealed Task the venue producers emit", async () => {
+    const fixture = await makeFixture();
+    const staged = JSON.parse(
+      await readFile(join(fixture.paths.input, "task.sealed"), "utf8"),
+    ) as { inputs: { name: string }[] };
+    expect(staged.inputs).toHaveLength(3);
+    const evaluate = passingEvaluate();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(0);
+    expect(evaluate).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * The reason the receipt is read positionally rather than by name search: a Delivery output may
+   * legitimately be named `admission-receipt`, and a name search would mistake that subject Result
+   * for the receipt and refuse a Task that verifies today.
+   */
+  test("does not mistake a subject Result named admission-receipt for the receipt", async () => {
+    const fixture = await makeFixture({
+      subjectOutputs: [{
+        name: "admission-receipt",
+        mediaType: "text/x-diff",
+        required: true,
+      }],
+    });
+    const resultBytes = await readFile(join(fixture.paths.input, "result.patch"));
+    const subjectTaskBytes = await readFile(join(fixture.paths.input, "subject-task.json"));
+    const deliveryBytes = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
+      task: documentDigest(subjectTaskBytes),
+      outputs: [{
+        name: "admission-receipt",
+        mediaType: "text/x-diff",
+        digest: { sha256: digestHex(resultBytes) },
+      }],
+      outcome: "fulfilled",
+      createdAt: "2026-07-29T12:00:00.000Z",
+    });
+    const evaluationTask = deriveEvaluationTask({
+      subjectTask: { name: "subject-task.json", digest: digestString(subjectTaskBytes) },
+      subjectDelivery: { name: "subject-delivery.json", digest: digestString(deliveryBytes) },
+      subjectResults: [{ name: "admission-receipt", digest: digestString(resultBytes) }],
+      evaluationSpecDigest: fixture.specDigest,
+    });
+    await Promise.all([
+      writeFile(join(fixture.paths.input, "subject-delivery.json"), deliveryBytes),
+      writeFile(join(fixture.paths.input, "admission-receipt"), resultBytes),
+      writeFile(join(fixture.paths.input, "task.sealed"), evaluationTask.bytes),
+    ]);
+    const evaluate = passingEvaluate();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(0);
+    expect(evaluate).toHaveBeenCalledOnce();
+  });
+
+  test("refuses when the declared receipt descriptor does not pin the staged bytes", async () => {
+    const fixture = await makeFixture({ admissionReceipt: true });
+    // Canonical by construction, so the derivation byte-compare PASSES and the refusal can only
+    // come from the staged-material digest check.
+    const tampered = deriveEvaluationTask({
+      subjectTask: fixture.subjectTaskRef,
+      subjectDelivery: fixture.subjectDeliveryRef,
+      subjectResults: [...fixture.subjectResultRefs],
+      evaluationSpecDigest: fixture.specDigest,
+      admissionReceipt: {
+        ...fixture.admissionReceiptDescriptor,
+        digest: { sha256: "7".repeat(64) },
+      },
+    });
+    await writeFile(join(fixture.paths.input, "task.sealed"), tampered.bytes);
+    const written = captureStderr();
+    const evaluate = passingEvaluate();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(written.join("")).toContain(
+      "verified input material admission-receipt no longer matches its digest",
+    );
+    await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
+  });
+
+  test("refuses when the sealed Task declares a receipt whose bytes are not staged", async () => {
+    const fixture = await makeFixture({ admissionReceipt: true });
+    await rm(join(fixture.paths.input, "admission-receipt"));
+    const written = captureStderr();
+    const evaluate = passingEvaluate();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(written.join("")).toContain(
+      "verified input material admission-receipt is unavailable",
+    );
+  });
+
+  test("refuses a fourth input that is not the admission receipt", async () => {
+    const fixture = await makeFixture();
+    await restageTaskInputs(fixture, (inputs) => [
+      ...inputs,
+      { name: "smuggled-input", digest: { sha256: "8".repeat(64) } },
+    ]);
+    const written = captureStderr();
+    const evaluate = passingEvaluate();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(written.join("")).toContain(
+      'evaluation Task input after its subject artifacts must be named "admission-receipt"',
+    );
+  });
+
+  test("refuses inputs that cannot be the derivation of its bound subject artifacts", async () => {
+    const fixture = await makeFixture({ admissionReceipt: true });
+    await restageTaskInputs(fixture, (inputs) => [...inputs, ...inputs]);
+    const written = captureStderr();
+    const evaluate = passingEvaluate();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(written.join("")).toContain(
+      "evaluation Task inputs do not match its bound subject artifacts",
+    );
+  });
+
+  test("classifies an underivable receipt descriptor as invalid input, not an operational failure", async () => {
+    const fixture = await makeFixture({ admissionReceipt: true });
+    // No uri/digest/content: the profiles ResourceDescriptor schema refuses it outright, so the
+    // re-derivation cannot even be attempted. That is invalid input (65), never exit 70.
+    await restageTaskInputs(fixture, (inputs) => [
+      ...inputs.slice(0, 3),
+      { name: "admission-receipt", mediaType: ADMISSION_RECEIPT_MEDIA_TYPE },
+    ]);
+    const written = captureStderr();
+    const evaluate = passingEvaluate();
+
+    const exitCode = await runEvaluationHarness(
+      fixture.paths,
+      deployment(fixture.spec, registration(evaluate)),
+    );
+
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_INVALID_INPUT);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(written.join("")).toContain(
+      "evaluation Task bindings are not a derivable profiles input",
+    );
   });
 });
