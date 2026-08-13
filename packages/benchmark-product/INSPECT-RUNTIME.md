@@ -21,7 +21,10 @@ The supported first slice is deliberately narrow:
   `read_eval_log` API.
 
 The optional OCI host narrows this further to Python `3.11.9`, Inspect Evals
-`0.16.0`, OpenAI SDK `2.53.0`, `linux/amd64`, and one exact `sampleId`.
+`0.16.0`, OpenAI SDK `2.53.0`, `linux/amd64`, and one exact `sampleId`. It can
+also host the narrow task-level `sandbox="docker"` shape through the product's
+sealed `jinn-oci` Inspect sandbox extension. Inspect still invokes its public
+sandbox API; the trusted runtime host, not task code, owns Docker.
 
 The adapter is implemented against Inspect's official
 [Python/CLI reference](https://inspect.aisi.org.uk/reference/),
@@ -44,6 +47,29 @@ View. Jinn seals the selected method, creates every expected arm × task ×
 repetition cell, supervises attempts, retains exact artifacts, attributes the
 score, accounts for non-results, produces the signed Report, and verifies the
 portable bundle.
+
+## Architecture status
+
+This integration is a private Tier 4 product adapter, not a Jinn protocol or
+Tier 3 platform API. Its selection manifests, host-connection descriptor,
+`jinn.network/model-broker/1`, `jinn.network/inspect-sandbox-host/1`,
+`jinn-openai`, `jinn-oci`, and their locked policies are product-private
+interfaces. Digest-binding them into a Benchmark Product method makes the
+executed configuration exact; it does not make those interfaces normative for
+other Jinn implementations.
+
+The injected runtime host keeps the product lifecycle independent of the local
+process owner, but selection is intentionally Inspect-specific in this first
+external-runtime slice. It will not be generalized merely because parts of the
+implementation look reusable. A second independent product or evaluation
+runtime consumer would trigger a separate Tier 3 design, standards audit,
+service-neutral contract, and conformance kit before any extraction.
+
+The hosted sandbox remains narrower than an operator console or universal
+sandbox service: one task-level default Docker declaration, one environment,
+one fixed policy, and no task network. Operational containment and Inspect
+sandbox events do not become positive Jinn isolation evidence; OCI campaigns
+continue to report isolation as `unverifiable`.
 
 ## Installation and selection
 
@@ -89,6 +115,11 @@ Use the sealed provider profile on each arm:
   "imageDigest": "sha256:<local-image-id>",
   "projectDir": "/absolute/path/to/project-or-empty-directory",
   "datasetCacheDir": "/absolute/path/to/prefetched-cache",
+  "sandboxExecution": {
+    "provider": "jinn-oci",
+    "imageDigest": "sha256:<sandbox-image-id>",
+    "platform": "linux/amd64"
+  },
   "taskReference": "inspect_evals/arc_easy",
   "arms": [
     {
@@ -171,6 +202,13 @@ docker build --platform linux/amd64 \
 docker image inspect --format '{{.Id}}' jinn-inspect-worker:0.3.255-local
 ```
 
+The selected cache must be a materialized, symlink-free tree. Hugging Face's
+download cache normally contains link-based snapshot indexes, so an operator
+must copy the resolved revision bytes into a dedicated ordinary-file cache
+before selection. The product refuses symlinks instead of digesting a path
+whose target could drift. The HumanEval proof pins
+`openai/openai_humaneval@7dce6050a7d6d172f3cc5c32aa97f52fa1a2e544`.
+
 ```json
 {
   "execution": "oci",
@@ -178,6 +216,11 @@ docker image inspect --format '{{.Id}}' jinn-inspect-worker:0.3.255-local
   "imageDigest": "sha256:<local-image-id>",
   "projectDir": "/absolute/path/to/existing-inspect-project",
   "datasetCacheDir": "/absolute/path/to/prefetched-read-only-cache",
+  "sandboxExecution": {
+    "provider": "jinn-oci",
+    "imageDigest": "sha256:<sandbox-image-id>",
+    "platform": "linux/amd64"
+  },
   "taskReference": "evals/hermetic.py@hermetic",
   "arms": [
     { "armId": "control", "model": "mockllm/model" },
@@ -193,6 +236,11 @@ worker source, Docker executable and engine/API versions, project/task/scorer
 identity, selected-sample digest, complete dataset-cache tree digest, mounts,
 network policy, and resource limits. Later probes use `--pull=never`; missing
 or changed inputs fail as method drift rather than falling back to host Python.
+When `sandboxExecution` is present, selection additionally binds schema v2 of
+the Inspect selection, the task's declared `docker` sandbox, the effective
+`jinn-oci` provider/configuration, provider and controller source digests, the
+sandbox image ID and platform, and the complete fixed resource, network,
+filesystem, operation, and timeout policy.
 
 Selection calls Inspect's public programmatic `eval` interface. The local path
 can resolve metadata without running samples; the OCI path runs its locked
@@ -229,12 +277,15 @@ The material option allowlist is `sampleId`, `maxSamples`, `maxSubprocesses`,
 `maxSandboxes`, `retryOnError`, `failOnError`, `messageLimit`, `tokenLimit`,
 and `timeLimit`. `sampleId` selects one exact dataset row. `maxSamples` is
 Inspect's concurrent-sample limit and never selects or truncates the dataset.
-Inspect owns the behavior of those options. Task-defined and
-run-option sandboxes are refused in this slice because a provider name or
-mutable image tag is not strong enough for the lock guarantee. Custom sandbox
-providers require a follow-up that binds the provider, complete configuration,
-and immutable image/environment identity; the adapter does not silently
-coerce them to local execution.
+Inspect owns the behavior of those options. Without `sandboxExecution`, task-
+defined and run-option sandboxes remain refused. With `sandboxExecution`, this
+slice accepts exactly one task-level `docker` declaration with no custom
+configuration and replaces it through Inspect's public run override with the
+sealed `jinn-oci` provider. Per-sample sandbox overrides, `Sample.files`,
+`Sample.setup`, custom Dockerfiles or compose files, multiple environments,
+arbitrary sandbox providers, and runtime-supplied sandbox configuration are
+refused rather than coerced. A task that does not declare the supported Docker
+sandbox cannot opt into it merely through selection JSON.
 
 Inspect epochs are intentionally not configurable. One Jinn repetition is one
 expected cell and invokes Inspect with one epoch. This prevents one sample from
@@ -277,6 +328,18 @@ no new privileges, no direct external network, bounded CPU/memory/process/scratc
 an ephemeral home, and only the selected project/cache plus current attempt
 directories mounted. It never mounts the host home, keyring, repository root,
 Docker socket, or credential files.
+
+For the supported task sandbox, the worker sends only versioned `exec`,
+`read_file`, `write_file`, start, and cleanup requests over its private framed
+standard-I/O channel. The trusted product runtime host validates every request
+against the sealed policy and creates a second digest-pinned container with an
+unprivileged user, read-only root, capability drop, no-new-privileges, no
+network, one bounded writable scratch filesystem, and no host mounts at all.
+The worker and sandbox never receive the Docker socket. One environment and 64
+operations are allowed per sample; commands are capped at 30 seconds and the
+environment at 120 seconds. Cancellation kills in-flight Docker operations and
+removes the worker, sandbox, broker when applicable, private network, and
+ephemeral volumes.
 
 The worker receives a minimal environment and no ambient credential variables.
 Hugging Face's processed dataset bytes remain on the digest-locked read-only
@@ -371,3 +434,10 @@ one produced a particular cell or how strong that containment was. The Report,
 claim package, workspace verifier, and detached-bundle verifier all derive the
 same disclosure from the sealed Run. Stronger isolation claims require
 positive per-cell evidence and are outside this slice.
+
+The hosted sandbox strengthens operational containment but does not change
+that accounting result: an OCI campaign still records isolation as
+`unverifiable`, never `match`. The sandbox event stream, configuration, image,
+policy, operation count, and sanitized event digest are retained as native and
+Jinn evidence inputs, but this Tier 4 slice does not invent a new Tier 1–3
+per-cell isolation attestation.

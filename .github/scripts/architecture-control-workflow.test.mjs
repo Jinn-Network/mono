@@ -37,6 +37,7 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   const finalJob = source.slice(source.indexOf('  platform-verification:'));
   assert.doesNotMatch(controlJob, /(?:id-token|attestations|artifact-metadata): write/u);
   assert.match(controlJob, /node \.github\/scripts\/generate-architecture\.mjs --check/u);
+  assert.match(controlJob, /\.github\/scripts\/benchmark-product-source-boundaries\.test\.mjs/u);
   assert.match(reusableJob, /permissions:\n\s+contents: read\n\s+id-token: write\n\s+attestations: write\n\s+artifact-metadata: write/u);
   assert.doesNotMatch(finalJob, /(?:id-token|attestations|artifact-metadata): write/u);
 });

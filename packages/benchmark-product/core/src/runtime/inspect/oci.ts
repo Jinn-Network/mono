@@ -1,11 +1,16 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
   INSPECT_SELECTION_SCHEMA,
+  INSPECT_SANDBOX_PACKAGE_VERSION,
+  INSPECT_SANDBOX_PROTOCOL,
+  INSPECT_SANDBOX_PROVIDER,
+  INSPECT_SANDBOX_SELECTION_SCHEMA,
   InspectSelectionManifestSchema,
   SUPPORTED_INSPECT_EVALS_VERSION,
   SUPPORTED_OPENAI_SDK_VERSION,
@@ -54,6 +59,37 @@ export const INSPECT_BROKER_POLICY = Object.freeze({
   scratchBytes: 67_108_864,
 });
 
+export const INSPECT_SANDBOX_POLICY = Object.freeze({
+  provider: INSPECT_SANDBOX_PROVIDER,
+  platform: SUPPORTED_OCI_PLATFORM,
+  user: "65532:65532" as const,
+  readOnlyRoot: true as const,
+  network: "none" as const,
+  capabilities: [] as [],
+  noNewPrivileges: true as const,
+  cpuCount: 1 as const,
+  memoryBytes: 536_870_912 as const,
+  pidsLimit: 32 as const,
+  scratchBytes: 268_435_456 as const,
+  maxEnvironments: 1 as const,
+  maxOperations: 64 as const,
+  commandTimeoutSeconds: 30 as const,
+  totalTimeoutSeconds: 120 as const,
+  maxInputBytes: 16 * 1024 * 1024,
+  maxOutputBytes: 20 * 1024 * 1024,
+  maxReadFileBytes: 100 * 1024 * 1024,
+});
+
+export function inspectSandboxPolicySha256(): string {
+  return createHash("sha256").update(JSON.stringify(INSPECT_SANDBOX_POLICY)).digest("hex");
+}
+
+export interface InspectSandboxExecutionRequest {
+  readonly provider: typeof INSPECT_SANDBOX_PROVIDER;
+  readonly imageDigest: string;
+  readonly platform: typeof SUPPORTED_OCI_PLATFORM;
+}
+
 export const InspectOciHostBindingSchema = z.object({
   kind: z.literal("oci"),
   dockerPath: SafeAbsolutePathSchema,
@@ -62,6 +98,11 @@ export const InspectOciHostBindingSchema = z.object({
   projectDir: SafeAbsolutePathSchema,
   datasetCacheDir: SafeAbsolutePathSchema,
   user: z.string().regex(/^[0-9]+:[0-9]+$/),
+  sandboxExecution: z.object({
+    provider: z.literal(INSPECT_SANDBOX_PROVIDER),
+    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    platform: z.literal(SUPPORTED_OCI_PLATFORM),
+  }).strict().optional(),
 }).strict();
 export type InspectOciHostBinding = z.infer<typeof InspectOciHostBindingSchema>;
 
@@ -75,6 +116,7 @@ export interface ProbeInspectOciSelectionInput {
   readonly arms: readonly InspectArmConfiguration[];
   readonly scorer: { readonly name: string; readonly passValue: string | number | boolean | null };
   readonly runOptions: InspectRunOptions & { readonly sampleId: string | number };
+  readonly sandboxExecution?: InspectSandboxExecutionRequest;
 }
 
 export interface InspectOciSelectionResolution {
@@ -88,6 +130,7 @@ export interface InspectOciRunInput {
   readonly inputDir?: string;
   readonly outputDir?: string;
   readonly network: "none" | string;
+  readonly probeConfigDir?: string;
 }
 
 function bindMount(source: string, destination: string, readonly = false): string {
@@ -147,8 +190,12 @@ export function buildInspectOciRunArgs(
       "--mount", bindMount(input.outputDir, "/jinn/output"),
     );
   }
+  if (input.operation === "probe" && input.probeConfigDir !== undefined) {
+    args.push("--mount", bindMount(input.probeConfigDir, "/jinn/input", true));
+  }
   args.push(binding.imageDigest, input.operation);
   if (input.operation === "run") args.push("/jinn/input/inspect-run.json");
+  if (input.operation === "probe" && input.probeConfigDir !== undefined) args.push("/jinn/input/inspect-probe.json");
   return args;
 }
 
@@ -238,8 +285,12 @@ function inspectWorkerSourceSha256(): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-function inspectRuntimeAssetSha256(name: "broker.py" | "model_provider.py"): string {
+function inspectRuntimeAssetSha256(name: "broker.py" | "model_provider.py" | "sandbox-controller.mjs"): string {
   return createHash("sha256").update(readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)))).digest("hex");
+}
+
+function inspectSandboxProviderSourceSha256(): string {
+  return directoryTreeSha256(fileURLToPath(new URL("./sandbox_extension", import.meta.url)));
 }
 
 export function inspectOciRunnerPath(): string {
@@ -262,31 +313,61 @@ export async function probeInspectOciSelection(
     projectDir: realpathSync(input.projectDir),
     datasetCacheDir: realpathSync(input.datasetCacheDir),
     user: `${process.getuid?.() ?? 65532}:${process.getgid?.() ?? 65532}`,
+    ...(input.sandboxExecution === undefined ? {} : { sandboxExecution: input.sandboxExecution }),
   });
-  const [serverResult, imageResult] = await Promise.all([
+  const [serverResult, imageResult, sandboxImageResult] = await Promise.all([
     runBoundedProcess(binding.dockerPath, ["version", "--format", "{{json .Server}}"], undefined, signal),
     runBoundedProcess(binding.dockerPath, ["image", "inspect", "--format", "{{json .}}", binding.imageDigest], undefined, signal),
+    binding.sandboxExecution === undefined
+      ? Promise.resolve(undefined)
+      : runBoundedProcess(binding.dockerPath, ["image", "inspect", "--format", "{{json .}}", binding.sandboxExecution.imageDigest], undefined, signal),
   ]);
   const server = DockerServerSchema.parse(JSON.parse(serverResult.stdout));
   const image = DockerImageSchema.parse(JSON.parse(imageResult.stdout));
   if (image.Id !== binding.imageDigest) throw new TypeError("OCI image ID does not match the selected digest");
+  if (sandboxImageResult !== undefined) {
+    const sandboxImage = DockerImageSchema.parse(JSON.parse(sandboxImageResult.stdout));
+    if (sandboxImage.Id !== binding.sandboxExecution?.imageDigest) throw new TypeError("sandbox image ID does not match the selected digest");
+  }
 
   const workerSourceSha256 = inspectWorkerSourceSha256();
   const brokerSourceSha256 = inspectRuntimeAssetSha256("broker.py");
   const modelProviderSourceSha256 = inspectRuntimeAssetSha256("model_provider.py");
+  const sandboxProviderSourceSha256 = inspectSandboxProviderSourceSha256();
   const providerBacked = input.arms.some((arm) => arm.provider !== undefined);
-  const probeArgs = buildInspectOciRunArgs(binding, {
-    name: `jinn-inspect-probe-${randomUUID().replaceAll("-", "").slice(0, 20)}`,
-    operation: "probe",
-    network: "none",
-  });
-  const workerResult = await runBoundedProcess(binding.dockerPath, probeArgs, JSON.stringify({
+  const probeName = `jinn-inspect-probe-${randomUUID().replaceAll("-", "").slice(0, 20)}`;
+  const probeConfigDir = mkdtempSync(join(tmpdir(), "jinn-inspect-probe-"));
+  writeFileSync(join(probeConfigDir, "inspect-probe.json"), JSON.stringify({
     projectDir: "/jinn/project",
     taskReference: input.taskReference,
     taskArgs: input.taskArgs ?? {},
     scorerName: input.scorer.name,
     runOptions: input.runOptions,
-  }), signal);
+    ...(binding.sandboxExecution === undefined ? {} : {
+      sandboxExecution: {
+        schema: "jinn.network/benchmark-product/inspect-sandbox/1",
+        imageDigest: binding.sandboxExecution.imageDigest,
+        platform: binding.sandboxExecution.platform,
+        policySha256: inspectSandboxPolicySha256(),
+      },
+    }),
+  }), { mode: 0o600 });
+  const probeArgs = buildInspectOciRunArgs(binding, {
+    name: probeName,
+    operation: "probe",
+    network: "none",
+    probeConfigDir,
+  });
+  let workerResult: ProcessResult;
+  try {
+    workerResult = binding.sandboxExecution === undefined
+      ? await runBoundedProcess(binding.dockerPath, probeArgs, undefined, signal)
+      : await runBoundedProcess(process.execPath, [
+        inspectOciRunnerPath(), "sandbox", binding.dockerPath, binding.sandboxExecution.imageDigest, ...probeArgs,
+      ], undefined, signal, { LANG: "C.UTF-8" });
+  } finally {
+    rmSync(probeConfigDir, { recursive: true, force: true });
+  }
   const envelope = WorkerEnvelopeSchema.parse(JSON.parse(workerResult.stdout));
   if (!envelope.ok) throw new Error("OCI Inspect worker probe failed");
   const runtime = envelope.value.runtime;
@@ -296,9 +377,12 @@ export async function probeInspectOciSelection(
   if (runtime.brokerSha256 !== brokerSourceSha256 || runtime.modelProviderSha256 !== modelProviderSourceSha256) {
     throw new TypeError("OCI broker or model-provider source differs from the product runtime assets");
   }
+  if (binding.sandboxExecution !== undefined && runtime.sandboxProviderSha256 !== sandboxProviderSourceSha256) {
+    throw new TypeError("OCI sandbox provider source differs from the product runtime assets");
+  }
 
   const manifest = InspectSelectionManifestSchema.parse({
-    schema: INSPECT_SELECTION_SCHEMA,
+    schema: binding.sandboxExecution === undefined ? INSPECT_SELECTION_SCHEMA : INSPECT_SANDBOX_SELECTION_SCHEMA,
     runtime: {
       ...runtime,
       adapterVersion: "1",
@@ -327,6 +411,19 @@ export async function probeInspectOciSelection(
           mounts: providerBacked ? INSPECT_OCI_PROVIDER_MOUNTS : INSPECT_OCI_MOUNTS,
         },
         ...(providerBacked ? { broker: INSPECT_BROKER_POLICY } : {}),
+        ...(binding.sandboxExecution === undefined ? {} : {
+          sandbox: {
+            protocol: INSPECT_SANDBOX_PROTOCOL,
+            provider: INSPECT_SANDBOX_PROVIDER,
+            packageVersion: INSPECT_SANDBOX_PACKAGE_VERSION,
+            providerSourceSha256: sandboxProviderSourceSha256,
+            controllerSourceSha256: inspectRuntimeAssetSha256("sandbox-controller.mjs"),
+            imageDigest: binding.sandboxExecution.imageDigest,
+            platform: binding.sandboxExecution.platform,
+            policySha256: inspectSandboxPolicySha256(),
+            policy: INSPECT_SANDBOX_POLICY,
+          },
+        }),
       },
     },
     task: envelope.value.task,
@@ -347,13 +444,19 @@ export async function assertInspectOciHostUndrifted(
   if (directoryTreeSha256(binding.datasetCacheDir) !== execution.datasetCacheSha256) {
     throw new TypeError("offline dataset cache drifted after selection");
   }
-  const [serverResult, imageResult] = await Promise.all([
+  const [serverResult, imageResult, sandboxImageResult] = await Promise.all([
     runBoundedProcess(binding.dockerPath, ["version", "--format", "{{json .Server}}"], undefined, signal),
     runBoundedProcess(binding.dockerPath, ["image", "inspect", "--format", "{{json .}}", binding.imageDigest], undefined, signal),
+    binding.sandboxExecution === undefined
+      ? Promise.resolve(undefined)
+      : runBoundedProcess(binding.dockerPath, ["image", "inspect", "--format", "{{json .}}", binding.sandboxExecution.imageDigest], undefined, signal),
   ]);
   const server = DockerServerSchema.parse(JSON.parse(serverResult.stdout));
   const image = DockerImageSchema.parse(JSON.parse(imageResult.stdout));
+  const sandboxImage = sandboxImageResult === undefined ? undefined : DockerImageSchema.parse(JSON.parse(sandboxImageResult.stdout));
   if (
+    (binding.sandboxExecution === undefined) !== (execution.sandbox === undefined)
+    ||
     image.Id !== execution.imageDigest
     || server.Version !== execution.dockerEngineVersion
     || server.ApiVersion !== execution.dockerApiVersion
@@ -361,6 +464,14 @@ export async function assertInspectOciHostUndrifted(
     || inspectOciRunnerSha256() !== execution.runtimeHostSourceSha256
     || inspectRuntimeAssetSha256("broker.py") !== execution.brokerSourceSha256
     || inspectRuntimeAssetSha256("model_provider.py") !== execution.modelProviderSourceSha256
+    || (execution.sandbox !== undefined && (
+      binding.sandboxExecution === undefined
+      || sandboxImage?.Id !== execution.sandbox.imageDigest
+      || inspectSandboxProviderSourceSha256() !== execution.sandbox.providerSourceSha256
+      || inspectRuntimeAssetSha256("sandbox-controller.mjs") !== execution.sandbox.controllerSourceSha256
+      || inspectSandboxPolicySha256() !== execution.sandbox.policySha256
+      || JSON.stringify(INSPECT_SANDBOX_POLICY) !== JSON.stringify(execution.sandbox.policy)
+    ))
     || createHash("sha256").update(readFileSync(binding.dockerPath)).digest("hex") !== execution.dockerExecutableSha256
   ) {
     throw new TypeError("OCI image, Docker runtime, or worker source drifted after selection");

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   INSPECT_SELECTION_SCHEMA,
+  INSPECT_SANDBOX_SELECTION_SCHEMA,
   InspectSelectionManifestSchema,
   SUPPORTED_INSPECT_VERSION,
   SUPPORTED_INSPECT_WHEEL_SHA256,
@@ -120,6 +121,98 @@ describe("InspectSelectionManifestSchema", () => {
       runOptions: { sampleId: "Mercury_417466", maxSamples: 1 },
     });
     expect(result.success).toBe(true);
+  });
+
+  test("versions and binds the declared and effective hosted sandbox", () => {
+    const policy = {
+      provider: "jinn-oci",
+      platform: "linux/amd64",
+      user: "65532:65532",
+      readOnlyRoot: true,
+      network: "none",
+      capabilities: [],
+      noNewPrivileges: true,
+      cpuCount: 1,
+      memoryBytes: 536_870_912,
+      pidsLimit: 32,
+      scratchBytes: 268_435_456,
+      maxEnvironments: 1,
+      maxOperations: 64,
+      commandTimeoutSeconds: 30,
+      totalTimeoutSeconds: 120,
+      maxInputBytes: 16 * 1024 * 1024,
+      maxOutputBytes: 20 * 1024 * 1024,
+      maxReadFileBytes: 100 * 1024 * 1024,
+    } as const;
+    const sandbox = {
+      protocol: "jinn.network/inspect-sandbox-host/1",
+      provider: "jinn-oci",
+      packageVersion: "0.1.0",
+      providerSourceSha256: "8".repeat(64),
+      controllerSourceSha256: "9".repeat(64),
+      imageDigest: `sha256:${"a".repeat(64)}`,
+      platform: "linux/amd64",
+      policySha256: "b".repeat(64),
+      policy,
+    } as const;
+    const runtimeExecution = {
+      kind: "oci",
+      imageDigest: `sha256:${"2".repeat(64)}`,
+      platform: "linux/amd64",
+      inspectEvalsVersion: "0.16.0",
+      openaiSdkVersion: "2.53.0",
+      workerSourceSha256: manifest.runtime.workerSha256,
+      runtimeHostSourceSha256: "6".repeat(64),
+      brokerSourceSha256: "7".repeat(64),
+      modelProviderSourceSha256: "8".repeat(64),
+      dockerExecutableSha256: "5".repeat(64),
+      dockerEngineVersion: "28.5.1",
+      dockerApiVersion: "1.51",
+      datasetCacheSha256: "3".repeat(64),
+      isolation: {
+        readOnlyRoot: true,
+        network: "none",
+        capabilities: [],
+        noNewPrivileges: true,
+        cpuCount: 1,
+        memoryBytes: 1_073_741_824,
+        pidsLimit: 64,
+        scratchBytes: 536_870_912,
+        user: "501:20",
+        mounts: ["project:ro", "dataset-cache:ro", "attempt-input:ro", "attempt-output:rw"],
+      },
+      sandbox,
+    } as const;
+    const sandboxManifest = {
+      ...manifest,
+      schema: INSPECT_SANDBOX_SELECTION_SCHEMA,
+      runtime: { ...manifest.runtime, pythonVersion: "3.11.9", execution: runtimeExecution },
+      task: {
+        ...manifest.task,
+        declaredSandbox: { type: "docker", config: null },
+        resolvedSandbox: {
+          type: "jinn-oci",
+          config: {
+            schema: "jinn.network/benchmark-product/inspect-sandbox/1",
+            imageDigest: sandbox.imageDigest,
+            platform: sandbox.platform,
+            policySha256: sandbox.policySha256,
+          },
+        },
+        dataset: {
+          ...manifest.task.dataset,
+          selectedSampleId: "alpha",
+          orderedSampleSha256: "4".repeat(64),
+        },
+      },
+      runOptions: { sampleId: "alpha", maxSamples: 1 },
+    };
+    expect(InspectSelectionManifestSchema.safeParse(sandboxManifest).success).toBe(true);
+    expect(InspectSelectionManifestSchema.safeParse({ ...sandboxManifest, schema: INSPECT_SELECTION_SCHEMA }).success).toBe(false);
+    expect(InspectSelectionManifestSchema.safeParse({
+      ...sandboxManifest,
+      task: { ...sandboxManifest.task, resolvedSandbox: null },
+    }).success).toBe(false);
   });
 
   test("accepts only the sealed Luna Responses profile on a broker-only OCI runtime", () => {

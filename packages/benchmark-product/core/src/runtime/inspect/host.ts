@@ -61,8 +61,8 @@ async function callWorker(
     const child = spawn(pythonPath, [inspectWorkerPath(), operation], {
       stdio: ["pipe", "pipe", "pipe"],
       signal,
-      // No ambient credential variables cross this boundary. Credentialed provider support must
-      // use an explicit future secret-forward port, never inherit the web/server environment.
+      // No ambient credential variables cross this boundary. The optional OCI provider path uses
+      // the runtime host's broker port; local-Python never inherits web/server credentials.
       env: {
         PYTHONDONTWRITEBYTECODE: "1",
         PYTHONNOUSERSITE: "1",
@@ -179,6 +179,7 @@ export async function assertInspectSelectionUndrifted(
       imageDigest: host.imageDigest,
       projectDir: host.projectDir,
       datasetCacheDir: host.datasetCacheDir,
+      sandboxExecution: host.sandboxExecution,
       taskReference: expected.task.reference,
       taskArgs: expected.task.args as Readonly<Record<string, unknown>>,
       arms: expected.arms,
