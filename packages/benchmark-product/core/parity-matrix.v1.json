@@ -291,6 +291,10 @@
     {
       "name": "bundle verify",
       "reason": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal"
+    },
+    {
+      "name": "demo1 prereg verify",
+      "reason": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access"
     }
   ]
 }
