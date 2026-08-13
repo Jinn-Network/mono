@@ -115,6 +115,42 @@ describe("buildRunAssemblyPorts trust resolver — signature-verified, fail-clos
   });
 });
 
+describe("buildAssemblyPortsFromFacts isolation inventory", () => {
+  async function isolationStatus(isolationPolicy: string) {
+    const cell = {
+      cellKey: "cell-1",
+      armId: "arm-1",
+      replicate: 1,
+      taskDigest: "a".repeat(64),
+      dispatches: 1,
+      verdicts: [],
+    };
+    const ports = buildAssemblyPortsFromFacts({
+      runRecord: {
+        policy: { submissionBaseline: { isolationPolicy } },
+      } as unknown as RunRecord,
+      cells: [cell],
+      owner: OWNER,
+      runCancelled: false,
+      receiptsByTaskDigest: new Map(),
+      resolveBytes: () => new Uint8Array(),
+      evaluatorKeys: () => new Map(),
+    });
+    return ports.pinning.observe(undefined, {
+      cellKey: cell.cellKey,
+      arm: { pinning: {} },
+    });
+  }
+
+  it("preserves the native venue's singleton vacuous match", async () => {
+    await expect(isolationStatus("unrestricted")).resolves.toMatchObject({ isolation: "match" });
+  });
+
+  it("makes OCI isolation unverifiable because the configured venue admits two policies", async () => {
+    await expect(isolationStatus("oci-container")).resolves.toMatchObject({ isolation: "unverifiable" });
+  });
+});
+
 describe("buildRunAssemblyPorts — runCancelled derivation (BP-22)", () => {
   it("is absent from inputScope when no cancel marker exists for the draft", () => {
     const ports = buildPorts("draft-1");

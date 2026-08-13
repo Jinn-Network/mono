@@ -59,10 +59,18 @@ export const NATIVE_MARKETPLACE_TEE_FAILURE_KIND = 'native_marketplace_batch_app
  * itself, before returning. If this decorator rethrew, the projector would never receive a batch
  * whose cursor is already committed, and those chain events would be permanently invisible to the
  * signed-announcement chain — trading a settlement-critical, non-re-derivable path for a lagging,
- * idempotent, re-derivable one. Reachable throws are real, not hypothetical: `apply`'s
- * `changed bytes` guard fires when a venue-state reset (cursor lives in `venueStateDbPath`, the
- * journal in the shared `dbPath`) replays blocks re-tiered `observed-safe` → `finalized`, i.e. the
- * same event key with different bytes; and any `SQLITE_BUSY` past the busy timeout throws too.
+ * idempotent, re-derivable one. Reachable throws are real, not hypothetical: any `SQLITE_BUSY` past
+ * the busy timeout throws, and `apply`'s `changed bytes` guard fires on a genuine byte divergence
+ * for an already-journalled `event_key`.
+ *
+ * **The re-tier case is no longer one of them (defect #47 review).** A venue-state reset (cursor
+ * lives in `venueStateDbPath`, the journal in the shared `dbPath`) — and, far more routinely, the
+ * `rewindChainLogCursor` replay in `projector-replay.ts` — re-offers already-journalled blocks at
+ * `finalized` where they were first journalled `safe`. That used to throw, and because `apply` is
+ * ONE transaction it discarded the whole batch, the brand-new events above the old cursor included;
+ * those are never re-listed, so the recovery step silently holed the read model it was repairing.
+ * `apply` now upgrades the tier in place instead — see `native-canonical-observations.ts`'s
+ * repository comment for why finality is an observer mark rather than a fact about the log.
  *
  * So the failure is caught, logged LOUDLY with a named event kind, and the batch is returned
  * regardless. This is deliberately not a silent swallow: the read-model gap is an operator-visible
@@ -118,6 +126,18 @@ export function teeNativeMarketplaceEvents(input: {
   };
 }
 
+/**
+ * Matches the source-writer's announcement-conflict error by NAME, not `instanceof`: the client
+ * resolves `@jinn-network/record-discovery-serve` both directly (portal) and nested under other
+ * workspace packages (registry), so the class object this module would import is not reliably
+ * the same object the writer threw — CI's module graph produced exactly that split (#2636), and
+ * `instanceof` across two copies of one class is always false. `name` is assigned in the class
+ * constructor and survives any number of module instances.
+ */
+function isSourceAnnouncementConflict(error: unknown): error is Error {
+  return error instanceof Error && error.name === 'SourceAnnouncementConflictError';
+}
+
 /** Minimum representable ISO gap between two adjacent record announcements (1ms). */
 const RECORD_ANNOUNCEMENT_STEP_MS = 1;
 
@@ -159,7 +179,7 @@ export interface NativeSolutionCorrections {
 
 export function buildNativeSolutionCorrections(input: {
   readonly store: Store;
-  readonly publisher: Pick<NativeSolutionPublisher, 'publish' | 'withdraw'>;
+  readonly publisher: Pick<NativeSolutionPublisher, 'publish' | 'withdraw' | 'committedAnnouncement'>;
   readonly marketplaceEvents: NativeMarketplaceEventRepository;
 }): NativeSolutionCorrections {
   const { store, publisher, marketplaceEvents } = input;
@@ -260,31 +280,47 @@ export function buildNativeSolutionCorrections(input: {
         });
         const timestamp = advanceAnnouncementTimestamp(reannounceBase, reannounced);
         reannounced += 1;
-        const receipt = await publisher.publish({
-          publication: {
-            publicationKey: announcementId,
-            engagementId: delivery.engagement_id,
-            sourceId: delivery.source_id,
-            role: 'delivery',
-            recordDigest: delivery.record_digest,
-            availability: 'available',
-            status: 'intent',
-            detail: { canonicalBlockHash: event.derivation.blockHash },
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          },
-          artifact: {
-            engagementId: delivery.engagement_id,
-            role: 'delivery',
-            family: delivery.family,
-            mediaType: delivery.media_type,
-            name: delivery.name,
-            digest: delivery.record_digest,
+        let receipt: { readonly sequence: string; readonly entryDigest: `sha256:${string}` };
+        try {
+          receipt = await publisher.publish({
+            publication: {
+              publicationKey: announcementId,
+              engagementId: delivery.engagement_id,
+              sourceId: delivery.source_id,
+              role: 'delivery',
+              recordDigest: delivery.record_digest,
+              availability: 'available',
+              status: 'intent',
+              detail: { canonicalBlockHash: event.derivation.blockHash },
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            },
+            artifact: {
+              engagementId: delivery.engagement_id,
+              role: 'delivery',
+              family: delivery.family,
+              mediaType: delivery.media_type,
+              name: delivery.name,
+              digest: delivery.record_digest,
+              bytes: delivery.exact_bytes,
+              createdAt: timestamp,
+            },
             bytes: delivery.exact_bytes,
-            createdAt: timestamp,
-          },
-          bytes: delivery.exact_bytes,
-        });
+          });
+        } catch (cause) {
+          // A conflict here is the crash window of #2636: a previous pass COMMITTED this exact
+          // announcement — its identity is deterministic (`available:<blockHash>`) — and died
+          // before recording the correction row, and this pass's fresh wall-clock timestamp can
+          // never reproduce the committed fingerprint. The source already holds the entry, so
+          // adopt its receipt rather than appending anything (`created_at` below then carries
+          // this pass's recomputed timestamp, not the committed instant, which the receipt does
+          // not expose). A conflict the source cannot account for as a committed availability —
+          // and every other failure — stays loud.
+          if (!isSourceAnnouncementConflict(cause)) throw cause;
+          const committed = await publisher.committedAnnouncement(announcementId);
+          if (committed === undefined || committed.action !== 'available') throw cause;
+          receipt = committed;
+        }
         store.db.prepare(
           `INSERT INTO native_solution_discovery_corrections
             (event_key, action, delivery_digest, announcement_id, source_sequence, entry_digest, created_at)

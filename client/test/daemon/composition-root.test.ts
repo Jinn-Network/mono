@@ -1264,3 +1264,182 @@ describe('readSealedDocuments legacy bridge (E41)', () => {
     }
   });
 });
+
+// ── Defect #47: the two chain-read enrich ports ──────────────────────────────────────────────
+//
+// Both root causes of the round-28 gate stall were host-injected chain reads that were honest
+// about failure but incomplete about where to look. Live shapes are pinned exactly: task 1236,
+// verdict requestId 0x0146da0b…, taskCidDigest 0xc0c3d703… on Base Sepolia.
+describe('buildReadTodayDeliveryFacts (defect #47: verdict request refs)', () => {
+  const TASK_COORDINATOR = '0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98' as const;
+  // The exact evaluation requestId the round-28 verdict settled under.
+  const VERDICT_REQUEST_ID = '0x0146da0b2974fa82237aa9e2acd92d0719bf9c44fe6d93bbfac98786efdc0fa6' as const;
+  const SOLUTION_REQUEST_ID = `0x${'1'.repeat(64)}` as const;
+  const SOLUTION_KECCAK = `0x${'2'.repeat(64)}` as const;
+  // `getVerdict(1236, 0, 0).verdictCidDigest` as read off Base Sepolia.
+  const VERDICT_DIGEST = '0xdd9bce401c90e45f31e0d68c0c74b51a53e9955b9f81175f8674ee461cbaed66' as const;
+
+  /**
+   * The deployed coordinator's real two-map shape: a requestId registered by
+   * `registerVerdictRequest` lives ONLY in `_verdictRequestRefs`, so `getRequestRef` reports
+   * `exists: false` for it (`TaskCoordinator.sol:353-364`, verified against the live contract).
+   */
+  function coordinatorMock() {
+    return vi.fn(async ({ functionName, args }: { functionName: string; args: readonly unknown[] }) => {
+      if (functionName === 'getRequestRef') {
+        return args[0] === SOLUTION_REQUEST_ID ? [7n, 3, true] : [0n, 0, false];
+      }
+      if (functionName === 'getVerdictRequestRef') {
+        return args[0] === VERDICT_REQUEST_ID ? [1236n, 0, 0, true] : [0n, 0, 0, false];
+      }
+      if (functionName === 'getAttempt') {
+        return { taskId: 7n, attemptIndex: 3, solutionCidDigest: SOLUTION_KECCAK };
+      }
+      if (functionName === 'getVerdict') {
+        return { taskId: 1236n, attemptIndex: 0, verdictIndex: 0, verdictCidDigest: VERDICT_DIGEST };
+      }
+      throw new Error(`unexpected functionName ${functionName}`);
+    });
+  }
+
+  it('resolves a VERDICT delivery requestId that getRequestRef does not know about', async () => {
+    const { buildReadTodayDeliveryFacts } = await import('../../src/daemon/composition-root.js');
+    const read = buildReadTodayDeliveryFacts(
+      { readContract: coordinatorMock() } as never,
+      TASK_COORDINATOR,
+    );
+
+    await expect(read(VERDICT_REQUEST_ID)).resolves.toEqual({
+      taskId: 1236n,
+      attemptIndex: 0,
+      onChainKeccak: VERDICT_DIGEST,
+    });
+  });
+
+  it('still resolves a SOLUTION delivery requestId off the attempt record, unchanged', async () => {
+    const { buildReadTodayDeliveryFacts } = await import('../../src/daemon/composition-root.js');
+    const read = buildReadTodayDeliveryFacts(
+      { readContract: coordinatorMock() } as never,
+      TASK_COORDINATOR,
+    );
+
+    await expect(read(SOLUTION_REQUEST_ID)).resolves.toEqual({
+      taskId: 7n,
+      attemptIndex: 3,
+      onChainKeccak: SOLUTION_KECCAK,
+    });
+  });
+
+  it('fails closed for a requestId in neither map', async () => {
+    const { buildReadTodayDeliveryFacts } = await import('../../src/daemon/composition-root.js');
+    const read = buildReadTodayDeliveryFacts(
+      { readContract: coordinatorMock() } as never,
+      TASK_COORDINATOR,
+    );
+
+    await expect(read(`0x${'9'.repeat(64)}`)).resolves.toBeUndefined();
+  });
+
+  it('consults the verdict map even when the solution-leg read throws', async () => {
+    const { buildReadTodayDeliveryFacts } = await import('../../src/daemon/composition-root.js');
+    const readContract = vi.fn(async ({ functionName, args }: { functionName: string; args: readonly unknown[] }) => {
+      if (functionName === 'getRequestRef') throw new Error('reverted');
+      if (functionName === 'getVerdictRequestRef') {
+        return args[0] === VERDICT_REQUEST_ID ? [1236n, 0, 0, true] : [0n, 0, 0, false];
+      }
+      if (functionName === 'getVerdict') {
+        return { taskId: 1236n, attemptIndex: 0, verdictIndex: 0, verdictCidDigest: VERDICT_DIGEST };
+      }
+      throw new Error(`unexpected functionName ${functionName}`);
+    });
+    const read = buildReadTodayDeliveryFacts({ readContract } as never, TASK_COORDINATOR);
+
+    await expect(read(VERDICT_REQUEST_ID)).resolves.toEqual({
+      taskId: 1236n,
+      attemptIndex: 0,
+      onChainKeccak: VERDICT_DIGEST,
+    });
+  });
+});
+
+describe('buildReadOnChainTaskDigest (defect #47: the native association key)', () => {
+  const TASK_COORDINATOR = '0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98' as const;
+  // `getTask(1236).taskCidDigest` as read off Base Sepolia — the exact value round-28's
+  // `TaskCreated` carried, and the exact anchor operator A's stored association is keyed on.
+  const TASK_CID_DIGEST = '0xc0c3d703b3938a944095dcc91b4ec7da96f1bc10b1bb85b0419440a5f44d1204' as const;
+
+  function coordinatorMock(taskCidDigest: `0x${string}` | undefined) {
+    return vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName !== 'getTask') throw new Error(`unexpected functionName ${functionName}`);
+      if (taskCidDigest === undefined) throw new Error('no such task');
+      return { creator: `0x${'1'.repeat(40)}`, taskCidDigest, manifestDigest: `0x${'2'.repeat(64)}` };
+    });
+  }
+
+  it('reads back the same anchor TaskCreated carries, for an event class that has none', async () => {
+    const { buildReadOnChainTaskDigest } = await import('../../src/daemon/composition-root.js');
+    const read = buildReadOnChainTaskDigest(
+      { readContract: coordinatorMock(TASK_CID_DIGEST) } as never,
+      TASK_COORDINATOR,
+    );
+
+    await expect(read(1236n)).resolves.toBe(`sha256:${TASK_CID_DIGEST.slice(2)}`);
+  });
+
+  it('memoizes the immutable anchor rather than re-reading it per event', async () => {
+    const { buildReadOnChainTaskDigest } = await import('../../src/daemon/composition-root.js');
+    const readContract = coordinatorMock(TASK_CID_DIGEST);
+    const read = buildReadOnChainTaskDigest({ readContract } as never, TASK_COORDINATOR);
+
+    await read(1236n);
+    await read(1236n);
+    await read(1236n);
+
+    expect(readContract).toHaveBeenCalledTimes(1);
+  });
+
+  it('never memoizes a miss — a task created after the read must still resolve later', async () => {
+    const { buildReadOnChainTaskDigest } = await import('../../src/daemon/composition-root.js');
+    let posted = false;
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName !== 'getTask') throw new Error(`unexpected functionName ${functionName}`);
+      if (!posted) throw new Error('no such task');
+      return { creator: `0x${'1'.repeat(40)}`, taskCidDigest: TASK_CID_DIGEST };
+    });
+    const read = buildReadOnChainTaskDigest({ readContract } as never, TASK_COORDINATOR);
+
+    await expect(read(1236n)).resolves.toBeUndefined();
+    posted = true;
+    await expect(read(1236n)).resolves.toBe(`sha256:${TASK_CID_DIGEST.slice(2)}`);
+  });
+
+  it('fails closed on an all-zero record rather than keying an association on a zero digest', async () => {
+    const { buildReadOnChainTaskDigest } = await import('../../src/daemon/composition-root.js');
+    const read = buildReadOnChainTaskDigest(
+      { readContract: coordinatorMock(`0x${'0'.repeat(64)}`) } as never,
+      TASK_COORDINATOR,
+    );
+
+    await expect(read(1236n)).resolves.toBeUndefined();
+  });
+
+  // The default-initialized-record race: a read that lands before the creation transaction is
+  // included returns an all-zero record. Memoizing THAT would strand the task permanently — and on
+  // this wiring a permanently unresolvable task means every later event for it drops permanently.
+  it('never memoizes an all-zero record either', async () => {
+    const { buildReadOnChainTaskDigest } = await import('../../src/daemon/composition-root.js');
+    let included = false;
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName !== 'getTask') throw new Error(`unexpected functionName ${functionName}`);
+      return {
+        creator: `0x${'1'.repeat(40)}`,
+        taskCidDigest: included ? TASK_CID_DIGEST : `0x${'0'.repeat(64)}`,
+      };
+    });
+    const read = buildReadOnChainTaskDigest({ readContract } as never, TASK_COORDINATOR);
+
+    await expect(read(1236n)).resolves.toBeUndefined();
+    included = true;
+    await expect(read(1236n)).resolves.toBe(`sha256:${TASK_CID_DIGEST.slice(2)}`);
+  });
+});

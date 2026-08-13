@@ -6,7 +6,7 @@
 // failure means the fresh rewrite diverges from the legacy oracle, not that the fixture is wrong.
 // The broadcast() and logSource() subjects wire the real Safe broadcaster / chain log source
 // against a scripted, in-memory viem-client double (no network); fork() drives `createBaseVenue`
-// itself against a live Anvil fork (`venue-fork.ts`). The well-known Anvil dev key here is the
+// itself against snapshot-backed Anvil (`venue-fork.ts`). The well-known Anvil dev key here is the
 // one private-key literal this plan allows anywhere in this component (it never appears in
 // `venue-base`).
 import { mkdtempSync } from "node:fs";
@@ -384,7 +384,7 @@ function buildLogSourceSubject(): {
 }
 
 // ---------------------------------------------------------------------------------------------
-// fork(): the real createBaseVenue against a live Anvil fork (venue-fork.ts's deployment).
+// fork(): the real createBaseVenue against snapshot-backed Anvil (venue-fork.ts's deployment).
 // ---------------------------------------------------------------------------------------------
 
 async function buildForkSubject(

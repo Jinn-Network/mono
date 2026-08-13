@@ -499,4 +499,72 @@ describe('createProjectorEnrich', () => {
 
     expect(enriched).toBeUndefined();
   });
+
+  // Defect #47, third resolver miss. Exactly the `fetchDeliveryBytes` (#23/#2559/#2561) class, one
+  // leg further up the digest join: a NATIVE Task document is HTTP-served off the requester's own
+  // record plane and need never reach the IPFS gateway. Before `fetchTaskBytes`, the join's
+  // content-fetch step went straight to `fetchIpfsBytes`, so every event for a native task dropped
+  // at "Task content ... unresolvable" even once its Submission resolved.
+  it('resolves a Task document that is HTTP-served but absent from the IPFS gateway', async () => {
+    const store = buildFixtureStore();
+    const task = content({ instructions: 'restore service health' });
+    store.submissionsByTask.set(TASK_ID.toString(), submissionRecordBytes(task.digest.slice('sha256:'.length)));
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+    // Task bytes live ONLY behind the record source -- deliberately no `store.ipfs` entry.
+    const httpRecords = new Map<string, Uint8Array>([[task.digest, task.bytes]]);
+
+    const enrich = createProjectorEnrich(buildPorts(store, {
+      fetchTaskBytes: async (digest) => httpRecords.get(digest),
+    }));
+    const enriched = await enrich(taskCreatedEvent(task.digest.slice('sha256:'.length)));
+
+    expect(enriched).toBeDefined();
+    expect(enriched?.projection.taskDigest).toBe(task.digest);
+  });
+
+  it('still re-derives the digest of record-plane Task bytes and drops them when they do not match the claim', async () => {
+    const store = buildFixtureStore();
+    const task = content({ instructions: 'restore service health' });
+    const forged = content({ instructions: 'a different task entirely' });
+    store.submissionsByTask.set(TASK_ID.toString(), submissionRecordBytes(task.digest.slice('sha256:'.length)));
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+    // The record plane serves the WRONG bytes under the claimed Task digest.
+    const httpRecords = new Map<string, Uint8Array>([[task.digest, forged.bytes]]);
+
+    const enrich = createProjectorEnrich(buildPorts(store, {
+      fetchTaskBytes: async (digest) => httpRecords.get(digest),
+    }));
+    const enriched = await enrich(taskCreatedEvent(task.digest.slice('sha256:'.length)));
+
+    expect(enriched).toBeUndefined();
+  });
+
+  it('falls back to the IPFS gateway for Task content when no record-plane resolver is wired', async () => {
+    const store = buildFixtureStore();
+    const task = content({ instructions: 'restore service health' });
+    store.ipfs.set(task.digest, task.bytes);
+    store.submissionsByTask.set(TASK_ID.toString(), submissionRecordBytes(task.digest.slice('sha256:'.length)));
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+
+    // No `fetchTaskBytes` -- the legacy composition has no record source.
+    const enrich = createProjectorEnrich(buildPorts(store));
+    const enriched = await enrich(taskCreatedEvent(task.digest.slice('sha256:'.length)));
+
+    expect(enriched?.projection.taskDigest).toBe(task.digest);
+  });
+
+  // Defect #47 diagnosability: a drop is PERMANENT (the chain-log cursor is committed before
+  // `poll()` returns), so the one log line it emits has to name the block the replay must reach.
+  it('names the event kind and block in the drop line so the replay range is recoverable from logs', async () => {
+    const store = buildFixtureStore();
+    const warn = vi.fn();
+    const enrich = createProjectorEnrich(buildPorts(store, { logger: { warn } }));
+
+    // No Submission resolvable for this task -- the exact round-28 drop.
+    await enrich(taskCreatedEvent('a'.repeat(64), { blockNumber: 45_420_025 }));
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('TaskCreated at block 45420025'),
+    );
+  });
 });

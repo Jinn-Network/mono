@@ -1,9 +1,10 @@
 import type { BenchmarkRecord, MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
-import { buildLocalVenueHonesty } from "../operations/run-results.js";
+import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
 import { buildClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
+import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
 
 export interface ClaimRecordIdentities {
   readonly benchmarkSha256: string;
@@ -88,7 +89,7 @@ export function assertClaimConsistency(input: {
     reportRecord,
     reportSha256: identities.reportSha256,
     reportEnvelopeSha256: identities.reportEnvelopeSha256,
-    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells),
+    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord),
     verificationCommandVerb: "bundle verify",
     assurance: {
       preset: input.assurancePreset,
@@ -112,6 +113,23 @@ export function assertClaimConsistency(input: {
 
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
   const reportLimitations = reportRecord.limitations ?? [];
+  const expectedLimitations = [
+    ...localVenueLimitsForRun(runRecord),
+    ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
+  ];
+  const isolationPosture = venueIsolationPostureForPolicy(
+    runRecord.policy.submissionBaseline?.["isolationPolicy"],
+  );
+  if (
+    isolationPosture.inventory.length > 1
+    && !bytesEqual(canonicalJsonBytes(reportLimitations), canonicalJsonBytes(expectedLimitations))
+  ) {
+    refuse(
+      "record-integrity",
+      "claim-consistency",
+      "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
+    );
+  }
   if (rehearsalLine === undefined) {
     if (reportLimitations.some((line) => line.includes("disposable preview rehearsal(s)"))) {
       refuse("record-integrity", "claim-consistency", "Report discloses a rehearsal absent from the claim");

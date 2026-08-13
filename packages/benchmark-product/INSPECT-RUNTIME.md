@@ -361,3 +361,13 @@ adapter id plus a sealed selection digest and constructs a venue through the
 shared runtime registry. A later framework can implement task selection,
 execution, and native-artifact handling behind that seam without adding a
 second Benchmark Product lifecycle.
+
+Isolation accounting is deliberately narrower than operational containment.
+Native and local-Python Runs admit only the `unrestricted` policy and retain
+their documented singleton-inventory result. An OCI Inspect Run admits both
+`unrestricted` and `oci-container`, so its Matrix isolation axis is
+`unverifiable`: admission proves that both policies are available, not which
+one produced a particular cell or how strong that containment was. The Report,
+claim package, workspace verifier, and detached-bundle verifier all derive the
+same disclosure from the sealed Run. Stronger isolation claims require
+positive per-cell evidence and are outside this slice.
