@@ -6,9 +6,9 @@
  * `arm list`, `authority grant`, `authority revoke`, `authority show`,
  * `quote`, `lock`, `launch`, `resume`, `status`, `collect`, `results`,
  * `cancel`, `report`, `verify`, `publish`), plus the path-oriented standalone
- * `bundle verify` exclusion and `help`. Every verb takes `--json` for a
- * machine-readable envelope; every failure is a typed error envelope with a
- * distinct exit code (§4.3). `runCli` never throws and never touches
+ * `bundle verify` and Demo-1 preregistration-verifier exclusions, plus `help`.
+ * Every verb takes `--json` for a machine-readable envelope; every failure is a
+ * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
  * `process` — `bin.ts` is the only file in this package that does.
  *
  * `runCli` is `async` because `sample.init` (spec: the bundled sample
@@ -25,8 +25,8 @@
  * only the final rendered result.
  *
  * `CLI_VERB_NAMES` is the dispatch inventory. The generated parity artifact
- * checks the 27 workspace operations against the facade and records `bundle
- * verify` separately because it needs neither workspace nor principal.
+ * checks the 27 workspace operations against the facade and records the two
+ * read-only standalone verifiers separately.
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
@@ -68,6 +68,9 @@ import {
   type SelectInspectEvaluationInput,
 } from "../operations/index.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
+import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
+import { readRunJournalEntries } from "../run/journal.js";
+import { requireRunState } from "../run/state.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
@@ -112,6 +115,9 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   publish          --workspace <dir> --principal <id> --draft <draftId>
                    [--include-native-artifacts]
   bundle verify    --bundle <dir> [--json]
+  demo1 prereg verify --workspace <dir> --draft <draftId> --witness <witness.json>
+                   --method-summary-sha256 <sha256> --grader-program-sha256 <sha256>
+                   --source-commit <full-git-oid> [--json]
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
@@ -148,6 +154,9 @@ const REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const VERIFY_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft", "include-native-artifacts"] as const;
 const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
+const DEMO1_PREREG_VERIFY_FLAGS = [
+  "workspace", "draft", "witness", "method-summary-sha256", "grader-program-sha256", "source-commit", "json",
+] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -664,6 +673,36 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   );
 }
 
+function handleDemo1PreregistrationVerify(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): CliResult {
+  assertKnownFlags(args, DEMO1_PREREG_VERIFY_FLAGS);
+  const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
+  const draftId = required(args, "draft");
+  const runState = requireRunState(workspaceDir, draftId);
+  if (runState.runSha256 === undefined) {
+    refuse("illegal-transition", `runs.${draftId}`, "Demo-1 preregistration verification requires a sealed Run");
+  }
+  const result = verifyDemo1PreregistrationPreDispatch({
+    commitment: {
+      runSha256: runState.runSha256,
+      methodSummarySha256: required(args, "method-summary-sha256"),
+      graderProgramSha256: required(args, "grader-program-sha256"),
+      sourceCommit: required(args, "source-commit"),
+    },
+    witness: readJsonFile(pathFrom(context.cwd, required(args, "witness"))),
+    runState,
+    journal: readRunJournalEntries(workspaceDir, draftId),
+  });
+  return renderResult(
+    { ok: true, result },
+    jsonMode,
+    (value) => `Demo-1 preregistration ready (${value.stage}): ${value.manifestCid} / ${value.transactionHash}\n`,
+  );
+}
+
 type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
 
 const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
@@ -696,6 +735,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["verify", handleVerify],
   ["publish", handlePublish],
   ["bundle verify", handleBundleVerify],
+  ["demo1 prereg verify", handleDemo1PreregistrationVerify],
 ]);
 
 /** The complete verb surface, derived from `VERBS` — the parity anchor `./parity.test.ts` checks

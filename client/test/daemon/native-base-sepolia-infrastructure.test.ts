@@ -10,6 +10,7 @@ import {
   createSolverReads,
   createViemBaseSepoliaReadClients,
   mountBaseSepoliaPublicSource,
+  PRE_SETTLEMENT_CLAIM_SKEW_MS,
   verifyCanonicalTodayTaskCreated,
   inspectBaseSepoliaNativeTarget,
   type NativeBaseSepoliaAnchorReadClient,
@@ -1121,5 +1122,83 @@ describe('first-party Base Sepolia finalized trust anchors', () => {
     });
 
     expect(result).toBeNull();
+  });
+});
+
+/**
+ * Defect #44, live round 27. `preSettlementClaimTime` is the stand-in the evaluator hands the
+ * `verdict-effective-time` named check for the on-chain claim that has NOT happened yet, and the
+ * check requires `evaluatedAt <= claimBlockTime`. Reading Base Sepolia's FINALIZED head for that
+ * stand-in made the requirement unsatisfiable for every live grade: the finalized head runs two
+ * epochs (20-30 min) behind wall clock, while `evaluatedAt` is the harness's wall-clock grade
+ * instant, so the comparison was `now <= now - 26min`. Round 27 measured the two heads together --
+ * latest 45410754 @ 02:56:36Z against finalized 45409957 @ 02:30:02Z -- with the grade at
+ * 02:51:55.896Z sitting between them: later than the finalized head (deterministic refusal),
+ * earlier than the live head (correctly bounded).
+ */
+describe('pre-settlement claim-time stand-in', () => {
+  const LIVE_HEAD = '2026-08-13T02:56:36.000Z';
+  const LIVE_FINALIZED_HEAD = '2026-08-13T02:30:02.000Z';
+  const ROUND_27_EVALUATED_AT = '2026-08-13T02:51:55.896Z';
+  const unusedRecords = {
+    async byDigest() { throw new Error('unused'); },
+    async byLocation() { throw new Error('unused'); },
+    async byRawCid() { throw new Error('unused'); },
+  };
+
+  function headClient() {
+    const tags: string[] = [];
+    return {
+      tags,
+      client: {
+        async getBlock(request: { readonly blockTag?: string } = {}) {
+          tags.push(request.blockTag ?? 'latest');
+          const iso = request.blockTag === 'finalized' ? LIVE_FINALIZED_HEAD : LIVE_HEAD;
+          return {
+            number: request.blockTag === 'finalized' ? 45_409_957n : 45_410_754n,
+            hash: `0x${'ab'.repeat(32)}` as const,
+            timestamp: BigInt(Date.parse(iso) / 1_000),
+          };
+        },
+      },
+    };
+  }
+
+  function claimTime(publicClient: unknown) {
+    return createBaseSepoliaEvaluatorReads({
+      config: {
+        ...requesterInput(),
+        role: 'evaluator',
+        marketplaceAgentAddress: '0x3333333333333333333333333333333333333333',
+      },
+      publicClient: publicClient as never,
+      records: unusedRecords,
+    }).preSettlementClaimTime;
+  }
+
+  it('bounds the live round-27 grade against the live head, never the finalized head behind it', async () => {
+    const head = headClient();
+    const bound = await claimTime(head.client)();
+
+    expect(Date.parse(bound)).toBeGreaterThanOrEqual(Date.parse(ROUND_27_EVALUATED_AT));
+    expect(Date.parse(bound)).toBeGreaterThan(Date.parse(LIVE_FINALIZED_HEAD));
+    expect(head.tags).toEqual(['latest']);
+  });
+
+  it('stays inside the bounded skew allowance, so a fabricated future grade still refuses', async () => {
+    const head = headClient();
+    const before = Date.now();
+    const bound = await claimTime(head.client)();
+    const after = Date.now();
+
+    // The stand-in is a bound, not an open window: it never reaches further than the later of the
+    // chain head and this host's clock, plus the named skew allowance. A grade dated an hour past
+    // that (the fabrication this check exists to refuse) therefore still exceeds it, and
+    // `verdict-effective-time` still fails closed.
+    expect(Date.parse(bound))
+      .toBeGreaterThanOrEqual(Math.max(Date.parse(LIVE_HEAD), before) + PRE_SETTLEMENT_CLAIM_SKEW_MS);
+    expect(Date.parse(bound))
+      .toBeLessThanOrEqual(Math.max(Date.parse(LIVE_HEAD), after) + PRE_SETTLEMENT_CLAIM_SKEW_MS);
+    expect(Date.parse(bound)).toBeLessThan(Math.max(Date.parse(LIVE_HEAD), after) + 3_600_000);
   });
 });

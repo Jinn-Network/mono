@@ -107,6 +107,30 @@ export {
   parseDemo1UpstreamSkill,
   verifyDemo1PreRunFreeze,
 } from "./method/demo1-prerun.js";
+
+// Demo-1 E4: benchmark-specific preregistration over an injected generic IPFS/ERC-8004 manifest
+// boundary. The witness is local handoff evidence, not a new record kind or publication claim.
+export {
+  DEMO1_PREREGISTRATION_BATCH_KIND,
+  DEMO1_PREREGISTRATION_MEDIA_TYPE,
+  anchorDemo1Preregistration,
+  canonicalDemo1PreregistrationCommitmentBytes,
+  canonicalDemo1PreregistrationWitnessBytes,
+  verifyDemo1PreregistrationOrdering,
+  verifyDemo1PreregistrationPreDispatch,
+  verifyDemo1PreregistrationRunOrdering,
+} from "./method/demo1-preregistration.js";
+export type {
+  Demo1OfficialDispatchEvidenceIdentity,
+  Demo1PreregistrationAnchorBoundary,
+  Demo1PreregistrationCommitment,
+  Demo1PreregistrationExternalBlock,
+  Demo1PreregistrationOrderingResult,
+  Demo1PreregistrationPreDispatchResult,
+  Demo1PreregistrationReadBack,
+  Demo1PreregistrationRunOrderingResult,
+  Demo1PreregistrationWitness,
+} from "./method/demo1-preregistration.js";
 export { DEMO1_PINNED_SKILLS_SOURCE } from "./method/demo1-prerun-source.js";
 export type {
   Demo1AuthenticatedCandidateSource,
