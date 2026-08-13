@@ -694,6 +694,16 @@ function createRequesterReads(input: {
   };
 }
 
+/**
+ * Clock-skew allowance carried by the pre-settlement claim-time stand-in (defect #44). The two
+ * instants it reconciles are read off different clocks -- `evaluatedAt` is stamped by whichever
+ * host ran the grade, the bound is read off the chain head and this host -- so the bound needs a
+ * margin wide enough to absorb ordinary host-to-host skew. Five minutes is well under the 20-30
+ * minute finality lag that made this comparison unsatisfiable, and far under any plausible
+ * fabricated future date, so the check still fails closed on the thing it exists to refuse.
+ */
+export const PRE_SETTLEMENT_CLAIM_SKEW_MS = 5 * 60_000;
+
 export function createBaseSepoliaEvaluatorReads(input: {
   readonly config: NativeCanonicalReadIdentity;
   readonly publicClient: PublicClient;
@@ -869,9 +879,30 @@ export function createBaseSepoliaEvaluatorReads(input: {
         }
       },
     },
+    /**
+     * Stand-in for the on-chain claim time BEFORE the claim exists (defect #44). It feeds the
+     * `verdict-effective-time` named check, which requires `evaluatedAt <= claimBlockTime` -- the
+     * ordering that stops a settlement from carrying a grade which did not yet exist when it
+     * landed. Post-settlement that bound is the settlement transaction's own block (`blockTime`,
+     * and `verdictSettlement.transaction.blockTime` on the cross-operator consumer path); those are
+     * where the strict invariant is enforceable and they are untouched.
+     *
+     * Pre-settlement the claim is in the FUTURE, so the strict ordering is not yet checkable and
+     * the only honest guard is against a grade dated ahead of the present. That makes the bound
+     * forward-looking. Reading the FINALIZED head here inverted it: Base Sepolia finalizes two
+     * epochs behind wall clock (round 27 measured latest 45410754 @ 02:56:36Z against finalized
+     * 45409957 @ 02:30:02Z), while `evaluatedAt` is the harness's wall-clock grade instant, so
+     * every live grade was compared against a time ~26 minutes in its own past and the check was
+     * deterministically unsatisfiable.
+     *
+     * The later of the live head and this host's clock keeps an honest grade inside the bound
+     * whichever of the two clocks is behind; `PRE_SETTLEMENT_CLAIM_SKEW_MS` absorbs the rest. It
+     * stays a bound, not an open window -- a grade dated beyond it still refuses.
+     */
     async preSettlementClaimTime() {
-      const block = await publicClient.getBlock({ blockTag: 'finalized' });
-      return new Date(Number(block.timestamp) * 1_000).toISOString();
+      const block = await publicClient.getBlock({ blockTag: 'latest' });
+      const head = Number(block.timestamp) * 1_000;
+      return new Date(Math.max(head, Date.now()) + PRE_SETTLEMENT_CLAIM_SKEW_MS).toISOString();
     },
     async blockTime(blockNumber) {
       const block = await publicClient.getBlock({ blockNumber });

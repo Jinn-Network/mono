@@ -788,6 +788,52 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     });
   });
 
+  /**
+   * Defect #44, live round 27. The rule above is right and stays right; what broke live was the
+   * value the evaluator handed it as `claimBlockTime` while the claim it names was still in the
+   * FUTURE. It passed Base Sepolia's finalized head, which trails wall clock by two epochs, so an
+   * honest grade was measured against a time in its own past and `verdict-effective-time` refused
+   * every live evaluation. These are the instants round 27 measured, held against the real gate:
+   * the finalized head refuses the honest grade, the forward-looking bound the evaluator now
+   * derives (`preSettlementClaimTime` in `client/src/daemon/native-base-sepolia-infrastructure.ts`)
+   * admits it, and a grade dated past that bound still refuses. The last case is the one this
+   * check exists for, and it must survive any widening of the pre-settlement stand-in.
+   */
+  describe("live round-27 claim-time instants", () => {
+    const GRADE = "2026-08-13T02:51:55.896Z";
+    const FINALIZED_HEAD = "2026-08-13T02:30:02Z";
+    /** Live head 02:56:36Z plus the evaluator's five-minute skew allowance. */
+    const FORWARD_BOUND = "2026-08-13T03:01:36Z";
+
+    function gateInput(claimBlockTime: string, evaluatedAt: string): VerdictObservationGateInput {
+      const fixture = makeFixture();
+      const graded = withStatement(fixture, (statement) => {
+        (statement.predicate as Record<string, unknown>).evaluatedAt = evaluatedAt;
+      });
+      return { ...graded, verdict: { ...graded.verdict, claimBlockTime } };
+    }
+
+    test("refuses the honest grade against a claim time behind it", async () => {
+      expect(await gateVerdictObservation(gateInput(FINALIZED_HEAD, GRADE), makePorts())).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "verdict-effective-time", detail: expect.any(String) }],
+      });
+    });
+
+    test("accepts the honest grade against a forward-looking bound", async () => {
+      await expect(gateVerdictObservation(gateInput(FORWARD_BOUND, GRADE), makePorts()))
+        .resolves.toEqual({ decisionGrade: true, failures: [] });
+    });
+
+    test("still refuses a grade dated past the forward-looking bound", async () => {
+      const fabricated = gateInput(FORWARD_BOUND, "2026-08-13T04:01:36Z");
+      expect(await gateVerdictObservation(fabricated, makePorts())).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "verdict-effective-time", detail: expect.any(String) }],
+      });
+    });
+  });
+
   test("refuses a Statement with no verdict rather than defaulting to Invalid", async () => {
     const fixture = makeFixture();
     const input = withStatement(fixture, (statement) => {
