@@ -153,6 +153,31 @@ export interface ProjectorEnrichPorts {
   readonly readTodayDeliveryFacts: (requestId: Hex) => Promise<
     { readonly taskId: bigint; readonly attemptIndex: number; readonly onChainKeccak: Hex } | undefined
   >;
+  /**
+   * Defect #48, Gate C. Resolves the COUNTERPARTY's published solution-Delivery record for one
+   * today-generation `SolutionDeliveryClaimed`, from the record plane rather than from a Mech
+   * `Deliver` fact this operator does not subscribe to.
+   *
+   * Absent (the legacy composition, and any composition with no record plane) leaves the reducer's
+   * mech-fact requirement untouched — this is purely additive. The port itself decides whether
+   * this operator is the requester for the task; `enrich` only asks.
+   *
+   * Returns the two digests over the exact resolved bytes plus the coordinator's own anchor, so
+   * the reducer can re-check the binding rather than trust this resolution — see
+   * `ObservationProjectionContext.recordPlaneDelivery`.
+   */
+  readonly resolveRecordPlaneDelivery?: (input: {
+    readonly chainId: number;
+    readonly taskCoordinator: Address;
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+    readonly requestId: Hex;
+    readonly operator: Address;
+  }) => Promise<{
+    readonly sha256Digest: Sha256Digest;
+    readonly keccakEvidenceHash: Hex;
+    readonly onChainKeccak: Hex;
+  } | undefined>;
   readonly logger?: { warn(message: string): void };
 }
 
@@ -492,6 +517,36 @@ export function createProjectorEnrich(
         submissionDigest = identity.submissionDigest;
       }
 
+      // Defect #48, Gate C. Only the TODAY generation needs this: a revised
+      // `SolutionDeliveryClaimed` carries `deliveryDigest` on the event itself, so the reducer
+      // never consults a mech fact for its digest and the requester is already served. A miss here
+      // is never a drop — the reducer's existing mech-fact branch still runs and still decides.
+      let recordPlaneDelivery: ObservationProjectionContext['recordPlaneDelivery'];
+      if (
+        event.event === 'SolutionDeliveryClaimed'
+        && !('deliveryDigest' in event.facts)
+        && ports.resolveRecordPlaneDelivery !== undefined
+        && attemptIndex !== undefined
+      ) {
+        try {
+          recordPlaneDelivery = await ports.resolveRecordPlaneDelivery({
+            chainId: event.derivation.chainId,
+            taskCoordinator: ports.chain.taskCoordinator,
+            taskId,
+            attemptIndex,
+            requestId: event.facts.requestId,
+            operator: event.facts.operator,
+          });
+        } catch (error) {
+          // A resolver failure is a MISS, never a drop and never a crash: the reducer's mech-fact
+          // branch is the pre-existing behavior and remains correct without this field.
+          ports.logger?.warn(
+            `[projector-enrich] record-plane delivery resolution failed for task ${taskId} `
+              + `attempt ${attemptIndex}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
       const taskProjection = await resolveTaskProjection({
         chainId: event.derivation.chainId,
         taskId,
@@ -539,6 +594,7 @@ export function createProjectorEnrich(
         dispatchContext:
           dispatchContext ?? unengagedDispatchContext(event.derivation.chainId, taskId),
         ...(deliveryCorrespondence === undefined ? {} : { deliveryCorrespondence }),
+        ...(recordPlaneDelivery === undefined ? {} : { recordPlaneDelivery }),
       };
       return { ...event, projection } as ObservationMarketplaceEvent;
     } catch (error) {

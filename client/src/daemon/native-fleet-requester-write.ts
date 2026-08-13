@@ -116,6 +116,14 @@ export interface FleetRequesterWriteInput {
    * `main.ts` builds a {@link AdoptionReceiptStore} under the requester state dir.
    */
   readonly adoptionReceipts: AdoptionReceiptStore;
+  /**
+   * Defect #48. The digest-verified record-plane reader (`nativeRecordBytes`), used only as a
+   * fallback when the venue's `attempt_deliveries` has no bytes for a ref — which is the normal
+   * case for a delivery a SECOND operator produced. Untrusted like every other transport: the
+   * caller re-derives the digest from whatever comes back. Absent leaves adoption on the venue
+   * store alone (the pre-#48 behavior).
+   */
+  readonly recordPlaneBytes?: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
   /** Optional info/warn sink for adoption outcomes — a new accepted adoption logs info, a refusal a loud warn. */
   readonly logger?: { info(message: string): void; warn(message: string): void };
   /** Overrides the fleet default terms (tests). Production uses {@link FLEET_REQUESTER_POSTING_TERMS}. */
@@ -220,8 +228,46 @@ export function buildFleetRequesterWrite(input: FleetRequesterWriteInput): Fleet
   // delegating literal preserves each method's own closure `this`.
   const adoptionPort: DeliveryObservePort & { readonly receipts: AdoptionReceiptStore } = {
     observe: (ref) => input.observe.observe(ref),
-    deliveries: (attempt) => input.observe.deliveries(attempt),
-    fetchDelivery: (ref) => input.observe.fetchDelivery(ref),
+    /**
+     * Defect #48, Gate B. `attempt_deliveries` is the venue's own delivery-BYTES table, and the
+     * only writer of it is `MarketplaceObservePort.recordDelivery` — which the native daemon never
+     * calls, because the operator that holds a solution's bytes is the solver, and it publishes
+     * them to the record plane rather than into the requester's venue store. Reading that table
+     * alone therefore returned `[]` on every tick, forever, and `adoptPostedTask` short-circuited
+     * before any of its verification ran.
+     *
+     * The canonical observation log is the honest requester-side enumeration: a
+     * `delivery-recorded.v1` observation exists only after the projector bound a delivery to this
+     * Attempt against an on-chain anchor. So the refs are the union of both — the store's rows
+     * when they exist (a self-solved task, the conformance kit), plus the log's digests. Nothing
+     * is trusted from either: `verifyDeliveryRef` re-derives every digest from the bytes it
+     * fetches, and `adoptPostedTask` independently requires the digest to be in `derived.deliveries`.
+     */
+    async deliveries(attempt) {
+      const refs = new Map<string, { readonly attempt: typeof attempt; readonly digest: `sha256:${string}` }>();
+      for (const ref of await input.observe.deliveries(attempt)) refs.set(ref.digest, ref);
+      const snapshot = await input.observe.observe(attempt);
+      for (const { digest } of snapshot.descriptor.derived.deliveries) {
+        if (!refs.has(digest)) refs.set(digest, { attempt, digest });
+      }
+      return [...refs.values()];
+    },
+    /**
+     * Defect #48, Gate B. Same asymmetry from the bytes side: a delivery this operator did not
+     * produce has no row in `attempt_deliveries`, and its bytes live on the record plane the
+     * projector already resolved them from. The transport stays untrusted — `verifyDeliveryRef`
+     * hashes what comes back and refuses anything that does not re-derive to the ref's digest —
+     * so falling back to it cannot widen what is adoptable, only what is reachable.
+     */
+    async fetchDelivery(ref) {
+      try {
+        return await input.observe.fetchDelivery(ref);
+      } catch (err) {
+        const bytes = await input.recordPlaneBytes?.(ref.digest);
+        if (bytes !== undefined) return bytes;
+        throw err;
+      }
+    },
     receipts: input.adoptionReceipts,
   };
   const now = input.now ?? (() => new Date());

@@ -2760,6 +2760,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           adoptionReceipts: createFileAdoptionReceiptStore({
             dir: join(nativeRuntime.requesterWrite.requesterStateDir, 'adoptions'),
           }),
+          // Defect #48: the SAME digest-verified record-plane reader the projector already holds,
+          // so adoption can fetch the bytes of a delivery a SECOND operator produced and published
+          // there. Not a second transport, and not trusted — the caller re-derives the digest.
+          ...(nativeRuntime.projectorPorts.resolveDeliveryBytes === undefined
+            ? {}
+            : { recordPlaneBytes: nativeRuntime.projectorPorts.resolveDeliveryBytes }),
           logger: {
             info: (message) => console.log(message),
             warn: (message) => console.warn(message),

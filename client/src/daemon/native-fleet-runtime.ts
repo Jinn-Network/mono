@@ -63,6 +63,7 @@ import {
 } from './native-fleet-discovery.js';
 import type { NativeDiscoveryConsumer } from './native-discovery.js';
 import type { NativePublicRecordTransport } from './native-infrastructure-bundle.js';
+import { listPublicRecordDigests } from './native-evaluator-public-record-index.js';
 import { NativeOperatorStateRepository } from './native-operator-state.js';
 import type { NativeProjectorExactPorts } from './native-projector-ports.js';
 import { openNativeTrustCatalog, type NativeTrustAuthority } from './native-trust-catalog.js';
@@ -534,6 +535,12 @@ export async function buildFleetNativeRuntime(
     ),
     verifyVerdictObservation: lateBoundVerdict.port,
     resolveDeliveryBytes: nativeRecordBytes,
+    // Defect #48. The requester's candidate content addresses for a counterparty's solution
+    // Delivery: today generation puts the sha256 anchor only on the Mech `Deliver` this operator
+    // does not subscribe to, so the projector keys its fetch off the signed record-plane location
+    // statements instead — hints, re-checked against the coordinator's own keccak anchor by
+    // `buildRecordPlaneSolutionDeliveryPort` before anything is believed about them.
+    listRecordPlaneDigests: (limit) => listPublicRecordDigests(input.store, limit),
   };
 
   const discovery = await buildFleetNativeDiscovery({
