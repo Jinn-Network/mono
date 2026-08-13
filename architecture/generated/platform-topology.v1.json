@@ -1776,7 +1776,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2981,
+      "discoveredFirstPartySurfaces": 2980,
       "generatedOutputSources": 1314,
       "generatorSources": 618,
       "marketplaceControl": 2,
@@ -7121,6 +7121,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/architecture/discovery-client-neutrality.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/architecture/evaluator-primitives.test.ts"
       },
       {
@@ -7542,16 +7552,6 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/checkpoint-publish.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/cli/codedigest-revert-check.test.ts"
       },
       {
         "categories": [
@@ -14263,16 +14263,6 @@
           "@ritsukai"
         ],
         "path": "client/test/learner/revert-stats.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/learner/verification-gate.test.ts"
       },
       {
         "categories": [

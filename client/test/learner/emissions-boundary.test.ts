@@ -16,10 +16,10 @@ import { fileURLToPath } from 'node:url';
  *     name, so we scan BROADLY: the core emissions dirs PLUS the full api/ and
  *     cli/ trees. This gives the guard real future teeth — a NEW emissions
  *     endpoint (e.g. api/rewards-v2.ts) that reads gradedScore is caught even
- *     though it doesn't exist yet. The only legitimate user of `gradedScores`
- *     in the broad scan is cli/commands/codedigest-revert-check.ts (the
- *     learning loop's revert-check CLI tool, NOT an emissions path), which is
- *     explicitly excluded.
+ *     though it doesn't exist yet. The broad scan currently has no legitimate
+ *     `gradedScores` user outside learner/ — the one that used to be excluded,
+ *     cli/commands/codedigest-revert-check.ts, was retired by one-swap R3b
+ *     (issue #2494), so its exclusion row was removed with it.
  *
  *   TIER 2 — GENERIC counts `passedCount` / `totalCount`.
  *     These collide with unrelated fields (e.g. StorageSummary.totalCount in
@@ -56,7 +56,6 @@ function walk(dir: string): string[] {
 // Shared exclusions for both tiers.
 const isExcluded = (f: string): boolean =>
   f.includes('/learner/') || // graded scores ARE consumed here — by design
-  f.includes('codedigest-revert-check') || // learning loop's revert-check CLI tool, not emissions
   f.endsWith('.test.ts');
 
 // Core emissions/reward dirs — fully scanned by BOTH tiers.
