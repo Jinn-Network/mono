@@ -188,6 +188,40 @@ describe('buildNativeSolutionCorrections', () => {
     expect(sink.withdraw).not.toHaveBeenCalled();
   });
 
+  it('recovers a conflict thrown by a different module instance of the source-writer', async () => {
+    // The client resolves @jinn-network/record-discovery-serve both directly (portal) and nested
+    // under other workspace packages (registry), so the conflict the writer throws is not
+    // reliably an `instanceof` the class this module could import — CI's module graph produced
+    // exactly that split (#2636). Recovery must key on the error NAME, which survives any number
+    // of module instances. This foreign-class error is one.
+    class ForeignConflict extends Error {
+      override readonly name = 'SourceAnnouncementConflictError';
+    }
+    seedPublishedDelivery();
+    const events = new NativeMarketplaceEventRepository(store);
+    events.apply({ events: [settlementEvent()] as never });
+    events.apply({ events: [], orphanedBlockHashes: [BLOCK_HASH] });
+    const sink = publisher();
+    const corrections = buildNativeSolutionCorrections({ store, publisher: sink, marketplaceEvents: events });
+    await corrections.reconcile();
+    events.apply({ events: [settlementEvent(`0x${'f'.repeat(64)}`)] as never });
+    sink.publish.mockRejectedValueOnce(new ForeignConflict('already committed different exact input bytes'));
+    sink.committedAnnouncement.mockResolvedValueOnce({
+      action: 'available' as const,
+      sequence: '9',
+      entryDigest: `sha256:${'d'.repeat(64)}` as const,
+    } as never);
+
+    await corrections.reconcile();
+
+    expect(store.db.prepare(
+      `SELECT action, source_sequence FROM native_solution_discovery_corrections ORDER BY rowid`,
+    ).all()).toEqual([
+      { action: 'withdrawn', source_sequence: '1' },
+      { action: 'available', source_sequence: '9' },
+    ]);
+  });
+
   it('rethrows a re-announce conflict when the source holds no committed announcement', async () => {
     // Recovery from `SourceAnnouncementConflictError` (#2636) is only for the crash window where
     // the source already committed OUR announcement. A conflict the source cannot account for is a
