@@ -24,7 +24,7 @@ import { initWorkspace } from "./init.js";
 import { readAuditEntries } from "../audit/journal.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { buildBundleManifest } from "../bundle/manifest.js";
+import { BUNDLE_V3_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
 import { runCli } from "../cli/main.js";
 import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
@@ -597,6 +597,31 @@ describe("portable public bundle", () => {
     } finally {
       rmSync(copied, { recursive: true, force: true });
     }
+  }, 30_000);
+
+  test("legacy verification refuses a canonical v2 bundle relabeled as v3", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    if (!reported.ok) return;
+    const runState = readRunState(workspaceDir, "draft-1");
+    expect(runState).toBeDefined();
+    if (runState === undefined) return;
+    const bundleDir = materializePublicBundle({
+      workspaceDir,
+      draftId: "draft-1",
+      benchmarkSha256: reported.result.claimPackage.records.benchmarkSha256,
+      runState,
+    }).bundleDir;
+    const manifestPath = join(bundleDir, "bundle.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { format: string };
+    manifest.format = BUNDLE_V3_FORMAT;
+    writeCanonical(manifestPath, manifest);
+
+    await expect(verifyPublicBundle(bundleDir)).rejects.toMatchObject({
+      issues: [expect.objectContaining({ path: "bundle.json", message: expect.stringMatching(/not a v2 bundle/i) })],
+    });
   }, 30_000);
 
   test("materializes and portably verifies every real could-not-grade lineage shape", async () => {

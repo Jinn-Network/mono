@@ -38,7 +38,7 @@ import {
 import { InspectSelectionManifestSchema, type InspectSelectionManifest } from "../runtime/inspect/manifest.js";
 import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import { buildPublicAssets } from "./assets.js";
-import { verifyBundleSnapshot, type VerifyBundleSnapshotDeps } from "./manifest.js";
+import { BUNDLE_FORMAT, verifyBundleSnapshot, type VerifyBundleSnapshotDeps } from "./manifest.js";
 import { PUBLIC_BUNDLE_FILES } from "./materialize.js";
 import {
   BundleAssemblyCellSchema,
@@ -159,6 +159,9 @@ export async function verifyPublicBundle(
   deps: VerifyPublicBundleDeps = {},
 ): Promise<PublicBundleVerificationResult> {
   const checked = verifyBundleSnapshot(bundleDir, deps);
+  if (checked.manifest.format !== BUNDLE_FORMAT) {
+    refuse("record-integrity", "bundle.json", "bundle manifest is not a v2 bundle");
+  }
   const read = (path: string): Uint8Array => {
     const bytes = checked.fileBytes.get(path);
     if (bytes === undefined) refuse("record-integrity", path, `authenticated bundle snapshot is missing "${path}"`);
