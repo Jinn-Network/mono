@@ -73,7 +73,7 @@ export {
   runtimeSubmissionBaseline,
   runtimeNativeArtifactPublicationPolicy,
 } from "./runtime/adapter.js";
-export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary, RuntimeEvidenceAdapterOptions, RuntimeEvidenceDispatchInput } from "./runtime/adapter.js";
+export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary, RuntimeEvidenceAdapterOptions, RuntimeEvidenceDispatchInput, RuntimePublicationAdapter } from "./runtime/adapter.js";
 export { createDefaultBenchmarkRuntimeHost } from "./runtime/host-port.js";
 export type {
   BenchmarkRuntimeHost,
