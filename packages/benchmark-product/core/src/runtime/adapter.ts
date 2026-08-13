@@ -6,6 +6,14 @@
  * behind adapters. The native implementation remains the compatibility/reference adapter.
  */
 
+import { createHash } from "node:crypto";
+import type { BenchmarkAccountingDispatch, DigestBearingResourceDescriptor } from "@jinn-network/benchmarking-records";
+import type {
+  PublicationCheck,
+  ReferenceBytesResolver,
+  RuntimeEvidenceContributor,
+  RuntimeEvidenceVerifier,
+} from "@jinn-network/benchmarking-publication";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import { refuse } from "../errors.js";
 import {
@@ -17,6 +25,28 @@ import { createDefaultBenchmarkRuntimeHost, type BenchmarkRuntimeHost } from "./
 import { INSPECT_ADAPTER_ID } from "./inspect/manifest.js";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
+export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";
+export const INSPECT_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/inspect-evidence/v1";
+export const INSPECT_EVAL_LOG_ARTIFACT_ROLE = "https://product.jinn.network/artifact-roles/inspect/eval-log/v1";
+export const INSPECT_SELECTION_CORRELATION_ROLE = "https://product.jinn.network/artifact-roles/inspect/selection-manifest/v1";
+export const INSPECT_RUNTIME_PROVENANCE_ROLE = "https://product.jinn.network/artifact-roles/inspect/runtime-provenance/v1";
+
+type RuntimeRegistrationArtifact = Awaited<ReturnType<RuntimeEvidenceContributor["registration"]>>[number];
+type RuntimeNativeArtifact = BenchmarkAccountingDispatch["nativeArtifacts"][number];
+type RuntimeCorrelation = BenchmarkAccountingDispatch["correlations"][number];
+
+/** Exact bytes are retained by the caller's artifact store; the adapter only carries their descriptors. */
+export interface RuntimeEvidenceAdapterOptions {
+  readonly registrationArtifacts?: readonly RuntimeRegistrationArtifact[];
+}
+/**
+ * This deliberately extends the reusable dispatch input only with opaque captured evidence.
+ * Publication policy (consent, scrubbing, and object-store placement) remains outside the adapter.
+ */
+export type RuntimeEvidenceDispatchInput = Parameters<RuntimeEvidenceContributor["dispatch"]>[0] & {
+  readonly correlations?: BenchmarkAccountingDispatch["correlations"];
+  readonly nativeArtifacts?: BenchmarkAccountingDispatch["nativeArtifacts"];
+};
 
 export interface RuntimeAdapterSummary {
   readonly id: string;
@@ -25,13 +55,23 @@ export interface RuntimeAdapterSummary {
   readonly selectionRequired: boolean;
 }
 
-export interface EvaluationRuntimeAdapter {
+export interface EvaluationRuntimeAdapter extends RuntimeEvidenceContributor, RuntimeEvidenceVerifier {
   readonly summary: RuntimeAdapterSummary;
   readonly nativeArtifactPublication: "not-applicable" | "explicit-consent";
   submissionBaseline(binding: EvaluationRuntimeBinding | undefined): Readonly<Record<string, unknown>>;
+  dispatch(input: RuntimeEvidenceDispatchInput): Promise<{
+    readonly correlations: BenchmarkAccountingDispatch["correlations"];
+    readonly nativeArtifacts: BenchmarkAccountingDispatch["nativeArtifacts"];
+  }>;
 }
 
-const nativeAdapter: EvaluationRuntimeAdapter = {
+interface AdapterDefinition {
+  readonly summary: RuntimeAdapterSummary;
+  readonly nativeArtifactPublication: "not-applicable" | "explicit-consent";
+  readonly profile: string;
+}
+
+const nativeDefinition: AdapterDefinition = {
   summary: {
     id: NATIVE_RUNTIME_ADAPTER_ID,
     label: "Built-in native",
@@ -39,10 +79,10 @@ const nativeAdapter: EvaluationRuntimeAdapter = {
     selectionRequired: false,
   },
   nativeArtifactPublication: "not-applicable",
-  submissionBaseline: (binding) => ({ isolationPolicy: binding?.isolationPolicy ?? VENUE_ISOLATION_POLICY }),
+  profile: NATIVE_RUNTIME_EVIDENCE_PROFILE,
 };
 
-const inspectAdapter: EvaluationRuntimeAdapter = {
+const inspectDefinition: AdapterDefinition = {
   summary: {
     id: INSPECT_ADAPTER_ID,
     label: "Inspect",
@@ -50,11 +90,101 @@ const inspectAdapter: EvaluationRuntimeAdapter = {
     selectionRequired: true,
   },
   nativeArtifactPublication: "explicit-consent",
-  // Runtime identity is already transitively sealed by Benchmark -> Task -> selection manifest.
-  // Isolation is still a visible submission fact: local Python is unrestricted while the OCI
-  // host is container-isolated. Neither posture is allowed to disappear behind the adapter id.
-  submissionBaseline: (binding) => ({ isolationPolicy: binding?.isolationPolicy ?? VENUE_ISOLATION_POLICY }),
+  profile: INSPECT_RUNTIME_EVIDENCE_PROFILE,
 };
+
+function digestMatches(bytes: Uint8Array, descriptor: DigestBearingResourceDescriptor): boolean {
+  return createHash("sha256").update(bytes).digest("hex") === descriptor.digest.sha256;
+}
+
+function uniqueRoles(values: readonly { readonly role: string }[]): boolean {
+  return new Set(values.map((value) => value.role)).size === values.length;
+}
+
+function disclosureCheck(artifacts: readonly RuntimeNativeArtifact[]): PublicationCheck {
+  const valid = artifacts.every((artifact) => artifact.availability === "public"
+    ? artifact.artifact !== undefined
+    : artifact.reason !== undefined && artifact.reason.trim() !== "");
+  return valid
+    ? { name: "runtime-native-artifact-disclosure", status: "pass" }
+    : { name: "runtime-native-artifact-disclosure", status: "fail", detail: "a public artifact needs a descriptor and every withheld artifact needs a non-blank reason" };
+}
+
+function roleCheck(correlations: readonly RuntimeCorrelation[], artifacts: readonly RuntimeNativeArtifact[]): PublicationCheck {
+  return uniqueRoles(correlations) && uniqueRoles(artifacts)
+    ? { name: "runtime-evidence-unique-roles", status: "pass" }
+    : { name: "runtime-evidence-unique-roles", status: "fail", detail: "correlation and native-artifact roles must each be unique per dispatch" };
+}
+
+async function exactEvidenceCheck(
+  name: string,
+  correlations: readonly RuntimeCorrelation[],
+  artifacts: readonly RuntimeNativeArtifact[],
+  references: ReferenceBytesResolver | undefined,
+): Promise<PublicationCheck> {
+  const descriptors = [
+    ...correlations.map((correlation) => correlation.artifact),
+    ...artifacts.flatMap((artifact) => artifact.artifact === undefined ? [] : [artifact.artifact]),
+  ];
+  if (descriptors.length === 0) return { name, status: "pass" };
+  if (references === undefined) return { name, status: "indeterminate", detail: "no exact-byte resolver was supplied" };
+  let unavailable = false;
+  for (const descriptor of descriptors) {
+    const bytes = await references.getExact({ digest: `sha256:${descriptor.digest.sha256}` as Parameters<ReferenceBytesResolver["getExact"]>[0]["digest"] });
+    if (bytes === undefined) {
+      unavailable = true;
+      continue;
+    }
+    if (!digestMatches(bytes, descriptor)) return { name, status: "fail", detail: `exact bytes do not match ${descriptor.digest.sha256}` };
+  }
+  return unavailable ? { name, status: "indeterminate", detail: "one or more exact artifacts are unavailable" } : { name, status: "pass" };
+}
+
+function createAdapter(definition: AdapterDefinition, options: RuntimeEvidenceAdapterOptions = {}): EvaluationRuntimeAdapter {
+  return {
+    ...definition,
+    submissionBaseline: (binding) => ({ isolationPolicy: binding?.isolationPolicy ?? VENUE_ISOLATION_POLICY }),
+    async registration() {
+      // No reserialization or descriptor synthesis: registration bytes are already sealed by the runtime.
+      return options.registrationArtifacts ?? [];
+    },
+    async dispatch(input: RuntimeEvidenceDispatchInput) {
+      // A native source can be absent or collection can fail. Preserve those facts rather than inventing a blob.
+      return { correlations: input.correlations ?? [], nativeArtifacts: input.nativeArtifacts ?? [] };
+    },
+    async verify(input) {
+      const prefix = definition.summary.id === INSPECT_ADAPTER_ID ? "inspect" : "native";
+      const correlations = input.dispatch.correlations;
+      const nativeArtifacts = input.dispatch.nativeArtifacts;
+      return [
+        { name: `${prefix}-runtime-profile`, status: "pass" as const },
+        roleCheck(correlations, nativeArtifacts),
+        disclosureCheck(nativeArtifacts),
+        await exactEvidenceCheck(`${prefix}-exact-native-evidence`, correlations, nativeArtifacts, input.references),
+      ];
+    },
+  };
+}
+
+const nativeAdapter = createAdapter(nativeDefinition);
+const inspectAdapter = createAdapter(inspectDefinition);
+
+/**
+ * Creates the publication-facing adapter for a particular sealed runtime binding. The caller
+ * supplies already-captured registration artifacts, so this tier never chooses disclosure policy
+ * or turns native bytes into a product-specific format.
+ */
+export function createRuntimeEvidenceAdapter(
+  binding?: EvaluationRuntimeBinding,
+  options: RuntimeEvidenceAdapterOptions = {},
+): EvaluationRuntimeAdapter {
+  const adapter = adapterFor(binding);
+  return createAdapter({
+    summary: adapter.summary,
+    nativeArtifactPublication: adapter.nativeArtifactPublication,
+    profile: adapter.profile,
+  }, options);
+}
 
 const ADAPTERS = new Map<string, EvaluationRuntimeAdapter>([
   [nativeAdapter.summary.id, nativeAdapter],
@@ -69,6 +199,12 @@ function adapterFor(binding: EvaluationRuntimeBinding | undefined): EvaluationRu
   }
   return adapter;
 }
+
+/*
+ * Runtime identity is already transitively sealed by Benchmark -> Task -> selection manifest.
+ * Isolation is still a visible submission fact: local Python is unrestricted while the OCI
+ * host is container-isolated. Neither posture is allowed to disappear behind the adapter id.
+ */
 
 export function listRuntimeAdapters(): readonly RuntimeAdapterSummary[] {
   return [...ADAPTERS.values()].map((adapter) => adapter.summary);

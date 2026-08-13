@@ -62,12 +62,18 @@ export type {
 // Runtime-neutral adapter catalog. Lifecycle state stores only an opaque digest-bound binding.
 export {
   NATIVE_RUNTIME_ADAPTER_ID,
+  NATIVE_RUNTIME_EVIDENCE_PROFILE,
+  INSPECT_RUNTIME_EVIDENCE_PROFILE,
+  INSPECT_EVAL_LOG_ARTIFACT_ROLE,
+  INSPECT_SELECTION_CORRELATION_ROLE,
+  INSPECT_RUNTIME_PROVENANCE_ROLE,
+  createRuntimeEvidenceAdapter,
   createRuntimeVenue,
   listRuntimeAdapters,
   runtimeSubmissionBaseline,
   runtimeNativeArtifactPublicationPolicy,
 } from "./runtime/adapter.js";
-export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary } from "./runtime/adapter.js";
+export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary, RuntimeEvidenceAdapterOptions, RuntimeEvidenceDispatchInput } from "./runtime/adapter.js";
 export { createDefaultBenchmarkRuntimeHost } from "./runtime/host-port.js";
 export type {
   BenchmarkRuntimeHost,
