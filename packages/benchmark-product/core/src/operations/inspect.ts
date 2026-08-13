@@ -131,7 +131,11 @@ export function inspectDraft(
         spec.taskSet.kind === "benchmark"
           ? resolveBenchmarkInspection(context.workspaceDir, spec.taskSet.benchmarkSha256)
           : undefined;
-      const runtimeMethod = inspectRuntimeMethodForBinding(context.workspaceDir, spec.evaluationRuntime);
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        context.workspaceDir,
+        spec.evaluationRuntime,
+        resolveAssurance(spec.assurance),
+      );
 
       const inspection: DraftInspection = {
         draftId: document.draftId,

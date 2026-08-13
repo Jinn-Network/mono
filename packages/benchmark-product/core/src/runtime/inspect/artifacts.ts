@@ -3,7 +3,6 @@ import {
   EVALUATION_SPEC_FORMAT_URI,
   EVAL_SEMANTICS_VERSION,
   TASK_PROFILE_FORMAT_URI,
-  evaluateVerdictRule,
   sealEvaluationSpec,
   sealTaskProfile,
   type EvaluationSpec,
@@ -14,6 +13,10 @@ import { isInspectMultiScorerSelection, type InspectSelectionManifest } from "./
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { sha256Hex } from "../../workspace/sealed-store.js";
 import { z } from "zod";
+// This runtime is shared verbatim with the fresh verifier subprocess. The schemas above keep its
+// boundary typed and fail closed before the product accepts its result.
+// @ts-expect-error Product-private runtime asset intentionally has no public declaration surface.
+import { projectInspectCellVerdictRuntime, verifyInspectLogProjectionRuntime } from "./projection-runtime.mjs";
 
 export const INSPECT_TASK_PROFILE_URI = "https://product.jinn.network/profiles/inspect-evaluation/1";
 export const INSPECT_NATIVE_LOG_MEDIA_TYPE = "application/vnd.inspect-ai.eval";
@@ -139,98 +142,12 @@ export interface InspectVerifiedProjection {
   readonly measurements: readonly { readonly name: string; readonly value: boolean }[];
 }
 
-const SCORE_SHAPE_ORDER = ["null", "boolean", "number", "string", "list", "object"] as const;
-
-function equalStrings(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 /** Validate the product projection and return the only verdict authorized by its sealed rule. */
 export function projectInspectCellVerdict(
   summary: InspectCellSummaryV2,
   manifest: InspectSelectionManifest,
 ): "pass" | "fail" | "inconclusive" | null {
-  if (!isInspectMultiScorerSelection(manifest)) {
-    throw new TypeError("Inspect summary v2 requires a multi-scorer selection manifest");
-  }
-  const scorerNames = summary.scorers.map((scorer) => scorer.name);
-  if (!equalStrings(scorerNames, manifest.scorers.map((scorer) => scorer.name))) {
-    throw new TypeError("Inspect scorer inventory differs from the sealed ordered scorer set");
-  }
-  for (const scorer of summary.scorers) {
-    if (scorer.presentSamples + scorer.missingSamples !== summary.observedSamples) {
-      throw new TypeError("Inspect scorer inventory does not account for every observed sample");
-    }
-    const canonicalShapes = SCORE_SHAPE_ORDER.filter((shape) => scorer.valueShapes.includes(shape));
-    if (!equalStrings(scorer.valueShapes, canonicalShapes)) {
-      throw new TypeError("Inspect scorer value shapes are duplicated or non-canonical");
-    }
-  }
-  if (summary.measurements.length !== manifest.scoring.projections.length) {
-    throw new TypeError("Inspect summary measurement count differs from the sealed projections");
-  }
-  const values: Record<string, boolean> = {};
-  summary.measurements.forEach((measurement, index) => {
-    const projection = manifest.scoring.projections[index]!;
-    if (
-      measurement.measurementName !== projection.measurementName
-      || measurement.scorerName !== projection.scorerName
-      || measurement.subScoreKey !== projection.subScoreKey
-      || measurement.missingSamples + measurement.invalidValueSamples > summary.observedSamples
-    ) {
-      throw new TypeError("Inspect summary measurement differs from its sealed projection");
-    }
-    if (summary.terminal === "scored") {
-      if (
-        measurement.value === null
-        || measurement.missingSamples !== 0
-        || measurement.invalidValueSamples !== 0
-      ) {
-        throw new TypeError("scored Inspect summary carries an incomplete projected measurement");
-      }
-      values[measurement.measurementName] = measurement.value;
-    } else if (measurement.value !== null) {
-      throw new TypeError("unscorable Inspect summary carries a projected measurement value");
-    }
-  });
-  if (summary.terminal === "unscorable") return null;
-  if (
-    summary.inspectStatus !== "success"
-    || summary.invalidated
-    || summary.erroredSamples !== 0
-    || summary.expectedSamples === null
-    || summary.expectedSamples !== summary.observedSamples
-  ) {
-    throw new TypeError("scored Inspect summary contradicts its run/sample accounting");
-  }
-  return evaluateVerdictRule(manifest.scoring.verdictRule, values).verdict;
-}
-
-function comparableSummary(summary: InspectCellSummary): Record<string, unknown> {
-  const common = {
-    terminal: summary.terminal,
-    inspectStatus: summary.inspectStatus,
-    expectedSamples: summary.expectedSamples,
-    observedSamples: summary.observedSamples,
-    erroredSamples: summary.erroredSamples,
-    invalidated: summary.invalidated,
-    nativeLogSha256: summary.nativeLogSha256,
-    nativeLogBytes: summary.nativeLogBytes,
-  };
-  return summary.schema === "jinn.network/benchmark-product/inspect-cell-summary/1"
-    ? {
-      summarySchema: summary.schema,
-      ...common,
-      missingScoreSamples: summary.missingScoreSamples,
-      scorer: summary.scorer,
-      measurement: summary.measurement,
-    }
-    : {
-      summarySchema: summary.schema,
-      ...common,
-      scorers: summary.scorers,
-      measurements: summary.measurements,
-    };
+  return projectInspectCellVerdictRuntime(summary, manifest) as "pass" | "fail" | "inconclusive" | null;
 }
 
 /**
@@ -242,65 +159,7 @@ export function verifyInspectLogProjection(
   observation: InspectLogObservation,
   manifest: InspectSelectionManifest,
 ): InspectVerifiedProjection {
-  if (summary.schema !== observation.summarySchema) {
-    throw new TypeError("Inspect log observation and execution summary use different schemas");
-  }
-  const observedComparable = { ...observation } as Record<string, unknown>;
-  delete observedComparable.schema;
-  if (
-    sha256Hex(canonicalJsonBytes(comparableSummary(summary) as never))
-    !== sha256Hex(canonicalJsonBytes(observedComparable as never))
-  ) {
-    throw new TypeError("Inspect execution summary differs from the independently read native log");
-  }
-  if (observation.summarySchema === "jinn.network/benchmark-product/inspect-cell-summary/1") {
-    if (isInspectMultiScorerSelection(manifest)) {
-      throw new TypeError("legacy Inspect observation cannot verify a multi-scorer selection");
-    }
-    if (observation.terminal === "scored" && observation.measurement === null) {
-      throw new TypeError("scored Inspect log observation carries no measurement");
-    }
-    const verdict = observation.terminal === "unscorable"
-      ? null
-      : evaluateVerdictRule(
-        { threshold: { measurement: "inspect-score-pass", op: "eq", value: true } },
-        { "inspect-score-pass": observation.measurement! },
-      ).verdict;
-    if (summary.verdict !== verdict) {
-      throw new TypeError("Inspect execution summary verdict differs from the sealed projection");
-    }
-    return {
-      verdict,
-      measurements: observation.measurement === null
-        ? []
-        : [{ name: "inspect-score-pass", value: observation.measurement }],
-    };
-  }
-  const projectedSummary: InspectCellSummaryV2 = {
-    schema: "jinn.network/benchmark-product/inspect-cell-summary/2",
-    terminal: observation.terminal,
-    inspectStatus: observation.inspectStatus,
-    expectedSamples: observation.expectedSamples,
-    observedSamples: observation.observedSamples,
-    erroredSamples: observation.erroredSamples,
-    invalidated: observation.invalidated,
-    scorers: observation.scorers,
-    measurements: observation.measurements,
-    verdict: summary.verdict,
-    evaluatedAt: summary.evaluatedAt,
-    nativeLogSha256: observation.nativeLogSha256,
-    nativeLogBytes: observation.nativeLogBytes,
-  };
-  const verdict = projectInspectCellVerdict(projectedSummary, manifest);
-  if (summary.verdict !== verdict) {
-    throw new TypeError("Inspect execution summary verdict differs from the sealed projection");
-  }
-  return {
-    verdict,
-    measurements: observation.measurements.flatMap((measurement) => measurement.value === null
-      ? []
-      : [{ name: measurement.measurementName, value: measurement.value }]),
-  };
+  return verifyInspectLogProjectionRuntime(summary, observation, manifest) as InspectVerifiedProjection;
 }
 
 const SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;

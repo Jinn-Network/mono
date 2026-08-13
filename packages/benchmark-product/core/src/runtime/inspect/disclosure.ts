@@ -1,5 +1,6 @@
 import type { VerdictRule } from "@jinn-network/task-execution-profiles";
-import type { EvaluationRuntimeBinding } from "../../domain/draft.js";
+import type { EvaluationRuntimeBinding, ResolvedAssurance } from "../../domain/draft.js";
+import { deriveInspectEvaluationStrategy } from "./assurance.js";
 import { readInspectSelectionManifest } from "./host.js";
 import {
   INSPECT_ADAPTER_ID,
@@ -26,6 +27,10 @@ export interface InspectRuntimeMethodDisclosure {
     readonly epochReducers: readonly string[] | null;
   };
   readonly evaluatorRelationship: "same-execution-scorer";
+  readonly scoreSourceRelationship: "same-execution-scorer";
+  readonly officialEvaluationRelationship: "same-execution-scorer" | "separate-log-verifier";
+  readonly officialEvaluatorCount: number;
+  readonly partyIndependence: "not-established";
 }
 
 function ruleText(rule: VerdictRule): string {
@@ -44,7 +49,9 @@ function ruleText(rule: VerdictRule): string {
 export function describeInspectRuntimeMethod(
   manifest: InspectSelectionManifest,
   selectionManifestSha256: string,
+  assurance?: Readonly<Partial<ResolvedAssurance>>,
 ): InspectRuntimeMethodDisclosure {
+  const strategy = deriveInspectEvaluationStrategy(assurance);
   const projections: readonly InspectScoringProjectionDisclosure[] = isInspectMultiScorerSelection(manifest)
     ? manifest.scoring.projections
     : [{
@@ -71,16 +78,24 @@ export function describeInspectRuntimeMethod(
       }
       : { metrics: null, epochReducers: null },
     evaluatorRelationship: "same-execution-scorer",
+    scoreSourceRelationship: "same-execution-scorer",
+    officialEvaluationRelationship: strategy === "embedded"
+      ? "same-execution-scorer"
+      : "separate-log-verifier",
+    officialEvaluatorCount: assurance?.minVerdicts ?? 1,
+    partyIndependence: "not-established",
   };
 }
 
 export function inspectRuntimeMethodForBinding(
   workspaceDir: string,
   binding: EvaluationRuntimeBinding | undefined,
+  assurance?: Readonly<Partial<ResolvedAssurance>>,
 ): InspectRuntimeMethodDisclosure | undefined {
   if (binding?.adapterId !== INSPECT_ADAPTER_ID) return undefined;
   return describeInspectRuntimeMethod(
     readInspectSelectionManifest(workspaceDir, binding.selectionManifestSha256),
     binding.selectionManifestSha256,
+    assurance,
   );
 }

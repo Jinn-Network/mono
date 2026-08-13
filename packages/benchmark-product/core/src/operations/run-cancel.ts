@@ -70,6 +70,7 @@ import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import { deriveInspectEvaluationStrategy, type InspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -133,13 +134,14 @@ async function acquireFreeVenue(
   workspaceDir: string,
   now: () => string,
   evaluatorCount: number,
+  inspectEvaluationStrategy: InspectEvaluationStrategy,
 ): Promise<
   | { readonly ok: true; readonly venue: LocalVenue }
   | { readonly ok: false; readonly reason: "contention" | "unavailable"; readonly detail: string }
 > {
   let venue: LocalVenue | undefined;
   try {
-    venue = createVenue({ workspaceDir, now, evaluatorCount });
+    venue = createVenue({ workspaceDir, now, evaluatorCount, inspectEvaluationStrategy });
     const preflight = await venue.backend.preflight({});
     if (!preflight.ready) {
       const detail = preflight.detail ?? preflight.error?.message ?? "local venue is not ready";
@@ -270,7 +272,13 @@ export function runCancel(
       // From the SEALED Run record, never the draft — same reasoning as runLaunch/runResume.
       const minVerdicts = runRecord.policy.evaluation?.minVerdicts ?? 1;
 
-      const acquired = await acquireFreeVenue(createVenue, clockedContext.workspaceDir, context.clock, minVerdicts);
+      const acquired = await acquireFreeVenue(
+        createVenue,
+        clockedContext.workspaceDir,
+        context.clock,
+        minVerdicts,
+        deriveInspectEvaluationStrategy(runRecord.policy.evaluation),
+      );
       if (!acquired.ok) {
         if (acquired.reason === "contention") {
           return { phase: "requested", reason: "venue-contention", detail: acquired.detail };

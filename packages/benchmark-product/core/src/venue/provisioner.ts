@@ -579,7 +579,8 @@ export interface InspectProvisionerOptions {
   readonly selectionManifestSha256: string;
   readonly manifest: InspectSelectionManifest;
   readonly host: InspectHostBinding;
-  readonly evaluator: VenueEvaluatorSigner;
+  /** Present only for the exact embedded direct-check strategy. */
+  readonly embeddedEvaluator?: VenueEvaluatorSigner;
 }
 
 function inspectProvisionerContract(
@@ -636,7 +637,7 @@ function inspectProvisionerContract(
       await rename(nativeSource, join(paths.out, "inspect-log"));
       await rename(summarySource, join(paths.out, "inspect-summary"));
 
-      if (summary.terminal === "scored") {
+      if (summary.terminal === "scored" && options.embeddedEvaluator !== undefined) {
         if (summary.verdict === null) throw new Error("Inspect scored terminal carries no verdict");
         let measurements: Array<{ readonly name: string; readonly value: boolean }>;
         if (summary.schema === "jinn.network/benchmark-product/inspect-cell-summary/1") {
@@ -692,7 +693,7 @@ function inspectProvisionerContract(
           statementBytes: unsigned,
           evaluatorId: INSPECT_EMBEDDED_EVALUATOR_ID,
           expectedEvaluationSpecificationSha256: evaluationSpecSha256,
-          signer: options.evaluator.signer,
+          signer: options.embeddedEvaluator.signer,
         });
         await writeFile(join(paths.out, "verdict"), envelope, { mode: 0o600, flag: "wx" });
       }

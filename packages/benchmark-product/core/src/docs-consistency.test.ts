@@ -110,6 +110,10 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("`read_eval_log`");
     expect(guide).toContain("inspect view --log-dir");
     expect(guide).toContain("same-execution-scorer");
+    expect(guide).toContain("`separate-log-verification`");
+    expect(guide).toContain('`partyIndependence:\n"not-established"`');
+    expect(guide).toMatch(/embedded score is source evidence and\s+is not counted as another Matrix vote/is);
+    expect(guide).toMatch(/not independent\s+rescoring, method diversity, a separate organization, or real-world party\s+independence/is);
     expect(guide).toMatch(/not called independent/i);
     expect(guide).toMatch(/summary.*not an EvalLog/is);
     expect(guide).toMatch(/no ambient credential variables/i);

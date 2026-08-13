@@ -320,7 +320,16 @@ const VerdictStatementSchema = z.looseObject({
     evaluationSpecification: z.looseObject({
       digest: z.looseObject({ sha256: z.string().regex(/^[a-f0-9]{64}$/) }),
     }),
+    evaluationMethod: z.looseObject({
+      name: z.string().min(1),
+      digest: z.looseObject({ sha256: z.string().regex(/^[a-f0-9]{64}$/) }),
+    }).optional(),
     measurements: z.array(z.looseObject({ name: z.string().min(1), value: MeasurementValueSchema })).optional(),
+    evidence: z.array(z.looseObject({
+      name: z.string().min(1),
+      digest: z.looseObject({ sha256: z.string().regex(/^[a-f0-9]{64}$/) }),
+      mediaType: z.string().optional(),
+    })).optional(),
     evaluatedAt: z.string().min(1),
     limitations: z.array(z.string()).optional(),
   }),
@@ -332,6 +341,8 @@ export interface VerdictStatementView {
   readonly evaluationSpecificationSha256: string;
   readonly measurements: Record<string, boolean | number | string>;
   readonly evaluatedAt: string;
+  readonly evaluationMethod?: { readonly name: string; readonly sha256: string };
+  readonly evidence?: readonly { readonly name: string; readonly sha256: string; readonly mediaType?: string }[];
   readonly evaluatorExtensions?: Readonly<Record<string, unknown>>;
   readonly limitations?: readonly string[];
 }
@@ -374,6 +385,19 @@ function parseVerdictStatementJson(json: unknown, label: string): VerdictStateme
     evaluationSpecificationSha256: predicate.evaluationSpecification.digest.sha256,
     measurements,
     evaluatedAt: predicate.evaluatedAt,
+    ...(predicate.evaluationMethod === undefined ? {} : {
+      evaluationMethod: {
+        name: predicate.evaluationMethod.name,
+        sha256: predicate.evaluationMethod.digest.sha256,
+      },
+    }),
+    ...(predicate.evidence === undefined ? {} : {
+      evidence: predicate.evidence.map((entry) => ({
+        name: entry.name,
+        sha256: entry.digest.sha256,
+        ...(entry.mediaType === undefined ? {} : { mediaType: entry.mediaType }),
+      })),
+    }),
     ...(Object.keys(evaluatorExtensions).length === 0 ? {} : { evaluatorExtensions }),
     ...(predicate.limitations === undefined ? {} : { limitations: predicate.limitations }),
   };

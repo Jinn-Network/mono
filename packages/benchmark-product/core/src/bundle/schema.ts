@@ -65,7 +65,7 @@ export type BundleVerdictCatalog = z.infer<typeof BundleVerdictCatalogSchema>;
 
 const AssemblyVerdictSchema = z.object({
   sha256: Sha256HexSchema,
-  relationship: z.literal("same-execution-scorer").optional(),
+  relationship: z.enum(["same-execution-scorer", "separate-log-verifier"]).optional(),
   evalTaskSha256: Sha256HexSchema.optional(),
   evalSubmissionSha256: Sha256HexSchema.optional(),
   evalDeliverySha256: Sha256HexSchema.optional(),
@@ -113,7 +113,7 @@ export const BundleAssemblyHeaderSchema = z.object({
     evaluations: z.array(z.object({
       cellKey: z.string().min(1),
       evalIndex: z.number().int().positive(),
-      relationship: z.literal("same-execution-scorer").optional(),
+      relationship: z.enum(["same-execution-scorer", "separate-log-verifier"]).optional(),
       evaluator: z.string().optional(),
       evalTaskSha256: Sha256HexSchema.optional(),
       evalSubmissionSha256: Sha256HexSchema.optional(),

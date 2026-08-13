@@ -32,6 +32,7 @@ import type { RunRecord } from "@jinn-network/benchmarking-records";
 import type { BackendCapabilities } from "@jinn-network/task-execution-backend";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition, type LifecycleState } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -270,7 +271,13 @@ export function runQuote(
       // audit timestamps are pinned to one instant.
       let venue: LocalVenue;
       try {
-        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock });
+        const resolvedAssurance = resolveAssurance(document.spec.assurance);
+        venue = createVenue({
+          workspaceDir: clockedContext.workspaceDir,
+          now: context.clock,
+          evaluatorCount: resolvedAssurance.minVerdicts,
+          inspectEvaluationStrategy: deriveInspectEvaluationStrategy(resolvedAssurance),
+        });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }

@@ -17,7 +17,7 @@
  */
 
 import { sealRun } from "@jinn-network/benchmarking-records";
-import type { DraftDocument } from "../domain/draft.js";
+import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
@@ -70,6 +70,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const runtimeMethod = inspectRuntimeMethodForBinding(
         clockedContext.workspaceDir,
         document.spec.evaluationRuntime,
+        resolveAssurance(document.spec.assurance),
       );
 
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);

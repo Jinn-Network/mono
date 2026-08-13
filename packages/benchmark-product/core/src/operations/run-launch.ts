@@ -57,6 +57,7 @@ import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -225,6 +226,7 @@ export function runLaunch(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          inspectEvaluationStrategy: deriveInspectEvaluationStrategy(loaded.runRecord.policy.evaluation),
           ...(deps.solveStartDelayMsForTesting !== undefined
             ? { solveStartDelayMsForTesting: deps.solveStartDelayMsForTesting }
             : {}),
@@ -353,6 +355,7 @@ export function runResume(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          inspectEvaluationStrategy: deriveInspectEvaluationStrategy(loaded.runRecord.policy.evaluation),
           ...(deps.solveStartDelayMsForTesting !== undefined
             ? { solveStartDelayMsForTesting: deps.solveStartDelayMsForTesting }
             : {}),

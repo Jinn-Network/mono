@@ -8,14 +8,15 @@ import {
   defineEvaluatorRegistration,
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
-  evaluateVerdictRule,
   parserAllowlistKey,
 } from "@jinn-network/task-execution-profiles";
+import { verifyInspectLogProjectionRuntime } from "./projection-runtime.mjs";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf8", { fatal: true });
 const MAX_WORKER_OUTPUT_BYTES = 1024 * 1024;
 const INSPECT_LOG_MEDIA_TYPE = "application/vnd.inspect-ai.eval";
+const INSPECT_SUMMARY_MEDIA_TYPE = "application/vnd.jinn.inspect-summary+json";
 
 function operational(code, detail, cause) {
   return new EvaluationOperationalError({
@@ -25,18 +26,6 @@ function operational(code, detail, cause) {
     safeDetail: detail,
     ...(cause === undefined ? {} : { cause }),
   });
-}
-
-function canonical(value) {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
-  }
-  return value;
-}
-
-function equalJson(left, right) {
-  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 }
 
 function sha256(bytes) {
@@ -67,103 +56,48 @@ function parseSummary(bytes) {
   return value;
 }
 
-function comparableSummary(summary) {
-  const common = {
-    terminal: summary.terminal,
-    inspectStatus: summary.inspectStatus,
-    expectedSamples: summary.expectedSamples,
-    observedSamples: summary.observedSamples,
-    erroredSamples: summary.erroredSamples,
-    invalidated: summary.invalidated,
-    nativeLogSha256: summary.nativeLogSha256,
-    nativeLogBytes: summary.nativeLogBytes,
-  };
-  return summary.schema.endsWith("/1")
-    ? {
-      summarySchema: summary.schema,
-      ...common,
-      missingScoreSamples: summary.missingScoreSamples,
-      scorer: summary.scorer,
-      measurement: summary.measurement,
-    }
-    : {
-      summarySchema: summary.schema,
-      ...common,
-      scorers: summary.scorers,
-      measurements: summary.measurements,
-    };
-}
-
-function projectObservation(manifest, summary, observation) {
-  if (
-    observation?.schema !== "jinn.network/benchmark-product/inspect-log-observation/1"
-    || observation.summarySchema !== summary.schema
-  ) throw operational("DATA_LOSS", "Inspect verifier returned an invalid observation");
-  const observedComparable = { ...observation };
-  delete observedComparable.schema;
-  if (!equalJson(comparableSummary(summary), observedComparable)) {
-    throw operational("DATA_LOSS", "Inspect execution summary differs from the independently read native log");
-  }
-  if (observation.terminal !== "scored") {
-    throw operational("FAILED_PRECONDITION", "Inspect native log is unscorable");
-  }
-  if (observation.summarySchema.endsWith("/1")) {
-    if (manifest.scoring !== undefined || typeof observation.measurement !== "boolean") {
-      throw operational("DATA_LOSS", "Inspect legacy score projection is invalid");
-    }
-    const measurements = [{ name: "inspect-score-pass", value: observation.measurement }];
-    const verdict = evaluateVerdictRule(
-      { threshold: { measurement: "inspect-score-pass", op: "eq", value: true } },
-      { "inspect-score-pass": observation.measurement },
-    ).verdict;
-    if (summary.verdict !== verdict) throw operational("DATA_LOSS", "Inspect summary verdict is inconsistent");
-    return { verdict, measurements };
-  }
-  if (!Array.isArray(observation.measurements) || observation.measurements.length !== manifest.scoring?.projections.length) {
-    throw operational("DATA_LOSS", "Inspect multi-scorer projection is incomplete");
-  }
-  const values = {};
-  const measurements = observation.measurements.map((measurement, index) => {
-    const projection = manifest.scoring.projections[index];
-    if (
-      measurement.measurementName !== projection.measurementName
-      || measurement.scorerName !== projection.scorerName
-      || measurement.subScoreKey !== projection.subScoreKey
-      || measurement.missingSamples !== 0
-      || measurement.invalidValueSamples !== 0
-      || typeof measurement.value !== "boolean"
-    ) throw operational("DATA_LOSS", "Inspect multi-scorer projection differs from the sealed method");
-    values[measurement.measurementName] = measurement.value;
-    return { name: measurement.measurementName, value: measurement.value };
-  });
-  const verdict = evaluateVerdictRule(manifest.scoring.verdictRule, values).verdict;
-  if (summary.verdict !== verdict) throw operational("DATA_LOSS", "Inspect summary verdict is inconsistent");
-  return { verdict, measurements };
-}
-
 async function spawnBounded(executable, args, env, signal) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       env,
       stdio: ["ignore", "pipe", "pipe"],
-      signal,
     });
     const stdout = [];
     let bytes = 0;
+    let spawnError;
+    let outputExceeded = false;
+    let killTimer;
+    const cancel = () => {
+      child.kill("SIGTERM");
+      killTimer ??= setTimeout(() => child.kill("SIGKILL"), 10_000);
+      killTimer.unref();
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
     child.stdout.on("data", (chunk) => {
       bytes += chunk.length;
-      if (bytes > MAX_WORKER_OUTPUT_BYTES) child.kill("SIGKILL");
-      else stdout.push(chunk);
+      if (bytes > MAX_WORKER_OUTPUT_BYTES) {
+        outputExceeded = true;
+        child.kill("SIGKILL");
+      } else stdout.push(chunk);
     });
     child.stderr.resume();
     child.once("error", (cause) => {
-      reject(signal.aborted
-        ? operational("CANCELLED", "Inspect log verification was cancelled", cause)
-        : operational("UNAVAILABLE", "Inspect log verifier could not start", cause));
+      spawnError = cause;
     });
-    child.once("exit", (code, exitSignal) => {
+    child.once("close", (code, exitSignal) => {
+      signal.removeEventListener("abort", cancel);
+      if (killTimer !== undefined) clearTimeout(killTimer);
       if (signal.aborted) {
-        reject(operational("CANCELLED", "Inspect log verification was cancelled"));
+        reject(operational("CANCELLED", "Inspect log verification was cancelled", spawnError));
+        return;
+      }
+      if (spawnError !== undefined) {
+        reject(operational("UNAVAILABLE", "Inspect log verifier could not start", spawnError));
+        return;
+      }
+      if (outputExceeded) {
+        reject(operational("RESOURCE_EXHAUSTED", "Inspect log verifier exceeded its output limit"));
         return;
       }
       if (code !== 0) {
@@ -272,9 +206,24 @@ export function createInspectLogVerifierRegistration(options) {
           nativeLog.descriptor.mediaType !== INSPECT_LOG_MEDIA_TYPE
           || nativeLog.descriptor.digest?.sha256 !== sha256(nativeLog.bytes)
         ) throw operational("DATA_LOSS", "Inspect native log descriptor is inconsistent");
+        if (
+          summaryMaterial.descriptor.mediaType !== INSPECT_SUMMARY_MEDIA_TYPE
+          || summaryMaterial.descriptor.digest?.sha256 !== sha256(summaryMaterial.bytes)
+        ) throw operational("DATA_LOSS", "Inspect summary descriptor is inconsistent");
         const summary = parseSummary(summaryMaterial.bytes);
         const observation = await readObservation(options, nativeLog, attempt, deadlineSignal);
-        const projected = projectObservation(options.manifest, summary, observation);
+        if (observation?.schema !== "jinn.network/benchmark-product/inspect-log-observation/1") {
+          throw operational("DATA_LOSS", "Inspect verifier returned an invalid observation");
+        }
+        let projected;
+        try {
+          projected = verifyInspectLogProjectionRuntime(summary, observation, options.manifest);
+        } catch (cause) {
+          throw operational("DATA_LOSS", "Inspect native-log projection does not match the sealed execution summary", cause);
+        }
+        if (projected.verdict === null) {
+          throw operational("FAILED_PRECONDITION", "Inspect native log is unscorable");
+        }
         return {
           detailedOutcome: {
             relationship: "separate-log-verifier",

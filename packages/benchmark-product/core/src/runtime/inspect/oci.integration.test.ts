@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseMatrix, parseReport, sealMatrix } from "@jinn-network/benchmarking-records";
-import { createDraft } from "../../operations/drafts.js";
+import { createDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { selectInspectEvaluation } from "../../operations/inspect-runtime.js";
 import { runCollect } from "../../operations/run-collect.js";
@@ -59,6 +59,10 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     };
     expect(initWorkspace(context).ok).toBe(true);
     expect(createDraft(context, { draftId: "inspect-sandbox", name: "OCI Inspect sandbox fixture" }).ok).toBe(true);
+    expect(updateDraft(context, {
+      draftId: "inspect-sandbox",
+      patch: { assurance: { preset: "separate-evaluator" } },
+    }).ok).toBe(true);
     const selected = await selectInspectEvaluation(context, {
       draftId: "inspect-sandbox",
       execution: "oci",
@@ -98,12 +102,16 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
     expect(collected.ok, JSON.stringify(collected)).toBe(true);
     if (!collected.ok) throw new Error("unreachable");
     const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
-    expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
+    expect(
+      matrix.completeness,
+      JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, "inspect-sandbox") }),
+    ).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
     expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
     const journal = readRunJournalEntries(workspaceDir, "inspect-sandbox");
     const deliveries = journal.filter((entry) => entry.kind === "delivery");
     expect(deliveries).toHaveLength(2);
     for (const delivery of deliveries) {
+      expect(delivery.outputs.map((output) => output.name).sort()).toEqual(["inspect-log", "inspect-summary"]);
       const summaryOutput = delivery.outputs.find((output) => output.name === "inspect-summary");
       const summary = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, summaryOutput!.sha256)));
       expect(summary).toMatchObject({
@@ -128,8 +136,17 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       expect(summary.sandbox.operationCount).toBeGreaterThanOrEqual(3);
       expect(summary.sandbox.eventDigest).toMatch(/^[a-f0-9]{64}$/u);
     }
+    const evaluations = journal.filter((entry) => entry.kind === "evaluation");
+    expect(evaluations).toHaveLength(2);
+    expect(evaluations.every((entry) =>
+      entry.evalTaskSha256 !== undefined
+      && entry.evalDeliverySha256 !== undefined
+      && entry.evalAttempt !== undefined
+      && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer"
+    )).toBe(true);
     expect((await runReport(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
-    expect((await runVerify(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    const verified = await runVerify(context, { draftId: "inspect-sandbox" });
+    expect(verified.ok, JSON.stringify(verified)).toBe(true);
     const published = await runPublish(context, { draftId: "inspect-sandbox", includeNativeArtifacts: true });
     expect(published.ok, JSON.stringify(published)).toBe(true);
     if (!published.ok) throw new Error("unreachable");

@@ -51,6 +51,11 @@ import {
   describeInspectRuntimeMethod,
   type InspectRuntimeMethodDisclosure,
 } from "../runtime/inspect/disclosure.js";
+import {
+  deriveInspectEvaluationStrategy,
+  INSPECT_SEPARATE_ASSURANCE_LIMITATIONS,
+  inspectLogVerifierMethod,
+} from "../runtime/inspect/assurance.js";
 import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import { buildPublicAssets } from "./assets.js";
 import { verifyBundleSnapshot, type VerifyBundleSnapshotDeps } from "./manifest.js";
@@ -399,6 +404,7 @@ export async function verifyPublicBundle(
   const inspectClosureByCell = new Map<string, {
     readonly summary: InspectCellSummary;
     readonly selection: InspectSelectionManifest;
+    readonly selectionSha256: string;
     readonly arm: InspectArmConfiguration;
     readonly nativeLog: { readonly name: string; readonly sha256: string };
     readonly verdictOutput?: { readonly name: string; readonly sha256: string };
@@ -514,6 +520,7 @@ export async function verifyPublicBundle(
       inspectClosureByCell.set(edge.cellKey, {
         summary,
         selection,
+        selectionSha256: selectionSha256 as string,
         arm,
         nativeLog,
         ...(verdictOutput === undefined ? {} : { verdictOutput }),
@@ -544,14 +551,28 @@ export async function verifyPublicBundle(
   unique(assembly.header.graph.evaluations.map((edge) => `${edge.cellKey}:${edge.evalIndex}`), "verification.graph.evaluations.coordinates");
   const evaluationsByVerdict = new Map<string, Array<(typeof assembly.header.graph.evaluations)[number]>>();
   const consumedEvaluationSubmissions = new Set<string>();
+  const inspectEvaluationStrategy = deriveInspectEvaluationStrategy(run.policy.evaluation);
   for (const edge of assembly.header.graph.evaluations) {
     const cell = cellsByKey.get(edge.cellKey);
     if (cell === undefined) refuse("record-integrity", "evidence-closure", "evaluation graph names an unknown cell");
     if (edge.evalIndex < 1 || edge.evalIndex > minVerdicts) refuse("record-integrity", "evidence-closure", "evaluation graph index is outside Run policy");
     const successful = edge.verdictSha256 !== undefined;
     const embedded = edge.relationship === "same-execution-scorer";
+    const separateInspectVerifier = edge.relationship === "separate-log-verifier";
+    const inspectClosure = inspectClosureByCell.get(cell.cellKey);
+    if (
+      successful
+      && inspectClosure !== undefined
+      && inspectEvaluationStrategy === "separate-log-verification"
+      && !separateInspectVerifier
+    ) {
+      refuse("record-integrity", "evidence-closure", "separate Inspect verdict omits its verifier relationship");
+    }
     if (successful) {
       if (embedded) {
+        if (inspectEvaluationStrategy !== "embedded") {
+          refuse("record-integrity", "evidence-closure", "separate Inspect assurance contains an embedded Matrix vote");
+        }
         if (
           edge.evaluator !== INSPECT_EMBEDDED_EVALUATOR_ID
           || edge.evalTaskSha256 !== undefined || edge.evalSubmissionSha256 !== undefined
@@ -591,6 +612,18 @@ export async function verifyPublicBundle(
         || edge.evalSubmissionSha256 === undefined || edge.evalAttempt === undefined
         || edge.evalDeliverySha256 === undefined || edge.evaluationTerminal !== undefined
       ) refuse("record-integrity", "evidence-closure", "successful evaluation lacks its exact Task/Submission/attempt/Delivery closure");
+      if (separateInspectVerifier) {
+        const closure = inspectClosureByCell.get(cell.cellKey);
+        if (
+          inspectEvaluationStrategy !== "separate-log-verification"
+          || closure === undefined
+          || closure.verdictOutput !== undefined
+          || closure.summary.terminal !== "scored"
+          || edge.evaluator === INSPECT_EMBEDDED_EVALUATOR_ID
+        ) {
+          refuse("record-integrity", "evidence-closure", "separate Inspect verification is not bound to a scored solve-only native-log closure");
+        }
+      }
     } else if (
       edge.evaluationTerminal !== "could-not-grade"
       || cell.evaluationTerminal !== "could-not-grade"
@@ -728,6 +761,44 @@ export async function verifyPublicBundle(
         || !view.limitations?.includes("same-execution-scorer")
       )) {
         refuse("record-integrity", "evidence-closure", `verdict ${declared.sha256} does not disclose its same-execution scorer relationship`);
+      }
+      if (declared.relationship === "separate-log-verifier") {
+        const closure = inspectClosureByCell.get(cell.cellKey);
+        if (closure === undefined) {
+          refuse("record-integrity", "evidence-closure", `verdict ${declared.sha256} has no Inspect solve closure`);
+        }
+        const requiredLimitations = [
+          "score-source:same-execution-scorer",
+          "verification-process:separate",
+          "self-run-operator-custody",
+          "not-independent-rescoring",
+          "not-separate-real-world-party",
+          "not-method-diversity",
+        ];
+        const expectedMethod = inspectLogVerifierMethod(closure.selection, closure.selectionSha256);
+        const expectedMeasurements = closure.summary.schema === "jinn.network/benchmark-product/inspect-cell-summary/1"
+          ? [{ name: "inspect-score-pass", value: closure.summary.measurement! }]
+          : closure.summary.measurements.map((measurement) => ({
+            name: measurement.measurementName,
+            value: measurement.value!,
+          }));
+        if (
+          closure.summary.verdict !== view.verdict
+          || view.evaluatorId === INSPECT_EMBEDDED_EVALUATOR_ID
+          || view.evaluationMethod?.name !== expectedMethod.name
+          || view.evaluationMethod.sha256 !== expectedMethod.digest!.sha256
+          || requiredLimitations.some((limitation) => !view.limitations?.includes(limitation))
+          || !equalBytes(
+            canonicalJsonBytes(readOrderedVerdictMeasurements(verdictBytes)),
+            canonicalJsonBytes(expectedMeasurements),
+          )
+          || !view.evidence?.some((evidence) =>
+            evidence.name === "inspect-native-log"
+            && evidence.sha256 === closure.nativeLog.sha256
+            && evidence.mediaType === "application/vnd.inspect-ai.eval")
+        ) {
+          refuse("record-integrity", "evidence-closure", `verdict ${declared.sha256} is not the locked separate Inspect log verification claim`);
+        }
       }
       if (
         view.evaluatorId !== declared.evaluator || view.verdict !== declared.verdict
@@ -870,6 +941,9 @@ export async function verifyPublicBundle(
     reportRecord: verifiedReport.record,
     draftId: assembly.header.draftId,
     assurancePreset: assembly.header.assurancePreset,
+    ...(inspectSelections.size > 0 && inspectEvaluationStrategy === "separate-log-verification"
+      ? { additionalLimitations: INSPECT_SEPARATE_ASSURANCE_LIMITATIONS }
+      : {}),
     ...(assembly.header.rehearsal === undefined ? {} : { rehearsal: assembly.header.rehearsal }),
   });
   checks.push("claim-consistency");
@@ -899,7 +973,11 @@ export async function verifyPublicBundle(
     : undefined;
   const runtimeMethod = bundledInspectSelection === undefined
     ? undefined
-    : describeInspectRuntimeMethod(bundledInspectSelection[1], bundledInspectSelection[0]);
+    : describeInspectRuntimeMethod(
+      bundledInspectSelection[1],
+      bundledInspectSelection[0],
+      run.policy.evaluation,
+    );
   return {
     identity: checked.identity,
     checks,
