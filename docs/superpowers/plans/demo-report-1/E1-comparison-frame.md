@@ -1,16 +1,16 @@
 # E1 — Comparison Frame and Citation Map
 
-**Version:** 0.6 (native-Claude baseline amendment)
+**Version:** 0.7 (E3 closure-preparation amendment)
 **Date:** 2026-08-13
 **Author:** E1 method-stream agent
 **Program:** `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` (Stage 2, packet E1)
-**Status:** **Frame approved by the operator (Ritsu).** Nothing is locked — the lock happens at the sealed Run record, after E2's power numbers and E3's red-team register close. One open operator question remains (§2.8).
+**Status:** **Frame approved by the operator (Ritsu).** Nothing is locked — the lock happens at the sealed Run record, after E2's power numbers and E3's pre-lock dispositions close. The publication framing is resolved (§2.8); network publication remains outside this program.
 
 ---
 
 ## 0. What this document is for
 
-Demo Report #1 is the product's first published benchmark. Its motivation section has to be real: there must be a live public argument the report speaks into, and the report has to close a gap that is actually open. Part 1 establishes both with verified sources. Part 2 records the approved comparison design, and keeps the rejected alternatives on the page so the choice stays auditable.
+Demo Report #1 is the product's first sealed benchmark report bundle. Its motivation section has to be real: there must be a live public argument the report speaks into, and the report has to close a gap that is actually open. Part 1 establishes both with verified sources. Part 2 records the approved comparison design, and keeps the rejected alternatives on the page so the choice stays auditable. This program stops at the independently recomputed publication handoff; it does not claim the report is published.
 
 Two things this document does not do. It does not design engineering (that is R1–R5 and P1–P5). It does not choose statistics (that is C3/R4 — every number in the report comes from a named `BENCHMARKING_METHOD_REGISTRY` method, and this document proposes no estimator).
 
@@ -18,13 +18,14 @@ Two things this document does not do. It does not design engineering (that is R1
 
 | Question | Decision |
 |---|---|
-| **Frame** | **Mechanism vs mechanism** — same agent, same bytes, delivery varied. The higher-pull public-skill on/off alternative is declined for this report and stays available as a second report (§2.6). |
+| **Frame** | **Mechanism vs mechanism** — same agent, same instruction-body bytes, delivery varied. The Skill wrapper retains its required upstream frontmatter; only the instruction body is byte-identical. The higher-pull public-skill on/off alternative is declined for this report and stays available as a second report (§2.6). |
 | **Arm count** | **Three arms.** Arm C is the manipulation check (§2.2). The two-arm fallback is not taken. |
-| **Content artifact** | **`anthropics/skills`** (Apache-2.0 verified; the four source-available document skills excluded). The SWE-Skills-Bench upgrade path stays blocked on independent verification (§2.3). |
+| **Content source** | **`anthropics/skills`** (the four source-available document skills excluded; the selected folder requires its own compatible license). The SWE-Skills-Bench C1 path is formally withdrawn for Demo-1 (§2.3). |
 | **Public pre-registration (E4)** | **Committed**, conditional on the P5 e2e gate being green (§2.10). |
 | **Flat-file mechanism (2026-08-13)** | **Native root `CLAUDE.md`.** P2 stopped after proving Claude Code does not load `AGENTS.md`; the operator chose the runtime-native file rather than an import shim or prompt injection. The motivating public debate is retained, but the measured and reported comparison is Skill minus CLAUDE.md. |
+| **Report framing (2026-08-13)** | **Name the Vercel comparison and Hacker News objection directly and respectfully.** Attribute only source-supported facts, describe Demo-1 as a controlled follow-up rather than a correction or takedown, and require the independent arithmetic/source fact-check in E3 J7. |
 
-Still open: publication framing (§2.8). Arm C is now the true no-file control and therefore has an intentionally unverifiable loadout axis. P2 owns verification of the resolved product-side placement and exclusion path.
+No comparison-frame operator question remains open. Arm C is the true no-file control and therefore has an intentionally unverifiable loadout axis. P2 owns verification of the resolved product-side placement and exclusion path. Publication topology, author-source identity, report origin, discovery, mirrors, Explorer ingestion, key custody, and errata policy remain decisions for the separate publication program.
 
 ---
 
@@ -84,7 +85,7 @@ These matter most, because if either already ran our experiment, the demo report
 
 ## 1.6 The gap this report closes
 
-**No verified published study holds the instruction bytes constant and varies only the delivery mechanism between a Claude Code progressive-disclosure skill and native always-on root `CLAUDE.md`.**
+**No verified published study holds the instruction-body bytes constant and varies only the delivery mechanism between a Claude Code progressive-disclosure skill and native always-on root `CLAUDE.md`.**
 
 Stated precisely, and with each clause backed above:
 
@@ -95,7 +96,7 @@ Stated precisely, and with each clause backed above:
 5. The two studies that do hold content fixed vary organization *within* the skill mechanism, not the mechanism itself (§1.5) — subject to the SkillJuror verification item.
 6. Practitioners are choosing between these mechanisms today at scale, and the mechanism they overwhelmingly choose is the one with the most contradictory evidence (§1.4, Harness Engineering).
 
-The honest framing of the motivation is therefore not "nobody has studied this." It is: **this question has been argued publicly with numbers on both sides, and every published number confounds what the instructions say with how they are delivered. We hold the bytes fixed and vary only the delivery.**
+The honest framing of the motivation is therefore not "nobody has studied this." It is: **this question has been argued publicly with numbers on both sides, and every published number confounds what the instructions say with how they are delivered. We hold the instruction-body bytes fixed and vary delivery; the Skill's upstream routing frontmatter remains a measured mechanism difference.**
 
 ## 1.7 Verification log
 
@@ -111,7 +112,7 @@ Sources seen in search results but **not fetched, and therefore not cited**: HAN
 
 ## 2.1 Approved frame: mechanism versus mechanism
 
-**Same agent. Same model. Same effort. Same tasks. Same instruction bytes. Only the delivery mechanism differs.**
+**Same agent. Same model. Same effort. Same tasks. Same instruction-body bytes. Only the delivery mechanism differs.**
 
 | Arm | Delivery | What the agent sees |
 |---|---|---|
@@ -119,7 +120,7 @@ Sources seen in search results but **not fetched, and therefore not cited**: HAN
 | **B — flat** | `CLAUDE.md` at repository root, loaded by Claude Code's native project-memory discovery | Body always in context, in full, every turn |
 | **C — neither** | True no-file control: no loadout and no experiment-created instruction path | Nothing; the loadout axis is truthfully `unverifiable` |
 
-The measured quantity is the effect of the *delivery mechanism*, with content held byte-identical. This is exactly the contrast the public argument needs and exactly the one no published work supplies.
+The measured quantity is the effect of the *delivery mechanism*, with the instruction body held byte-identical. The Skill's upstream frontmatter is additional delivered text and part of that mechanism. This is exactly the contrast the public argument needs and exactly the one no published work supplies.
 
 ## 2.2 Arms: three, approved
 
@@ -167,10 +168,10 @@ Requirements the content must satisfy:
 | Candidate | License status | Assessment |
 |---|---|---|
 | **C2 (approved) — a skill from [github.com/anthropics/skills](https://github.com/anthropics/skills)** | **Apache-2.0 for many skills, verified at the repository level.** The four document skills (`docx`, `pdf`, `pptx`, `xlsx`) are source-available and **must be excluded**. Because the repository is not uniformly licensed, **the chosen skill's license is confirmed from its own subfolder before lock** — repository-level verification is not sufficient. | License verified live. Authored as a skill by the mechanism's originator, which removes the strongest objection to a negative result for arm A ("you wrote a bad skill"). Ships an upstream `description`, satisfying §2.4. Constraint: the chosen skill's domain must plausibly bear on a SWE-shaped slate; the creative and enterprise categories do not, so the viable set is narrow and must be named before lock. |
-| **C1 (preferred upgrade, blocked) — a skill from the 49-skill SWE-Skills-Bench set** | **Unverified. Artifact repository returned 404 (§1.7).** | Strongest option on the merits: third-party authored, domain-matched, and already measured on/off in published work — so the "does this content do anything" prior is partly known, and we could deliberately select from the seven skills the paper reports as producing meaningful gains, which are the only ones where a mechanism contrast is measurable at all. **Blocked until availability and license verify.** Do not adopt on the strength of the paper alone. |
+| **C1 (withdrawn for Demo-1) — a skill from the 49-skill SWE-Skills-Bench set** | **Unverified. Artifact repository returned 404 (§1.7).** | Strong option on the merits, but unavailable for independent source-and-license verification. The operator fixed C2 as Demo-1's source; C1 is not a live upgrade or late switching path for this run. |
 | **C3 (not recommended) — content derived from the target repositories' own public docs** | Per-repository OSS licenses; heterogeneous. | Highest ecological validity — this is what real AGENTS.md files contain — but the worst risk profile. Leakage risk is highest (a repo's own docs may touch the very issue under test), licensing is per-repo rather than uniform, and if we generate or summarize the content ourselves we inherit exactly the confound the ETH Zurich study identified with LLM-generated context files, while losing "public and licensed." |
 
-**Approved: C2** — a skill from `anthropics/skills`, Apache-2.0, with the four source-available document skills excluded. C1 remains a documented upgrade path **if and only if** its availability and license verify independently (the artifact repo returned 404 at verification, §1.7); it is not adopted on the strength of the paper alone. The specific artifact, its upstream URL, its commit or version, its license, and its sha256 go into the Benchmark record before lock.
+**Approved: C2** — a skill from `anthropics/skills`, Apache-2.0, with the four source-available document skills excluded. **C1 is formally withdrawn for Demo-1.** Its artifact repository returned 404 at verification (§1.7), and the operator has fixed C2 as this report's source rather than retaining a late content-switching path. The specific C2 artifact, its upstream URL, its commit or version, its per-folder license, and its sha256 go into the Benchmark record before lock.
 
 ## 2.4 Content identity: how it is guaranteed and how a reader audits it
 
@@ -204,7 +205,7 @@ The platform's `jinn.skill.v1` materializer digest-verifies each single-file loa
 
 This keeps the pinning claim subordinate to the baseline's validity, which is the correct ordering: arm C exists to make the A-vs-B result interpretable (§2.2), and a compromised baseline defeats that purpose no matter how clean its pin looks.
 
-**Rejected alternative, recorded:** running an `AGENTS.md` arm through a generated `CLAUDE.md` import/symlink or prompt injection. That would add a third mechanism and make the flat arm something other than native AGENTS.md loading, so the operator selected native CLAUDE.md instead.
+**Rejected alternative, recorded:** running an `AGENTS.md` arm through a generated `CLAUDE.md` import/symlink or prompt injection. That would add a third compatibility-shim mechanism instead of using Claude Code's native project-memory path, so the operator selected native root `CLAUDE.md` instead.
 
 Verification note: the path C1 reported omitted the `backend-local` segment; the file is at `packages/task-execution/backend-local/workspace/src/materialize.ts`, and the cited line range and digest-refusal behavior were confirmed there directly.
 
@@ -242,7 +243,7 @@ Exclusion and infra-failure retry rules are proposed by R5 **before anyone sees 
 
 ## 2.6 Blast-radius rationale: why this frame embarrasses no one
 
-- **No third party's artifact is on trial.** The same bytes appear in both arms. A negative result for arm A is a result about progressive-disclosure *delivery*, not about anyone's writing. This is the structural reason the frame is safe, and it holds even if the content is an Anthropic-authored skill.
+- **No third party's artifact is on trial.** The same instruction-body bytes appear in both arms; the Skill wrapper additionally carries its required upstream frontmatter. A negative result for arm A is a result about progressive-disclosure *delivery*, not about anyone's writing. This is the structural reason the frame is safe, and it holds even if the content is an Anthropic-authored skill.
 - **The result cannot be read as vendor-versus-vendor.** Both arms run on the same vendor's agent. There is no "X beats Y" headline available to a careless reader, because there is no X and Y.
 - **Both mechanisms are native to the selected runtime.** `CLAUDE.md` and Agent Skills are documented Claude Code loading mechanisms. The broader AGENTS.md standard remains the public motivation, not the literal baseline executed here.
 - **The genre is already established as a contribution, not an attack.** Vercel published a directionally negative result about skills and it was received as research. We are refining the comparison, not contradicting a person.
@@ -254,7 +255,7 @@ Exclusion and infra-failure retry rules are proposed by R5 **before anyone sees 
 - **It is also already done, better.** SWE-Skills-Bench measured on/off across 49 public skills and ~565 instances. We would be second, with less data, on a weaker venue.
 - **Decision: not taken for this report.** It is a good *second* report once the venue has an external track record, and the method transfers unchanged, so it stays cheap to run later.
 
-**A third option the operator should see, because it is a presentation choice rather than a design choice.** The same design can be *framed* at publication as "the controlled version of the comparison Vercel ran" — naming the post and the Hacker News objection directly. Pull is high, because multiple commenters on a 524-point thread independently articulated our design rationale. Blast is moderate, because we would be naming a company. The design is identical either way, so this decision can be deferred to E5 and made at publication time rather than at lock.
+**Resolved report framing (operator decision, 2026-08-13).** The report names the Vercel comparison and the Hacker News objection directly, respectfully, and only to the extent supported by their own text. Demo-1 is a controlled follow-up to a live public question, not a correction, certification, or takedown. Because naming a company raises the standard on our own arithmetic and attribution, E3 J7's independent recomputation and source fact-check are mandatory before the handoff packet can close.
 
 ## 2.7 What this frame does not claim (feeds the §8.1 must-not-imply discipline)
 
@@ -262,28 +263,28 @@ Every line below is a limitation the report carries, not a caveat to be trimmed 
 
 - **Not** that skills are better or worse than AGENTS.md or context files **in general**. One agent, one model, one native `CLAUDE.md` mechanism, one content artifact, one task family, one slate.
 - **Not** that skills or `CLAUDE.md` do not work. Content efficacy is arm C's contrast, and it is secondary.
-- **Not** a judgment of any authored skill's quality. The bytes are identical across arms; nothing here evaluates the content's merit.
+- **Not** a judgment of any authored skill's quality. The instruction-body bytes are identical across arms; the Skill's upstream routing frontmatter differs by design, and nothing here evaluates the content's merit.
 - **Not** a vendor comparison. Both arms are the same agent.
 - **Not** the skill mechanism at its best. It is the mechanism as delivered by the upstream-authored description (§2.4).
 - **Not** an official certification or a universal ranking (§8.1).
-- **Not** owner-honesty-proven. The run is on a **self-run local venue**: its pre-registration is a discipline, not a proof against its own owner (§7.1). This appears in the product and in the report.
-- **Not** a claim that every configured runtime property was independently enforced (§8.1). Effort is pinned and dispatch-gated, but is not checked by run-pinning verification and is **not a graded Matrix axis**, so that the model applied the pinned reasoning depth is **attested only** (§2.5). Per-axis pinning status — including any `attested` or `unverifiable` axis — is published, not hidden (§7.3).
+- **Not** owner-honesty-proven. The run is on a **self-run local venue**. The product and report both carry this exact sentence: **“Pre-registration here is a discipline enforced by this tool, not a proof against the run's own owner — nothing prevents the owner from having altered the record before publishing it.”**
+- **Not** a claim that every configured runtime property was independently enforced (§8.1). Exact E3 C1 limitation sentence: **“Effort was configured and dispatch-gated at `high`, but it is not a graded Matrix axis and run-pinning verification does not independently establish the reasoning depth the model applied; that property is attested only.”** Per-axis pinning status — including any `attested` or `unverifiable` axis — is reported, not hidden (§7.3).
 - **Not** generalizable below the declared MDE. An underpowered null is reported as "we cannot detect effects smaller than X" and never quietly reframed as "no effect" (E2).
 - **Not** rehearsal-free. Every preview is logged, counted, and disclosed in the limitations (§7.2).
 - **Not** re-derivable at the Matrix integrity tier. SWE-shaped tasks mint no admission receipt today, so the Matrix integrity tier on those tasks is **`attested-only`, never `re-derivable`** (C1 recon). Engineering will **disclose this for demo 1, not fix it** — so the report states it as a limitation rather than implying a stronger integrity tier than the run has.
-- **Not** disinterested. **Conflict-of-interest statement, printed plainly in the limitations:** the contributors who designed and ran this benchmark operate the venue it ran on, and the agent under test is made by the same vendor whose skill mechanism is one of the two arms. We hold no position that a particular arm should win, and the design's content-identity construction (§2.4) is what makes that claim checkable rather than a promise. Attribution is role-only per the repo's external-communication rules; no named contributors.
-- **Not** a multi-harness result. **Single-harness scope:** every cell runs the claude-code harness. Generalization to other harnesses is **unknown, not assumed** — and Claw-SWE-Bench's 27.4 pp harness-choice swing (§1.4) is the reason that line is a real limitation rather than boilerplate.
+- **Not** disinterested. **Conflict-of-interest statement, printed plainly in the limitations:** the contributors who designed and ran this benchmark operate the self-run venue it ran on, chose the slate and content artifact, built the estimator in the same program that emits the result, produced the grading environment, ran and graded both arms, and are using the report to demonstrate the benchmark product. The agent under test is made by the same vendor whose skill mechanism is one of the two arms. We hold no position that a particular arm should win; the sealed inputs, independently recomputed arithmetic, and content-identity construction (§2.4) are the checks a reader should rely on rather than that statement of intent. Attribution is role-only per the repo's external-communication rules; no named contributors.
+- **Not** a multi-harness result. Exact E3 C2 limitation sentence: **“Every cell used one Claude Code harness configuration; generalization to other harnesses or configurations is unknown, and prior work's 27.4 percentage-point harness-choice swing is why this result is bounded to the exact configuration sealed here.”**
 - **Not** silent about non-completions. **Per-arm timeout counts and per-arm retry counts are published**, not just aggregate pass rates. **Timeouts count as FAIL**, declared before the run — not dropped, not treated as missing data, not reclassified after seeing which arm they landed in.
 - **Not** seed-shopped. The **bootstrap seed is bound at lock** and published with the report, so the interval is reproducible rather than one draw among many.
 - **Not** a novelty claim that survives the SkillJuror verification item (§1.5). If E3 finds SkillJuror's flat baseline is an always-on context file, this report is a replication and says so.
 
-## 2.8 Open questions
+## 2.8 Resolved report framing and deferred publication topology
 
-Frame, arm count, content artifact, and native flat-file mechanism are decided (§0.1). One publication-framing item remains.
+Frame, arm count, source repository, native flat-file mechanism, and report framing are decided (§0.1). The exact C2 folder remains outcome-blind method work under the frozen selection rule, not an operator framing choice.
 
-1. **Publication framing.** Name the Vercel post and the Hacker News objection directly in the report's motivation, or motivate the gap generically (§2.6)? Deferrable to E5.
+1. **Report framing — resolved.** Name the Vercel post and Hacker News objection directly and respectfully (§2.6). The independent recomputation and source fact-check in E3 J7 are mandatory.
 
-   Note this question has **narrowed** since v0.1. The MDE anchoring in §2.2.1 takes its ~21 pp figure from Vercel's published numbers, so the method section cites them regardless. What remains is a question of *prominence and tone* — whether the report leads with "the controlled version of the comparison Vercel ran," or cites the numbers in the method and motivates the gap generically — not whether Vercel is named at all.
+2. **Publication topology — deferred.** Public report origin, author-source identity/name, signed Record Discovery source, archive mirror, Explorer ingestion/UI, key custody, errata policy, and the live `spec.jinn.network` dependency are intentionally unresolved in this program. The publication handoff names them without choosing or implementing them.
 
 ## 2.9 Handoffs
 
@@ -292,14 +293,14 @@ Frame, arm count, content artifact, and native flat-file mechanism are decided (
 - **To P2 (launcher arm wiring):** both A and B pin `enforced` on `jinn.skill.v1`; A loads a valid plugin, B uses native root `CLAUDE.md`, and C carries no loadout. Verify the copy hashes, exact runtime inventories, loader argv, symmetric exclusions, and harness-version equality.
 - **To R5:** the slate must be domain-compatible with the chosen content artifact, or the manipulation check fails by construction (§2.3).
 - **To C3/R4:** no estimator is proposed here. Every number comes from a named registry method. The registry method must support the recomputability commitment in §2.10.
-- **To E5 (publication):** the claim package ships the one-command recomputation recipe (§2.10), the COI statement, the single-harness scope line, per-arm timeout and retry counts, and the bootstrap seed (§2.7).
+- **To E5 (report and handoff):** the sealed claim package ships the one-command recomputation recipe (§2.10), the COI statement, the single-harness scope line, per-arm timeout and retry counts, and the bootstrap seed (§2.7). It does not claim network publication.
 
-## 2.10 Published commitments
+## 2.10 Pre-dispatch and handoff commitments
 
-Two commitments that raise the report above a self-published number. Both are approved; neither is optional at publication.
+Two commitments make the report bundle more than an unsupported self-run number. Both are approved; neither is optional at the publication handoff boundary.
 
 **Public pre-registration (E4) — committed, conditional on the P5 e2e gate being green.** Before the official run, we publish: the **locked method summary**, the **Run record digest**, and the **frozen grader program digest**. The grader digest matters as much as the method: pre-registering the method while leaving the grader mutable would leave the outcome definition adjustable after the fact, which is the loophole a careful reader checks for. Publishing all three before any official cell executes is what converts the local venue's structurally weak pre-registration (§7.1 — leg (a) structural and leg (c) append-order only, **no guarantee against the run owner**) into something a third party can actually hold us to. The conditionality is deliberate and is itself disclosed: we do not pre-register a run the pipeline cannot yet complete. If infrastructure trouble hits after pre-registration anyway, it is accounted for honestly in `runOutcome` rather than quietly re-run.
 
-**Third-party recomputability — a headline deliverable, not a footnote.** Every number in the report must be recomputable from the published bundle using the published verifier, by someone who does not trust us and does not run our product. The claim package ships the **one-command recipe**. This is the concrete form of the design's "evidence that outlives the product" posture (§8.2) and the honest answer to the venue limitation: we cannot prove owner-honesty by running the venue ourselves (§7.1), so instead we make every published number independently checkable and say plainly that checkability — not our good faith — is what the reader should rely on.
+**Third-party recomputability — a headline deliverable, not a footnote.** Every number in the report must be recomputable from the sealed bundle using the handoff-supplied exact verifier and canary/package artifacts, by someone who does not trust us and does not run our product. The claim package ships the **one-command recipe**. This is the concrete form of the design's "evidence that outlives the product" posture (§8.2) and the honest answer to the venue limitation: we cannot prove owner-honesty by running the venue ourselves (§7.1), so instead we make every reported number independently checkable and say plainly that checkability — not our good faith — is what the reader should rely on.
 
 Note what recomputability does and does not cover. It covers the path from the sealed bundle to the reported numbers. It does **not** make the run itself re-derivable — SWE-shaped tasks mint no admission receipt today, so the Matrix integrity tier stays `attested-only` (§2.7). Both statements appear together in the report; the strong one must not be allowed to imply the weak one.

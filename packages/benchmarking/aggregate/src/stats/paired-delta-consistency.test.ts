@@ -40,6 +40,16 @@ describe("clusteredPairedDeltaInterval endpoint consistency", () => {
 
     expect(clusteredPairedDeltaInterval([], { seed: 7, resamples: 100, alpha: 0.05 }))
       .toMatchObject({ delta: 0.25, low: -0.25, high: 0.75, draws: 200, clusters: CLUSTERS });
+    expect(mocks.clusteredPairedRateDiffBca).toHaveBeenNthCalledWith(1, [], {
+      seed: 7,
+      resamples: 100,
+      alpha: 0.025,
+    });
+    expect(mocks.clusteredPairedRateDiffBca).toHaveBeenNthCalledWith(2, [], {
+      seed: 7,
+      resamples: 100,
+      alpha: 0.975,
+    });
   });
 
   test.each([

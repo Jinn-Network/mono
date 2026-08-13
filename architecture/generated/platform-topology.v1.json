@@ -1778,7 +1778,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2983,
       "generatedOutputSources": 1314,
-      "generatorSources": 625,
+      "generatorSources": 627,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -20093,6 +20093,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/p5-walkthrough.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/pack-smoke.mjs"
       },
       {
@@ -20224,6 +20234,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/aggregate/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/aggregate/scripts/generate-paired-delta-oracles.py"
       },
       {
         "categories": [
