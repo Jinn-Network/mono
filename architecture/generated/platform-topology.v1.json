@@ -1871,9 +1871,9 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 3028,
+      "discoveredFirstPartySurfaces": 2984,
       "generatedOutputSources": 1333,
-      "generatorSources": 623,
+      "generatorSources": 622,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -2333,6 +2333,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/layer-publish-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/marketplace-hermetic-anvil.test.mjs"
       },
       {
         "categories": [
@@ -5906,26 +5916,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/_support/engine.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/_support/engine.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/_support/fixtures"
       },
       {
@@ -6047,6 +6037,16 @@
           "@ritsukai"
         ],
         "path": "client/test/_support/native-config-fixture.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/_support/pack-probe.ts"
       },
       {
         "categories": [
@@ -7226,6 +7226,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/architecture/discovery-client-neutrality.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/architecture/evaluator-primitives.test.ts"
       },
       {
@@ -7287,6 +7297,16 @@
           "@ritsukai"
         ],
         "path": "client/test/architecture/native-solution-boundaries.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/no-legacy-task-engine.test.ts"
       },
       {
         "categories": [
@@ -7647,16 +7667,6 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/checkpoint-publish.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/cli/codedigest-revert-check.test.ts"
       },
       {
         "categories": [
@@ -8496,6 +8506,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/config/joined-solver-nets-tolerated.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/config/migrate-shape-v2-native-collision.test.ts"
       },
       {
@@ -8896,16 +8916,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/_engine-fixtures.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/daemon/ai-units-gate.test.ts"
       },
       {
@@ -8946,27 +8956,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/claim-failed-emit.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/daemon/claim-gate.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/claim-readiness-gate.test.ts"
       },
       {
         "categories": [
@@ -8987,16 +8977,6 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/creator.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/daemon-recovery-nonblocking.test.ts"
       },
       {
         "categories": [
@@ -9066,27 +9046,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/evaluation-path-regression.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/daemon/evaluator-loop.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/event-loop-lag-under-backlog.test.ts"
       },
       {
         "categories": [
@@ -9137,26 +9097,6 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/harvest-loop.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/hot-apply-join-integration.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/join-applier.test.ts"
       },
       {
         "categories": [
@@ -9856,7 +9796,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/race-loss-classification.test.ts"
+        "path": "client/test/daemon/requester-adoption-defect-48.test.ts"
       },
       {
         "categories": [
@@ -9866,7 +9806,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/readiness-gate.test.ts"
+        "path": "client/test/daemon/requester-role-before-anchor-2647.test.ts"
       },
       {
         "categories": [
@@ -9917,16 +9857,6 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/skip-log-dedup.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/solution-path-retired.test.ts"
       },
       {
         "categories": [
@@ -10167,16 +10097,6 @@
           "@ritsukai"
         ],
         "path": "client/test/dashboard/helpers/mock-daemon-api.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/dashboard/join.e2e.test.ts"
       },
       {
         "categories": [
@@ -10796,17 +10716,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/e2e/freeze-mode.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces",
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/e2e/hermes-agent-full-cycle.ts"
       },
       {
@@ -10984,17 +10893,6 @@
           "@ritsukai"
         ],
         "path": "client/test/e2e/task-first-helpers.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces",
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/e2e/task-first-local.ts"
       },
       {
         "categories": [
@@ -12277,26 +12175,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/adoption-delivery.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/artifact-invariant.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/artifact-scrub.test.ts"
       },
       {
@@ -12308,26 +12186,6 @@
           "@ritsukai"
         ],
         "path": "client/test/harnesses/engine/backfill-failed-deliveries.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/bug-fixes.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/claim-gate.test.ts"
       },
       {
         "categories": [
@@ -12357,76 +12215,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/engine-identity-publisher.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-mode.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-packaging.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-reputation-feedback.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-tick-admission.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-work-dir-cleanup.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/envelope-assembly.test.ts"
       },
       {
@@ -12437,117 +12225,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/execution-request.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/generator-model.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/impl-state-dir.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/in-flight-gate-manifest-scope.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/intermediate-failure-diffs.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/joined-eligibility.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/learner-attribution.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/legacy-claude-skip.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/manifest-resolver-stub.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/mineable-producer.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/mutable-joined-view.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/official-autopilot-profile-policy.test.ts"
       },
       {
         "categories": [
@@ -12607,36 +12285,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/prediction-v1-runtime-gate.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/race-loss-pruning.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/recovery.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/registry.test.ts"
       },
       {
@@ -12657,57 +12305,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/synthetic-claim.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/task-provenance-fields.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/transient-rpc-stall.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/transition-log-dedup.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/validate-manifest.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/window-expiry-single-flight.test.ts"
       },
       {
         "categories": [
@@ -14438,16 +14036,6 @@
           "@ritsukai"
         ],
         "path": "client/test/learner/revert-stats.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/learner/verification-gate.test.ts"
       },
       {
         "categories": [
@@ -16228,16 +15816,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/smoke/donation-mode-smoke.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/solver-nets"
       },
       {
@@ -17279,16 +16857,6 @@
           "@ritsukai"
         ],
         "path": "client/test/task-creator/public-repo-e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/task-first-local.test.ts"
       },
       {
         "categories": [
