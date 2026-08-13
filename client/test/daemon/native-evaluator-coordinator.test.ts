@@ -267,7 +267,7 @@ describe("NativeEvaluatorCoordinator", () => {
     });
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
       kind: "paused",
-      reason: "evaluator-dependency-failed",
+      reason: "evaluator-dependency-failed: Error: trusted authority unavailable",
     });
     expect(authority).toHaveBeenCalledOnce();
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
@@ -278,7 +278,7 @@ describe("NativeEvaluatorCoordinator", () => {
     nowMs += 1_001;
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
       kind: "paused",
-      reason: "evaluator-dependency-failed",
+      reason: "evaluator-dependency-failed: Error: trusted authority unavailable",
     });
     nowMs += 1_001;
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
@@ -313,13 +313,13 @@ describe("NativeEvaluatorCoordinator", () => {
     });
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
       kind: "paused",
-      reason: "evaluator-dependency-failed",
+      reason: "evaluator-dependency-failed: Error: trusted authority unavailable",
     });
     for (let attempt = 2; attempt <= 8; attempt++) {
       nowMs += 1_001;
       await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
         kind: "paused",
-        reason: "evaluator-dependency-failed",
+        reason: "evaluator-dependency-failed: Error: trusted authority unavailable",
       });
     }
     expect(state.getEvaluation(id)).toMatchObject({ state: "paused" });

@@ -713,7 +713,7 @@ async function evaluatorRetryRun(input: { readonly path: string; readonly restar
   let store = new Store(input.path);
   let runtime = make(store);
   await expect(runtime.coordinator.reconcileEvaluation(id)).resolves.toEqual({
-    kind: 'paused', reason: 'evaluator-dependency-failed',
+    kind: 'paused', reason: 'evaluator-dependency-failed: Error: B804 backend temporarily unavailable',
   });
   nowMs += 1_001;
   if (input.restart) {
