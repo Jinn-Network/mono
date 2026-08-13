@@ -11,11 +11,12 @@ import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { sampleInit } from "../../operations/sample.js";
 import { readRunJournalEntries } from "../../run/journal.js";
+import { createRuntimeEvidenceAdapter } from "../adapter.js";
 import { artifactsDir } from "../../workspace/layout.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { recordHarborDispatchMapping } from "../../venue/provisioner.js";
 import { harborSelectionManifestBytes, type HarborSelectionManifest } from "./manifest.js";
-import { harborEvidenceContributionFromArchive, readHarborDispatchArchive } from "./venue.js";
+import { HARBOR_ATIF_ROLE, HARBOR_LOGS_ROLE, HARBOR_SELECTION_ROLE, harborEvidenceContributionFromArchive, readHarborDispatchArchive } from "./venue.js";
 
 const manifest: HarborSelectionManifest = {
   schema: "jinn.network/benchmark-product/harbor-selection/1", adapter: { id: "harbor", version: "1" },
@@ -86,6 +87,7 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       expect(armAdd(context, { draftId: "harbor-run", armId: "two", pinning: { harness: { id: "placeholder", version: "1" }, harborArm: "two" } }).ok).toBe(true);
       const selected = await selectHarborRuntime(context, { draftId: "harbor-run", executable, dataset: manifest.dataset, task: manifest.task, agent: manifest.agent, model: manifest.model, environment: manifest.environment });
       expect(selected.ok).toBe(true);
+      if (!selected.ok) throw new Error("Harbor selection unexpectedly failed");
       const quoted = await runQuote(context, { draftId: "harbor-run" });
       expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
       expect(runLock(context, { draftId: "harbor-run" }).ok).toBe(true);
@@ -111,7 +113,29 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       const unknown = archive.nativeArtifacts.find((item) => item.path.endsWith("unknown.bin"))!;
       expect(getSealedBytes(workspaceDir, unknown.sha256)).toEqual(new Uint8Array([7, 8, 9]));
       const before = indexes.length;
-      expect(harborEvidenceContributionFromArchive(workspaceDir, index.archiveSha256).correlations).toHaveLength(2);
+      const contribution = harborEvidenceContributionFromArchive(workspaceDir, index.archiveSha256);
+      expect(contribution.correlations).toHaveLength(2);
+      expect(contribution.nativeArtifacts.filter((item) => item.role === HARBOR_ATIF_ROLE).length).toBeGreaterThanOrEqual(2);
+      expect(contribution.nativeArtifacts.filter((item) => item.role === HARBOR_LOGS_ROLE).length).toBeGreaterThanOrEqual(2);
+      const selectionBytes = getSealedBytes(workspaceDir, selected.result.selectionManifestSha256);
+      const adapter = createRuntimeEvidenceAdapter(
+        { adapterId: "harbor", selectionManifestSha256: selected.result.selectionManifestSha256 },
+        { registrationArtifacts: [{ id: "harbor-selection.json", role: HARBOR_SELECTION_ROLE, digest: `sha256:${selected.result.selectionManifestSha256}`, bytes: selectionBytes, mediaType: "application/json", actions: ["store"] }] },
+      );
+      const checks = await adapter.verify({
+        dispatch: {
+          index: 1,
+          submission: { kind: "https://spec.jinn.network/records/submission/v1", record: { name: "submission.json", mediaType: "application/json", digest: { sha256: archive.lineage.submissionSha256 } } },
+          evidence: [], evaluations: [], ...contribution,
+        },
+        references: { async getExact({ digest }) { return getSealedBytes(workspaceDir, digest.slice("sha256:".length)); } },
+      });
+      expect(checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "runtime-evidence-unique-roles", status: "pass" }),
+        expect.objectContaining({ name: "harbor-required-native-evidence", status: "pass" }),
+        expect.objectContaining({ name: "harbor-job-trial-structure", status: "pass" }),
+        expect.objectContaining({ name: "harbor-exact-native-evidence", status: "pass" }),
+      ]));
       expect(await readdir(indexRoot)).toHaveLength(before);
     } finally { await rm(workspaceDir, { recursive: true, force: true }); }
   }, 120_000);

@@ -152,10 +152,10 @@ function disclosureCheck(artifacts: readonly RuntimeNativeArtifact[]): Publicati
     : { name: "runtime-native-artifact-disclosure", status: "fail", detail: "a public artifact needs a descriptor and every withheld artifact needs a non-blank reason" };
 }
 
-function roleCheck(correlations: readonly RuntimeCorrelation[], artifacts: readonly RuntimeNativeArtifact[]): PublicationCheck {
-  return uniqueRoles(correlations) && uniqueRoles(artifacts)
+function roleCheck(correlations: readonly RuntimeCorrelation[], artifacts: readonly RuntimeNativeArtifact[], nativeRoleGroups: boolean): PublicationCheck {
+  return uniqueRoles(correlations) && (nativeRoleGroups || uniqueRoles(artifacts))
     ? { name: "runtime-evidence-unique-roles", status: "pass" }
-    : { name: "runtime-evidence-unique-roles", status: "fail", detail: "correlation and native-artifact roles must each be unique per dispatch" };
+    : { name: "runtime-evidence-unique-roles", status: "fail", detail: "correlation roles must be unique; this runtime profile does not permit repeated native-artifact roles" };
 }
 
 async function exactEvidenceCheck(
@@ -374,7 +374,10 @@ function createPublicationAdapter(
         adapter.profile === expectedProfile && definition.summary.id === adapterId
           ? { name: `${prefix}-runtime-profile`, status: "pass" as const }
           : { name: `${prefix}-runtime-profile`, status: "fail" as const, detail: "publication adapter profile does not match its selected runtime identity" },
-        roleCheck(correlations, nativeArtifacts),
+        // Correlations are identity joins and always singular by role. Native artifact role
+        // cardinality belongs to the runtime profile: one Harbor Trial commonly has multiple
+        // ATIF and log files under the same semantic role, each retained by exact descriptor.
+        roleCheck(correlations, nativeArtifacts, adapterId === HARBOR_ADAPTER_ID),
         disclosureCheck(nativeArtifacts),
         ...(adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? inspectRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
         ...(adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? harborRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
