@@ -25,7 +25,7 @@ import { compileDraft } from "../run/compile.js";
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
-import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
+import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
@@ -86,13 +86,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const runWithPublicationAuthorization = withRunPublicationExtension(
         compiled.plannedRun.record as unknown as Record<string, unknown>,
         {
-          registrationArtifacts: document.spec.evaluationRuntime === undefined ? [] : [{
-            role: INSPECT_SELECTION_CORRELATION_ROLE,
-            artifact: {
-              digest: { sha256: document.spec.evaluationRuntime.selectionManifestSha256 },
-              mediaType: "application/json",
-            },
-          }],
+          registrationArtifacts: [...runtimeRegistrationArtifacts(clockedContext.workspaceDir, document.spec.evaluationRuntime)],
         },
       );
       const sealed = sealRun(runWithPublicationAuthorization);

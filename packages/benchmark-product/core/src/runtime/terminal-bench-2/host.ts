@@ -1,14 +1,15 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { artifactsDir } from "../../workspace/layout.js";
-import { putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import { assertSupportedHarborVersion, type HarborSelectionManifest } from "../harbor/manifest.js";
 import { resolveHarborMaterial, type HarborRuntimeSelectionRequest } from "../harbor/host.js";
 import {
   TERMINAL_BENCH_2_DATASET_ID,
   TERMINAL_BENCH_2_PROFILE,
+  HARBOR_021_PACKAGER_ALGORITHM,
   TerminalBench2SelectionManifestSchema,
   TerminalBenchRegistryMetadataSchema,
   TerminalBenchMigrationManifestSchema,
@@ -27,9 +28,51 @@ export interface TerminalBench2SelectionRequest {
   readonly taskMaterialPath: string;
   readonly taskName: string;
   readonly taskRevision: `sha256:${string}`;
+  readonly migrationManifestSha256?: string;
   readonly arms: HarborSelectionManifest["arms"];
   readonly environment: HarborSelectionManifest["environment"];
   readonly outputs: HarborSelectionManifest["outputs"];
+}
+
+/** Faithful Harbor v0.21.0 `Packager.compute_content_hash` for its default-ignore
+ * branch. Custom `.gitignore` uses Python pathspec semantics, so this implementation
+ * refuses it instead of silently approximating the registry identity. */
+export function computeHarbor021TaskContentHash(taskPath: string): { readonly contentHash: string; readonly files: readonly string[] } {
+  const root = realpathSync(taskPath);
+  if (!lstatSync(root).isDirectory()) throw new TypeError("Harbor package task must be a directory");
+  if (existsSync(join(root, ".gitignore"))) throw new TypeError("Harbor package hashing refuses custom .gitignore; resolve with the pinned official Packager instead");
+  const files: string[] = [];
+  for (const name of ["task.toml", "instruction.md", "README.md"]) if (existsSync(join(root, name))) {
+    if (lstatSync(join(root, name)).isSymbolicLink()) throw new TypeError(`Harbor package hashing refuses symlink ${name}`);
+    files.push(name);
+  }
+  const ignored = (relative: string): boolean => {
+    const pieces = relative.split("/");
+    const name = pieces.at(-1)!;
+    return pieces.includes("__pycache__") || name.endsWith(".pyc") || name === ".DS_Store"
+      || name.endsWith(".swp") || name.endsWith(".swo") || name.endsWith("~");
+  };
+  const visit = (directory: string, relative: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = `${relative}/${entry.name}`;
+      const absolute = join(directory, entry.name);
+      if (entry.isSymbolicLink()) throw new TypeError(`Harbor package hashing refuses symlink ${path}`);
+      if (entry.isDirectory()) visit(absolute, path);
+      else if (entry.isFile() && !ignored(path)) files.push(path);
+      else if (!entry.isFile()) throw new TypeError(`Harbor package hashing refuses non-regular entry ${path}`);
+    }
+  };
+  for (const directory of ["environment", "tests", "solution", "steps"]) {
+    const absolute = join(root, directory);
+    if (existsSync(absolute)) visit(absolute, directory);
+  }
+  files.sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  const outer = createHash("sha256");
+  for (const relative of files) {
+    const digest = createHash("sha256").update(readFileSync(join(root, relative))).digest("hex");
+    outer.update(`${relative}\0${digest}\n`);
+  }
+  return { contentHash: outer.digest("hex"), files };
 }
 
 export interface TerminalBench2SelectionResolution {
@@ -75,12 +118,25 @@ export function resolveTerminalBench2Selection(workspaceDir: string, input: Term
   if (taskTomls.length !== 1 || resolved.files.some((file) => file.path.endsWith("/task.toml") && file.path !== `${input.taskName}/task.toml`)) {
     throw new TypeError("Terminal-Bench 2 material must contain exactly the selected task package");
   }
-  const material = sealMaterial(workspaceDir, input.taskMaterialPath, resolved);
+  const packageHash = computeHarbor021TaskContentHash(join(realpathSync(input.taskMaterialPath), input.taskName));
+  if (`sha256:${packageHash.contentHash}` !== input.taskRevision) throw new TypeError("Terminal-Bench 2 task ref does not match Harbor 0.21 Packager.compute_content_hash over the selected package bytes");
+  sealMaterial(workspaceDir, input.taskMaterialPath, resolved);
+  const taskRoot = join(realpathSync(input.taskMaterialPath), input.taskName);
+  const taskResolved = resolveHarborMaterial({ input: { name: `terminal-bench/${input.taskName}`, ref: input.taskRevision }, materialPath: taskRoot, revision: input.taskRevision });
+  const material = sealMaterial(workspaceDir, taskRoot, taskResolved);
+  let migrationManifestSha256: string | undefined;
+  if (input.migrationManifestSha256 !== undefined) {
+    if (!/^[a-f0-9]{64}$/u.test(input.migrationManifestSha256)) throw new TypeError("Terminal-Bench migration manifest digest must be lowercase sha256 hex");
+    const migration = TerminalBenchMigrationManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(workspaceDir, input.migrationManifestSha256))));
+    if (migration.runnable.checksum !== material.checksum) throw new TypeError("Terminal-Bench migration runnable bytes do not equal the selected immutable task material");
+    migrationManifestSha256 = input.migrationManifestSha256;
+  }
   const registrySnapshotSha256 = putSealedBytes(workspaceDir, registryBytes);
   const profile = TerminalBench2SelectionManifestSchema.parse({
     schema: "jinn.network/benchmark-product/terminal-bench-2-selection/1",
     dataset: { id: TERMINAL_BENCH_2_DATASET_ID, revision: input.datasetRevision, registrySnapshotSha256, registrySnapshotBytes: registryBytes.byteLength },
-    selectedTask: { package: { name: `terminal-bench/${input.taskName}`, ref: input.taskRevision }, filter: input.taskName, material },
+    selectedTask: { package: { name: `terminal-bench/${input.taskName}`, ref: input.taskRevision }, contentHashAlgorithm: HARBOR_021_PACKAGER_ALGORITHM, filter: input.taskName, datasetProjectionChecksum: resolved.checksum, material },
+    ...(migrationManifestSha256 === undefined ? {} : { migrationManifestSha256 }),
     execution: { source: "dataset", nTasks: 1, nAttempts: 1, nConcurrent: 1, maxRetries: 0 },
   });
   const profileSha256 = sha256Hex(terminalBench2SelectionBytes(profile));

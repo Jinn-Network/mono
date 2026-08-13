@@ -1,7 +1,8 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { readRunPublicationExtension } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
 import { createDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
@@ -15,12 +16,14 @@ import { readHarborDispatchArchive } from "../harbor/venue.js";
 import type { HarborSelectionManifest } from "../harbor/manifest.js";
 import { artifactsDir } from "../../workspace/layout.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
-import { resolveTerminalBench2Selection } from "./host.js";
-import { TERMINAL_BENCH_2_DATASET_ID, TERMINAL_BENCH_2_PROFILE, TerminalBench2SelectionManifestSchema } from "./manifest.js";
+import { computeHarbor021TaskContentHash, resolveTerminalBench2Selection } from "./host.js";
+import { TERMINAL_BENCH_2_DATASET_ID, TERMINAL_BENCH_2_PROFILE, TERMINAL_BENCH_2_SELECTION_ROLE, TERMINAL_BENCH_MIGRATION_ROLE, TerminalBench2SelectionManifestSchema } from "./manifest.js";
+import { HARBOR_SELECTION_ROLE } from "../harbor/venue.js";
+import { createRuntimeEvidenceAdapter } from "../adapter.js";
 import { terminalBench2SmokeReadiness } from "./smoke.js";
 
 const datasetRevision = `sha256:${"a".repeat(64)}` as const;
-const taskRevision = `sha256:${"b".repeat(64)}` as const;
+const taskRevision = "sha256:f36995f8854db7fe68476fe10260b22729da0801627608d051e626b3dc555c2d" as const;
 const image = `registry.example/tb2@sha256:${"c".repeat(64)}`;
 const arms: HarborSelectionManifest["arms"] = [
   { armId: "one", agent: { id: "terminus", configuration: {} }, model: { id: "openai/model-one", configuration: {} }, jobAgent: { name: "terminus", model_name: "openai/model-one" } },
@@ -45,7 +48,7 @@ if (args[0] === "task") {
   if (JSON.stringify(args) !== JSON.stringify(["task","migrate","-i","source","-o","transformed"])) process.exit(65);
   mkdirSync("transformed", { recursive: true });
   cpSync("source", "transformed", { recursive: true });
-  writeFileSync(join("transformed", "task.toml"), "[task]\\nname='migrated'\\n");
+  writeFileSync(join("transformed", "task.toml"), ${JSON.stringify(`[task]\nname = "echo"\n[environment]\ndocker_image = "${image}"\n`)});
   process.stdout.write("migrated\\n"); process.exit(0);
 }
 if (args[0] !== "run" || args[1] !== "-c" || args.length !== 3) process.exit(64);
@@ -108,6 +111,15 @@ describe("Terminal-Bench 2 product profile", () => {
   });
 
   test("requires immutable official registry/task resolution and rejects drift", () => {
+    expect(computeHarbor021TaskContentHash(join(materialPath, "echo"))).toEqual({
+      contentHash: taskRevision.slice("sha256:".length),
+      files: ["instruction.md", "task.toml"],
+    });
+    mkdirSync(join(materialPath, "echo", "tests"));
+    writeFileSync(join(materialPath, "echo", "tests", ".DS_Store"), "ignored");
+    writeFileSync(join(materialPath, "echo", "tests", "cached.pyc"), "ignored");
+    writeFileSync(join(materialPath, "echo", "unrelated.bin"), "outside Packager collection");
+    expect(computeHarbor021TaskContentHash(join(materialPath, "echo")).contentHash).toBe(taskRevision.slice("sha256:".length));
     const resolved = resolveTerminalBench2Selection(workspaceDir, request());
     expect(resolved.profile.dataset).toMatchObject({ id: TERMINAL_BENCH_2_DATASET_ID, revision: datasetRevision });
     expect(resolved.profile.selectedTask).toMatchObject({ package: { name: "terminal-bench/echo", ref: taskRevision }, filter: "echo" });
@@ -115,6 +127,17 @@ describe("Terminal-Bench 2 product profile", () => {
     expect(resolved.harbor.profiles?.[TERMINAL_BENCH_2_PROFILE]).toEqual(resolved.profile);
     expect(() => resolveTerminalBench2Selection(workspaceDir, { ...request(), datasetRevision: `sha256:${"d".repeat(64)}` })).toThrow(/drifted/i);
     expect(() => resolveTerminalBench2Selection(workspaceDir, { ...request(), taskRevision: `sha256:${"e".repeat(64)}` })).toThrow(/exactly once/i);
+    writeFileSync(metadataPath, JSON.stringify({ name: TERMINAL_BENCH_2_DATASET_ID, dataset_version_content_hash: datasetRevision, task_ids: [{ org: "terminal-bench", name: "echo", ref: `sha256:${"b".repeat(64)}` }] }));
+    expect(() => resolveTerminalBench2Selection(workspaceDir, { ...request(), taskRevision: `sha256:${"b".repeat(64)}` })).toThrow(/Packager\.compute_content_hash/i);
+    writeFileSync(metadataPath, JSON.stringify({ name: TERMINAL_BENCH_2_DATASET_ID, dataset_version_content_hash: datasetRevision, task_ids: [{ org: "terminal-bench", name: "echo", ref: taskRevision }] }));
+    writeFileSync(join(materialPath, "echo", ".gitignore"), "ignored.txt\n");
+    expect(() => resolveTerminalBench2Selection(workspaceDir, request())).toThrow(/custom \.gitignore/i);
+    rmSync(join(materialPath, "echo", ".gitignore"));
+    symlinkSync("instruction.md", join(materialPath, "echo", "README.md"));
+    expect(() => resolveTerminalBench2Selection(workspaceDir, request())).toThrow(/symlink/i);
+    rmSync(join(materialPath, "echo", "README.md"));
+    rmSync(join(materialPath, "echo", "tests"), { recursive: true });
+    rmSync(join(materialPath, "echo", "unrelated.bin"));
     mkdirSync(join(materialPath, "other"));
     writeFileSync(join(materialPath, "other", "task.toml"), "");
     expect(() => resolveTerminalBench2Selection(workspaceDir, request())).toThrow(/exactly the selected task/i);
@@ -164,5 +187,40 @@ describe("Terminal-Bench 2 product profile", () => {
     for (const entry of [...migrated.result.manifest.source.files, ...migrated.result.manifest.transformed.files]) {
       expect(getSealedBytes(workspaceDir, entry.sha256)).toHaveLength(entry.bytes);
     }
+
+    const selectedDataset = join(root, "migrated-selection");
+    mkdirSync(selectedDataset);
+    cpSync(migrated.result.runnableMaterialPath, join(selectedDataset, "echo"), { recursive: true });
+    const migratedTaskRevision = `sha256:${computeHarbor021TaskContentHash(join(selectedDataset, "echo")).contentHash}` as const;
+    writeFileSync(metadataPath, JSON.stringify({ name: TERMINAL_BENCH_2_DATASET_ID, dataset_version_content_hash: datasetRevision, task_ids: [{ org: "terminal-bench", name: "echo", ref: migratedTaskRevision }] }));
+    expect(createDraft(context, { draftId: "migrated", name: "Migrated TB2" }).ok).toBe(true);
+    expect((await sampleInit(context, { draftId: "migrated" })).ok).toBe(true);
+    expect(armAdd(context, { draftId: "migrated", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
+    expect(armAdd(context, { draftId: "migrated", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
+    const selected = await selectTerminalBench2Runtime(context, { draftId: "migrated", ...request(), taskMaterialPath: selectedDataset, taskRevision: migratedTaskRevision, migrationManifestSha256: migrated.result.manifestSha256 });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    const profile = TerminalBench2SelectionManifestSchema.parse((JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))) as { profiles: Record<string, unknown> }).profiles[TERMINAL_BENCH_2_PROFILE]);
+    expect(profile.migrationManifestSha256).toBe(migrated.result.manifestSha256);
+    expect(profile.selectedTask.material.checksum).toBe(migrated.result.manifest.runnable.checksum);
+    expect((await runQuote(context, { draftId: "migrated" })).ok).toBe(true);
+    const locked = runLock(context, { draftId: "migrated" });
+    expect(locked.ok, JSON.stringify(locked)).toBe(true);
+    if (!locked.ok) return;
+    const run = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, locked.result.runSha256))) as Record<string, unknown>;
+    const registration = readRunPublicationExtension(run)!.registrationArtifacts;
+    expect(registration.map((entry) => entry.role)).toEqual([
+      HARBOR_SELECTION_ROLE,
+      TERMINAL_BENCH_MIGRATION_ROLE,
+      TERMINAL_BENCH_2_SELECTION_ROLE,
+    ].sort());
+    const adapter = createRuntimeEvidenceAdapter(
+      { adapterId: "harbor", selectionManifestSha256: selected.result.selectionManifestSha256 },
+      { registrationArtifacts: registration.map((entry, index) => ({
+        id: `tb2-registration-${index}.json`, role: entry.role, digest: `sha256:${entry.artifact.digest.sha256}`,
+        bytes: getSealedBytes(workspaceDir, entry.artifact.digest.sha256), mediaType: "application/json", actions: ["store"],
+      })) },
+    );
+    await expect(adapter.registration({ runDigest: `sha256:${locked.result.runSha256}` })).resolves.toHaveLength(3);
   });
 });

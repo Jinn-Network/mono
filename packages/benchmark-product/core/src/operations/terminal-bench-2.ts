@@ -13,9 +13,9 @@ import {
   type TerminalBenchMigrationRequest,
   type TerminalBenchMigrationResolution,
 } from "../runtime/terminal-bench-2/host.js";
-import { TERMINAL_BENCH_2_PROFILE, TerminalBench2SelectionManifestSchema, terminalBench2SelectionBytes } from "../runtime/terminal-bench-2/manifest.js";
+import { TERMINAL_BENCH_2_PROFILE, TerminalBench2SelectionManifestSchema, TerminalBenchMigrationManifestSchema, terminalBench2SelectionBytes } from "../runtime/terminal-bench-2/manifest.js";
 import { draftPath } from "../workspace/layout.js";
-import { putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -49,8 +49,14 @@ export function selectTerminalBench2Runtime(context: OperationContext, input: Se
       || !("ref" in resolution.manifest.source.input)
       || resolution.manifest.source.input.ref !== selected.profile.dataset.revision
       || resolution.manifest.source.taskName !== selected.profile.selectedTask.filter
-      || resolution.manifest.source.resolved.checksum !== selected.profile.selectedTask.material.checksum) {
+      || resolution.manifest.source.resolved.checksum !== selected.profile.selectedTask.datasetProjectionChecksum) {
       refuse("record-integrity", "terminalBench2.harbor", "Harbor selection does not exactly bind the Terminal-Bench 2 dataset/task material");
+    }
+    if (embedded.migrationManifestSha256 !== undefined) {
+      const migration = TerminalBenchMigrationManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, embedded.migrationManifestSha256))));
+      if (migration.harbor.version !== resolution.manifest.harbor.version || migration.harbor.executableSha256 !== resolution.manifest.harbor.executableSha256) {
+        refuse("record-integrity", "terminalBench2.migration.harbor", "migration and execution must use the same byte-pinned Harbor release");
+      }
     }
     const bytes = harborSelectionManifestBytes(resolution.manifest);
     const selectionManifestSha256 = harborSelectionManifestSha256(resolution.manifest);

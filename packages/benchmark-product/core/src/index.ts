@@ -118,6 +118,9 @@ export type { HarborRuntimeSelectionRequest, HarborRuntimeSelectionResolution } 
 export {
   TERMINAL_BENCH_2_DATASET_ID,
   TERMINAL_BENCH_2_PROFILE,
+  TERMINAL_BENCH_2_SELECTION_ROLE,
+  TERMINAL_BENCH_MIGRATION_ROLE,
+  HARBOR_021_PACKAGER_ALGORITHM,
   TerminalBench2SelectionManifestSchema,
   TerminalBenchMigrationManifestSchema,
   terminalBench2SelectionBytes,
@@ -130,6 +133,7 @@ export type {
 } from "./runtime/terminal-bench-2/manifest.js";
 export {
   migrateTerminalBenchLegacyMaterial,
+  computeHarbor021TaskContentHash,
   resolveTerminalBench2Selection,
 } from "./runtime/terminal-bench-2/host.js";
 export { terminalBench2SmokeReadiness } from "./runtime/terminal-bench-2/smoke.js";

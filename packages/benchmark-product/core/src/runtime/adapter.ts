@@ -7,7 +7,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { parseCellKey, type BenchmarkAccountingDispatch, type DigestBearingResourceDescriptor } from "@jinn-network/benchmarking-records";
+import { parseCellKey, type BenchmarkAccountingDispatch, type DigestBearingResourceDescriptor, type RegistrationArtifact } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import type {
   PublicationCheck,
@@ -17,6 +17,7 @@ import type {
 } from "@jinn-network/benchmarking-publication";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import { refuse } from "../errors.js";
+import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   VENUE_ISOLATION_POLICY,
   type LocalVenue,
@@ -45,6 +46,14 @@ import {
   HARBOR_TRIAL_RESULT_ROLE,
 } from "./harbor/venue.js";
 import { HarborSelectionManifestSchema, harborJobSource, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
+import {
+  TERMINAL_BENCH_2_PROFILE,
+  TERMINAL_BENCH_2_SELECTION_ROLE,
+  TERMINAL_BENCH_MIGRATION_ROLE,
+  TerminalBench2SelectionManifestSchema,
+  TerminalBenchMigrationManifestSchema,
+  terminalBench2SelectionBytes,
+} from "./terminal-bench-2/manifest.js";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
 export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";
@@ -264,6 +273,59 @@ function assertHarborRegistration(expectedSelectionManifestSha256: string, artif
   if (selection.length !== 1 || selection[0]!.digest !== `sha256:${expectedSelectionManifestSha256}` || !digestMatches(selection[0]!.bytes, { name: selection[0]!.id, mediaType: selection[0]!.mediaType, digest: { sha256: expectedSelectionManifestSha256 } })) {
     throw new TypeError("Harbor registration requires the exact sealed HarborSelectionManifest bytes");
   }
+  const manifest = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selection[0]!.bytes)));
+  const terminalBenchProfileValue = manifest.profiles?.[TERMINAL_BENCH_2_PROFILE];
+  const terminalBenchArtifacts = artifacts.filter((artifact) => artifact.role === TERMINAL_BENCH_2_SELECTION_ROLE);
+  const migrationArtifacts = artifacts.filter((artifact) => artifact.role === TERMINAL_BENCH_MIGRATION_ROLE);
+  if (terminalBenchProfileValue === undefined) {
+    if (terminalBenchArtifacts.length !== 0 || migrationArtifacts.length !== 0) throw new TypeError("non-TB2 Harbor registration must not claim Terminal-Bench roles");
+    return;
+  }
+  const profile = TerminalBench2SelectionManifestSchema.parse(terminalBenchProfileValue);
+  const profileBytes = terminalBench2SelectionBytes(profile);
+  const profileSha256 = sha256Hex(profileBytes);
+  if (terminalBenchArtifacts.length !== 1 || terminalBenchArtifacts[0]!.digest !== `sha256:${profileSha256}`
+    || !Buffer.from(terminalBenchArtifacts[0]!.bytes).equals(Buffer.from(profileBytes))) {
+    throw new TypeError("Terminal-Bench 2 registration requires its exact profile bytes under the declared role");
+  }
+  if (profile.migrationManifestSha256 === undefined) {
+    if (migrationArtifacts.length !== 0) throw new TypeError("Terminal-Bench migration role is unbound by the selected profile");
+    return;
+  }
+  if (migrationArtifacts.length !== 1 || migrationArtifacts[0]!.digest !== `sha256:${profile.migrationManifestSha256}`
+    || sha256Hex(migrationArtifacts[0]!.bytes) !== profile.migrationManifestSha256) throw new TypeError("Terminal-Bench migration registration does not match the selected profile");
+  const migration = TerminalBenchMigrationManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(migrationArtifacts[0]!.bytes)));
+  if (migration.runnable.checksum !== profile.selectedTask.material.checksum) throw new TypeError("Terminal-Bench registered migration runnable bytes differ from selected task material");
+}
+
+/** Adapter-owned registration closure used by run-lock. Every byte descriptor is read back
+ * from product CAS and interpreted under the selected adapter before entering the Run. */
+export function runtimeRegistrationArtifacts(workspaceDir: string, binding: EvaluationRuntimeBinding | undefined): readonly RegistrationArtifact[] {
+  if (binding === undefined) return [];
+  const selectionBytes = getSealedBytes(workspaceDir, binding.selectionManifestSha256);
+  if (binding.adapterId === INSPECT_ADAPTER_ID) return [{ role: INSPECT_SELECTION_CORRELATION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } }];
+  if (binding.adapterId !== HARBOR_ADAPTER_ID) refuse("venue-unavailable", "spec.evaluationRuntime.adapterId", `evaluation runtime adapter "${binding.adapterId}" is not installed`);
+  const manifest = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selectionBytes)));
+  const result: RegistrationArtifact[] = [{ role: HARBOR_SELECTION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } }];
+  const profileValue = manifest.profiles?.[TERMINAL_BENCH_2_PROFILE];
+  if (profileValue !== undefined) {
+    const profile = TerminalBench2SelectionManifestSchema.parse(profileValue);
+    const profileBytes = terminalBench2SelectionBytes(profile);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) throw new TypeError("Terminal-Bench 2 profile CAS bytes do not match the Harbor selection");
+    result.push({ role: TERMINAL_BENCH_2_SELECTION_ROLE, artifact: { digest: { sha256: profileSha256 }, mediaType: "application/json" } });
+    if (profile.migrationManifestSha256 !== undefined) {
+      const migrationBytes = getSealedBytes(workspaceDir, profile.migrationManifestSha256);
+      const migration = TerminalBenchMigrationManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(migrationBytes)));
+      if (migration.runnable.checksum !== profile.selectedTask.material.checksum) throw new TypeError("Terminal-Bench migration runnable bytes differ from selected task material");
+      result.push({ role: TERMINAL_BENCH_MIGRATION_ROLE, artifact: { digest: { sha256: profile.migrationManifestSha256 }, mediaType: "application/json" } });
+    }
+  }
+  return result.sort((left, right) => {
+    const leftKey = `${left.role}\u001f${left.artifact.digest.sha256}`;
+    const rightKey = `${right.role}\u001f${right.artifact.digest.sha256}`;
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
 }
 
 function assertHarborContribution(expectedSelectionManifestSha256: string, correlations: readonly RuntimeCorrelation[]): void {

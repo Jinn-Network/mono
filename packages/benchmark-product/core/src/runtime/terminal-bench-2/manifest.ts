@@ -5,8 +5,11 @@ import { sha256Hex } from "../../workspace/sealed-store.js";
 
 export const TERMINAL_BENCH_2_DATASET_ID = "terminal-bench/terminal-bench-2" as const;
 export const TERMINAL_BENCH_2_PROFILE = "https://product.jinn.network/profiles/terminal-bench-2-selection/v1" as const;
+export const TERMINAL_BENCH_2_SELECTION_ROLE = "https://product.jinn.network/artifact-roles/terminal-bench-2/selection/v1" as const;
+export const TERMINAL_BENCH_MIGRATION_ROLE = "https://product.jinn.network/artifact-roles/terminal-bench/migration/v1" as const;
 export const TERMINAL_BENCH_2_SELECTION_SCHEMA = "jinn.network/benchmark-product/terminal-bench-2-selection/1" as const;
 export const TERMINAL_BENCH_MIGRATION_SCHEMA = "jinn.network/benchmark-product/terminal-bench-migration/1" as const;
+export const HARBOR_021_PACKAGER_ALGORITHM = "harbor-framework/harbor@64afbbcb62165950301e1a6407c729aa26d844ff:Packager.compute_content_hash" as const;
 
 const Sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 const RegistryRevision = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
@@ -40,9 +43,12 @@ export const TerminalBench2SelectionManifestSchema = z.object({
   }).strict(),
   selectedTask: z.object({
     package: z.object({ name: z.string().regex(/^terminal-bench\/[^/]+$/u), ref: RegistryRevision }).strict(),
+    contentHashAlgorithm: z.literal(HARBOR_021_PACKAGER_ALGORITHM),
     filter: z.string().min(1).regex(/^[^/]+$/u),
+    datasetProjectionChecksum: Sha256,
     material: TerminalBenchMaterialSchema,
   }).strict(),
+  migrationManifestSha256: Sha256.optional(),
   execution: z.object({ source: z.literal("dataset"), nTasks: z.literal(1), nAttempts: z.literal(1), nConcurrent: z.literal(1), maxRetries: z.literal(0) }).strict(),
 }).strict();
 export type TerminalBench2SelectionManifest = z.infer<typeof TerminalBench2SelectionManifestSchema>;
@@ -78,4 +84,3 @@ export function terminalBenchMigrationBytes(value: TerminalBenchMigrationManifes
 }
 
 export function terminalBenchManifestSha256(bytes: Uint8Array): string { return sha256Hex(bytes); }
-
