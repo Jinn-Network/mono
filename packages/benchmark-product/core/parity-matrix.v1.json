@@ -173,16 +173,6 @@
       }
     },
     {
-      "operation": "publicationStatus",
-      "cliVerb": "publication status",
-      "authorityGated": false,
-      "description": "Reads the local publication state, timing assurance, receipts, compatibility, and recovery guidance without contacting a backend.",
-      "gui": {
-        "status": "shipped",
-        "action": "publication.status"
-      }
-    },
-    {
       "operation": "publicationReport",
       "cliVerb": "publication report",
       "authorityGated": true,
@@ -190,6 +180,16 @@
       "gui": {
         "status": "shipped",
         "action": "publication.report"
+      }
+    },
+    {
+      "operation": "publicationStatus",
+      "cliVerb": "publication status",
+      "authorityGated": false,
+      "description": "Reads the local publication state, timing assurance, receipts, compatibility, and recovery guidance without contacting a backend.",
+      "gui": {
+        "status": "shipped",
+        "action": "publication.status"
       }
     },
     {

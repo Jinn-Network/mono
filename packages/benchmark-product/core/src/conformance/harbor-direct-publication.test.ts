@@ -17,6 +17,7 @@ import { initWorkspace } from "../operations/init.js";
 import { publicationAccounting } from "../operations/publication-accounting.js";
 import { publicationConfigure, publicationRegister } from "../operations/publication-register.js";
 import { runLaunch } from "../operations/run-launch.js";
+import { runCollect } from "../operations/run-collect.js";
 import { runLock } from "../operations/run-lock.js";
 import { runQuote } from "../operations/run-quote.js";
 import { sampleInit } from "../operations/sample.js";
@@ -80,7 +81,7 @@ describe("PUB-15 direct Harbor public-before-dispatch", () => {
       const tracePath = join(workspaceDir, "external-order.trace");
       const executable = await fakeHarbor(workspaceDir, tracePath);
       const material = join(workspaceDir, "task"); await mkdir(material);
-      await writeFile(join(material, "task.toml"), `[task]\\nname = "demo/task"\\n[environment]\\ndocker_image = "${manifest.environment.image}"\\n`);
+      await writeFile(join(material, "task.toml"), `[task]\nname = "demo/task"\n[environment]\ndocker_image = "${manifest.environment.image}"\n`);
       const context = { workspaceDir, principal: "publisher", clock: () => new Date().toISOString() };
       expect(initWorkspace(context).ok).toBe(true);
       expect(createDraft(context, { draftId: "direct", name: "Direct public Harbor" }).ok).toBe(true);
@@ -103,7 +104,7 @@ describe("PUB-15 direct Harbor public-before-dispatch", () => {
       const delivered = journal.filter((entry) => entry.kind === "delivery");
       expect(captured).toHaveLength(delivered.length);
       expect(captured.length).toBeGreaterThan(0);
-      for (const entry of captured) expect(entry.publicationSourceSequence).toMatch(/^\\d{16}$/u);
+      for (const entry of captured) expect(entry.publicationSourceSequence).toMatch(/^\d{16}$/u);
       const runSha256 = readRunState(workspaceDir, "direct")?.runSha256;
       expect(runSha256).toMatch(/^[a-f0-9]{64}$/u);
       const runPath = new URL(publicArchiveUrl(source.base, recordPath(`sha256:${runSha256!}`))).pathname;
@@ -129,6 +130,8 @@ describe("PUB-15 direct Harbor public-before-dispatch", () => {
       }
       expect(harborInvocations).toBe(captured.length);
 
+      const collected = await runCollect(context, { draftId: "direct" });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
       const published = await publicationAccounting(context, { draftId: "direct" });
       expect(published.ok, JSON.stringify(published)).toBe(true);
       if (!published.ok) return;

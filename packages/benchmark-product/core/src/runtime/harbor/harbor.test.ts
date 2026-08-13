@@ -10,6 +10,7 @@ import { createDraft, getDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { selectHarborRuntime } from "../../operations/harbor-runtime.js";
 import { runLaunch } from "../../operations/run-launch.js";
+import { runCollect } from "../../operations/run-collect.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
 import { sampleInit } from "../../operations/sample.js";
@@ -271,6 +272,8 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       expect(runLock(context, { draftId: "harbor-run" }).ok).toBe(true);
       const launched = await runLaunch(context, { draftId: "harbor-run" });
       expect(launched.ok, JSON.stringify(launched)).toBe(true);
+      const collected = await runCollect(context, { draftId: "harbor-run" });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
 
       // This is deliberately post-hoc: the fake executable has completed before the product
       // configures its source. Registration/accounting must only read retained exact bytes; a
