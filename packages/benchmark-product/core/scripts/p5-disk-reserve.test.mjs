@@ -78,4 +78,6 @@ test("P5 returns the unused reserve after cold verification", () => withRoot((ro
   const released = releaseP5DiskReserve(root);
   assert.equal(released.releasedBytes, String(P5_RESERVE_BYTES));
   assert.equal(inspectP5DiskReserve(root).currentBytes, 0);
+  assert.deepEqual(releaseP5DiskReserve(root), released);
+  assert.equal(readFileSync(join(root, P5_RECOVERY_LOG), "utf8").trim().split("\n").length, 1);
 }));

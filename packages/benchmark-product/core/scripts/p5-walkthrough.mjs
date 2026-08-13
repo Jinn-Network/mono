@@ -150,6 +150,22 @@ function replaceWalkthroughState(runRoot, state) {
   }
 }
 
+function writeDurableJsonExclusive(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  const fileFd = openSync(path, "r");
+  try {
+    fsyncSync(fileFd);
+  } finally {
+    closeSync(fileFd);
+  }
+  const directoryFd = openSync(dirname(path), "r");
+  try {
+    fsyncSync(directoryFd);
+  } finally {
+    closeSync(directoryFd);
+  }
+}
+
 function rfc3339(value) {
   const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?Z?$/u.exec(value);
   if (match === null) fail(`fixture provenance timestamp is not a supported UTC instant: ${value}`);
@@ -212,6 +228,65 @@ export function assertP5ReadyToCollect(status) {
   if (status?.counts?.judged !== status?.counts?.expected) {
     fail("not all cells reached a grader outcome; checkpoint remains resumable");
   }
+}
+
+export async function finishStagedBundle({
+  runRoot,
+  workspaceDir,
+  bundleDir,
+  transcriptPath,
+  checkpoint,
+  verifyPublicBundle,
+  releaseReserve = releaseP5DiskReserve,
+}) {
+  const pending = checkpoint.pendingTranscript;
+  if (pending?.schema !== "demo1.p5-plumbing/1"
+    || typeof pending.digests?.bundleIdentity !== "string") {
+    fail("bundle-staged checkpoint has no valid pending transcript");
+  }
+  if (existsSync(transcriptPath)) {
+    const existing = JSON.parse(readFileSync(transcriptPath, "utf8"));
+    if (existing?.schema !== pending.schema
+      || existing?.digests?.bundleIdentity !== pending.digests.bundleIdentity
+      || existsSync(workspaceDir)) {
+      fail("completed transcript disagrees with its staged bundle checkpoint");
+    }
+    const verified = await verifyPublicBundle(bundleDir);
+    if (verified.identity !== pending.digests.bundleIdentity) {
+      fail("completed transcript names a different cold bundle identity");
+    }
+    checkpoint.phase = "complete";
+    checkpoint.completed = true;
+    checkpoint.completedAt = existing.completedAt;
+    delete checkpoint.pendingTranscript;
+    replaceWalkthroughState(runRoot, checkpoint);
+    return existing;
+  }
+
+  rmSync(workspaceDir, { recursive: true, force: true });
+  if (existsSync(workspaceDir)) fail("builder workspace survived deletion-portability cut");
+  const coldVerification = await verifyPublicBundle(bundleDir);
+  if (coldVerification.identity !== pending.digests.bundleIdentity) {
+    fail("cold bundle identity moved after builder-workspace deletion");
+  }
+  const reserveRelease = releaseReserve(runRoot, "cold bundle verified");
+  const transcript = {
+    ...pending,
+    completedAt: new Date().toISOString(),
+    disk: { ...pending.disk, reserveRelease },
+    verification: {
+      ...pending.verification,
+      builderWorkspaceDeleted: true,
+      coldBundleChecks: coldVerification.checks,
+    },
+  };
+  writeDurableJsonExclusive(transcriptPath, transcript);
+  checkpoint.phase = "complete";
+  checkpoint.completed = true;
+  checkpoint.completedAt = transcript.completedAt;
+  delete checkpoint.pendingTranscript;
+  replaceWalkthroughState(runRoot, checkpoint);
+  return transcript;
 }
 
 async function main() {
@@ -283,6 +358,19 @@ async function main() {
   const records = await import("@jinn-network/benchmarking-records");
   const { graderProgramDigest } = await import("@jinn-network/task-execution-oci-grader");
   const { parseDsseEnvelope } = await import("@jinn-network/trust-core");
+
+  if (checkpoint.phase === "bundle-staged") {
+    const transcript = await finishStagedBundle({
+      runRoot,
+      workspaceDir,
+      bundleDir,
+      transcriptPath,
+      checkpoint,
+      verifyPublicBundle: core.verifyPublicBundle,
+    });
+    process.stdout.write(`${JSON.stringify(transcript, null, 2)}\n`);
+    return;
+  }
 
   const sourceMd = new Uint8Array(readFileSync(join(fixtureRoot, "instructions", "source.md")));
   const frontmatter = JSON.parse(readFileSync(join(fixtureRoot, "instructions", "frontmatter.json"), "utf8"));
@@ -511,16 +599,21 @@ async function main() {
     benchmarkSha256,
     runState,
   });
-  cpSync(materialized.bundleDir, bundleDir, { recursive: true, errorOnExist: true, force: false });
-  rmSync(workspaceDir, { recursive: true, force: true });
-  if (existsSync(workspaceDir)) fail("builder workspace survived deletion-portability cut");
-  const coldVerification = await core.verifyPublicBundle(bundleDir);
-  const reserveRelease = releaseP5DiskReserve(runRoot, "cold bundle verified");
+  if (existsSync(bundleDir)) {
+    const existing = await core.verifyPublicBundle(bundleDir);
+    if (existing.identity !== materialized.identity) fail("staged bundle identity disagrees on resume");
+  } else {
+    const bundleStage = join(runRoot, ".bundle-staging");
+    rmSync(bundleStage, { recursive: true, force: true });
+    cpSync(materialized.bundleDir, bundleStage, { recursive: true, errorOnExist: true, force: false });
+    const staged = await core.verifyPublicBundle(bundleStage);
+    if (staged.identity !== materialized.identity) fail("copied bundle identity disagrees before cold cut");
+    renameSync(bundleStage, bundleDir);
+  }
 
-  const transcript = {
+  const pendingTranscript = {
     schema: "demo1.p5-plumbing/1",
     startedAt: startedAt.toISOString(),
-    completedAt: new Date().toISOString(),
     scope: {
       taskCount: 3,
       arms: [CANDIDATE_ARM, BASELINE_ARM],
@@ -534,7 +627,6 @@ async function main() {
     disk: {
       atStart: diskAtStart,
       beforeLaunch: diskBeforeLaunch,
-      reserveRelease,
       recoveryLog: P5_RECOVERY_LOG,
     },
     fixture: {
@@ -587,19 +679,20 @@ async function main() {
     },
     verification: {
       workspaceChecks: verified.checks,
-      builderWorkspaceDeleted: true,
-      coldBundleChecks: coldVerification.checks,
     },
     bundleDir,
   };
-  writeFileSync(transcriptPath, `${JSON.stringify(transcript, null, 2)}\n`, {
-    encoding: "utf8",
-    flag: "wx",
-  });
-  checkpoint.phase = "complete";
-  checkpoint.completed = true;
-  checkpoint.completedAt = transcript.completedAt;
+  checkpoint.phase = "bundle-staged";
+  checkpoint.pendingTranscript = pendingTranscript;
   replaceWalkthroughState(runRoot, checkpoint);
+  const transcript = await finishStagedBundle({
+    runRoot,
+    workspaceDir,
+    bundleDir,
+    transcriptPath,
+    checkpoint,
+    verifyPublicBundle: core.verifyPublicBundle,
+  });
   process.stdout.write(`${JSON.stringify(transcript, null, 2)}\n`);
 }
 

@@ -197,6 +197,13 @@ export function releaseP5DiskReserve(runRoot, label = "run complete", { diskPath
   const root = resolve(runRoot);
   const before = freeBytes(diskPath);
   const { state, reservePath } = validatedState(root);
+  if (state.currentBytes === 0 && existsSync(join(root, P5_RECOVERY_LOG))) {
+    const events = readFileSync(join(root, P5_RECOVERY_LOG), "utf8")
+      .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    const prior = events.findLast((event) => event?.label === label
+      && event?.reserveRemainingBytes === "0");
+    if (prior !== undefined) return prior;
+  }
   const released = state.currentBytes;
   truncateSync(reservePath, 0);
   const fd = openSync(reservePath, "r+");

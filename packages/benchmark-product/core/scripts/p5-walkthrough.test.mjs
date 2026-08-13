@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
   assertP5ReadyToCollect,
+  finishStagedBundle,
   p5ArmPinning,
   p5CheckpointAction,
   p5ResumeNeeded,
@@ -82,6 +86,60 @@ test("walkthrough leaves pending work open and refuses an exhausted retry before
   assert.doesNotThrow(
     () => assertP5ReadyToCollect({ counts: { judged: 12, expected: 12 }, evaluationRecovery: { pendingCells: 0, exhaustedCells: 0 } }),
   );
+});
+
+test("bundle-staged checkpoint finishes after workspace deletion and re-entry is idempotent", async () => {
+  const root = mkdtempSync(join(tmpdir(), "p5-finalize-test-"));
+  try {
+    const workspaceDir = join(root, "builder-workspace");
+    const bundleDir = join(root, "bundle");
+    const transcriptPath = join(root, "transcript.json");
+    mkdirSync(workspaceDir);
+    mkdirSync(bundleDir);
+    const pendingTranscript = {
+      schema: "demo1.p5-plumbing/1",
+      digests: { bundleIdentity: "a".repeat(64) },
+      disk: { recoveryLog: "p5-disk-recovery.jsonl" },
+      verification: { workspaceChecks: ["matrix-rederivation"] },
+    };
+    const checkpoint = {
+      schema: "demo1.p5-walkthrough-state/1",
+      phase: "bundle-staged",
+      completed: false,
+      pendingTranscript,
+    };
+    writeFileSync(join(root, "p5-walkthrough-state.json"), `${JSON.stringify(checkpoint)}\n`);
+    const verification = { identity: "a".repeat(64), checks: ["manifest", "evidence-closure"] };
+    const reserveRelease = { label: "cold bundle verified", reserveRemainingBytes: "0" };
+    const transcript = await finishStagedBundle({
+      runRoot: root,
+      workspaceDir,
+      bundleDir,
+      transcriptPath,
+      checkpoint,
+      verifyPublicBundle: async () => verification,
+      releaseReserve: () => reserveRelease,
+    });
+    assert.equal(existsSync(workspaceDir), false);
+    assert.equal(transcript.verification.builderWorkspaceDeleted, true);
+    assert.deepEqual(transcript.verification.coldBundleChecks, verification.checks);
+    assert.deepEqual(transcript.disk.reserveRelease, reserveRelease);
+
+    const staleCheckpoint = { ...checkpoint, phase: "bundle-staged", completed: false, pendingTranscript };
+    writeFileSync(join(root, "p5-walkthrough-state.json"), `${JSON.stringify(staleCheckpoint)}\n`);
+    const replayed = await finishStagedBundle({
+      runRoot: root,
+      workspaceDir,
+      bundleDir,
+      transcriptPath,
+      checkpoint: staleCheckpoint,
+      verifyPublicBundle: async () => verification,
+      releaseReserve: () => { throw new Error("reserve must not release twice"); },
+    });
+    assert.deepEqual(replayed, JSON.parse(readFileSync(transcriptPath, "utf8")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 function expectResume(counts, evaluationRecovery, expected) {

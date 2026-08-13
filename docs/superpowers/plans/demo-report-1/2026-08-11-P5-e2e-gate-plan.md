@@ -149,6 +149,9 @@ secret-forwarding file. A readiness probe revalidates that same binding. Accepte
 evaluation attempts resume under the same attempt identity; only a durable eligible outage
 advances to attempt 2. If disk recovery cannot restore the hard floor, the command exits before
 that attempt and the same output directory remains resumable.
+Bundle copying uses a run-owned staging directory and a durable `bundle-staged` checkpoint. A
+restart after copying—or even after builder-workspace deletion—re-verifies the copied identity,
+finishes the cold verification and reserve release idempotently, and writes the final transcript.
 
 The operations facade is intentional: the real Claude binding is a host-owned injected runtime,
 and the CLI does not infer it from ambient executable or credential state.

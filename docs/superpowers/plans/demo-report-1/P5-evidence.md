@@ -200,7 +200,7 @@ for `provenance.json`. The strict post-P3b fixture suite passes all 11 assertion
 
 Final non-Docker reruns on Node 22 passed:
 
-- P5 pure/injected tests: 26/26;
+- P5 pure/injected tests: 27/27;
 - strict final-fixture tests: 11/11;
 - benchmark-product core full suite: 83 files passed, 3 skipped; 892 tests passed,
   13 skipped;
