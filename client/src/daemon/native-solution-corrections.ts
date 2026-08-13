@@ -59,10 +59,18 @@ export const NATIVE_MARKETPLACE_TEE_FAILURE_KIND = 'native_marketplace_batch_app
  * itself, before returning. If this decorator rethrew, the projector would never receive a batch
  * whose cursor is already committed, and those chain events would be permanently invisible to the
  * signed-announcement chain — trading a settlement-critical, non-re-derivable path for a lagging,
- * idempotent, re-derivable one. Reachable throws are real, not hypothetical: `apply`'s
- * `changed bytes` guard fires when a venue-state reset (cursor lives in `venueStateDbPath`, the
- * journal in the shared `dbPath`) replays blocks re-tiered `observed-safe` → `finalized`, i.e. the
- * same event key with different bytes; and any `SQLITE_BUSY` past the busy timeout throws too.
+ * idempotent, re-derivable one. Reachable throws are real, not hypothetical: any `SQLITE_BUSY` past
+ * the busy timeout throws, and `apply`'s `changed bytes` guard fires on a genuine byte divergence
+ * for an already-journalled `event_key`.
+ *
+ * **The re-tier case is no longer one of them (defect #47 review).** A venue-state reset (cursor
+ * lives in `venueStateDbPath`, the journal in the shared `dbPath`) — and, far more routinely, the
+ * `rewindChainLogCursor` replay in `projector-replay.ts` — re-offers already-journalled blocks at
+ * `finalized` where they were first journalled `safe`. That used to throw, and because `apply` is
+ * ONE transaction it discarded the whole batch, the brand-new events above the old cursor included;
+ * those are never re-listed, so the recovery step silently holed the read model it was repairing.
+ * `apply` now upgrades the tier in place instead — see `native-canonical-observations.ts`'s
+ * repository comment for why finality is an observer mark rather than a fact about the log.
  *
  * So the failure is caught, logged LOUDLY with a named event kind, and the batch is returned
  * regardless. This is deliberately not a silent swallow: the read-model gap is an operator-visible
