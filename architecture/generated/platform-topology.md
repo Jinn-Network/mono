@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **85** entries: **52** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **19** other entries below `packages/**`, and **6** adjacent entries.
+The catalog contains **86** entries: **53** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **19** other entries below `packages/**`, and **6** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -33,6 +33,7 @@ The catalog contains **85** entries: **52** `platform-v1` packages, **8** disabl
 | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution | discovery | 3 | platform | task-execution facts projection | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-protocol<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>zod | — | — |
 | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust | discovery | 3 | platform | trust facts projection | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-protocol<br>@jinn-network/trust-core<br>zod | — | — |
 | @jinn-network/record-discovery-protocol | packages/discovery/protocol | discovery | 1 | platform | record-discovery protocol | candidate | platform-v1 | canary-only | @jinn-network/trust-core<br>@noble/hashes<br>zod | — | — |
+| @jinn-network/record-publication | packages/discovery/publication | discovery | 3 | platform | kind-neutral recoverable record publication coordinator | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve | — | — |
 | @jinn-network/record-discovery-serve | packages/discovery/serve | discovery | 3 | platform | discovery serving contract | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-protocol<br>zod | — | — |
 | @jinn-network/record-discovery-source-evidence-journal | packages/discovery/sources/evidence-journal | discovery | 3 | platform | evidence-journal source adapter | candidate | platform-v1 | canary-only | @jinn-network/evidence-discovery<br>@jinn-network/evidence-repository<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>zod | — | — |
 | @jinn-network/record-discovery-testing | packages/discovery/testing | discovery | — | platform-support | record-discovery conformance kit | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-protocol<br>zod | — | vitest |
@@ -307,6 +308,8 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/record-discovery-transport-http | runtime | @jinn-network/record-discovery-client |
 | @jinn-network/record-discovery-transport-http | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/record-discovery-transport-http | runtime | @jinn-network/record-discovery-serve |
+| @jinn-network/record-publication | runtime | @jinn-network/record-discovery-protocol |
+| @jinn-network/record-publication | runtime | @jinn-network/record-discovery-serve |
 | @jinn-network/task-admission | runtime | @jinn-network/environment-record |
 | @jinn-network/task-admission | runtime | @jinn-network/task-execution-profiles |
 | @jinn-network/task-admission | runtime | @jinn-network/task-execution-protocol |
@@ -364,7 +367,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 1. `@jinn-network/evidence-protocol`, `@jinn-network/task-execution-protocol`, `@jinn-network/trust-core`
 2. `@jinn-network/benchmarking-records`, `@jinn-network/evidence-derivation`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-trace`, `@jinn-network/record-discovery-protocol`, `@jinn-network/task-execution-backend`, `@jinn-network/task-execution-profiles`, `@jinn-network/trust-authoring`, `@jinn-network/trust-resolve`
 3. `@jinn-network/attestation-issuer`, `@jinn-network/benchmarking-aggregate`, `@jinn-network/benchmarking-interop`, `@jinn-network/benchmarking-run`, `@jinn-network/benchmarking-testing`, `@jinn-network/evidence-discovery`, `@jinn-network/evidence-publication`, `@jinn-network/evidence-repository-ipfs`, `@jinn-network/evidence-repository-oci`, `@jinn-network/evidence-trace-decode`, `@jinn-network/execution-recorder`, `@jinn-network/marketplace-binding`, `@jinn-network/record-discovery-client`, `@jinn-network/record-discovery-facts-benchmarking`, `@jinn-network/record-discovery-facts-task-execution`, `@jinn-network/record-discovery-facts-trust`, `@jinn-network/record-discovery-serve`, `@jinn-network/record-discovery-testing`, `@jinn-network/task-execution-supervisor`, `@jinn-network/task-execution-workspace`, `@jinn-network/trust-testing`
-4. `@jinn-network/benchmarking-local`, `@jinn-network/evidence-catalog-sqlite`, `@jinn-network/evidence-contribution`, `@jinn-network/evidence-retrieval`, `@jinn-network/execution-recorder-bridge`, `@jinn-network/marketplace-projector`, `@jinn-network/record-discovery-facts-evidence`, `@jinn-network/record-discovery-source-evidence-journal`, `@jinn-network/record-discovery-transport-http`, `@jinn-network/task-execution-launchers`
+4. `@jinn-network/benchmarking-local`, `@jinn-network/evidence-catalog-sqlite`, `@jinn-network/evidence-contribution`, `@jinn-network/evidence-retrieval`, `@jinn-network/execution-recorder-bridge`, `@jinn-network/marketplace-projector`, `@jinn-network/record-discovery-facts-evidence`, `@jinn-network/record-discovery-source-evidence-journal`, `@jinn-network/record-discovery-transport-http`, `@jinn-network/record-publication`, `@jinn-network/task-execution-launchers`
 5. `@jinn-network/benchmarking-marketplace`, `@jinn-network/evidence-local-runtime`, `@jinn-network/marketplace-venue-base`, `@jinn-network/task-execution-backend-local`, `@jinn-network/task-execution-evaluation-harness`
 6. `@jinn-network/task-execution-evaluator-adapters`, `@jinn-network/task-execution-testing`
 7. `@jinn-network/marketplace-testing`, `@jinn-network/task-execution-oci-grader`
@@ -410,6 +413,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/record-discovery-source-evidence-journal | @jinn-network/evidence-discovery<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/trust-core |
 | @jinn-network/record-discovery-testing | @jinn-network/record-discovery-protocol<br>@jinn-network/trust-core |
 | @jinn-network/record-discovery-transport-http | @jinn-network/record-discovery-client<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/trust-core |
+| @jinn-network/record-publication | @jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/trust-core |
 | @jinn-network/task-execution-backend | @jinn-network/task-execution-protocol |
 | @jinn-network/task-execution-backend-local | @jinn-network/evidence-discovery<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/execution-recorder<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace |
 | @jinn-network/task-execution-evaluation-harness | @jinn-network/attestation-issuer<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace |
@@ -434,10 +438,10 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | experimental-policy | 2 | policy-ci | disabled | false | false | false |
 | experimental-task-supply | 5 | task-supply-ci | disabled | false | false | false |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
-| platform-v1 | 52 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
+| platform-v1 | 53 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
 | transitional-or-private | 12 | autopilot-ci<br>benchmark-product-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci<br>website-ci | private<br>never | false | false | false |
 
-The exact 52-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 8 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 53-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 8 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
@@ -478,6 +482,7 @@ The exact 52-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/record-discovery-source-evidence-journal | stack-npm-publish.yml | blank |
 | @jinn-network/record-discovery-testing | stack-npm-publish.yml | blank |
 | @jinn-network/record-discovery-transport-http | stack-npm-publish.yml | blank |
+| @jinn-network/record-publication | stack-npm-publish.yml | blank |
 | @jinn-network/task-execution-backend | stack-npm-publish.yml | blank |
 | @jinn-network/task-execution-backend-local | stack-npm-publish.yml | blank |
 | @jinn-network/task-execution-evaluation-harness | stack-npm-publish.yml | blank |
@@ -521,6 +526,7 @@ The exact 52-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/record-discovery-facts-task-execution | platform-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-trust | platform-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-protocol | platform-v1 | — | — | fixtures | — |
+| @jinn-network/record-publication | platform-v1 | — | — | — | — |
 | @jinn-network/record-discovery-serve | platform-v1 | — | — | — | — |
 | @jinn-network/record-discovery-source-evidence-journal | platform-v1 | — | — | fixtures | — |
 | @jinn-network/record-discovery-testing | platform-v1 | — | — | fixtures | . |
@@ -1497,14 +1503,14 @@ The exact 52-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3736 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3741 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
 | --- | ---: |
-| authorityDocuments | 28 |
+| authorityDocuments | 29 |
 | boundaryPolicies | 23 |
-| catalogManifests | 85 |
+| catalogManifests | 86 |
 | catalogPublicSurfaces | 1258 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
@@ -1512,7 +1518,7 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | decisionRecords | 4 |
 | discoveredFirstPartySurfaces | 2978 |
 | generatedOutputSources | 1314 |
-| generatorSources | 617 |
+| generatorSources | 620 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
 | staticControl | 6 |

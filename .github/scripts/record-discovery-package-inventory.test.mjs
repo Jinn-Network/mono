@@ -13,6 +13,7 @@ const DISCOVERY_PACKAGES = [
   ['protocol', '@jinn-network/record-discovery-protocol'],
   ['testing', '@jinn-network/record-discovery-testing'],
   ['serve', '@jinn-network/record-discovery-serve'],
+  ['publication', '@jinn-network/record-publication'],
   ['client', '@jinn-network/record-discovery-client'],
   ['facts/evidence', '@jinn-network/record-discovery-facts-evidence'],
   ['facts/trust', '@jinn-network/record-discovery-facts-trust'],
@@ -60,6 +61,9 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // per-package project that portals to protocol, even when serve's own
   // source never imports trust-core directly.
   ['serve', { dependencies: ['@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  // publication is the kind-neutral tier-3 coordinator. It composes the
+  // durable source writer but deliberately has no record-kind dependency.
+  ['publication', { dependencies: ['@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve'], devDependencies: ['@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
   // client's own source imports protocol + trust-core (plan Task 18: the
   // verification driver wires trust-core key-binding resolution). It
   // declares no facts/* dependency -- the facts leaves are reached only
@@ -191,7 +195,7 @@ test('the record discovery package inventory is explicit and has one manifest pe
   const actual = packageManifests(join(root, 'packages'))
     .flatMap((packageJson) => {
       const { name } = JSON.parse(readFileSync(packageJson, 'utf8'));
-      return /^@jinn-network\/record-discovery-/.test(name)
+      return (/^@jinn-network\/record-discovery-/.test(name) || name === '@jinn-network/record-publication')
         ? [[relative(packageRoot, dirname(packageJson)), name]]
         : [];
     }).sort(([left], [right]) => left.localeCompare(right));
