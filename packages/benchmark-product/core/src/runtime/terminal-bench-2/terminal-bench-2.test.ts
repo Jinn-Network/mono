@@ -9,6 +9,7 @@ import { createDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { publicationAccounting } from "../../operations/publication-accounting.js";
 import { buildRegistrationClosure, publicationConfigure, publicationRegister } from "../../operations/publication-register.js";
+import { runCollect } from "../../operations/run-collect.js";
 import { runLaunch } from "../../operations/run-launch.js";
 import { runLock } from "../../operations/run-lock.js";
 import { runQuote } from "../../operations/run-quote.js";
@@ -232,6 +233,56 @@ describe("Terminal-Bench 2 product profile", () => {
     });
   });
 
+  test("publishes depth-first nested material with a same-prefix sibling before running it", async () => {
+    const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
+    expect(initWorkspace(context).ok).toBe(true);
+    expect(createDraft(context, { draftId: "nested", name: "Nested TB2" }).ok).toBe(true);
+    expect((await sampleInit(context, { draftId: "nested" })).ok).toBe(true);
+    expect(armAdd(context, { draftId: "nested", armId: "one", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
+    expect(armAdd(context, { draftId: "nested", armId: "two", pinning: { harness: { id: "placeholder", version: "1" } } }).ok).toBe(true);
+    mkdirSync(join(materialPath, "echo", "tests", "assets"), { recursive: true });
+    writeFileSync(join(materialPath, "echo", "tests", "assets", "file.txt"), "nested asset\n");
+    writeFileSync(join(materialPath, "echo", "tests", "assets.json"), "{\"sibling\":true}\n");
+    const nestedTaskRevision = `sha256:${computeHarbor021TaskContentHash(join(materialPath, "echo")).contentHash}` as const;
+    writeFileSync(metadataPath, JSON.stringify({
+      name: TERMINAL_BENCH_2_DATASET_ID,
+      dataset_version_content_hash: datasetRevision,
+      task_ids: [{ org: "terminal-bench", name: "echo", ref: nestedTaskRevision }],
+    }));
+    const selected = await selectTerminalBench2Runtime(context, { draftId: "nested", ...request(), taskRevision: nestedTaskRevision });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) return;
+    const outer = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, selected.result.selectionManifestSha256))));
+    const profile = TerminalBench2SelectionManifestSchema.parse(outer.profiles?.[TERMINAL_BENCH_2_PROFILE]);
+    expect(profile.selectedTask.material.files.map((file) => file.path)).toEqual([
+      "instruction.md", "task.toml", "tests/assets/file.txt", "tests/assets.json",
+    ]);
+    expect((await runQuote(context, { draftId: "nested" })).ok).toBe(true);
+    const locked = runLock(context, { draftId: "nested" });
+    expect(locked.ok, JSON.stringify(locked)).toBe(true);
+    if (!locked.ok) return;
+    const runtimeDependencyDigests = [
+      outer.harbor.executableSha256,
+      ...outer.source.resolved.files.map((file) => file.sha256),
+      profile.dataset.registrySnapshotSha256,
+      ...profile.selectedTask.material.files.map((file) => file.sha256),
+    ];
+    const source = await startPublicationSource();
+    try {
+      expect((await publicationConfigure(context, { draftId: "nested", publicBaseUrl: source.base })).ok).toBe(true);
+      expect((await publicationRegister(context, { draftId: "nested" })).ok).toBe(true);
+      await expectPublishedRuntimeDependencies(source.base, "nested", runtimeDependencyDigests);
+      const beforeLaunch = harborRunBytes();
+      const launch = await runLaunch(context, { draftId: "nested" });
+      expect(launch.ok, JSON.stringify(launch)).toBe(true);
+      const deliveries = readRunJournalEntries(workspaceDir, "nested").filter((entry) => entry.kind === "delivery");
+      expectOneFilteredTrialPerDispatch(parseHarborRuns(), deliveries.length);
+      expect(harborRunBytes()).not.toBe(beforeLaunch);
+    } finally {
+      await source.close();
+    }
+  }, 120_000);
+
   test("one Jinn dispatch creates one filtered Harbor Trial through the normal lifecycle", async () => {
     const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
     expect(initWorkspace(context).ok).toBe(true);
@@ -284,6 +335,8 @@ describe("Terminal-Bench 2 product profile", () => {
 
       const launch = await runLaunch(context, { draftId: "tb2" });
       expect(launch.ok, JSON.stringify(launch)).toBe(true);
+      const collected = await runCollect(context, { draftId: "tb2" });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
       const journal = readRunJournalEntries(workspaceDir, "tb2");
       const deliveries = journal.filter((entry) => entry.kind === "delivery");
       expect(deliveries.length).toBeGreaterThan(0);
@@ -317,7 +370,7 @@ describe("Terminal-Bench 2 product profile", () => {
   test("legacy migration uses official argv and discloses distinct source/transformed bytes", async () => {
     const context = { workspaceDir, principal: "sponsor-1", clock: clock() };
     expect(initWorkspace(context).ok).toBe(true);
-    const legacy = join(root, "legacy"); mkdirSync(legacy); writeFileSync(join(legacy, "instruction.md"), "legacy task\n");
+    const legacy = join(root, "legacy"); mkdirSync(legacy); writeFileSync(join(legacy, "instruction.md"), "legacy task\n"); writeFileSync(join(legacy, "empty.txt"), "");
     const migrated = await migrateTerminalBenchLegacyTask(context, { executable, sourcePath: legacy, manualAdjustment: { status: "none" } });
     expect(migrated.ok, JSON.stringify(migrated)).toBe(true);
     if (!migrated.ok) return;
@@ -363,6 +416,10 @@ describe("Terminal-Bench 2 product profile", () => {
       ...migrated.result.manifest.runnable.files.map((file) => file.sha256),
     ];
     expectTransitiveRuntimeDependencies(runBytes, locked.result.runSha256, runtimeDependencyDigests);
+    const emptyDependencyMembers = buildRegistrationClosure(workspaceDir, runBytes, locked.result.runSha256, "2026-08-13T00:00:00.000Z")
+      .filter((member) => member.id.startsWith("runtime-material:") && member.digest === `sha256:${migrated.result.manifest.command.stderrSha256}`);
+    expect(emptyDependencyMembers.length).toBeGreaterThan(3);
+    expect(new Set(emptyDependencyMembers.map((member) => member.mediaType))).toEqual(new Set(["application/octet-stream"]));
     const run = JSON.parse(new TextDecoder().decode(runBytes)) as Record<string, unknown>;
     const registration = readRunPublicationExtension(run)!.registrationArtifacts;
     expect(registration.map((entry) => entry.role)).toEqual([
@@ -397,6 +454,8 @@ describe("Terminal-Bench 2 product profile", () => {
 
       const launch = await runLaunch(context, { draftId: "migrated" });
       expect(launch.ok, JSON.stringify(launch)).toBe(true);
+      const collected = await runCollect(context, { draftId: "migrated" });
+      expect(collected.ok, JSON.stringify(collected)).toBe(true);
       const journal = readRunJournalEntries(workspaceDir, "migrated");
       const deliveries = journal.filter((entry) => entry.kind === "delivery");
       expect(deliveries.length).toBeGreaterThan(0);
