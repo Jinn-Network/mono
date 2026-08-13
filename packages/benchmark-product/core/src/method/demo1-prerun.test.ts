@@ -3,104 +3,84 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   DEMO1_DOCUMENT_SKILL_PATHS,
+  DEMO1_PINNED_SKILLS_SOURCE,
+  DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR,
   DEMO1_PRE_RUN_FREEZE_SCHEMA,
   buildDemo1PreRunFreeze,
   canonicalDemo1PreRunFreezeBytes,
   demo1PreRunFreezeDigest,
   parseDemo1UpstreamSkill,
-  type Demo1CandidateInput,
+  verifyDemo1PreRunFreeze,
+  type Demo1PreRunFreeze,
+  type Demo1PreRunFreezeInput,
   type Demo1TaskEligibilityInput,
-} from "./demo1-prerun.js";
+} from "../index.js";
 
 const encoder = new TextEncoder();
-const sha = (character: string) => character.repeat(64);
-const evidence = (name: string) => ({
-  uri: `urn:demo1:evidence:${name}`,
-  sha256: createHash("sha256").update(name).digest("hex"),
-});
+const digest = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
+const evidence = (name: string) => ({ uri: `urn:demo1:evidence:${name}`, sha256: digest(name) });
 
-function skill(name: string, description = `Use ${name} for repository work.`): Uint8Array {
-  return encoder.encode(`---\nname: ${name}\ndescription: ${description}\nlicense: Complete terms in LICENSE.txt\n---\n\n# ${name}\n\nFollow this procedure.\n`);
+const artifactUrl = new URL(
+  "../../../../../docs/superpowers/plans/demo-report-1/E1-pre-run-freeze.stop.v2.json",
+  import.meta.url,
+);
+const winnerSkillUrl = new URL("./__fixtures__/anthropics-skills-f17010-brand-guidelines.SKILL.md", import.meta.url);
+
+function readStoppedFreeze(): Demo1PreRunFreeze {
+  return JSON.parse(readFileSync(artifactUrl, "utf8")) as Demo1PreRunFreeze;
 }
 
-function task(
-  id: string,
-  repository: string,
-  pool: "suitability" | "rehearsal" | "official",
-  overrides: Partial<Demo1TaskEligibilityInput["checks"]> = {},
-): Demo1TaskEligibilityInput {
-  const check = (name: string) => ({ status: "match" as const, evidence: [evidence(name)] });
+function clone<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function task(id: string, repository: string, pool: "suitability" | "rehearsal" | "official"): Demo1TaskEligibilityInput {
+  const check = (criterion: string) => ({ status: "match" as const, evidence: [evidence(`${id}:${criterion}`)] });
   return {
     taskId: id,
     repository,
     pool,
-    taskSha256: sha("a"),
-    image: { digest: `sha256:${sha("b")}`, evidence: [evidence(`${id}-image`)] },
+    taskSha256: digest(`task:${id}`),
+    image: { digest: `sha256:${digest(`image:${id}`)}`, evidence: [evidence(`${id}:image`)] },
     checks: {
-      goldPatchPasses: check(`${id}-gold`),
-      emptyPatchFails: check(`${id}-empty`),
-      compatibleTaskLicense: check(`${id}-license`),
-      instructionLeakageAbsent: check(`${id}-leakage`),
-      conflictingInstructionFileAbsent: check(`${id}-conflict`),
-      contentGoldPatchCollisionAbsent: check(`${id}-collision`),
-      ...overrides,
+      goldPatchPasses: check("gold"),
+      emptyPatchFails: check("empty"),
+      compatibleTaskLicense: check("license"),
+      instructionLeakageAbsent: check("leakage"),
+      conflictingInstructionFileAbsent: check("conflict"),
+      contentGoldPatchCollisionAbsent: check("collision"),
     },
   };
 }
 
-function candidate(
-  path: string,
-  tasks: readonly Demo1TaskEligibilityInput[],
-  overrides: Partial<Demo1CandidateInput> = {},
-): Demo1CandidateInput {
-  const name = path.slice("skills/".length);
-  return {
-    repositoryPath: path,
-    skillMd: skill(name),
-    license: { spdxId: "Apache-2.0", bytes: encoder.encode("Apache License 2.0\n") },
-    standalone: {
-      status: "match",
-      detail: "SKILL.md contains a usable procedure without sibling files.",
-      evidence: [evidence(`${name}-standalone`)],
-    },
-    tasks,
-    ...overrides,
+function readyInput(): Demo1PreRunFreezeInput {
+  const input = clone(readStoppedFreeze().inputs) as Demo1PreRunFreezeInput;
+  const mutable = input as unknown as {
+    candidates: Array<{
+      repositoryPath: string;
+      skillMdBase64?: string;
+      tasks: Demo1TaskEligibilityInput[];
+    }>;
   };
+  const candidate = mutable.candidates.find((entry) => entry.repositoryPath === "skills/brand-guidelines")!;
+  candidate.skillMdBase64 = readFileSync(winnerSkillUrl).toString("base64");
+  candidate.tasks = [
+    ...Array.from({ length: 6 }, (_, index) => task(`s-${index}`, `suitability/repo-${index}`, "suitability")),
+    ...Array.from({ length: 10 }, (_, index) => task(`r-${index}`, `rehearsal/repo-${index % 5}`, "rehearsal")),
+    ...Array.from({ length: 7 }, (_, index) => task(`o-${index}`, `official/repo-${index % 3}`, "official")),
+  ];
+  return input;
 }
-
-function readyInput(candidates: readonly Demo1CandidateInput[]) {
-  return {
-    source: {
-      repositoryUrl: "https://github.com/anthropics/skills.git",
-      commit: "0123456789abcdef0123456789abcdef01234567",
-      skillsTree: "89abcdef0123456789abcdef0123456789abcdef",
-    },
-    officialPoolRequirement: { status: "resolved" as const, tasks: 2, repositories: 1 },
-    poolRequirements: {
-      suitability: { tasks: 2, repositories: 2 },
-      rehearsal: { tasks: 3, repositories: 2 },
-    },
-    candidates,
-  };
-}
-
-const enoughTasks = (prefix: string) => [
-  task(`${prefix}-s1`, `${prefix}/suitability-one`, "suitability"),
-  task(`${prefix}-s2`, `${prefix}/suitability-two`, "suitability"),
-  task(`${prefix}-r1`, `${prefix}/rehearsal-one`, "rehearsal"),
-  task(`${prefix}-r2`, `${prefix}/rehearsal-two`, "rehearsal"),
-  task(`${prefix}-r3`, `${prefix}/rehearsal-one`, "rehearsal"),
-  task(`${prefix}-o1`, `${prefix}/official-one`, "official"),
-  task(`${prefix}-o2`, `${prefix}/official-one`, "official"),
-];
 
 describe("Demo-1 pre-run source transform", () => {
-  it("extracts the literal body and exact upstream description", () => {
+  it("extracts the literal instruction body and exact multiline description", () => {
     const bytes = encoder.encode("---\nname: claude-api\ndescription: |-\n  First line.\n  Second line.\nlicense: x\n---\n\n# Body\n");
     const parsed = parseDemo1UpstreamSkill(bytes);
-    expect(parsed.name).toBe("claude-api");
-    expect(parsed.description).toBe("First line.\nSecond line.");
-    expect(new TextDecoder().decode(parsed.sourceMd)).toBe("# Body\n");
+    expect(parsed).toEqual({
+      name: "claude-api",
+      description: "First line.\nSecond line.",
+      sourceMd: encoder.encode("# Body\n"),
+    });
   });
 
   it.each([
@@ -112,197 +92,158 @@ describe("Demo-1 pre-run source transform", () => {
   });
 });
 
-describe("Demo-1 pre-run freeze", () => {
-  it("ranks ready candidates by eligible-task count then repository path and freezes literal loadout bytes", () => {
-    const alpha = candidate("skills/alpha", enoughTasks("alpha"));
-    const beta = candidate("skills/beta", [
-      ...enoughTasks("beta"),
-      task("beta-o3", "beta/official-one", "official"),
-    ]);
-    const freeze = buildDemo1PreRunFreeze(readyInput([beta, alpha]));
+describe("Demo-1 canonical STOP artifact", () => {
+  it("independently recomputes every status, rejection, rank, selection basis, and seed", () => {
+    const frozen = readStoppedFreeze();
+    verifyDemo1PreRunFreeze(frozen);
+    const recomputed = buildDemo1PreRunFreeze(frozen.inputs);
 
-    expect(freeze.schema).toBe(DEMO1_PRE_RUN_FREEZE_SCHEMA);
-    expect(freeze.status).toBe("ready");
-    expect(freeze.ranking.map((entry) => entry.repositoryPath)).toEqual([
-      "skills/beta",
-      "skills/alpha",
-    ]);
-    expect(freeze.winner?.repositoryPath).toBe("skills/beta");
-    expect(Buffer.from(freeze.winner!.sourceMd.content, "base64").toString("utf8"))
-      .toBe("# beta\n\nFollow this procedure.\n");
-    expect(Buffer.from(freeze.winner!.claudeMd.content, "base64"))
-      .toEqual(Buffer.from(freeze.winner!.sourceMd.content, "base64"));
-    expect(freeze.winner!.selectedPools.suitability).toHaveLength(2);
-    expect(new Set(freeze.winner!.selectedPools.suitability.map((entry) => entry.repository)).size).toBe(2);
-    expect(freeze.winner!.selectedPools.rehearsal).toHaveLength(3);
-    expect(new Set(freeze.winner!.selectedPools.rehearsal.map((entry) => entry.repository)).size).toBeGreaterThanOrEqual(2);
+    expect(recomputed).toEqual(frozen);
+    expect(frozen.schema).toBe(DEMO1_PRE_RUN_FREEZE_SCHEMA);
+    expect(frozen.derived.status).toBe("stop");
+    expect(frozen.derived.winner).toBeNull();
+    expect(frozen.derived.ranking).toEqual([]);
+    expect(frozen.derived.stopReasons).toEqual(["no-candidate-meets-pre-e2-feasibility-floor"]);
+    expect(frozen.derived.candidates).toHaveLength(17);
+    expect(frozen.derived.candidates.every((entry) => entry.eligibleTaskCount === 0)).toBe(true);
+    expect(frozen.inputs.candidates.every((entry) => entry.source.skill.description.length > 0)).toBe(true);
+    expect(frozen.inputs.candidates.every((entry) => entry.source.skill.bytes > 0)).toBe(true);
+    expect(frozen.inputs.candidates.every((entry) => entry.standalone.evidence.length > 0)).toBe(true);
+    expect(Object.values(frozen.execution).every((count) => count === 0)).toBe(true);
   });
 
-  it("uses lexicographic repository path as the exact tie-breaker", () => {
-    const freeze = buildDemo1PreRunFreeze(readyInput([
-      candidate("skills/zeta", enoughTasks("zeta")),
-      candidate("skills/alpha", enoughTasks("alpha")),
-    ]));
-    expect(freeze.ranking.map((entry) => entry.repositoryPath)).toEqual(["skills/alpha", "skills/zeta"]);
-  });
-
-  it("excludes all four fixed document skills independently of their license", () => {
-    expect(DEMO1_DOCUMENT_SKILL_PATHS).toEqual([
-      "skills/docx",
-      "skills/pdf",
-      "skills/pptx",
-      "skills/xlsx",
-    ]);
-    const freeze = buildDemo1PreRunFreeze(readyInput(
-      DEMO1_DOCUMENT_SKILL_PATHS.map((path) => candidate(path, enoughTasks(path))),
-    ));
-    expect(freeze.status).toBe("stop");
-    expect(freeze.candidates.every((entry) => entry.rejectionReasons.includes("source-available-document-skill")))
-      .toBe(true);
-  });
-
-  it("refuses missing licenses, descriptions, non-standalone instructions, and unresolved official capacity", () => {
-    const freeze = buildDemo1PreRunFreeze({
-      ...readyInput([
-        candidate("skills/missing-license", enoughTasks("license"), { license: undefined }),
-        candidate("skills/not-standalone", enoughTasks("standalone"), {
-          standalone: { status: "mismatch", detail: "Requires sibling scripts.", evidence: [evidence("standalone-fail")] },
-        }),
-      ]),
-      officialPoolRequirement: {
-        status: "unresolved",
-        detail: "E2 has not frozen the official task capacity requirement.",
-      } as const,
-    });
-    expect(freeze.status).toBe("stop");
-    expect(freeze.stopReasons).toContain("official-pool-requirement-unresolved");
-    expect(freeze.candidates.find((entry) => entry.repositoryPath === "skills/missing-license")?.rejectionReasons)
-      .toContain("missing-compatible-folder-license");
-    expect(freeze.candidates.find((entry) => entry.repositoryPath === "skills/not-standalone")?.rejectionReasons)
-      .toContain("instructions-not-standalone");
-  });
-
-  it.each([
-    "goldPatchPasses",
-    "emptyPatchFails",
-    "compatibleTaskLicense",
-    "instructionLeakageAbsent",
-    "conflictingInstructionFileAbsent",
-    "contentGoldPatchCollisionAbsent",
-  ] as const)("does not count a task when %s lacks matching evidence", (criterion) => {
-    const bad = task("bad", "repo/bad", "official", {
-      [criterion]: { status: "unverifiable", detail: "proof absent", evidence: [] },
-    });
-    const freeze = buildDemo1PreRunFreeze(readyInput([
-      candidate("skills/alpha", [...enoughTasks("alpha"), bad]),
-    ]));
-    const inventory = freeze.candidates[0]!.tasks.find((entry) => entry.taskId === "bad")!;
-    expect(inventory.eligible).toBe(false);
-    expect(inventory.rejectionReasons).toContain(criterion);
-  });
-
-  it("stops on cross-pool repository overlap even when every task is otherwise eligible", () => {
-    const tasks = enoughTasks("alpha");
-    tasks[5] = task("alpha-o1", "alpha/suitability-one", "official");
-    const freeze = buildDemo1PreRunFreeze(readyInput([candidate("skills/alpha", tasks)]));
-    expect(freeze.status).toBe("stop");
-    expect(freeze.candidates[0]!.rejectionReasons).toContain("repository-pool-overlap");
-  });
-
-  it("records the exact insufficient pool instead of leaving a partial candidate unexplained", () => {
-    const partial = enoughTasks("alpha").slice(0, -1);
-    const freeze = buildDemo1PreRunFreeze(readyInput([candidate("skills/alpha", partial)]));
-    expect(freeze.status).toBe("stop");
-    expect(freeze.candidates[0]!.eligibleTaskCount).toBeGreaterThan(0);
-    expect(freeze.candidates[0]!.rejectionReasons).toContain("insufficient-official-pool");
-  });
-
-  it("refuses a pool requirement with more repositories than tasks", () => {
-    const input = readyInput([candidate("skills/alpha", enoughTasks("alpha"))]);
-    expect(() => buildDemo1PreRunFreeze({
-      ...input,
-      poolRequirements: { ...input.poolRequirements, suitability: { tasks: 2, repositories: 3 } },
-    })).toThrow(/repository count cannot exceed task count/u);
-  });
-
-  it("derives resolved SHA-256 integer seeds and canonical bytes solely from frozen inputs", () => {
-    const input = readyInput([candidate("skills/alpha", enoughTasks("alpha"))]);
-    const first = buildDemo1PreRunFreeze(input);
-    const second = buildDemo1PreRunFreeze(input);
-    expect(first.seeds).toEqual(second.seeds);
-    for (const value of Object.values(first.seeds.resolved)) {
-      expect(Number.isInteger(value)).toBe(true);
-      expect(value).toBeGreaterThanOrEqual(1);
-      expect(value).toBeLessThanOrEqual(4_294_967_295);
-    }
-    expect(canonicalDemo1PreRunFreezeBytes(first)).toEqual(canonicalDemo1PreRunFreezeBytes(second));
-    expect(demo1PreRunFreezeDigest(first)).toMatch(/^sha256:[0-9a-f]{64}$/u);
-
-    const changed = buildDemo1PreRunFreeze({
-      ...input,
-      source: { ...input.source, commit: "1123456789abcdef0123456789abcdef01234567" },
-    });
-    expect(changed.seeds.resolved).not.toEqual(first.seeds.resolved);
-  });
-
-  it("keeps the pinned 17-folder upstream inventory canonical and explicitly stopped", () => {
-    const fixtureUrl = new URL(
-      "../../../../../docs/superpowers/plans/demo-report-1/E1-pre-run-freeze.stop.v1.json",
-      import.meta.url,
-    );
-    const fileBytes = readFileSync(fixtureUrl);
-    const parsed = JSON.parse(fileBytes.toString("utf8")) as {
-      readonly schema: string;
-      readonly status: string;
-      readonly source: { readonly repositoryUrl: string; readonly commit: string; readonly skillsTree: string };
-      readonly documentSkillExclusions: readonly string[];
-      readonly candidates: readonly { readonly repositoryPath: string; readonly eligibleTaskCount: number; readonly descriptionPresent: boolean }[];
-      readonly ranking: readonly unknown[];
-      readonly winner: unknown;
-      readonly stopReasons: readonly string[];
-      readonly execution: Readonly<Record<string, number>>;
-    };
-    expect(parsed.schema).toBe("jinn.demo1.pre-run-source-inventory.v1");
-    expect(parsed.source).toEqual({
+  it("preserves the exact pinned tree, complete 17-folder inventory, and four exclusions", () => {
+    const frozen = readStoppedFreeze();
+    expect(frozen.inputs.source).toEqual({
+      authentication: "git-tree-path-blob+sha256@1",
       repositoryUrl: "https://github.com/anthropics/skills.git",
       commit: "f17010c9bb483898c1d9c9f42dde2b3a98889434",
+      commitTree: "0fe4c0c8372b239b13062036d08d05f79d4055a1",
       skillsTree: "491339fffffe73a52f638f09747dddd8ae2cf154",
     });
-    expect(parsed.candidates).toHaveLength(17);
-    expect(parsed.candidates.map((entry) => entry.repositoryPath)).toEqual([
-      "skills/algorithmic-art",
-      "skills/brand-guidelines",
-      "skills/canvas-design",
-      "skills/claude-api",
-      "skills/doc-coauthoring",
-      "skills/docx",
-      "skills/frontend-design",
-      "skills/internal-comms",
-      "skills/mcp-builder",
-      "skills/pdf",
-      "skills/pptx",
-      "skills/skill-creator",
-      "skills/slack-gif-creator",
-      "skills/theme-factory",
-      "skills/web-artifacts-builder",
-      "skills/webapp-testing",
-      "skills/xlsx",
+    expect(frozen.inputs.candidates.map((entry) => entry.repositoryPath))
+      .toEqual(DEMO1_PINNED_SKILLS_SOURCE.candidates.map((entry) => entry.repositoryPath));
+    expect(frozen.inputs.exclusions.documentSkills).toEqual(DEMO1_DOCUMENT_SKILL_PATHS);
+    expect(frozen.inputs.poolRequirements.officialFeasibilityFloor)
+      .toEqual(DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR);
+  });
+
+  it("uses canonical bytes and refuses derived-field or execution-accounting substitution", () => {
+    const frozen = readStoppedFreeze();
+    expect(demo1PreRunFreezeDigest(frozen)).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(canonicalDemo1PreRunFreezeBytes(frozen)).toEqual(canonicalDemo1PreRunFreezeBytes(readStoppedFreeze()));
+
+    const changedDerived = clone(frozen) as unknown as { derived: { selectionBasisSha256: string } };
+    changedDerived.derived.selectionBasisSha256 = "0".repeat(64);
+    expect(() => verifyDemo1PreRunFreeze(changedDerived as unknown as Demo1PreRunFreeze)).toThrow(/do not recompute/u);
+
+    const changedExecution = clone(frozen) as unknown as { execution: { modelArms: number } };
+    changedExecution.execution.modelArms = 1;
+    expect(() => verifyDemo1PreRunFreeze(changedExecution as unknown as Demo1PreRunFreeze)).toThrow(/zero-execution/u);
+  });
+});
+
+describe("Demo-1 authenticated source and license boundary", () => {
+  it.each(["commit", "commitTree", "skillsTree"] as const)("rejects substituted source %s", (field) => {
+    const input = clone(readStoppedFreeze().inputs) as unknown as Record<string, unknown>;
+    const source = input.source as Record<string, unknown>;
+    source[field] = field === "commit" ? "0".repeat(40) : "1".repeat(40);
+    expect(() => buildDemo1PreRunFreeze(input as unknown as Demo1PreRunFreezeInput)).toThrow(/pinned Git tree/u);
+  });
+
+  it("rejects arbitrary SKILL, description, folder-tree, and license identity labels", () => {
+    const mutations: Array<(candidate: Record<string, unknown>) => void> = [
+      (candidate) => { (candidate.source as { folderTree: string }).folderTree = "0".repeat(40); },
+      (candidate) => { ((candidate.source as { skill: { sha256: string } }).skill).sha256 = "0".repeat(64); },
+      (candidate) => { ((candidate.source as { skill: { description: string } }).skill).description = "substituted"; },
+      (candidate) => { ((candidate.source as { license: { spdxId: string } }).license).spdxId = "MIT"; },
+    ];
+    for (const mutate of mutations) {
+      const input = clone(readStoppedFreeze().inputs) as unknown as { candidates: Record<string, unknown>[] };
+      mutate(input.candidates[1]!);
+      expect(() => buildDemo1PreRunFreeze(input as unknown as Demo1PreRunFreezeInput)).toThrow(/identity|pinned Git tree|authenticated bytes/u);
+    }
+  });
+
+  it("requires every exact pinned folder exactly once and rejects unknown schema fields", () => {
+    const missing = clone(readStoppedFreeze().inputs) as unknown as { candidates: unknown[] };
+    missing.candidates.pop();
+    expect(() => buildDemo1PreRunFreeze(missing as unknown as Demo1PreRunFreezeInput)).toThrow(/every pinned source folder/u);
+
+    const extra = clone(readStoppedFreeze().inputs) as unknown as Record<string, unknown>;
+    extra.callerDeclaredTrust = true;
+    expect(() => buildDemo1PreRunFreeze(extra as unknown as Demo1PreRunFreezeInput)).toThrow(/unknown or missing fields/u);
+  });
+});
+
+describe("Demo-1 pre-E2 selection boundary", () => {
+  it("locks a qualifying winner before E2 while exact official capacity remains pending", () => {
+    const frozen = buildDemo1PreRunFreeze(readyInput());
+    expect(frozen.derived.status).toBe("ready");
+    expect(frozen.derived.winner?.repositoryPath).toBe("skills/brand-guidelines");
+    expect(frozen.inputs.officialDesign.exactCapacity).toBeNull();
+    expect(frozen.inputs.officialDesign.winnerLockedBeforeE2).toBe(true);
+    expect(frozen.derived.winner?.selectedPools.suitability).toHaveLength(6);
+    expect(frozen.derived.winner?.selectedPools.rehearsal).toHaveLength(10);
+    expect(frozen.derived.winner?.selectedPools.officialFeasibility).toHaveLength(5);
+    expect(frozen.derived.winner?.officialTaskOrder).toHaveLength(7);
+    expect(Buffer.from(frozen.derived.winner!.sourceMd.content, "base64"))
+      .toEqual(Buffer.from(frozen.derived.winner!.claudeMd.content, "base64"));
+  });
+
+  it("stops below the objective official feasibility floor without waiting for E2", () => {
+    const input = readyInput();
+    const mutable = input as unknown as { candidates: Array<{ repositoryPath: string; tasks: Demo1TaskEligibilityInput[] }> };
+    const candidate = mutable.candidates.find((entry) => entry.repositoryPath === "skills/brand-guidelines")!;
+    candidate.tasks = candidate.tasks.filter((entry) => entry.pool !== "official").concat([
+      task("o-0", "official/repo-0", "official"),
+      task("o-1", "official/repo-1", "official"),
+      task("o-2", "official/repo-0", "official"),
+      task("o-3", "official/repo-1", "official"),
     ]);
-    expect(parsed.status).toBe("stop");
-    expect(parsed.winner).toBeNull();
-    expect(parsed.ranking).toEqual([]);
-    expect(parsed.candidates.every((entry) => entry.eligibleTaskCount === 0)).toBe(true);
-    expect(parsed.candidates.every((entry) => entry.descriptionPresent)).toBe(true);
-    expect(parsed.documentSkillExclusions).toEqual(DEMO1_DOCUMENT_SKILL_PATHS);
-    expect(parsed.stopReasons).toEqual([
-      "official-pool-requirement-unresolved",
-      "no-candidate-supports-disjoint-suitability-rehearsal-official-pools",
-    ]);
-    expect(Object.values(parsed.execution).every((count) => count === 0)).toBe(true);
-    const canonicalDigest = createHash("sha256")
-      .update(canonicalDemo1PreRunFreezeBytes(parsed as never))
-      .digest("hex");
-    expect(`sha256:${canonicalDigest}`)
-      .toBe("sha256:ac213523dc8292edb18066c05826454bb44a79f6a6dc9dd1cfa7e984aac35f66");
+    const frozen = buildDemo1PreRunFreeze(input);
+    expect(frozen.derived.status).toBe("stop");
+    expect(frozen.derived.candidates.find((entry) => entry.repositoryPath === "skills/brand-guidelines")?.rejectionReasons)
+      .toContain("insufficient-official-feasibility-pool");
+  });
+
+  it("does not accept a caller-resolved E2 capacity or permit outcome-informed switching", () => {
+    const input = readyInput() as unknown as { officialDesign: Record<string, unknown> };
+    input.officialDesign.status = "resolved";
+    input.officialDesign.exactCapacity = { tasks: 20, repositories: 10 };
+    expect(() => buildDemo1PreRunFreeze(input as unknown as Demo1PreRunFreezeInput)).toThrow(/pending E2/u);
+  });
+
+  it("never treats matching task or standalone claims without evidence as eligible", () => {
+    const input = readyInput();
+    const mutable = input as unknown as { candidates: Array<{ repositoryPath: string; tasks: Demo1TaskEligibilityInput[] }> };
+    const candidate = mutable.candidates.find((entry) => entry.repositoryPath === "skills/brand-guidelines")!;
+    candidate.tasks.push({
+      ...task("unproved", "official/unproved", "official"),
+      checks: {
+        ...task("unproved", "official/unproved", "official").checks,
+        goldPatchPasses: { status: "match", evidence: [] },
+      },
+    });
+    expect(() => buildDemo1PreRunFreeze(input)).toThrow(/cannot match without evidence/u);
+  });
+
+  it("fails closed if winner source bytes do not match the pinned path/blob", () => {
+    const input = readyInput() as unknown as { candidates: Array<{ repositoryPath: string; skillMdBase64?: string }> };
+    const candidate = input.candidates.find((entry) => entry.repositoryPath === "skills/brand-guidelines")!;
+    candidate.skillMdBase64 = Buffer.from("substituted").toString("base64");
+    expect(() => buildDemo1PreRunFreeze(input as unknown as Demo1PreRunFreezeInput)).toThrow(/do not match the pinned path\/blob/u);
+  });
+
+  it("normalizes task and evidence ordering before deriving selectionBasisSha256 and seeds", () => {
+    const firstInput = readyInput();
+    const secondInput = clone(firstInput) as unknown as { candidates: Array<{ repositoryPath: string; tasks: Demo1TaskEligibilityInput[] }> };
+    const candidate = secondInput.candidates.find((entry) => entry.repositoryPath === "skills/brand-guidelines")!;
+    candidate.tasks.reverse();
+    const first = buildDemo1PreRunFreeze(firstInput);
+    const second = buildDemo1PreRunFreeze(secondInput as unknown as Demo1PreRunFreezeInput);
+    expect(second.inputs).toEqual(first.inputs);
+    expect(second.derived.selectionBasisSha256).toBe(first.derived.selectionBasisSha256);
+    expect(second.derived.seeds).toEqual(first.derived.seeds);
   });
 });

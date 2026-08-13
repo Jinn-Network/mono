@@ -98,14 +98,18 @@ export {
   DEMO1_INSTRUCTION_TRANSFORM_ID,
   DEMO1_INSTRUCTION_TRANSFORM_SPEC,
   DEMO1_OUTCOME_BLIND_TASK_CHECKS,
+  DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR,
   DEMO1_PRE_RUN_FREEZE_SCHEMA,
   DEMO1_SKILLS_SOURCE_URL,
   buildDemo1PreRunFreeze,
   canonicalDemo1PreRunFreezeBytes,
   demo1PreRunFreezeDigest,
   parseDemo1UpstreamSkill,
+  verifyDemo1PreRunFreeze,
 } from "./method/demo1-prerun.js";
+export { DEMO1_PINNED_SKILLS_SOURCE } from "./method/demo1-prerun-source.js";
 export type {
+  Demo1AuthenticatedCandidateSource,
   Demo1CandidateInput,
   Demo1CandidateInventory,
   Demo1EvidenceCheck,
@@ -113,6 +117,7 @@ export type {
   Demo1EvidenceStatus,
   Demo1Pool,
   Demo1PreRunFreeze,
+  Demo1PreRunFreezeDerived,
   Demo1PreRunFreezeInput,
   Demo1TaskEligibilityInput,
   Demo1TaskInventory,
