@@ -141,29 +141,50 @@ function projectObservation(manifest, summary, observation) {
   return { verdict, measurements };
 }
 
-async function spawnBounded(executable, args, env, signal) {
+/** Product-private process boundary. Exported only so cancellation/reaping remains directly
+ * regression-testable without requiring a Python or OCI runtime. */
+export async function spawnBounded(executable, args, env, signal) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       env,
       stdio: ["ignore", "pipe", "pipe"],
-      signal,
     });
     const stdout = [];
     let bytes = 0;
+    let spawnError;
+    let outputExceeded = false;
+    let killTimer;
+    const cancel = () => {
+      child.kill("SIGTERM");
+      killTimer ??= setTimeout(() => child.kill("SIGKILL"), 10_000);
+      killTimer.unref();
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
     child.stdout.on("data", (chunk) => {
       bytes += chunk.length;
-      if (bytes > MAX_WORKER_OUTPUT_BYTES) child.kill("SIGKILL");
-      else stdout.push(chunk);
+      if (bytes > MAX_WORKER_OUTPUT_BYTES) {
+        outputExceeded = true;
+        child.kill("SIGKILL");
+      } else stdout.push(chunk);
     });
     child.stderr.resume();
     child.once("error", (cause) => {
-      reject(signal.aborted
-        ? operational("CANCELLED", "Inspect log verification was cancelled", cause)
-        : operational("UNAVAILABLE", "Inspect log verifier could not start", cause));
+      spawnError = cause;
     });
-    child.once("exit", (code, exitSignal) => {
+    child.once("close", (code, exitSignal) => {
+      signal.removeEventListener("abort", cancel);
+      if (killTimer !== undefined) clearTimeout(killTimer);
       if (signal.aborted) {
-        reject(operational("CANCELLED", "Inspect log verification was cancelled"));
+        reject(operational("CANCELLED", "Inspect log verification was cancelled", spawnError));
+        return;
+      }
+      if (spawnError !== undefined) {
+        reject(operational("UNAVAILABLE", "Inspect log verifier could not start", spawnError));
+        return;
+      }
+      if (outputExceeded) {
+        reject(operational("RESOURCE_EXHAUSTED", "Inspect log verifier exceeded its output limit"));
         return;
       }
       if (code !== 0) {
