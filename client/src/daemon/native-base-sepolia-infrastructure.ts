@@ -1042,7 +1042,18 @@ export function createSolverReads(input: {
         const detail = operation.detail as { readonly deliveryDigest?: unknown };
         if (typeof detail?.deliveryDigest !== 'string'
           || !/^sha256:[0-9a-f]{64}$/u.test(detail.deliveryDigest)) {
-          return { kind: 'orphaned', txHash: event.transactionHash, reason: 'solution operation has no exact Delivery digest' };
+          // A missing digest in the operator's OWN local row is an absence of local state, not a
+          // reorg — exactly the absence→`orphaned` class this reader stopped drawing above, and it
+          // was the one instance of it left inside the settlement leg (#2623). Returning `orphaned`
+          // here rolled the engagement back to `solution-published`, and the reopen it triggered
+          // reopened an operation whose detail the orphan notice had just destroyed, so the next
+          // read landed on this same branch — an unbounded loop that never touched a clock, because
+          // `recordSolutionSettlementOrphaned` returns normally. THROW instead: the coordinator's
+          // `dependency()` wrapper converts it into a retryable failure, which inherits the existing
+          // 24h deadline and 5-attempt ceiling through `recordSolutionPaused`.
+          throw new Error(
+            `solution settlement operation ${operation.operationId} carries no exact Delivery digest`,
+          );
         }
         const correspondence = await exactDelivery({
           chainId: 84532,

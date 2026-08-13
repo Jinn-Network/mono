@@ -423,6 +423,108 @@ describe('NativeSolutionCoordinator', () => {
       .filter(({ kind }) => kind === 'solution-settlement')).toHaveLength(1);
   });
 
+  // #2623: the settlement operation's `detail_json` is its IDENTITY — `{attempt, deliveryDigest}`,
+  // written at intent and read by the settlement reader to bind the settlement to the exact public
+  // Delivery. An orphan notice must ANNOTATE it, never replace it.
+  it('annotates the settlement identity when an orphan notice lands', async () => {
+    const txHash = `0x${'7'.repeat(64)}` as const;
+    const subject = setup({
+      settlementFacts: [
+        { kind: 'absent', checkedAtBlock: 119n },
+        { kind: 'orphaned', txHash, reason: 'projector-reorg-correction' },
+      ],
+    });
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toEqual({ kind: 'solution-published' });
+
+    const operation = subject.state.listOperations(subject.engagementId)
+      .find(({ kind }) => kind === 'solution-settlement')!;
+    expect(operation.status).toBe('orphaned');
+    expect(operation.detail).toEqual({
+      attempt: subject.state.getEngagement(subject.engagementId)!.attemptUri,
+      deliveryDigest: documentDigest(subject.deliveryBytes),
+      kind: 'orphaned',
+      txHash,
+      reason: 'projector-reorg-correction',
+    });
+  });
+
+  // Round 26 (CP6 live gate, Base Sepolia), operator B, task 1234. An older build's orphan notice
+  // overwrote the settlement operation's detail with `{kind, txHash, reason}`, and the reopen
+  // restored only `status` / `tx_hash` / `block_*` — so every subsequent poll read an operation with
+  // no exact Delivery digest, orphaned it again, and rolled the engagement back to
+  // `solution-published`: 48 orphan events at the ~33s cadence, no deadline, no attempt ceiling, one
+  // permanently occupied `maxConcurrent: 1` slot. The row seeded below is that operator's exact
+  // on-disk shape. Recovery must not require hand-editing a database: the reopen re-derives the
+  // identity from durable state no orphan notice can reach (`native_engagements.attempt_uri` plus
+  // the `delivery` row in `native_solution_artifacts`) and the engagement reaches terminal
+  // `solution-settled`, freeing the slot.
+  it('recovers a settlement whose operation detail an older build already destroyed', async () => {
+    const liveTxHash = '0xc5d458e15d4deaae121500b0689bdd2d8084193c4383350fdf5a94dcbb432474' as const;
+    const liveBlockHash = `0x${'ab'.repeat(32)}` as const;
+    const liveBlockNumber = 45_401_836n;
+    const liveReason = 'solution operation has no exact Delivery digest';
+    const subject = setup({
+      settlementFacts: [
+        { kind: 'absent', checkedAtBlock: 119n },
+        { kind: 'orphaned', txHash: `0x${'7'.repeat(64)}`, reason: liveReason },
+      ],
+    });
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toEqual({ kind: 'solution-published' });
+    const operation = subject.state.listOperations(subject.engagementId)
+      .find(({ kind }) => kind === 'solution-settlement')!;
+
+    // Replay the poisoned write an older build persisted, field for field.
+    subject.store.db.prepare(
+      `UPDATE native_operations SET status = 'orphaned', tx_hash = ?, block_hash = NULL,
+         block_number = NULL, detail_json = ? WHERE operation_id = ?`,
+    ).run(
+      liveTxHash,
+      JSON.stringify({ kind: 'orphaned', txHash: liveTxHash, reason: liveReason }),
+      operation.operationId,
+    );
+    expect(subject.state.getOperation(operation.operationId)).toMatchObject({
+      status: 'orphaned',
+      blockNumber: null,
+      detail: { kind: 'orphaned', txHash: liveTxHash, reason: liveReason },
+    });
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'solution-published' });
+
+    // The settlement reader as it now stands: a local row carrying no exact Delivery digest is
+    // unreadable and RAISES; it is never reported as `orphaned`.
+    const digestsRead: Array<string | undefined> = [];
+    subject.settlement.readCanonical.mockImplementation(async ({ operation: row }) => {
+      const digest = (row.detail as { readonly deliveryDigest?: unknown }).deliveryDigest;
+      digestsRead.push(typeof digest === 'string' ? digest : undefined);
+      if (typeof digest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(digest)) {
+        throw new Error(`solution settlement operation ${row.operationId} carries no exact Delivery digest`);
+      }
+      return {
+        kind: 'finalized' as const,
+        txHash: liveTxHash,
+        blockHash: liveBlockHash,
+        blockNumber: liveBlockNumber,
+      };
+    });
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toMatchObject({ kind: 'solution-settled', operationId: operation.operationId });
+
+    // One read, off the re-derived identity — no orphan, no re-broadcast, no second operation.
+    expect(digestsRead).toEqual([documentDigest(subject.deliveryBytes)]);
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'solution-settled' });
+    expect(subject.state.getOperation(operation.operationId)).toMatchObject({
+      status: 'finalized',
+      txHash: liveTxHash,
+      blockNumber: liveBlockNumber,
+    });
+    expect(subject.state.listOperations(subject.engagementId)
+      .filter(({ kind }) => kind === 'solution-settlement')).toHaveLength(1);
+  });
+
   it.each(['evidence', 'publication', 'settlement'] as const)(
     'durably pauses and resumes a retryable %s outage without duplicating logical operations',
     async (dependency) => {

@@ -504,7 +504,10 @@ describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
     updatedAt: '2026-08-10T19:00:00.000Z',
   } as unknown as NativeEngagementRow;
 
-  function fixture(options: { readonly httpBytes?: Uint8Array } = {}) {
+  function fixture(options: {
+    readonly httpBytes?: Uint8Array;
+    readonly correspondenceTransactionHash?: `0x${string}`;
+  } = {}) {
     // The IPFS plane always misses — the native delivery record was never pinned there.
     const byDigest = vi.fn(async () => { throw new Error('block was not found locally'); });
     const byLocation = vi.fn(async () => {
@@ -528,8 +531,20 @@ describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
         if (input.functionName === 'mapAgentMechFactories') return '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
         throw new Error(`unexpected read ${input.functionName}`);
       },
-      async getContractEvents(input: { eventName: string; address?: string }) {
-        if (input.eventName === 'SolutionDeliveryClaimed') return [routerEvent];
+      async getContractEvents(input: {
+        eventName: string;
+        address?: string;
+        args?: { readonly operator?: string };
+      }) {
+        if (input.eventName === 'SolutionDeliveryClaimed') {
+          // The settlement leg scans `SolutionDeliveryClaimed` by `(requestId, taskId)`; the exact
+          // Delivery correspondence (`readCanonicalSolutionDelivery`) scans the same event filtered
+          // ON `operator` as well. Keying the fixture on that argument lets a case bind the
+          // canonical exact Delivery to a DIFFERENT transaction than the settlement leg found.
+          return options.correspondenceTransactionHash !== undefined && input.args?.operator !== undefined
+            ? [{ ...routerEvent, transactionHash: options.correspondenceTransactionHash }]
+            : [routerEvent];
+        }
         expect(input.address!.toLowerCase()).toBe(deliveryMech.toLowerCase());
         return [{
           args: { requestId, mechServiceMultisig: operator, data: `0x${advertisedDeliveryDigest.slice(7)}` },
@@ -584,6 +599,52 @@ describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
       deliveryPublicLocations: [deliveryLocation],
     })).rejects.toThrow(/not found locally/u);
     expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+  });
+
+  // POSITIVE evidence, and the only orphan verdict this leg still draws after the finalized check:
+  // the canonical exact Delivery for this attempt is bound to a transaction that is not the one the
+  // settlement leg observed. This branch had no coverage.
+  it('orphans a settlement the canonical exact Delivery binds to a different transaction', async () => {
+    const otherTransaction = `0x${'5c'.repeat(32)}` as const;
+    const { reads } = fixture({
+      httpBytes: deliveryBytes,
+      correspondenceTransactionHash: otherTransaction,
+    });
+
+    await expect(reads.solutionSettlementCanonical({
+      operation,
+      engagement,
+      deliveryPublicLocations: [deliveryLocation],
+    })).resolves.toEqual({
+      kind: 'orphaned',
+      txHash: transactionHash,
+      reason: 'solution settlement does not bind the exact public Delivery',
+    });
+  });
+
+  // #2623: the absence of a digest in the operator's OWN local row is not evidence about the chain.
+  // Calling it `orphaned` rolled the engagement back to `solution-published`, and the reopen that
+  // followed re-entered this same branch on an operation whose detail the orphan notice had just
+  // destroyed — an unbounded loop with no deadline and no attempt ceiling, because the orphan
+  // recorder returns normally instead of raising. It must RAISE, so the coordinator's retry
+  // machinery (24h deadline, 5 attempts) owns the give-up decision.
+  it('raises rather than orphans when local state carries no exact Delivery digest', async () => {
+    const { reads } = fixture({ httpBytes: deliveryBytes });
+    const poisoned = {
+      ...operation,
+      // Operator B's live on-disk shape after the orphan notice overwrote the operation identity.
+      detail: {
+        kind: 'orphaned',
+        txHash: transactionHash,
+        reason: 'solution operation has no exact Delivery digest',
+      },
+    } as unknown as NativeOperationRow;
+
+    await expect(reads.solutionSettlementCanonical({
+      operation: poisoned,
+      engagement,
+      deliveryPublicLocations: [deliveryLocation],
+    })).rejects.toThrow(/carries no exact Delivery digest/u);
   });
 });
 
