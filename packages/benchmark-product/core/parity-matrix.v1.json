@@ -339,6 +339,10 @@
       "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
     },
     {
+      "name": "publicationReport",
+      "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
+    },
+    {
       "name": "bundle verify",
       "reason": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal"
     },

@@ -103,8 +103,8 @@ describe("checkAuthority", () => {
     expect(error.code).toBe("authority-denied");
   });
 
-  test("publication intent, registration, and accounting require explicit irreversible-disclosure grants", () => {
-    for (const operation of ["publication.configure", "publication.register", "publication.accounting"]) {
+  test("publication intent, registration, accounting, and signed reporting require explicit irreversible-disclosure grants", () => {
+    for (const operation of ["publication.configure", "publication.register", "publication.accounting", "publication.report"]) {
       expect(() => checkAuthority(policy, "agent-2", operation)).toThrow(BenchmarkProductError);
       expect(() => checkAuthority(policy, "sponsor-1", operation)).not.toThrow();
     }

@@ -124,6 +124,8 @@ export {
 // re-derives the Matrix (and, once reported, the Report and claim package) from the workspace's
 // own durable state.
 export { runReport, type RunReportInput, type RunReportResult } from "./report.js";
+// PUB-13c's programmatic signed-envelope stage; PUB-14 owns a user-facing command/surface.
+export { publicationReport, type PublicationReportDeps, type PublicationReportInput, type PublicationReportResult } from "./publication-report.js";
 export { runVerify, type RunVerifyCheck, type RunVerifyInput, type RunVerifyResult } from "./verify.js";
 export { runPublish, type RunPublishDeps, type RunPublishInput, type RunPublishResult } from "./publish.js";
 

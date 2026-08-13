@@ -1,9 +1,10 @@
-import { cpSync, existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, linkSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { generateKeyPairSync } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { cellIdempotencyKey, parseMatrix, parseReport } from "@jinn-network/benchmarking-records";
+import { cellIdempotencyKey, parseBenchmarkAccounting, parseMatrix, parseReport, parseSignedReportRecord } from "@jinn-network/benchmarking-records";
 import { requirementsDigest } from "@jinn-network/benchmarking-local";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
@@ -12,7 +13,8 @@ import { deriveEvaluationTask } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { claimPackageArtifactPath, publicBundlesDir } from "../workspace/layout.js";
+import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
+import { claimPackageArtifactPath, publicationServeRoot, publicBundlesDir } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { LEGACY_VERDICT_EVALUATOR_ID, createVerdictDsseSigner, loadOrCreateVerdictSigningKey, sealVerdictStatement } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -31,18 +33,24 @@ import { runLaunch } from "./run-launch.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { runReport } from "./report.js";
+import { publicationReport } from "./publication-report.js";
+import { publicationAccounting } from "./publication-accounting.js";
+import { publicationConfigure, publicationRegister } from "./publication-register.js";
 import { runPublish } from "./publish.js";
 import { runVerify } from "./verify.js";
 import { runResults } from "./run-results.js";
 import { sampleInit } from "./sample.js";
 
 let workspaceDir: string;
+let publicationServer: Server | undefined;
 
 beforeEach(() => {
   workspaceDir = mkdtempSync(join(tmpdir(), "bp13-report-op-"));
 });
 
-afterEach(() => {
+afterEach(async () => {
+  if (publicationServer !== undefined) await new Promise<void>((resolve) => publicationServer!.close(() => resolve()));
+  publicationServer = undefined;
   rmSync(workspaceDir, { recursive: true, force: true });
 });
 
@@ -57,6 +65,19 @@ function makeClock(): () => string {
 
 function contextFor(clock: () => string, principal = "sponsor-1"): OperationContext {
   return { workspaceDir, principal, clock };
+}
+
+async function servePublicationWorkspace(): Promise<string> {
+  const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+  publicationServer = createServer(async (request, response) => {
+    const result = await handler(new Request(`http://127.0.0.1${request.url ?? "/"}`, { method: request.method }));
+    response.writeHead(result.status, Object.fromEntries(result.headers));
+    response.end(Buffer.from(await result.arrayBuffer()));
+  });
+  await new Promise<void>((resolve) => publicationServer!.listen(0, "127.0.0.1", resolve));
+  const address = publicationServer.address();
+  if (address === null || typeof address === "string") throw new Error("publication test server has no TCP address");
+  return `http://127.0.0.1:${address.port}`;
 }
 
 function utf8(json: unknown): Uint8Array {
@@ -342,6 +363,94 @@ async function setUpClosedRun(
   if (!collected.ok) throw new Error("unreachable");
   expect(readDraftDocument(workspaceDir, draftId).state).toBe("closed");
 }
+
+/** The Report-v2 operation consumes the independent accounting closure; it never launches this
+ * fixture's backend. Registration after close is deliberately post-hoc. */
+async function setUpPublishedAccounting(clock: () => string): Promise<void> {
+  await setUpClosedRun(clock);
+  const publicBaseUrl = await servePublicationWorkspace();
+  const configured = await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl });
+  expect(configured.ok, JSON.stringify(configured)).toBe(true);
+  const registered = await publicationRegister(contextFor(clock), { draftId: "draft-1" });
+  expect(registered.ok, JSON.stringify(registered)).toBe(true);
+  const accounted = await publicationAccounting(contextFor(clock), { draftId: "draft-1" });
+  expect(accounted.ok, JSON.stringify(accounted)).toBe(true);
+}
+
+describe("publication.report — signed Report v2", () => {
+  test("publishes exact payload before the owned envelope, derives post-hoc disclosure, and is idempotent", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock);
+    const published = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) return;
+    expect(published.result.reportPayloadSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(published.result.reportRecordSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(published.result.reportPayloadSha256).not.toBe(published.result.reportRecordSha256);
+    const signed = parseSignedReportRecord(getSealedBytes(workspaceDir, published.result.reportRecordSha256));
+    expect(signed.payload.preregistered).toBe(true);
+    expect((signed.payload as Record<string, any>)["https://spec.jinn.network/extensions/benchmark-publication/v1"].publicRegistration.perSubject[0].status).toBe("post-hoc");
+
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    const announcements = Object.values((await source.writer.readState())!.announcements);
+    const sequence = (digest: string) => announcements.find((entry) => entry.receipt.record?.digest === `sha256:${digest}`)!.receipt.sequence;
+    const state = readRunState(workspaceDir, "draft-1")!;
+    expect(Number(sequence(state.runSha256!))).toBeLessThan(Number(sequence(state.accountingSha256!)));
+    expect(Number(sequence(state.accountingSha256!))).toBeLessThan(Number(sequence(state.matrixV2Sha256!)));
+    expect(Number(sequence(state.matrixV2Sha256!))).toBeLessThan(Number(sequence(published.result.reportRecordSha256)));
+    expect(state.publication!.report.state).toBe("complete");
+    expect(state.reportPayloadSha256).toBe(published.result.reportPayloadSha256);
+    expect(state.reportRecordSha256).toBe(published.result.reportRecordSha256);
+
+    const repeated = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(repeated).toEqual(published);
+  }, 60_000);
+
+  test("leaves accounting complete and report unstarted when an exact-public dependency is unavailable", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock);
+    const state = readRunState(workspaceDir, "draft-1")!;
+    unlinkSync(join(publicationServeRoot(workspaceDir), recordPath(`sha256:${state.matrixV2Sha256!}`)));
+    const refused = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error.detail).toMatch(/Matrix v2|probe/);
+    const after = readRunState(workspaceDir, "draft-1")!;
+    expect(after.publication!.accounting.state).toBe("complete");
+    expect(after.publication!.report.state).toBe("not-started");
+    expect(after.reportRecordSha256).toBeUndefined();
+  }, 60_000);
+
+  test("refuses unavailable accounting support before creating a Report", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock);
+    const state = readRunState(workspaceDir, "draft-1")!;
+    const accounting = parseBenchmarkAccounting(getSealedBytes(workspaceDir, state.accountingSha256!));
+    const submissionSha256 = accounting.cells.flatMap((cell) => cell.dispatches)[0]!.submission.record.digest.sha256;
+    unlinkSync(join(publicationServeRoot(workspaceDir), recordPath(`sha256:${submissionSha256}`)));
+    const refused = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error.detail).toMatch(/support|payload probe|returned 404/);
+    const after = readRunState(workspaceDir, "draft-1")!;
+    expect(after.publication!.accounting.state).toBe("complete");
+    expect(after.publication!.report.state).toBe("not-started");
+  }, 60_000);
+
+  test("recovers the same source receipt after a crash following append", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock);
+    let crashed = false;
+    const first = await publicationReport(contextFor(clock), { draftId: "draft-1" }, { afterAppendBeforeCheckpoint: async () => { crashed = true; throw new Error("fixture crash"); } });
+    expect(first.ok).toBe(false);
+    expect(crashed).toBe(true);
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    const before = (await source.writer.readState())!.last!;
+    const retried = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(retried.ok, JSON.stringify(retried)).toBe(true);
+    if (!retried.ok) return;
+    expect(retried.result.receipt.entrySha256).toBe(before.entryDigest.slice(7));
+    expect(readRunState(workspaceDir, "draft-1")!.publication!.report.receipt!.entrySha256).toBe(before.entryDigest.slice(7));
+  }, 60_000);
+});
 
 describe("runReport — happy path", () => {
   test(

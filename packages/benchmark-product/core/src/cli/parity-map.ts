@@ -28,7 +28,8 @@
  * tally the results document builds; it is not itself an operation with an
  * `OperationContext`/`OperationResult` shape.
  */
-export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCounts"];
+// `publicationReport` is intentionally programmatic until PUB-14 adds its consent/UI surface.
+export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCounts", "publicationReport"];
 
 /** Standalone filesystem helpers deliberately outside the workspace operations/audit boundary. */
 export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
