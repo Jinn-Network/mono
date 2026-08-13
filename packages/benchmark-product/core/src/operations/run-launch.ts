@@ -55,7 +55,7 @@ import {
   outstandingCells,
   readRunJournalEntries,
 } from "../run/journal.js";
-import { requireRunState, writeRunState } from "../run/state.js";
+import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
@@ -86,6 +86,22 @@ export interface RunLaunchInput {
 
 export interface RunLaunchResult {
   readonly draft: DraftDocument;
+}
+
+function prospectiveRegistrationVerified(publication: PublicationState): boolean {
+  return publication.registration.state === "complete"
+    && publication.registration.receipt !== undefined
+    && publication.source.publicBaseUrl !== undefined;
+}
+
+function requireProspectiveRegistrationVerified(publication: PublicationState, draftId: string): void {
+  if (!prospectiveRegistrationVerified(publication)) {
+    refuse(
+      "conflict",
+      `runs.${draftId}.publication.registration`,
+      "prospective public registration is pending/unverified until it has a durable receipt and public locator; retry registration before dispatch",
+    );
+  }
 }
 
 export interface RunResumeInput {
@@ -198,9 +214,7 @@ async function createRunLaunchCapture(
   if (publication?.mode !== "prospective") {
     return createProductLaunchCapture({ workspaceDir, draftId, liveClock });
   }
-  if (publication.registration.state !== "complete" || publication.source.publicBaseUrl === undefined) {
-    refuse("conflict", `runs.${draftId}.publication.registration`, "prospective public registration must be complete and retrievable before dispatch");
-  }
+  requireProspectiveRegistrationVerified(publication, draftId);
   const frozenCaptures = readRunJournalEntries(workspaceDir, draftId).filter(
     (entry) => entry.kind === "submission-captured" && entry.publicationSourceSequence !== undefined,
   );
@@ -250,9 +264,7 @@ export function runLaunch(
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
       const publicationIntent = requireRunState(clockedContext.workspaceDir, input.draftId).publication;
-      if (publicationIntent?.mode === "prospective" && publicationIntent.registration.state !== "complete") {
-        refuse("conflict", `runs.${input.draftId}.publication.registration`, "public registration must be complete and retrievable before launch");
-      }
+      if (publicationIntent?.mode === "prospective") requireProspectiveRegistrationVerified(publicationIntent, input.draftId);
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 

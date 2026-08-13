@@ -16,7 +16,7 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
-import { readRunState } from "../run/state.js";
+import { readRunState, writeRunState } from "../run/state.js";
 import { createWorkspacePublicationHttpHandler } from "../run/publication-source.js";
 import { runJournalPath } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
@@ -28,6 +28,7 @@ import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { runLaunch, runResume } from "./run-launch.js";
 import { publicationConfigure, publicationRegister } from "./publication-register.js";
+import { publicationStatus } from "./publication-status.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { runStatus } from "./run-status.js";
@@ -268,6 +269,50 @@ describe("runLaunch — gating (authority-denied / grant)", () => {
 });
 
 describe("runLaunch — prospective mounted publication", () => {
+  test("refuses dispatch when complete registration has no durable receipt and reports resumable verification", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    expect((await publicationConfigure(contextFor(clock), {
+      draftId: "draft-1",
+      publicBaseUrl: "https://public.example/publication",
+    })).ok).toBe(true);
+    const current = readRunState(workspaceDir, "draft-1");
+    if (current?.publication === undefined) throw new Error("configured publication state missing");
+    writeRunState(workspaceDir, "draft-1", {
+      ...current,
+      publication: {
+        ...current.publication,
+        registration: {
+          state: "complete",
+          announcedAt: "2026-08-05T00:00:00.000Z",
+          postHoc: false,
+          digests: { run: current.runSha256! },
+        },
+      },
+    });
+
+    let venueCalls = 0;
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => { venueCalls += 1; throw new Error("backend must not be constructed"); },
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { code: "conflict", detail: expect.stringMatching(/pending\/unverified.*durable receipt.*retry registration/i) },
+    });
+    expect(venueCalls).toBe(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    expect(readRunState(workspaceDir, "draft-1")?.launchedAt).toBeUndefined();
+
+    const status = publicationStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(status).toMatchObject({
+      ok: true,
+      result: {
+        registrationTiming: "pending-verification",
+        recovery: { resumable: true, guidance: expect.stringMatching(/durable receipt.*retry/i) },
+      },
+    });
+  }, 30_000);
+
   test("registers and probes every prospective Submission beneath the exact nested archive mount", async () => {
     const clock = makeClock();
     await setUpLockedDraft(clock);
