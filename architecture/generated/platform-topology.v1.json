@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 86,
+    "inventory": 87,
     "otherPackagesRootEntries": 19,
-    "packagesRootEntries": 80,
-    "platformV1": 53
+    "packagesRootEntries": 81,
+    "platformV1": 54
   },
   "graph": {
     "edgeSections": {
@@ -181,6 +181,21 @@
       },
       {
         "from": "@jinn-network/benchmarking-marketplace",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/benchmarking-publication",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-records"
+      },
+      {
+        "from": "@jinn-network/benchmarking-publication",
+        "kind": "runtime",
+        "to": "@jinn-network/record-publication"
+      },
+      {
+        "from": "@jinn-network/benchmarking-publication",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-protocol"
       },
@@ -1329,6 +1344,7 @@
       "@jinn-network/benchmarking-interop",
       "@jinn-network/benchmarking-local",
       "@jinn-network/benchmarking-marketplace",
+      "@jinn-network/benchmarking-publication",
       "@jinn-network/benchmarking-records",
       "@jinn-network/benchmarking-run",
       "@jinn-network/benchmarking-testing",
@@ -1445,6 +1461,14 @@
           "@jinn-network/task-execution-protocol",
           "@jinn-network/trust-core",
           "@jinn-network/trust-resolve"
+        ],
+        "@jinn-network/benchmarking-publication": [
+          "@jinn-network/benchmarking-records",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/record-publication",
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-records": [
           "@jinn-network/task-execution-protocol",
@@ -1793,6 +1817,7 @@
         ],
         [
           "@jinn-network/benchmarking-marketplace",
+          "@jinn-network/benchmarking-publication",
           "@jinn-network/evidence-local-runtime",
           "@jinn-network/evidence-publication",
           "@jinn-network/marketplace-venue-base",
@@ -1815,7 +1840,7 @@
     "counts": {
       "authorityDocuments": 29,
       "boundaryPolicies": 23,
-      "catalogManifests": 86,
+      "catalogManifests": 87,
       "catalogPublicSurfaces": 1274,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
@@ -1823,7 +1848,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 3005,
       "generatedOutputSources": 1330,
-      "generatorSources": 620,
+      "generatorSources": 623,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -20423,6 +20448,46 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/marketplace/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/publication/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/publication/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/publication/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/publication/scripts/pack-smoke.mjs"
       },
       {
         "categories": [
@@ -42825,6 +42890,44 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/benchmarking-records",
+          "@jinn-network/record-publication",
+          "@jinn-network/task-execution-protocol"
+        ]
+      },
+      "domain": "benchmarking",
+      "name": "@jinn-network/benchmarking-publication",
+      "ownerGroup": "architecture-control",
+      "path": "packages/benchmarking/publication",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-only",
+      "releaseGroup": "platform-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "role": "benchmark publication planning and accounting verification",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
           "@jinn-network/task-execution-protocol",
           "@jinn-network/trust-core",
           "@noble/hashes",
@@ -54221,6 +54324,15 @@
       },
       {
         "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/benchmarking-publication",
+        "path": "packages/benchmarking/publication",
+        "profiles": [],
+        "releaseGroup": "platform-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [],
         "fixtures": [
           "fixtures"
         ],
@@ -55388,6 +55500,7 @@
         "@jinn-network/benchmarking-interop",
         "@jinn-network/benchmarking-local",
         "@jinn-network/benchmarking-marketplace",
+        "@jinn-network/benchmarking-publication",
         "@jinn-network/benchmarking-records",
         "@jinn-network/benchmarking-run",
         "@jinn-network/benchmarking-testing",
@@ -55498,6 +55611,17 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/benchmarking-marketplace",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
+          "package": "@jinn-network/benchmarking-publication",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -56161,13 +56285,14 @@
         "platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 53,
+      "expectedPackageCount": 54,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/benchmarking-aggregate",
         "@jinn-network/benchmarking-interop",
         "@jinn-network/benchmarking-local",
         "@jinn-network/benchmarking-marketplace",
+        "@jinn-network/benchmarking-publication",
         "@jinn-network/benchmarking-records",
         "@jinn-network/benchmarking-run",
         "@jinn-network/benchmarking-testing",

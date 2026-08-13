@@ -133,7 +133,7 @@
   },
   "releaseGroups": {
     "platform-v1": {
-      "expectedPackageCount": 53,
+      "expectedPackageCount": 54,
       "publishPolicies": [
         "canary-only"
       ],
@@ -1090,6 +1090,49 @@
         "fixtures": [
           "fixtures"
         ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-publication",
+      "path": "packages/benchmarking/publication",
+      "domain": "benchmarking",
+      "role": "benchmark publication planning and accounting verification",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
         "conformance": []
       },
       "supersedes": [],

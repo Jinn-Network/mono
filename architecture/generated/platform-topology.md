@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **86** entries: **53** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **19** other entries below `packages/**`, and **6** adjacent entries.
+The catalog contains **87** entries: **54** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **19** other entries below `packages/**`, and **6** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -21,6 +21,7 @@ The catalog contains **86** entries: **53** `platform-v1` packages, **8** disabl
 | @jinn-network/benchmarking-interop | packages/benchmarking/interop | benchmarking | 3 | platform | task-execution import and export | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/benchmarking-local | packages/benchmarking/local | benchmarking | 3 | platform | local venue adapter | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run | — | — |
 | @jinn-network/benchmarking-marketplace | packages/benchmarking/marketplace | benchmarking | 3 | platform | marketplace adapter | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/task-execution-protocol | — | — |
+| @jinn-network/benchmarking-publication | packages/benchmarking/publication | benchmarking | 3 | platform | benchmark publication planning and accounting verification | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/record-publication<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/benchmarking-records | packages/benchmarking/records | benchmarking | 2 | platform | benchmark record family | candidate | platform-v1 | canary-only | @jinn-network/task-execution-protocol<br>@jinn-network/trust-core<br>@noble/hashes<br>zod | — | — |
 | @jinn-network/benchmarking-run | packages/benchmarking/run | benchmarking | 3 | platform | benchmark orchestration | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/benchmarking-testing | packages/benchmarking/testing | benchmarking | — | platform-support | benchmarking conformance kit | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol | — | vitest |
@@ -137,6 +138,9 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/benchmarking-marketplace | runtime | @jinn-network/marketplace-binding |
 | @jinn-network/benchmarking-marketplace | runtime | @jinn-network/marketplace-projector |
 | @jinn-network/benchmarking-marketplace | runtime | @jinn-network/task-execution-protocol |
+| @jinn-network/benchmarking-publication | runtime | @jinn-network/benchmarking-records |
+| @jinn-network/benchmarking-publication | runtime | @jinn-network/record-publication |
+| @jinn-network/benchmarking-publication | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/benchmarking-records | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/benchmarking-records | runtime | @jinn-network/trust-core |
 | @jinn-network/benchmarking-run | runtime | @jinn-network/benchmarking-records |
@@ -371,7 +375,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 2. `@jinn-network/benchmarking-records`, `@jinn-network/evidence-derivation`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-trace`, `@jinn-network/record-discovery-protocol`, `@jinn-network/task-execution-backend`, `@jinn-network/task-execution-profiles`, `@jinn-network/trust-authoring`, `@jinn-network/trust-resolve`
 3. `@jinn-network/attestation-issuer`, `@jinn-network/benchmarking-aggregate`, `@jinn-network/benchmarking-interop`, `@jinn-network/benchmarking-run`, `@jinn-network/benchmarking-testing`, `@jinn-network/evidence-discovery`, `@jinn-network/evidence-repository-ipfs`, `@jinn-network/evidence-repository-oci`, `@jinn-network/evidence-trace-decode`, `@jinn-network/execution-recorder`, `@jinn-network/marketplace-binding`, `@jinn-network/record-discovery-client`, `@jinn-network/record-discovery-facts-benchmarking`, `@jinn-network/record-discovery-facts-task-execution`, `@jinn-network/record-discovery-facts-trust`, `@jinn-network/record-discovery-serve`, `@jinn-network/record-discovery-testing`, `@jinn-network/task-execution-supervisor`, `@jinn-network/task-execution-workspace`, `@jinn-network/trust-testing`
 4. `@jinn-network/benchmarking-local`, `@jinn-network/evidence-catalog-sqlite`, `@jinn-network/evidence-retrieval`, `@jinn-network/execution-recorder-bridge`, `@jinn-network/marketplace-projector`, `@jinn-network/record-discovery-facts-evidence`, `@jinn-network/record-discovery-source-evidence-journal`, `@jinn-network/record-discovery-transport-http`, `@jinn-network/record-publication`, `@jinn-network/task-execution-launchers`
-5. `@jinn-network/benchmarking-marketplace`, `@jinn-network/evidence-local-runtime`, `@jinn-network/evidence-publication`, `@jinn-network/marketplace-venue-base`, `@jinn-network/task-execution-backend-local`, `@jinn-network/task-execution-evaluation-harness`
+5. `@jinn-network/benchmarking-marketplace`, `@jinn-network/benchmarking-publication`, `@jinn-network/evidence-local-runtime`, `@jinn-network/evidence-publication`, `@jinn-network/marketplace-venue-base`, `@jinn-network/task-execution-backend-local`, `@jinn-network/task-execution-evaluation-harness`
 6. `@jinn-network/evidence-contribution`, `@jinn-network/task-execution-evaluator-adapters`, `@jinn-network/task-execution-testing`
 7. `@jinn-network/marketplace-testing`, `@jinn-network/task-execution-oci-grader`
 
@@ -384,6 +388,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/benchmarking-interop | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
 | @jinn-network/benchmarking-local | @jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
 | @jinn-network/benchmarking-marketplace | @jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core<br>@jinn-network/trust-resolve |
+| @jinn-network/benchmarking-publication | @jinn-network/benchmarking-records<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-publication<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
 | @jinn-network/benchmarking-records | @jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
 | @jinn-network/benchmarking-run | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
 | @jinn-network/benchmarking-testing | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
@@ -441,10 +446,10 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | experimental-policy | 2 | policy-ci | disabled | false | false | false |
 | experimental-task-supply | 5 | task-supply-ci | disabled | false | false | false |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
-| platform-v1 | 53 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
+| platform-v1 | 54 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
 | transitional-or-private | 12 | autopilot-ci<br>benchmark-product-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci<br>website-ci | private<br>never | false | false | false |
 
-The exact 53-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 8 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 54-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 8 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
@@ -453,6 +458,7 @@ The exact 53-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/benchmarking-interop | stack-npm-publish.yml | blank |
 | @jinn-network/benchmarking-local | stack-npm-publish.yml | blank |
 | @jinn-network/benchmarking-marketplace | stack-npm-publish.yml | blank |
+| @jinn-network/benchmarking-publication | stack-npm-publish.yml | blank |
 | @jinn-network/benchmarking-records | stack-npm-publish.yml | blank |
 | @jinn-network/benchmarking-run | stack-npm-publish.yml | blank |
 | @jinn-network/benchmarking-testing | stack-npm-publish.yml | blank |
@@ -517,6 +523,7 @@ The exact 53-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/benchmarking-interop | platform-v1 | — | — | fixtures | — |
 | @jinn-network/benchmarking-local | platform-v1 | — | — | — | — |
 | @jinn-network/benchmarking-marketplace | platform-v1 | — | — | fixtures | — |
+| @jinn-network/benchmarking-publication | platform-v1 | — | — | — | — |
 | @jinn-network/benchmarking-records | platform-v1 | schemas | — | fixtures | — |
 | @jinn-network/benchmarking-run | platform-v1 | — | — | — | — |
 | @jinn-network/benchmarking-testing | platform-v1 | — | — | fixtures | . |
@@ -1522,14 +1529,14 @@ The exact 53-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3768 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3772 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
 | --- | ---: |
 | authorityDocuments | 29 |
 | boundaryPolicies | 23 |
-| catalogManifests | 86 |
+| catalogManifests | 87 |
 | catalogPublicSurfaces | 1274 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
@@ -1537,7 +1544,7 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | decisionRecords | 4 |
 | discoveredFirstPartySurfaces | 3005 |
 | generatedOutputSources | 1330 |
-| generatorSources | 620 |
+| generatorSources | 623 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
 | staticControl | 6 |
