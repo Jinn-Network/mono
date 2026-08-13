@@ -118,6 +118,23 @@ export function teeNativeMarketplaceEvents(input: {
   };
 }
 
+/** Minimum representable ISO gap between two adjacent record announcements (1ms). */
+const RECORD_ANNOUNCEMENT_STEP_MS = 1;
+
+/**
+ * Announcement timestamp for the correction at `ordinal` within one shared-base batch. Distinct
+ * ordinals yield strictly-increasing instants so each correction advances the append-only signed
+ * source head; the value is a pure function of the base and ordinal, so a resumed pass over a
+ * persisted base recomputes the identical timestamp.
+ */
+function advanceAnnouncementTimestamp(base: string, ordinal: number): string {
+  const baseMs = Date.parse(base);
+  if (!Number.isFinite(baseMs)) {
+    throw new Error(`native solution correction timestamp is not a valid instant: ${base}`);
+  }
+  return new Date(baseMs + ordinal * RECORD_ANNOUNCEMENT_STEP_MS).toISOString();
+}
+
 interface DeliveryPublicationRow {
   engagement_id: `sha256:${string}`;
   record_digest: `sha256:${string}`;
@@ -164,7 +181,24 @@ export function buildNativeSolutionCorrections(input: {
 
   return {
     async reconcile(): Promise<void> {
+      // A reorg stamps every event of an orphaned block with ONE `orphaned_at`
+      // (`NativeMarketplaceEventRepository.apply` computes a single `now` per batch), and each
+      // withdrawal is announced into ONE append-only signed source whose head must STRICTLY
+      // advance per announcement (see packages/discovery/serve/src/source-writer.ts). Announcing
+      // two orphaned deliveries at that shared instant therefore collides on withdrawal 2+ with
+      // `SourceWriterIntegrityError`, and the retry re-reads the same fixed `orphaned_at`, so it
+      // can never recover — the corrections-side sibling of solver defect #24 (#2560) and
+      // evaluator defect #46 (#2634), fixed the same way: derive each withdrawal's announcement
+      // timestamp from its stable ordinal among the enumerated candidates sharing its
+      // `orphaned_at`. Ordinals are consumed by every enumerated candidate — skipped ones
+      // included — over the repository's deterministic order, so already-withdrawn candidates
+      // keep theirs: the still-pending withdrawals of a partially-published batch advance PAST
+      // the head the first withdrawal already set, and a resumed pass recomputes the identical
+      // timestamp, reconciling idempotently with any withdrawal already committed.
+      const withdrawalOrdinals = new Map<string, number>();
       for (const orphan of marketplaceEvents.orphanedSolutionCandidates()) {
+        const ordinal = withdrawalOrdinals.get(orphan.orphanedAt) ?? 0;
+        withdrawalOrdinals.set(orphan.orphanedAt, ordinal + 1);
         const exists = store.db.prepare(
           `SELECT 1 FROM native_solution_discovery_corrections WHERE event_key = ? AND action = 'withdrawn'`,
         ).get(orphan.eventKey);
@@ -181,21 +215,28 @@ export function buildNativeSolutionCorrections(input: {
           recordDigest: delivery.record_digest,
           availabilityState: `withdrawn:${orphan.event.derivation.blockHash.toLowerCase()}`,
         });
+        const timestamp = advanceAnnouncementTimestamp(orphan.orphanedAt, ordinal);
         const receipt = await publisher.withdraw({
           withdrawalKey,
           targetAnnouncementId: latestAvailable?.announcement_id ?? delivery.publication_key,
           recordDigest: delivery.record_digest,
           bytes: delivery.exact_bytes,
           mediaType: delivery.media_type,
-          timestamp: orphan.orphanedAt,
+          timestamp,
           reason: 'reorged',
         });
         store.db.prepare(
           `INSERT INTO native_solution_discovery_corrections
             (event_key, action, delivery_digest, announcement_id, source_sequence, entry_digest, created_at)
            VALUES (?, 'withdrawn', ?, ?, ?, ?, ?)`,
-        ).run(orphan.eventKey, delivery.record_digest, withdrawalKey, receipt.sequence, receipt.entryDigest, orphan.orphanedAt);
+        ).run(orphan.eventKey, delivery.record_digest, withdrawalKey, receipt.sequence, receipt.entryDigest, timestamp);
       }
+      // The re-announce leg has no shared persisted base — each pass stamps wall-clock time — but
+      // two announcements inside one millisecond collide on the source head the same way. One base
+      // per pass, advanced by each published announcement's ordinal, keeps the pass strictly
+      // advancing; a retried pass takes a fresh, later base, so it needs no persisted ordinal.
+      const reannounceBase = new Date().toISOString();
+      let reannounced = 0;
       for (const event of marketplaceEvents.solutionCandidates()) {
         const delivery = deliveryPublicationFor(event);
         if (delivery === undefined) continue;
@@ -217,7 +258,8 @@ export function buildNativeSolutionCorrections(input: {
           recordDigest: delivery.record_digest,
           availabilityState: `available:${event.derivation.blockHash.toLowerCase()}`,
         });
-        const timestamp = new Date().toISOString();
+        const timestamp = advanceAnnouncementTimestamp(reannounceBase, reannounced);
+        reannounced += 1;
         const receipt = await publisher.publish({
           publication: {
             publicationKey: announcementId,
