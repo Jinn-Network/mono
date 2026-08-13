@@ -102,19 +102,37 @@ malformed durable state fail closed.
 ### Optional evaluation-runtime worker
 
 The Inspect adapter executes user-selected Python tasks, solvers, tools,
-scorers, and providers only in a supervised child process. They never import
-into the web request process. Selection seals the worker, Python executable,
+scorers, and providers only in a supervised worker. They never import into the
+web request process. Selection seals the worker, Python executable,
 installed-package environment, Inspect distribution, task source/project, and
 material run configuration; launch re-probes that identity before accepting a
-cell submission. The child receives a minimal environment with no ambient
-credential variables. Credentialed provider execution is not supported until an
-explicit allowlisted secret-forward port exists.
+cell submission. The worker receives a minimal environment with no ambient
+credential variables. Optional OpenAI execution uses the separately sealed,
+allowlisted broker boundary documented in the
+[Inspect runtime guide](./INSPECT-RUNTIME.md); the credential is broker-only.
 
 This process boundary isolates the web lifecycle from imported Python code but
 is not a hostile-code or filesystem sandbox. Task code retains the product OS
 user's filesystem permissions. A customer running untrusted or secret-bearing
-code must isolate the complete worker in a container or worker host. See the
-[Inspect runtime guide](./INSPECT-RUNTIME.md).
+code must use the OCI runtime or another customer-controlled worker host.
+
+The OCI runtime can host the narrow task-level default Docker sandbox through
+the public Inspect sandbox extension. The worker sends versioned sandbox
+operations over private standard I/O; only the trusted runtime host can invoke
+Docker. The nested task sandbox has no host mounts, Docker socket, credentials,
+or network, and runs as an unprivileged user under fixed resource and operation
+budgets. Custom providers, per-sample files/setup, multiple environments, and
+mutable sandbox definitions remain unsupported. These controls establish an
+operational boundary, not positive Jinn per-cell isolation evidence; OCI
+campaigns continue to disclose isolation as `unverifiable`.
+
+The worker, broker, sandbox-host protocol, provider names, and fixed controller
+policy are private Tier 4 adapter machinery. They are not a task-execution
+backend, protocol profile, reusable platform sandbox, or conformance surface.
+The product owns them only to enforce the locked local venue policy around its
+optional Inspect composition. A future move into Tier 3 requires a separate
+approved design and a conformance kit before implementation; a second consumer,
+not anticipated reuse, is the trigger for considering that move.
 
 ### Public disclosure
 

@@ -8,6 +8,10 @@ export const SUPPORTED_OPENAI_SDK_VERSION = "2.53.0" as const;
 export const SUPPORTED_OCI_PYTHON_VERSION = "3.11.9" as const;
 export const SUPPORTED_OCI_PLATFORM = "linux/amd64" as const;
 export const INSPECT_SELECTION_SCHEMA = "jinn.network/benchmark-product/inspect-selection/1" as const;
+export const INSPECT_SANDBOX_SELECTION_SCHEMA = "jinn.network/benchmark-product/inspect-selection/2" as const;
+export const INSPECT_SANDBOX_PROTOCOL = "jinn.network/inspect-sandbox-host/1" as const;
+export const INSPECT_SANDBOX_PROVIDER = "jinn-oci" as const;
+export const INSPECT_SANDBOX_PACKAGE_VERSION = "0.1.0" as const;
 export const INSPECT_ARM_REQUIREMENT_KEY = "jinn.network/inspect-arm" as const;
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -103,6 +107,39 @@ const InspectBrokerPolicySchema = z.object({
   scratchBytes: z.literal(67_108_864),
 }).strict();
 
+export const InspectSandboxPolicySchema = z.object({
+  provider: z.literal(INSPECT_SANDBOX_PROVIDER),
+  platform: z.literal(SUPPORTED_OCI_PLATFORM),
+  user: z.literal("65532:65532"),
+  readOnlyRoot: z.literal(true),
+  network: z.literal("none"),
+  capabilities: z.tuple([]),
+  noNewPrivileges: z.literal(true),
+  cpuCount: z.literal(1),
+  memoryBytes: z.literal(536_870_912),
+  pidsLimit: z.literal(32),
+  scratchBytes: z.literal(268_435_456),
+  maxEnvironments: z.literal(1),
+  maxOperations: z.literal(64),
+  commandTimeoutSeconds: z.literal(30),
+  totalTimeoutSeconds: z.literal(120),
+  maxInputBytes: z.literal(16 * 1024 * 1024),
+  maxOutputBytes: z.literal(20 * 1024 * 1024),
+  maxReadFileBytes: z.literal(100 * 1024 * 1024),
+}).strict();
+
+const InspectSandboxRuntimeSchema = z.object({
+  protocol: z.literal(INSPECT_SANDBOX_PROTOCOL),
+  provider: z.literal(INSPECT_SANDBOX_PROVIDER),
+  packageVersion: z.literal(INSPECT_SANDBOX_PACKAGE_VERSION),
+  providerSourceSha256: Sha256Schema,
+  controllerSourceSha256: Sha256Schema,
+  imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  platform: z.literal(SUPPORTED_OCI_PLATFORM),
+  policySha256: Sha256Schema,
+  policy: InspectSandboxPolicySchema,
+}).strict();
+
 export const InspectOciRuntimeIdentitySchema = z.object({
   kind: z.literal("oci"),
   imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
@@ -119,10 +156,26 @@ export const InspectOciRuntimeIdentitySchema = z.object({
   datasetCacheSha256: Sha256Schema,
   isolation: InspectOciIsolationSchema,
   broker: InspectBrokerPolicySchema.optional(),
+  sandbox: InspectSandboxRuntimeSchema.optional(),
+}).strict();
+
+const InspectResolvedSandboxSchema = z.object({
+  type: z.literal(INSPECT_SANDBOX_PROVIDER),
+  config: z.object({
+    schema: z.literal("jinn.network/benchmark-product/inspect-sandbox/1"),
+    imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    platform: z.literal(SUPPORTED_OCI_PLATFORM),
+    policySha256: Sha256Schema,
+  }).strict(),
+}).strict();
+
+const InspectDeclaredSandboxSchema = z.object({
+  type: z.literal("docker"),
+  config: z.null(),
 }).strict();
 
 export const InspectSelectionManifestSchema = z.object({
-  schema: z.literal(INSPECT_SELECTION_SCHEMA),
+  schema: z.union([z.literal(INSPECT_SELECTION_SCHEMA), z.literal(INSPECT_SANDBOX_SELECTION_SCHEMA)]),
   runtime: z.object({
     adapterVersion: z.literal("1"),
     workerSha256: Sha256Schema,
@@ -147,7 +200,8 @@ export const InspectSelectionManifestSchema = z.object({
     args: z.record(z.string(), SafeJsonSchema),
     resolvedName: z.string().min(1),
     resolvedVersion: z.string().nullable(),
-    resolvedSandbox: z.null(),
+    declaredSandbox: InspectDeclaredSandboxSchema.optional(),
+    resolvedSandbox: z.union([z.null(), InspectResolvedSandboxSchema]),
     source: z.object({
       kind: z.enum(["project-file", "installed-package"]),
       path: z.string().min(1),
@@ -183,6 +237,26 @@ export const InspectSelectionManifestSchema = z.object({
   runOptions: InspectRunOptionsSchema,
 }).strict().superRefine((manifest, context) => {
   const providerBacked = manifest.arms.some((arm) => arm.provider !== undefined);
+  const sandboxed = manifest.runtime.execution?.sandbox !== undefined;
+  if (sandboxed !== (manifest.schema === INSPECT_SANDBOX_SELECTION_SCHEMA)) {
+    context.addIssue({ code: "custom", path: ["schema"], message: "sandbox selections require selection schema v2" });
+  }
+  if (sandboxed !== (manifest.task.resolvedSandbox !== null) || sandboxed !== (manifest.task.declaredSandbox !== undefined)) {
+    context.addIssue({ code: "custom", path: ["task", "resolvedSandbox"], message: "sandbox runtime, declared sandbox, and effective sandbox must be present together" });
+  }
+  if (sandboxed) {
+    const selected = manifest.runtime.execution?.sandbox;
+    const resolved = manifest.task.resolvedSandbox;
+    if (
+      selected === undefined
+      || resolved === null
+      || resolved.config.imageDigest !== selected.imageDigest
+      || resolved.config.platform !== selected.platform
+      || resolved.config.policySha256 !== selected.policySha256
+    ) {
+      context.addIssue({ code: "custom", path: ["task", "resolvedSandbox"], message: "effective sandbox must match the sealed sandbox runtime" });
+    }
+  }
   if (manifest.runtime.execution === undefined) {
     if (providerBacked) {
       context.addIssue({ code: "custom", path: ["runtime", "execution"], message: "provider-backed arms require OCI execution" });
@@ -218,6 +292,7 @@ export const InspectSelectionManifestSchema = z.object({
 export type InspectArmConfiguration = z.infer<typeof InspectArmConfigurationSchema>;
 export type InspectRunOptions = z.infer<typeof InspectRunOptionsSchema>;
 export type InspectSelectionManifest = z.infer<typeof InspectSelectionManifestSchema>;
+export type InspectSandboxPolicy = z.infer<typeof InspectSandboxPolicySchema>;
 
 const SECRETISH_KEY = /(?:^|[_-])(api[_-]?key|authorization|credential|password|private[_-]?key|secret|token)(?:$|[_-])/iu;
 const SECRETISH_VALUES = [

@@ -28,6 +28,7 @@ import { createRuntimeVenue } from "../adapter.js";
 
 const imageDigest = process.env.JINN_INSPECT_OCI_IMAGE;
 const datasetCacheDir = process.env.JINN_INSPECT_OCI_DATASET_CACHE;
+const humanEvalCacheDir = process.env.JINN_INSPECT_HUMANEVAL_CACHE;
 const dockerPath = process.env.JINN_DOCKER_PATH ?? "/usr/local/bin/docker";
 const fixtureDir = dirname(fileURLToPath(new URL("../../../test/fixtures/inspect-project/hermetic_eval.py", import.meta.url)));
 const workspaces: string[] = [];
@@ -45,6 +46,178 @@ afterEach(() => {
 });
 
 describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("real OCI Inspect runtime", () => {
+  test("runs an Inspect scorer through the runtime-hosted sandbox and preserves native evidence", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-sandbox-"));
+    const hostDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-sandbox-host-"));
+    workspaces.push(workspaceDir, hostDir);
+    const sentinelPath = join(hostDir, "host-sentinel");
+    writeFileSync(sentinelPath, "HOST_SENTINEL_MUST_NOT_BE_READ", { mode: 0o600 });
+    const context: OperationContext = {
+      workspaceDir,
+      principal: "sponsor-1",
+      clock: () => new Date().toISOString(),
+    };
+    expect(initWorkspace(context).ok).toBe(true);
+    expect(createDraft(context, { draftId: "inspect-sandbox", name: "OCI Inspect sandbox fixture" }).ok).toBe(true);
+    const selected = await selectInspectEvaluation(context, {
+      draftId: "inspect-sandbox",
+      execution: "oci",
+      dockerPath,
+      imageDigest: imageDigest!,
+      projectDir: fixtureDir,
+      datasetCacheDir: datasetCacheDir!,
+      sandboxExecution: { provider: "jinn-oci", imageDigest: imageDigest!, platform: "linux/amd64" },
+      taskReference: "hermetic_eval.py@hosted_sandbox_eval",
+      taskArgs: { host_sentinel_path: sentinelPath },
+      arms: [
+        { armId: "sandbox-a", model: "mockllm/sandbox-a" },
+        { armId: "sandbox-b", model: "mockllm/sandbox-b" },
+      ],
+      scorer: { name: "hosted_sandbox_scorer", passValue: "C" },
+      runOptions: { sampleId: "alpha", maxSamples: 1, maxSandboxes: 1, retryOnError: 0 },
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) throw new Error("unreachable");
+    expect(selected.result.draft.spec.evaluationRuntime?.isolationPolicy).toBe("oci-container");
+    expect((await runPreview(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    expect((await runQuote(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    expect(runLock(context, { draftId: "inspect-sandbox" }).ok).toBe(true);
+    expect((await runLaunch(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    const collected = await runCollect(context, { draftId: "inspect-sandbox" });
+    expect(collected.ok, JSON.stringify(collected)).toBe(true);
+    if (!collected.ok) throw new Error("unreachable");
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+    expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
+    expect(matrix.cells.every((cell) => cell.verification.isolation === "unverifiable")).toBe(true);
+    const journal = readRunJournalEntries(workspaceDir, "inspect-sandbox");
+    const deliveries = journal.filter((entry) => entry.kind === "delivery");
+    expect(deliveries).toHaveLength(2);
+    for (const delivery of deliveries) {
+      const summaryOutput = delivery.outputs.find((output) => output.name === "inspect-summary");
+      const summary = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, summaryOutput!.sha256)));
+      expect(summary).toMatchObject({
+        terminal: "scored",
+        verdict: "pass",
+        sandbox: {
+          provider: "jinn-oci",
+          protocol: "jinn.network/inspect-sandbox-host/1",
+          imageDigest,
+          environmentCount: 1,
+        },
+      });
+      expect(summary.sandbox.operationCount).toBeGreaterThanOrEqual(3);
+      expect(summary.sandbox.eventDigest).toMatch(/^[a-f0-9]{64}$/u);
+    }
+    expect((await runReport(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    expect((await runVerify(context, { draftId: "inspect-sandbox" })).ok).toBe(true);
+    const published = await runPublish(context, { draftId: "inspect-sandbox", includeNativeArtifacts: true });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) throw new Error("unreachable");
+    const detachedRoot = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-sandbox-bundle-"));
+    workspaces.push(detachedRoot);
+    const detachedBundle = join(detachedRoot, "bundle");
+    cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
+    rmSync(workspaceDir, { recursive: true, force: true });
+    expect((await verifyPublicBundle(detachedBundle)).checks).toContain("report-verification");
+    const nativeDir = join(detachedBundle, "native", "inspect");
+    const officialRead = execFileSync(dockerPath, [
+      "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
+      "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
+      "--entrypoint=python", imageDigest!, "-c",
+      "from inspect_ai.log import list_eval_logs,read_eval_log; logs=[read_eval_log(x) for x in list_eval_logs('/logs')]; assert len(logs)==2; assert all(x.status=='success' for x in logs); events=[e for x in logs for s in (x.samples or []) for e in (s.events or []) if e.event=='sandbox']; assert len(events)>=6; assert all(x.eval.sandbox.type=='jinn-oci' for x in logs)",
+    ], { encoding: "utf8" });
+    expect(officialRead).toBe("");
+    const viewerOutputRoot = join(detachedRoot, "viewer-output");
+    mkdirSync(viewerOutputRoot, { mode: 0o777 });
+    chmodSync(viewerOutputRoot, 0o777);
+    execFileSync(dockerPath, [
+      "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
+      "--user", `${String(process.getuid?.())}:${String(process.getgid?.())}`,
+      "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864", "--env=HOME=/tmp/home",
+      "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
+      "--mount", `type=bind,src=${viewerOutputRoot},dst=/output`,
+      "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
+    ], { encoding: "utf8" });
+    expect(readdirSync(join(viewerOutputRoot, "inspect-view-bundle")).length).toBeGreaterThan(0);
+    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
+    expect(remaining).toBe("");
+  }, 300_000);
+
+  test.skipIf(humanEvalCacheDir === undefined)("runs one unmodified Inspect Evals HumanEval sample in the hosted sandbox", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-humaneval-"));
+    workspaces.push(workspaceDir);
+    const context: OperationContext = {
+      workspaceDir,
+      principal: "sponsor-1",
+      clock: () => new Date().toISOString(),
+    };
+    expect(initWorkspace(context).ok).toBe(true);
+    expect(createDraft(context, { draftId: "inspect-humaneval", name: "Inspect Evals HumanEval sandbox proof" }).ok).toBe(true);
+    const selected = await selectInspectEvaluation(context, {
+      draftId: "inspect-humaneval",
+      execution: "oci",
+      dockerPath,
+      imageDigest: imageDigest!,
+      projectDir: fixtureDir,
+      datasetCacheDir: humanEvalCacheDir!,
+      sandboxExecution: { provider: "jinn-oci", imageDigest: imageDigest!, platform: "linux/amd64" },
+      taskReference: "inspect_evals/humaneval",
+      arms: [
+        { armId: "humaneval-a", model: "mockllm/model" },
+        { armId: "humaneval-b", model: "mockllm/model" },
+      ],
+      scorer: { name: "verify", passValue: "C" },
+      runOptions: { sampleId: "HumanEval/0", maxSamples: 1, maxSandboxes: 1, retryOnError: 0 },
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) throw new Error("unreachable");
+    expect((await runPreview(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    expect((await runQuote(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    expect(runLock(context, { draftId: "inspect-humaneval" }).ok).toBe(true);
+    expect((await runLaunch(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    const collected = await runCollect(context, { draftId: "inspect-humaneval" });
+    expect(collected.ok, JSON.stringify(collected)).toBe(true);
+    if (!collected.ok) throw new Error("unreachable");
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+    expect(matrix.completeness).toMatchObject({ expected: 2, judged: 2, runOutcome: "complete" });
+    expect(matrix.cells.every((cell) => cell.outcome === "judged" && cell.verification.isolation === "unverifiable")).toBe(true);
+    expect((await runReport(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    expect((await runVerify(context, { draftId: "inspect-humaneval" })).ok).toBe(true);
+    const published = await runPublish(context, { draftId: "inspect-humaneval", includeNativeArtifacts: true });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) throw new Error("unreachable");
+    const detachedRoot = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-humaneval-bundle-"));
+    workspaces.push(detachedRoot);
+    const detachedBundle = join(detachedRoot, "bundle");
+    cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
+    rmSync(workspaceDir, { recursive: true, force: true });
+    expect((await verifyPublicBundle(detachedBundle)).checks).toContain("report-verification");
+    const nativeDir = join(detachedBundle, "native", "inspect");
+    const officialRead = execFileSync(dockerPath, [
+      "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
+      "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
+      "--entrypoint=python", imageDigest!, "-c",
+      "from inspect_ai.log import list_eval_logs,read_eval_log; logs=[read_eval_log(x) for x in list_eval_logs('/logs')]; assert len(logs)==2; assert all(x.status=='success' and x.eval.task=='inspect_evals/humaneval' and x.eval.sandbox.type=='jinn-oci' for x in logs); assert all(len(x.samples or [])==1 and str(x.samples[0].id)=='HumanEval/0' and x.samples[0].scores.get('verify') is not None for x in logs)",
+    ], { encoding: "utf8" });
+    expect(officialRead).toBe("");
+    const viewerOutputRoot = join(detachedRoot, "viewer-output");
+    mkdirSync(viewerOutputRoot, { mode: 0o777 });
+    chmodSync(viewerOutputRoot, 0o777);
+    execFileSync(dockerPath, [
+      "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
+      "--user", `${String(process.getuid?.())}:${String(process.getgid?.())}`,
+      "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+      "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=67108864", "--env=HOME=/tmp/home",
+      "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
+      "--mount", `type=bind,src=${viewerOutputRoot},dst=/output`,
+      "--entrypoint=inspect", imageDigest!, "view", "bundle", "--log-dir=/logs", "--output-dir=/output/inspect-view-bundle",
+    ], { encoding: "utf8" });
+    expect(readdirSync(join(viewerOutputRoot, "inspect-view-bundle")).length).toBeGreaterThan(0);
+    const remaining = execFileSync(dockerPath, ["ps", "-a", "--filter", "name=jinn-inspect-", "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
+    expect(remaining).toBe("");
+  }, 300_000);
+
   test("runs one exact sample across two arms through preview and the official lifecycle", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-oci-"));
     workspaces.push(workspaceDir);
@@ -136,7 +309,8 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       imageDigest: imageDigest!,
       projectDir: fixtureDir,
       datasetCacheDir: datasetCacheDir!,
-      taskReference: "hermetic_eval.py@cancellation_eval",
+      sandboxExecution: { provider: "jinn-oci", imageDigest: imageDigest!, platform: "linux/amd64" },
+      taskReference: "hermetic_eval.py@hosted_sandbox_cancellation_eval",
       arms: [
         { armId: "control", model: "mockllm/model" },
         { armId: "candidate", model: "mockllm/model" },
@@ -247,13 +421,14 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       imageDigest: imageDigest!,
       projectDir: fixtureDir,
       datasetCacheDir: datasetCacheDir!,
-      taskReference: "hermetic_eval.py@broker_isolation_eval",
+      sandboxExecution: { provider: "jinn-oci", imageDigest: imageDigest!, platform: "linux/amd64" },
+      taskReference: "hermetic_eval.py@broker_sandbox_isolation_eval",
       taskArgs: { host_sentinel_path: sentinelPath },
       arms: [
         { armId: "luna-none", model: "jinn-openai/gpt-5.6-luna", provider: { ...provider, reasoningEffort: "none" } },
         { armId: "luna-low", model: "jinn-openai/gpt-5.6-luna", provider: { ...provider, reasoningEffort: "low" } },
       ],
-      scorer: { name: "match", passValue: "C" },
+      scorer: { name: "hosted_sandbox_scorer", passValue: "C" },
       runOptions: { sampleId: "alpha", maxSamples: 1, retryOnError: 0 },
     });
     expect(selected.ok, JSON.stringify(selected)).toBe(true);
@@ -293,6 +468,12 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
         brokerProtocol: "jinn.network/model-broker/1",
       });
       expect(summary.provider.eventDigest).toMatch(/^[a-f0-9]{64}$/u);
+      expect(summary.sandbox).toMatchObject({
+        provider: "jinn-oci",
+        protocol: "jinn.network/inspect-sandbox-host/1",
+        imageDigest,
+        environmentCount: 1,
+      });
     }
     const reported = await runReport(context, { draftId: "inspect-broker" });
     expect(reported.ok, JSON.stringify(reported)).toBe(true);
@@ -336,7 +517,7 @@ describe.skipIf(imageDigest === undefined || datasetCacheDir === undefined)("rea
       "run", "--rm", "--pull=never", "--platform=linux/amd64", "--network=none",
       "--mount", `type=bind,src=${nativeDir},dst=/logs,readonly`,
       "--entrypoint=python", imageDigest!, "-c",
-      "from inspect_ai.log import list_eval_logs,read_eval_log; logs=[read_eval_log(x) for x in list_eval_logs('/logs')]; assert len(logs)==2; assert all(x.status=='success' for x in logs); events=[e for x in logs for s in (x.samples or []) for e in (s.events or []) if e.event=='model']; assert len(events)==2; assert all(e.call and e.call.request['model']=='gpt-5.6-luna' and e.call.response['model']=='gpt-5.6-luna' for e in events)",
+      "from inspect_ai.log import list_eval_logs,read_eval_log; logs=[read_eval_log(x) for x in list_eval_logs('/logs')]; assert len(logs)==2; assert all(x.status=='success' for x in logs); model_events=[e for x in logs for s in (x.samples or []) for e in (s.events or []) if e.event=='model']; sandbox_events=[e for x in logs for s in (x.samples or []) for e in (s.events or []) if e.event=='sandbox']; assert len(model_events)==2; assert len(sandbox_events)>=6; assert all(x.eval.sandbox.type=='jinn-oci' for x in logs); assert all(e.call and e.call.request['model']=='gpt-5.6-luna' and e.call.response['model']=='gpt-5.6-luna' for e in model_events)",
     ], { encoding: "utf8" });
     expect(officialRead).toBe("");
     const viewerOutputRoot = join(detachedRoot, "viewer-output");
