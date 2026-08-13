@@ -394,6 +394,7 @@ export { BUNDLE_V3_FORMAT } from "./bundle/manifest.js";
 export { materializeBundleV3 } from "./bundle/v3-materialize.js";
 export type {
   BundleV3NativeArtifactInput,
+  MaterializeBundleV3Deps,
   MaterializeBundleV3Input,
   MaterializedBundleV3,
 } from "./bundle/v3-materialize.js";

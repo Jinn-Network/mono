@@ -1,14 +1,11 @@
 import { z } from "zod";
+import { DigestBearingResourceDescriptorSchema } from "@jinn-network/benchmarking-records";
 
 export const BUNDLE_V3_INDEX_FORMAT = "benchmark-product-public-bundle-index/3" as const;
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const Rfc3339Schema = z.string().datetime({ offset: true });
-const DescriptorSchema = z.object({
-  sha256: Sha256HexSchema,
-  mediaType: z.string().min(1).optional(),
-  name: z.string().min(1).optional(),
-});
+const DescriptorSchema = DigestBearingResourceDescriptorSchema;
 
 /**
  * An adapter-owned native artifact disclosure. The first four states are the exact
@@ -57,8 +54,8 @@ export const BundleV3NativeDisclosureSchema = z.discriminatedUnion("state", [
     ordinal: z.number().int().positive(),
     role: z.string().min(1),
     state: z.literal("scrub-derived"),
-    /** Original source identity if it is safe to disclose; omission is intentional source-absent. */
-    source: DescriptorSchema.optional(),
+    /** Exact original descriptor from BenchmarkAccounting. */
+    source: DescriptorSchema,
     artifact: DescriptorSchema,
     path: z.string().regex(/^native\/[a-f0-9]{64}\.bin$/),
     derivation: z.object({

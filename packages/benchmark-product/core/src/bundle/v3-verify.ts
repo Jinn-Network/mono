@@ -91,13 +91,22 @@ export function verifyBundleV3(bundleDir: string, deps: VerifyBundleV3Deps = {})
       refuse("record-integrity", "bundle-v3.json", "Report v2 identities differ from exact bundled bytes");
     }
   }
-  const expectedSourceBytes = bundleV3SourcePositions(accountingBytes).map((position) => canonicalJsonBytes(position));
-  if (expectedSourceBytes.length !== index.sourceReceipts.length) {
+  const expectedReceipts = bundleV3SourcePositions(accountingBytes).map((position) => {
+    const positionBytes = canonicalJsonBytes(position);
+    const digest = sha256(positionBytes);
+    return { position, sha256: digest, path: `sources/${digest}.json` };
+  });
+  if (expectedReceipts.length !== index.sourceReceipts.length) {
     refuse("record-integrity", "sourceReceipts", "source receipt closure differs from BenchmarkAccounting positions");
   }
-  expectedSourceBytes.forEach((bytes, indexAt) => {
+  expectedReceipts.forEach((expected, indexAt) => {
     const declared = index.sourceReceipts[indexAt];
-    if (declared === undefined || declared.sha256 !== sha256(bytes) || !equalBytes(read(declared.path), bytes)) {
+    const positionBytes = canonicalJsonBytes(expected.position);
+    if (
+      declared === undefined
+      || !equalBytes(canonicalJsonBytes(declared), canonicalJsonBytes(expected))
+      || !equalBytes(read(expected.path), positionBytes)
+    ) {
       refuse("record-integrity", "sourceReceipts", "source receipt bytes or position differ from BenchmarkAccounting");
     }
   });

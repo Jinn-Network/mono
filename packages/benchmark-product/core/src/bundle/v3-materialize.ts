@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   parseBenchmarkAccounting,
@@ -13,7 +13,7 @@ import {
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
-import { buildBundleManifest, BUNDLE_MANIFEST_FILENAME, BUNDLE_V3_FORMAT } from "./manifest.js";
+import { buildBundleManifest, BUNDLE_MANIFEST_FILENAME, BUNDLE_V3_FORMAT, verifyBundleManifest } from "./manifest.js";
 import { BundleV3IndexSchema, type BundleV3NativeDisclosure } from "./v3-schema.js";
 
 function sha256(bytes: Uint8Array): string {
@@ -22,6 +22,12 @@ function sha256(bytes: Uint8Array): string {
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
+}
+
+function nodeCode(cause: unknown): string | undefined {
+  return cause !== null && typeof cause === "object" && "code" in cause
+    ? String((cause as { code?: unknown }).code)
+    : undefined;
 }
 
 function nativeKey(value: Pick<BundleV3NativeDisclosure, "cellKey" | "dispatch" | "ordinal">): string {
@@ -54,6 +60,16 @@ export interface MaterializedBundleV3 {
   readonly reportRecordSha256?: string;
 }
 
+export interface MaterializeBundleV3Deps {
+  /** Deterministic fault injection after every staged byte is durable, before final rename. */
+  readonly beforeRename?: () => void;
+}
+
+function exactJsonEqual(left: unknown, right: unknown): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return equalBytes(canonicalJsonBytes(left), canonicalJsonBytes(right));
+}
+
 function assertNativeInput(input: MaterializeBundleV3Input): void {
   const accounting = parseBenchmarkAccounting(input.accountingBytes);
   const expected = new Map<string, { role: string; availability: string; artifact?: { digest: { sha256: string } } }>();
@@ -70,10 +86,10 @@ function assertNativeInput(input: MaterializeBundleV3Input): void {
     actual.set(key, value);
     const byteBearing = parsed.state === "public" || parsed.state === "scrub-derived";
     if (byteBearing) {
-      if (value.bytes === undefined || sha256(value.bytes) !== parsed.artifact.sha256) {
+      if (value.bytes === undefined || sha256(value.bytes) !== parsed.artifact.digest.sha256) {
         refuse("record-integrity", `nativeArtifacts.${key}`, "public native artifact bytes do not match their declared digest");
       }
-      if (parsed.path !== `native/${parsed.artifact.sha256}.bin`) {
+      if (parsed.path !== `native/${parsed.artifact.digest.sha256}.bin`) {
         refuse("record-integrity", `nativeArtifacts.${key}`, "native artifact path must be derived from its exact digest");
       }
     } else if (value.bytes !== undefined) {
@@ -90,19 +106,18 @@ function assertNativeInput(input: MaterializeBundleV3Input): void {
       if (disclosure.state !== accountingArtifact.availability) {
         refuse("record-integrity", `nativeArtifacts.${key}`, "native disclosure state differs from BenchmarkAccounting");
       }
-      const original = accountingArtifact.artifact?.digest.sha256;
-      if (original !== undefined && "artifact" in disclosure && disclosure.artifact !== undefined && disclosure.artifact.sha256 !== original) {
-        refuse("record-integrity", `nativeArtifacts.${key}`, "native disclosure digest differs from BenchmarkAccounting");
+      const disclosedArtifact = "artifact" in disclosure ? disclosure.artifact : undefined;
+      if (!exactJsonEqual(disclosedArtifact, accountingArtifact.artifact)) {
+        refuse("record-integrity", `nativeArtifacts.${key}`, "native disclosure descriptor differs from BenchmarkAccounting");
       }
     } else {
-      const original = accountingArtifact.artifact?.digest.sha256;
-      if (original !== undefined && disclosure.source?.sha256 !== original) {
-        refuse("record-integrity", `nativeArtifacts.${key}`, "scrub derivation must name the BenchmarkAccounting source artifact");
+      if (accountingArtifact.artifact === undefined) {
+        refuse("record-integrity", `nativeArtifacts.${key}`, "scrub derivation requires a source descriptor in BenchmarkAccounting");
       }
-      if (original === undefined && disclosure.source !== undefined) {
-        refuse("record-integrity", `nativeArtifacts.${key}`, "scrub derivation cannot invent a source identity absent from BenchmarkAccounting");
+      if (!exactJsonEqual(disclosure.source, accountingArtifact.artifact)) {
+        refuse("record-integrity", `nativeArtifacts.${key}`, "scrub derivation source descriptor differs from BenchmarkAccounting");
       }
-      if (original !== undefined && disclosure.artifact.sha256 === original) {
+      if (disclosure.artifact.digest.sha256 === accountingArtifact.artifact.digest.sha256) {
         refuse("record-integrity", `nativeArtifacts.${key}`, "scrub-derived artifact must have a new digest");
       }
     }
@@ -191,63 +206,103 @@ export function bundleV3SourcePositions(accountingBytes: Uint8Array): readonly u
 }
 
 /** Materializes an additive v3 bundle. It deliberately has no workspace/operation dependency. */
-export function materializeBundleV3(input: MaterializeBundleV3Input): MaterializedBundleV3 {
+export function materializeBundleV3(
+  input: MaterializeBundleV3Input,
+  deps: MaterializeBundleV3Deps = {},
+): MaterializedBundleV3 {
   if (existsSync(input.bundleDir)) refuse("conflict", "bundleDir", "v3 bundle target already exists");
   assertBundleV3Input(input);
   const staging = `${input.bundleDir}.tmp-${randomUUID()}`;
   mkdirSync(staging, { recursive: true });
-  const files: string[] = [];
-  const write = (path: string, bytes: Uint8Array): void => {
-    atomicWriteFileSync(join(staging, path), bytes);
-    files.push(path);
-  };
-  write("records/accounting.json", input.accountingBytes);
-  write("records/matrix.json", input.matrixBytes);
-  if (input.report !== undefined) {
-    write("records/report-payload.json", input.report.payloadBytes);
-    write("records/report-envelope.json", input.report.envelopeBytes);
-  }
-  const nativeArtifacts = (input.nativeArtifacts ?? []).map(({ disclosure, bytes }) => {
-    if (bytes !== undefined) {
-      if (disclosure.state !== "public" && disclosure.state !== "scrub-derived") {
-        refuse("record-integrity", "nativeArtifacts", "non-public disclosure cannot materialize bytes");
-      }
-      write(disclosure.path, bytes);
+  let renamed = false;
+  try {
+    const files: string[] = [];
+    const write = (path: string, bytes: Uint8Array): void => {
+      atomicWriteFileSync(join(staging, path), bytes);
+      files.push(path);
+    };
+    write("records/accounting.json", input.accountingBytes);
+    write("records/matrix.json", input.matrixBytes);
+    if (input.report !== undefined) {
+      write("records/report-payload.json", input.report.payloadBytes);
+      write("records/report-envelope.json", input.report.envelopeBytes);
     }
-    return disclosure;
-  });
-  for (const [path, bytes] of Object.entries(input.humanFiles ?? {})) {
-    if (!path.startsWith("human/") || path.includes("..")) refuse("validation", "humanFiles", "human files must remain under human/");
-    write(path, bytes);
+    const nativeArtifacts = (input.nativeArtifacts ?? []).map(({ disclosure, bytes }) => {
+      if (bytes !== undefined) {
+        if (disclosure.state !== "public" && disclosure.state !== "scrub-derived") {
+          refuse("record-integrity", "nativeArtifacts", "non-public disclosure cannot materialize bytes");
+        }
+        write(disclosure.path, bytes);
+      }
+      return disclosure;
+    });
+    for (const [path, bytes] of Object.entries(input.humanFiles ?? {})) {
+      if (!path.startsWith("human/") || path.includes("..")) refuse("validation", "humanFiles", "human files must remain under human/");
+      write(path, bytes);
+    }
+    const sourceReceipts = bundleV3SourcePositions(input.accountingBytes).map((position) => {
+      const bytes = canonicalJsonBytes(position);
+      const digest = sha256(bytes);
+      const path = `sources/${digest}.json`;
+      write(path, bytes);
+      return { position, sha256: digest, path };
+    });
+    const index = BundleV3IndexSchema.parse({
+      format: "benchmark-product-public-bundle-index/3",
+      accounting: { sha256: sha256(input.accountingBytes), path: "records/accounting.json" },
+      matrix: { sha256: sha256(input.matrixBytes), path: "records/matrix.json" },
+      ...(input.report === undefined ? {} : { report: {
+        payload: { sha256: sha256(input.report.payloadBytes), path: "records/report-payload.json" },
+        envelope: { sha256: sha256(input.report.envelopeBytes), path: "records/report-envelope.json" },
+      } }),
+      sourceReceipts,
+      nativeArtifacts,
+    });
+    write("bundle-v3.json", canonicalJsonBytes(index));
+    const manifest = buildBundleManifest(staging, files, { format: BUNDLE_V3_FORMAT });
+    atomicWriteFileSync(join(staging, BUNDLE_MANIFEST_FILENAME), manifest.bytes);
+    fsyncDirectorySync(staging);
+    deps.beforeRename?.();
+    if (existsSync(input.bundleDir)) {
+      const existing = verifyBundleManifest(input.bundleDir);
+      if (existing.manifest.format !== BUNDLE_V3_FORMAT || existing.identity !== manifest.identity) {
+        refuse("conflict", "bundleDir", "v3 bundle target appeared with different bytes; refusing to overwrite it");
+      }
+      return {
+        bundleDir: input.bundleDir,
+        identity: existing.identity,
+        accountingSha256: index.accounting.sha256,
+        matrixSha256: index.matrix.sha256,
+        ...(index.report === undefined ? {} : { reportRecordSha256: index.report.envelope.sha256 }),
+      };
+    }
+    try {
+      renameSync(staging, input.bundleDir);
+      renamed = true;
+      fsyncDirectorySync(join(input.bundleDir, ".."));
+    } catch (cause) {
+      const code = nodeCode(cause);
+      if (code !== "EEXIST" && code !== "ENOTEMPTY") throw cause;
+      const existing = verifyBundleManifest(input.bundleDir);
+      if (existing.manifest.format !== BUNDLE_V3_FORMAT || existing.identity !== manifest.identity) {
+        refuse("conflict", "bundleDir", "v3 bundle target is occupied by different bytes; refusing to overwrite it");
+      }
+      return {
+        bundleDir: input.bundleDir,
+        identity: existing.identity,
+        accountingSha256: index.accounting.sha256,
+        matrixSha256: index.matrix.sha256,
+        ...(index.report === undefined ? {} : { reportRecordSha256: index.report.envelope.sha256 }),
+      };
+    }
+    return {
+      bundleDir: input.bundleDir,
+      identity: manifest.identity,
+      accountingSha256: index.accounting.sha256,
+      matrixSha256: index.matrix.sha256,
+      ...(index.report === undefined ? {} : { reportRecordSha256: index.report.envelope.sha256 }),
+    };
+  } finally {
+    if (!renamed && existsSync(staging)) rmSync(staging, { recursive: true, force: true });
   }
-  const sourceReceipts = bundleV3SourcePositions(input.accountingBytes).map((position) => {
-    const bytes = canonicalJsonBytes(position);
-    const digest = sha256(bytes);
-    const path = `sources/${digest}.json`;
-    write(path, bytes);
-    return { position, sha256: digest, path };
-  });
-  const index = BundleV3IndexSchema.parse({
-    format: "benchmark-product-public-bundle-index/3",
-    accounting: { sha256: sha256(input.accountingBytes), path: "records/accounting.json" },
-    matrix: { sha256: sha256(input.matrixBytes), path: "records/matrix.json" },
-    ...(input.report === undefined ? {} : { report: {
-      payload: { sha256: sha256(input.report.payloadBytes), path: "records/report-payload.json" },
-      envelope: { sha256: sha256(input.report.envelopeBytes), path: "records/report-envelope.json" },
-    } }),
-    sourceReceipts,
-    nativeArtifacts,
-  });
-  write("bundle-v3.json", canonicalJsonBytes(index));
-  const manifest = buildBundleManifest(staging, files, { format: BUNDLE_V3_FORMAT });
-  atomicWriteFileSync(join(staging, BUNDLE_MANIFEST_FILENAME), manifest.bytes);
-  renameSync(staging, input.bundleDir);
-  fsyncDirectorySync(join(input.bundleDir, ".."));
-  return {
-    bundleDir: input.bundleDir,
-    identity: manifest.identity,
-    accountingSha256: index.accounting.sha256,
-    matrixSha256: index.matrix.sha256,
-    ...(index.report === undefined ? {} : { reportRecordSha256: index.report.envelope.sha256 }),
-  };
 }
