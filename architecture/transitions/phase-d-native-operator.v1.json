@@ -143,10 +143,7 @@
         "client/src/daemon/daemon.ts"
       ],
       "replacement": "Native evaluator composition and its durable evaluation, publication, and verdict-settlement sagas.",
-      "consumers": [
-        "client/src/index.ts",
-        "client/src/main.ts"
-      ],
+      "consumers": [],
       "defaultMode": "legacy",
       "noNewUseGuard": {
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
@@ -155,12 +152,12 @@
       "usageSignal": {
         "name": "legacy-evaluator-delivery-watcher-loaded",
         "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
-        "sourceDescription": "durable counter exposed by GET /v1/status and instrumented when the legacy delivery watcher is loaded (client/src/daemon/daemon.ts:337)",
+        "sourceDescription": "durable counter exposed by GET /v1/status; it was instrumented on legacy delivery-watcher load until Wave-4 D2 deleted the watcher, and is no longer recorded. The name stays in the signal vocabulary so an already-written durable observation file carrying the counter still validates.",
         "zeroDefinition": "No legacy delivery watcher or evaluator component is loaded during the approved observation window."
       },
       "migration": {
         "description": "Prove native evaluation, publication, and verdict settlement before removing the legacy watcher.",
-        "compatibility": "The watcher remains available only through explicit or default legacy composition during Phase C."
+        "compatibility": "None remains: the watcher and the mech adapter's evaluation-opportunity machinery are deleted, and no composition can reach them."
       },
       "sunsetCondition": {
         "description": "Native evaluation closure is green and legacy components have zero measured load.",
@@ -174,7 +171,8 @@
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
       "targetPullRequest": "Phase D4 evaluator deletion",
-      "status": "planned"
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-05-cutover-one-swap-collapse.md"
     },
     {
       "id": "legacy-wiring-config",
