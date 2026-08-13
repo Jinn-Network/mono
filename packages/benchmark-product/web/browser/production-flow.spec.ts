@@ -1,9 +1,12 @@
 import { cpSync, existsSync, lstatSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, join, resolve } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page, type Response } from "@playwright/test";
+import {
+  DynamicResponseBodyAudit,
+  isExactChromiumAbort,
+} from "../src/test/dynamic-response-audit";
 import { PINNED_PERMISSIONS_POLICY as PERMISSIONS_POLICY } from "./chromium-policy";
 import { readRuntimeConfig } from "./runtime-config";
 
@@ -12,6 +15,16 @@ const CANCELLED_DRAFT_ID = "bp52-browser-cancelled";
 const runtime = readRuntimeConfig();
 const WORKSPACE = runtime.workspaceDir;
 const ORIGIN = "http://127.0.0.1:3017";
+const responseBodyAudits = new WeakMap<Page, DynamicResponseBodyAudit<Response>>();
+
+async function settleDynamicResponseBodies(page: Page): Promise<void> {
+  await responseBodyAudits.get(page)?.settleBeforeNextBrowserOperation();
+}
+
+async function auditedGoto(page: Page, url: string): Promise<void> {
+  await settleDynamicResponseBodies(page);
+  await page.goto(url);
+}
 
 async function tabTo(page: Page, target: Locator): Promise<void> {
   await expect(target).toBeVisible();
@@ -32,6 +45,10 @@ async function typeByKeyboard(page: Page, target: Locator, value: string): Promi
 
 async function activateByKeyboard(page: Page, target: Locator): Promise<void> {
   await tabTo(page, target);
+  // Do not navigate or dispatch another action until Chromium has yielded the exact bytes from
+  // every prior auditable response. Place this immediately before Enter: target discovery and
+  // keyboard traversal may overlap the tail of the response that made the target interactive.
+  await settleDynamicResponseBodies(page);
   await page.keyboard.press("Enter");
 }
 
@@ -112,14 +129,8 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   const consoleFailures: string[] = [];
   const requestUrls: string[] = [];
   const externalRequests: string[] = [];
-  const dynamicResponses: Array<{
-    readonly response: Response;
-    readonly body: Promise<
-      | { readonly kind: "complete"; readonly bytes: Buffer }
-      | { readonly kind: "aborted"; readonly detail: string }
-      | { readonly kind: "error"; readonly detail: string }
-    >;
-  }> = [];
+  const responseBodyAudit = new DynamicResponseBodyAudit<Response>();
+  responseBodyAudits.set(page, responseBodyAudit);
   page.on("console", (message) => {
     const rendered = `${message.type()}: ${message.text()}`;
     consoleMessages.push(rendered);
@@ -133,36 +144,18 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   page.on("response", (response) => {
     const type = response.headers()["content-type"] ?? "";
     if (!response.url().startsWith(ORIGIN) || (!type.includes("text/html") && !type.includes("text/x-component"))) return;
-    // Retain completed response bytes immediately. Next intentionally cancels speculative RSC
-    // prefetches; Chromium rejects those body reads before request.failure is always populated, so
-    // poll that explicit failure for at most one second. The promise therefore cannot wedge the
-    // gate, and an abort is never mistaken for a scanned completed response.
-    const body = response.request().method() === "HEAD" || response.status() === 204 || response.status() === 304
-      ? Promise.resolve({ kind: "complete" as const, bytes: Buffer.alloc(0) })
-      : (async () => {
-      try {
-        return { kind: "complete" as const, bytes: await response.body() };
-      } catch (cause) {
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-          const requestFailure = response.request().failure();
-          if (requestFailure !== null) return { kind: "aborted" as const, detail: requestFailure.errorText };
-          await delay(10);
-        }
-        return { kind: "error" as const, detail: cause instanceof Error ? cause.message : String(cause) };
-      }
-    })();
-    dynamicResponses.push({ response, body });
+    responseBodyAudit.capture(response);
   });
 
-  await page.goto("/");
+  await auditedGoto(page, "/");
   await expect(page.getByRole("heading", { level: 1, name: "Compare agents on the same work." })).toBeVisible();
   await auditState(page, "landing route");
 
-  await page.goto("/workspace/new");
+  await auditedGoto(page, "/workspace/new");
   await expect(page.getByRole("heading", { level: 1, name: "New draft" })).toBeVisible();
   await auditState(page, "new draft route");
 
-  await page.goto("/workspace");
+  await auditedGoto(page, "/workspace");
   const skipLink = page.getByRole("link", { name: "Skip to main content" });
   await page.keyboard.press("Tab");
   await expect(skipLink).toBeFocused();
@@ -247,12 +240,12 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
 
   // BP-52 cross-packet proof: the optimized browser must drive the real venue's
   // requested -> draining -> cancelled boundary and publish that terminal result.
-  await page.goto("/workspace/new");
+  await auditedGoto(page, "/workspace/new");
   await typeByKeyboard(page, page.getByLabel("Name", { exact: true }), "Cancelled browser benchmark");
   await typeByKeyboard(page, page.getByLabel("Draft ID"), CANCELLED_DRAFT_ID);
   await typeByKeyboard(page, page.getByLabel("Description"), "Real venue cancellation acceptance");
   await submitAction(page, "Create draft", /bp52-browser-cancelled/u);
-  await page.goto(`/workspace/${CANCELLED_DRAFT_ID}`);
+  await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}`);
   await submitAction(page, "Attach sample", /sample/u);
   const cancelledArm = actionForm(page, "Add arm");
   await typeByKeyboard(page, cancelledArm.getByLabel("Arm ID"), "baseline");
@@ -263,7 +256,7 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await submitAction(page, "Add arm", /sample/u);
   await submitAction(page, "Quote", /solveCells/u);
   await submitAction(page, "Lock run", /locked/u);
-  await page.goto(`/workspace/${CANCELLED_DRAFT_ID}/run`);
+  await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}/run`);
   await submitAction(page, "Launch", /scheduled/u);
   const cancelledLifecycle = page.getByRole("heading", { level: 2, name: "Lifecycle" }).locator("../..");
   await expect(cancelledLifecycle).toContainText("running", { timeout: 30_000 });
@@ -276,7 +269,7 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await expect(cancelledLifecycle).toContainText("closed");
   await expect(page.getByText("Cancellation finalized; run is cancelled.")).toBeVisible();
   await auditState(page, "cancelled run monitor");
-  await page.goto(`/workspace/${CANCELLED_DRAFT_ID}/results`);
+  await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}/results`);
   await expect(page.getByRole("heading", { level: 3, name: "Run outcome" }).locator("../..")).toContainText("cancelled");
   await expect(page.getByRole("heading", { level: 3, name: "Expected" }).locator("../..")).toContainText("6");
   const cancelledCells = page.locator('[aria-label="Scrollable sealed cells table"]');
@@ -321,10 +314,11 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   for (const [index, message] of consoleMessages.entries()) expectStringsAbsent(message, secrets, `console message ${index}`);
   for (const [index, url] of requestUrls.entries()) expectStringsAbsent(url, secrets, `request URL ${index}`);
 
-  expect(dynamicResponses.some(({ response }) => response.request().method() === "POST")).toBe(true);
-  expect(dynamicResponses.some(({ response }) => (response.headers()["content-type"] ?? "").includes("text/html"))).toBe(true);
-  expect(dynamicResponses.some(({ response }) => (response.headers()["content-type"] ?? "").includes("text/x-component"))).toBe(true);
-  for (const captured of dynamicResponses) {
+  await responseBodyAudit.settleBeforeNextBrowserOperation();
+  expect(responseBodyAudit.captures.some(({ response }) => response.request().method() === "POST")).toBe(true);
+  expect(responseBodyAudit.captures.some(({ response }) => (response.headers()["content-type"] ?? "").includes("text/html"))).toBe(true);
+  expect(responseBodyAudit.captures.some(({ response }) => (response.headers()["content-type"] ?? "").includes("text/x-component"))).toBe(true);
+  for (const captured of responseBodyAudit.captures) {
     const { response } = captured;
     const headers = response.headers();
     expect(headers["cache-control"]).toContain("no-store");
@@ -337,7 +331,10 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
     expect(headers["permissions-policy"]).toBe(PERMISSIONS_POLICY);
     const body = await captured.body;
     if (body.kind === "aborted") {
-      expect(body.detail, `${response.request().method()} ${response.url()} did not complete`).toMatch(/ERR_ABORTED|aborted/u);
+      expect(
+        isExactChromiumAbort(body.detail),
+        `${response.request().method()} ${response.url()} did not complete: ${body.detail}`,
+      ).toBe(true);
       continue;
     }
     expect(body.kind, body.kind === "error" ? body.detail : undefined).toBe("complete");

@@ -71,7 +71,7 @@ jobs:
       # then BP-12's real local-venue stack (backend, supervisor, workspace, launchers -- all now
       # real runtime dependencies, not the prior test-only `task-execution-launchers`
       # devDependency) plus its evidence-* / attestation-issuer transitives and the evaluation
-      # leg (evaluation-harness, evaluator-adapters, backend-local, benchmarking-run,
+      # leg (evaluation-harness, evaluator-adapters, OCI grader, backend-local, benchmarking-run,
       # benchmarking-local), then BP-13's `benchmarking-aggregate` (Report production/
       # verification -- depends only on records + trust-core, both already built earlier).
       - name: Build portal dependencies from source
@@ -95,6 +95,7 @@ jobs:
           (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/oci-grader && yarn install --immutable && yarn build)
           # BP-32's synchronous ownership assertion is the narrow platform seam that lets a web
           # response distinguish a rejected contender from a durably-started in-process driver.
           (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn vitest run src/backend.shutdown.test.ts && yarn build)

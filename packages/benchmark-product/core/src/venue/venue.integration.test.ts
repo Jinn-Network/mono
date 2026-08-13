@@ -175,7 +175,7 @@ describe("createLocalVenue", () => {
       });
 
       // Evaluation leg.
-      const prepared = venue.prepareEvaluationCell({
+      const prepared = await venue.prepareEvaluationCell({
         subjectTaskBytes: task.bytes,
         subjectDeliveryBytes,
         resultArtifacts: [{ name: subjectDelivery.outputs[0]!.name, bytes: resultBytes }],
@@ -283,7 +283,7 @@ describe("createLocalVenue", () => {
         });
 
         // One evaluation cell, dispatched once per evaluator identity.
-        const prepared = multiVenue.prepareEvaluationCell({
+        const prepared = await multiVenue.prepareEvaluationCell({
           subjectTaskBytes: task.bytes,
           subjectDeliveryBytes,
           resultArtifacts: [{ name: subjectDelivery.outputs[0]!.name, bytes: resultBytes }],

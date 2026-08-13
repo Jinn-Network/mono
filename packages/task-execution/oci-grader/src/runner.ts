@@ -30,6 +30,12 @@ export interface PinnedOciRunnerOptions {
   readonly spawn?: GraderProcessSpawner;
   /** Absolute path to the runtime CLI when it is not on the daemon's inherited PATH. */
   readonly dockerPath?: string;
+  /**
+   * `if-missing` preserves the standalone runner's explicit digest-pinned pre-stage behavior.
+   * `never` is the fail-closed child contract: inspect the already-staged digest, but never issue
+   * a registry-facing pull if it disappeared between parent preparation and child execution.
+   */
+  readonly imagePullPolicy?: "if-missing" | "never";
 }
 
 const RUNTIME_CANDIDATES: Readonly<Record<"docker" | "podman", readonly string[]>> = {
@@ -131,12 +137,36 @@ export async function ensurePinnedOciImage(
   }
 }
 
+/** Requires an exact digest to remain locally present without granting registry authority. */
+async function requirePinnedOciImageLocally(
+  input: {
+    readonly runtime: "docker" | "podman";
+    readonly image: string;
+  },
+  options: PinnedOciRunnerOptions,
+): Promise<void> {
+  if (!PINNED_IMAGE.test(input.image)) refuse("grader image must be pinned by sha256 digest");
+  const inspected = await boundedExit({
+    runtime: input.runtime,
+    args: ["image", "inspect", input.image],
+    timeoutMs: 30_000,
+    options,
+  });
+  if (inspected.timedOut || inspected.code !== 0) {
+    unavailable("pre-staged pinned grader image is unavailable locally");
+  }
+}
+
 /** Runs one bounded grader and returns only the exact bytes it left on the output mount. */
 export async function runPinnedOciGrader(
   input: PinnedOciGraderInput,
   options: PinnedOciRunnerOptions = {},
 ): Promise<Uint8Array> {
-  await ensurePinnedOciImage(input, options);
+  if (options.imagePullPolicy === "never") {
+    await requirePinnedOciImageLocally(input, options);
+  } else {
+    await ensurePinnedOciImage(input, options);
+  }
   let ownedNetwork: string | undefined;
   if (input.profileRequiresNetwork && input.allowedNetwork === undefined) {
     ownedNetwork = `jinn-oci-grader-network-${randomUUID()}`;

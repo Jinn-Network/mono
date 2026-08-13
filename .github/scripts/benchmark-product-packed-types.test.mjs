@@ -90,7 +90,7 @@ assertFamilyCoverage();
 // (none is on the registry), in dependency order (pack/install order): protocol + records (BP-01),
 // BP-11's intake edges (interop, task-admission, and their transitives environment-record /
 // trust-core / profiles), BP-12's real local-venue stack (backend, backend-local, supervisor,
-// workspace, launchers, the evaluation-harness + evaluator-adapters pair, benchmarking-run,
+// workspace, launchers, the evaluation-harness + evaluator-adapters + OCI-grader chain, benchmarking-run,
 // benchmarking-local, and the evidence-* / attestation-issuer transitives the evaluation-harness
 // pair pulls in), and BP-13's `benchmarking-aggregate` (Report production/verification -- depends
 // only on records + trust-core, both already earlier in this list). Each `npm pack` is independent,
@@ -116,6 +116,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
   ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
   ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
+  ['@jinn-network/task-execution-oci-grader', join(root, 'packages', 'task-execution', 'oci-grader')],
   ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
   ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
   ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
