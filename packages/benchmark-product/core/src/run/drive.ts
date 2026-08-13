@@ -133,7 +133,6 @@ export function createRecordingProxy(
       if (ack.accepted && coord !== undefined && nonce !== undefined) {
         const submissionSha256 = putSealedBytes(deps.workspaceDir, submissionBytes);
         const leg = nonce.startsWith("eval:") ? "evaluation" : "solve";
-        if (leg === "solve" && deps.recordSolveSubmissions === false) return ack;
         const pinningEvidence = leg === "solve"
           ? backend.pinningEvidenceForSubmission?.(ack.submission)
           : undefined;
@@ -143,17 +142,30 @@ export function createRecordingProxy(
             deps.workspaceDir,
             canonicalRunPinningEvidenceBytes(pinningEvidence, ack.digest),
           );
-        appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
-          kind: "submission-accepted",
-          at: deps.liveClock(),
-          cellKey: coord.cellKey,
-          dispatch: coord.dispatch,
-          submissionSha256,
-          // The `eval:` prefix is this driver's own evaluation-nonce marker (see
-          // `cellKeyAndDispatchFromNonce`'s doc comment); everything else is a solve dispatch.
-          leg,
-          ...(pinningEvidenceSha256 === undefined ? {} : { pinningEvidenceSha256 }),
-        });
+        if (leg === "solve" && deps.recordSolveSubmissions === false) {
+          if (pinningEvidenceSha256 !== undefined) {
+            appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+              kind: "submission-pinning-evidence",
+              at: deps.liveClock(),
+              cellKey: coord.cellKey,
+              dispatch: coord.dispatch,
+              submissionSha256,
+              pinningEvidenceSha256,
+            });
+          }
+        } else {
+          appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+            kind: "submission-accepted",
+            at: deps.liveClock(),
+            cellKey: coord.cellKey,
+            dispatch: coord.dispatch,
+            submissionSha256,
+            // The `eval:` prefix is this driver's own evaluation-nonce marker (see
+            // `cellKeyAndDispatchFromNonce`'s doc comment); everything else is a solve dispatch.
+            leg,
+            ...(pinningEvidenceSha256 === undefined ? {} : { pinningEvidenceSha256 }),
+          });
+        }
       }
       return ack;
     },

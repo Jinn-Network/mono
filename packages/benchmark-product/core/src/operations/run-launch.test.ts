@@ -619,7 +619,7 @@ describe("runResume — lifecycle guard", () => {
     expect(droppedB).toBeDefined();
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== droppedA && entry.event.cellKey !== droppedB;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== droppedA && entry.cellKey !== droppedB;
       }
       return true;
@@ -748,7 +748,7 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     // naming it, keeping the other 5 cells' entries (and the launched marker) intact.
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== droppedCellKey;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== droppedCellKey;
       }
       return true;
@@ -776,10 +776,10 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     for (const cellKey of untouchedCellKeys) {
       const original = fullEntries.filter((entry) =>
         (entry.kind === "cell-event" && entry.event.cellKey === cellKey)
-        || ((entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
+        || ((entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
       const after = afterEntries.filter((entry) =>
         (entry.kind === "cell-event" && entry.event.cellKey === cellKey)
-        || ((entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
+        || ((entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
       expect(after).toEqual(original);
     }
   }, 30_000);

@@ -14,7 +14,7 @@ const snapshot: ObservationSnapshot = {
     attempt: "urn:uuid:00000000-0000-5000-8000-000000000002",
     task: `sha256:${"a".repeat(64)}`,
     submission: "urn:uuid:00000000-0000-5000-8000-000000000001",
-    derived: { state: "claimed", terminal: false, contradictory: false, cancelRequested: false, executionIds: [], deliveries: [] },
+    derived: { state: "running", terminal: false, contradictory: false, cancelRequested: false, executionIds: [], deliveries: [] },
   },
   cursor: { sequence: "0" },
   observations: [],

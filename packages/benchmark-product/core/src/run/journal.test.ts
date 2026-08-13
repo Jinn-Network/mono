@@ -357,6 +357,18 @@ describe("foldRunJournal — per-cell status", () => {
     });
   });
 
+  test("associates a separate append-only pinning evidence fact with prospective capture", () => {
+    const fold = foldRunJournal([
+      { kind: "submission-captured", at: "t0", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, submissionSha256: HEX("9") },
+      { kind: "submission-pinning-evidence", at: "t1", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9"), pinningEvidenceSha256: HEX("6") },
+      { kind: "submission-accepted", at: "t2", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9"), leg: "solve" },
+    ]);
+    expect(fold.get(CELL_A)).toMatchObject({
+      submissionSha256: HEX("9"),
+      pinningEvidenceSha256: HEX("6"),
+    });
+  });
+
   test("a later solve dispatch without proof clears the prior dispatch's evidence", () => {
     const fold = foldRunJournal([
       {

@@ -115,6 +115,16 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     leg: z.enum(["solve", "evaluation"]).optional(),
   }),
   z.object({
+    /** Append-only enrichment captured by the post-ack backend proxy. Kept separate from
+     * `submission-accepted` so LaunchCapturePort remains the sole acceptance writer. */
+    kind: z.literal("submission-pinning-evidence"),
+    at: Rfc3339Schema,
+    cellKey: z.string(),
+    dispatch: z.number().int().positive(),
+    submissionSha256: Sha256HexSchema,
+    pinningEvidenceSha256: Sha256HexSchema,
+  }),
+  z.object({
     /** Exact sealed observation archive formed from the backend's accepted snapshot. */
     kind: z.literal("observation-accepted"),
     at: Rfc3339Schema,
@@ -278,6 +288,7 @@ export interface DispatchLineageFold {
   readonly dispatch: number;
   readonly submissionSha256?: string;
   readonly acceptedSubmissionSha256?: string;
+  readonly pinningEvidenceSha256?: string;
   readonly observationArchiveSha256?: string;
   readonly attempt?: string;
   readonly deliverySha256?: string;
@@ -350,7 +361,16 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
   };
 
   for (const entry of entries) {
-    if (entry.kind === "cell-event") {
+    if (entry.kind === "submission-captured") {
+      const fold = ensure(entry.cellKey, entry.armId, entry.replicate);
+      if (entry.dispatch > fold.lastDispatch) fold.lastDispatch = entry.dispatch;
+      fold.seenDispatches.add(entry.dispatch);
+      fold.dispatches = fold.seenDispatches.size;
+      if (fold.submissionSha256 !== entry.submissionSha256) {
+        fold.pinningEvidenceSha256 = undefined;
+      }
+      fold.submissionSha256 = entry.submissionSha256;
+    } else if (entry.kind === "cell-event") {
       const event = entry.event;
       const fold = ensure(event.cellKey, event.armId, event.replicate);
       if (event.dispatch > fold.lastDispatch) fold.lastDispatch = event.dispatch;
@@ -378,6 +398,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       }
     } else if (entry.kind === "submission-accepted") {
       const fold = ensure(entry.cellKey, "", 0);
+      const sameCapturedSubmission = fold.submissionSha256 === entry.submissionSha256;
       if (entry.dispatch > fold.lastDispatch) fold.lastDispatch = entry.dispatch;
       // Acceptance itself proves this dispatch exists even if the process dies before the
       // generator yields its corresponding cell-event. Count by dispatch id so the later event
@@ -392,8 +413,19 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
         fold.submissionSha256 = entry.submissionSha256;
         // A fresh solve acceptance without proof must clear any earlier dispatch's proof. This
         // makes missing evidence stay missing instead of inheriting a prior match.
-        fold.pinningEvidenceSha256 = entry.pinningEvidenceSha256;
+        if (entry.pinningEvidenceSha256 !== undefined) {
+          fold.pinningEvidenceSha256 = entry.pinningEvidenceSha256;
+        } else if (!sameCapturedSubmission) {
+          fold.pinningEvidenceSha256 = undefined;
+        }
       }
+    } else if (entry.kind === "submission-pinning-evidence") {
+      const fold = ensure(entry.cellKey, "", 0);
+      if (entry.dispatch > fold.lastDispatch) fold.lastDispatch = entry.dispatch;
+      fold.seenDispatches.add(entry.dispatch);
+      fold.dispatches = fold.seenDispatches.size;
+      fold.submissionSha256 = entry.submissionSha256;
+      fold.pinningEvidenceSha256 = entry.pinningEvidenceSha256;
     } else if (entry.kind === "delivery") {
       const fold = ensure(entry.cellKey, "", 0);
       fold.deliverySha256 = entry.deliverySha256;
@@ -452,7 +484,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
 export function foldRunJournalLineage(entries: readonly RunJournalEntry[]): Map<string, readonly DispatchLineageFold[]> {
   type Mutable = {
     cellKey: string; armId: string; replicate: number; dispatch: number;
-    submissionSha256?: string; acceptedSubmissionSha256?: string; observationArchiveSha256?: string;
+    submissionSha256?: string; acceptedSubmissionSha256?: string; pinningEvidenceSha256?: string; observationArchiveSha256?: string;
     attempt?: string; deliverySha256?: string; verdicts: CellVerdictFold[]; status?: CellStatus;
   };
   const byCell = new Map<string, Map<number, Mutable>>();
@@ -470,6 +502,10 @@ export function foldRunJournalLineage(entries: readonly RunJournalEntry[]): Map<
       ensure(entry.cellKey, entry.dispatch, entry.armId, entry.replicate).submissionSha256 = entry.submissionSha256;
     } else if (entry.kind === "submission-accepted" && entry.leg !== "evaluation") {
       ensure(entry.cellKey, entry.dispatch).acceptedSubmissionSha256 = entry.submissionSha256;
+    } else if (entry.kind === "submission-pinning-evidence") {
+      const fold = ensure(entry.cellKey, entry.dispatch);
+      fold.submissionSha256 = entry.submissionSha256;
+      fold.pinningEvidenceSha256 = entry.pinningEvidenceSha256;
     } else if (entry.kind === "observation-accepted") {
       const fold = ensure(entry.cellKey, entry.dispatch, entry.armId, entry.replicate);
       fold.observationArchiveSha256 = entry.observationArchiveSha256;

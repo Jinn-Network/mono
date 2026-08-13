@@ -350,7 +350,7 @@ describe("runResults — an expected-but-never-dispatched cell", () => {
     const [droppedCellKey] = deliveredCells;
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== droppedCellKey;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== droppedCellKey;
       }
       return true;
@@ -480,7 +480,7 @@ describe("runResults — failure block, sourced from the run journal fold (BP-22
     // only the evaluation leg, then add the real could-not-grade terminal shape.
     const withoutTargets = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return !solveTerminalKeys.has(entry.event.cellKey);
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         if (solveTerminalKeys.has(entry.cellKey)) return false;
         if (entry.cellKey !== unscorableCellKey) return true;
         if (entry.kind === "evaluation") return false;

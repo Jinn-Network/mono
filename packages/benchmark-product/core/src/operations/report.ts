@@ -210,6 +210,10 @@ export function runReport(
       // transition, so a retried `report` after a crash here simply rewrites it identically.
       writeRunState(clockedContext.workspaceDir, input.draftId, {
         ...runState,
+        // Keep the released product aliases byte-for-byte synchronized while callers migrate
+        // to the profile's unambiguous payload/record names.
+        reportSha256,
+        reportEnvelopeSha256,
         reportPayloadSha256: reportSha256,
         reportRecordSha256: reportEnvelopeSha256,
         reportedAt: at,

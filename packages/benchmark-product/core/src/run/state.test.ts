@@ -120,6 +120,71 @@ describe("publication state migration", () => {
     renamed.registration = publication.registration;
     expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: renamed }))).toThrow(/immutable/);
   });
+
+  test("forbids dropping and recreating publication state after a receipt", () => {
+    const publication = createPublicationState();
+    publication.registration = {
+      state: "complete",
+      receipt: { sourceSequence: "0001", entrySha256: "d".repeat(64) },
+      digests: { run: "e".repeat(64) },
+    };
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication }));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState())).toThrow(/cannot be removed/);
+
+    const recreated = createPublicationState({ name: "replacement-source" });
+    recreated.registration = publication.registration;
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: recreated }))).toThrow(/immutable/);
+    expect(readRunState(workspaceDir, "draft-1")?.publication?.source.name).toBe("colophon-benchmarks");
+  });
+
+  test("forbids receipt and established digest removal or mutation for every publication stage", () => {
+    const publication = createPublicationState();
+    const stageNames = ["registration", "accounting", "report"] as const;
+    stageNames.forEach((stageName, index) => {
+      publication[stageName] = {
+        state: "complete",
+        receipt: { sourceSequence: `000${index + 1}`, entrySha256: String(index + 1).repeat(64) },
+        digests: { record: String(index + 4).repeat(64) },
+      };
+    });
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication }));
+
+    for (const stageName of stageNames) {
+      const noReceipt = structuredClone(publication);
+      delete noReceipt[stageName].receipt;
+      expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: noReceipt })), stageName).toThrow(/receipt cannot be removed or changed/);
+
+      const changedReceipt = structuredClone(publication);
+      changedReceipt[stageName].receipt!.entrySha256 = "f".repeat(64);
+      expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: changedReceipt })), stageName).toThrow(/receipt cannot be removed or changed/);
+
+      const noDigest = structuredClone(publication);
+      noDigest[stageName].digests = {};
+      expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: noDigest })), stageName).toThrow(/digest cannot be removed or changed/);
+
+      const changedDigest = structuredClone(publication);
+      changedDigest[stageName].digests!.record = "f".repeat(64);
+      expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: changedDigest })), stageName).toThrow(/digest cannot be removed or changed/);
+    }
+  });
+
+  test("allows a public URL move and forward-only stage progress", () => {
+    const publication = createPublicationState({ publicBaseUrl: "https://old.example" });
+    publication.registration = {
+      state: "complete",
+      receipt: { sourceSequence: "0001", entrySha256: "d".repeat(64) },
+      digests: { run: "e".repeat(64) },
+    };
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication }));
+    const advanced = structuredClone(publication);
+    advanced.source.publicBaseUrl = "https://new.example";
+    advanced.accounting = { state: "in-progress", digests: { observation: "a".repeat(64) } };
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication: advanced }));
+    expect(readRunState(workspaceDir, "draft-1")?.publication).toMatchObject({
+      source: { publicBaseUrl: "https://new.example" },
+      accounting: { state: "in-progress" },
+    });
+  });
 });
 
 describe("deterministicUuidUri / deriveRunOwner", () => {

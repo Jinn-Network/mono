@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { appendRunJournalEntry } from "./journal.js";
 import { assessPublicationCompatibility } from "./publication-compatibility.js";
-import { createPublicationState, writeRunState } from "./state.js";
+import { createPublicationState, writeRunState, type PublicationState, type RunState } from "./state.js";
 
 let workspaceDir: string;
 const HEX = (value: string) => value.repeat(64);
@@ -13,7 +13,7 @@ const CELL = `${HEX("a")}/arm-a/1`;
 beforeEach(() => { workspaceDir = mkdtempSync(join(tmpdir(), "pub09-compat-")); });
 afterEach(() => { rmSync(workspaceDir, { recursive: true, force: true }); });
 
-function state(publication = undefined) {
+function state(publication?: PublicationState): RunState {
   return { draftId: "draft-1", specSha256: HEX("a"), owner: "urn:uuid:00000000-0000-5000-8000-000000000001", ...(publication === undefined ? {} : { publication }) };
 }
 

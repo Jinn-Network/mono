@@ -219,6 +219,33 @@ describe("createRecordingProxy", () => {
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual([]);
   });
 
+  test("prospective solve capture keeps pinning evidence as a separate append-only enrichment", async () => {
+    const pinningEvidence = {
+      ready: true,
+      checkedRequirementsDigest: `sha256:${"7".repeat(64)}` as const,
+    };
+    const backend = makeFakeBackend({ pinningEvidence });
+    const proxy = createRecordingProxy(backend, {
+      workspaceDir,
+      draftId: "draft-1",
+      liveClock: makeClock(),
+      recordSolveSubmissions: false,
+    });
+    const submissionBytes = utf8({ nonce: `${CELL_A}:1`, submission: "urn:uuid:00000000-0000-4000-8000-000000000001" });
+    await proxy.submit(new Uint8Array([1]), submissionBytes);
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "submission-pinning-evidence",
+      cellKey: CELL_A,
+      dispatch: 1,
+      submissionSha256: sha256Hex(submissionBytes),
+      pinningEvidenceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(entries.some((entry) => entry.kind === "submission-accepted")).toBe(false);
+  });
+
   test("journals submission-accepted with leg 'evaluation' from an eval-shaped nonce (eval:<runSha256>:e<i>:<cellKey>:<dispatch>)", async () => {
     const clock = makeClock();
     const backend = makeFakeBackend({});

@@ -193,26 +193,54 @@ export function requireRunState(workspaceDir: string, draftId: string): RunState
 
 /** Validates and atomically writes the RunState for `draftId`. */
 export function writeRunState(workspaceDir: string, draftId: string, state: RunState): void {
+  const result = RunStateSchema.safeParse(state);
+  if (!result.success) {
+    refuseWithIssues("validation", issuesFromZodError(result.error));
+  }
   // Source name/key identify an announcement chain. Once any append receipt is durable, changing
-  // either would falsely make old positions appear to belong to a new source. A public URL is a
-  // locator only and deliberately remains mutable.
+  // either — or weakening any already-durable stage fact — would falsely move old positions to a
+  // new source/history. A public URL is a locator only and deliberately remains mutable.
   const currentBytes = readFileIfExistsSync(runStatePath(workspaceDir, draftId));
   if (currentBytes !== undefined) {
     const current = readRunState(workspaceDir, draftId);
     if (current?.publication !== undefined) {
       const stages = [current.publication.registration, current.publication.accounting, current.publication.report];
       const hasReceipt = stages.some((stage) => stage.receipt !== undefined);
-      if (hasReceipt && state.publication !== undefined && (
-        current.publication.source.name !== state.publication.source.name
-        || current.publication.source.agentKeyRef !== state.publication.source.agentKeyRef
-      )) {
-        refuse("conflict", `runs.${draftId}.publication.source`, "source name and agent key reference are immutable after a durable source append receipt");
+      if (hasReceipt) {
+        const proposed = result.data.publication;
+        if (proposed === undefined) {
+          refuse("conflict", `runs.${draftId}.publication`, "publication state cannot be removed after a durable source append receipt");
+        }
+        if (
+          current.publication.source.name !== proposed.source.name
+          || current.publication.source.agentKeyRef !== proposed.source.agentKeyRef
+        ) {
+          refuse("conflict", `runs.${draftId}.publication.source`, "source name and agent key reference are immutable after a durable source append receipt");
+        }
+        const stageNames = ["registration", "accounting", "report"] as const;
+        const rank = { "not-started": 0, "in-progress": 1, complete: 2 } as const;
+        for (const stageName of stageNames) {
+          const before = current.publication[stageName];
+          const after = proposed[stageName];
+          if (rank[after.state] < rank[before.state]) {
+            refuse("conflict", `runs.${draftId}.publication.${stageName}.state`, "publication stage state cannot move backward after a durable source append receipt");
+          }
+          if (before.receipt !== undefined && (
+            after.receipt?.sourceSequence !== before.receipt.sourceSequence
+            || after.receipt.entrySha256 !== before.receipt.entrySha256
+          )) {
+            refuse("conflict", `runs.${draftId}.publication.${stageName}.receipt`, "a durable source append receipt cannot be removed or changed");
+          }
+          if (before.receipt !== undefined || before.state === "complete") {
+            for (const [role, digest] of Object.entries(before.digests ?? {})) {
+              if (after.digests?.[role] !== digest) {
+                refuse("conflict", `runs.${draftId}.publication.${stageName}.digests.${role}`, "an established publication-stage digest cannot be removed or changed");
+              }
+            }
+          }
+        }
       }
     }
-  }
-  const result = RunStateSchema.safeParse(state);
-  if (!result.success) {
-    refuseWithIssues("validation", issuesFromZodError(result.error));
   }
   atomicWriteFileSync(runStatePath(workspaceDir, draftId), JSON.stringify(result.data, null, 2));
 }
