@@ -21,7 +21,10 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function fixture(): { accountingBytes: Uint8Array; matrixBytes: Uint8Array } {
+function fixture(matrixCloseBoundary: {
+  readonly at: string;
+  readonly anchor?: { readonly chain: string; readonly blockNumber: number; readonly blockHash: string };
+} = { at: "2026-08-13T00:00:00Z" }): { accountingBytes: Uint8Array; matrixBytes: Uint8Array } {
   const run = "4e65d3fbe8ad6535681b021b30785b12b6c0e3f8878859a4148b3f58b8835db0";
   const accountingBytes = sealBenchmarkAccounting({
     protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
@@ -42,7 +45,7 @@ function fixture(): { accountingBytes: Uint8Array; matrixBytes: Uint8Array } {
   const matrixBytes = sealMatrix(withMatrixPublicationExtension({
     protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     run: { digest: { sha256: run } },
-    closeBoundary: { at: "2026-08-13T00:00:00Z" },
+    closeBoundary: matrixCloseBoundary,
     cells: [],
     exclusions: [],
     attrition: { perArm: {}, asymmetryFlags: [] },
@@ -91,11 +94,12 @@ function reportedFixture(): { accountingBytes: Uint8Array; matrixBytes: Uint8Arr
   return { accountingBytes, matrixBytes, payloadBytes, envelopeBytes };
 }
 
-function nativeFixture(availability: "digest-only" | "collection-failed") {
+function nativeFixture(availability: "public" | "digest-only" | "collection-failed", nativeArtifactCount = 1) {
   const taskDigest = "a".repeat(64);
   const run = "4e65d3fbe8ad6535681b021b30785b12b6c0e3f8878859a4148b3f58b8835db0";
   const cellKey = `${taskDigest}/arm/1`;
-  const source = { name: "raw.log", mediaType: "text/plain", digest: { sha256: "b".repeat(64) } };
+  const nativeBytes = new TextEncoder().encode("shared native log\n");
+  const source = { name: "raw.log", mediaType: "text/plain", digest: { sha256: sha256(nativeBytes) } };
   const accountingBytes = sealBenchmarkAccounting({
     protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     run: { digest: { sha256: run } }, publisher: "did:example:publisher", publisherAuthority: { kind: "run-owner" },
@@ -107,7 +111,9 @@ function nativeFixture(availability: "digest-only" | "collection-failed") {
       submission: { kind: "https://spec.jinn.network/records/submission/v1", record: { digest: { sha256: "d".repeat(64) } } },
       delivery: { kind: "https://spec.jinn.network/records/delivery/v1", record: { digest: { sha256: "e".repeat(64) } } },
       evidence: [], evaluations: [], correlations: [],
-      nativeArtifacts: [{ role: "https://example.test/log", availability, artifact: source, reason: "source retained privately" }],
+      nativeArtifacts: Array.from({ length: nativeArtifactCount }, () => ({
+        role: "https://example.test/log", availability, artifact: source, reason: "source retained privately",
+      })),
     }] }],
   }).bytes;
   const matrixBytes = sealMatrix(withMatrixPublicationExtension({
@@ -117,7 +123,7 @@ function nativeFixture(availability: "digest-only" | "collection-failed") {
     attrition: { perArm: { arm: { expected: 1, judged: 0, unjudged: 1, unscorable: 0, expired: 0, invalidated: 0, excluded: 0, replacements: 0 } }, asymmetryFlags: [] },
     completeness: { expected: 1, judged: 0, floor: "1", runOutcome: "partial" }, assembly: { procedure: "jinn.benchmarking.assembly", version: "2.0" },
   }, { accounting: { digest: { sha256: sha256(accountingBytes) } } })).bytes;
-  return { accountingBytes, matrixBytes, cellKey, source };
+  return { accountingBytes, matrixBytes, cellKey, source, nativeBytes };
 }
 
 function rewriteV3Index(bundleDir: string, mutate: (index: Record<string, any>) => void): void {
@@ -171,6 +177,30 @@ describe("portable benchmark bundle v3", () => {
     }
   });
 
+  test.each([
+    ["close time", { at: "2026-08-13T00:00:01Z" }],
+    ["close anchor", {
+      at: "2026-08-13T00:00:00Z",
+      anchor: { chain: "eip155:1", blockNumber: 42, blockHash: `0x${"a".repeat(64)}` },
+    }],
+  ])("rejects an otherwise-valid Matrix whose %s differs from BenchmarkAccounting", (_name, closeBoundary) => {
+    const root = mkdtempSync(join(tmpdir(), "bp-pub-v3-"));
+    try {
+      const mismatched = fixture(closeBoundary);
+      expect(() => assertBundleV3Input({ bundleDir: "unused", ...mismatched })).toThrow(/closeBoundary must match exactly/i);
+
+      const bundleDir = join(root, "bundle");
+      materializeBundleV3({ bundleDir, ...fixture() });
+      writeFileSync(join(bundleDir, "records", "matrix.json"), mismatched.matrixBytes);
+      rewriteV3Index(bundleDir, (index) => {
+        index.matrix.sha256 = sha256(mismatched.matrixBytes);
+      });
+      expect(() => verifyBundleV3(bundleDir)).toThrow(/closeBoundary must match exactly/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("rejects a manifest-authenticated source receipt whose inline position was altered", () => {
     const root = mkdtempSync(join(tmpdir(), "bp-pub-v3-"));
     try {
@@ -214,6 +244,59 @@ describe("portable benchmark bundle v3", () => {
         bundleDir: "unused", accountingBytes: failed.accountingBytes, matrixBytes: failed.matrixBytes,
         nativeArtifacts: [{ disclosure: { cellKey: failed.cellKey, dispatch: 1, ordinal: 1, role: "https://example.test/log", state: "collection-failed", reason: "collector unavailable" } }],
       })).toThrow(/descriptor differs/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("content-dedupes repeated public native artifacts and emits one manifest path", () => {
+    const root = mkdtempSync(join(tmpdir(), "bp-pub-v3-"));
+    try {
+      const input = nativeFixture("public", 2);
+      const path = `native/${input.source.digest.sha256}.bin`;
+      const nativeArtifacts = [1, 2].map((ordinal) => ({
+        disclosure: {
+          cellKey: input.cellKey, dispatch: 1, ordinal, role: "https://example.test/log", state: "public" as const,
+          artifact: input.source, path,
+        },
+        bytes: input.nativeBytes,
+      }));
+      const bundleDir = join(root, "bundle");
+      materializeBundleV3({
+        bundleDir, accountingBytes: input.accountingBytes, matrixBytes: input.matrixBytes, nativeArtifacts,
+      });
+      expect(verifyBundleV3(bundleDir).checks).toContain("native-disclosures");
+      const manifest = JSON.parse(readFileSync(join(bundleDir, "bundle.json"), "utf8")) as { files: Array<{ path: string }> };
+      const paths = manifest.files.map((file) => file.path);
+      expect(paths.filter((candidate) => candidate === path)).toHaveLength(1);
+      expect(new Set(paths).size).toBe(paths.length);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses conflicting bytes for a repeated staged artifact path and cleans staging", () => {
+    const root = mkdtempSync(join(tmpdir(), "bp-pub-v3-"));
+    try {
+      const input = nativeFixture("public", 2);
+      const path = `native/${input.source.digest.sha256}.bin`;
+      const nativeArtifacts = [1, 2].map((ordinal) => ({
+        disclosure: {
+          cellKey: input.cellKey, dispatch: 1, ordinal, role: "https://example.test/log", state: "public" as const,
+          artifact: input.source, path,
+        },
+        bytes: input.nativeBytes,
+      }));
+      const bundleDir = join(root, "bundle");
+      expect(() => materializeBundleV3({
+        bundleDir, accountingBytes: input.accountingBytes, matrixBytes: input.matrixBytes, nativeArtifacts,
+      }, {
+        beforeStagedWrite: (candidate, occurrence) => {
+          if (candidate === path && occurrence === 2) input.nativeBytes[0] = input.nativeBytes[0]! ^ 1;
+        },
+      })).toThrow(/reused for conflicting bytes/i);
+      expect(existsSync(bundleDir)).toBe(false);
+      expect(readdirSync(root).filter((name) => name.startsWith("bundle.tmp-"))).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

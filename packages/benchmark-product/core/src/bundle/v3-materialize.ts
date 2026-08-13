@@ -61,6 +61,8 @@ export interface MaterializedBundleV3 {
 }
 
 export interface MaterializeBundleV3Deps {
+  /** Deterministic fault injection before a staged-path occurrence is reconciled. */
+  readonly beforeStagedWrite?: (path: string, occurrence: number) => void;
   /** Deterministic fault injection after every staged byte is durable, before final rename. */
   readonly beforeRename?: () => void;
 }
@@ -135,6 +137,9 @@ export function assertBundleV3Input(input: MaterializeBundleV3Input): void {
   }
   if (matrix.run.digest.sha256 !== accounting.run.digest.sha256) {
     refuse("record-integrity", "matrix", "Matrix and BenchmarkAccounting refer to different Run identities");
+  }
+  if (!exactJsonEqual(matrix.closeBoundary, accounting.closeBoundary)) {
+    refuse("record-integrity", "matrix", "Matrix and BenchmarkAccounting closeBoundary must match exactly");
   }
   const matrixCells = new Map(matrix.cells.map((cell) => [cell.cellKey, cell]));
   if (matrixCells.size !== accounting.cells.length) {
@@ -217,8 +222,21 @@ export function materializeBundleV3(
   let renamed = false;
   try {
     const files: string[] = [];
+    const written = new Map<string, Uint8Array>();
+    const occurrences = new Map<string, number>();
     const write = (path: string, bytes: Uint8Array): void => {
+      const occurrence = (occurrences.get(path) ?? 0) + 1;
+      occurrences.set(path, occurrence);
+      deps.beforeStagedWrite?.(path, occurrence);
+      const prior = written.get(path);
+      if (prior !== undefined) {
+        if (!equalBytes(prior, bytes)) {
+          refuse("record-integrity", path, `bundle path "${path}" is reused for conflicting bytes`);
+        }
+        return;
+      }
       atomicWriteFileSync(join(staging, path), bytes);
+      written.set(path, new Uint8Array(bytes));
       files.push(path);
     };
     write("records/accounting.json", input.accountingBytes);
