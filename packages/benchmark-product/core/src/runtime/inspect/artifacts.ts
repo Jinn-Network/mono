@@ -103,6 +103,42 @@ export const InspectCellSummarySchema = z.union([InspectCellSummaryV1Schema, Ins
 export type InspectCellSummary = z.infer<typeof InspectCellSummarySchema>;
 export type InspectCellSummaryV2 = z.infer<typeof InspectCellSummaryV2Schema>;
 
+const InspectLogObservationCommonSchema = z.object({
+  schema: z.literal("jinn.network/benchmark-product/inspect-log-observation/1"),
+  terminal: z.enum(["scored", "unscorable"]),
+  inspectStatus: z.enum(["started", "success", "cancelled", "error"]),
+  expectedSamples: z.number().int().nonnegative().nullable(),
+  observedSamples: z.number().int().nonnegative(),
+  erroredSamples: z.number().int().nonnegative(),
+  invalidated: z.boolean(),
+  nativeLogSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  nativeLogBytes: z.number().int().nonnegative(),
+});
+
+export const InspectLogObservationV1Schema = InspectLogObservationCommonSchema.extend({
+  summarySchema: z.literal("jinn.network/benchmark-product/inspect-cell-summary/1"),
+  missingScoreSamples: z.number().int().nonnegative(),
+  scorer: z.string().min(1),
+  measurement: z.boolean().nullable(),
+}).strict();
+
+export const InspectLogObservationV2Schema = InspectLogObservationCommonSchema.extend({
+  summarySchema: z.literal("jinn.network/benchmark-product/inspect-cell-summary/2"),
+  scorers: InspectCellSummaryV2Schema.shape.scorers,
+  measurements: InspectCellSummaryV2Schema.shape.measurements,
+}).strict();
+
+export const InspectLogObservationSchema = z.discriminatedUnion("summarySchema", [
+  InspectLogObservationV1Schema,
+  InspectLogObservationV2Schema,
+]);
+export type InspectLogObservation = z.infer<typeof InspectLogObservationSchema>;
+
+export interface InspectVerifiedProjection {
+  readonly verdict: "pass" | "fail" | "inconclusive" | null;
+  readonly measurements: readonly { readonly name: string; readonly value: boolean }[];
+}
+
 const SCORE_SHAPE_ORDER = ["null", "boolean", "number", "string", "list", "object"] as const;
 
 function equalStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -168,6 +204,103 @@ export function projectInspectCellVerdict(
     throw new TypeError("scored Inspect summary contradicts its run/sample accounting");
   }
   return evaluateVerdictRule(manifest.scoring.verdictRule, values).verdict;
+}
+
+function comparableSummary(summary: InspectCellSummary): Record<string, unknown> {
+  const common = {
+    terminal: summary.terminal,
+    inspectStatus: summary.inspectStatus,
+    expectedSamples: summary.expectedSamples,
+    observedSamples: summary.observedSamples,
+    erroredSamples: summary.erroredSamples,
+    invalidated: summary.invalidated,
+    nativeLogSha256: summary.nativeLogSha256,
+    nativeLogBytes: summary.nativeLogBytes,
+  };
+  return summary.schema === "jinn.network/benchmark-product/inspect-cell-summary/1"
+    ? {
+      summarySchema: summary.schema,
+      ...common,
+      missingScoreSamples: summary.missingScoreSamples,
+      scorer: summary.scorer,
+      measurement: summary.measurement,
+    }
+    : {
+      summarySchema: summary.schema,
+      ...common,
+      scorers: summary.scorers,
+      measurements: summary.measurements,
+    };
+}
+
+/**
+ * Cross-check an execution summary against observations independently read from the native log,
+ * then return the only projection authorized by the sealed EvaluationSpec inputs.
+ */
+export function verifyInspectLogProjection(
+  summary: InspectCellSummary,
+  observation: InspectLogObservation,
+  manifest: InspectSelectionManifest,
+): InspectVerifiedProjection {
+  if (summary.schema !== observation.summarySchema) {
+    throw new TypeError("Inspect log observation and execution summary use different schemas");
+  }
+  const observedComparable = { ...observation } as Record<string, unknown>;
+  delete observedComparable.schema;
+  if (
+    sha256Hex(canonicalJsonBytes(comparableSummary(summary) as never))
+    !== sha256Hex(canonicalJsonBytes(observedComparable as never))
+  ) {
+    throw new TypeError("Inspect execution summary differs from the independently read native log");
+  }
+  if (observation.summarySchema === "jinn.network/benchmark-product/inspect-cell-summary/1") {
+    if (isInspectMultiScorerSelection(manifest)) {
+      throw new TypeError("legacy Inspect observation cannot verify a multi-scorer selection");
+    }
+    if (observation.terminal === "scored" && observation.measurement === null) {
+      throw new TypeError("scored Inspect log observation carries no measurement");
+    }
+    const verdict = observation.terminal === "unscorable"
+      ? null
+      : evaluateVerdictRule(
+        { threshold: { measurement: "inspect-score-pass", op: "eq", value: true } },
+        { "inspect-score-pass": observation.measurement! },
+      ).verdict;
+    if (summary.verdict !== verdict) {
+      throw new TypeError("Inspect execution summary verdict differs from the sealed projection");
+    }
+    return {
+      verdict,
+      measurements: observation.measurement === null
+        ? []
+        : [{ name: "inspect-score-pass", value: observation.measurement }],
+    };
+  }
+  const projectedSummary: InspectCellSummaryV2 = {
+    schema: "jinn.network/benchmark-product/inspect-cell-summary/2",
+    terminal: observation.terminal,
+    inspectStatus: observation.inspectStatus,
+    expectedSamples: observation.expectedSamples,
+    observedSamples: observation.observedSamples,
+    erroredSamples: observation.erroredSamples,
+    invalidated: observation.invalidated,
+    scorers: observation.scorers,
+    measurements: observation.measurements,
+    verdict: summary.verdict,
+    evaluatedAt: summary.evaluatedAt,
+    nativeLogSha256: observation.nativeLogSha256,
+    nativeLogBytes: observation.nativeLogBytes,
+  };
+  const verdict = projectInspectCellVerdict(projectedSummary, manifest);
+  if (summary.verdict !== verdict) {
+    throw new TypeError("Inspect execution summary verdict differs from the sealed projection");
+  }
+  return {
+    verdict,
+    measurements: observation.measurements.flatMap((measurement) => measurement.value === null
+      ? []
+      : [{ name: measurement.measurementName, value: measurement.value }]),
+  };
 }
 
 const SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u;

@@ -2,7 +2,9 @@ import { describe, expect, test } from "vitest";
 import type { VerdictRule } from "@jinn-network/task-execution-profiles";
 import {
   InspectCellSummaryV2Schema,
+  InspectLogObservationSchema,
   projectInspectCellVerdict,
+  verifyInspectLogProjection,
 } from "./artifacts.js";
 import type { InspectSelectionManifest } from "./manifest.js";
 
@@ -88,5 +90,44 @@ describe("multiple Inspect scorer projection", () => {
     const scorerReordered = summary(true, true);
     scorerReordered.scorers.reverse();
     expect(() => projectInspectCellVerdict(scorerReordered, manifest(rule))).toThrow(/ordered scorer/u);
+  });
+
+  test("accepts only a native-log observation that exactly reproduces the sealed projection", () => {
+    const rule = {
+      all: projections.map((projection) => ({
+        threshold: { measurement: projection.measurementName, op: "eq" as const, value: true },
+      })),
+    };
+    const executionSummary = { ...summary(true, true), verdict: "pass" as const };
+    const observation = InspectLogObservationSchema.parse({
+      schema: "jinn.network/benchmark-product/inspect-log-observation/1",
+      summarySchema: executionSummary.schema,
+      terminal: executionSummary.terminal,
+      inspectStatus: executionSummary.inspectStatus,
+      expectedSamples: executionSummary.expectedSamples,
+      observedSamples: executionSummary.observedSamples,
+      erroredSamples: executionSummary.erroredSamples,
+      invalidated: executionSummary.invalidated,
+      scorers: executionSummary.scorers,
+      measurements: executionSummary.measurements,
+      nativeLogSha256: executionSummary.nativeLogSha256,
+      nativeLogBytes: executionSummary.nativeLogBytes,
+    });
+    expect(verifyInspectLogProjection(executionSummary, observation, manifest(rule))).toEqual({
+      verdict: "pass",
+      measurements: [
+        { name: "correct", value: true },
+        { name: "safe", value: true },
+      ],
+    });
+
+    if (observation.summarySchema !== "jinn.network/benchmark-product/inspect-cell-summary/2") {
+      throw new Error("expected multi-scorer observation");
+    }
+    const altered = InspectLogObservationSchema.parse({
+      ...observation,
+      measurements: [{ ...observation.measurements[0]!, value: false }, observation.measurements[1]!],
+    });
+    expect(() => verifyInspectLogProjection(executionSummary, altered, manifest(rule))).toThrow(/differs/u);
   });
 });
