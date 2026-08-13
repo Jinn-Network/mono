@@ -35,7 +35,7 @@ and proves copied-bundle verification after source-workspace deletion.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **28 generated operations**, all shipped through the library, CLI, and
+contains **30 generated operations**, all shipped through the library, CLI, and
 GUI:
 
 | Library operation | CLI command | Purpose |
@@ -53,6 +53,8 @@ GUI:
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
+| `publicationConfigure` | `colophon publication configure` | Configure the public locator and opt into prospective disclosure. |
+| `publicationRegister` | `colophon publication register` | Store, announce, and exact-probe the registration closure. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
 | `runLaunch` | `colophon launch` | Drive the real local venue. |
@@ -101,9 +103,10 @@ Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 
 ## Authority and lifecycle behavior
 
-The **five gated operations** are `lock`, `launch`, `cancel`, `report`, and
-`publish`. The founding sponsor receives all five grants. A delegated agent may
-perform any of them only after a sponsor grants it. `authority grant` and
+The **seven gated operations** are `lock`, `launch`, `cancel`, `report`,
+`publish`, `publication.configure`, and `publication.register`. The founding
+sponsor receives all seven grants. A delegated agent may perform any of them
+only after a sponsor grants it. `authority grant` and
 `authority revoke` are separately sponsor-only, so a delegated agent cannot
 self-escalate. This is local-process policy and attribution, not operating-system
 or hosted authentication.

@@ -235,6 +235,7 @@ export {
   createWorkspacePublicationHttpHandler,
   createWorkspacePublicationSource,
 } from "./run/publication-source.js";
+export { recordPublicationOrigin } from "./run/publication-authority.js";
 export { foldRunJournalLineage } from "./run/journal.js";
 export type { DispatchLineageFold } from "./run/journal.js";
 
@@ -299,6 +300,7 @@ export type {
   PreviewArtifact,
   PublicationConfigureInput,
   PublicationRegisterInput,
+  PublicationRegisterDeps,
   PublicationRegistrationResult,
   QuoteArmSize,
   QuoteCoverageRefusal,

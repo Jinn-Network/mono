@@ -179,3 +179,13 @@ export function publicationStatePath(workspaceDir: string, sourceId: string, kin
 export function publicationJournalPath(workspaceDir: string, draftId: string): string {
   return join(publicationDir(workspaceDir), "journals", `${draftId}.json`);
 }
+
+/** Immutable workspace proof that its did:key authored one exact record digest. */
+export function publicationAuthorshipPath(workspaceDir: string, recordSha256: string): string {
+  return join(publicationDir(workspaceDir), "authorship", `${recordSha256}.json`);
+}
+
+/** Durable externally verified source coordinate for a non-workspace-owned record. */
+export function publicationOriginPath(workspaceDir: string, recordSha256: string): string {
+  return join(publicationDir(workspaceDir), "origins", `${recordSha256}.json`);
+}

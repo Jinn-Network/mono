@@ -16,7 +16,7 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
-import { sealRun, withRunPublicationExtension } from "@jinn-network/benchmarking-records";
+import { RUN_RECORD_KIND, sealRun, withRunPublicationExtension } from "@jinn-network/benchmarking-records";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
@@ -26,6 +26,7 @@ import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
+import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
@@ -96,6 +97,12 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       );
       const sealed = sealRun(runWithPublicationAuthorization);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
+      recordWorkspaceAuthorship({
+        workspaceDir: clockedContext.workspaceDir,
+        recordSha256: runSha256,
+        recordKind: RUN_RECORD_KIND,
+        authoredAt: at,
+      });
 
       const transitioned = transition("quoted", "lock");
       if (!transitioned.ok) {

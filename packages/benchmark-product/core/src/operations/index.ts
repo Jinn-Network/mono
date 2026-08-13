@@ -84,6 +84,7 @@ export {
   publicationRegister,
   type PublicationConfigureInput,
   type PublicationRegisterInput,
+  type PublicationRegisterDeps,
   type PublicationRegistrationResult,
 } from "./publication-register.js";
 export {

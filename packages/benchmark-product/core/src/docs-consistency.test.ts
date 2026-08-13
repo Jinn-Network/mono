@@ -76,7 +76,7 @@ describe("product documentation consistency", () => {
     };
     const coreReadme = read(coreReadmePath);
 
-    expect(parity.entries).toHaveLength(28);
+    expect(parity.entries).toHaveLength(30);
     for (const entry of parity.entries) {
       expect(coreReadme, entry.operation).toContain(`\`${entry.operation}\``);
       expect(coreReadme, entry.cliVerb).toContain(`\`${PRODUCT_BRANDING.commandName} ${entry.cliVerb}`);
@@ -86,8 +86,8 @@ describe("product documentation consistency", () => {
 
     for (const operation of GATED_OPERATIONS) expect(coreReadme).toContain(`\`${operation}\``);
     for (const code of PRODUCT_ERROR_CODES) expect(coreReadme).toContain(`\`${code}\``);
-    expect(coreReadme).toContain("28 generated operations");
-    expect(coreReadme).toContain("five gated operations");
+    expect(coreReadme).toContain("30 generated operations");
+    expect(coreReadme).toContain("seven gated operations");
     expect(coreReadme).toContain("11 typed error codes");
     expect(coreReadme).toContain("`{\"ok\":true,\"result\":...}`");
     expect(coreReadme).toContain("`{\"ok\":false,\"error\":...}`");

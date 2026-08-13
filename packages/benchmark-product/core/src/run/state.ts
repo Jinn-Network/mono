@@ -9,14 +9,9 @@
  * (reused here, not reimplemented) — so `runLock` can refuse a stale quote (A2: any edit of a
  * quoted draft invalidates the quote) by comparing digests rather than re-diffing documents.
  *
- * `owner` is a deterministic `urn:uuid:` IRI derived from the workspace's own `createdAt` plus
- * the draftId — the same construction `benchmarking-run`'s `launch.ts` uses internally for
- * deterministic Submission URIs (`deterministicSubmissionUri`, not exported publicly, so
- * mirrored here rather than imported). Deterministic so a RunState rebuilt from the same
- * workspace and draftId always names the same owner, and so the value satisfies both the
- * platform Run record's `owner: AgentIriSchema` (any absolute IRI) and the Submission record's
- * `requester: string` — `launchAndWatch` uses `run.owner` as the Submission `requester`
- * (verified in `@jinn-network/benchmarking-run`'s `launch.ts`).
+ * `owner` on newly quoted runs is the stable workspace-held Ed25519 `did:key`, shared with the
+ * Record Discovery source. Historical deterministic `urn:uuid:` owners remain schema-readable;
+ * `deriveRunOwner` below is retained for that compatibility surface.
  */
 
 import { createHash } from "node:crypto";
@@ -103,7 +98,7 @@ export const RunStateSchema = z.object({
   draftId: z.string().min(1),
   /** sha256 hex of the draft spec's canonical JSON as of the most recent quote (A2). */
   specSha256: Sha256HexSchema,
-  /** Deterministic `urn:uuid:` run owner (see module header). */
+  /** Stable workspace did:key for new runs; historical absolute owner IRIs remain readable. */
   owner: z.string().min(1),
   quote: QuoteReportSchema.optional(),
   quotedAt: Rfc3339Schema.optional(),

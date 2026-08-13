@@ -96,7 +96,7 @@ describe("runLock — lifecycle transition", () => {
     expect(tasks.every((task) => task.dependsOn?.some((id) => id.startsWith("evaluation:")))).toBe(true);
     const benchmark = members.find((member) => member.id.startsWith("benchmark:"));
     expect(benchmark?.dependsOn).toEqual(expect.arrayContaining(tasks.map((task) => task.id)));
-    expect(members.at(-1)?.dependsOn).toEqual([benchmark?.id]);
+    expect(members.at(-1)?.dependsOn).toEqual(expect.arrayContaining([benchmark?.id]));
 
     const profilePath = sealedRecordPath(workspaceDir, PREDICTION_FORECAST_PROFILE_DIGEST_HEX);
     unlinkSync(profilePath);

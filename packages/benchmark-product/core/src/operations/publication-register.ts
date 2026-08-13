@@ -12,7 +12,14 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { createDiscoverySourceAnnouncementPort } from "@jinn-network/record-publication";
-import { executePublicationPlan, sha256, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
+import {
+  executePublicationPlan,
+  sha256,
+  type OriginVerificationPort,
+  type PublicationArtifact,
+  type PublicationPlan,
+  type PublicationRecord,
+} from "@jinn-network/record-publication";
 import { TASK_MEDIA_TYPE, TaskSpecificationSchema, sealTask, type TaskSpecification } from "@jinn-network/task-execution-protocol";
 import {
   EVALUATION_SPEC_MEDIA_TYPE,
@@ -29,6 +36,11 @@ import {
   withWorkspacePublicationSourceLock,
 } from "../run/publication-source.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
+import {
+  WORKSPACE_AUTHORSHIP_ROLE,
+  readPublicationOrigin,
+  requireWorkspaceAuthorship,
+} from "../run/publication-authority.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import type { OperationContext } from "./context.js";
 import { operateAsync } from "./operate-async.js";
@@ -50,6 +62,11 @@ export interface PublicationRegistrationResult {
   readonly postHoc: boolean;
   readonly sourceSequence: string;
   readonly recordSha256: string;
+}
+
+export interface PublicationRegisterDeps {
+  /** Required for every foreign Task/Benchmark carrying durable origin coordinates. */
+  readonly verifyOrigin?: OriginVerificationPort;
 }
 
 function publicUrl(base: string, path: string): string {
@@ -98,6 +115,21 @@ function ownedRecord(
   };
 }
 
+function originRecord(
+  id: string,
+  kind: string,
+  digestHex: string,
+  bytes: Uint8Array,
+  mediaType: string,
+  origin: NonNullable<PublicationRecord["authority"]["origin"]>,
+  dependsOn: readonly string[] = [],
+): PublicationRecord {
+  return {
+    id, kind, digest: `sha256:${digestHex}`, bytes, mediaType,
+    authority: { mode: "origin-reference", origin }, actions: ["verify-origin", "mirror"], dependsOn,
+  };
+}
+
 interface ExactTaskDependency {
   readonly digestHex: string;
   readonly role: string;
@@ -106,18 +138,23 @@ interface ExactTaskDependency {
 }
 
 /** Explicit Task schema descriptors only; no generic digest-shaped-object inference. */
-function taskDependencies(task: TaskSpecification): ExactTaskDependency[] {
+export function taskDependencies(task: TaskSpecification): ExactTaskDependency[] {
   const output: ExactTaskDependency[] = [];
-  const push = (descriptor: unknown, role: string, mediaType: string, prefix: string) => {
+  const push = (descriptor: unknown, role: string, mediaType: string, prefix: string, required = false) => {
+    if (descriptor === undefined) return;
     const digestHex = ((descriptor as { digest?: { sha256?: unknown } } | undefined)?.digest?.sha256);
-    if (typeof digestHex === "string" && /^[a-f0-9]{64}$/.test(digestHex)) output.push({ digestHex, role, mediaType, prefix });
+    if (typeof digestHex !== "string" || !/^[a-f0-9]{64}$/.test(digestHex)) {
+      if (required) refuse("record-integrity", `registration.task.${prefix}`, `${prefix} descriptor must carry an exact local sha256 digest; URI-only dependencies cannot be registered`);
+      return;
+    }
+    output.push({ digestHex, role, mediaType, prefix });
   };
-  push(task.profile, RECORD_KINDS.profileDocument, TASK_PROFILE_MEDIA_TYPE, "profile");
-  push(task.evaluation, RECORD_KINDS.evaluationSpec, EVALUATION_SPEC_MEDIA_TYPE, "evaluation");
+  push(task.profile, RECORD_KINDS.profileDocument, TASK_PROFILE_MEDIA_TYPE, "profile", true);
+  push(task.evaluation, RECORD_KINDS.evaluationSpec, EVALUATION_SPEC_MEDIA_TYPE, "evaluation", true);
   for (const input of Array.isArray(task.inputs) ? task.inputs : []) {
-    push(input, "https://spec.jinn.network/artifacts/task-input/v1", (input as { mediaType?: string }).mediaType ?? "application/octet-stream", "input");
+    push(input, "https://spec.jinn.network/artifacts/task-input/v1", (input as { mediaType?: string }).mediaType ?? "application/octet-stream", "input", true);
   }
-  push(task.supersedes, RECORD_KINDS.task, TASK_MEDIA_TYPE, "superseded-task");
+  push(task.supersedes, RECORD_KINDS.task, TASK_MEDIA_TYPE, "superseded-task", true);
   for (const outputSlot of Array.isArray(task.outputs) ? task.outputs : []) {
     push((outputSlot as { schema?: unknown }).schema, "https://spec.jinn.network/artifacts/output-schema/v1", "application/schema+json", "output-schema");
   }
@@ -147,6 +184,34 @@ export function buildRegistrationClosure(
   const members: Array<PublicationArtifact | PublicationRecord> = [];
   const ids = new Set<string>();
   const add = (member: PublicationArtifact | PublicationRecord) => { if (!ids.has(member.id)) { ids.add(member.id); members.push(member); } };
+  const authorityDependencies = (
+    recordId: string,
+    recordKind: string,
+    digestHex: string,
+    author: string | undefined,
+    dependencies: readonly string[],
+  ): { owned: true; dependencies: readonly string[] } | { owned: false; origin: NonNullable<PublicationRecord["authority"]["origin"]>; dependencies: readonly string[] } => {
+    if (author === run.owner) {
+      let proof;
+      try {
+        proof = requireWorkspaceAuthorship({ workspaceDir, recordSha256: digestHex, recordKind, author });
+      } catch (cause) {
+        refuse("record-integrity", `registration.${recordId}.authorship`, cause instanceof Error ? cause.message : String(cause));
+      }
+      const proofId = `authorship:${digestHex}`;
+      add(artifact(proofId, WORKSPACE_AUTHORSHIP_ROLE, proof.digestHex, proof.bytes, proof.mediaType));
+      return { owned: true, dependencies: [...dependencies, proofId].sort() };
+    }
+    const origin = readPublicationOrigin(workspaceDir, `sha256:${digestHex}`);
+    if (origin === undefined) {
+      refuse(
+        "record-integrity",
+        `registration.${recordId}.origin`,
+        "authorless or foreign record has no durable validated origin source position; refusing source-absent dependency",
+      );
+    }
+    return { owned: false, origin, dependencies: [...dependencies].sort() };
+  };
   const taskIds: string[] = [];
   for (const item of benchmark.items) {
     const taskSha256 = itemTaskDigest(item);
@@ -166,9 +231,10 @@ export function buildRegistrationClosure(
       dependencyIds.push(id);
     }
     const taskId = `task:${taskSha256}`;
-    add(task.author === run.owner
-      ? ownedRecord(taskId, RECORD_KINDS.task, taskSha256, taskBytes, TASK_MEDIA_TYPE, at, dependencyIds.sort())
-      : artifact(taskId, RECORD_KINDS.task, taskSha256, taskBytes, TASK_MEDIA_TYPE, dependencyIds.sort()));
+    const taskAuthority = authorityDependencies(taskId, RECORD_KINDS.task, taskSha256, task.author, dependencyIds);
+    add(taskAuthority.owned
+      ? ownedRecord(taskId, RECORD_KINDS.task, taskSha256, taskBytes, TASK_MEDIA_TYPE, at, taskAuthority.dependencies)
+      : originRecord(taskId, RECORD_KINDS.task, taskSha256, taskBytes, TASK_MEDIA_TYPE, taskAuthority.origin, taskAuthority.dependencies));
     taskIds.push(taskId);
   }
   const extension = readRunPublicationExtension(run as unknown as Record<string, unknown>);
@@ -180,11 +246,47 @@ export function buildRegistrationClosure(
     runtimeIds.push(id);
   }
   const benchmarkId = `benchmark:${benchmarkSha256}`;
-  add(benchmark.author === run.owner
-    ? ownedRecord(benchmarkId, BENCHMARK_RECORD_KIND, benchmarkSha256, benchmarkBytes, BENCHMARK_MEDIA_TYPE, at, [...taskIds, ...runtimeIds].sort())
-    : artifact(benchmarkId, BENCHMARK_RECORD_KIND, benchmarkSha256, benchmarkBytes, BENCHMARK_MEDIA_TYPE, [...taskIds, ...runtimeIds].sort()));
-  members.push(ownedRecord("run", RUN_RECORD_KIND, runSha256, runBytes, RUN_MEDIA_TYPE, at, [benchmarkId]));
-  return members;
+  const benchmarkAuthority = authorityDependencies(
+    benchmarkId,
+    BENCHMARK_RECORD_KIND,
+    benchmarkSha256,
+    benchmark.author,
+    [...taskIds, ...runtimeIds],
+  );
+  add(benchmarkAuthority.owned
+    ? ownedRecord(benchmarkId, BENCHMARK_RECORD_KIND, benchmarkSha256, benchmarkBytes, BENCHMARK_MEDIA_TYPE, at, benchmarkAuthority.dependencies)
+    : originRecord(benchmarkId, BENCHMARK_RECORD_KIND, benchmarkSha256, benchmarkBytes, BENCHMARK_MEDIA_TYPE, benchmarkAuthority.origin, benchmarkAuthority.dependencies));
+  let runProof;
+  try {
+    runProof = requireWorkspaceAuthorship({
+      workspaceDir,
+      recordSha256: runSha256,
+      recordKind: RUN_RECORD_KIND,
+      author: run.owner,
+    });
+  } catch (cause) {
+    refuse("record-integrity", "registration.run.authorship", cause instanceof Error ? cause.message : String(cause));
+  }
+  const runProofId = `authorship:${runSha256}`;
+  add(artifact(runProofId, WORKSPACE_AUTHORSHIP_ROLE, runProof.digestHex, runProof.bytes, runProof.mediaType));
+  members.push(ownedRecord("run", RUN_RECORD_KIND, runSha256, runBytes, RUN_MEDIA_TYPE, at, [benchmarkId, runProofId].sort()));
+  // Record Discovery requires strictly advancing head timestamps. Derive stable millisecond
+  // offsets from the DAG's actual record order while retaining `at` as the one frozen stage time.
+  const announcementOrder = members
+    .filter((member): member is PublicationRecord => "kind" in member && member.actions.includes("announce"))
+    .map((member) => member.id)
+    .sort((left, right) => {
+      const rank = (id: string) => id === "run" ? 2 : id.startsWith("benchmark:") ? 1 : 0;
+      return rank(left) - rank(right) || left.localeCompare(right);
+    });
+  const rankById = new Map(announcementOrder.map((id, index) => [id, index]));
+  const baseTime = Date.parse(at);
+  return members.map((member) => {
+    const rank = rankById.get(member.id);
+    return rank === undefined || !("kind" in member)
+      ? member
+      : { ...member, announcementTimestamp: new Date(baseTime + rank).toISOString() };
+  });
 }
 
 /** Configure the mutable public locator independently of immutable source identity. */
@@ -225,6 +327,7 @@ export function publicationConfigure(
 export function publicationRegister(
   context: OperationContext,
   input: PublicationRegisterInput,
+  deps: PublicationRegisterDeps = {},
 ): Promise<OperationResult<PublicationRegistrationResult>> {
   return operateAsync({
     context,
@@ -270,6 +373,9 @@ export function publicationRegister(
         writeRunState(context.workspaceDir, input.draftId, state);
       }
       const members = buildRegistrationClosure(context.workspaceDir, runBytes, lockedRunSha256, timestamp);
+      if (members.some((member) => "kind" in member && member.authority.mode === "origin-reference") && deps.verifyOrigin === undefined) {
+        refuse("record-integrity", `runs.${input.draftId}.publication.origin`, "foreign registration dependencies require an injected exact origin verifier");
+      }
       const plan: PublicationPlan = {
         id: `benchmark-registration:${input.draftId}:${lockedRunSha256}`,
         stages: [{ stage: "registration", members }],
@@ -285,7 +391,20 @@ export function publicationRegister(
             if (record.authority.mode !== "owner" || state.owner !== source.source.agent) {
               throw new Error("only records authored by this source did:key may be announced");
             }
+            let declaredAuthor: string;
+            if (record.kind === RUN_RECORD_KIND) declaredAuthor = parseRun(record.bytes).owner;
+            else if (record.kind === BENCHMARK_RECORD_KIND) declaredAuthor = parseBenchmark(record.bytes).author ?? "";
+            else if (record.kind === RECORD_KINDS.task) declaredAuthor = parseExactTask(record.bytes).author ?? "";
+            else throw new Error(`unsupported owned registration record kind ${record.kind}`);
+            if (declaredAuthor !== source.source.agent) throw new Error("announced record author/owner does not equal the source did:key");
+            requireWorkspaceAuthorship({
+              workspaceDir: context.workspaceDir,
+              recordSha256: record.digest.slice(7),
+              recordKind: record.kind,
+              author: declaredAuthor,
+            });
           } },
+          ...(deps.verifyOrigin === undefined ? {} : { verifyOrigin: deps.verifyOrigin }),
           announce: { async announce(value) {
             const announced = await announcement.announce(value);
             const durable = announced as { sequence: string; entryDigest: `sha256:${string}` };
@@ -303,7 +422,7 @@ export function publicationRegister(
         receipt = { sequence: match.receipt.sequence, entryDigest: match.receipt.entryDigest };
       }
       for (const member of members) {
-        if ("kind" in member) await probeExact(base, member.digest, member.bytes);
+        if ("kind" in member && member.actions.includes("announce")) await probeExact(base, member.digest, member.bytes);
         else await probeArtifactExact(base, member.digest, member.bytes);
       }
       const digests = Object.fromEntries(members.map((member) => [member.id, member.digest.slice(7)]));
