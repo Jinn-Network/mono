@@ -155,11 +155,7 @@
     "net-liveness": "tsx scripts/net-liveness-probe.ts",
     "phase-d-observe": "tsx scripts/phase-d-observation-collector.ts",
     "cleanup:engine-work": "tsx scripts/cleanup-engine-work.ts",
-    "e2e": "tsx test/e2e/validate.ts",
-    "e2e:task-first-local": "tsx test/e2e/task-first-local.ts",
     "e2e:claude-code-learner": "tsx test/e2e/claude-code-learner-portfolio-v0.ts",
-    "e2e:prediction": "tsx test/e2e/prediction-v1.ts",
-    "e2e:freeze-mode": "tsx test/e2e/freeze-mode.test.ts",
     "e2e:checkpoint-flow": "tsx test/e2e/checkpoint-flow.test.ts",
     "e2e:swe-rebench-v2": "tsx test/e2e/swe-rebench-v2.test.ts",
     "e2e:hermes": "tsx test/e2e/hermes-agent-full-cycle.ts",
@@ -182,7 +178,6 @@
     "dev:spa": "yarn workspace @jinn-network/operator-spa dev",
     "e2e:spa": "yarn build && playwright test --config=playwright.config.ts test/dashboard/spa.e2e.test.ts",
     "e2e:solvernet-flow": "yarn build && playwright test --config=playwright.config.ts test/dashboard/solvernet-flow.e2e.test.ts",
-    "e2e:join": "yarn build && playwright test --config=playwright.config.ts test/dashboard/join.e2e.test.ts",
     "e2e:claim-policy-flow": "yarn build && playwright test --config=playwright.config.ts test/dashboard/claim-policy-flow.e2e.test.ts",
     "e2e:posting-status": "yarn build && playwright test --config=playwright.config.ts test/dashboard/posting-status.e2e.test.ts",
     "e2e:app-flow": "yarn build && playwright test --config=playwright.config.ts test/dashboard/claim-policy-flow.e2e.test.ts test/dashboard/posting-status.e2e.test.ts",
@@ -190,9 +185,10 @@
     "e2e:degraded-daemon-guard": "yarn build && vitest run --config vitest.main-e2e.config.ts",
     "e2e:dashboard": "yarn build && playwright test --config=playwright.config.ts",
     "e2e:dashboard-app": "yarn build && playwright test --config=playwright.config.ts 'test/dashboard/[^/]+[.]e2e[.]test[.]ts$'",
-    "e2e:donation": "vitest run test/smoke/donation-mode-smoke.test.ts test/smoke/donation-ipfs-http-smoke.test.ts",
     "build:stack": "yarn --cwd ../packages/evidence/protocol install --immutable && yarn --cwd ../packages/evidence/protocol build && yarn --cwd ../packages/evidence/repository install --immutable && yarn --cwd ../packages/evidence/repository build && yarn --cwd ../packages/evidence/discovery install --immutable && yarn --cwd ../packages/evidence/discovery build && yarn --cwd ../packages/evidence/catalog-sqlite install --immutable && yarn --cwd ../packages/evidence/catalog-sqlite build && yarn --cwd ../packages/trust/core install --immutable && yarn --cwd ../packages/trust/core build && yarn --cwd ../packages/trust/authoring install --immutable && yarn --cwd ../packages/trust/authoring build && yarn --cwd ../packages/discovery/protocol install --immutable && yarn --cwd ../packages/discovery/protocol build && yarn --cwd ../packages/discovery/serve install --immutable && yarn --cwd ../packages/discovery/serve build && yarn --cwd ../packages/evidence/local-runtime install --immutable && yarn --cwd ../packages/evidence/local-runtime build && yarn --cwd ../packages/evidence/execution-recorder install --immutable && yarn --cwd ../packages/evidence/execution-recorder build && yarn --cwd ../packages/evidence/attestation-issuer install --immutable && yarn --cwd ../packages/evidence/attestation-issuer build && yarn --cwd ../packages/task-execution/protocol install --immutable && yarn --cwd ../packages/task-execution/protocol build && yarn --cwd ../packages/task-execution/backend install --immutable && yarn --cwd ../packages/task-execution/backend build && yarn --cwd ../packages/task-execution/profiles install --immutable && yarn --cwd ../packages/task-execution/profiles build && yarn --cwd ../packages/trust/resolve install --immutable && yarn --cwd ../packages/trust/resolve build && yarn --cwd ../packages/environments/record install --immutable && yarn --cwd ../packages/environments/record build && yarn --cwd ../packages/task-supply/admission install --immutable && yarn --cwd ../packages/task-supply/admission build && yarn --cwd ../packages/marketplace/binding install --immutable && yarn --cwd ../packages/marketplace/binding build && yarn --cwd ../packages/task-execution/backend-local/supervisor install --immutable && yarn --cwd ../packages/task-execution/backend-local/supervisor build && yarn --cwd ../packages/task-execution/backend-local/workspace install --immutable && yarn --cwd ../packages/task-execution/backend-local/workspace build && yarn --cwd ../packages/task-execution/backend-local/launchers install --immutable && yarn --cwd ../packages/task-execution/backend-local/launchers build && yarn --cwd ../packages/task-execution/evaluation-harness install --immutable && yarn --cwd ../packages/task-execution/evaluation-harness build && yarn --cwd ../packages/task-execution/evaluator-adapters install --immutable && yarn --cwd ../packages/task-execution/evaluator-adapters build && yarn --cwd ../packages/task-execution/backend-local/assembly install --immutable && yarn --cwd ../packages/task-execution/backend-local/assembly build && yarn --cwd ../packages/marketplace/pipeline install --immutable && yarn --cwd ../packages/marketplace/pipeline build && yarn --cwd ../packages/marketplace/projector install --immutable && yarn --cwd ../packages/marketplace/projector build && yarn --cwd ../packages/marketplace/venue-base install --immutable && yarn --cwd ../packages/marketplace/venue-base build && yarn --cwd ../packages/discovery/client install --immutable && yarn --cwd ../packages/discovery/client build && yarn --cwd ../packages/discovery/facts/task-execution install --immutable && yarn --cwd ../packages/discovery/facts/task-execution build && yarn --cwd ../packages/discovery/transport-http install --immutable && yarn --cwd ../packages/discovery/transport-http build && yarn --cwd ../packages/policy/identity install --immutable && yarn --cwd ../packages/policy/identity build && yarn --cwd ../packages/discovery/testing install --immutable && yarn --cwd ../packages/discovery/testing build",
-    "projector-replay": "tsx scripts/projector-replay.ts"
+    "projector-replay": "tsx scripts/projector-replay.ts",
+    "e2e": "tsx test/e2e/validate.ts",
+    "e2e:prediction": "tsx test/e2e/prediction-v1.ts"
   },
   "resolutions": {
     "@jinn-network/attestation-issuer": "portal:../packages/evidence/attestation-issuer",

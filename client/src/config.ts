@@ -480,7 +480,10 @@ export const JinnConfigSchema = z.object({
    *
    * Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
    *
-   * Populated by `POST /v1/operator/join/:cid` when an operator joins a
+   * Legacy key. Its claim gate retired in Wave-4 D1 (DR-2026-08-05); the key
+   * itself stays parseable until stage 5 (composition program contract 4) and
+   * is still read by status, launcher, spend-cap and `jinn eval` surfaces.
+   * Historically populated by the retired `POST /v1/operator/join/:cid` when an operator joined a
    * launched SolverNet from the registry catalog. Keys are `manifestCid`
    * (CIDv0 / CIDv1) — the only stable identifier that maps back to a
    * launched-instance authority across launchers.

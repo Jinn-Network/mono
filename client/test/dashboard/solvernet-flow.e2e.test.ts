@@ -58,10 +58,6 @@ type RegistrySummary = Record<string, unknown> & {
   manifestCid: string;
   status: LifecycleTarget;
 };
-type JoinedSolverNetEntry = Record<string, unknown> & {
-  manifestCid: string;
-  roles: Array<'solver' | 'evaluator'>;
-};
 interface ObservedLifecycleRequest {
   method: string;
   solverNetId: string;
@@ -192,7 +188,6 @@ interface MockState {
   launchedReadCount: number;
   launchedRecord: Record<string, unknown> | null;
   registrySummaries: RegistrySummary[];
-  joinedSolverNets: Record<string, JoinedSolverNetEntry>;
 }
 
 function makeMockState(overrides: Partial<MockState> = {}): MockState {
@@ -203,7 +198,6 @@ function makeMockState(overrides: Partial<MockState> = {}): MockState {
     launchedReadCount: 0,
     launchedRecord: null,
     registrySummaries: [],
-    joinedSolverNets: {},
     ...overrides,
   };
 }
@@ -413,53 +407,6 @@ async function mockDaemonApi(page: Page, state: MockState): Promise<void> {
       body: JSON.stringify(SOLVERNETS_CATALOG),
     }),
   );
-  await page.route('**/v1/operator/joined', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ joinedSolverNets: state.joinedSolverNets }),
-    }),
-  );
-  await page.route('**/v1/operator/join/*', async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    const segments = url.pathname.split('/').filter(Boolean);
-    const manifestCid = decodeURIComponent(segments[3] ?? '');
-    if (req.method() !== 'POST') {
-      return route.fulfill({ status: 405, body: 'method not allowed' });
-    }
-    const body = (req.postDataJSON?.() ?? {}) as {
-      name?: string;
-      contract?: { id: string; version: string };
-      roles?: Array<'solver' | 'evaluator'>;
-      harness?: string;
-      model?: string;
-      plugins?: string[];
-      disabledDefaultPlugins?: string[];
-    };
-    const config: JoinedSolverNetEntry = {
-      manifestCid,
-      ...(body.name !== undefined ? { name: body.name } : {}),
-      ...(body.contract !== undefined ? { contract: body.contract } : {}),
-      roles: body.roles ?? [],
-      ...(body.harness !== undefined ? { harness: body.harness } : {}),
-      ...(body.model !== undefined ? { model: body.model } : {}),
-      ...(body.plugins !== undefined ? { plugins: body.plugins } : {}),
-      ...(body.disabledDefaultPlugins !== undefined
-        ? { disabledDefaultPlugins: body.disabledDefaultPlugins }
-        : {}),
-    };
-    state.joinedSolverNets[manifestCid] = config;
-    return route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: true,
-        restartRequired: true,
-        manifestCid,
-        config,
-      }),
-    });
-  });
-  // Suppress recent-events polling (204 / empty list — SPA tolerates both).
   await page.route('**/v1/events/recent**', (route) =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ events: [] }) }),
   );
@@ -964,61 +911,6 @@ test('Launched dashboard surfaces the vetted-pool stale notice, distinct from re
   ).toHaveCount(0);
 });
 
-test('Operator catalog join flow writes manifest-cid keyed evaluator config from the launched registry', async ({
-  page,
-}) => {
-  await clearLocalStorage(page);
-  const state = makeMockState({
-    registrySummaries: [buildRegistrySummary()],
-  });
-  await mockDaemonApi(page, state);
-
-  // Navigate directly to the Operator registry sub-route. The TopTabs renders
-  // the /operator path as "Settings" (not "operator"), and the registry
-  // catalog lives at /operator/registry (not the bare /operator which
-  // redirects to /operator/memberships). Direct navigation mirrors the
-  // approach in the sibling join.e2e.test.ts.
-  await page.goto(dashboardUrl('/operator/registry'));
-  await expect(page.getByText('jinn operator')).toBeVisible();
-  await expect(page).toHaveURL(/\/operator\/registry/);
-
-  const card = page.getByTestId('registry-card');
-  await expect(card).toContainText(MOCK_MANIFEST.name);
-  await expect(card.getByTestId('registry-status-badge')).toContainText(/launched/i);
-  await page.getByTestId('registry-join-cta').click();
-
-  await expect(page).toHaveURL(new RegExp(`/operator/join/${MANIFEST_CID}`));
-  await expect(page.getByTestId('join-flow-title')).toContainText(
-    `Join ${MOCK_MANIFEST.name}`,
-  );
-  await expect(page.getByTestId('join-flow-open-roles')).toContainText(
-    /solver, evaluator/i,
-  );
-
-  await page.getByLabel('Evaluator').check();
-  await expect(page.getByTestId('join-flow-evaluator-info')).toContainText(
-    MOCK_MANIFEST.contract.evaluationFunction.implementation,
-  );
-  await expect(page.getByTestId('join-flow-solver-fields')).toHaveCount(0);
-  await page.getByTestId('join-flow-submit').click();
-
-  // Post-join: the SPA now renders an explicit success card in-place at the
-  // /operator/join/:cid route rather than redirecting to /operator#solvernets
-  // (that redirect was removed in issue #333 fix — the silent redirect left
-  // operators unsure the join had landed). Assert the success card is visible
-  // and the URL stayed on the join page.
-  await expect(page).toHaveURL(new RegExp(`/operator/join/${MANIFEST_CID}`));
-  await expect(page.getByTestId('join-flow-success-card')).toBeVisible();
-
-  expect(state.joinedSolverNets[MANIFEST_CID]).toMatchObject({
-    manifestCid: MANIFEST_CID,
-    name: MOCK_MANIFEST.name,
-    contract: PREDICTION_CONTRACT,
-    roles: ['evaluator'],
-  });
-  expect(state.joinedSolverNets[MANIFEST_CID].harness).toBeUndefined();
-});
-
 test('Fresh daemon empty states show no launched operator catalog and no owned launcher SolverNets', async ({
   page,
 }) => {
@@ -1028,7 +920,7 @@ test('Fresh daemon empty states show no launched operator catalog and no owned l
 
   // Navigate directly to /operator/registry — the TopTabs label for /operator
   // is "Settings" (not "operator"), and the registry catalog empty state lives
-  // at /operator/registry, not /operator (which redirects to /operator/memberships).
+  // at /operator/registry, not /operator (which redirects to /operator/claim-policy).
   await page.goto(dashboardUrl('/operator/registry'));
   await expect(page.getByText('jinn operator')).toBeVisible();
 

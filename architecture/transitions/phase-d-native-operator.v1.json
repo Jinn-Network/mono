@@ -314,8 +314,7 @@
         "client/src/cli/commands/backfill-failed-deliveries.ts",
         "client/src/daemon/delivery-watcher.ts",
         "client/src/daemon/work-loop-corpus.ts",
-        "client/src/harnesses/engine/backfill-failed-deliveries.ts",
-        "client/src/harnesses/engine/engine.ts"
+        "client/src/harnesses/engine/backfill-failed-deliveries.ts"
       ],
       "defaultMode": "not-applicable",
       "noNewUseGuard": {

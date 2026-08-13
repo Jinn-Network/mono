@@ -2,14 +2,16 @@ import { type ReactNode, type JSX } from 'react';
 import { cn } from '../../lib/utils.js';
 import { PhaseStatusTag, type PhaseStatus } from './PhaseStatusTag.js';
 
-export type Phase = 1 | 2 | 3 | 4 | 5;
+export type Phase = 1 | 2 | 3 | 4;
 
 const PHASE_TITLES: Record<Phase, string> = {
   1: 'Provisioning your wallet',
   2: 'Fund your wallet',
   3: 'Joining Jinn',
-  4: 'Pick your first SolverNet',
-  5: 'Set up harness + model',
+  // Step 4 confirms readiness; it does not "set up" anything. Wave-4 D1
+  // removed the harness/model picker that used to live here — that choice is
+  // configuration now (see regions/Onboarding.tsx).
+  4: 'Check your harness',
 };
 
 /**
