@@ -12,7 +12,7 @@ import type { HarborHostBinding } from "./host.js";
 export const HARBOR_LAUNCHER_ID = "harbor";
 
 export function harborJobName(submissionSha256: string, dispatch: number): string {
-  if (!/^[a-f0-9]{64}$/.test(submissionSha256) || !Number.isInteger(dispatch) || dispatch < 1) throw new TypeError("Harbor Job naming requires a Jinn Submission digest and positive dispatch index");
+  if (!/^[a-f0-9]{64}$/.test(submissionSha256) || !Number.isInteger(dispatch) || dispatch < 1) throw new TypeError("Harbor Job naming requires a Submission digest and positive dispatch index");
   return `jinn-${submissionSha256.slice(0, 24)}-d${dispatch}`;
 }
 

@@ -542,7 +542,7 @@ async function harborStructureCheck(
     const joined = await exact(correlation.artifact);
     const harbor = joined.harbor as { jobName?: unknown; jobId?: unknown; trialId?: unknown } | undefined;
     const lineage = joined.lineage as { submissionSha256?: unknown; attemptUri?: unknown; runSha256?: unknown; cellKey?: unknown; dispatchIndex?: unknown } | undefined;
-    if (joined.selectionManifestSha256 !== expectedSelectionManifestSha256 || typeof harbor?.jobName !== "string" || typeof harbor.jobId !== "string" || typeof harbor.trialId !== "string" || typeof lineage?.submissionSha256 !== "string" || typeof lineage.attemptUri !== "string" || typeof lineage.runSha256 !== "string" || typeof lineage.cellKey !== "string" || !Number.isInteger(lineage.dispatchIndex)) throw new Error("correlation lacks complete Jinn/Harbor identity binding");
+    if (joined.selectionManifestSha256 !== expectedSelectionManifestSha256 || typeof harbor?.jobName !== "string" || typeof harbor.jobId !== "string" || typeof harbor.trialId !== "string" || typeof lineage?.submissionSha256 !== "string" || typeof lineage.attemptUri !== "string" || typeof lineage.runSha256 !== "string" || typeof lineage.cellKey !== "string" || !Number.isInteger(lineage.dispatchIndex)) throw new Error("correlation lacks complete product/Harbor identity binding");
     const submittedJob = await exact(find(HARBOR_INVOCATION_CONFIG_ROLE)!);
     const job = normalizeHarborSavedJobConfig(await exact(find(HARBOR_JOB_CONFIG_ROLE)!), submittedJob);
     const trial = await exact(find(HARBOR_TRIAL_CONFIG_ROLE)!);
@@ -561,7 +561,7 @@ async function harborStructureCheck(
       || !sameJson(job.agents, [selectedArm.jobAgent]) || !sameJson(job.artifacts, selected.outputs.map((output) => output.artifact))
       || (!("tasks" in expectedSource) ? "tasks" in job : !("tasks" in job) || !sameJson(job.tasks, expectedSource.tasks))
       || (!("datasets" in expectedSource) ? "datasets" in job : !("datasets" in job) || !sameJson(job.datasets, expectedSource.datasets))
-      || selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1 || selected.retryPolicy.maxRetries !== 0) throw new Error("Harbor Job identity, lineage, or retry policy does not match sealed Jinn selection");
+      || selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1 || selected.retryPolicy.maxRetries !== 0) throw new Error("Harbor Job identity, lineage, or retry policy does not match the sealed runtime selection");
     return { name: "harbor-job-trial-structure", status: "pass" };
   } catch (cause) {
     return { name: "harbor-job-trial-structure", status: "fail", detail: cause instanceof Error ? cause.message : String(cause) };

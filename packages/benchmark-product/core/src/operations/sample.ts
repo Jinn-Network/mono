@@ -20,7 +20,7 @@
 import type { DraftDocument } from "../domain/draft.js";
 import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
 import { putSealedBytes } from "../workspace/sealed-store.js";
-import { buildSampleBenchmark } from "../intake/sample.js";
+import { buildSampleBenchmark, sealSamplePredictionAdmissionReceipt } from "../intake/sample.js";
 import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../intake/workspace-authored.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
@@ -77,24 +77,27 @@ export function sampleInit(
         sealTaskProfile(buildPredictionForecastProfile()).bytes,
       );
       const evaluationSpecSha256 = putSealedBytes(clockedContext.workspaceDir, sample.evaluationSpec.bytes);
-      const authoredTasks = sample.tasks.map((task) => {
-        const receiptSha256 = putSealedBytes(clockedContext.workspaceDir, task.receipt.envelopeBytes);
+      const authoredTasks: Array<{ marketId: string; taskSha256: string; receiptSha256: string; bytes: Uint8Array }> = [];
+      for (const task of sample.tasks) {
+        const sourceReceiptSha256 = putSealedBytes(clockedContext.workspaceDir, task.receipt.envelopeBytes);
         putSealedBytes(clockedContext.workspaceDir, task.bytes);
         const authored = deriveWorkspaceAuthoredTask({
           sourceBytes: task.bytes,
           author,
           sourceKind: "bundled-sample",
-          sourceReceiptSha256: receiptSha256,
+          sourceReceiptSha256,
         });
         const taskSha256 = putSealedBytes(clockedContext.workspaceDir, authored.bytes);
+        const receipt = await sealSamplePredictionAdmissionReceipt(authored.bytes, sample.evaluationSpec.bytes);
+        const receiptSha256 = putSealedBytes(clockedContext.workspaceDir, receipt.envelopeBytes);
         recordWorkspaceAuthorship({
           workspaceDir: clockedContext.workspaceDir,
           recordSha256: taskSha256,
           recordKind: RECORD_KINDS.task,
           authoredAt: at,
         });
-        return { marketId: task.marketId, taskSha256, receiptSha256, bytes: authored.bytes };
-      });
+        authoredTasks.push({ marketId: task.marketId, taskSha256, receiptSha256, bytes: authored.bytes });
+      }
       putSealedBytes(clockedContext.workspaceDir, sample.benchmark.bytes);
       const authoredBenchmark = deriveWorkspaceAuthoredBenchmark({
         sourceBytes: sample.benchmark.bytes,

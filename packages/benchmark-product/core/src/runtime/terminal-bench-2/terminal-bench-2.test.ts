@@ -26,7 +26,7 @@ import { computeHarbor021TaskContentHash, resolveTerminalBench2Selection } from 
 import { TERMINAL_BENCH_2_DATASET_ID, TERMINAL_BENCH_2_PROFILE, TERMINAL_BENCH_2_SELECTION_ROLE, TERMINAL_BENCH_MIGRATION_ROLE, TerminalBench2SelectionManifestSchema } from "./manifest.js";
 import { HARBOR_SELECTION_ROLE } from "../harbor/venue.js";
 import { createRuntimeEvidenceAdapter } from "../adapter.js";
-import { terminalBench2SmokeReadiness } from "./smoke.js";
+import { terminalBench2ExternalReadiness } from "./external-readiness.js";
 
 const datasetRevision = `sha256:${"a".repeat(64)}` as const;
 const taskRevision = "sha256:f36995f8854db7fe68476fe10260b22729da0801627608d051e626b3dc555c2d" as const;
@@ -94,7 +94,9 @@ function request() {
 
 function clock(): () => string {
   let tick = 0;
-  const epoch = Date.parse("2026-08-13T12:00:00Z");
+  // The local backend's supervisor enforces Submission deadlines against the host clock.
+  // Anchor this integration fixture to the live wall clock so it cannot become date-brittle.
+  const epoch = Date.now();
   return () => new Date(epoch + tick++ * 1_000).toISOString();
 }
 
@@ -182,8 +184,8 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("Terminal-Bench 2 product profile", () => {
   test("real smoke is opt-in and transparently refuses missing prerequisites", async () => {
-    await expect(terminalBench2SmokeReadiness({ optIn: false, dockerExecutable: "/missing/docker", registryMetadataPath: "/missing/metadata", taskMaterialPath: "/missing/task" })).resolves.toMatchObject({ ready: false, reason: "opt-in-required" });
-    await expect(terminalBench2SmokeReadiness({ optIn: true, dockerExecutable: "/missing/docker", registryMetadataPath: metadataPath, taskMaterialPath: materialPath })).resolves.toMatchObject({ ready: false, reason: "docker-unavailable" });
+    await expect(terminalBench2ExternalReadiness({ optIn: false, dockerExecutable: "/missing/docker", registryMetadataPath: "/missing/metadata", taskMaterialPath: "/missing/task" })).resolves.toMatchObject({ ready: false, reason: "opt-in-required" });
+    await expect(terminalBench2ExternalReadiness({ optIn: true, dockerExecutable: "/missing/docker", registryMetadataPath: metadataPath, taskMaterialPath: materialPath })).resolves.toMatchObject({ ready: false, reason: "docker-unavailable" });
   });
 
   test("requires immutable official registry/task resolution and rejects drift", () => {

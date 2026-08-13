@@ -111,6 +111,7 @@ jobs:
       - name: Build indexer local package dependencies
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
 
       - name: Install indexer deps

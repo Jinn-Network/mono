@@ -62,6 +62,10 @@ function context(now: () => string): OperationContext {
   return { workspaceDir, principal: "sponsor-1", clock: now };
 }
 
+const HARBOR_EXECUTABLE_BYTES = new TextEncoder().encode("fixture Harbor executable");
+const HARBOR_TASK_BYTES = new TextEncoder().encode("x");
+const HARBOR_TASK_FILES = [{ path: "task.toml", sha256: sha256Hex(HARBOR_TASK_BYTES), bytes: HARBOR_TASK_BYTES.length }];
+
 async function serveWorkspace(): Promise<string> {
   const handler = createWorkspacePublicationHttpHandler(workspaceDir);
   server = createServer(async (request, response) => {
@@ -82,10 +86,10 @@ function harborManifest(): HarborSelectionManifest {
   return {
     schema: "jinn.network/benchmark-product/harbor-selection/1",
     adapter: { id: "harbor", version: "1" },
-    harbor: { version: "0.21.4", executableSha256: "a".repeat(64) },
+    harbor: { version: "0.21.4", executableSha256: sha256Hex(HARBOR_EXECUTABLE_BYTES) },
     source: {
       kind: "task", input: { name: "fixture/task", ref: "r1" }, jobInput: { path: ".jinn-harbor/task" },
-      resolved: { reference: "fixture/task", revision: "r1", checksum: "b".repeat(64), files: [{ path: "task.toml", sha256: "c".repeat(64), bytes: 1 }] },
+      resolved: { reference: "fixture/task", revision: "r1", checksum: sha256Hex(canonicalJsonBytes(HARBOR_TASK_FILES as never)), files: HARBOR_TASK_FILES },
     },
     arms: ["a", "b"].map((armId) => ({
       armId, agent: { id: `agent-${armId}`, configuration: {} }, model: { id: `model-${armId}`, configuration: {} },
@@ -105,6 +109,8 @@ async function registeredClosed(now: () => string, harbor = false) {
   expect(armAdd(context(now), { draftId: "draft-1", armId: "b", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } }).ok).toBe(true);
   let selectionSha256: string | undefined;
   if (harbor) {
+    putSealedBytes(workspaceDir, HARBOR_EXECUTABLE_BYTES);
+    putSealedBytes(workspaceDir, HARBOR_TASK_BYTES);
     selectionSha256 = putSealedBytes(workspaceDir, harborSelectionManifestBytes(harborManifest()));
     expect(updateDraft(context(now), { draftId: "draft-1", patch: { evaluationRuntime: { adapterId: "harbor", selectionManifestSha256: selectionSha256, isolationPolicy: "unrestricted" } } }).ok).toBe(true);
   }

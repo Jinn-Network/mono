@@ -5,18 +5,18 @@ import { test } from "vitest";
 import { HarborJobConfigSchema, assertSupportedHarborVersion } from "../harbor/manifest.js";
 import { TERMINAL_BENCH_2_DATASET_ID } from "./manifest.js";
 
-const optedIn = process.env.JINN_TERMINAL_BENCH_2_SMOKE === "1";
+const optedIn = process.env.COLOPHON_TERMINAL_BENCH_2_EXTERNAL === "1";
 const invoke = async (executable: string, argv: readonly string[]) => await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
   execFile(executable, [...argv], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" }, maxBuffer: 32 * 1024 * 1024 },
     (error, stdout, stderr) => error === null ? resolve({ stdout, stderr }) : reject(new Error(`${executable} ${argv.join(" ")} failed: ${stderr}`, { cause: error })));
 });
 
 test.skipIf(!optedIn)("opt-in real Harbor 0.21 / Terminal-Bench 2 smoke executes one Trial", async ({ skip }) => {
-  const harbor = process.env.JINN_TERMINAL_BENCH_2_HARBOR;
-  const docker = process.env.JINN_TERMINAL_BENCH_2_DOCKER ?? "docker";
-  const configPath = process.env.JINN_TERMINAL_BENCH_2_SMOKE_CONFIG;
+  const harbor = process.env.COLOPHON_TERMINAL_BENCH_2_HARBOR;
+  const docker = process.env.COLOPHON_TERMINAL_BENCH_2_DOCKER ?? "docker";
+  const configPath = process.env.COLOPHON_TERMINAL_BENCH_2_EXTERNAL_CONFIG;
   if (harbor === undefined || configPath === undefined || !existsSync(harbor) || !existsSync(configPath)) {
-    console.warn("TB2 smoke skipped: set JINN_TERMINAL_BENCH_2_HARBOR and JINN_TERMINAL_BENCH_2_SMOKE_CONFIG to exact local files");
+    console.warn("TB2 external check skipped: set COLOPHON_TERMINAL_BENCH_2_HARBOR and COLOPHON_TERMINAL_BENCH_2_EXTERNAL_CONFIG to exact local files");
     skip(); return;
   }
   try { await invoke(docker, ["info", "--format", "{{json .ServerVersion}}"]) } catch {
@@ -36,4 +36,3 @@ test.skipIf(!optedIn)("opt-in real Harbor 0.21 / Terminal-Bench 2 smoke executes
     && existsSync(join(jobRoot, entry.name, "config.json")) && existsSync(join(jobRoot, entry.name, "result.json")));
   if (trials.length !== 1) throw new TypeError(`real TB2 smoke expected exactly one Harbor Trial, found ${trials.length}`);
 });
-

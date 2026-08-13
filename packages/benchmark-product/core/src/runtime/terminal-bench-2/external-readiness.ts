@@ -1,21 +1,21 @@
-/** Explicit readiness gate for the optional real Terminal-Bench 2 smoke. It never downloads,
- * starts Docker, or silently substitutes a fixture. */
+/** Explicit readiness gate for the optional real Terminal-Bench 2 external check. It never
+ * downloads, starts Docker, or silently substitutes a fixture. */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 
-export type TerminalBench2SmokeReadiness =
+export type TerminalBench2ExternalReadiness =
   | { readonly ready: true }
   | { readonly ready: false; readonly reason: "opt-in-required" | "selection-material-unavailable" | "docker-unavailable"; readonly detail: string };
 
-export interface TerminalBench2SmokeReadinessInput {
+export interface TerminalBench2ExternalReadinessInput {
   readonly optIn: boolean;
   readonly dockerExecutable: string;
   readonly registryMetadataPath: string;
   readonly taskMaterialPath: string;
 }
 
-export async function terminalBench2SmokeReadiness(input: TerminalBench2SmokeReadinessInput): Promise<TerminalBench2SmokeReadiness> {
-  if (!input.optIn) return { ready: false, reason: "opt-in-required", detail: "set JINN_TERMINAL_BENCH_2_SMOKE=1 to opt in" };
+export async function terminalBench2ExternalReadiness(input: TerminalBench2ExternalReadinessInput): Promise<TerminalBench2ExternalReadiness> {
+  if (!input.optIn) return { ready: false, reason: "opt-in-required", detail: "set COLOPHON_TERMINAL_BENCH_2_EXTERNAL=1 to opt in" };
   if (!existsSync(input.registryMetadataPath) || !existsSync(input.taskMaterialPath)) {
     return { ready: false, reason: "selection-material-unavailable", detail: "an exact downloaded registry snapshot and task package are required; this gate never selects floating latest" };
   }
@@ -26,6 +26,5 @@ export async function terminalBench2SmokeReadiness(input: TerminalBench2SmokeRea
   });
   return available
     ? { ready: true }
-    : { ready: false, reason: "docker-unavailable", detail: "Docker CLI/daemon is unavailable; real Terminal-Bench 2 smoke was not attempted" };
+    : { ready: false, reason: "docker-unavailable", detail: "Docker CLI/daemon is unavailable; the external Terminal-Bench 2 check was not attempted" };
 }
-

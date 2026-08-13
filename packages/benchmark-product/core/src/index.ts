@@ -137,8 +137,8 @@ export {
   computeHarbor021TaskContentHash,
   resolveTerminalBench2Selection,
 } from "./runtime/terminal-bench-2/host.js";
-export { terminalBench2SmokeReadiness } from "./runtime/terminal-bench-2/smoke.js";
-export type { TerminalBench2SmokeReadiness, TerminalBench2SmokeReadinessInput } from "./runtime/terminal-bench-2/smoke.js";
+export { terminalBench2ExternalReadiness } from "./runtime/terminal-bench-2/external-readiness.js";
+export type { TerminalBench2ExternalReadiness, TerminalBench2ExternalReadinessInput } from "./runtime/terminal-bench-2/external-readiness.js";
 export type {
   TerminalBench2SelectionRequest,
   TerminalBench2SelectionResolution,

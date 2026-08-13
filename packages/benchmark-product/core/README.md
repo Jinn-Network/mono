@@ -35,7 +35,7 @@ and proves copied-bundle verification after source-workspace deletion.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **33 generated operations**, all shipped through the library and CLI
+contains **36 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -58,6 +58,7 @@ with an explicit shipped/deferred GUI disposition:
 | `publicationRegister` | `colophon publication register` | Store, announce, and exact-probe the registration closure. |
 | `publicationStatus` | `colophon publication status` | Read timing assurance, stage receipts, compatibility, and recovery guidance without backend calls. |
 | `publicationAccounting` | `colophon publication accounting` | Publish retained complete or partial accounting and Matrix v2 without a Report or rerun. |
+| `publicationReport` | `colophon publication report` | Produce, verify, and publish the signed Report v2 envelope from the accounting closure. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
 | `runLaunch` | `colophon launch` | Drive the real local venue. |
@@ -108,9 +109,9 @@ Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 
 ## Authority and lifecycle behavior
 
-The **eight gated operations** are `lock`, `launch`, `cancel`, `report`,
-`publish`, `publication.configure`, `publication.register`, and
-`publication.accounting`. The founding sponsor receives all eight grants. A delegated agent may perform any of them
+The **nine gated operations** are `lock`, `launch`, `cancel`, `report`,
+`publish`, `publication.configure`, `publication.register`,
+`publication.accounting`, and `publication.report`. The founding sponsor receives all nine grants. A delegated agent may perform any of them
 only after a sponsor grants it. `authority grant` and
 `authority revoke` are separately sponsor-only, so a delegated agent cannot
 self-escalate. This is local-process policy and attribution, not operating-system

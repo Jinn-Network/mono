@@ -1871,7 +1871,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2966,
+      "discoveredFirstPartySurfaces": 2967,
       "generatedOutputSources": 1330,
       "generatorSources": 622,
       "marketplaceControl": 2,
@@ -22139,6 +22139,16 @@
           "@ritsukai"
         ],
         "path": "packages/discovery/facts/benchmarking/fixtures/benchmark-accounting/valid.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/manifest.sha256.json"
       },
       {
         "categories": [

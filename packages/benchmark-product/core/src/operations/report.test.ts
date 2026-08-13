@@ -85,7 +85,7 @@ async function servePublicationWorkspace(mount = ""): Promise<string> {
   await new Promise<void>((resolve) => publicationServer!.listen(0, "127.0.0.1", resolve));
   const address = publicationServer.address();
   if (address === null || typeof address === "string") throw new Error("publication test server has no TCP address");
-  return `http://127.0.0.1:${address.port}`;
+  return `http://127.0.0.1:${address.port}${mount}`;
 }
 
 function utf8(json: unknown): Uint8Array {

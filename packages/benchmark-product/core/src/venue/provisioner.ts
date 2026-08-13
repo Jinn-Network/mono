@@ -653,7 +653,7 @@ export async function recordHarborDispatchMapping(workspaceDir: string, jinnIden
     for (const path of paths) {
       try {
         const existing = await readFile(path);
-        if (!Buffer.from(existing).equals(Buffer.from(document))) throw new Error("Jinn dispatch and Harbor Job/Trial identities cannot be remapped or reused");
+        if (!Buffer.from(existing).equals(Buffer.from(document))) throw new Error("benchmark dispatch and Harbor Job/Trial identities cannot be remapped or reused");
       } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
     }
     for (const path of paths) {
@@ -702,7 +702,7 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
       cellKey = typeof input.submission.annotations?.cellKey === "string" ? input.submission.annotations.cellKey : nonceParts.at(-2) ?? "unknown-cell";
       const runReference = input.submission.annotations?.run;
       runSha256 = typeof runReference === "string" && runReference.startsWith("sha256:") ? runReference.slice("sha256:".length) : "";
-      if (!/^[a-f0-9]{64}$/u.test(runSha256) || !Number.isInteger(dispatch) || dispatch < 1) throw new Error("Harbor requires contemporaneous Jinn Run/cell/dispatch lineage");
+      if (!/^[a-f0-9]{64}$/u.test(runSha256) || !Number.isInteger(dispatch) || dispatch < 1) throw new Error("Harbor requires contemporaneous Run/cell/dispatch lineage");
       const armId = parseCellKey(cellKey).armId;
       const arm = options.manifest.arms.find((candidate) => candidate.armId === armId);
       if (arm === undefined) throw new Error(`Harbor selection has no exact AgentConfig mapping for arm ${armId}`);

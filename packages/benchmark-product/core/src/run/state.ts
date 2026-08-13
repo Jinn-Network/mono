@@ -154,14 +154,9 @@ export const RunStateSchema = z.object({
       message: "signed Report v2 payload and record identities must be established together",
     });
   }
-  if (state.publication?.report.state === "complete"
-    && (state.reportPayloadSha256 === undefined || state.reportRecordSha256 === undefined)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["publication", "report"],
-      message: "a complete signed Report v2 publication stage requires both v2 identities",
-    });
-  }
+  // A crash can durably append the Report and advance the stage marker before the two local
+  // identities are checkpointed. Keep that state readable so publication.report can reproduce
+  // and reconcile the exact bytes; user-facing completion still requires receipt + identities.
 }).transform((state) => {
   // PUB-09 temporarily serialized the legacy v1 identities under both name pairs. Such a state
   // predates a completed Report-v2 stage, so normalize those duplicate aliases away in memory.

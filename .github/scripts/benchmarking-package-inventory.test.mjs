@@ -110,6 +110,8 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     // testing kit is used only for describeExportConformance in the package test suite.
     devDependencies: ['@jinn-network/benchmarking-testing'],
+    // benchmarking-records now parses signed Report v2 envelopes through trust-core.
+    portalResolutions: ['@jinn-network/trust-core'],
     optionalDependencies: [], peerDependencies: [],
   }],
   ['marketplace', {
@@ -149,6 +151,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     portalResolutions: [
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-protocol',
+      '@jinn-network/trust-core',
     ],
     optionalDependencies: [], peerDependencies: [],
   }],
