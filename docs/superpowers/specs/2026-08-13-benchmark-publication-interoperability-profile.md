@@ -881,7 +881,7 @@ The profile is not complete until third-party code can pass byte-level fixtures 
 4. a Colophon-managed completed Harbor Job published post-hoc without rerun;
 5. refusal to synthesize TEP history for an arbitrary completed Harbor Job;
 6. a marketplace operator executing one accepted Submission through Harbor;
-7. a failed dispatch followed by a visible replacement and no Harbor-internal retry;
+7. an unsuccessful, host-classified unscorable dispatch followed by a visible replacement and no Harbor-internal retry;
 8. a cancelled/partial run publishing accounting and Matrix without a Report;
 9. independent combinations of analysis `preregistered` and public-registration status;
 10. legacy raw Report v1 facts plus signed-envelope Report v2 identity/facts;

@@ -3,8 +3,10 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { launchAndWatch, type CellStatusEvent } from "@jinn-network/benchmarking-run";
+import { parseBenchmark, parseBenchmarkAccounting, parseRun } from "@jinn-network/benchmarking-records";
 import { armAdd } from "../../operations/arms.js";
-import { createDraft } from "../../operations/drafts.js";
+import { createDraft, getDraft, updateDraft } from "../../operations/drafts.js";
 import { initWorkspace } from "../../operations/init.js";
 import { selectHarborRuntime } from "../../operations/harbor-runtime.js";
 import { runLaunch } from "../../operations/run-launch.js";
@@ -16,13 +18,12 @@ import { publicationConfigure, publicationRegister } from "../../operations/publ
 import { readRunJournalEntries } from "../../run/journal.js";
 import { createWorkspacePublicationHttpHandler, publicArchiveUrl, recordPath } from "../../run/publication-source.js";
 import { readRunState } from "../../run/state.js";
-import { createRuntimeEvidenceAdapter } from "../adapter.js";
+import { createRuntimeEvidenceAdapter, createRuntimeVenue } from "../adapter.js";
 import { artifactsDir } from "../../workspace/layout.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { recordHarborDispatchMapping } from "../../venue/provisioner.js";
 import { HarborJobConfigSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "./manifest.js";
 import { HARBOR_ATIF_ROLE, HARBOR_LOGS_ROLE, HARBOR_REWARD_ROLE, HARBOR_SELECTION_ROLE, harborEvidenceContributionFromArchive, readHarborDispatchArchive } from "./venue.js";
-import { parseBenchmarkAccounting } from "@jinn-network/benchmarking-records";
 
 const manifest: HarborSelectionManifest = {
   schema: "jinn.network/benchmark-product/harbor-selection/1", adapter: { id: "harbor", version: "1" },
@@ -138,6 +139,115 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       expect(settled.filter((value) => value.status === "rejected")).toHaveLength(1);
     } finally { await rm(workspaceDir, { recursive: true, force: true }); }
   });
+
+  test("PUB-15 case 7: a host-classified unscorable Harbor dispatch is visibly replaced without a Harbor retry", async () => {
+    const workspaceDir = await mkdtemp(join(tmpdir(), "harbor-visible-replacement-"));
+    try {
+      // The fake executable refuses any config that could hide another Trial beneath this
+      // dispatch. Its invocation log is consequently an external count of actual Harbor work.
+      const executable = await fakeHarbor(workspaceDir);
+      const taskMaterialPath = join(workspaceDir, "task-material");
+      await mkdir(taskMaterialPath);
+      await writeFile(join(taskMaterialPath, "task.toml"), `[task]\nname = "demo/task"\n[environment]\ndocker_image = "${manifest.environment.image}"\n`);
+      const clock = () => "2026-08-13T12:00:00Z";
+      const context = { workspaceDir, principal: "sponsor-1", clock };
+      expect(initWorkspace(context).ok).toBe(true);
+      expect(createDraft(context, { draftId: "replacement", name: "Visible Harbor replacement" }).ok).toBe(true);
+      expect((await sampleInit(context, { draftId: "replacement" })).ok).toBe(true);
+      const mutable = getDraft(context, { draftId: "replacement" });
+      expect(mutable.ok).toBe(true);
+      if (!mutable.ok) throw new Error("draft unexpectedly unavailable");
+      // §7.4 replacement is opt-in and bounded. Generic failed/rejected/lost terminals stay
+      // non-replaceable; the first completed Harbor attempt below is specifically unscorable.
+      expect(updateDraft(context, {
+        draftId: "replacement",
+        patch: {
+          policy: {
+            ...mutable.result.draft.spec.policy,
+            replacement: { allowed: true, maxPerCell: 1 },
+          },
+        },
+      }).ok).toBe(true);
+      for (const arm of manifest.arms) {
+        expect(armAdd(context, {
+          draftId: "replacement",
+          armId: arm.armId,
+          pinning: { harness: { id: "placeholder", version: "1" } },
+        }).ok).toBe(true);
+      }
+      const selected = await selectHarborRuntime(context, {
+        draftId: "replacement",
+        executable,
+        source: { kind: "task", input: { name: "demo/task", ref: "r2" }, materialPath: taskMaterialPath, revision: "r2" },
+        arms: manifest.arms,
+        environment: manifest.environment,
+        outputs: manifest.outputs,
+      });
+      expect(selected.ok, JSON.stringify(selected)).toBe(true);
+      expect((await runQuote(context, { draftId: "replacement" })).ok).toBe(true);
+      expect(runLock(context, { draftId: "replacement" }).ok).toBe(true);
+
+      const locked = getDraft(context, { draftId: "replacement" });
+      expect(locked.ok).toBe(true);
+      if (!locked.ok || locked.result.draft.spec.taskSet.kind !== "benchmark") {
+        throw new Error("locked benchmark draft unexpectedly unavailable");
+      }
+      const runState = readRunState(workspaceDir, "replacement");
+      expect(runState?.runSha256).toMatch(/^[a-f0-9]{64}$/u);
+      if (runState?.runSha256 === undefined) throw new Error("lock did not retain the sealed Run");
+      const benchmark = parseBenchmark(getSealedBytes(workspaceDir, locked.result.draft.spec.taskSet.benchmarkSha256));
+      const run = parseRun(getSealedBytes(workspaceDir, runState.runSha256));
+      const venue = createRuntimeVenue(locked.result.draft.spec.evaluationRuntime, {
+        workspaceDir,
+        now: clock,
+        evaluatorCount: run.policy.evaluation?.minVerdicts ?? 1,
+      });
+      try {
+        venue.assertRunOwnership?.();
+        await venue.preflightRun?.();
+        const events: CellStatusEvent[] = [];
+        let firstTerminalClassified = false;
+        for await (const event of launchAndWatch(benchmark, run, venue.backend, {
+          runDigest: `sha256:${runState.runSha256}`,
+          taskBytesFor: (digest) => getSealedBytes(workspaceDir, digest),
+          clock: { now: () => new Date(clock()) },
+          // This is an application-owned benchmark verdict: the Harbor process completed, but
+          // its first result is unusable. It is deliberately not a generic TEP failure retry.
+          hostTerminalFacts: () => {
+            if (firstTerminalClassified) return undefined;
+            firstTerminalClassified = true;
+            return { unscorable: true };
+          },
+        })) {
+          events.push(event);
+          if (event.dispatch === 2 && event.kind === "delivered") break;
+        }
+
+        const firstCell = events[0]?.cellKey;
+        expect(firstCell).toBeTruthy();
+        const lineage = events.filter((event) => event.cellKey === firstCell);
+        const firstDispatch = lineage.find((event) => event.dispatch === 1 && event.kind === "dispatch");
+        const firstTerminal = lineage.find((event) => event.dispatch === 1 && event.kind === "error");
+        const replacementDispatch = lineage.find((event) => event.dispatch === 2 && event.kind === "dispatch");
+        const replacementTerminal = lineage.find((event) => event.dispatch === 2 && event.kind === "delivered");
+        expect(firstTerminal).toMatchObject({ replaceable: true, replaceableReason: "unscorable", detail: "unscorable" });
+        expect(firstDispatch?.submissionDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
+        expect(replacementDispatch?.submissionDigest).toMatch(/^sha256:[a-f0-9]{64}$/u);
+        expect(replacementDispatch?.submissionDigest).not.toBe(firstDispatch?.submissionDigest);
+        expect(replacementDispatch?.attempt).toMatch(/^urn:uuid:/u);
+        expect(replacementDispatch?.attempt).not.toBe(firstDispatch?.attempt);
+        expect(replacementTerminal?.attempt).toBe(replacementDispatch?.attempt);
+
+        // Two visible Jinn dispatches account for exactly two actual Harbor invocations. The
+        // fake Harbor asserts n_attempts=1, n_concurrent_trials=1, and max_retries=0 each time.
+        const invocations = (await readFile(join(workspaceDir, "harbor-invocations.log"), "utf8"))
+          .trim().split("\n").filter(Boolean);
+        expect(invocations).toHaveLength(2);
+      } finally {
+        await venue.shutdown();
+      }
+    } finally { await rm(workspaceDir, { recursive: true, force: true }); }
+  }, 120_000);
 
   test("runLaunch uses the default host/backend, preserves solve output, and archives the official direct-root Trial tree", async () => {
     const workspaceDir = await mkdtemp(join(tmpdir(), "harbor-lifecycle-"));
