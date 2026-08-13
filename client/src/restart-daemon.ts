@@ -16,7 +16,6 @@
  *   - POST /v1/setup/network              — RPC URL change
  *   - POST /v1/setup/change-password      — keystore password rotation
  *   - POST /v1/setup/solvernets/:name     — SolverNet enable/disable
- *   - POST /v1/operator/join/:cid         — SolverNet join
  *
  * Headless gate: `JINN_NO_UI=1` (already the established headless flag in
  * main.ts) skips the respawn — operators running `jinn run --no-ui` from a

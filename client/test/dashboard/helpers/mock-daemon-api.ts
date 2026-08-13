@@ -427,11 +427,6 @@ export async function mockDaemonApi(page: Page, _opts: MockDaemonApiOptions = {}
       route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) }),
   );
   // Specific exact routes registered AFTER catch-all so they win (checked first).
-  await page.route(
-    (url) => url.pathname === '/v1/operator/joined',
-    (route) =>
-      route.fulfill({ contentType: 'application/json', body: JSON.stringify(DEFAULT_JOINED_SOLVER_NETS) }),
-  );
   // execution-data accepts query params (source, limit); match by pathname.
   await page.route(
     (url) => url.pathname === '/v1/operator/execution-data',

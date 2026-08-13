@@ -50,7 +50,6 @@ import {
 } from '../setup/claude-code-install.js';
 import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
 import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
-import type { JoinedSolverNetConfig } from '../solver-nets/registry.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
 
@@ -145,19 +144,10 @@ export interface SetupRoutesConfig {
    */
   retryBootstrap?: () => Promise<void>;
   /**
-   * #1037: hot-apply a join to the running daemon. The route registers
-   * eagerly (Hono freezes its matcher), so the applier is passed via a holder
-   * populated by main.ts after the join-consuming subsystems are built. When
-   * `current` is undefined (pre-running) or the apply throws, the endpoint
-   * returns restartRequired:true so the operator restarts to pick up the
-   * on-disk write.
-   */
-  joinApplier?: { current?: (entry: JoinedSolverNetConfig) => Promise<void> };
-  /**
    * #983: called after POST /v1/operator/onboarding-complete persists the flag
    * to disk, so the daemon's in-memory config reflects it and GET /v1/bootstrap
    * (which reads the in-memory config) returns onboardingComplete:true without
-   * a restart. Mirrors the join-applier's in-memory mutation (join-applier.ts).
+   * a restart.
    */
   markOnboardingComplete?: () => void;
 }

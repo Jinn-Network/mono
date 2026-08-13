@@ -15,7 +15,7 @@
  *   - `claim-policy-endpoints.ts`'s two PUT handlers (claim policy / execution wiring) — always
  *     restart-required, no hot-apply path exists.
  *   - `setup-endpoints.ts`'s join-SolverNet endpoint, but only on the branch where hot-apply via
- *     the join-applier failed or wasn't wired yet (mirrors that endpoint's own
+ *     a hot-apply path is unavailable (mirrors that endpoint's own
  *     `restartRequired` response field exactly).
  *   - `setup-endpoints.ts`'s leave-SolverNet and rpcUrl (network config) endpoints — always
  *     restart-required, no hot-apply path exists.
