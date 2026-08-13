@@ -19,7 +19,6 @@
  */
 import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
 import type { ChainLogSource } from '@jinn-network/marketplace-venue-base';
-import { SourceAnnouncementConflictError } from '@jinn-network/record-discovery-serve';
 import type { Address } from 'viem';
 import {
   applyNativeMarketplaceBatch,
@@ -117,6 +116,18 @@ export function teeNativeMarketplaceEvents(input: {
     orphanedBlockHashes: () => input.source.orphanedBlockHashes(),
     close: () => input.source.close(),
   };
+}
+
+/**
+ * Matches the source-writer's announcement-conflict error by NAME, not `instanceof`: the client
+ * resolves `@jinn-network/record-discovery-serve` both directly (portal) and nested under other
+ * workspace packages (registry), so the class object this module would import is not reliably
+ * the same object the writer threw — CI's module graph produced exactly that split (#2636), and
+ * `instanceof` across two copies of one class is always false. `name` is assigned in the class
+ * constructor and survives any number of module instances.
+ */
+function isSourceAnnouncementConflict(error: unknown): error is Error {
+  return error instanceof Error && error.name === 'SourceAnnouncementConflictError';
 }
 
 /** Minimum representable ISO gap between two adjacent record announcements (1ms). */
@@ -297,7 +308,7 @@ export function buildNativeSolutionCorrections(input: {
           // this pass's recomputed timestamp, not the committed instant, which the receipt does
           // not expose). A conflict the source cannot account for as a committed availability —
           // and every other failure — stays loud.
-          if (!(cause instanceof SourceAnnouncementConflictError)) throw cause;
+          if (!isSourceAnnouncementConflict(cause)) throw cause;
           const committed = await publisher.committedAnnouncement(announcementId);
           if (committed === undefined || committed.action !== 'available') throw cause;
           receipt = committed;
