@@ -346,7 +346,6 @@ function exactMaterialArtifacts(
   material: Pick<TerminalBenchMaterial, "checksum" | "files">,
 ): RuntimeRegistrationPublicationArtifact[] {
   const paths = new Set<string>();
-  let previous: string | undefined;
   const artifacts: RuntimeRegistrationPublicationArtifact[] = [];
   for (const file of material.files) {
     if (file.path.startsWith("/") || file.path.includes("\\") || file.path.includes("\0")
@@ -354,8 +353,7 @@ function exactMaterialArtifacts(
       throw new TypeError(`runtime registration material has unsafe path ${file.path}`);
     }
     if (paths.has(file.path)) throw new TypeError(`runtime registration material repeats path ${file.path}`);
-    if (previous !== undefined && previous.localeCompare(file.path) >= 0) throw new TypeError("runtime registration material inventory is not in canonical path order");
-    paths.add(file.path); previous = file.path;
+    paths.add(file.path);
     const bytes = getSealedBytes(workspaceDir, file.sha256);
     if (bytes.byteLength !== file.bytes || sha256Hex(bytes) !== file.sha256) throw new TypeError(`runtime registration material does not match ${file.path}`);
     artifacts.push({
@@ -403,9 +401,9 @@ export function runtimeRegistrationPublicationClosure(
     if (ids.has(artifact.id)) throw new TypeError(`runtime registration closure has duplicate artifact id ${artifact.id}`);
     ids.add(artifact.id); nested.push({ ...artifact, dependsOn: [...artifact.dependsOn] }); return artifact.id;
   };
-  const addExact = (namespace: string, role: string, digestHex: string, mediaType = "application/octet-stream"): string => {
+  const addExact = (namespace: string, role: string, digestHex: string): string => {
     const bytes = getSealedBytes(workspaceDir, digestHex);
-    return addNested({ id: `runtime-material:${namespace}:${digestHex}`, role, digestHex, bytes, mediaType, dependsOn: [] });
+    return addNested({ id: `runtime-material:${namespace}:${digestHex}`, role, digestHex, bytes, mediaType: "application/octet-stream", dependsOn: [] });
   };
   const addMaterial = (namespace: string, role: string, material: Pick<TerminalBenchMaterial, "checksum" | "files">): string[] =>
     exactMaterialArtifacts(workspaceDir, namespace, role, material).map(addNested);
@@ -436,7 +434,7 @@ export function runtimeRegistrationPublicationClosure(
     const registryMatches = registry.task_ids.filter((task) => task.name === profile.selectedTask.filter && task.ref === profile.selectedTask.package.ref);
     if (registryMatches.length !== 1) throw new TypeError("Terminal-Bench registry snapshot must contain the selected task/ref exactly once");
     const profileDependencies = [
-      addNested({ id: `runtime-material:tb2-registry:${profile.dataset.registrySnapshotSha256}`, role: TERMINAL_BENCH_2_REGISTRY_ROLE, digestHex: profile.dataset.registrySnapshotSha256, bytes: registryBytes, mediaType: "application/json", dependsOn: [] }),
+      addNested({ id: `runtime-material:tb2-registry:${profile.dataset.registrySnapshotSha256}`, role: TERMINAL_BENCH_2_REGISTRY_ROLE, digestHex: profile.dataset.registrySnapshotSha256, bytes: registryBytes, mediaType: "application/octet-stream", dependsOn: [] }),
       ...addMaterial("tb2-selected-task", TERMINAL_BENCH_2_TASK_MATERIAL_ROLE, profile.selectedTask.material),
     ];
     if (profile.migrationManifestSha256 !== undefined) {
@@ -449,8 +447,8 @@ export function runtimeRegistrationPublicationClosure(
       if (!Buffer.from(canonicalJsonBytes(migration.runnable as never)).equals(Buffer.from(canonicalJsonBytes(profile.selectedTask.material as never)))) throw new TypeError("Terminal-Bench migration runnable inventory differs from selected task material");
       const migrationDependencies = [
         addExact("tb-migration-executable", TERMINAL_BENCH_MIGRATION_EXECUTABLE_ROLE, migration.harbor.executableSha256),
-        addExact("tb-migration-stdout", TERMINAL_BENCH_MIGRATION_STDOUT_ROLE, migration.command.stdoutSha256, "text/plain"),
-        addExact("tb-migration-stderr", TERMINAL_BENCH_MIGRATION_STDERR_ROLE, migration.command.stderrSha256, "text/plain"),
+        addExact("tb-migration-stdout", TERMINAL_BENCH_MIGRATION_STDOUT_ROLE, migration.command.stdoutSha256),
+        addExact("tb-migration-stderr", TERMINAL_BENCH_MIGRATION_STDERR_ROLE, migration.command.stderrSha256),
         ...addMaterial("tb-migration-source", TERMINAL_BENCH_MIGRATION_SOURCE_ROLE, migration.source),
         ...addMaterial("tb-migration-transformed", TERMINAL_BENCH_MIGRATION_TRANSFORMED_ROLE, migration.transformed),
         ...addMaterial("tb-migration-runnable", TERMINAL_BENCH_MIGRATION_RUNNABLE_ROLE, migration.runnable),
@@ -460,6 +458,12 @@ export function runtimeRegistrationPublicationClosure(
     profileRoot.dependsOn = [...profileDependencies].sort();
   }
   rootMembers[harborRootIndex]!.dependsOn = [...harborDependencies].sort();
+  const nestedMediaTypes = new Map<string, string>();
+  for (const artifact of nested) {
+    const previous = nestedMediaTypes.get(artifact.digestHex);
+    if (previous !== undefined && previous !== artifact.mediaType) throw new TypeError(`runtime dependency ${artifact.digestHex} has conflicting media types`);
+    nestedMediaTypes.set(artifact.digestHex, artifact.mediaType);
+  }
   nested.sort((left, right) => left.id.localeCompare(right.id));
   return { artifacts: [...nested, ...rootMembers], rootIds };
 }
