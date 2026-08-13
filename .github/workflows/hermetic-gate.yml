@@ -149,12 +149,14 @@ jobs:
           yarn install --immutable
           yarn compile
 
-      # Run the hermetic suite. The new test/hermetic/** tests load the snapshot
+      # Run the hermetic suite. The test/hermetic/** tests load the snapshot
       # via spawnAnvilFromState (adversarial claim/delivery on real bytecode) and
       # exercise the deterministic RPC fallback chain (#592) with a mock
       # transport. The positional path scopes vitest to just this home (the same
       # filename-filter form `release:tier-1:T1.1` uses) so the gate's verdict
-      # maps 1:1 to the hermetic surface.
+      # maps 1:1 to the hermetic surface. The daemon full-loop fixture owns the
+      # solution leg through SolutionDeliveryClaimed; native evaluator verdict
+      # settlement/activity coverage is tracked separately in issue #2666.
       # The dedicated hermetic config runs the suite SEQUENTIALLY
       # (fileParallelism:false) with a long timeout — its heavy files each spawn
       # Anvil (+ Ponder / a real daemon) and would contend/flake if run
@@ -211,7 +213,7 @@ jobs:
             "headSha": "${HEAD_SHA}",
             "conclusion": "success",
             "scenarios": [
-              { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
+              { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery and exact solution settlement on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
               { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon SPA journeys (solvernet-flow create→launch + join discover→join→observe) green (#1014)" }
             ],
             "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."

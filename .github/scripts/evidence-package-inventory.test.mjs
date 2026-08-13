@@ -90,6 +90,14 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     devDependencies: [],
     optionalDependencies: [],
     peerDependencies: [],
+    // Yarn 4 does not inherit the neutral publication portals from the
+    // portaled evidence-publication dependency.
+    transitivePortalResolutions: [
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/record-publication',
+      '@jinn-network/trust-core',
+    ],
   }],
   ['trace', {
     dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/trust-core'],

@@ -150,7 +150,10 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       const taskMaterialPath = join(workspaceDir, "task-material");
       await mkdir(taskMaterialPath);
       await writeFile(join(taskMaterialPath, "task.toml"), `[task]\nname = "demo/task"\n[environment]\ndocker_image = "${manifest.environment.image}"\n`);
-      const clock = () => "2026-08-13T12:00:00Z";
+      // This fixture drives the real local backend, whose supervisor enforces Attempt deadlines
+      // against wall time. Keep the injected application clock live so a slow CI queue cannot
+      // make the replacement expire before the fake Harbor process reports its Delivery.
+      const clock = () => new Date().toISOString();
       const context = { workspaceDir, principal: "sponsor-1", clock };
       expect(initWorkspace(context).ok).toBe(true);
       expect(createDraft(context, { draftId: "replacement", name: "Visible Harbor replacement" }).ok).toBe(true);
