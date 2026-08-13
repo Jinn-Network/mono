@@ -1,11 +1,16 @@
 import {
   BENCHMARK_ACCOUNTING_RECORD_KIND,
+  BENCHMARK_ACCOUNTING_MEDIA_TYPE,
   BENCHMARK_PUBLICATION_EXTENSION,
+  MATRIX_MEDIA_TYPE,
   MATRIX_ASSEMBLY_PROCEDURE,
   MATRIX_ASSEMBLY_PROCEDURE_VERSION,
   MATRIX_RECORD_KIND,
   REPORT_V2_RECORD_KIND,
+  RUN_MEDIA_TYPE,
   RUN_RECORD_KIND,
+  SIGNED_REPORT_MEDIA_TYPE,
+  checkPublicRegistrationOrder,
   parseBenchmarkAccounting,
   parseMatrix,
   parseRun,
@@ -55,6 +60,7 @@ function digestHex(input: PublicationRecordInput | PublicationArtifactInput): st
 function parseSemanticClosure(input: BenchmarkPublicationPlanInput): void {
   const runInput = input.registration.find((candidate) => candidate.id === input.runId);
   if (runInput === undefined || !hasKind(runInput) || runInput.kind !== RUN_RECORD_KIND) throw new Error("runId must identify the Run registration record");
+  if (runInput.mediaType !== RUN_MEDIA_TYPE) throw new Error(`Run publication member mediaType must be ${RUN_MEDIA_TYPE}`);
   assertExactDigest(runInput);
   let run;
   try { run = parseRun(runInput.bytes); } catch { throw new Error("Run publication member does not contain exact Run bytes"); }
@@ -67,12 +73,14 @@ function parseSemanticClosure(input: BenchmarkPublicationPlanInput): void {
   }
 
   if (input.accounting.accounting.kind !== BENCHMARK_ACCOUNTING_RECORD_KIND) throw new Error("accounting stage must contain BenchmarkAccounting");
+  if (input.accounting.accounting.mediaType !== BENCHMARK_ACCOUNTING_MEDIA_TYPE) throw new Error(`BenchmarkAccounting publication member mediaType must be ${BENCHMARK_ACCOUNTING_MEDIA_TYPE}`);
   assertExactDigest(input.accounting.accounting);
   let accounting;
   try { accounting = parseBenchmarkAccounting(input.accounting.accounting.bytes); } catch { throw new Error("accounting member does not contain exact BenchmarkAccounting bytes"); }
   if (accounting.run.digest.sha256 !== digestHex(runInput)) throw new Error("BenchmarkAccounting does not bind the selected exact Run");
 
   if (input.accounting.matrix.kind !== MATRIX_RECORD_KIND) throw new Error("accounting stage must contain Matrix");
+  if (input.accounting.matrix.mediaType !== MATRIX_MEDIA_TYPE) throw new Error(`Matrix publication member mediaType must be ${MATRIX_MEDIA_TYPE}`);
   assertExactDigest(input.accounting.matrix);
   let matrix;
   try { matrix = parseMatrix(input.accounting.matrix.bytes); } catch { throw new Error("matrix member does not contain exact Matrix bytes"); }
@@ -86,6 +94,7 @@ function parseSemanticClosure(input: BenchmarkPublicationPlanInput): void {
 
   if (input.report === undefined) return;
   if (input.report.record.kind !== REPORT_V2_RECORD_KIND) throw new Error("report stage accepts only signed Report v2");
+  if (input.report.record.mediaType !== SIGNED_REPORT_MEDIA_TYPE) throw new Error(`signed Report v2 publication member mediaType must be ${SIGNED_REPORT_MEDIA_TYPE}`);
   assertExactDigest(input.report.record);
   let signed;
   try { signed = parseSignedReportRecord(input.report.record.bytes); } catch { throw new Error("report member does not contain an exact signed Report v2 envelope"); }
@@ -94,16 +103,20 @@ function parseSemanticClosure(input: BenchmarkPublicationPlanInput): void {
   if (signed.payload.subjects.length !== 1 || signed.payload.subjects[0]!.digest.sha256 !== matrixDigest) {
     throw new Error("signed Report v2 subject must bind the selected exact Matrix");
   }
-  const extension = signed.payload[BENCHMARK_PUBLICATION_EXTENSION] as Record<string, unknown> | undefined;
-  const publicRegistration = extension?.["publicRegistration"] as Record<string, unknown> | undefined;
-  const perSubject = publicRegistration?.["perSubject"];
-  if (!Array.isArray(perSubject) || perSubject.length !== 1) throw new Error("signed Report v2 requires one publication disclosure for its Matrix subject");
-  const disclosure = perSubject[0] as Record<string, unknown>;
-  const accountingDescriptor = disclosure["accounting"] as { digest?: { sha256?: unknown } } | undefined;
-  if (disclosure["subjectSha256"] !== matrixDigest || accountingDescriptor?.digest?.sha256 !== digestHex(input.accounting.accounting)) {
-    throw new Error("signed Report v2 publication extension does not bind the selected Matrix and BenchmarkAccounting");
+  const extension = signed.payload[BENCHMARK_PUBLICATION_EXTENSION];
+  const expectedExtension = {
+    publicRegistration: {
+      perSubject: [{
+        subjectSha256: matrixDigest,
+        status: accounting.publicRegistration.status,
+        accounting: matrixExtension.accounting,
+        check: checkPublicRegistrationOrder(accounting),
+      }],
+    },
+  };
+  if (!exactJsonEqual(extension, expectedExtension)) {
+    throw new Error("signed Report v2 publication disclosure/check is not the canonical derivation from exact Matrix and BenchmarkAccounting bytes");
   }
-  if (disclosure["status"] !== accounting.publicRegistration.status) throw new Error("signed Report v2 publication status does not match BenchmarkAccounting");
 }
 
 /**
