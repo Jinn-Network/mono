@@ -112,6 +112,9 @@ export const HarborSelectionManifestSchema = z.object({
   environment: z.object({ type: EnvironmentType, image: z.string().regex(/@sha256:[a-f0-9]{64}$/u), configuration: HarborEnvironmentConfigurationSchema }).strict(),
   outputs: z.array(z.object({ name: z.string().min(1), mediaType: z.string().min(1), artifact: ArtifactConfig, nativePath: z.string().regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u) }).strict()).min(1),
   retryPolicy: z.object({ nAttempts: z.literal(1), nConcurrent: z.literal(1), maxRetries: z.literal(0) }).strict(),
+  /** Product-tier selection profiles may bind extra immutable resolution evidence without
+   * teaching this reusable Harbor seam any benchmark-specific policy. */
+  profiles: z.record(z.string().url(), Json).optional(),
 }).strict();
 
 /** The exact non-deprecated Harbor 0.21 JobConfig subset emitted by this adapter. */

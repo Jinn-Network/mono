@@ -115,6 +115,31 @@ export type {
   HarborDispatchArchive,
 } from "./runtime/harbor/venue.js";
 export type { HarborRuntimeSelectionRequest, HarborRuntimeSelectionResolution } from "./runtime/harbor/host.js";
+export {
+  TERMINAL_BENCH_2_DATASET_ID,
+  TERMINAL_BENCH_2_PROFILE,
+  TerminalBench2SelectionManifestSchema,
+  TerminalBenchMigrationManifestSchema,
+  terminalBench2SelectionBytes,
+  terminalBenchMigrationBytes,
+} from "./runtime/terminal-bench-2/manifest.js";
+export type {
+  TerminalBench2SelectionManifest,
+  TerminalBenchMaterial,
+  TerminalBenchMigrationManifest,
+} from "./runtime/terminal-bench-2/manifest.js";
+export {
+  migrateTerminalBenchLegacyMaterial,
+  resolveTerminalBench2Selection,
+} from "./runtime/terminal-bench-2/host.js";
+export { terminalBench2SmokeReadiness } from "./runtime/terminal-bench-2/smoke.js";
+export type { TerminalBench2SmokeReadiness, TerminalBench2SmokeReadinessInput } from "./runtime/terminal-bench-2/smoke.js";
+export type {
+  TerminalBench2SelectionRequest,
+  TerminalBench2SelectionResolution,
+  TerminalBenchMigrationRequest,
+  TerminalBenchMigrationResolution,
+} from "./runtime/terminal-bench-2/host.js";
 
 // Demo-1's explicit real-Claude runtime and byte-preserving arm construction. The product does
 // not discover executables or source content ambiently; callers bind both before lock.
@@ -312,6 +337,8 @@ export {
   sampleInit,
   selectInspectEvaluation,
   selectHarborRuntime,
+  selectTerminalBench2Runtime,
+  migrateTerminalBenchLegacyTask,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -331,6 +358,8 @@ export type {
   ImportSweBenchRowsResult,
   OperationContext,
   OperationResult,
+  MigrateTerminalBenchLegacyTaskInput,
+  MigrateTerminalBenchLegacyTaskResult,
   PreviewArtifact,
   PublicationConfigureInput,
   PublicationRegisterInput,
@@ -368,6 +397,8 @@ export type {
   RunResumeInput,
   RunResumeResult,
   RunStatusCell,
+  SelectTerminalBench2RuntimeInput,
+  SelectTerminalBench2RuntimeResult,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,

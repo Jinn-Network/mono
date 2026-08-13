@@ -61,6 +61,9 @@ import {
   runVerify,
   sampleInit,
   selectInspectEvaluation,
+  selectHarborRuntime,
+  selectTerminalBench2Runtime,
+  migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
   type OperationContext,
@@ -68,6 +71,9 @@ import {
   type QuotePresentation,
   type RunLaunchDeps,
   type SelectInspectEvaluationInput,
+  type SelectHarborRuntimeInput,
+  type SelectTerminalBench2RuntimeInput,
+  type MigrateTerminalBenchLegacyTaskInput,
 } from "../operations/index.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
@@ -93,6 +99,11 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--provenance-timestamp <rfc3339>]
   runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
+  runtime harbor select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
+  runtime terminal-bench-2 select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
+  runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   arm add          --workspace <dir> --principal <id> --draft <draftId>
                    --arm <armId> --pinning <json> [--notes <text>]
   arm update       --workspace <dir> --principal <id> --draft <draftId>
@@ -138,6 +149,9 @@ const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
 const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -358,6 +372,32 @@ async function handleInspectRuntimeSelect(
     jsonMode,
     (value) => `selected Inspect evaluation ${value.selectionManifestSha256} for draft ${draftId}\n`,
   );
+}
+
+async function handleTerminalBench2RuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectTerminalBench2RuntimeInput, "draftId">;
+  const result = await selectTerminalBench2Runtime(opContext, { draftId, ...configuration } as SelectTerminalBench2RuntimeInput);
+  return renderResult(result, jsonMode, (value) => `selected Terminal-Bench 2 profile ${value.terminalBench2ProfileSha256} for draft ${draftId}\n`);
+}
+
+async function handleHarborRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_HARBOR_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectHarborRuntimeInput, "draftId">;
+  const result = await selectHarborRuntime(opContext, { draftId, ...configuration } as SelectHarborRuntimeInput);
+  return renderResult(result, jsonMode, (value) => `selected Harbor runtime ${value.selectionManifestSha256} for draft ${draftId}\n`);
+}
+
+async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as MigrateTerminalBenchLegacyTaskInput;
+  const result = await migrateTerminalBenchLegacyTask(opContext, configuration);
+  return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
 function handleArmAdd(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -738,6 +778,9 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
   ["runtime inspect select", handleInspectRuntimeSelect],
+  ["runtime harbor select", handleHarborRuntimeSelect],
+  ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],
+  ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],

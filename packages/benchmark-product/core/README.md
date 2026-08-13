@@ -35,8 +35,8 @@ and proves copied-bundle verification after source-workspace deletion.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **30 generated operations**, all shipped through the library, CLI, and
-GUI:
+contains **33 generated operations**, all shipped through the library and CLI
+with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
 |---|---|---|
@@ -53,6 +53,7 @@ GUI:
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
+| `migrateTerminalBenchLegacyTask` | `colophon runtime terminal-bench migrate` | Transform legacy Terminal-Bench material with pinned Harbor and preserve both byte histories. |
 | `publicationConfigure` | `colophon publication configure` | Configure the public locator and opt into prospective disclosure. |
 | `publicationRegister` | `colophon publication register` | Store, announce, and exact-probe the registration closure. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
@@ -69,6 +70,8 @@ GUI:
 | `runVerify` | `colophon verify` | Re-derive Matrix, Report, and claim consistency. |
 | `sampleInit` | `colophon sample init` | Attach the bundled three-task benchmark. |
 | `selectInspectEvaluation` | `colophon runtime inspect select` | Select and bind a real Inspect evaluation. |
+| `selectHarborRuntime` | `colophon runtime harbor select` | Select and bind the managed Harbor runtime. |
+| `selectTerminalBench2Runtime` | `colophon runtime terminal-bench-2 select` | Resolve and bind one immutable Terminal-Bench 2 task through Harbor. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI

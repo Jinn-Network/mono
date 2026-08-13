@@ -46,6 +46,14 @@ export {
   type SelectInspectEvaluationResult,
 } from "./inspect-runtime.js";
 export { selectHarborRuntime, type SelectHarborRuntimeInput, type SelectHarborRuntimeResult } from "./harbor-runtime.js";
+export {
+  migrateTerminalBenchLegacyTask,
+  selectTerminalBench2Runtime,
+  type MigrateTerminalBenchLegacyTaskInput,
+  type MigrateTerminalBenchLegacyTaskResult,
+  type SelectTerminalBench2RuntimeInput,
+  type SelectTerminalBench2RuntimeResult,
+} from "./terminal-bench-2.js";
 
 export {
   armAdd,

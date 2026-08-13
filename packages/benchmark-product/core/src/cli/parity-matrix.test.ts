@@ -105,11 +105,23 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       gui: capability,
     }))).toEqual([
       {
+        operation: "migrateTerminalBenchLegacyTask",
+        gui: { status: "deferred", deferredTo: "PUB-14" },
+      },
+      {
         operation: "publicationConfigure",
         gui: { status: "deferred", deferredTo: "PUB-14" },
       },
       {
         operation: "publicationRegister",
+        gui: { status: "deferred", deferredTo: "PUB-14" },
+      },
+      {
+        operation: "selectHarborRuntime",
+        gui: { status: "deferred", deferredTo: "PUB-14" },
+      },
+      {
+        operation: "selectTerminalBench2Runtime",
         gui: { status: "deferred", deferredTo: "PUB-14" },
       },
     ]);

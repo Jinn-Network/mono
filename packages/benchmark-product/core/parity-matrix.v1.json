@@ -133,6 +133,16 @@
       }
     },
     {
+      "operation": "migrateTerminalBenchLegacyTask",
+      "cliVerb": "runtime terminal-bench migrate",
+      "authorityGated": false,
+      "description": "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
+      "gui": {
+        "status": "deferred",
+        "deferredTo": "PUB-14"
+      }
+    },
+    {
       "operation": "publicationConfigure",
       "cliVerb": "publication configure",
       "authorityGated": true,
@@ -283,6 +293,16 @@
       }
     },
     {
+      "operation": "selectHarborRuntime",
+      "cliVerb": "runtime harbor select",
+      "authorityGated": false,
+      "description": "Selects and digest-binds a managed Harbor runtime.",
+      "gui": {
+        "status": "deferred",
+        "deferredTo": "PUB-14"
+      }
+    },
+    {
       "operation": "selectInspectEvaluation",
       "cliVerb": "runtime inspect select",
       "authorityGated": false,
@@ -290,6 +310,16 @@
       "gui": {
         "status": "shipped",
         "action": "runtime.inspect.select"
+      }
+    },
+    {
+      "operation": "selectTerminalBench2Runtime",
+      "cliVerb": "runtime terminal-bench-2 select",
+      "authorityGated": false,
+      "description": "Resolves one immutable Terminal-Bench 2 task and binds it to the managed Harbor runtime.",
+      "gui": {
+        "status": "deferred",
+        "deferredTo": "PUB-14"
       }
     },
     {

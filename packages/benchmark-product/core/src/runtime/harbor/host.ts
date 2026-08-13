@@ -16,6 +16,7 @@ export interface HarborRuntimeSelectionRequest {
   readonly arms: HarborSelectionManifest["arms"];
   readonly environment: HarborSelectionManifest["environment"];
   readonly outputs: HarborSelectionManifest["outputs"];
+  readonly profiles?: HarborSelectionManifest["profiles"];
 }
 
 export const HarborHostBindingSchema = z.object({ executable: z.string().min(1), sourceMaterialPath: z.string().min(1) }).strict();
@@ -78,6 +79,7 @@ export async function resolveHarborSelection(input: HarborRuntimeSelectionReques
     harbor: { version: resolvedVersion, executableSha256 },
     source, arms: input.arms, environment: input.environment, outputs: input.outputs,
     retryPolicy: { nAttempts: 1, nConcurrent: 1, maxRetries: 0 },
+    ...(input.profiles === undefined ? {} : { profiles: input.profiles }),
   });
   return { manifest, binding: { executable, sourceMaterialPath: materialRoot } };
 }
