@@ -34,6 +34,11 @@
     "public-quickstart": "./quickstart/public-quickstart.mjs",
     "generate:parity": "node scripts/generate-parity-matrix.mjs",
     "check:parity": "node scripts/generate-parity-matrix.mjs --check",
+    "p5:fixture:mint": "node scripts/mint-micro-slate.mjs",
+    "p5:fixture:check": "node scripts/mint-micro-slate.mjs --check",
+    "p5:offline:test": "node --preserve-symlinks --test scripts/p5-disk-gate.test.mjs scripts/p5-accounting.test.mjs scripts/mint-micro-slate.test.mjs",
+    "p5:green": "node scripts/p5-green-baseline.mjs",
+    "p5:walkthrough": "node scripts/p5-walkthrough.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
