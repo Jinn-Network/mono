@@ -1166,6 +1166,40 @@ describe('native announce path — requester-side counterparty delivery (#2644 p
     expect(error.message).toContain('no single durable solution-delivery record');
   });
 
+  it('names the CHAIN read, not the record plane, when the anchor read is unavailable (#2647)', async () => {
+    // The enrich-side sibling of this leg turns a transport failure into a replayable DROP, because
+    // it has a role to protect and a rejection to avoid. This leg has neither: `todayDeliveryMaterial`
+    // refuses either way, and per #2649 that refusal is permanent for the event. What it must not do
+    // is send the operator to debug the counterparty's serving plane for a failure that never
+    // reached it — so the plane is not consulted at all, and the warning says why.
+    const warnings: string[] = [];
+    let planeConsulted = false;
+    const resolveRecord = buildNativeResolveRecord(
+      BASE_SEPOLIA_TODAY,
+      async () => SUBMISSION_BYTES,
+      undefined,
+      { solutionDelivery: async () => undefined, evaluationDelivery: async () => undefined },
+      buildRecordPlaneCounterpartyDeliveryResolver({
+        readTodayDeliveryFacts: async () => 'unavailable',
+        fetchDeliveryBytes: async () => {
+          planeConsulted = true;
+          return REQUESTER_DELIVERY_BYTES;
+        },
+        listRecordPlaneDigests: () => [REQUESTER_DELIVERY_DIGEST],
+        logger: { warn: (message) => warnings.push(message) },
+      }),
+    );
+    const claimed = requesterTodaySequence().find(
+      (event) => event.event === 'SolutionDeliveryClaimed',
+    )!;
+
+    const error = await resolveRecord(claimed, 'delivery').catch((cause) => cause);
+    expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(planeConsulted).toBe(false);
+    expect(warnings.some((line) => line.includes('unavailable')
+      && line.includes('the record plane was never consulted'))).toBe(true);
+  });
+
   it('refuses a candidate that hashes to the anchor but names a different attempt', async () => {
     // The bytes carry the coordinator's anchor yet describe another Attempt — a contradiction the
     // chain itself asserts against. Same posture as the adoption port's gate 4.
