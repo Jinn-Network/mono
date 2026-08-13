@@ -1871,7 +1871,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 3009,
+      "discoveredFirstPartySurfaces": 3010,
       "generatedOutputSources": 1330,
       "generatorSources": 623,
       "marketplaceControl": 2,
@@ -20069,6 +20069,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/src/conformance"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance/harbor-direct-publication.test.ts"
       },
       {
         "categories": [
