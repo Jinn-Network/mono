@@ -108,14 +108,16 @@ describe("benchmark publication", () => {
         { observation: from("https://a.example/stream", "one", "0000000000000001", "same") },
         { observation: from("https://a.example/stream", "conflict", "0000000000000002", "left") },
         { observation: from("https://a.example/stream", "conflict", "0000000000000002", "right") },
-        // The archive never invents a missing sequence: the gap remains observable in exact data.
-        { observation: from("https://b.example/stream", "three", "0000000000000003", "gap-after-two") },
+        // The archive never invents a missing sequence: 1 and 3 remain exact observations.
+        { observation: from("https://a.example/stream", "three", "0000000000000003", "gap-after-two") },
+        { observation: from("https://b.example/stream", "other", "0000000000000001", "separate-source") },
       ],
     }).archive;
     expect(archive.streams).toHaveLength(2);
-    expect(archive.streams[0]!.observations.map((entry) => entry.id)).toEqual(["one"]);
+    expect(archive.streams[0]!.observations.map((entry) => entry.id)).toEqual(["one", "three"]);
+    expect(archive.streams[0]!.observations.map((entry) => entry.sequence)).toEqual(["0000000000000001", "0000000000000003"]);
     expect(archive.streams[0]!.conflicts).toHaveLength(1);
-    expect(archive.streams[1]!.observations.map((entry) => entry.sequence)).toEqual(["0000000000000003"]);
+    expect(archive.streams[1]!.observations.map((entry) => entry.id)).toEqual(["other"]);
   });
 
   test.each([
