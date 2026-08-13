@@ -91,7 +91,11 @@ export interface RewindChainLogCursorInput {
   readonly state: ProjectorReplayDatabase;
   /** `venue:<chainId>:<jinnRouter lowercased>` unless the host overrode `options.stream`. */
   readonly stream: string;
-  /** The block the next poll resumes ABOVE. Must be strictly below the current live cursor. */
+  /**
+   * The block the next poll resumes ABOVE. Must be strictly below BOTH persisted marks — below the
+   * live cursor so the rewind goes backwards, and below the finalized mark so it does not advance
+   * a durable checkpoint `poll()` will never move back.
+   */
   readonly toBlock: bigint;
   /** Live chain read; the rewind refuses rather than write a hash it could not confirm. */
   readonly readCanonicalBlockHash: (blockNumber: bigint) => Promise<Hex | undefined>;
@@ -148,7 +152,8 @@ export function readChainLogCursor(
 /**
  * Rewinds one stream's chain-log cursor so the next `ProjectorLoop.tick()` re-offers the range.
  * Fails closed on every ambiguity: an absent row (deleting it would jump to head — see the module
- * comment), a non-backwards target, or a block hash the chain would not confirm.
+ * comment), a non-backwards target, a target that would advance the finalized mark rather than
+ * rewind it, or a block hash the chain would not confirm.
  */
 export async function rewindChainLogCursor(
   input: RewindChainLogCursorInput,
