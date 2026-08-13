@@ -6,6 +6,7 @@ export const P5_PRESTAGE_STOP_SCHEMA = "demo1.p5-green-baseline-stop/2";
 const TIMEOUT_CLASSIFICATIONS = new Set([
   "child-timeout-kill-observed",
   "child-exit-before-timeout",
+  "child-process-error",
 ]);
 
 function exactIsoTimestamp(value, field) {
@@ -34,29 +35,41 @@ export function assertP5PrestageStopEvidence(record) {
   if (record.configuredTimeoutSeconds !== 1_800) {
     throw new TypeError("configuredTimeoutSeconds must equal the sealed P5 bound of 1800");
   }
+  if (!Number.isInteger(record.childTimeoutSeconds)
+    || record.childTimeoutSeconds < 1
+    || record.childTimeoutSeconds > record.configuredTimeoutSeconds) {
+    throw new TypeError("childTimeoutSeconds must be a positive bound within configuredTimeoutSeconds");
+  }
   if (typeof record.timedOut !== "boolean") {
     throw new TypeError("timedOut must be a directly captured boolean");
   }
   if (!TIMEOUT_CLASSIFICATIONS.has(record.timeoutClassification)) {
     throw new TypeError("timeoutClassification is not a direct child outcome");
   }
-  const expectedClassification = record.timedOut
-    ? "child-timeout-kill-observed"
-    : "child-exit-before-timeout";
-  if (record.timeoutClassification !== expectedClassification) {
-    throw new TypeError("timedOut and timeoutClassification disagree");
+  if (record.timedOut && record.timeoutClassification !== "child-timeout-kill-observed") {
+    throw new TypeError("a timed-out child requires child-timeout-kill-observed");
+  }
+  if (!record.timedOut && record.timeoutClassification === "child-timeout-kill-observed") {
+    throw new TypeError("a non-timeout child cannot claim child-timeout-kill-observed");
+  }
+  if (record.timeoutClassification === "child-process-error") {
+    if (record.processError?.name === undefined || "exitCode" in record) {
+      throw new TypeError("child-process-error requires typed processError and no exitCode");
+    }
+  } else if (record.processError !== undefined || !("exitCode" in record)) {
+    throw new TypeError("child exit classifications require exitCode and no processError");
   }
   if (record.timedOut
-    && record.monotonicElapsedMs < record.configuredTimeoutSeconds * 1_000) {
-    throw new TypeError("a timed-out stop cannot complete before its configured bound");
+    && record.monotonicElapsedMs < record.childTimeoutSeconds * 1_000) {
+    throw new TypeError("a timed-out stop cannot complete before its child bound");
   }
   return record;
 }
 
 /**
- * Wrap the grader's injected process seam so a pull stop records the exact SIGKILL timeout
- * action and monotonic elapsed time. Wall-clock timestamps are descriptive only; duration and
- * timeout classification come from the monotonic clock and the observed child control action.
+ * Wrap the grader's injected process seam so every image-prestage child stop records the exact
+ * SIGKILL timeout action, process-error-vs-exit outcome, and monotonic elapsed time. Wall-clock
+ * timestamps are descriptive only; duration and classification come from direct child events.
  */
 export function createP5ObservedDockerSpawner({
   dockerPath,
@@ -64,31 +77,36 @@ export function createP5ObservedDockerSpawner({
   wallNow = () => new Date(),
   monotonicNow = () => performance.now(),
 } = {}) {
-  let pullObservation;
+  let childObservation;
 
   function observedSpawn(command, args) {
-    const child = spawn(dockerPath ?? command, [...args], {
-      stdio: "ignore",
-      env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
-    });
-    const observesPull = args[0] === "pull";
-    if (observesPull) {
-      pullObservation = {
-        startedAt: wallNow().toISOString(),
-        startedMonotonicMs: monotonicNow(),
-        timeoutKillObserved: false,
-      };
+    const observation = {
+      operation: args[0] === "pull" ? "pull" : args.slice(0, 2).join(" "),
+      startedAt: wallNow().toISOString(),
+      startedMonotonicMs: monotonicNow(),
+      timeoutKillObserved: false,
+    };
+    childObservation = observation;
+    let child;
+    try {
+      child = spawn(dockerPath ?? command, [...args], {
+        stdio: "ignore",
+        env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+      });
+    } catch (error) {
+      finishChild({ kind: "process-error", error });
+      throw error;
     }
 
-    const finishPull = (exitCode) => {
-      if (!observesPull || pullObservation?.completedAt !== undefined) return;
-      pullObservation.completedAt = wallNow().toISOString();
-      pullObservation.monotonicElapsedMs = Math.max(
+    function finishChild(outcome) {
+      if (observation.completedAt !== undefined) return;
+      observation.completedAt = wallNow().toISOString();
+      observation.monotonicElapsedMs = Math.max(
         0,
-        monotonicNow() - pullObservation.startedMonotonicMs,
+        monotonicNow() - observation.startedMonotonicMs,
       );
-      pullObservation.exitCode = exitCode;
-    };
+      observation.outcome = outcome;
+    }
 
     const wrapped = {
       get pid() {
@@ -97,20 +115,20 @@ export function createP5ObservedDockerSpawner({
       on(event, listener) {
         if (event === "exit") {
           child.on("exit", (code) => {
-            finishPull(code);
+            finishChild({ kind: "exit", exitCode: code });
             listener(code);
           });
         } else {
           child.on("error", (error) => {
-            finishPull(null);
+            finishChild({ kind: "process-error", error });
             listener(error);
           });
         }
         return wrapped;
       },
       kill(signal) {
-        if (observesPull && signal === "SIGKILL" && pullObservation !== undefined) {
-          pullObservation.timeoutKillObserved = true;
+        if (signal === "SIGKILL") {
+          observation.timeoutKillObserved = true;
         }
         return child.kill(signal);
       },
@@ -118,25 +136,43 @@ export function createP5ObservedDockerSpawner({
     return wrapped;
   }
 
-  function completedPullEvidence(configuredTimeoutSeconds) {
-    if (pullObservation?.completedAt === undefined
-      || pullObservation.monotonicElapsedMs === undefined) {
+  function completedPrestageEvidence(configuredTimeoutSeconds) {
+    if (childObservation?.completedAt === undefined
+      || childObservation.monotonicElapsedMs === undefined
+      || childObservation.outcome === undefined) {
       return undefined;
     }
+    const timedOut = childObservation.timeoutKillObserved;
+    const processErrored = !timedOut && childObservation.outcome.kind === "process-error";
     const evidence = {
       schema: P5_PRESTAGE_STOP_SCHEMA,
-      startedAt: pullObservation.startedAt,
-      completedAt: pullObservation.completedAt,
-      monotonicElapsedMs: pullObservation.monotonicElapsedMs,
+      startedAt: childObservation.startedAt,
+      completedAt: childObservation.completedAt,
+      monotonicElapsedMs: childObservation.monotonicElapsedMs,
       configuredTimeoutSeconds,
-      timedOut: pullObservation.timeoutKillObserved,
-      timeoutClassification: pullObservation.timeoutKillObserved
+      childTimeoutSeconds: childObservation.operation === "pull"
+        ? configuredTimeoutSeconds
+        : Math.min(30, configuredTimeoutSeconds),
+      operation: childObservation.operation,
+      timedOut,
+      timeoutClassification: timedOut
         ? "child-timeout-kill-observed"
-        : "child-exit-before-timeout",
-      exitCode: pullObservation.exitCode,
+        : (processErrored ? "child-process-error" : "child-exit-before-timeout"),
+      ...(processErrored
+        ? {
+            processError: {
+              name: childObservation.outcome.error instanceof Error
+                ? childObservation.outcome.error.name
+                : "UnknownProcessError",
+              ...(typeof childObservation.outcome.error?.code === "string"
+                ? { code: childObservation.outcome.error.code }
+                : {}),
+            },
+          }
+        : { exitCode: childObservation.outcome.exitCode }),
     };
     return assertP5PrestageStopEvidence(evidence);
   }
 
-  return { spawn: observedSpawn, completedPullEvidence };
+  return { spawn: observedSpawn, completedPrestageEvidence };
 }

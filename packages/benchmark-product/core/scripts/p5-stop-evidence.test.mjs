@@ -31,6 +31,9 @@ function fakeChild() {
     exit(code) {
       events.emit("exit", code);
     },
+    error(error) {
+      events.emit("error", error);
+    },
   };
 }
 
@@ -59,12 +62,14 @@ test("future pre-stage stops directly capture timeout kill and monotonic elapsed
   process.kill("SIGKILL");
   await exited;
 
-  assert.deepEqual(observer.completedPullEvidence(1_800), {
+  assert.deepEqual(observer.completedPrestageEvidence(1_800), {
     schema: P5_PRESTAGE_STOP_SCHEMA,
     startedAt: "2026-08-13T03:00:00.000Z",
     completedAt: "2026-08-13T03:30:00.005Z",
     monotonicElapsedMs: 1_800_005,
     configuredTimeoutSeconds: 1_800,
+    childTimeoutSeconds: 1_800,
+    operation: "pull",
     timedOut: true,
     timeoutClassification: "child-timeout-kill-observed",
     exitCode: null,
@@ -88,12 +93,14 @@ test("future pre-stage stops distinguish a nonzero child exit before timeout", a
   child.exit(1);
   await exited;
 
-  assert.deepEqual(observer.completedPullEvidence(1_800), {
+  assert.deepEqual(observer.completedPrestageEvidence(1_800), {
     schema: P5_PRESTAGE_STOP_SCHEMA,
     startedAt: "2026-08-13T03:00:00.000Z",
     completedAt: "2026-08-13T03:00:04.000Z",
     monotonicElapsedMs: 4_000,
     configuredTimeoutSeconds: 1_800,
+    childTimeoutSeconds: 1_800,
+    operation: "pull",
     timedOut: false,
     timeoutClassification: "child-exit-before-timeout",
     exitCode: 1,
@@ -107,8 +114,10 @@ test("future stop schema rejects missing or inferred timeout evidence", () => {
     completedAt: "2026-08-13T03:30:00.000Z",
     monotonicElapsedMs: 1_800_000,
     configuredTimeoutSeconds: 1_800,
+    childTimeoutSeconds: 1_800,
     timedOut: true,
     timeoutClassification: "child-timeout-kill-observed",
+    exitCode: null,
   };
   assert.equal(assertP5PrestageStopEvidence(valid), valid);
   assert.throws(
@@ -129,16 +138,83 @@ test("future stop schema rejects missing or inferred timeout evidence", () => {
   );
   assert.throws(
     () => assertP5PrestageStopEvidence({ ...valid, timedOut: false }),
-    /disagree/u,
+    /cannot claim/u,
   );
   assert.throws(
     () => assertP5PrestageStopEvidence({ ...valid, monotonicElapsedMs: 1_799_999 }),
-    /configured bound/u,
+    /child bound/u,
   );
   assert.throws(
     () => assertP5PrestageStopEvidence({ ...valid, configuredTimeoutSeconds: 1_799 }),
     /sealed P5 bound/u,
   );
+});
+
+test("ChildProcess error is typed and never classified as an ordinary early exit", async () => {
+  const child = fakeChild();
+  const wallTimes = [
+    new Date("2026-08-13T03:00:00.000Z"),
+    new Date("2026-08-13T03:00:00.010Z"),
+  ];
+  const monotonicTimes = [20, 30];
+  const observer = createP5ObservedDockerSpawner({
+    spawn: () => child,
+    wallNow: () => wallTimes.shift(),
+    monotonicNow: () => monotonicTimes.shift(),
+  });
+  const process = observer.spawn("docker", ["pull", "--platform", "linux/amd64", "image"]);
+  const errorObserved = new Promise((resolve) => process.on("error", resolve));
+  const processError = Object.assign(new Error("spawn failed"), { code: "ENOENT" });
+  processError.name = "SpawnError";
+  child.error(processError);
+  await errorObserved;
+
+  const evidence = observer.completedPrestageEvidence(1_800);
+  assert.deepEqual(evidence, {
+    schema: P5_PRESTAGE_STOP_SCHEMA,
+    startedAt: "2026-08-13T03:00:00.000Z",
+    completedAt: "2026-08-13T03:00:00.010Z",
+    monotonicElapsedMs: 10,
+    configuredTimeoutSeconds: 1_800,
+    childTimeoutSeconds: 1_800,
+    operation: "pull",
+    timedOut: false,
+    timeoutClassification: "child-process-error",
+    processError: { name: "SpawnError", code: "ENOENT" },
+  });
+  assert.notEqual(evidence.timeoutClassification, "child-exit-before-timeout");
+});
+
+test("synchronous spawn failure is preserved as a typed process error", () => {
+  const processError = Object.assign(new Error("spawn failed"), { code: "EACCES" });
+  processError.name = "SpawnError";
+  const wallTimes = [
+    new Date("2026-08-13T03:00:00.000Z"),
+    new Date("2026-08-13T03:00:00.001Z"),
+  ];
+  const monotonicTimes = [50, 51];
+  const observer = createP5ObservedDockerSpawner({
+    spawn: () => { throw processError; },
+    wallNow: () => wallTimes.shift(),
+    monotonicNow: () => monotonicTimes.shift(),
+  });
+
+  assert.throws(
+    () => observer.spawn("docker", ["image", "inspect", "image"]),
+    (error) => error === processError,
+  );
+  assert.deepEqual(observer.completedPrestageEvidence(1_800), {
+    schema: P5_PRESTAGE_STOP_SCHEMA,
+    startedAt: "2026-08-13T03:00:00.000Z",
+    completedAt: "2026-08-13T03:00:00.001Z",
+    monotonicElapsedMs: 1,
+    configuredTimeoutSeconds: 1_800,
+    childTimeoutSeconds: 30,
+    operation: "image inspect",
+    timedOut: false,
+    timeoutClassification: "child-process-error",
+    processError: { name: "SpawnError", code: "EACCES" },
+  });
 });
 
 test("historical stops preserve machine facts while qualifying timeout as operator-attested", () => {

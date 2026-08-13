@@ -76,8 +76,10 @@ event, while declaring that private history is not a retention dependency.
 - Future pre-stage stop output uses local operational schema `demo1.p5-green-baseline-stop/2`
   (not a platform record kind). Its injected child observer must capture `startedAt`,
   `completedAt`, monotonic elapsed, configured timeout, the direct `timedOut` boolean, and a
-  timeout-kill-versus-early-exit classification. Validation rejects missing, contradictory, or
-  elapsed-before-bound timeout evidence.
+  timeout-kill, early-exit, or typed child-process-error classification. A ChildProcess error can
+  never be labeled as an ordinary exit. The canonical `p5:walkthrough` always supplies immutable
+  stop output and attempt identity, so every future image-prestage stop takes this v2 path.
+  Validation rejects missing, contradictory, or elapsed-before-child-bound timeout evidence.
 
 The final fixture was minted at `2026-08-13T01:06:45.511Z` after an immediate
 47,323,076-KiB (45.13-GiB) disk pass. It contains three rows from three repositories and seals:
@@ -94,7 +96,7 @@ for `provenance.json`. The strict post-P3b fixture suite passes all 11 assertion
 
 Final non-Docker reruns on Node 22 passed:
 
-- P5 pure/injected tests: 14/14;
+- P5 pure/injected tests: 17/17;
 - strict final-fixture tests: 11/11;
 - benchmark-product core full suite: 78 files passed, 3 skipped; 819 tests passed,
   13 skipped;

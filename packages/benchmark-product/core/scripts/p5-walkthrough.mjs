@@ -106,6 +106,20 @@ function rfc3339(value) {
   return normalized;
 }
 
+/** Canonical walkthrough boundary: every green-baseline pre-stage stop must emit v2 evidence. */
+export async function runCanonicalP5GreenBaseline({
+  runRoot,
+  dockerPath,
+  runGreenBaseline = runP5GreenBaseline,
+}) {
+  return runGreenBaseline({
+    dockerPath,
+    output: join(runRoot, "green-baseline.json"),
+    stopOutput: join(runRoot, "green-baseline-prestage-stop.json"),
+    attempt: 1,
+  });
+}
+
 async function main() {
   const claudePath = resolve(option("--claude", "JINN_P5_CLAUDE_PATH"));
   const claudeVersion = option("--claude-version", "JINN_P5_CLAUDE_VERSION");
@@ -154,10 +168,9 @@ async function main() {
   }
 
   const dockerGatePath = createDockerGateWrapper(runRoot, dockerPath);
-  const greenBaselinePath = join(runRoot, "green-baseline.json");
-  const { transcript: greenBaseline } = await runP5GreenBaseline({
+  const { transcript: greenBaseline } = await runCanonicalP5GreenBaseline({
+    runRoot,
     dockerPath: dockerGatePath,
-    output: greenBaselinePath,
   });
   if (!greenBaseline.passed) fail("gold/empty grader control did not pass for all three tasks");
   const createVenue = (options) => createLocalVenue({
@@ -358,4 +371,7 @@ async function main() {
   process.stdout.write(`${JSON.stringify(transcript, null, 2)}\n`);
 }
 
-await main();
+if (process.argv[1] !== undefined
+  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main();
+}

@@ -128,7 +128,7 @@ export async function runP5GreenBaseline({ dockerPath, output, stopOutput, attem
         );
       } catch (error) {
         if (stopOutput !== undefined && observer !== undefined) {
-          const timing = observer.completedPullEvidence(image.timeoutMs / 1_000);
+          const timing = observer.completedPrestageEvidence(image.timeoutMs / 1_000);
           if (timing === undefined) {
             fail("pre-stage failed without a completed pull observation; no stop record was emitted");
           }

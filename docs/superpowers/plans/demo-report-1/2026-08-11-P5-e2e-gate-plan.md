@@ -70,9 +70,11 @@ no automatic substitution or silent workaround.
 Every future image-prestage stop must be emitted as local operational schema
 `demo1.p5-green-baseline-stop/2` with directly captured `startedAt`, `completedAt`, monotonic
 elapsed, configured timeout, `timedOut`, and timeout classification. The P5 child observer records
-the actual timeout `SIGKILL`; validation rejects inferred, missing, contradictory, or
-elapsed-before-bound timeout claims. This stop schema is not a new platform record kind or
-tier-1–3 publication semantic.
+the actual timeout `SIGKILL` and distinguishes typed ChildProcess errors from ordinary child
+exits; validation rejects inferred, missing, contradictory, or elapsed-before-child-bound timeout
+claims. The canonical walkthrough always supplies v2 stop output and attempt identity to the
+green-baseline runner. This stop schema is not a new platform record kind or tier-1–3 publication
+semantic.
 
 ## One-command execution
 
