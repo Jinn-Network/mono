@@ -70,6 +70,13 @@ type RuntimeCorrelation = BenchmarkAccountingDispatch["correlations"][number];
 /** Exact bytes are retained by the caller's artifact store; the adapter only carries their descriptors. */
 export interface RuntimeEvidenceAdapterOptions {
   readonly registrationArtifacts?: readonly RuntimeRegistrationArtifact[];
+  /** Exact sealed selection bytes. The contributor, not a lifecycle caller, assigns its role. */
+  readonly selectionManifest?: {
+    readonly id?: string;
+    readonly digest: `sha256:${string}`;
+    readonly bytes: Uint8Array;
+    readonly mediaType?: string;
+  };
 }
 /**
  * This deliberately extends the reusable dispatch input only with opaque captured evidence.
@@ -101,6 +108,12 @@ export interface EvaluationRuntimeAdapter {
 /** Publication is an opt-in tier-3 view over a selected legacy runtime adapter. */
 export interface RuntimePublicationAdapter extends RuntimeEvidenceContributor, RuntimeEvidenceVerifier {
   readonly adapterId: string;
+  /**
+   * The sealed registration closure is available without contacting a runtime.  Keeping this
+   * synchronous is intentional: `lock` must seal the Run before any execution can start, and
+   * must not invent a runtime-specific role itself.
+   */
+  registrationArtifacts(): readonly RuntimeRegistrationArtifact[];
   dispatch(input: RuntimeEvidenceDispatchInput): Promise<{
     readonly correlations: BenchmarkAccountingDispatch["correlations"];
     readonly nativeArtifacts: BenchmarkAccountingDispatch["nativeArtifacts"];
@@ -418,13 +431,30 @@ function createPublicationAdapter(
   const adapter: RuntimePublicationAdapter = {
     adapterId,
     profile: definition.profile,
-    async registration() {
+    registrationArtifacts() {
       // No reserialization or descriptor synthesis: registration bytes are already sealed by the runtime.
-      const artifacts = options.registrationArtifacts ?? [];
+      const artifacts = options.registrationArtifacts ?? (() => {
+        const selection = options.selectionManifest;
+        if (selection === undefined) return [];
+        const role = adapterId === HARBOR_ADAPTER_ID
+          ? HARBOR_SELECTION_ROLE
+          : adapterId === INSPECT_ADAPTER_ID
+            ? INSPECT_SELECTION_CORRELATION_ROLE
+            : undefined;
+        return role === undefined ? [] : [{
+          id: selection.id ?? "runtime-selection-manifest.json",
+          role,
+          digest: selection.digest,
+          bytes: selection.bytes,
+          mediaType: selection.mediaType ?? "application/json",
+          actions: ["store"] as const,
+        }];
+      })();
       if (adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertInspectRegistration(expectedSelectionManifestSha256, artifacts);
       if (adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertHarborRegistration(expectedSelectionManifestSha256, artifacts);
       return artifacts;
     },
+    async registration() { return adapter.registrationArtifacts(); },
     async dispatch(input: RuntimeEvidenceDispatchInput) {
       // A native source can be absent or collection can fail. Preserve those facts rather than inventing a blob.
       const correlations = input.correlations ?? [];

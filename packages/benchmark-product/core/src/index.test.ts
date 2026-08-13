@@ -58,6 +58,7 @@ describe("public surface", () => {
       "sampleInit", "importSweBenchRows", "selectInspectEvaluation", "armAdd", "armUpdate", "armRemove", "armList",
       "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertSweBenchRows",
       "runPreview", "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
+      "publicationConfigure", "publicationRegister", "publicationAccounting",
       "runReport", "runVerify", "runPublish", "listRuntimeAdapters", "runtimeNativeArtifactPublicationPolicy", "createRuntimeVenue",
       "createDefaultBenchmarkRuntimeHost", "resolveHarborSelection", "harborEvidenceContributionFromArchive",
     ] as const) {

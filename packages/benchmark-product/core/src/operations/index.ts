@@ -96,6 +96,7 @@ export {
   type PublicationRegisterDeps,
   type PublicationRegistrationResult,
 } from "./publication-register.js";
+export { publicationAccounting, type PublicationAccountingInput, type PublicationAccountingResult } from "./publication-accounting.js";
 export {
   runLaunch,
   runResume,

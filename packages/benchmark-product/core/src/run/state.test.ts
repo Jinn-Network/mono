@@ -79,6 +79,16 @@ describe("readRunState / writeRunState round trip", () => {
 });
 
 describe("publication state migration", () => {
+  test("adds independent Matrix v2 state without changing legacy Matrix state", () => {
+    const publication = createPublicationState();
+    expect(publication.accounting).toEqual({ state: "not-started" });
+    expect(publication.matrixV2).toEqual({ state: "not-started" });
+    const state = minimalState({ matrixSha256: "b".repeat(64), publication });
+    writeRunState(workspaceDir, "draft-v2", state);
+    expect(readRunState(workspaceDir, "draft-v2")?.matrixSha256).toBe("b".repeat(64));
+    expect(readRunState(workspaceDir, "draft-v2")?.matrixV2Sha256).toBeUndefined();
+  });
+
   test("reads a legacy report state without rewriting it and exposes profile digest names", () => {
     const path = runStatePath(workspaceDir, "draft-legacy");
     const legacy = {

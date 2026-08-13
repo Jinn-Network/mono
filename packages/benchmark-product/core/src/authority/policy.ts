@@ -34,6 +34,7 @@ export const GATED_OPERATIONS = [
   "publish",
   "publication.configure",
   "publication.register",
+  "publication.accounting",
 ] as const;
 
 export type GatedOperation = (typeof GATED_OPERATIONS)[number];

@@ -176,8 +176,10 @@ export function publicationStatePath(workspaceDir: string, sourceId: string, kin
   return join(publicationDir(workspaceDir), "sources", `${sourceId}.${kind}.json`);
 }
 
-export function publicationJournalPath(workspaceDir: string, draftId: string): string {
-  return join(publicationDir(workspaceDir), "journals", `${draftId}.json`);
+export function publicationJournalPath(workspaceDir: string, draftId: string, stage?: string): string {
+  // Keep PUB-12 registration recovery on its original path. New independently resumable stages
+  // use a suffix so their plans can never collide with that completed journal fingerprint.
+  return join(publicationDir(workspaceDir), "journals", stage === undefined ? `${draftId}.json` : `${draftId}.${stage}.json`);
 }
 
 /** Immutable workspace proof that its did:key authored one exact record digest. */

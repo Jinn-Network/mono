@@ -48,6 +48,11 @@ export const PublicationStageSchema = z.object({
     sourceSequence: z.string().min(1),
     entrySha256: Sha256HexSchema,
   }).optional(),
+  /** Frozen source position which bounds the complete accounting input enumeration. */
+  sourceCutoff: z.object({
+    sourceSequence: z.string().regex(/^\d{16}$/),
+    entrySha256: Sha256HexSchema,
+  }).optional(),
   /** Exact record/artifact bytes made durable by this stage, keyed by their product role. */
   digests: z.record(z.string(), Sha256HexSchema).optional(),
 });
@@ -58,8 +63,10 @@ export const PublicationStateSchema = z.object({
   source: PublicationSourceSchema,
   registration: PublicationStageSchema,
   accounting: PublicationStageSchema,
+  /** Matrix v2 is a later, separately announced record; legacy `matrixSha256` remains untouched. */
+  matrixV2: PublicationStageSchema.optional(),
   report: PublicationStageSchema,
-});
+}).transform((publication) => ({ ...publication, matrixV2: publication.matrixV2 ?? { state: "not-started" as const } }));
 
 export type PublicationSource = z.infer<typeof PublicationSourceSchema>;
 export type PublicationStage = z.infer<typeof PublicationStageSchema>;
@@ -79,6 +86,7 @@ export function createPublicationState(source: Partial<PublicationSource> = {}):
     },
     registration: { state: "not-started" },
     accounting: { state: "not-started" },
+    matrixV2: { state: "not-started" },
     report: { state: "not-started" },
   };
 }
@@ -111,6 +119,10 @@ export const RunStateSchema = z.object({
   closedAt: Rfc3339Schema.optional(),
   /** sha256 hex of the sealed Matrix record's exact bytes, set at `run.collect`. */
   matrixSha256: Sha256HexSchema.optional(),
+  /** sha256 hex of the accounting-bound Matrix v2; never replaces the legacy Matrix v1 field. */
+  matrixV2Sha256: Sha256HexSchema.optional(),
+  /** sha256 hex of the exact BenchmarkAccounting record. */
+  accountingSha256: Sha256HexSchema.optional(),
   /** sha256 hex of the sealed Report record's exact PAYLOAD bytes, set at `report` (BP-13). */
   reportSha256: Sha256HexSchema.optional(),
   /** sha256 hex of the sealed Report's DSSE ENVELOPE bytes, set at `report` (BP-13). */
@@ -206,7 +218,7 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
   if (currentBytes !== undefined) {
     const current = readRunState(workspaceDir, draftId);
     if (current?.publication !== undefined) {
-      const stages = [current.publication.registration, current.publication.accounting, current.publication.report];
+      const stages = [current.publication.registration, current.publication.accounting, current.publication.matrixV2, current.publication.report];
       const hasReceipt = stages.some((stage) => stage.receipt !== undefined);
       if (hasReceipt) {
         const proposed = result.data.publication;
@@ -222,7 +234,7 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
         if ((current.publication.mode ?? "local") !== (proposed.mode ?? "local")) {
           refuse("conflict", `runs.${draftId}.publication.mode`, "publication mode is immutable after a durable source append receipt");
         }
-        const stageNames = ["registration", "accounting", "report"] as const;
+        const stageNames = ["registration", "accounting", "matrixV2", "report"] as const;
         const rank = { "not-started": 0, "in-progress": 1, complete: 2 } as const;
         for (const stageName of stageNames) {
           const before = current.publication[stageName];

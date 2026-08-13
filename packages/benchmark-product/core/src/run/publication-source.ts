@@ -140,8 +140,8 @@ export async function withWorkspacePublicationSourceLock<T>(
 }
 
 /** Durable neutral-plan journal, CAS-shaped so record-publication owns retry semantics. */
-export function createWorkspacePublicationJournal(workspaceDir: string, draftId: string): PublicationJournalStore {
-  const path = publicationJournalPath(workspaceDir, draftId);
+export function createWorkspacePublicationJournal(workspaceDir: string, draftId: string, stage?: string): PublicationJournalStore {
+  const path = publicationJournalPath(workspaceDir, draftId, stage);
   return {
     async read() {
       const value = readJson<PublicationJournal>(path);
