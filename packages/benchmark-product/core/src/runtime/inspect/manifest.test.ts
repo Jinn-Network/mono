@@ -1,12 +1,17 @@
 import { describe, expect, test } from "vitest";
 import {
+  INSPECT_MULTI_SCORER_SELECTION_SCHEMA,
+  INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA,
   INSPECT_SELECTION_SCHEMA,
   INSPECT_SANDBOX_SELECTION_SCHEMA,
   InspectSelectionManifestSchema,
+  InspectScoringRequestSchema,
   SUPPORTED_INSPECT_VERSION,
   SUPPORTED_INSPECT_WHEEL_SHA256,
   assertNoSecretLikeConfiguration,
 } from "./manifest.js";
+import { buildInspectSelectionArtifacts } from "./artifacts.js";
+import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
 
 const manifest = {
   schema: INSPECT_SELECTION_SCHEMA,
@@ -41,16 +46,114 @@ const manifest = {
   scorer: { name: "match", passValue: "C", definition: { name: "match", options: {}, metrics: [] } },
   runOptions: { maxSamples: 1 },
 };
+const manifestWithoutScorer = Object.fromEntries(
+  Object.entries(manifest).filter(([key]) => key !== "scorer"),
+);
 
 describe("InspectSelectionManifestSchema", () => {
+  test("validates public-safe unique projection names and exact verdict-rule references", () => {
+    const projection = { measurementName: "safe", scorerName: "policy", subScoreKey: "safe", passValue: true };
+    expect(InspectScoringRequestSchema.safeParse({
+      projections: [projection],
+      verdictRule: { threshold: { measurement: "safe", op: "eq", value: true } },
+    }).success).toBe(true);
+    expect(InspectScoringRequestSchema.safeParse({
+      projections: [projection, projection],
+      verdictRule: { threshold: { measurement: "safe", op: "eq", value: true } },
+    }).success).toBe(false);
+    expect(InspectScoringRequestSchema.safeParse({
+      projections: [{ ...projection, measurementName: "private value" }],
+      verdictRule: { threshold: { measurement: "private value", op: "eq", value: true } },
+    }).success).toBe(false);
+  });
+
   test("pins runtime, source, task, arms, scorer, and material options", () => {
     expect(InspectSelectionManifestSchema.parse(manifest)).toEqual(manifest);
+  });
+
+  test("keeps the singular schema-1 selection and derived record bytes unchanged", () => {
+    const artifacts = buildInspectSelectionArtifacts(InspectSelectionManifestSchema.parse(manifest));
+    expect({
+      manifest: artifacts.manifestSha256,
+      evaluationSpec: artifacts.evaluationSpecSha256,
+      task: artifacts.taskSha256,
+      benchmark: artifacts.benchmarkSha256,
+    }).toEqual({
+      manifest: "93408728fc4831f52529f7b229e3e3c60864a87450395dc9057b7379e4a129b6",
+      evaluationSpec: "6747bb8a60f628c93b0579d585667351c127cee191ff8afb7bd03b532af0c400",
+      task: "a7ad2ec3b2ac2bf8d6b0b7e153b306f8cd1d48d018c5a534596e92ed6c572870",
+      benchmark: "cc7b46722d363fb027c6316d911bc4b436b4552eb5847e121f47af50157d38d5",
+    });
   });
 
   test("epochs cannot be configured because benchmark repetitions own that axis", () => {
     expect(InspectSelectionManifestSchema.safeParse({
       ...manifest,
       runOptions: { epochs: 2 },
+    }).success).toBe(false);
+  });
+
+  test("pins ordered multiple scorers, native metrics/reducers, projections, and the Jinn verdict rule", () => {
+    const multi = {
+      ...manifestWithoutScorer,
+      schema: INSPECT_MULTI_SCORER_SELECTION_SCHEMA,
+      scorers: [
+        { name: "correctness", definition: { name: "correctness", options: {}, metrics: [] } },
+        { name: "policy", definition: { name: "policy", options: {}, metrics: [] } },
+      ],
+      scoring: {
+        projections: [
+          { measurementName: "correct", scorerName: "correctness", passValue: "C" },
+          { measurementName: "safe", scorerName: "policy", subScoreKey: "safe", passValue: true },
+        ],
+        verdictRule: {
+          all: [
+            { threshold: { measurement: "correct", op: "eq", value: true } },
+            { threshold: { measurement: "safe", op: "eq", value: true } },
+          ],
+        },
+        inspectMetrics: [{ name: "accuracy", options: null }],
+        inspectEpochReducers: null,
+      },
+    };
+    const parsed = InspectSelectionManifestSchema.parse(multi);
+    const artifacts = buildInspectSelectionArtifacts(parsed);
+    const evaluationSpec = parseEvaluationSpec(artifacts.evaluationSpecBytes);
+    expect(evaluationSpec.grader).toHaveLength(2);
+    expect(evaluationSpec.measurements).toEqual([
+      { name: "correct", type: "boolean", required: true },
+      { name: "safe", type: "boolean", required: true },
+    ]);
+    expect(evaluationSpec.verdictRule).toEqual(multi.scoring.verdictRule);
+  });
+
+  test("refuses duplicate scorer names and verdict rules that omit or invent projected measurements", () => {
+    const scoring = {
+      projections: [
+        { measurementName: "correct", scorerName: "correctness", passValue: "C" },
+        { measurementName: "safe", scorerName: "policy", passValue: true },
+      ],
+      verdictRule: { threshold: { measurement: "correct", op: "eq", value: true } },
+      inspectMetrics: null,
+      inspectEpochReducers: null,
+    };
+    expect(InspectSelectionManifestSchema.safeParse({
+      ...manifestWithoutScorer,
+      schema: INSPECT_MULTI_SCORER_SELECTION_SCHEMA,
+      scorers: [
+        { name: "correctness", definition: {} },
+        { name: "correctness", definition: {} },
+      ],
+      scoring,
+    }).success).toBe(false);
+    expect(InspectSelectionManifestSchema.safeParse({
+      ...manifestWithoutScorer,
+      schema: INSPECT_MULTI_SCORER_SELECTION_SCHEMA,
+      scorers: [
+        { name: "correctness", definition: {} },
+        { name: "policy", definition: {} },
+      ],
+      scoring,
     }).success).toBe(false);
   });
 
@@ -207,7 +310,35 @@ describe("InspectSelectionManifestSchema", () => {
       },
       runOptions: { sampleId: "alpha", maxSamples: 1 },
     };
-    expect(InspectSelectionManifestSchema.safeParse(sandboxManifest).success).toBe(true);
+    const parsedSandboxManifest = InspectSelectionManifestSchema.safeParse(sandboxManifest);
+    expect(parsedSandboxManifest.success).toBe(true);
+    if (!parsedSandboxManifest.success) throw new Error("unreachable");
+    expect(buildInspectSelectionArtifacts(parsedSandboxManifest.data).manifestSha256).toBe(
+      "2ec5234498f510c4bb78c8d1f7c96a3f326bddf70c958b828b2487b5c880f4c6",
+    );
+    const multiSandboxManifest = {
+      ...Object.fromEntries(Object.entries(sandboxManifest).filter(([key]) => key !== "scorer")),
+      schema: INSPECT_MULTI_SCORER_SANDBOX_SELECTION_SCHEMA,
+      scorers: [
+        { name: "correctness", definition: { name: "correctness", metrics: [], options: {} } },
+        { name: "policy", definition: { name: "policy", metrics: [], options: {} } },
+      ],
+      scoring: {
+        projections: [
+          { measurementName: "correct", scorerName: "correctness", passValue: "C" },
+          { measurementName: "safe", scorerName: "policy", subScoreKey: "safe", passValue: true },
+        ],
+        verdictRule: {
+          all: [
+            { threshold: { measurement: "correct", op: "eq", value: true } },
+            { threshold: { measurement: "safe", op: "eq", value: true } },
+          ],
+        },
+        inspectMetrics: [{ name: "accuracy" }],
+        inspectEpochReducers: ["mean"],
+      },
+    };
+    expect(InspectSelectionManifestSchema.safeParse(multiSandboxManifest).success).toBe(true);
     expect(InspectSelectionManifestSchema.safeParse({ ...sandboxManifest, schema: INSPECT_SELECTION_SCHEMA }).success).toBe(false);
     expect(InspectSelectionManifestSchema.safeParse({
       ...sandboxManifest,

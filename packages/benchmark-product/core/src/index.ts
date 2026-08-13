@@ -76,6 +76,11 @@ export type {
   InspectRuntimeSelectionRequest,
   InspectRuntimeSelectionResolution,
 } from "./runtime/host-port.js";
+export type {
+  InspectRuntimeMethodDisclosure,
+  InspectScoringProjectionDisclosure,
+} from "./runtime/inspect/disclosure.js";
+export type { InspectScoringRequest, InspectScoreProjection } from "./runtime/inspect/manifest.js";
 
 // Demo-1's explicit real-Claude runtime and byte-preserving arm construction. The product does
 // not discover executables or source content ambiently; callers bind both before lock.

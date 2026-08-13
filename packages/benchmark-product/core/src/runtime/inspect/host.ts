@@ -8,10 +8,14 @@ import { atomicWriteFileSync, readFileIfExistsSync } from "../../fs/atomic.js";
 import { runtimeHostPath } from "../../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
 import {
+  INSPECT_MULTI_SCORER_SELECTION_SCHEMA,
   INSPECT_SELECTION_SCHEMA,
+  InspectScoringRequestSchema,
   InspectSelectionManifestSchema,
+  isInspectMultiScorerSelection,
   type InspectArmConfiguration,
   type InspectRunOptions,
+  type InspectScoringSelectionRequest,
   type InspectSelectionManifest,
 } from "./manifest.js";
 import {
@@ -33,15 +37,14 @@ export const InspectLocalHostBindingSchema = z.object({
 export const InspectHostBindingSchema = z.union([InspectLocalHostBindingSchema, InspectOciHostBindingSchema]);
 export type InspectHostBinding = z.infer<typeof InspectHostBindingSchema>;
 
-export interface ProbeInspectSelectionInput {
+export type ProbeInspectSelectionInput = InspectScoringSelectionRequest & {
   readonly pythonPath: string;
   readonly projectDir: string;
   readonly taskReference: string;
   readonly taskArgs?: Readonly<Record<string, unknown>>;
   readonly arms: readonly InspectArmConfiguration[];
-  readonly scorer: { readonly name: string; readonly passValue: string | number | boolean | null };
   readonly runOptions?: InspectRunOptions;
-}
+};
 
 export function inspectWorkerPath(): string {
   return fileURLToPath(new URL("./worker.py", import.meta.url));
@@ -107,14 +110,17 @@ async function callWorker(
 }
 
 export async function probeInspectSelection(input: ProbeInspectSelectionInput): Promise<InspectSelectionManifest> {
+  const scoring = input.scoring === undefined ? undefined : InspectScoringRequestSchema.parse(input.scoring);
+  if ((input.scorer === undefined) === (scoring === undefined)) throw new TypeError("select exactly one of scorer or scoring");
   const probed = await callWorker(input.pythonPath, "probe", {
     projectDir: input.projectDir,
     taskReference: input.taskReference,
     taskArgs: input.taskArgs ?? {},
-    scorerName: input.scorer.name,
-  }) as { runtime?: unknown; task?: unknown; scorer?: unknown };
+    ...(scoring === undefined ? { scorerName: input.scorer!.name } : { scorerNames: scoring.projections.map((projection) => projection.scorerName) }),
+    runOptions: input.runOptions ?? {},
+  }) as { runtime?: unknown; task?: unknown; scorer?: unknown; scorers?: unknown; inspectMetrics?: unknown; inspectEpochReducers?: unknown };
   const manifest = InspectSelectionManifestSchema.safeParse({
-    schema: INSPECT_SELECTION_SCHEMA,
+    schema: scoring === undefined ? INSPECT_SELECTION_SCHEMA : INSPECT_MULTI_SCORER_SELECTION_SCHEMA,
     runtime: {
       ...(probed.runtime as Record<string, unknown>),
       adapterVersion: "1",
@@ -122,11 +128,32 @@ export async function probeInspectSelection(input: ProbeInspectSelectionInput): 
     },
     task: probed.task,
     arms: input.arms,
-    scorer: { ...input.scorer, definition: probed.scorer },
+    ...(scoring === undefined
+      ? { scorer: { ...input.scorer, definition: probed.scorer } }
+      : {
+        scorers: Array.isArray(probed.scorers)
+          ? probed.scorers.map((definition) => ({
+            name: (definition as { readonly name?: unknown }).name,
+            definition,
+          }))
+          : probed.scorers,
+        scoring: {
+          ...scoring,
+          inspectMetrics: probed.inspectMetrics ?? null,
+          inspectEpochReducers: probed.inspectEpochReducers ?? null,
+        },
+      }),
     runOptions: input.runOptions ?? {},
   });
   if (!manifest.success) {
-    refuse("venue-unavailable", "inspect.selection", "Inspect worker resolved a selection that does not satisfy the pinned adapter schema");
+    const paths = manifest.error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .join(", ");
+    refuse(
+      "venue-unavailable",
+      "inspect.selection",
+      `Inspect worker resolved a selection that does not satisfy the pinned adapter schema at ${paths}`,
+    );
   }
   return manifest.data;
 }
@@ -173,6 +200,9 @@ export async function assertInspectSelectionUndrifted(
 ): Promise<void> {
   const expected = readInspectSelectionManifest(workspaceDir, selectionManifestSha256);
   const host = readInspectHostBinding(workspaceDir, selectionManifestSha256);
+  const scoringRequest = isInspectMultiScorerSelection(expected)
+    ? { scoring: { projections: expected.scoring.projections, verdictRule: expected.scoring.verdictRule } }
+    : { scorer: { name: expected.scorer.name, passValue: expected.scorer.passValue } };
   const actual = host.kind === "oci"
     ? (await probeInspectOciSelection({
       dockerPath: host.dockerPath,
@@ -183,7 +213,7 @@ export async function assertInspectSelectionUndrifted(
       taskReference: expected.task.reference,
       taskArgs: expected.task.args as Readonly<Record<string, unknown>>,
       arms: expected.arms,
-      scorer: expected.scorer,
+      ...scoringRequest,
       runOptions: expected.runOptions as InspectRunOptions & { sampleId: string | number },
     })).manifest
     : await probeInspectSelection({
@@ -192,7 +222,7 @@ export async function assertInspectSelectionUndrifted(
       taskReference: expected.task.reference,
       taskArgs: expected.task.args as Readonly<Record<string, unknown>>,
       arms: expected.arms,
-      scorer: expected.scorer,
+      ...scoringRequest,
       runOptions: expected.runOptions,
     });
   if (host.kind === "oci") await assertInspectOciHostUndrifted(host, expected);
