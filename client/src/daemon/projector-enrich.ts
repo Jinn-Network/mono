@@ -153,8 +153,66 @@ export interface ProjectorEnrichPorts {
   readonly readTodayDeliveryFacts: (requestId: Hex) => Promise<
     { readonly taskId: bigint; readonly attemptIndex: number; readonly onChainKeccak: Hex } | undefined
   >;
+  /**
+   * Defect #48, Gate C. Resolves the COUNTERPARTY's published solution-Delivery record for one
+   * today-generation `SolutionDeliveryClaimed`, from the record plane rather than from a Mech
+   * `Deliver` fact this operator does not subscribe to.
+   *
+   * Absent (the legacy composition, and any composition with no record plane) leaves the reducer's
+   * mech-fact requirement untouched — this is purely additive. The port itself decides whether
+   * this operator is the requester for the task; `enrich` only asks.
+   *
+   * Returns the two digests over the exact resolved bytes plus the coordinator's own anchor, so
+   * the reducer can re-check the binding rather than trust this resolution — see
+   * `ObservationProjectionContext.recordPlaneDelivery`.
+   */
+  readonly resolveRecordPlaneDelivery?: (input: {
+    readonly chainId: number;
+    readonly taskCoordinator: Address;
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+    readonly requestId: Hex;
+    readonly operator: Address;
+  }) => Promise<RecordPlaneDeliveryResolution | undefined>;
   readonly logger?: { warn(message: string): void };
 }
+
+/**
+ * Defect #48, fix round. The resolver's answer is discriminated by ROLE, not by whether content
+ * resolution happened to succeed.
+ *
+ * `undefined` — this operator is NOT the requester for this attempt (it is the solver, or it holds
+ * no signed Submission for the task). The reducer's pre-existing mech-fact logic decides, exactly
+ * as it did before #48; the solver path is untouched.
+ *
+ * `{ role: 'requester', witness }` — this operator IS the requester and resolved the counterparty's
+ * published Delivery. The reducer re-checks the binding and records the delivery.
+ *
+ * `{ role: 'requester', witness: undefined }` — this operator IS the requester and could NOT
+ * resolve the Delivery (serving plane down, record not yet published, catalog window exhausted).
+ * A requester never witnesses the Mech `Deliver`, so it must NOT emit the reducer's
+ * `rejected`/`invalid-reference` terminal on this: that terminal is permanent, lands beside the
+ * verdict's own terminal, folds the Attempt `contradictory`, and makes `adoptPostedTask` throw
+ * `attempt-contradictory` forever. `enrich` DROPS the event instead, which leaves the canonical log
+ * clean and the event replayable once the plane is back.
+ */
+export type RecordPlaneDeliveryResolution =
+  | {
+    readonly role: 'requester';
+    readonly witness: {
+      readonly sha256Digest: Sha256Digest;
+      readonly keccakEvidenceHash: Hex;
+      readonly onChainKeccak: Hex;
+    };
+  }
+  | {
+    readonly role: 'requester';
+    readonly witness: undefined;
+    /** The coordinator's anchor the missing record must hash to — the operator's search key. */
+    readonly onChainKeccak: Hex;
+    /** Diagnosable cause, logged verbatim at the drop site. */
+    readonly reason: string;
+  };
 
 /** Reinterprets an on-chain bytes32 anchor as its sha256 digest string. Never throws. */
 function digestFromBytes32(value: Hex): Sha256Digest | undefined {
@@ -492,6 +550,64 @@ export function createProjectorEnrich(
         submissionDigest = identity.submissionDigest;
       }
 
+      // Defect #48, Gate C. Only the TODAY generation needs this: a revised
+      // `SolutionDeliveryClaimed` carries `deliveryDigest` on the event itself, so the reducer
+      // never consults a mech fact for its digest and the requester is already served.
+      //
+      // The resolver's answer is ROLE-discriminated (see `RecordPlaneDeliveryResolution`), and the
+      // two non-witness answers are NOT the same fact:
+      //   - `undefined` (not the requester) is a MISS — the reducer's pre-existing mech-fact branch
+      //     runs and still decides. The solver path is untouched.
+      //   - `{ role: 'requester', witness: undefined }` is a DROP — a requester never witnesses the
+      //     Mech `Deliver`, so handing the event to the reducer would emit `rejected`/
+      //     `invalid-reference` on a delivery the coordinator itself settled. That terminal is
+      //     permanent, folds the Attempt `contradictory` beside the verdict's terminal, and wedges
+      //     `adoptPostedTask` on `attempt-contradictory` for good. Dropping leaves the canonical log
+      //     clean and the event REPLAYABLE — the same contract `resolveSubmissionBytes` misses take,
+      //     and what makes the runbook's rewind a recovery rather than a one-way door.
+      let recordPlaneDelivery: ObservationProjectionContext['recordPlaneDelivery'];
+      if (
+        event.event === 'SolutionDeliveryClaimed'
+        && !('deliveryDigest' in event.facts)
+        && ports.resolveRecordPlaneDelivery !== undefined
+        && attemptIndex !== undefined
+      ) {
+        let resolution: RecordPlaneDeliveryResolution | undefined;
+        try {
+          resolution = await ports.resolveRecordPlaneDelivery({
+            chainId: event.derivation.chainId,
+            taskCoordinator: ports.chain.taskCoordinator,
+            taskId,
+            attemptIndex,
+            requestId: event.facts.requestId,
+            operator: event.facts.operator,
+          });
+        } catch (error) {
+          // A throw escapes the resolver only from its ROLE gates (the chain reads and the local
+          // association lookup), i.e. before the role is known. That is a MISS, never a drop and
+          // never a crash: this operator may well be the solver, and dropping a solver's settlement
+          // would regress the pre-#48 behavior. Once the role IS known the resolver returns the
+          // requester signal rather than throwing.
+          ports.logger?.warn(
+            `[projector-enrich] record-plane delivery resolution failed for task ${taskId} `
+              + `attempt ${attemptIndex}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        if (resolution !== undefined) {
+          if (resolution.witness === undefined) {
+            ports.logger?.warn(
+              `[projector-enrich] role=requester DROPPING ${event.event} for task ${taskId} `
+                + `attempt ${attemptIndex} (requestId ${event.facts.requestId}, anchor `
+                + `${resolution.onChainKeccak}): no record-plane Delivery witness -- `
+                + `${resolution.reason}. The event is NOT journaled and will be re-offered on the `
+                + `next replay; bring the counterparty's serving plane up and rewind (defect #48).`,
+            );
+            return undefined;
+          }
+          recordPlaneDelivery = resolution.witness;
+        }
+      }
+
       const taskProjection = await resolveTaskProjection({
         chainId: event.derivation.chainId,
         taskId,
@@ -539,6 +655,7 @@ export function createProjectorEnrich(
         dispatchContext:
           dispatchContext ?? unengagedDispatchContext(event.derivation.chainId, taskId),
         ...(deliveryCorrespondence === undefined ? {} : { deliveryCorrespondence }),
+        ...(recordPlaneDelivery === undefined ? {} : { recordPlaneDelivery }),
       };
       return { ...event, projection } as ObservationMarketplaceEvent;
     } catch (error) {
