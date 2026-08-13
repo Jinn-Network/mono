@@ -693,9 +693,15 @@ export class MechAdapter implements ExecutionAdapter {
     // satisfy `ExecutionAdapter` until `legacy-operator-composition` retires the
     // legacy composition; it deliberately performs NO chain reads, because a poll
     // that can never yield must not spend RPC quota.
+    //
+    // Scope note (Wave-4 D2): this generator has no caller. Wave-4 D1 removed
+    // `_runEngineWatcherLoop`, the only production driver, so the whole
+    // watchForTasks/claimTask/watchForDeliveries surface is orphaned. Retiring the
+    // orphan is `legacy-operator-composition`'s door (stage 5), not this row's —
+    // D2 removes the evaluation half and leaves the rest structurally intact.
     while (!this.stopped) {
-      // #1043/#1038: keep the heartbeat advancing so the watchdog does not see the
-      // registered `engine-watcher` loop as stale while it is still supervised.
+      // Retained only because the `engine-watcher` LOOP_REGISTRY row is still
+      // declared (D6 owns its removal). Nothing supervises this loop any more.
       if (this.store) recordLoopTick(this.store, 'engine-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
@@ -1086,14 +1092,13 @@ export class MechAdapter implements ExecutionAdapter {
       // Cursor persistence is per-chunk inside the loop above (#552). A poll
       // that did no chunked work has no progress to persist.
 
-      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
-      // nothing was yielded) so an idle-but-polling loop never looks stale.
-      // #2407 caveat (i): see the matching comment at engine-watcher's
-      // heartbeat above — `delivery-watcher` is also `admission: 'always'`,
-      // so not consulting admission here is inert today. Wave-4 D2 deleted the
-      // `DeliveryWatcherLoop` that used to drive this generator; the LOOP_REGISTRY
-      // row stays declared (its removal belongs to the loop-registry transition),
-      // so this tick still has a registered name to write against.
+      // #1043/#1038 originally put a heartbeat at the poll-cycle tail so an
+      // idle-but-polling loop never looked stale to the watchdog. That
+      // supervision no longer exists: Wave-4 D2 deleted the `DeliveryWatcherLoop`
+      // that drove this generator, and the daemon no longer starts or registers a
+      // `delivery-watcher` loop, so nothing reads this tick. The write is retained
+      // only because the LOOP_REGISTRY row is still declared — D6 owns removing
+      // the row, and this call goes with it.
       if (this.store) recordLoopTick(this.store, 'delivery-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
