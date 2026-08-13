@@ -1618,12 +1618,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     .filter((entry) => entry.roles.includes('solver'))
     .map((entry) => entry.manifestCid);
 
-  // #547: only scan/ingest evaluation opportunities when this operator holds the
-  // evaluator role in at least one joined SolverNet. Restart-required since
-  // Wave-4 D1 retired the hot-apply join applier with the claim gate.
-  const evaluatorEnabled = Object.values(config.joinedSolverNets ?? {})
-    .some((entry) => entry.roles.includes('evaluator'));
-
   // ── DiscoveryAPI construction ─────────────────────────────────────────────
   // Build the shared DiscoveryAPI used by MechAdapter (task discovery),
   // the SolverNet registry client (lifecycle status), and the corpus library
@@ -1733,7 +1727,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
     taskDiscovery,
-    evaluatorEnabled,
     autopilotEvaluationContextResolver,
   }, sharedStore);
 
