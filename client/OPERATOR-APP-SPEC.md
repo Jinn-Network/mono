@@ -18,7 +18,8 @@
 > which retired the legacy TaskEngine and with it the `joinedSolverNets` claim gate, its live
 > join applier, and the join/leave routes ([headless design §4.2](../docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md#42-disposition-table),
 > "Join / leave SolverNet … **Retire at stage 1** … No CLI twin is scheduled"). Four sections
-> change, and all four changes are **removals of actions**, not of state:
+> change, and all four changes are **removals of actions**, not of state (a fifth, §2.10, is a
+> consequence rather than a removal — see the end of this note):
 > **(1)** §2.4 Network Memberships becomes **read-only until cutover stage 5**. Its Static and
 > Streams axes stand; its Actions axis is now empty. **(2)** §2.5's *join SolverNet* action is
 > removed; the Registry is a browse surface. **(3)** §2.8 Bootstrap's completion criterion no
@@ -26,6 +27,11 @@
 > left to persist either — and its onboarding-essential Static entries and Actions go with it.
 > **(4)** §2.9's onboarding rendering becomes a readiness **report**, not a selection surface;
 > the *select* action survives only in the Settings rendering, over §2.15's execution wiring.
+> **(5)** §2.10's `no_solvernets_joined` widens to any running node with no memberships. It is
+> not a new message and not a removal — it is what (3) leaves behind: with onboarding no longer
+> guaranteeing a membership, "freshly onboarded" and "left them all" stop being distinguishable
+> states, and the entry's old carve-out for the former became unsatisfiable. §2.9's #983 scope
+> note carried the same premise and is corrected with it.
 > Nothing here changes which SolverNets a node participates in — that is `joinedSolverNets` in
 > the operator config, unchanged and still read by every surface that read it before.
 
@@ -257,7 +263,7 @@ The surface for choosing an execution harness for a SolverNet's solver role and 
 
 **Two renderings, one model, different action surfaces (amended by Wave-4 D1).** The **onboarding rendering (a) is a report**: it lists every harness this build registers with its readiness verdict and that harness's own next step, and it exposes only *re-check*. It has no *select* action, because the takeover has no write path to persist a selection (§2.8). The **Settings rendering (b)** keeps the full surface, and the thing it selects into is §2.15's **execution wiring** (harness + model per work kind), not a per-membership environment — §2.4 is read-only.
 
-**Scope (#983).** The **onboarding rendering** (a) ships in #983. The **Settings home** (b) and the **removal of the legacy standalone overview readiness card** ship as a separate follow-up (the #983 split). Until that follow-up lands, the legacy overview card may persist; #983 itself only adds the onboarding rendering and clears the post-onboarding `no_solvernets_joined` residue for a freshly-onboarded node (§2.10).
+**Scope (#983).** The **onboarding rendering** (a) ships in #983. The **Settings home** (b) and the **removal of the legacy standalone overview readiness card** ship as a separate follow-up (the #983 split). Until that follow-up lands, the legacy overview card may persist; #983 itself only adds the onboarding rendering. (#983 also suppressed `no_solvernets_joined` for a freshly-onboarded node, on the premise that onboarding had just guaranteed a membership. Wave-4 D1 removed that guarantee, and §2.10 widens the message accordingly.)
 
 **Three-tier availability.** A harness an operator can actually pick is the intersection of three tiers; the surface makes the distinction legible so an operator understands *why* a harness is or isn't offered:
 
@@ -325,7 +331,7 @@ Components raise state messages locally. The Notifications component is the unio
 - `rpc_unreachable`
 - `rpc_all_failed` — every slot in the RPC fallback chain has failed (`AllRpcsFailedError`). Severity: action_required. The masked host list is included.
 - `rpc_primary_degraded` — slot 0 returned HTTP 429 / 5xx during the boot probe or steady-state traffic; a secondary slot served. Severity: informational.
-- `no_solvernets_joined` — fires **only** for a running node that has left all its SolverNets *after* onboarding. It is **never** shown to a freshly-onboarded node: onboarding's completion criterion (§2.8) guarantees ≥1 joined SolverNet, so a node that has just finished onboarding always has a membership. The onboarding-local "join a SolverNet to finish" prompt (§2.8 state messages) is the takeover-phase counterpart and is a distinct, non-taxonomy message.
+- `no_solvernets_joined` — fires for **any** running node with no memberships, whether it left them or never had them. Wave-4 D1 widened this: it previously fired only for a node that had left all its SolverNets *after* onboarding, because onboarding's completion criterion guaranteed ≥1 membership and a takeover-local "join a SolverNet to finish" prompt covered the pre-flip case. Both are gone (§2.8) — there is no join action for onboarding to require, so a freshly-onboarded node with no configured memberships is a normal state and this is the message that names it. Severity is unchanged; the fix is a config edit plus a restart (§2.4).
 - `safe_binding_pending`
 - `claim_failed`
 - `config_migrated` — the operator's config was migrated to shape v2 on this boot: a claim policy and execution wiring were derived from the existing SolverNet memberships, beside the legacy keys. Severity: info. Names how many wiring and posting entries were created, and whether per-claim caps are unset (in which case the USD spend gates remain the operative bound). Jumps to §2.15 Claim policy & wiring. Fires once per migrating boot; a re-run is a no-op.
