@@ -27,7 +27,13 @@ const TaskInput = z.union([
 ]);
 export type HarborDatasetInput = z.infer<typeof DatasetInput>;
 export type HarborTaskInput = z.infer<typeof TaskInput>;
-const ArtifactConfig = z.object({ source: z.string().min(1).refine((value) => !value.split("/").includes("..")), destination: z.string().min(1).regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u).optional(), exclude: z.array(z.string()).optional(), service: z.string().min(1).optional() }).strict();
+const ArtifactConfig = z.object({ source: z.string().min(1).refine((value) => !value.split("/").includes("..")), destination: z.string().min(1).regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u).nullable().optional(), exclude: z.array(z.string()).optional(), service: z.string().min(1).nullable().optional() }).strict().transform((value) => {
+  const normalized = { ...value };
+  if (normalized.destination === null) delete normalized.destination;
+  if (normalized.exclude?.length === 0) delete normalized.exclude;
+  if (normalized.service === null) delete normalized.service;
+  return normalized;
+});
 const EnvironmentType = z.enum(["docker", "daytona", "e2b", "modal", "runloop", "langsmith", "ec2", "gke", "ack", "openshift", "novita", "apple-container", "singularity", "islo", "tensorlake", "cwsandbox", "wandb", "use-computer", "cua-cloud", "blaxel", "opensandbox", "beam", "skypilot", "hf-sandbox"]);
 const ResourceMode = z.enum(["auto", "limit", "request", "guarantee", "ignore"]);
 const ServiceVolume = z.discriminatedUnion("type", [
@@ -36,15 +42,34 @@ const ServiceVolume = z.discriminatedUnion("type", [
   z.object({ type: z.literal("image"), source: z.string().min(1), target: z.string().min(1), read_only: z.literal(true).optional(), image: z.object({ subpath: z.string().min(1).optional() }).strict().optional() }).strict(),
 ]);
 /** Strict Harbor 0.21 EnvironmentConfig fields, excluding the separately-required `type`. */
-export const HarborEnvironmentConfigurationSchema = z.object({
-  import_path: z.string().min(1).optional(), force_build: z.boolean().optional(), delete: z.boolean().optional(),
+const HarborEnvironmentConfigurationRawSchema = z.object({
+  import_path: z.string().min(1).nullable().optional(), force_build: z.boolean().optional(), delete: z.boolean().optional(),
   cpu_enforcement_policy: ResourceMode.optional(), memory_enforcement_policy: ResourceMode.optional(),
   override_cpus: z.number().int().positive().nullable().optional(), override_memory_mb: z.number().int().positive().nullable().optional(),
   override_storage_mb: z.number().int().positive().nullable().optional(), override_gpus: z.number().int().nonnegative().nullable().optional(),
-  override_tpu: z.object({ type: z.string().min(1), topology: z.string().min(1).optional() }).strict().nullable().optional(), mounts: z.array(ServiceVolume).nullable().optional(), extra_docker_compose: z.array(z.string().min(1)).optional(),
+  override_tpu: z.object({ type: z.string().min(1), topology: z.string().min(1) }).strict().nullable().optional(), mounts: z.array(ServiceVolume).nullable().optional(), extra_docker_compose: z.array(z.string().min(1)).optional(),
   env: z.record(z.string(), z.string()).optional(), kwargs: z.record(z.string(), Json).optional(), extra_allowed_hosts: z.array(z.string().min(1)).optional(),
 }).strict();
-const JobAgentConfig = z.object({ name: z.string().min(1), model_name: z.string().min(1), kwargs: z.record(z.string(), Json).optional() }).strict();
+
+function canonicalEnvironmentConfiguration(value: z.infer<typeof HarborEnvironmentConfigurationRawSchema>): z.infer<typeof HarborEnvironmentConfigurationRawSchema> {
+  return Object.fromEntries(Object.entries(value).filter(([key, item]) => {
+    if (key === "force_build") return item !== false;
+    if (key === "delete") return item !== true;
+    if (key === "cpu_enforcement_policy" || key === "memory_enforcement_policy") return item !== "auto";
+    if (["import_path", "override_cpus", "override_memory_mb", "override_storage_mb", "override_gpus", "override_tpu", "mounts"].includes(key)) return item !== null;
+    if (["extra_docker_compose", "extra_allowed_hosts"].includes(key)) return !Array.isArray(item) || item.length > 0;
+    if (key === "env" || key === "kwargs") return typeof item !== "object" || item === null || Object.keys(item).length > 0;
+    return true;
+  })) as z.infer<typeof HarborEnvironmentConfigurationRawSchema>;
+}
+
+export const HarborEnvironmentConfigurationSchema = HarborEnvironmentConfigurationRawSchema.transform(canonicalEnvironmentConfiguration);
+const JobEnvironmentConfig = HarborEnvironmentConfigurationRawSchema.extend({ type: EnvironmentType }).transform(({ type, ...configuration }) => ({ type, ...canonicalEnvironmentConfiguration(configuration) }));
+const JobAgentConfigRawSchema = z.object({ name: z.string().min(1), model_name: z.string().min(1), kwargs: z.record(z.string(), Json).optional() }).strict();
+const JobAgentConfig = JobAgentConfigRawSchema.transform((value): z.infer<typeof JobAgentConfigRawSchema> => {
+  const { kwargs, ...rest } = value;
+  return kwargs !== undefined && Object.keys(kwargs).length === 0 ? rest : value;
+});
 const ArmSelection = z.object({
   armId: z.string().min(1),
   agent: z.object({ id: z.string().min(1), configuration: z.record(z.string(), Json) }).strict(),
@@ -79,7 +104,7 @@ export const HarborSelectionManifestSchema = z.object({
 const HarborJobConfigBase = z.object({
   job_name: z.string().min(1), jobs_dir: z.string().min(1), n_attempts: z.literal(1), n_concurrent_trials: z.literal(1),
   retry: z.object({ max_retries: z.literal(0) }).strict(),
-  environment: HarborEnvironmentConfigurationSchema.extend({ type: EnvironmentType }),
+  environment: JobEnvironmentConfig,
   agents: z.tuple([JobAgentConfig]), artifacts: z.array(ArtifactConfig).min(1),
 });
 const DatasetExecutionInput = z.union([

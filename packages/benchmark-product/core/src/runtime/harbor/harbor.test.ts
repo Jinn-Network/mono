@@ -24,7 +24,7 @@ const manifest: HarborSelectionManifest = {
   source: { kind: "task", input: { name: "demo/task", ref: "r2" }, jobInput: { path: ".jinn-harbor/task" }, resolved: { reference: "demo/task", revision: "r2", checksum: "c".repeat(64), files: [{ path: "task.toml", sha256: "b".repeat(64), bytes: 1 }] } },
   arms: [
     { armId: "one", agent: { id: "agent-one", configuration: { system: "pinned-one" } }, model: { id: "model-one", configuration: { temperature: 0 } }, jobAgent: { name: "agent-one", model_name: "model-one", kwargs: { system: "pinned-one", temperature: 0 } } },
-    { armId: "two", agent: { id: "agent-two", configuration: { system: "pinned-two" } }, model: { id: "model-two", configuration: { temperature: 0 } }, jobAgent: { name: "agent-two", model_name: "model-two", kwargs: { system: "pinned-two", temperature: 0 } } },
+    { armId: "two", agent: { id: "agent-two", configuration: { system: "pinned-two" } }, model: { id: "model-two", configuration: { temperature: 0 } }, jobAgent: { name: "agent-two", model_name: "model-two" } },
   ],
   environment: { type: "docker", image: `registry.example/env@sha256:${"d".repeat(64)}`, configuration: {} }, retryPolicy: { nAttempts: 1, nConcurrent: 1, maxRetries: 0 },
   outputs: [{ name: "prediction", mediaType: "application/json", artifact: { source: "/logs/artifacts/prediction.json", destination: "prediction.json" }, nativePath: "artifacts/prediction.json" }],
@@ -46,7 +46,7 @@ if (config.n_attempts !== 1 || config.n_concurrent_trials !== 1) throw new Error
 exactKeys(config.retry, ["max_retries"], "RetryConfig"); if (config.retry.max_retries !== 0) throw new Error("hidden retry");
 exactKeys(config.environment, ["type"], "EnvironmentConfig"); if (config.environment.type !== "docker" || config.environment.type.includes("@sha256:")) throw new Error("invalid environment backend type");
 if (!Array.isArray(config.agents) || config.agents.length !== 1) throw new Error("one AgentConfig required");
-exactKeys(config.agents[0], ["name", "model_name", "kwargs"], "AgentConfig");
+exactKeys(config.agents[0], config.agents[0].kwargs === undefined ? ["name", "model_name"] : ["name", "model_name", "kwargs"], "AgentConfig");
 if (isTask) { if (config.tasks.length !== 1) throw new Error("one TaskConfig required"); exactKeys(config.tasks[0], ["path"], "TaskConfig"); if (config.tasks[0].path !== ".jinn-harbor/task" || !existsSync(join(process.cwd(), config.tasks[0].path, "task.toml"))) throw new Error("unstaged TaskConfig"); }
 else { if (config.datasets.length !== 1) throw new Error("one DatasetConfig required"); exactKeys(config.datasets[0], ["path", "task_names", "n_tasks"], "DatasetConfig"); if (config.datasets[0].path !== ".jinn-harbor/dataset" || config.datasets[0].n_tasks !== 1 || config.datasets[0].task_names.length !== 1 || !existsSync(join(process.cwd(), config.datasets[0].path, "task.toml"))) throw new Error("unfiltered or unstaged DatasetConfig"); }
 if (!Array.isArray(config.artifacts) || config.artifacts.length !== 1) throw new Error("native output ArtifactConfig required"); exactKeys(config.artifacts[0], ["source", "destination"], "ArtifactConfig");
@@ -79,6 +79,15 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
     expect(() => harborSelectionManifestBytes({ ...manifest, harbor: { ...manifest.harbor, version: "0.22.0" } })).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, environment: { ...manifest.environment, type: manifest.environment.image } } as never)).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, source: { ...manifest.source, input: { path: "/private/host/task" } } } as never)).toThrow();
+    const canonicalSelection = JSON.parse(new TextDecoder().decode(harborSelectionManifestBytes({
+      ...manifest,
+      environment: { ...manifest.environment, configuration: { import_path: null, force_build: false, delete: true, cpu_enforcement_policy: "auto", memory_enforcement_policy: "auto", override_cpus: null, override_memory_mb: null, override_storage_mb: null, override_gpus: null, override_tpu: null, mounts: null, extra_docker_compose: [], env: {}, kwargs: {}, extra_allowed_hosts: [] } },
+      arms: [manifest.arms[0]!, { ...manifest.arms[1]!, jobAgent: { ...manifest.arms[1]!.jobAgent, kwargs: {} } }],
+      outputs: [{ ...manifest.outputs[0]!, artifact: { ...manifest.outputs[0]!.artifact, exclude: [], service: null } }],
+    } as never))) as HarborSelectionManifest;
+    expect(canonicalSelection.environment.configuration).toEqual({});
+    expect(canonicalSelection.arms[1]!.jobAgent).toEqual({ name: "agent-two", model_name: "model-two" });
+    expect(canonicalSelection.outputs[0]!.artifact).toEqual({ source: "/logs/artifacts/prediction.json", destination: "prediction.json" });
     expect(() => HarborJobConfigSchema.parse({ job_name: "job", jobs_dir: "jobs", n_attempts: 1, n_concurrent_trials: 1, retry: { max_retries: 0 }, environment: { type: manifest.environment.image }, agents: [manifest.arms[0]!.jobAgent], artifacts: manifest.outputs.map((output) => output.artifact), tasks: [manifest.source.jobInput] })).toThrow();
     const submitted = HarborJobConfigSchema.parse({ job_name: "job", jobs_dir: "jobs", n_attempts: 1, n_concurrent_trials: 1, retry: { max_retries: 0 }, environment: { type: "docker" }, agents: [manifest.arms[0]!.jobAgent], artifacts: manifest.outputs.map((output) => output.artifact), tasks: [manifest.source.jobInput] });
     expect(normalizeHarborSavedJobConfig({ ...submitted, n_attempts: undefined, retry: undefined, environment: undefined }, submitted)).toEqual(submitted);
@@ -87,6 +96,11 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
     expect(() => normalizeHarborSavedJobConfig({ ...submitted, environment: { type: "daytona" } }, submitted)).toThrow(/contradicts/i);
     const submittedNondefaultEnvironment = { ...submitted, environment: { type: "docker" as const, force_build: true } };
     expect(() => normalizeHarborSavedJobConfig({ ...submittedNondefaultEnvironment, environment: undefined }, submittedNondefaultEnvironment)).toThrow();
+    const canonicalSubmitted = HarborJobConfigSchema.parse({ ...submitted, environment: { type: "docker", force_build: false, delete: true, cpu_enforcement_policy: "auto" }, agents: [{ name: "agent-two", model_name: "model-two", kwargs: {} }], artifacts: [{ source: "/logs/output", exclude: [], destination: null, service: null }] });
+    expect(canonicalSubmitted.environment).toEqual({ type: "docker" });
+    expect(canonicalSubmitted.agents).toEqual([{ name: "agent-two", model_name: "model-two" }]);
+    expect(canonicalSubmitted.artifacts).toEqual([{ source: "/logs/output" }]);
+    expect(normalizeHarborSavedJobConfig({ ...canonicalSubmitted, n_attempts: undefined, retry: undefined, environment: undefined }, canonicalSubmitted)).toEqual(canonicalSubmitted);
     const datasetSource = harborJobSource({ ...manifest, source: { kind: "dataset", input: { name: "demo/dataset", version: "r1" }, jobInput: { path: ".jinn-harbor/dataset" }, resolved: manifest.source.resolved, taskName: "only-task" } });
     expect(datasetSource).toEqual({ datasets: [{ path: ".jinn-harbor/dataset", task_names: ["only-task"], n_tasks: 1 }] });
     expect(datasetSource).not.toHaveProperty("tasks");
