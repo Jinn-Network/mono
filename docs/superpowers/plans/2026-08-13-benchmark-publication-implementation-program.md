@@ -33,8 +33,8 @@
 | PUB-03 | Accounting facts and verification | PUB-01 | complete |
 | PUB-04 | Runner capture, explicit attempts, Matrix v2 | PUB-01 | complete |
 | PUB-05 | Aggregate Report v2 | PUB-01 | complete |
-| PUB-06 | Evidence-publication compatibility adapter | PUB-02 | pending |
-| PUB-07 | Benchmark-publication package | PUB-01..04, PUB-02 | pending |
+| PUB-06 | Evidence-publication compatibility adapter | PUB-02 | complete |
+| PUB-07 | Benchmark-publication package | PUB-01..04, PUB-02 | complete |
 | PUB-08 | Runtime contributor contract and adapter migration | PUB-07 | pending |
 | PUB-09 | Colophon durable capture and state migration | PUB-08 | pending |
 | PUB-10 | Harbor selection, execution, archive, verification | PUB-08 | pending |
@@ -58,3 +58,5 @@ The repository pins Node 22 and Yarn 4.13.0 (`.nvmrc`, `.node-version`, package 
 | PUB-03 | `58e155f6c` | `080ef2b0d`, `18107a2d1` | 39 tests; typecheck; build; pack smoke; discovery guards | APPROVE after 2 blockers fixed | `809cdb0ac`, `18637eb9d` |
 | PUB-04 | `58e155f6c` | `976073f9a` | 68 passed, 2 skipped; typecheck; build; pack smoke; conformance | APPROVE | `5bc33a494` |
 | PUB-05 | `58e155f6c` | `ed4a9e866`, `fbc80326c` | 199 tests; typecheck; build; pack smoke | APPROVE after close-boundary blocker fixed | `81789e196`, `d2c120249` |
+| PUB-06 | `5ad001499` | `319430ed8` | 398 tests; typecheck; build; packed consumer smoke | APPROVE | `dde07e0a2`; guards `17127c593` |
+| PUB-07 | `5ad001499` | `9393b1a9e`, `c9bef1c8b`, `e25861d3c` | 6 tests; typecheck; build; pack smoke; benchmarking guards; architecture | APPROVE after closure/media blockers fixed | `3826364d6`, `f854a55a1`, `b7862f06c` |
