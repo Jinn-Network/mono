@@ -217,6 +217,42 @@ describe('rewindChainLogCursor', () => {
     expect(readChainLogCursor(state, STREAM)?.liveBlockNumber).toBe(SWEPT_LIVE);
   });
 
+  // The rewind writes BOTH marks, and `poll()`'s checkpoint is monotone
+  // (`checkpoint = finalized > persisted.finalized ? finalized : persisted.finalized`). So a target
+  // between the finalized mark and the live cursor ADVANCES the durable checkpoint permanently,
+  // and every block in that span stops being rollbackable. Refusing costs nothing: a replay always
+  // wants a target below the range it lost, which is below the finalized mark by construction.
+  it('refuses a target at or above the persisted finalized mark — that would advance it, not rewind it', async () => {
+    seedSweptCursor(state);
+    // Strictly below the live cursor, so the backwards-only guard passes; still >= finalized.
+    const target = SWEPT_FINALIZED + 10n;
+    expect(target).toBeLessThan(SWEPT_LIVE);
+
+    await expect(rewindChainLogCursor({
+      state,
+      stream: STREAM,
+      toBlock: target,
+      apply: true,
+      readCanonicalBlockHash: async (blockNumber) => hashAt(blockNumber),
+    })).rejects.toThrow(/finalized mark/);
+    const row = readChainLogCursor(state, STREAM);
+    expect(row?.liveBlockNumber).toBe(SWEPT_LIVE);
+    expect(row?.finalizedBlockNumber).toBe(SWEPT_FINALIZED);
+  });
+
+  it('refuses a target exactly at the finalized mark', async () => {
+    seedSweptCursor(state);
+
+    await expect(rewindChainLogCursor({
+      state,
+      stream: STREAM,
+      toBlock: SWEPT_FINALIZED,
+      apply: true,
+      readCanonicalBlockHash: async (blockNumber) => hashAt(blockNumber),
+    })).rejects.toBeInstanceOf(ProjectorReplayError);
+    expect(readChainLogCursor(state, STREAM)?.finalizedBlockNumber).toBe(SWEPT_FINALIZED);
+  });
+
   it('refuses a block hash the chain would not confirm rather than writing one the next poll reads as a reorg', async () => {
     seedSweptCursor(state);
 

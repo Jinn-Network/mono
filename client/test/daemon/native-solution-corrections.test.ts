@@ -10,6 +10,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { encodeAbiParameters, encodeEventTopics } from 'viem';
+import { JINN_ROUTER_V3_ABI } from '@jinn-network/marketplace-binding';
 import { Store } from '../../src/store/store.js';
 import { NativeMarketplaceEventRepository } from '../../src/daemon/native-canonical-observations.js';
 import {
@@ -88,6 +90,34 @@ function settlementEvent(blockHash = BLOCK_HASH) {
       logIndex: 0,
       finalityTier: 'observed-safe',
     },
+  };
+}
+
+/** A real router log the tee's `decodeMarketplaceLogs` actually decodes, at a chosen tier. */
+function solutionClaimLog(
+  blockHash: `0x${string}`,
+  txHash: `0x${string}`,
+  blockNumber: bigint,
+  finalityTier: 'safe' | 'finalized',
+) {
+  return {
+    chainId: CHAIN.chainId,
+    address: CHAIN.jinnRouter,
+    blockNumber,
+    blockHash,
+    transactionHash: txHash,
+    logIndex: 0,
+    finalityTier,
+    topics: encodeEventTopics({
+      abi: JINN_ROUTER_V3_ABI,
+      eventName: 'SolutionDeliveryClaimed',
+      args: {
+        operator: `0x${'1'.repeat(40)}`,
+        requestId: `0x${'2'.repeat(64)}`,
+        taskId: 7n,
+      },
+    }),
+    data: encodeAbiParameters([{ name: 'attemptIndex', type: 'uint32' }], [0]),
   };
 }
 
@@ -204,12 +234,56 @@ describe('teeNativeMarketplaceEvents', () => {
     expect(apply).toHaveBeenCalledWith({ events: [], orphanedBlockHashes: [BLOCK_HASH] });
   });
 
+  // Defect #47 review. The tee is the FIRST writer a `rewindChainLogCursor` replay reaches -- it
+  // writes inside `poll()`, before the projector sees a log -- and a replayed range comes back
+  // re-tiered `safe` -> `finalized` because the catch-up fast path refetches it below the finalized
+  // head. That used to throw out of `apply`, and since `apply` is ONE transaction the throw
+  // discarded the whole batch: the new post-cursor blocks with it, which are never re-listed. So
+  // the recovery step silently holed the read model it was meant to repair. Real repository, real
+  // decode, two real polls.
+  it('ingests a replayed batch re-tiered safe -> finalized instead of dropping it', async () => {
+    const repository = new NativeMarketplaceEventRepository(store);
+    const warn = vi.fn();
+    let tier: 'safe' | 'finalized' = 'safe';
+    const teed = teeNativeMarketplaceEvents({
+      source: {
+        poll: async () => ({
+          logs: [solutionClaimLog(BLOCK_HASH, TX_HASH, 100n, tier)],
+          cursor: { blockNumber: 100n, blockHash: BLOCK_HASH },
+          finalizedCheckpoint: { blockNumber: 100n, blockHash: BLOCK_HASH },
+        }),
+        cursor: () => undefined,
+        finalizedCheckpoint: () => undefined,
+        logsInRange: async () => [],
+        orphanedBlockHashes: () => new Set<string>(),
+        close: () => undefined,
+      } as never,
+      repository,
+      chain: CHAIN,
+      isAuthorizedMechOrigin: () => true,
+      logger: { warn },
+    });
+
+    await teed.poll();
+    expect(repository.solutionCandidates()).toHaveLength(1);
+    expect(repository.solutionCandidates()[0]?.derivation.finalityTier).toBe('safe');
+
+    // The replay: the same log, refetched below the finalized head.
+    tier = 'finalized';
+    await teed.poll();
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(repository.solutionCandidates()).toHaveLength(1);
+    expect(repository.solutionCandidates()[0]?.derivation.finalityTier).toBe('finalized');
+  });
+
   it('never fails the projector\'s delivery when the read model rejects a batch', async () => {
     // `poll()` advances the durable cursor INSIDE itself, before returning. If this decorator
     // rethrew, the projector would never see a batch whose cursor is already committed and those
     // events would be permanently invisible to the signed-announcement chain. `apply` can throw
-    // for real -- its `changed bytes` guard fires when a venue-state reset replays blocks re-tiered
-    // observed-safe -> finalized, and SQLITE_BUSY past the timeout throws too.
+    // for real -- its `changed bytes` guard fires on a genuine byte divergence for an already
+    // journalled event key, and SQLITE_BUSY past the timeout throws too. (The re-tier case above
+    // is deliberately NOT one of them any more.)
     const repository = new NativeMarketplaceEventRepository(store);
     vi.spyOn(repository, 'apply').mockImplementation(() => {
       throw new Error('native marketplace event ...:0 changed bytes');

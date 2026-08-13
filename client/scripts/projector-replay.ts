@@ -11,7 +11,26 @@
  *     --rpc https://base-sepolia.publicnode.com \
  *     --router 0x6f47863ac4120a5a97af224a5e30c3ec2c9ea247 \
  *     --chain-id 84532 \
- *     --to-block 45415190 [--apply]
+ *     --to-block 45420024 [--apply]
+ *
+ * PICK THE NARROWEST TARGET THAT COVERS THE EVENT YOU LOST — one block below it, no further. The
+ * example above is round-28's: `VerdictDeliveryClaimed` at 45420025, so `--to-block 45420024`.
+ *
+ * The rewind writes ONE `log_cursors` row and signs nothing. The REPLAY it causes is not so narrow,
+ * and this is the part operators get wrong:
+ *
+ *   - `teeNativeMarketplaceEvents` writes `native_marketplace_events` INSIDE `poll()`, before the
+ *     projector sees a log — the first writer the replay reaches, not a downstream one. Replayed
+ *     rows come back re-tiered `safe` → `finalized`; `apply()` upgrades in place (it used to throw
+ *     and roll back the entire batch, new post-cursor blocks included).
+ *   - The projector journals the re-offered events and advances its cursor on the same tick, EVEN
+ *     when announcement publication throws. So a replay is ONE-SHOT per range: `hasCanonicalEvent`
+ *     suppresses those events afterwards. A tick that journals but fails to announce is spent.
+ *
+ * Widening the range does not make a requester see more. A requester never subscribes to the
+ * counterparty's mech, so the mech `Deliver` is structurally absent from its stream; re-offering
+ * `SolutionDeliveryClaimed` without it emits a `rejected`/`invalid-reference` attempt-terminal that
+ * folds the attempt `contradictory` and makes it UNADOPTABLE. See the runbook's step 2.
  */
 import { createPublicClient, http, type Hex } from 'viem';
 import { openVenueState } from '@jinn-network/marketplace-venue-base';
@@ -72,6 +91,11 @@ async function main(): Promise<void> {
     console.log(
       `[projector-replay] replays blocks ${result.replayFromBlock}..${result.replayThroughBlock} `
       + 'and everything mined since',
+    );
+    console.log(
+      '[projector-replay] one-shot — the replay tick journals every event in that range and '
+      + 'advances the projector cursor even if announcement publication throws; those events are '
+      + 'then suppressed for good. Prefer the narrowest target that covers the lost event.',
     );
     console.log(
       result.applied

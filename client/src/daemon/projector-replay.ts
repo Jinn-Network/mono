@@ -22,7 +22,7 @@
  * `(rewindBlock, finalized]` — the missing events included — and re-offers every one of them to the
  * fixed `enrich`.
  *
- * WHAT IT TOUCHES. Exactly one row: `log_cursors` WHERE `stream = <stream>`, columns
+ * WHAT THE REWIND ITSELF WRITES. Exactly one row: `log_cursors` WHERE `stream = <stream>`, columns
  * `live_block_number`, `live_block_hash`, `finalized_block_number`, `finalized_block_hash`,
  * `updated_at_ms`. Nothing else — not `scanned_block_hashes` (a rewound cursor whose hash matches
  * the chain never consults the displaced-suffix set), not `orphaned_blocks`, not the projector's
@@ -34,10 +34,38 @@
  * correctly linked across the replay, and so already-published canonical events are still suppressed
  * by `hasCanonicalEvent` rather than double-announced.
  *
+ * WHAT THE REPLAY IT CAUSES WRITES — a strictly larger set, and the distinction matters. The
+ * rewind is inert until the daemon restarts; from then on it is an ORDINARY tick over a range that
+ * has already been swept once, and every writer downstream of `poll()` runs again over it:
+ *
+ *   - `teeNativeMarketplaceEvents` (`native-solution-corrections.ts`, wired in
+ *     `composition-root.ts`) decorates the projector's log source and writes
+ *     `native_marketplace_events` INSIDE `poll()`, before the projector sees a single log. It is
+ *     therefore the FIRST writer the replay reaches, not a downstream one. Its rows carry the
+ *     finality tier the log was first fetched at, and a replayed range is refetched below
+ *     `finalized`, so the re-offer routinely promotes `safe` → `finalized`. `apply()` upgrades the
+ *     tier in place for that case; it used to throw, and since `apply()` is one transaction the
+ *     throw discarded the whole batch — the new post-cursor blocks included, which are never
+ *     re-listed. See the `NativeMarketplaceEventRepository` comment.
+ *   - The projector loop journals canonical events for the re-offered range and advances
+ *     `projector_cursor`, so this replay is ONE-SHOT per range: `hasCanonicalEvent` suppresses a
+ *     second announcement of anything already published, and `projector-loop.ts` journals events
+ *     even when `projectAnnouncements` throws (its announce-failure catch path). A range that
+ *     journals but fails to announce is spent — it must be rewound again to retry.
+ *   - Whatever the re-offered observations then drive: `anchorCheckedMaterial` and the requester
+ *     adoption path have no per-record try/catch, so one bad record aborts the rest of that tick's
+ *     records.
+ *
+ * None of that is signed material written BY the rewind. It is signed material the daemon may now
+ * publish because it can finally see the events — which is the point of the procedure, and also why
+ * the narrowest workable `--to-block` is the recommended one.
+ *
  * BOTH marks are set to the rewind point because the schema's own CHECK refuses a finalized mark
- * ahead of the live cursor. The regression is transient: `poll()` recomputes
+ * ahead of the live cursor. The LIVE regression is transient: `poll()` recomputes
  * `checkpoint = finalized > persisted.finalized ? finalized : persisted.finalized` on the very next
- * tick and restores the live finalized height.
+ * tick and restores the live finalized height. The FINALIZED regression is the reason `toBlock` must
+ * sit below the persisted finalized mark — that same monotone recompute would make an advance of it
+ * permanent (see the guard below).
  */
 import type { Hex } from 'viem';
 
@@ -143,6 +171,22 @@ export async function rewindChainLogCursor(
       `rewind target ${input.toBlock} is not below the live cursor ${before.liveBlockNumber} for `
       + `stream "${input.stream}" — a rewind must go backwards, and advancing the cursor here `
       + 'would skip unscanned blocks outright.',
+    );
+  }
+  // The finalized mark is MONOTONE in `poll()` ("a provider that regresses its `finalized` tag
+  // never moves it back": `checkpoint = finalized > persisted.finalized ? finalized : persisted`).
+  // This rewind writes BOTH marks to `toBlock`, so a target at or above the persisted finalized
+  // mark does not rewind that mark — it ADVANCES it, on the operator's say-so, and monotonicity
+  // then makes the advance permanent: every block in (old finalized, toBlock] becomes
+  // unrollbackable, so a later reorg touching that span can no longer roll back through it and its
+  // announcements can never be retracted. Refuse; a replay is meant to re-read history, never to
+  // assert finality about it.
+  if (input.toBlock >= before.finalizedBlockNumber) {
+    throw new ProjectorReplayError(
+      `rewind target ${input.toBlock} is not below the finalized mark ${before.finalizedBlockNumber} `
+      + `for stream "${input.stream}" — this rewind writes both marks, so that target would ADVANCE `
+      + 'the durable finalized checkpoint instead of rewinding it, and `poll()` never moves that '
+      + 'mark back. Pick a target below the finalized mark.',
     );
   }
   const blockHash = await input.readCanonicalBlockHash(input.toBlock);
