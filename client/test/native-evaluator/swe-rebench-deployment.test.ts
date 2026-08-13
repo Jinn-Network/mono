@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { packedDeploymentPaths } from "@test/pack-probe.js";
 import ts from "typescript";
 import type { BindingResolver, ResolvedBinding } from "@jinn-network/trust-core";
 import {
@@ -46,7 +45,6 @@ const SIGNER_HANDLE = "swe-rebench-v2-evaluator-verdict";
 const SWE_METHOD_URI = "https://spec.jinn.network/evaluation-methods/swe-rebench/v2";
 const MODULE_HREF = pathToFileURL(SWE_REBENCH_EVALUATOR_DEPLOYMENT_MODULE_PATH).href;
 const CLIENT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const execFileAsync = promisify(execFile);
 const roots: string[] = [];
 let claimEvidenceRoot: string;
 
@@ -389,14 +387,9 @@ describe("production swe-rebench-v2 deployment module — sidecar shape validati
 // --- packaging: the sidecar must never reach a downstream installer ------------------------------
 describe("production swe-rebench-v2 deployment module — npm packaging", () => {
   it("excludes the sidecar from the published tarball while still shipping the committed artifacts", async () => {
-    const { stdout } = await execFileAsync("npm", ["pack", "--dry-run", "--json"], {
-      cwd: CLIENT_ROOT,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    const [entry] = JSON.parse(stdout) as readonly {
-      readonly files: readonly { readonly path: string }[];
-    }[];
-    const paths = entry!.files.map((file) => file.path);
+    // Probed via a throwaway copy, never a live-root `npm pack` — see pack-probe.ts for why
+    // the latter breaks the whole suite (#2641).
+    const paths = await packedDeploymentPaths(CLIENT_ROOT);
     expect(paths).toContain("deployments/evaluator/swe-rebench-v2-deployment.mjs");
     expect(paths).toContain("deployments/evaluator/swe-rebench-v2-evaluation-method.v1.json");
     expect(paths).not.toContain("deployments/evaluator/swe-rebench-v2-deployment.local.json");
