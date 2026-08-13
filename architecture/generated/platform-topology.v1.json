@@ -1778,7 +1778,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2983,
       "generatedOutputSources": 1314,
-      "generatorSources": 623,
+      "generatorSources": 625,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -20054,6 +20054,26 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/p5-green-baseline.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/p5-stop-evidence.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/p5-stop-evidence.test.mjs"
       },
       {
         "categories": [

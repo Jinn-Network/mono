@@ -21,6 +21,10 @@ import {
 import { sweRebenchRowToTaskAndSpec } from "@jinn-network/task-execution-profiles";
 import { fetchRows } from "./mint-micro-slate.mjs";
 import { assertP5DiskGate } from "./p5-disk-gate.mjs";
+import {
+  createP5ObservedDockerSpawner,
+  P5_PRESTAGE_STOP_SCHEMA,
+} from "./p5-stop-evidence.mjs";
 
 const fixturePath = fileURLToPath(new URL("../fixtures/p5-micro-slate/rows.json", import.meta.url));
 
@@ -28,11 +32,11 @@ function fail(message) {
   throw new Error(`P5 green baseline: ${message}`);
 }
 
-function outputPath(argv) {
-  const index = argv.indexOf("--output");
+function optionValue(argv, option) {
+  const index = argv.indexOf(option);
   if (index === -1) return undefined;
   const value = argv[index + 1];
-  if (value === undefined || value.length === 0) fail("--output requires a path");
+  if (value === undefined || value.length === 0) fail(`${option} requires a value`);
   return value;
 }
 
@@ -77,7 +81,11 @@ async function grade(adapter, row, patchBytes, attemptNumber) {
   return { diskGate, evaluation };
 }
 
-export async function runP5GreenBaseline({ dockerPath, output } = {}) {
+export async function runP5GreenBaseline({ dockerPath, output, stopOutput, attempt = 1 } = {}) {
+  if (stopOutput !== undefined && dockerPath === undefined) {
+    fail("--stop-output requires an exact --docker path for direct child observation");
+  }
+  if (!Number.isSafeInteger(attempt) || attempt < 1) fail("attempt must be a positive integer");
   const startedAt = new Date();
   const initialDisk = assertP5DiskGate("green-baseline start");
   const fixtureRows = JSON.parse(readFileSync(fixturePath, "utf8"));
@@ -108,10 +116,47 @@ export async function runP5GreenBaseline({ dockerPath, output } = {}) {
       const image = pinnedSweRebenchImage(sweRebenchRowToTaskAndSpec(row).evaluationSpec);
       const diskBeforeImage = assertP5DiskGate(`image pre-stage ${row.instance_id}`);
       const imageStarted = Date.now();
-      await ensurePinnedOciImage(
-        { runtime: "docker", ...image },
-        dockerPath === undefined ? {} : { dockerPath },
-      );
+      const observer = stopOutput === undefined
+        ? undefined
+        : createP5ObservedDockerSpawner({ dockerPath });
+      try {
+        await ensurePinnedOciImage(
+          { runtime: "docker", ...image },
+          observer === undefined
+            ? (dockerPath === undefined ? {} : { dockerPath })
+            : { spawn: observer.spawn },
+        );
+      } catch (error) {
+        if (stopOutput !== undefined && observer !== undefined) {
+          const timing = observer.completedPullEvidence(image.timeoutMs / 1_000);
+          if (timing === undefined) {
+            fail("pre-stage failed without a completed pull observation; no stop record was emitted");
+          }
+          const stop = {
+            ...timing,
+            schema: P5_PRESTAGE_STOP_SCHEMA,
+            attempt,
+            stage: "image-prestage",
+            instanceId: row.instance_id,
+            image: image.image,
+            platform: image.platform,
+            diskBeforeAttempt: diskBeforeImage,
+            result: {
+              errorName: error instanceof Error ? error.name : "UnknownError",
+              safeDetail: error instanceof Error ? error.message : "unknown pre-stage failure",
+            },
+            goldOrEmptyGradeStarted: false,
+            claudeCellStarted: false,
+            fallbackAttempted: false,
+            timingSource: "direct child observation; no wall-clock duration inference",
+          };
+          writeFileSync(stopOutput, `${JSON.stringify(stop, null, 2)}\n`, {
+            encoding: "utf8",
+            flag: "wx",
+          });
+        }
+        throw error;
+      }
       const imageSetupMs = Date.now() - imageStarted;
 
       const goldBytes = new TextEncoder().encode(exactString(upstream, "patch"));
@@ -159,6 +204,13 @@ export async function runP5GreenBaseline({ dockerPath, output } = {}) {
 
 if (process.argv[1] !== undefined
   && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const { rendered } = await runP5GreenBaseline({ output: outputPath(process.argv.slice(2)) });
+  const argv = process.argv.slice(2);
+  const attempt = optionValue(argv, "--attempt");
+  const { rendered } = await runP5GreenBaseline({
+    output: optionValue(argv, "--output"),
+    stopOutput: optionValue(argv, "--stop-output"),
+    dockerPath: optionValue(argv, "--docker"),
+    ...(attempt === undefined ? {} : { attempt: Number(attempt) }),
+  });
   process.stdout.write(rendered);
 }

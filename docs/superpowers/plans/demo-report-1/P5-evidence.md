@@ -11,10 +11,11 @@
 ## Current outcome: stopped at the digest-pinned image pre-stage
 
 P5 is not complete. The disk precondition later recovered, so the fixture was legally minted and
-the real OCI green-baseline control began. The first exact digest-pinned image did not become
-locally available within its sealed 1,800-second timeout. One recorded infrastructure-only retry
-was authorized under the identical digest, platform, timeout, and grader contract; it timed out in
-the same pre-dispatch stage. Both attempts failed closed as:
+the real OCI green-baseline control began. The operator attests that the configured 1,800-second
+bound expired before the first exact digest-pinned image became locally available. One recorded
+infrastructure-only retry was authorized under the identical digest, platform, configured bound,
+and grader contract; the operator attests to the same configured-bound expiry in that
+pre-dispatch stage. Both attempts failed closed as:
 
 ```text
 EvaluationOperationalError: oci grader unavailable: pinned grader image is unavailable
@@ -28,15 +29,31 @@ The exact attempted image was
 for `linux/amd64`. Attempt 1 began with 47,299,448 KiB (45.1083 GiB) available and ended
 with 44,970,404 KiB (42.8871 GiB). Attempt 2 began with 44,939,716 KiB (42.8579 GiB)
 available and ended with 44,297,640 KiB (42.2455 GiB). The exact digest was absent after
-each timeout. No tag fallback, unpinned substitute, timeout change, cache deletion, or third
+each attempt. No tag fallback, unpinned substitute, timeout change, cache deletion, or third
 attempt occurred. No gold/empty grade or Claude cell was dispatched.
+
+The authenticated original execution history preserves command issuance, a late observation of
+the still-running exact pull (1,764 seconds for attempt 1; 1,748 seconds for attempt 2), terminal
+`UNAVAILABLE`, and the post-attempt exact-image absence. It does **not** expose the runner's
+`boundedExit.timedOut` value or a final monotonic elapsed measurement. Accordingly this packet
+does not claim a machine-proven timeout or infer one from wall-clock narrative; the precise expiry
+classification is operator-attested, while `UNAVAILABLE` and exact-image absence are preserved
+machine evidence.
 
 The append-only stop records are:
 
 - `p5-artifacts/green-baseline-attempt-1-stop.json`,
-  `sha256:6d4be7076689440453ed14da24c4149dfbedca29b35793b2d8e1dad697e3b6dc`;
+  `sha256:ffe480c0d7203340dd8e5b78531eb4ffefb9b6795ade814e0c66bc6e47ace47f`;
 - `p5-artifacts/green-baseline-attempt-2-stop.json`,
-  `sha256:eb0e385b95530206968c6cdefe25f4ef23562d0c39fa193bde2e2a47fd896287`.
+  `sha256:5a1201153ae5c26d99fba0a54f19b73a7101fb0b4fc16cdfb53b15dd0cf41ef1`.
+
+Their deletion-portable normalized source excerpts are
+`green-baseline-attempt-1-session-excerpt.json`
+(`sha256:d60564dfe7f5a7d623faceb76c8eb1f23c34f2c5943234e6b1ce2d3c5a464b8f`) and
+`green-baseline-attempt-2-session-excerpt.json`
+(`sha256:63be2562938bfac51a071c1728bff46368b6b15ad3721766cecaab05ec1ebd55`).
+Each excerpt identifies and hashes the authenticated source history and every normalized source
+event, while declaring that private history is not a retention dependency.
 
 ## Offline implementation evidence
 
@@ -56,6 +73,11 @@ The append-only stop records are:
   materialization, builder-workspace removal, and cold bundle verification.
 - The Docker executable is wrapped by a host-space guard. P3b remains responsible for digest
   pre-stage followed by child-local-only `--pull never`; grader network stays disabled.
+- Future pre-stage stop output uses local operational schema `demo1.p5-green-baseline-stop/2`
+  (not a platform record kind). Its injected child observer must capture `startedAt`,
+  `completedAt`, monotonic elapsed, configured timeout, the direct `timedOut` boolean, and a
+  timeout-kill-versus-early-exit classification. Validation rejects missing, contradictory, or
+  elapsed-before-bound timeout evidence.
 
 The final fixture was minted at `2026-08-13T01:06:45.511Z` after an immediate
 47,323,076-KiB (45.13-GiB) disk pass. It contains three rows from three repositories and seals:
@@ -72,7 +94,7 @@ for `provenance.json`. The strict post-P3b fixture suite passes all 11 assertion
 
 Final non-Docker reruns on Node 22 passed:
 
-- P5 pure/injected tests: 10/10;
+- P5 pure/injected tests: 14/14;
 - strict final-fixture tests: 11/11;
 - benchmark-product core full suite: 78 files passed, 3 skipped; 819 tests passed,
   13 skipped;
@@ -82,7 +104,8 @@ Final non-Docker reruns on Node 22 passed:
 
 ## Required continuation
 
-The two permitted pre-dispatch image attempts are exhausted. Continuation requires operator action
+The two permitted pre-dispatch image attempts are exhausted under the recorded retry policy.
+Continuation requires operator action
 outside this packet to make the exact digest-pinned image available without changing the frozen
 contract, followed by a fresh authorized run. Only then may the real three-task gold-PASS/
 empty-FAIL control, Claude readiness probe, 12 cells, and local cold bundle verification run.

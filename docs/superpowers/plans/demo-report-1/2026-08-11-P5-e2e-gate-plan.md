@@ -67,6 +67,13 @@ Other terminal stops are a missing/non-ready Claude binding, missing credentials
 digest-pinned image, a failed gold/empty control, or a required platform-semantics change. There is
 no automatic substitution or silent workaround.
 
+Every future image-prestage stop must be emitted as local operational schema
+`demo1.p5-green-baseline-stop/2` with directly captured `startedAt`, `completedAt`, monotonic
+elapsed, configured timeout, `timedOut`, and timeout classification. The P5 child observer records
+the actual timeout `SIGKILL`; validation rejects inferred, missing, contradictory, or
+elapsed-before-bound timeout claims. This stop schema is not a new platform record kind or
+tier-1–3 publication semantic.
+
 ## One-command execution
 
 From `packages/benchmark-product/core`, on Node 22 with portal symlink preservation:
@@ -114,7 +121,11 @@ The fixture check/mint and real gate are local-only because they use live source
 ```sh
 yarn p5:fixture:check
 yarn p5:fixture:mint
-yarn p5:green --output /new/transcript.json
+yarn p5:green \
+  --docker /absolute/path/to/docker \
+  --output /new/transcript.json \
+  --stop-output /new/prestage-stop.json \
+  --attempt 1
 ```
 
 ## Acceptance evidence
@@ -127,6 +138,9 @@ explicit no-publication boundary. If a terminal stop occurs, it records the stop
 of manufacturing a passing result.
 
 The current run stopped before dispatch after two exact-image pre-stage attempts (the original and
-the single authorized infrastructure retry) each exhausted the unchanged 1,800-second bound. The
-append-only stop records preserve both attempts. No third attempt, alternate image, gold/empty
-grade, or Claude cell is permitted in this packet without new operator action.
+the single authorized infrastructure retry). The operator attests that each configured
+1,800-second bound expired, but the original execution history did not capture the direct child
+timeout bit or final monotonic elapsed and therefore does not independently prove a timeout. The
+append-only stop records preserve both attempts, terminal `UNAVAILABLE`, exact-image absence, and
+this limitation. No third attempt, alternate image, gold/empty grade, or Claude cell is permitted
+in this packet without new operator action.
