@@ -115,6 +115,23 @@ publish because it can finally see the events — which is the point of the proc
    Each must return 200 **and** hash to the digest in its own path. A 200 serving the wrong bytes is
    worse than a 404: the resolver refuses it and you have spent the rewind either way.
 
+   **Confirm RPC health too, immediately before `--apply`.** The requester's role gate reads the
+   coordinator twice per `SolutionDeliveryClaimed`, and `buildReadTodayDeliveryFacts`
+   (`client/src/daemon/composition-root.ts`) currently returns `undefined` on a read *failure* the
+   same way it does for a requestId that genuinely is not ours. That reads as "not the requester",
+   which is the one remaining path to a false rejection. Round-trip both reads against the
+   configured endpoint first:
+
+   ```bash
+   cast call <coordinator> 'getRequestRef(bytes32)(uint256,uint32,bool)' <requestId> --rpc-url <rpc>
+   cast call <coordinator> 'getAttempt(uint256,uint32)' <taskId> <attemptIndex> --rpc-url <rpc>
+   ```
+
+   `getRequestRef` must return `exists = true` with your `(taskId, attemptIndex)`, and `getAttempt`'s
+   `solutionCidDigest` must be the non-zero anchor you are hunting the record for. A revert, a
+   timeout or a 429 here means **do not apply yet** — the replay is one-shot, and a flaky read spends
+   it. See the PR-body follow-up on gate 1's chain-read leg for the structural fix.
+
    The delivery digest is not on the coordinator (today generation anchors only its keccak), so read
    it off the counterparty's catalog. If the daemon already tried and dropped, its log names both the
    role and the anchor to search for:
