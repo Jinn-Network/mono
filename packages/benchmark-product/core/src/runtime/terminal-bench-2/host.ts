@@ -34,6 +34,28 @@ export interface TerminalBench2SelectionRequest {
   readonly outputs: HarborSelectionManifest["outputs"];
 }
 
+function harborDefaultIgnoreMatches(relative: string, finalComponentIsDirectory: boolean): boolean {
+  const components = relative.split("/");
+  return components.some((component, index) => {
+    const isDirectory = index < components.length - 1 || finalComponentIsDirectory;
+    return (isDirectory && component === "__pycache__") || component.endsWith(".pyc")
+      || component === ".DS_Store" || component.endsWith(".swp")
+      || component.endsWith(".swo") || component.endsWith("~");
+  });
+}
+
+/** Python compares Unicode strings by scalar value, unlike JavaScript's UTF-16
+ * relational comparison. Harbor sorts relative paths with Python's string order. */
+function comparePythonUnicode(left: string, right: string): number {
+  const leftPoints = Array.from(left, (value) => value.codePointAt(0)!);
+  const rightPoints = Array.from(right, (value) => value.codePointAt(0)!);
+  const sharedLength = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    if (leftPoints[index]! !== rightPoints[index]!) return leftPoints[index]! - rightPoints[index]!;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 /** Faithful Harbor v0.21.0 `Packager.compute_content_hash` for its default-ignore
  * branch. Custom `.gitignore` uses Python pathspec semantics, so this implementation
  * refuses it instead of silently approximating the registry identity. */
@@ -46,19 +68,14 @@ export function computeHarbor021TaskContentHash(taskPath: string): { readonly co
     if (lstatSync(join(root, name)).isSymbolicLink()) throw new TypeError(`Harbor package hashing refuses symlink ${name}`);
     files.push(name);
   }
-  const ignored = (relative: string): boolean => {
-    const pieces = relative.split("/");
-    const name = pieces.at(-1)!;
-    return pieces.includes("__pycache__") || name.endsWith(".pyc") || name === ".DS_Store"
-      || name.endsWith(".swp") || name.endsWith(".swo") || name.endsWith("~");
-  };
   const visit = (directory: string, relative: string) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = `${relative}/${entry.name}`;
       const absolute = join(directory, entry.name);
       if (entry.isSymbolicLink()) throw new TypeError(`Harbor package hashing refuses symlink ${path}`);
-      if (entry.isDirectory()) visit(absolute, path);
-      else if (entry.isFile() && !ignored(path)) files.push(path);
+      if (entry.isDirectory()) {
+        if (!harborDefaultIgnoreMatches(path, true)) visit(absolute, path);
+      } else if (entry.isFile() && !harborDefaultIgnoreMatches(path, false)) files.push(path);
       else if (!entry.isFile()) throw new TypeError(`Harbor package hashing refuses non-regular entry ${path}`);
     }
   };
@@ -66,7 +83,7 @@ export function computeHarbor021TaskContentHash(taskPath: string): { readonly co
     const absolute = join(root, directory);
     if (existsSync(absolute)) visit(absolute, directory);
   }
-  files.sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  files.sort(comparePythonUnicode);
   const outer = createHash("sha256");
   for (const relative of files) {
     const digest = createHash("sha256").update(readFileSync(join(root, relative))).digest("hex");

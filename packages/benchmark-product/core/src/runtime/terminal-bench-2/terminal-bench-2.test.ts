@@ -143,6 +143,20 @@ describe("Terminal-Bench 2 product profile", () => {
     expect(() => resolveTerminalBench2Selection(workspaceDir, request())).toThrow(/exactly the selected task/i);
   });
 
+  test("matches official Harbor 0.21 pathspec ancestor ignores and Python Unicode ordering", () => {
+    const taskPath = join(materialPath, "echo");
+    mkdirSync(join(taskPath, "tests", "a.pyc"), { recursive: true });
+    writeFileSync(join(taskPath, "tests", "a.pyc", "payload"), "ignored ancestor\n");
+    writeFileSync(join(taskPath, "tests", "\uE000"), "bmp private\n");
+    writeFileSync(join(taskPath, "tests", "\u{10000}"), "astral\n");
+
+    // Golden produced by Harbor v0.21.0 Packager at commit 64afbbcb62165950301e1a6407c729aa26d844ff.
+    expect(computeHarbor021TaskContentHash(taskPath)).toEqual({
+      contentHash: "a0d9eb7015d4c0bce447931bb76f17256748b53a35e4ea509b9261e61e784e5a",
+      files: ["instruction.md", "task.toml", "tests/\uE000", "tests/\u{10000}"],
+    });
+  });
+
   test("one Jinn dispatch creates one filtered Harbor Trial through the normal lifecycle", async () => {
     const context = { workspaceDir, principal: "sponsor-1", clock: () => new Date().toISOString() };
     expect(initWorkspace(context).ok).toBe(true);
