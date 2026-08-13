@@ -90,6 +90,33 @@ export {
   demo1ClaudeArmRequirements,
   generateDemo1InstructionArtifacts,
 } from "./venue/demo1-claude.js";
+
+// Demo-1 pre-run selection is a fail-closed, product-owned method boundary. It consumes only
+// frozen source bytes and outcome-blind task evidence; a STOP inventory is a valid result.
+export {
+  DEMO1_DOCUMENT_SKILL_PATHS,
+  DEMO1_INSTRUCTION_TRANSFORM_ID,
+  DEMO1_INSTRUCTION_TRANSFORM_SPEC,
+  DEMO1_OUTCOME_BLIND_TASK_CHECKS,
+  DEMO1_PRE_RUN_FREEZE_SCHEMA,
+  DEMO1_SKILLS_SOURCE_URL,
+  buildDemo1PreRunFreeze,
+  canonicalDemo1PreRunFreezeBytes,
+  demo1PreRunFreezeDigest,
+  parseDemo1UpstreamSkill,
+} from "./method/demo1-prerun.js";
+export type {
+  Demo1CandidateInput,
+  Demo1CandidateInventory,
+  Demo1EvidenceCheck,
+  Demo1EvidenceRef,
+  Demo1EvidenceStatus,
+  Demo1Pool,
+  Demo1PreRunFreeze,
+  Demo1PreRunFreezeInput,
+  Demo1TaskEligibilityInput,
+  Demo1TaskInventory,
+} from "./method/demo1-prerun.js";
 export type {
   Demo1ClaudeArm,
   Demo1ClaudeCommand,

@@ -1,0 +1,209 @@
+{
+  "schema": "jinn.demo1.pre-run-source-inventory.v1",
+  "freezeSchema": "jinn.demo1.pre-run-freeze.v1",
+  "status": "stop",
+  "source": {
+    "repositoryUrl": "https://github.com/anthropics/skills.git",
+    "commit": "f17010c9bb483898c1d9c9f42dde2b3a98889434",
+    "skillsTree": "491339fffffe73a52f638f09747dddd8ae2cf154"
+  },
+  "documentSkillExclusions": [
+    "skills/docx",
+    "skills/pdf",
+    "skills/pptx",
+    "skills/xlsx"
+  ],
+  "poolRequirements": {
+    "suitability": { "tasks": 6, "repositories": 6 },
+    "rehearsal": { "tasks": 10, "repositories": 5 },
+    "official": {
+      "status": "unresolved",
+      "detail": "E2 has not sealed the official task and repository capacity requirement; the 600-cell ceiling alone does not determine it."
+    }
+  },
+  "outcomeBlindTaskChecks": [
+    "verifiedImageDigest",
+    "goldPatchPasses",
+    "emptyPatchFails",
+    "compatibleTaskLicense",
+    "instructionLeakageAbsent",
+    "conflictingInstructionFileAbsent",
+    "contentGoldPatchCollisionAbsent"
+  ],
+  "candidates": [
+    {
+      "repositoryPath": "skills/algorithmic-art",
+      "skillMdSha256": "3bc4092c09804853186524c826bc0621b940bb6122c05b84496dff95388e6eef",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling generator and viewer templates." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/brand-guidelines",
+      "skillMdSha256": "1120b3769e2985cefb3d25be981b1f914abeba57ae079b83c20c666c164fa9fe",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "match", "detail": "Complete usable procedure in SKILL.md." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/canvas-design",
+      "skillMdSha256": "a1f288079624402f30682753c1d43920b6664785698d21d3e7aa197450a6448b",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling font assets." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/claude-api",
+      "skillMdSha256": "57c1e405c5110a14aeff2da10d25b95c188d801fc9a779fa7d7a25ccbf46b890",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling language and shared references." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/doc-coauthoring",
+      "skillMdSha256": "2e47d78846faeea4a56e9809c52700087a15a2155a3f293a3efbaded81398ef4",
+      "descriptionPresent": true,
+      "license": { "status": "missing", "spdxId": null, "sha256": null },
+      "standalone": { "status": "match", "detail": "Complete usable procedure in SKILL.md." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["missing-compatible-folder-license", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/docx",
+      "skillMdSha256": "8017469ea95fb7d28225c62daf8e2f3492a7b516fc64c18c28977cbf8980b7fe",
+      "descriptionPresent": true,
+      "license": { "status": "incompatible", "spdxId": "LicenseRef-Anthropic-Source-Available", "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa" },
+      "standalone": { "status": "mismatch", "detail": "Fixed document exclusion; also requires sibling scripts." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["source-available-document-skill", "missing-compatible-folder-license", "instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/frontend-design",
+      "skillMdSha256": "1608ea77fbb6fc30d13a97d12cfa8ebf31358d40f0dd97beed24829d6b3f45dd",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594" },
+      "standalone": { "status": "match", "detail": "Complete usable procedure in SKILL.md." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/internal-comms",
+      "skillMdSha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling examples." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/mcp-builder",
+      "skillMdSha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling references and scripts." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/pdf",
+      "skillMdSha256": "9f78b8359fbd4943ad260a7a1e436e5a96503406d6c34e99f69223d647d85b9c",
+      "descriptionPresent": true,
+      "license": { "status": "incompatible", "spdxId": "LicenseRef-Anthropic-Source-Available", "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa" },
+      "standalone": { "status": "mismatch", "detail": "Fixed document exclusion; also requires sibling references and scripts." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["source-available-document-skill", "missing-compatible-folder-license", "instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/pptx",
+      "skillMdSha256": "a7ff03e2c85b636f55232a6b1555f5dd90216b7a1a359ab289d8364e6acbc6a0",
+      "descriptionPresent": true,
+      "license": { "status": "incompatible", "spdxId": "LicenseRef-Anthropic-Source-Available", "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa" },
+      "standalone": { "status": "mismatch", "detail": "Fixed document exclusion; also requires sibling scripts." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["source-available-document-skill", "missing-compatible-folder-license", "instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/skill-creator",
+      "skillMdSha256": "dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling agents, references, scripts, assets, and eval viewer." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/slack-gif-creator",
+      "skillMdSha256": "2efca615ce55a3edd8fc05c779068a8085816617991987e446606403cd3abb22",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling core modules and requirements." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/theme-factory",
+      "skillMdSha256": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling showcase and theme files." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/web-artifacts-builder",
+      "skillMdSha256": "81c5002c6643b0de7b8710b00e7a9038daa6fb9b68d59870ee6adb12da8d10f8",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling initialization and bundling scripts." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/webapp-testing",
+      "skillMdSha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2",
+      "descriptionPresent": true,
+      "license": { "status": "compatible", "spdxId": "Apache-2.0", "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362" },
+      "standalone": { "status": "mismatch", "detail": "Requires sibling scripts and examples." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    },
+    {
+      "repositoryPath": "skills/xlsx",
+      "skillMdSha256": "6712b39718fe815054abca9c3ee72f989613e6f771c8a5c58f30a65a6c905622",
+      "descriptionPresent": true,
+      "license": { "status": "incompatible", "spdxId": "LicenseRef-Anthropic-Source-Available", "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa" },
+      "standalone": { "status": "mismatch", "detail": "Fixed document exclusion; also requires sibling scripts." },
+      "eligibleTaskCount": 0,
+      "rejectionReasons": ["source-available-document-skill", "missing-compatible-folder-license", "instructions-not-standalone", "no-grader-valid-repository-work-tasks"]
+    }
+  ],
+  "ranking": [],
+  "winner": null,
+  "selectionBasisSha256": "7dea27d6725ae8807c5887422be50279175feae38231e37b804e0dd810567859",
+  "seeds": {
+    "procedure": "sha256-first-u32be-nonzero@1",
+    "taskSelection": 1133641589,
+    "replicateScheduling": 624781390,
+    "interleaving": 3868643525,
+    "pairedBootstrap": 2714409742
+  },
+  "stopReasons": [
+    "official-pool-requirement-unresolved",
+    "no-candidate-supports-disjoint-suitability-rehearsal-official-pools"
+  ],
+  "execution": {
+    "modelArms": 0,
+    "dockerCells": 0,
+    "previews": 0,
+    "rehearsalCells": 0,
+    "officialCells": 0
+  }
+}
