@@ -105,6 +105,7 @@ export function normalizeHarborSavedJobConfig(saved: unknown, submitted: unknown
   const document = saved as Record<string, unknown>;
   const retry = document.retry;
   const environment = document.environment;
+  const committedEnvironmentIsDefault = committed.environment.type === "docker" && Object.keys(committed.environment).length === 1;
   const normalized: Record<string, unknown> = {
     ...document,
     ...(document.n_attempts === undefined && committed.n_attempts === 1 ? { n_attempts: 1 } : {}),
@@ -113,7 +114,9 @@ export function normalizeHarborSavedJobConfig(saved: unknown, submitted: unknown
       : typeof retry === "object" && retry !== null && !Array.isArray(retry) && (retry as Record<string, unknown>).max_retries === undefined && committed.retry.max_retries === 0
         ? { retry: { ...(retry as Record<string, unknown>), max_retries: 0 } }
         : {}),
-    ...(typeof environment === "object" && environment !== null && !Array.isArray(environment)
+    ...(environment === undefined && committedEnvironmentIsDefault
+      ? { environment: { type: "docker" } }
+      : typeof environment === "object" && environment !== null && !Array.isArray(environment)
       && (environment as Record<string, unknown>).type === undefined && committed.environment.type === "docker"
       ? { environment: { ...(environment as Record<string, unknown>), type: "docker" } }
       : {}),

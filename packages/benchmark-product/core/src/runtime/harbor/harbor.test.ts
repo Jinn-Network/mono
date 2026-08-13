@@ -53,7 +53,7 @@ if (!Array.isArray(config.artifacts) || config.artifacts.length !== 1) throw new
 const job = join(config.jobs_dir, config.job_name); const trial = join(job, "trial-1");
 mkdirSync(join(trial, "agent"), { recursive: true }); mkdirSync(join(trial, "verifier"), { recursive: true }); mkdirSync(join(trial, "artifacts"), { recursive: true });
 // Harbor 0.21 persists JobConfig with model_dump_json(exclude_defaults=True).
-const savedConfig = structuredClone(config); delete savedConfig.n_attempts; delete savedConfig.retry; delete savedConfig.environment.type;
+const savedConfig = structuredClone(config); delete savedConfig.n_attempts; delete savedConfig.retry; delete savedConfig.environment;
 writeFileSync(join(job, "config.json"), JSON.stringify(savedConfig));
 if (${String(failWithPartial)}) { writeFileSync(join(job, "result.json"), JSON.stringify({ id: config.job_name, status: "failed" })); writeFileSync(join(trial, "partial.log"), "partial evidence"); symlinkSync(join(trial, "partial.log"), join(trial, "unsafe-link")); process.stderr.write("fake Harbor partial failure\\n"); process.exit(2); }
 writeFileSync(join(job, "result.json"), JSON.stringify({ id: config.job_name, status: "success" }));
@@ -81,10 +81,12 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
     expect(() => harborSelectionManifestBytes({ ...manifest, source: { ...manifest.source, input: { path: "/private/host/task" } } } as never)).toThrow();
     expect(() => HarborJobConfigSchema.parse({ job_name: "job", jobs_dir: "jobs", n_attempts: 1, n_concurrent_trials: 1, retry: { max_retries: 0 }, environment: { type: manifest.environment.image }, agents: [manifest.arms[0]!.jobAgent], artifacts: manifest.outputs.map((output) => output.artifact), tasks: [manifest.source.jobInput] })).toThrow();
     const submitted = HarborJobConfigSchema.parse({ job_name: "job", jobs_dir: "jobs", n_attempts: 1, n_concurrent_trials: 1, retry: { max_retries: 0 }, environment: { type: "docker" }, agents: [manifest.arms[0]!.jobAgent], artifacts: manifest.outputs.map((output) => output.artifact), tasks: [manifest.source.jobInput] });
-    expect(normalizeHarborSavedJobConfig({ ...submitted, n_attempts: undefined, retry: undefined, environment: {} }, submitted)).toEqual(submitted);
+    expect(normalizeHarborSavedJobConfig({ ...submitted, n_attempts: undefined, retry: undefined, environment: undefined }, submitted)).toEqual(submitted);
     expect(() => normalizeHarborSavedJobConfig({ ...submitted, n_attempts: 2 }, submitted)).toThrow();
     expect(() => normalizeHarborSavedJobConfig({ ...submitted, retry: { max_retries: 1 } }, submitted)).toThrow();
     expect(() => normalizeHarborSavedJobConfig({ ...submitted, environment: { type: "daytona" } }, submitted)).toThrow(/contradicts/i);
+    const submittedNondefaultEnvironment = { ...submitted, environment: { type: "docker" as const, force_build: true } };
+    expect(() => normalizeHarborSavedJobConfig({ ...submittedNondefaultEnvironment, environment: undefined }, submittedNondefaultEnvironment)).toThrow();
     const datasetSource = harborJobSource({ ...manifest, source: { kind: "dataset", input: { name: "demo/dataset", version: "r1" }, jobInput: { path: ".jinn-harbor/dataset" }, resolved: manifest.source.resolved, taskName: "only-task" } });
     expect(datasetSource).toEqual({ datasets: [{ path: ".jinn-harbor/dataset", task_names: ["only-task"], n_tasks: 1 }] });
     expect(datasetSource).not.toHaveProperty("tasks");
@@ -143,7 +145,7 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       expect(archive.harbor).toMatchObject({ jobId: expect.any(String), trialId: expect.any(String), status: "completed" });
       expect(archive.nativeArtifacts.map((item) => item.path)).toEqual(expect.arrayContaining(["config.json", "result.json", "trial-1/config.json", "trial-1/result.json", "trial-1/ctrf.json", "trial-1/artifacts/unknown.bin"]));
       const effectiveJobConfig = JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, archive.nativeArtifacts.find((item) => item.path === "config.json")!.sha256))) as Record<string, unknown>;
-      expect(effectiveJobConfig.environment).toEqual({});
+      expect(effectiveJobConfig).not.toHaveProperty("environment");
       expect(effectiveJobConfig).not.toHaveProperty("n_attempts");
       expect(effectiveJobConfig).not.toHaveProperty("retry");
       expect(effectiveJobConfig).not.toHaveProperty("orchestrator");
