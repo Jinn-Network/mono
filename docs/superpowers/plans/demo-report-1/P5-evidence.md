@@ -6,7 +6,8 @@
 
 **Exact base:** `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`
 
-**Integrated through:** `b91bd0679`, including the merged P2/P2b/P3b/P4/E2/preregistration packets
+**Integrated through:** `342f5725c57d7f198d173dd707f5b9fda7ae5d3f`, including the merged
+P2/P2b/P3b/P4/E2/preregistration and current integration packets
 
 ## Current outcome: authenticated fresh run stopped at the disk gate
 
