@@ -5,10 +5,16 @@
  * both carry `joinedSolverNets` in `~/.jinn-client/config.json`; a parse refusal would
  * brick them, so the loader must tolerate the key rather than reject it.
  *
- * The entry shape below is the live one, verified read-only against an operator home
- * on 2026-08-13: manifest-CID keys plus one synthetic `legacy:<name>` key, each entry
- * carrying `{ manifestCid, name, contract, roles, harness, model?, plugins,
+ * The entry SHAPE below is the live one, verified read-only against an operator home
+ * on 2026-08-13: `{ manifestCid, name, contract, roles, harness, model?, plugins,
  * disabledDefaultPlugins }`.
+ *
+ * The fixture is a two-entry reduction of that home, not a copy of it — the live map
+ * carries three entries (two manifest-CID keys plus the synthetic `legacy:prediction`
+ * key). Two is what the parse claim needs: one entry per KEY FORM, since a CID key and
+ * a `legacy:<name>` key are the two things the loader has to accept. A third CID-keyed
+ * entry would exercise the same branch again. Counting entries is not the assertion —
+ * accepting both key forms, with and without the optional `model`, is.
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
