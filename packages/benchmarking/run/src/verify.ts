@@ -1,11 +1,17 @@
 import {
   documentDigest,
+  readMatrixPublicationExtension,
   type BenchmarkRecord,
   type MatrixRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
-import { assembleMatrix } from "./assemble.js";
-import type { AssemblyPorts, AssemblyProcedure } from "./ports.js";
+import {
+  assembleMatrix,
+  assembleMatrixV2,
+  MatrixV2AssemblyError,
+  type BenchmarkAccountingInput,
+} from "./assemble.js";
+import type { AssemblyPorts, AssemblyProcedure, MatrixV2AssemblyPorts } from "./ports.js";
 
 export type VerifyMatrixResult =
   | { ok: true }
@@ -70,4 +76,88 @@ export async function verifyMatrix(
     }
   }
   return { ok: true };
+}
+
+/**
+ * Verify an accounted Matrix procedure 2.0 record from exact Matrix and BenchmarkAccounting
+ * bytes. V1 verification remains unchanged above; this path requires the v2 accounting ports.
+ */
+export async function verifyMatrixV2(
+  matrix: MatrixRecord,
+  bench: BenchmarkRecord,
+  run: RunRecord,
+  ports: MatrixV2AssemblyPorts,
+  accountingInput: BenchmarkAccountingInput,
+  matrixBytes: Uint8Array,
+): Promise<VerifyMatrixResult> {
+  if (!(matrixBytes instanceof Uint8Array) || matrixBytes.length === 0) {
+    return {
+      ok: false,
+      check: "matrix-rederivation",
+      detail: "exact matrix bytes are required for verifyMatrixV2",
+    };
+  }
+  if (matrix.assembly.procedure !== "jinn.benchmarking.assembly" || matrix.assembly.version !== "2.0") {
+    return {
+      ok: false,
+      check: "matrix-assembly-v2",
+      detail: "verifyMatrixV2 requires jinn.benchmarking.assembly@2.0",
+    };
+  }
+  if (ports.verifySignatures !== undefined) {
+    const signature = await ports.verifySignatures.verifyMatrixAuthority(matrixBytes, run);
+    if (!signature.ok) {
+      return {
+        ok: false,
+        check: "matrix-authority",
+        detail: signature.detail,
+      };
+    }
+  }
+  try {
+    const assembled = await assembleMatrixV2(bench, run, ports, accountingInput);
+    let extension;
+    try {
+      extension = readMatrixPublicationExtension(matrix as Record<string, unknown>);
+    } catch (error) {
+      return {
+        ok: false,
+        check: "matrix-accounting-extension",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (extension === undefined) {
+      return {
+        ok: false,
+        check: "matrix-accounting-extension",
+        detail: "Matrix assembly v2 requires the benchmark-publication accounting extension",
+      };
+    }
+    const accountingDigest = documentDigest(accountingInput.bytes).slice("sha256:".length);
+    if (extension.accounting.digest.sha256 !== accountingDigest) {
+      return {
+        ok: false,
+        check: "matrix-accounting-binding",
+        detail: "Matrix accounting extension does not name the supplied exact BenchmarkAccounting bytes",
+      };
+    }
+    const expectedDigest = documentDigest(matrixBytes);
+    if (assembled.digest !== expectedDigest || !sameBytes(assembled.bytes, matrixBytes)) {
+      return {
+        ok: false,
+        check: "matrix-rederivation",
+        detail: `re-derived digest ${assembled.digest} !== received ${expectedDigest}`,
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof MatrixV2AssemblyError) {
+      return { ok: false, check: error.check, detail: error.message };
+    }
+    throw error;
+  }
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
