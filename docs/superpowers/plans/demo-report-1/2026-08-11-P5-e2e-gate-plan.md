@@ -7,7 +7,7 @@
 | **Updated** | 2026-08-13 |
 | **Lane** | C4 |
 | **Packet** | P5 |
-| **Base** | Started at `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`; merged through `97e49c43d09f0e56bb0f5ecb82c1d3365078c350` |
+| **Base** | Started at `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`; merged through `465adf76f` |
 
 ## Purpose and boundary
 
