@@ -27,7 +27,21 @@ const TaskInput = z.union([
 ]);
 export type HarborDatasetInput = z.infer<typeof DatasetInput>;
 export type HarborTaskInput = z.infer<typeof TaskInput>;
-const ArtifactConfig = z.object({ source: z.string().min(1).refine((value) => !value.split("/").includes("..")), destination: z.string().min(1).regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u).nullable().optional(), exclude: z.array(z.string()).optional(), service: z.string().min(1).nullable().optional() }).strict().transform((value) => {
+const ArtifactConfig = z.object({
+  source: z.string().min(1).refine((value) => !value.split("/").includes("..")),
+  destination: z.string().min(1)
+    .refine((value) => !value.includes("\\"), "must use forward-slash separators")
+    .regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u)
+    .refine((value) => !/^(?:\.\/?)+$/u.test(value), "must name a file or directory")
+    .refine((value) => value.replace(/\/+$/u, "") !== "manifest.json", "manifest.json is reserved")
+    .nullable().optional(),
+  exclude: z.array(z.string()).optional(),
+  service: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u).nullable().optional(),
+}).strict().superRefine((value, context) => {
+  if (value.service !== undefined && value.service !== null && value.service !== "main" && !value.source.startsWith("/") && !/^[A-Za-z]:[/\\]/u.test(value.source)) {
+    context.addIssue({ code: "custom", path: ["source"], message: "sidecar artifact source must be absolute" });
+  }
+}).transform((value) => {
   const normalized = { ...value };
   if (normalized.destination === null) delete normalized.destination;
   if (normalized.exclude?.length === 0) delete normalized.exclude;
@@ -47,8 +61,8 @@ const HarborEnvironmentConfigurationRawSchema = z.object({
   cpu_enforcement_policy: ResourceMode.optional(), memory_enforcement_policy: ResourceMode.optional(),
   override_cpus: z.number().int().positive().nullable().optional(), override_memory_mb: z.number().int().positive().nullable().optional(),
   override_storage_mb: z.number().int().positive().nullable().optional(), override_gpus: z.number().int().nonnegative().nullable().optional(),
-  override_tpu: z.object({ type: z.string().min(1), topology: z.string().min(1) }).strict().nullable().optional(), mounts: z.array(ServiceVolume).nullable().optional(), extra_docker_compose: z.array(z.string().min(1)).optional(),
-  env: z.record(z.string(), z.string()).optional(), kwargs: z.record(z.string(), Json).optional(), extra_allowed_hosts: z.array(z.string().min(1)).optional(),
+  override_tpu: z.object({ type: z.string().min(1), topology: z.string().regex(/^[1-9]\d*(?:x[1-9]\d*)+$/u) }).strict().nullable().optional(), mounts: z.array(ServiceVolume).nullable().optional(), extra_docker_compose: z.array(z.string().min(1)).optional(),
+  env: z.record(z.string(), z.string()).optional(), kwargs: z.record(z.string(), Json).optional(),
 }).strict();
 
 function canonicalEnvironmentConfiguration(value: z.infer<typeof HarborEnvironmentConfigurationRawSchema>): z.infer<typeof HarborEnvironmentConfigurationRawSchema> {
@@ -57,7 +71,7 @@ function canonicalEnvironmentConfiguration(value: z.infer<typeof HarborEnvironme
     if (key === "delete") return item !== true;
     if (key === "cpu_enforcement_policy" || key === "memory_enforcement_policy") return item !== "auto";
     if (["import_path", "override_cpus", "override_memory_mb", "override_storage_mb", "override_gpus", "override_tpu", "mounts"].includes(key)) return item !== null;
-    if (["extra_docker_compose", "extra_allowed_hosts"].includes(key)) return !Array.isArray(item) || item.length > 0;
+    if (key === "extra_docker_compose") return !Array.isArray(item) || item.length > 0;
     if (key === "env" || key === "kwargs") return typeof item !== "object" || item === null || Object.keys(item).length > 0;
     return true;
   })) as z.infer<typeof HarborEnvironmentConfigurationRawSchema>;

@@ -81,13 +81,27 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
     expect(() => harborSelectionManifestBytes({ ...manifest, source: { ...manifest.source, input: { path: "/private/host/task" } } } as never)).toThrow();
     const canonicalSelection = JSON.parse(new TextDecoder().decode(harborSelectionManifestBytes({
       ...manifest,
-      environment: { ...manifest.environment, configuration: { import_path: null, force_build: false, delete: true, cpu_enforcement_policy: "auto", memory_enforcement_policy: "auto", override_cpus: null, override_memory_mb: null, override_storage_mb: null, override_gpus: null, override_tpu: null, mounts: null, extra_docker_compose: [], env: {}, kwargs: {}, extra_allowed_hosts: [] } },
+      environment: { ...manifest.environment, configuration: { import_path: null, force_build: false, delete: true, cpu_enforcement_policy: "auto", memory_enforcement_policy: "auto", override_cpus: null, override_memory_mb: null, override_storage_mb: null, override_gpus: null, override_tpu: null, mounts: null, extra_docker_compose: [], env: {}, kwargs: {} } },
       arms: [manifest.arms[0]!, { ...manifest.arms[1]!, jobAgent: { ...manifest.arms[1]!.jobAgent, kwargs: {} } }],
       outputs: [{ ...manifest.outputs[0]!, artifact: { ...manifest.outputs[0]!.artifact, exclude: [], service: null } }],
     } as never))) as HarborSelectionManifest;
     expect(canonicalSelection.environment.configuration).toEqual({});
     expect(canonicalSelection.arms[1]!.jobAgent).toEqual({ name: "agent-two", model_name: "model-two" });
     expect(canonicalSelection.outputs[0]!.artifact).toEqual({ source: "/logs/artifacts/prediction.json", destination: "prediction.json" });
+    const selectionWithEnvironment = (configuration: unknown) => harborSelectionManifestBytes({ ...manifest, environment: { ...manifest.environment, configuration } } as never);
+    expect(() => selectionWithEnvironment({ override_tpu: { type: "v6e", topology: "2x4" } })).not.toThrow();
+    expect(() => selectionWithEnvironment({ override_tpu: { type: "v6e", topology: "2-by-4" } })).toThrow();
+    expect(() => selectionWithEnvironment({ override_tpu: { type: "v6e", topology: "0x4" } })).toThrow();
+    expect(() => selectionWithEnvironment({ extra_allowed_hosts: ["example.com"] })).toThrow();
+    expect(() => selectionWithEnvironment({ mounts: [{ type: "bind", source: "/host", target: "/guest", read_only: false }] })).toThrow();
+    expect(() => selectionWithEnvironment({ mounts: [{ type: "volume", source: "cache", target: "/guest", bind: { create_host_path: false } }] })).toThrow();
+    const selectionWithArtifact = (artifact: unknown) => harborSelectionManifestBytes({ ...manifest, outputs: [{ ...manifest.outputs[0]!, artifact }] } as never);
+    expect(() => selectionWithArtifact({ source: "/logs/output", destination: "bad\\path" })).toThrow();
+    expect(() => selectionWithArtifact({ source: "/logs/output", destination: "manifest.json" })).toThrow();
+    expect(() => selectionWithArtifact({ source: "/logs/output", destination: "manifest.json/" })).toThrow();
+    expect(() => selectionWithArtifact({ source: "relative/output", destination: "output", service: "sidecar" })).toThrow();
+    expect(() => selectionWithArtifact({ source: "/logs/output", destination: "output", service: "bad service" })).toThrow();
+    expect(() => selectionWithArtifact({ source: "/logs/../secret", destination: "output" })).toThrow();
     expect(() => HarborJobConfigSchema.parse({ job_name: "job", jobs_dir: "jobs", n_attempts: 1, n_concurrent_trials: 1, retry: { max_retries: 0 }, environment: { type: manifest.environment.image }, agents: [manifest.arms[0]!.jobAgent], artifacts: manifest.outputs.map((output) => output.artifact), tasks: [manifest.source.jobInput] })).toThrow();
     const submitted = HarborJobConfigSchema.parse({ job_name: "job", jobs_dir: "jobs", n_attempts: 1, n_concurrent_trials: 1, retry: { max_retries: 0 }, environment: { type: "docker" }, agents: [manifest.arms[0]!.jobAgent], artifacts: manifest.outputs.map((output) => output.artifact), tasks: [manifest.source.jobInput] });
     expect(normalizeHarborSavedJobConfig({ ...submitted, n_attempts: undefined, retry: undefined, environment: undefined }, submitted)).toEqual(submitted);
