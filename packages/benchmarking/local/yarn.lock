@@ -43,7 +43,6 @@ __metadata:
   resolution: "@jinn-network/benchmarking-run@portal:../run::locator=%40jinn-network%2Fbenchmarking-local%40workspace%3A."
   dependencies:
     "@jinn-network/benchmarking-records": "npm:0.1.0"
-    "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
   languageName: node
@@ -61,14 +60,6 @@ __metadata:
   peerDependenciesMeta:
     vitest:
       optional: true
-  languageName: node
-  linkType: soft
-
-"@jinn-network/task-execution-backend@portal:../../task-execution/backend::locator=%40jinn-network%2Fbenchmarking-local%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-backend@portal:../../task-execution/backend::locator=%40jinn-network%2Fbenchmarking-local%40workspace%3A."
-  dependencies:
-    "@jinn-network/task-execution-protocol": "npm:0.1.0"
   languageName: node
   linkType: soft
 

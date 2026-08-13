@@ -79,10 +79,12 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_AGGREGATE = [
   '@jinn-network/task-execution-protocol',
 ];
 
-// run (M4) may import the backend contract + protocol + profiles, but never a concrete
-// backend-local / evidence / marketplace / aggregate package (plan Task 4.1; tenet 3/4).
+// run (M4) consumes a narrow structural execution port plus protocol + profiles. Keeping the
+// full backend contract out of production source lets verification-only matrix assembly stay
+// independent of the execution package while concrete backends remain structurally compatible.
 const RUN_FORBIDDEN_EXTRA = [
   '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-backend-local',
   '@jinn-network/task-execution-workspace',

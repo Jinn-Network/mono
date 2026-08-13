@@ -3,6 +3,15 @@
 // Never imports a concrete backend, evidence binding, marketplace package, or aggregate.
 
 export type {
+  BenchmarkAttemptUri,
+  BenchmarkBackendCapabilities,
+  BenchmarkExecutionBackend,
+  BenchmarkObservationCursor,
+  BenchmarkObservationSnapshot,
+  BenchmarkSubmissionUri,
+} from "./backend-port.js";
+
+export type {
   AdmissionEvidencePort,
   AssemblyPorts,
   AssemblyProcedure,
