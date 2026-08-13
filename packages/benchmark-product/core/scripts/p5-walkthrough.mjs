@@ -120,6 +120,20 @@ export async function runCanonicalP5GreenBaseline({
   });
 }
 
+/**
+ * `compileDraft` owns the venue isolation policy in `policy.submissionBaseline`. The Demo-1
+ * runtime helper returns the complete effective requirement set because launcher/preflight callers
+ * need it, so the operations path must remove that one baseline-owned key before sealing an arm.
+ * Duplicating it on an arm is invalid under RunRecord §7.79 even when the value is identical.
+ */
+export function p5ArmPinning(effectiveRequirements) {
+  if (effectiveRequirements?.isolationPolicy !== "unrestricted") {
+    fail("Demo-1 effective requirements did not carry the expected unrestricted isolation policy");
+  }
+  const { isolationPolicy: _baselineOwned, ...armPinning } = effectiveRequirements;
+  return armPinning;
+}
+
 async function main() {
   const claudePath = resolve(option("--claude", "JINN_P5_CLAUDE_PATH"));
   const claudeVersion = option("--claude-version", "JINN_P5_CLAUDE_VERSION");
@@ -218,13 +232,13 @@ async function main() {
   await step("arm.add baseline", () => core.armAdd(context, {
     draftId: DRAFT_ID,
     armId: BASELINE_ARM,
-    pinning: core.demo1ClaudeArmRequirements(runtime, "claude-md"),
+    pinning: p5ArmPinning(core.demo1ClaudeArmRequirements(runtime, "claude-md")),
     notes: "Native root CLAUDE.md baseline B.",
   }));
   await step("arm.add candidate", () => core.armAdd(context, {
     draftId: DRAFT_ID,
     armId: CANDIDATE_ARM,
-    pinning: core.demo1ClaudeArmRequirements(runtime, "skill"),
+    pinning: p5ArmPinning(core.demo1ClaudeArmRequirements(runtime, "skill")),
     notes: "Native Claude Code skill arm A.",
   }));
   await step("draft.update", () => core.updateDraft(context, {
