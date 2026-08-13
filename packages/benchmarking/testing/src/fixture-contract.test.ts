@@ -85,6 +85,18 @@ describe("ordering and export fixture oracles", () => {
 });
 
 describe("method fixture/spec completeness", () => {
+  test("pins paired-delta draws to one shared cluster bootstrap ensemble", async () => {
+    const [paired, withheld] = await Promise.all([
+      fixtureJson("methods/paired-delta.json"),
+      fixtureJson("methods/paired-delta-withheld.json"),
+    ]);
+
+    expect(paired.expectedResults.bootstrap.draws).toBe(
+      paired.expectedResults.bootstrap.resamples * paired.expectedResults.bootstrap.count,
+    );
+    expect(withheld.expectedResults.bootstrap.draws).toBe(0);
+  });
+
   test("declares every reference method and Bradley–Terry's registered/unavailable status", async () => {
     const specs = [
       ...await fixtureJson("methods/method-specs.json"),

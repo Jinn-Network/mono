@@ -1040,6 +1040,21 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       }
     });
 
+    test("paired-delta reports one shared bootstrap ensemble's cluster draws", async () => {
+      const fixture = await loadFixture("paired-delta.json");
+      const prepared = prepareFixture(fixture);
+      const method = registry.get(fixture.methodId, fixture.methodVersion)!;
+      const results = onlySubjectResults(method.compute!({
+        subjects: prepared.subjects,
+        parameters: { ...fixture.parameters, verdictRule: fixture.verdictRule },
+        verdictRule: fixture.verdictRule,
+        registry,
+        ...prepared.ports,
+      })) as { bootstrap: { draws: number; resamples: number; count: number } };
+
+      expect(results.bootstrap.draws).toBe(results.bootstrap.resamples * results.bootstrap.count);
+    });
+
     test("registry entries reproduce the declarative method-spec fixture", async () => {
       const expected = [
         ...await loadJson<MethodSpecFixture[]>("method-specs.json"),
