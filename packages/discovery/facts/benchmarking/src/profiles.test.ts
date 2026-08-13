@@ -2,15 +2,19 @@ import { cloudEventsFields, referenceBearingFields, sealJson } from "@jinn-netwo
 import { describe, expect, it } from "vitest";
 
 import {
+  BENCHMARK_ACCOUNTING_RECORD_KIND,
   BENCHMARK_RECORD_KIND,
   MATRIX_RECORD_KIND,
   REPORT_RECORD_KIND,
+  REPORT_V2_RECORD_KIND,
   RUN_RECORD_KIND,
 } from "./identifiers.js";
 import {
+  benchmarkAccountingProfile,
   benchmarkProfile,
   matrixProfile,
   reportProfile,
+  signedReportProfile,
   runProfile,
 } from "./profiles.js";
 
@@ -22,6 +26,8 @@ const EXPECTED_DIGESTS: Record<string, string> = {
   run: "sha256:c7cd601d477aa308994c6f135f6026967d51a6f8700c735b58c885ae33ba9732",
   matrix: "sha256:80458de1c987bb7a68a73b3a0e0673cbbeb4106abe610ef916e4d09e99bdb76a",
   report: "sha256:85c7392b237da814e4dbdfdee1b4c7d9eb71663237d585e41320c3fb547f0b35",
+  reportV2: "sha256:23e0de1dc0b30dc1cf8fa3eac8941fb9235240cc46c139b64b91eda4968a984f",
+  accounting: "sha256:6f37b7e9dea41ea17760f62c31ea834334fea1963eaff065a27cdb239a3734e1",
 };
 
 function expectPinnedDigest(name: string, digest: string) {
@@ -121,8 +127,61 @@ describe("facts/benchmarking profile documents (program §7.128)", () => {
     expectPinnedDigest("report", sealJson(reportProfile).digest);
   });
 
+  it("signed Report v2 declares envelope and payload identities separately from legacy v1", () => {
+    expect(signedReportProfile.kind).toBe(REPORT_V2_RECORD_KIND);
+    expect(signedReportProfile.fields.map((field) => field.name)).toEqual([
+      "reportRecordDigest",
+      "reportPayloadDigest",
+      "recordMediaType",
+      "payloadMediaType",
+      "matrixDigests",
+      "methodId",
+      "methodVersion",
+      "author",
+      "preregistered",
+    ]);
+    expect(referenceBearingFields(signedReportProfile)).toEqual(["matrixDigests"]);
+    expectPinnedDigest("reportV2", sealJson(signedReportProfile).digest);
+  });
+
+  it("BenchmarkAccounting exposes declared scope, registration, and authority without a trust result", () => {
+    expect(benchmarkAccountingProfile.kind).toBe(BENCHMARK_ACCOUNTING_RECORD_KIND);
+    expect(benchmarkAccountingProfile.fields.map((field) => field.name)).toEqual([
+      "accountingDigest",
+      "recordMediaType",
+      "runDigest",
+      "publisher",
+      "procedureId",
+      "procedureVersion",
+      "closeAt",
+      "closeAnchorChain",
+      "closeAnchorBlockNumber",
+      "closeAnchorBlockHash",
+      "scopeStreamCount",
+      "scopeRoles",
+      "scopeKinds",
+      "publicRegistrationStatus",
+      "publisherAuthorityKind",
+      "publisherAuthorizationDigest",
+      "cellCount",
+      "dispatchCount",
+    ]);
+    expect(referenceBearingFields(benchmarkAccountingProfile)).toEqual([
+      "runDigest",
+      "publisherAuthorizationDigest",
+    ]);
+    expectPinnedDigest("accounting", sealJson(benchmarkAccountingProfile).digest);
+  });
+
   it("no benchmarking facts profile declares a substrate field", () => {
-    for (const profile of [benchmarkProfile, runProfile, matrixProfile, reportProfile]) {
+    for (const profile of [
+      benchmarkProfile,
+      runProfile,
+      matrixProfile,
+      reportProfile,
+      signedReportProfile,
+      benchmarkAccountingProfile,
+    ]) {
       expect(profile.fields.some((field) => field.class === "substrate")).toBe(false);
     }
   });

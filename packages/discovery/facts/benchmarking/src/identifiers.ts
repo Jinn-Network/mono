@@ -1,7 +1,9 @@
 import {
+  BENCHMARK_ACCOUNTING_RECORD_KIND,
   BENCHMARK_RECORD_KIND,
   MATRIX_RECORD_KIND,
   REPORT_RECORD_KIND,
+  REPORT_V2_RECORD_KIND,
   RUN_RECORD_KIND,
 } from "@jinn-network/benchmarking-records";
 import { assertRecordKindUri } from "@jinn-network/record-discovery-protocol";
@@ -14,10 +16,14 @@ assertRecordKindUri(BENCHMARK_RECORD_KIND);
 assertRecordKindUri(RUN_RECORD_KIND);
 assertRecordKindUri(MATRIX_RECORD_KIND);
 assertRecordKindUri(REPORT_RECORD_KIND);
+assertRecordKindUri(REPORT_V2_RECORD_KIND);
+assertRecordKindUri(BENCHMARK_ACCOUNTING_RECORD_KIND);
 
 export {
+  BENCHMARK_ACCOUNTING_RECORD_KIND,
   BENCHMARK_RECORD_KIND,
   MATRIX_RECORD_KIND,
   REPORT_RECORD_KIND,
+  REPORT_V2_RECORD_KIND,
   RUN_RECORD_KIND,
 };

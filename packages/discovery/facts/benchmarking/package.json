@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/record-discovery-facts-benchmarking",
   "version": "0.1.0",
-  "description": "Facts-profile documents and record-fact recompute functions for the Jinn Benchmarking Application record kinds (Benchmark, Run, Matrix, Report).",
+  "description": "Facts-profile documents and record-fact recompute functions for Benchmark, Run, Matrix, legacy/raw Report v1, signed Report v2, and BenchmarkAccounting records.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
