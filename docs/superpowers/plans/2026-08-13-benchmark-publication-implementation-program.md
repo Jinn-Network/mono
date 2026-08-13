@@ -31,8 +31,8 @@
 | PUB-01 | Benchmark records, Accounting/archive/Report v2/extensions | PUB-00 | complete |
 | PUB-02 | Neutral record-publication package and source adapter | PUB-00 | complete |
 | PUB-03 | Accounting facts and verification | PUB-01 | pending |
-| PUB-04 | Runner capture, explicit attempts, Matrix v2 | PUB-01 | pending |
-| PUB-05 | Aggregate Report v2 | PUB-01 | pending |
+| PUB-04 | Runner capture, explicit attempts, Matrix v2 | PUB-01 | complete |
+| PUB-05 | Aggregate Report v2 | PUB-01 | complete |
 | PUB-06 | Evidence-publication compatibility adapter | PUB-02 | pending |
 | PUB-07 | Benchmark-publication package | PUB-01..04, PUB-02 | pending |
 | PUB-08 | Runtime contributor contract and adapter migration | PUB-07 | pending |
@@ -55,3 +55,5 @@ The repository pins Node 22 and Yarn 4.13.0 (`.nvmrc`, `.node-version`, package 
 | PUB-00 | `fa3f452bb` | pending commit | `git diff --check`; authority files byte-for-byte transferred | authority documents approved | integration baseline |
 | PUB-01 | `36dc97bfa` | `85fa66d6a`, `e628c4bbf` | 330 tests; typecheck; build; schema drift/parity; pack smoke | APPROVE after 3 blockers fixed | `a898121c4`, `0923ac9aa` |
 | PUB-02 | `36dc97bfa` | `c56d178cd`, `c65947090` | 4 tests; typecheck; build; pack smoke; discovery/catalog/architecture guards | APPROVE after 2 blockers fixed | `449814ac3`, `fedc41282` |
+| PUB-04 | `58e155f6c` | `976073f9a` | 68 passed, 2 skipped; typecheck; build; pack smoke; conformance | APPROVE | `5bc33a494` |
+| PUB-05 | `58e155f6c` | `ed4a9e866`, `fbc80326c` | 199 tests; typecheck; build; pack smoke | APPROVE after close-boundary blocker fixed | `81789e196`, `d2c120249` |
