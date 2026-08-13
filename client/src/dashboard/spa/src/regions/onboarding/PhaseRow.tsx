@@ -2,14 +2,13 @@ import { type ReactNode, type JSX } from 'react';
 import { cn } from '../../lib/utils.js';
 import { PhaseStatusTag, type PhaseStatus } from './PhaseStatusTag.js';
 
-export type Phase = 1 | 2 | 3 | 4 | 5;
+export type Phase = 1 | 2 | 3 | 4;
 
 const PHASE_TITLES: Record<Phase, string> = {
   1: 'Provisioning your wallet',
   2: 'Fund your wallet',
   3: 'Joining Jinn',
-  4: 'Pick your first SolverNet',
-  5: 'Set up harness + model',
+  4: 'Set up harness + model',
 };
 
 /**

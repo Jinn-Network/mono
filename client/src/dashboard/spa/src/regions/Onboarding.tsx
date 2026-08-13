@@ -1,26 +1,28 @@
 /**
  * Onboarding — full-screen takeover while the fleet bootstraps.
  *
- * Five operator-meaningful steps displayed as a single always-visible list:
+ * Four operator-meaningful steps displayed as a single always-visible list:
  *
  *   01 · Provisioning your wallet      (wallet, safe_predicted)
  *   02 · Fund your wallet              (awaiting_funding)
  *   03 · Joining Jinn                  (everything else through mech_deployed)
- *   04 · Pick your first SolverNet     (post-terminal; SolverNetStep)
- *   05 · Set up harness + model        (post-join; HarnessSelectStep)
+ *   04 · Set up harness + model        (post-terminal; HarnessSelectStep)
  *
  * Each row shows status (done · active · queued). The active row expands
  * inline with whatever the operator needs at that moment — the funding
- * address card in step 2, a current sub-state line in step 3, the SolverNet
- * card in step 4, the harness picker in step 5. Done rows collapse to a thin
- * checkmark line. Queued rows are dim.
+ * address card in step 2, a current sub-state line in step 3, the harness
+ * picker in step 4. Done rows collapse to a thin checkmark line. Queued rows
+ * are dim.
  *
- * Steps 4 & 5 stay `queued` (label-only) while the bootstrap state machine is
- * still running. They must NOT mount SolverNetStep / HarnessSelectStep before
- * `bootstrapIsTerminal()` — those steps fetch the live registry / harness
- * readiness, which 503 before the running flip. Step 4 becomes active once the
- * bootstrap is terminal and no SolverNet is joined; step 5 becomes active once
- * ≥1 SolverNet is joined.
+ * Step 4 stays `queued` (label-only) while the bootstrap state machine is
+ * still running. It must NOT mount HarnessSelectStep before
+ * `bootstrapIsTerminal()` — that step fetches live harness readiness, which
+ * 503s before the running flip.
+ *
+ * Wave-4 D1 (DR-2026-08-05) removed the former step 4 ("Pick your first
+ * SolverNet"): the `joinedSolverNets` claim gate and its join lifecycle
+ * retired with the legacy TaskEngine, so there is no join to make here.
+ * SolverNet membership is operator config plus the `jinn solver-nets` CLI.
  *
  * Once bootstrap reaches 'complete' the daemon flips mode to 'running'; the
  * App-level overlay keeps the takeover mounted until onboarding is marked
@@ -50,9 +52,7 @@ import { NetworkBadge } from './onboarding/NetworkBadge.js';
 import { PhaseRow, type Phase } from './onboarding/PhaseRow.js';
 import { type PhaseStatus } from './onboarding/PhaseStatusTag.js';
 import { SubStateLine } from './onboarding/SubStateLine.js';
-import { SolverNetStep } from './onboarding/SolverNetStep.js';
 import { HarnessSelectStep, type HarnessSelection } from './onboarding/HarnessSelectStep.js';
-import { providerForModel } from '../pages/configuration/claudeModels.js';
 
 import { useCallback, useState, type JSX } from 'react';
 
@@ -60,9 +60,9 @@ import { useCallback, useState, type JSX } from 'react';
 const TERMINAL_STEPS = new Set(['complete', 'safe_binding_pending']);
 
 /**
- * The 2 action steps (SolverNet + harness/model) mount their live cards once
- * the bootstrap state machine reaches terminal OR the daemon has already
- * flipped to running. Until then those rows render label-only (queued).
+ * The action step (harness/model) mounts its live card once the bootstrap
+ * state machine reaches terminal OR the daemon has already flipped to
+ * running. Until then that row renders label-only (queued).
  */
 function bootstrapIsTerminal(bootstrap: BootstrapState): boolean {
   return bootstrap.mode === 'running' || TERMINAL_STEPS.has(bootstrap.currentStep);
@@ -141,25 +141,13 @@ export function Onboarding(): JSX.Element {
   const [harnessSel, setHarnessSel] = useState<HarnessSelection | null>(null);
   const onSelectionChange = useCallback((sel: HarnessSelection) => setHarnessSel(sel), []);
 
-  const joinedCids = Object.keys(bootstrap?.joinedSolverNets ?? {});
-  const primaryCid = joinedCids[0];
-
-  // Persist harness+model onto the joined membership (second upsert join keyed
-  // by the real manifest cid), then mark onboarding complete so App.tsx drops
-  // the takeover for <Operating>. PR A hot-applies the join live, so no restart.
-  // The App-level overlay (App.tsx) closes the takeover once mode===running
-  // AND onboardingComplete — set by completeOnboarding() below.
+  // Mark onboarding complete so App.tsx drops the takeover for <Operating>.
+  // The App-level overlay closes the takeover once mode===running AND
+  // onboardingComplete — set by completeOnboarding() below. Wave-4 D1 dropped
+  // the harness/model upsert that used to ride this mutation: it wrote into
+  // `joinedSolverNets`, whose write path retired with the claim gate.
   const enterMutation = useMutation({
     mutationFn: async () => {
-      if (primaryCid && harnessSel) {
-        const provider = providerForModel(harnessSel.model, harnessSel.harness);
-        await api.operator.join(primaryCid, {
-          roles: ['solver'],
-          harness: harnessSel.harness,
-          model: harnessSel.model,
-          ...(provider !== undefined ? { provider } : {}),
-        });
-      }
       await api.operator.completeOnboarding();
     },
     onSuccess: () => {
@@ -167,12 +155,7 @@ export function Onboarding(): JSX.Element {
     },
   });
 
-  const onJoined = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
-  }, [queryClient]);
-
-  const completionReady =
-    joinedCids.length > 0 && harnessSel?.ready === true && Boolean(harnessSel?.model);
+  const completionReady = harnessSel?.ready === true && Boolean(harnessSel?.model);
 
   if (isLoading || !bootstrap) {
     return (
@@ -189,16 +172,12 @@ export function Onboarding(): JSX.Element {
   const masterAddress = bootstrap.master_address ?? '';
   const { phase: currentPhase, subState } = bootstrapPhaseFor(bootstrap.currentStep);
   const isTerminal = bootstrapIsTerminal(bootstrap);
-  // Current step across the full 5-step rail. Steps 1-3 follow the bootstrap
-  // phase; step 4 is active once terminal with no join; step 5 once ≥1 joined.
-  const currentStep: Phase = !isTerminal
-    ? currentPhase
-    : joinedCids.length > 0
-      ? 5
-      : 4;
+  // Current step across the full 4-step rail. Steps 1-3 follow the bootstrap
+  // phase; step 4 is active once the bootstrap is terminal.
+  const currentStep: Phase = isTerminal ? 4 : currentPhase;
   const bootstrapError = bootstrap.error;
-  // #983: the App-level completion overlay now keeps Onboarding mounted in
-  // running mode (until ≥1 SolverNet is joined). A running-mode bootstrap
+  // #983: the App-level completion overlay keeps Onboarding mounted in running
+  // mode until the operator enters the dashboard. A running-mode bootstrap
   // response may omit `services`, so default to an empty array rather than
   // crashing on `.find`.
   const services = bootstrap.services ?? [];
@@ -243,14 +222,14 @@ export function Onboarding(): JSX.Element {
             data-testid="onboarding-progress"
             aria-label="Onboarding progress"
           >
-            <Progress value={Math.min(100, ((currentStep - 1) / 4) * 100)} />
+            <Progress value={Math.min(100, ((currentStep - 1) / 3) * 100)} />
             <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--fg-dim)]">
-              Phase {currentStep} of 5
+              Phase {currentStep} of 4
             </span>
           </div>
 
           <ol className="flex flex-col">
-            {([1, 2, 3, 4, 5] as Phase[]).map((p) => {
+            {([1, 2, 3, 4] as Phase[]).map((p) => {
               const status = statusFor(p, currentStep, fundingTargetMet);
               const showError = bootstrapError && p === currentStep && p <= 3;
               return (
@@ -282,24 +261,19 @@ export function Onboarding(): JSX.Element {
                       contractRevertReason={activeService?.error_revert_reason ?? null}
                     />
                   )}
-                  {/* Step 4 — SolverNet. Mounts the live registry card only once
-                      the bootstrap is terminal (queued rows are label-only; the
-                      registry endpoint 503s before the running flip). */}
+                  {/* Step 4 — harness + model. Mounts the live readiness card
+                      only once the bootstrap is terminal (queued rows are
+                      label-only; the readiness endpoint 503s before the running
+                      flip). Hosts the completion gate (Enter dashboard). */}
                   {p === 4 && status === 'active' && (
-                    <SolverNetStep onJoined={onJoined} joinedCids={joinedCids} />
-                  )}
-                  {/* Step 5 — harness + model. Active once ≥1 SolverNet joined;
-                      hosts the completion gate (Enter dashboard) as the last
-                      step's content. */}
-                  {p === 5 && status === 'active' && (
                     <div className="flex flex-col gap-6">
                       <HarnessSelectStep onSelectionChange={onSelectionChange} />
                       {enterMutation.isError && (
                         <Alert variant="blocking" data-testid="onboarding-enter-error">
                           <AlertTitle>Could not enter the dashboard.</AlertTitle>
                           <AlertDescription>
-                            Saving your harness selection or completing onboarding
-                            failed. Try again; check daemon logs if it keeps failing.
+                            Completing onboarding failed. Try again; check daemon
+                            logs if it keeps failing.
                           </AlertDescription>
                         </Alert>
                       )}

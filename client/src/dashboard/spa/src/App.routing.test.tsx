@@ -14,7 +14,6 @@ import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { getFeatures } from './lib/features.js';
 import { OperatorShell } from './pages/operator/OperatorShell.js';
-import { MembershipsTab } from './pages/operator/MembershipsTab.js';
 import { RegistryTab } from './pages/operator/RegistryTab.js';
 import { NetworkTab } from './pages/operator/NetworkTab.js';
 import { SecurityTab } from './pages/operator/SecurityTab.js';
@@ -293,15 +292,13 @@ describe('App routes', () => {
   });
 
   // ── Operator sub-routes (Task 5.1) ──
-  // The four new sub-routes resolve to their stub tabs wrapped in OperatorShell.
-  // Bare /operator redirects to /operator/memberships.
+  // The sub-routes resolve to their tabs wrapped in OperatorShell. Bare
+  // /operator redirects to /operator/claim-policy since Wave-4 D1 retired the
+  // memberships tab with the joinedSolverNets join lifecycle.
 
   function OperatorSubSwitch(): JSX.Element {
     return (
       <Switch>
-        <Route path="/operator/memberships">
-          <OperatorShell><MembershipsTab /></OperatorShell>
-        </Route>
         <Route path="/operator/registry">
           <OperatorShell><RegistryTab /></OperatorShell>
         </Route>
@@ -312,18 +309,12 @@ describe('App routes', () => {
           <OperatorShell><SecurityTab /></OperatorShell>
         </Route>
         <Route path="/operator">
-          <Redirect to="/operator/memberships" />
+          <Redirect to="/operator/claim-policy" />
         </Route>
         <Route path="/overview"><LocationProbe /></Route>
       </Switch>
     );
   }
-
-  it('renders MembershipsTab on /operator/memberships', () => {
-    render(withProviders(<OperatorSubSwitch />, '/operator/memberships'));
-    expect(screen.getByTestId('memberships-tab')).toBeTruthy();
-    expect(screen.getByTestId('operator-shell')).toBeTruthy();
-  });
 
   it('renders RegistryTab on /operator/registry', () => {
     render(withProviders(<OperatorSubSwitch />, '/operator/registry'));
@@ -343,18 +334,18 @@ describe('App routes', () => {
     expect(screen.getByTestId('operator-shell')).toBeTruthy();
   });
 
-  it('redirects bare /operator to /operator/memberships', async () => {
+  it('redirects bare /operator to /operator/claim-policy', async () => {
     render(
       withProviders(
         <Switch>
-          <Route path="/operator/memberships"><LocationProbe /></Route>
-          <Route path="/operator"><Redirect to="/operator/memberships" /></Route>
+          <Route path="/operator/claim-policy"><LocationProbe /></Route>
+          <Route path="/operator"><Redirect to="/operator/claim-policy" /></Route>
         </Switch>,
         '/operator',
       ),
     );
     await waitFor(() =>
-      expect(screen.getByTestId('location').textContent).toBe('/operator/memberships'),
+      expect(screen.getByTestId('location').textContent).toBe('/operator/claim-policy'),
     );
   });
 
@@ -362,11 +353,11 @@ describe('App routes', () => {
   // production routing table from App.tsx — not the local OperatorSubSwitch
   // fixture above, which rebuilds its own Switch.
   //
-  // Contract being locked in: the four `/operator/{memberships,registry,
+  // Contract being locked in: the `/operator/{claim-policy,registry,
   // network,security}` sub-routes must be listed BEFORE the bare-`/operator`
   // redirect in App.tsx's Switch. If a future refactor reorders the Switch
   // so the bare-`/operator` redirect catches first, /operator/network would
-  // wrongly redirect to /operator/memberships and this test would fail.
+  // wrongly redirect to /operator/claim-policy and this test would fail.
   // That's intentional — don't "fix" it by deleting the test; fix the
   // ordering in App.tsx.
   it('routes /operator/network directly to NetworkTab without shadow from the bare-/operator redirect', async () => {
@@ -388,7 +379,7 @@ describe('App routes', () => {
     } as unknown as BootstrapState);
     render(withProviders(<App />, '/operator/network'));
     await waitFor(() => expect(screen.getByTestId('network-tab')).toBeTruthy());
-    expect(screen.queryByTestId('memberships-tab')).toBeNull();
+    expect(screen.queryByTestId('claim-policy-tab')).toBeNull();
   });
 
   // ── #983: onboarding completion overlay ──

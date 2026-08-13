@@ -44,7 +44,6 @@ import type {
   ExecutionWiringConfigEntry,
   NotificationsV1Response,
 } from '../../../../api/contract/index.js';
-import type { ProviderRef } from '../../../../harnesses/provider-ref.js';
 
 interface JsonErrorPayload {
   error?: string;
@@ -428,10 +427,10 @@ export const api = {
       ),
   },
 
-  // ---- Operator participation flow (Task 21) ----
-  // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12. Writes a
-  // manifest-keyed entry to `config.joinedSolverNets[<cid>]`; restart-required
-  // — the daemon does not hot-reload SolverNet config.
+  // ---- Operator surfaces ----
+  // The join/leave lifecycle retired in Wave-4 D1 (DR-2026-08-05) with the
+  // `joinedSolverNets` claim gate; what remains here is read plus the
+  // non-membership operator mutations.
   operator: {
     listArtifacts: (opts: { source?: OperatorArtifactSource; artifactType?: string; limit?: number } = {}) => {
       const q = new URLSearchParams();
@@ -452,61 +451,6 @@ export const api = {
           body: JSON.stringify(pricing),
         },
       ),
-    join: (
-      manifestCid: string,
-      body: {
-        name?: string;
-        contract?: { id: string; version: string };
-        roles: Array<'solver' | 'evaluator'>;
-        harness?: string;
-        model?: string;
-        provider?: ProviderRef;
-        plugins?: string[];
-        disabledDefaultPlugins?: string[];
-      },
-    ) =>
-      jfetch<{
-        ok: boolean;
-        restartRequired: boolean;
-        manifestCid: string;
-        config: {
-          manifestCid: string;
-          name?: string;
-          contract?: { id: string; version: string };
-          roles: Array<'solver' | 'evaluator'>;
-          harness?: string;
-          model?: string;
-          provider?: ProviderRef;
-          plugins?: string[];
-          disabledDefaultPlugins?: string[];
-        };
-      }>(`/v1/operator/join/${encodeURIComponent(manifestCid)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-    leave: (manifestCid: string) =>
-      jfetch<{ ok: boolean; restartRequired: boolean; manifestCid: string }>(
-        `/v1/operator/join/${encodeURIComponent(manifestCid)}`,
-        { method: 'DELETE' },
-      ),
-    listJoined: () =>
-      jfetch<{
-        joinedSolverNets: Record<
-          string,
-          {
-            manifestCid: string;
-            name?: string;
-            contract?: { id: string; version: string };
-            roles: Array<'solver' | 'evaluator'>;
-            harness?: string;
-            model?: string;
-            provider?: ProviderRef;
-            plugins?: string[];
-            disabledDefaultPlugins?: string[];
-          }
-        >;
-      }>('/v1/operator/joined'),
     completeOnboarding: () =>
       jfetch<{ ok: boolean; onboardingComplete: boolean }>(
         '/v1/operator/onboarding-complete',
