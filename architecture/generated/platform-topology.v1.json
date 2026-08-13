@@ -190,6 +190,11 @@
         "to": "@jinn-network/task-execution-protocol"
       },
       {
+        "from": "@jinn-network/benchmarking-records",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
+      },
+      {
         "from": "@jinn-network/benchmarking-run",
         "kind": "runtime",
         "to": "@jinn-network/benchmarking-records"
@@ -538,6 +543,11 @@
         "from": "@jinn-network/evidence-publication",
         "kind": "runtime",
         "to": "@jinn-network/evidence-repository"
+      },
+      {
+        "from": "@jinn-network/evidence-publication",
+        "kind": "runtime",
+        "to": "@jinn-network/record-publication"
       },
       {
         "from": "@jinn-network/evidence-repository",
@@ -923,6 +933,11 @@
         "from": "@jinn-network/record-discovery-facts-benchmarking",
         "kind": "runtime",
         "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
+        "from": "@jinn-network/record-discovery-facts-benchmarking",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
       },
       {
         "from": "@jinn-network/record-discovery-facts-chain-environments",
@@ -1407,14 +1422,16 @@
         "@jinn-network/benchmarking-interop": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-local": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/benchmarking-run",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-marketplace": [
           "@jinn-network/benchmarking-records",
@@ -1430,18 +1447,21 @@
           "@jinn-network/trust-resolve"
         ],
         "@jinn-network/benchmarking-records": [
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-run": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-testing": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/evidence-catalog-sqlite": [
           "@jinn-network/evidence-discovery",
@@ -1452,7 +1472,11 @@
           "@jinn-network/evidence-derivation",
           "@jinn-network/evidence-protocol",
           "@jinn-network/evidence-publication",
-          "@jinn-network/evidence-repository"
+          "@jinn-network/evidence-repository",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/record-publication",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/evidence-derivation": [
           "@jinn-network/evidence-protocol"
@@ -1473,7 +1497,11 @@
         "@jinn-network/evidence-protocol": [],
         "@jinn-network/evidence-publication": [
           "@jinn-network/evidence-protocol",
-          "@jinn-network/evidence-repository"
+          "@jinn-network/evidence-repository",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/record-publication",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/evidence-repository": [
           "@jinn-network/evidence-protocol"
@@ -1736,7 +1764,6 @@
           "@jinn-network/benchmarking-run",
           "@jinn-network/benchmarking-testing",
           "@jinn-network/evidence-discovery",
-          "@jinn-network/evidence-publication",
           "@jinn-network/evidence-repository-ipfs",
           "@jinn-network/evidence-repository-oci",
           "@jinn-network/evidence-trace-decode",
@@ -1755,7 +1782,6 @@
         [
           "@jinn-network/benchmarking-local",
           "@jinn-network/evidence-catalog-sqlite",
-          "@jinn-network/evidence-contribution",
           "@jinn-network/evidence-retrieval",
           "@jinn-network/execution-recorder-bridge",
           "@jinn-network/marketplace-projector",
@@ -1768,11 +1794,13 @@
         [
           "@jinn-network/benchmarking-marketplace",
           "@jinn-network/evidence-local-runtime",
+          "@jinn-network/evidence-publication",
           "@jinn-network/marketplace-venue-base",
           "@jinn-network/task-execution-backend-local",
           "@jinn-network/task-execution-evaluation-harness"
         ],
         [
+          "@jinn-network/evidence-contribution",
           "@jinn-network/task-execution-evaluator-adapters",
           "@jinn-network/task-execution-testing"
         ],
@@ -1788,13 +1816,13 @@
       "authorityDocuments": 29,
       "boundaryPolicies": 23,
       "catalogManifests": 86,
-      "catalogPublicSurfaces": 1258,
+      "catalogPublicSurfaces": 1274,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2978,
-      "generatedOutputSources": 1314,
+      "discoveredFirstPartySurfaces": 3005,
+      "generatedOutputSources": 1330,
       "generatorSources": 620,
       "marketplaceControl": 2,
       "requiredGates": 22,
@@ -20430,6 +20458,90 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-authorization-after-close.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-protocol.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-publisher-authority.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-unsorted-cells.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/valid.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/valid.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmarking/records/fixtures/benchmark/invalid-bad-version.json"
       },
       {
@@ -20683,6 +20795,66 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/records/fixtures/matrix/valid.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/invalid-missing-profile.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/invalid-unsorted-streams.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/valid.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/valid.sha256"
       },
       {
         "categories": [
@@ -21052,6 +21224,18 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmarking/records/schemas/benchmark-accounting.schema.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmarking/records/schemas/benchmark.schema.json"
       },
       {
@@ -21065,6 +21249,18 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/records/schemas/matrix.schema.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/schemas/observation-archive.schema.json"
       },
       {
         "categories": [
@@ -22208,6 +22404,116 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/benchmark-accounting"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/benchmark-accounting/valid.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/README.md"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v1"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v1/legacy-raw-payload.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2/raw-v1-under-v2-kind.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2/valid-envelope.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2/wrong-media-envelope.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2/wrong-payload-envelope.json"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -22227,6 +22533,18 @@
           "@ritsukai"
         ],
         "path": "packages/discovery/facts/benchmarking/profiles"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json"
       },
       {
         "categories": [
@@ -22263,6 +22581,18 @@
           "@ritsukai"
         ],
         "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v2.json"
       },
       {
         "categories": [
@@ -42496,6 +42826,7 @@
         "peer": [],
         "runtime": [
           "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core",
           "@noble/hashes",
           "zod"
         ]
@@ -42709,7 +43040,8 @@
         "peer": [],
         "runtime": [
           "@jinn-network/benchmarking-records",
-          "@jinn-network/record-discovery-protocol"
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/trust-core"
         ]
       },
       "domain": "discovery",
@@ -43833,7 +44165,8 @@
           "vitest"
         ],
         "runtime": [
-          "@jinn-network/evidence-repository"
+          "@jinn-network/evidence-repository",
+          "@jinn-network/record-publication"
         ]
       },
       "domain": "evidence",
@@ -45890,6 +46223,60 @@
         "kind": "fixtures",
         "package": "@jinn-network/benchmarking-records",
         "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-authorization-after-close.json",
+        "relativeSource": "fixtures/benchmark-accounting/invalid-authorization-after-close.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-protocol.json",
+        "relativeSource": "fixtures/benchmark-accounting/invalid-missing-protocol.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-publisher-authority.json",
+        "relativeSource": "fixtures/benchmark-accounting/invalid-missing-publisher-authority.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-unsorted-cells.json",
+        "relativeSource": "fixtures/benchmark-accounting/invalid-unsorted-cells.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/valid.json",
+        "relativeSource": "fixtures/benchmark-accounting/valid.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/valid.sha256",
+        "relativeSource": "fixtures/benchmark-accounting/valid.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
         "path": "packages/benchmarking/records/fixtures/benchmark/invalid-bad-version.json",
         "relativeSource": "fixtures/benchmark/invalid-bad-version.json"
       },
@@ -46063,6 +46450,42 @@
         "packedTargets": [],
         "path": "packages/benchmarking/records/fixtures/matrix/valid.sha256",
         "relativeSource": "fixtures/matrix/valid.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/invalid-missing-profile.json",
+        "relativeSource": "fixtures/observation-archive/invalid-missing-profile.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/invalid-unsorted-streams.json",
+        "relativeSource": "fixtures/observation-archive/invalid-unsorted-streams.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/valid.json",
+        "relativeSource": "fixtures/observation-archive/valid.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/valid.sha256",
+        "relativeSource": "fixtures/observation-archive/valid.sha256"
       },
       {
         "claim": null,
@@ -46268,6 +46691,15 @@
         "kind": "schemas",
         "package": "@jinn-network/benchmarking-records",
         "packedTargets": [],
+        "path": "packages/benchmarking/records/schemas/benchmark-accounting.schema.json",
+        "relativeSource": "schemas/benchmark-accounting.schema.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
         "path": "packages/benchmarking/records/schemas/benchmark.schema.json",
         "relativeSource": "schemas/benchmark.schema.json"
       },
@@ -46279,6 +46711,15 @@
         "packedTargets": [],
         "path": "packages/benchmarking/records/schemas/matrix.schema.json",
         "relativeSource": "schemas/matrix.schema.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/schemas/observation-archive.schema.json",
+        "relativeSource": "schemas/observation-archive.schema.json"
       },
       {
         "claim": null,
@@ -46727,6 +47168,19 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v1",
+          "servedPath": "facts/benchmark-accounting/v1"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json",
+        "relativeSource": "profiles/benchmark-accounting.v1.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://spec.jinn.network/facts/benchmark/v1",
           "servedPath": "facts/benchmark/v1"
         },
@@ -46762,6 +47216,19 @@
         "packedTargets": [],
         "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json",
         "relativeSource": "profiles/report.v1.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/benchmark-report/v2",
+          "servedPath": "facts/benchmark-report/v2"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v2.json",
+        "relativeSource": "profiles/report.v2.json"
       },
       {
         "claim": {
@@ -54595,6 +55062,13 @@
       },
       {
         "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json"
+      },
+      {
+        "field": "profile",
         "identifier": "https://spec.jinn.network/facts/benchmark-matrix/v1",
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
@@ -54606,6 +55080,13 @@
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
         "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-report/v2",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v2.json"
       },
       {
         "field": "profile",
