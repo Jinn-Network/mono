@@ -95,7 +95,9 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       const journal = readRunJournalEntries(workspaceDir, "harbor-run");
       const deliveries = journal.filter((entry) => entry.kind === "delivery");
       expect(deliveries.length, JSON.stringify(journal)).toBeGreaterThan(0);
-      for (const delivery of deliveries) expect(delivery.outputs.map((output) => output.name)).toEqual(expect.arrayContaining(["prediction", "harbor-archive"]));
+      // The Task's declared solve output remains the Delivery contract; Harbor-native evidence
+      // is separately reachable through the durable product archive index checked below.
+      for (const delivery of deliveries) expect(delivery.outputs.map((output) => output.name)).toEqual(["prediction"]);
       expect(journal.some((entry) => entry.kind === "evaluation")).toBe(true);
 
       const indexRoot = join(artifactsDir(workspaceDir), "harbor", "archives", "by-dispatch");

@@ -58,7 +58,11 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
       return {
         // The product deliberately invokes the official CLI only; no synthetic JSON stdout protocol exists.
         argv: [executable, "run", "-c", join(paths.input, "harbor-job.json")], cwd: paths.work,
-        env: { HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1", TMPDIR: paths.tmp }, validExitCodes: [0],
+        // The backend spawns with exactly this environment. Keep the surface closed while
+        // retaining PATH so an already byte-pinned executable with an `/usr/bin/env` shebang can
+        // resolve its interpreter and installed dependencies. No credentials or arbitrary
+        // ambient variables cross the boundary.
+        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1", TMPDIR: paths.tmp }, validExitCodes: [0],
         blameExitCodes: [{ match: { signal: "SIGTERM" }, blame: "infrastructure", reasonCode: "cancelled" }],
         resultContract: { envelopeFormat: "harbor-job-directory-v1", correlationFields: ["harnessVersion"] }, interruptionBehavior: "nonrepeatable",
       };
