@@ -851,12 +851,21 @@ export function createBaseSepoliaEvaluatorReads(input: {
           }
           return { kind: 'canonical' };
         } catch {
-          try {
-            await publicClient.getTransaction({ hash: txHash });
-            return { kind: 'pending' };
-          } catch {
-            return { kind: 'orphaned', reason: 'transaction is absent from the canonical RPC view' };
-          }
+          // ABSENCE IS NOT EVIDENCE OF ORPHANHOOD. `publicClient` sits on the multi-provider
+          // fallback transport, so consecutive calls can land on different slots and a lagging
+          // replica answers "I have never seen this transaction" for one that is mined, successful,
+          // and finalized on the chain — live round 26 watched `finalized` heads disagree by
+          // 130-500 blocks between polls. Classifying that as `orphaned` fails OPEN into the one
+          // destructive verdict in this enum: `recordEvaluationOperationOrphaned` NULLs the
+          // evaluation's attempt URI and request id and rolls the aggregate back.
+          //
+          // `pending` is the honest reading of an unanswerable lookup — the operation is HELD, its
+          // transaction identity intact, and the next poll (or the next provider) resolves it.
+          // `orphaned` is reserved for POSITIVE evidence above: a receipt that reverted, or one in
+          // a block the canonical chain no longer carries. The give-up path for a transaction that
+          // truly never lands is the evaluation's admission deadline (see `reconcileMissing` in
+          // `native-evaluator-coordinator.ts`), which is a clock, not a provider's memory.
+          return { kind: 'pending' };
         }
       },
     },
@@ -942,12 +951,16 @@ export function createSolverReads(input: {
                 ? { kind: 'lost', reason: 'claim transaction has no matching TaskAttemptCreated event' }
                 : { kind: 'orphaned', txHash: operation.txHash, reason: 'claim receipt block is non-canonical' };
             } catch {
-              try {
-                await input.publicClient.getTransaction({ hash: operation.txHash });
-                return { kind: 'broadcast', txHash: operation.txHash };
-              } catch {
-                return { kind: 'orphaned', txHash: operation.txHash, reason: 'claim transaction is absent' };
-              }
+              // The polled provider can answer neither lookup. Same ruling as
+              // `chain.transactionStatus` above: absence is replica lag until proven otherwise, so
+              // the claim is HELD at `broadcast` — the identical state a claim already sits in
+              // while its transaction waits in the mempool. A false orphan here is the most
+              // expensive misclassification in the stack: `recordClaimOrphaned` NULLs the
+              // engagement's attempt index, attempt URI, and request id, returns it to `eligible`,
+              // and `prepareClaimRetry` then broadcasts a SECOND claim for work the first claim may
+              // already own. Positive evidence — a receipt in a displaced block — still orphans
+              // above, and a canonical receipt with no matching event is still `lost`.
+              return { kind: 'broadcast', txHash: operation.txHash };
             }
           }
           const finalized = await input.publicClient.getBlock({ blockTag: 'finalized' });
@@ -1046,7 +1059,19 @@ export function createSolverReads(input: {
           // verified against `advertisedDeliveryDigest`, bound to the on-chain settlement above.
           deliveryPublicLocations,
         });
-        if (correspondence === null || !sameHex(correspondence.transactionHash, event.transactionHash)) {
+        // A null correspondence is ABSENCE, not a reorg. `readCanonicalSolutionDelivery` returns
+        // null whenever it cannot re-derive the join — including when the polled slot has not yet
+        // indexed the router/Mech logs, and when its `finalized` head has REGRESSED below the
+        // settlement block it just accepted two reads ago. That is the live round-26 signature
+        // (operator B, settlement 0xc5d458e1…, block 45401836: mined, successful, finalized, and
+        // nonetheless flipped to `status='orphaned'` with a NULL block number). Hold the settlement
+        // at `broadcast` — its transaction identity is intact and the next poll re-derives the
+        // join — instead of rolling the engagement back to `solution-published` to re-broadcast a
+        // `claimSolutionDelivery` the chain has already settled.
+        if (correspondence === null) return { kind: 'broadcast', txHash: event.transactionHash };
+        if (!sameHex(correspondence.transactionHash, event.transactionHash)) {
+          // POSITIVE evidence: the canonical exact Delivery is bound to a DIFFERENT transaction, so
+          // this settlement is genuinely not the one the chain carries.
           return { kind: 'orphaned', txHash: event.transactionHash, reason: 'solution settlement does not bind the exact public Delivery' };
         }
       }
