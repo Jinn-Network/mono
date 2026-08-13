@@ -183,6 +183,10 @@ test("ChildProcess error is typed and never classified as an ordinary early exit
     processError: { name: "SpawnError", code: "ENOENT" },
   });
   assert.notEqual(evidence.timeoutClassification, "child-exit-before-timeout");
+  assert.deepEqual(
+    assertP5PrestageStopEvidence(JSON.parse(JSON.stringify(evidence))),
+    evidence,
+  );
 });
 
 test("synchronous spawn failure is preserved as a typed process error", () => {

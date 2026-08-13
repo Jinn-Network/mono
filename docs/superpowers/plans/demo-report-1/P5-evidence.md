@@ -6,7 +6,7 @@
 
 **Exact base:** `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`
 
-**Integrated through:** `0427833e9e7e62cf9fc86c1194ed01688354f1db`, including P4 draw correction `834f3436dc5991098addc9177f4652d81d6cbfb6`
+**Integrated through:** `97e49c43d09f0e56bb0f5ecb82c1d3365078c350`, including P4 draw correction `834f3436dc5991098addc9177f4652d81d6cbfb6`
 
 ## Current outcome: stopped at the digest-pinned image pre-stage
 

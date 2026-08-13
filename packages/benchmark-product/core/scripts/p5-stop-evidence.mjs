@@ -53,7 +53,9 @@ export function assertP5PrestageStopEvidence(record) {
     throw new TypeError("a non-timeout child cannot claim child-timeout-kill-observed");
   }
   if (record.timeoutClassification === "child-process-error") {
-    if (record.processError?.name === undefined || "exitCode" in record) {
+    if (typeof record.processError?.name !== "string"
+      || record.processError.name.length === 0
+      || "exitCode" in record) {
       throw new TypeError("child-process-error requires typed processError and no exitCode");
     }
   } else if (record.processError !== undefined || !("exitCode" in record)) {
@@ -158,7 +160,13 @@ export function createP5ObservedDockerSpawner({
       timeoutClassification: timedOut
         ? "child-timeout-kill-observed"
         : (processErrored ? "child-process-error" : "child-exit-before-timeout"),
-      ...(processErrored
+      ...(timedOut
+        ? {
+            exitCode: childObservation.outcome.kind === "exit"
+              ? childObservation.outcome.exitCode
+              : null,
+          }
+        : processErrored
         ? {
             processError: {
               name: childObservation.outcome.error instanceof Error
