@@ -80,6 +80,26 @@ describe("native evaluator public source", () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(firstBytes);
   });
 
+  it("refuses a distinct announcement whose timestamp does not advance the signed head", async () => {
+    // The strict-advance guard is a legitimate anti-replay / ordering invariant on the append-only
+    // source; defect #46 advances producer timestamps rather than weakening this check. Two DISTINCT
+    // records (different digests, so different announcements) sharing one timestamp must still be
+    // rejected on the second append.
+    const rootDir = await temporaryRoot();
+    const publisher = await openNativeEvaluatorPublisher({
+      rootDir,
+      publicBaseUrl: "https://evaluator.example/native",
+      source: { agent: "urn:jinn:evaluator:golden", name: "evaluator-records" },
+      signer,
+    });
+    closers.push(() => publisher.close());
+    // `value(bytes, 1)` stamps both publications with the same createdAt (sequence 1).
+    await expect(publisher.publish(value(new TextEncoder().encode('{"verdict":1}'), 1)))
+      .resolves.toMatchObject({ sequence: "0000000000000001" });
+    await expect(publisher.publish(value(new TextEncoder().encode('{"verdict":2}'), 1)))
+      .rejects.toThrow(/strictly advance the signed source head/u);
+  });
+
   it("allows exactly one lifecycle owner per evaluator source root", async () => {
     const rootDir = await temporaryRoot();
     const first = await openNativeEvaluatorPublisher({
