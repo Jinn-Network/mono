@@ -104,6 +104,17 @@ async function boundedExit(input: {
   }).catch((cause: unknown) => unavailable("grader runtime is unavailable", cause));
 }
 
+function imageMissingExitCode(runtime: "docker" | "podman", code: number | null): boolean {
+  // Docker reserves 1 for an inspect miss. Podman follows the common containers/image CLI
+  // convention and reports 125. Other non-zero statuses can be daemon, wrapper, or host-policy
+  // failures and must never be reinterpreted as permission to contact a registry.
+  return code === (runtime === "docker" ? 1 : 125);
+}
+
+function runtimeExit(code: number | null): string {
+  return code === null ? "signal termination" : `runtime exit ${code}`;
+}
+
 /** Fetches only an exact digest and positively re-inspects it before any grading may begin. */
 export async function ensurePinnedOciImage(
   input: {
@@ -123,17 +134,25 @@ export async function ensurePinnedOciImage(
     options,
   });
   const existing = await inspect();
-  if (!existing.timedOut && existing.code === 0) return;
+  if (existing.timedOut) unavailable("pinned grader image local inspection timed out");
+  if (existing.code === 0) return;
+  if (!imageMissingExitCode(input.runtime, existing.code)) {
+    unavailable(`pinned grader image local inspection failed with ${runtimeExit(existing.code)}`);
+  }
   const pulled = await boundedExit({
     runtime: input.runtime,
     args: ["pull", "--platform", input.platform, input.image],
     timeoutMs,
     options,
   });
-  if (pulled.timedOut || pulled.code !== 0) unavailable("pinned grader image is unavailable");
+  if (pulled.timedOut) unavailable("pinned grader image pull timed out");
+  if (pulled.code !== 0) {
+    unavailable(`pinned grader image pull failed with ${runtimeExit(pulled.code)}`);
+  }
   const verified = await inspect();
-  if (verified.timedOut || verified.code !== 0) {
-    unavailable("pinned grader image could not be verified locally");
+  if (verified.timedOut) unavailable("pulled grader image verification timed out");
+  if (verified.code !== 0) {
+    unavailable(`pulled grader image verification failed with ${runtimeExit(verified.code)}`);
   }
 }
 
@@ -152,8 +171,16 @@ async function requirePinnedOciImageLocally(
     timeoutMs: 30_000,
     options,
   });
-  if (inspected.timedOut || inspected.code !== 0) {
+  if (inspected.timedOut) {
+    unavailable("pre-staged pinned grader image local inspection timed out");
+  }
+  if (imageMissingExitCode(input.runtime, inspected.code)) {
     unavailable("pre-staged pinned grader image is unavailable locally");
+  }
+  if (inspected.code !== 0) {
+    unavailable(
+      `pre-staged pinned grader image local inspection failed with ${runtimeExit(inspected.code)}`,
+    );
   }
 }
 

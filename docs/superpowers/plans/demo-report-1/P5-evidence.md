@@ -8,7 +8,38 @@
 
 **Integrated through:** `b91bd0679`, including the merged P2/P2b/P3b/P4/E2/preregistration packets
 
-## Current outcome: fresh run stopped on isolated Claude authentication
+## Current outcome: authenticated fresh run stopped at the disk gate
+
+The operator-authorized recovery run used the product-owned secret-forwarding boundary described
+below. It passed isolated readiness and the repeated real gold-PASS/empty-FAIL baseline, locked at
+`2026-08-13T10:09:18.799Z`, and dispatched every one of its twelve fixed cells exactly once. Every
+Claude attempt used `claude-haiku-4-5-20251001` through Claude Code `2.1.222`; all twelve delivered
+a patch, every pinning axis matched, and there were zero authentication failures.
+
+Ten cells received valid grader verdicts: six PASS and four FAIL. The two Hermes WebUI Skill-arm
+replicates delivered patches but became `could-not-grade` when the host fell below the repeated
+40-GiB Docker safety gate. The sealed Matrix therefore has ten judged and two unscorable cells,
+is `partial`, and carries the `nonjudged-arm-imbalance` flag. The P5 accounting guard refused it,
+so no immutable bundle or cold verification was emitted. The closed Run was not resumed, topped
+up, or altered.
+
+The journal's historical failure detail is only `oci grader unavailable: pinned grader image is
+unavailable`: the OCI adapter discarded the failed inspection's exit code and stderr. A direct
+post-stop reproduction made the distinction observable. At 34.54 GiB, the exclusive P5 Docker
+wrapper refused an exact image inspection with exit 78, while direct Docker inspection succeeded
+and returned the sealed Hermes image digest. Live observations had crossed below 40 GiB before
+both failed grading operations. This strongly attributes the two stops to the disk gate without
+fabricating historical exit codes the journal did not retain.
+
+The normalized evidence is
+`p5-artifacts/fresh-run-disk-stop-2026-08-13.json`, digest
+`sha256:70fdb02db9eefdea9eb93ffdbcf7e106c4df18f88315c4d68667800422767229`. Its Run digest is
+`sha256:fb43d4d560cfa02555fb65c12ac284f85a43f1537472088db27c5df1bb360a8f`, Matrix digest is
+`sha256:4ea47bf74ab50393e8d462a29b9562035d2664deefa69a37617c2411cf61944f`, and Report digest is
+`sha256:f6d13f11928fb3d0972a2bcb2aaf9cb4989a0e691d4ff23775eb25c876f29fcd`.
+This remains a plumbing stop, not a capability result or publication artifact.
+
+## Earlier outcome: fresh run stopped on isolated Claude authentication
 
 The operator authorized a fresh P5 run after the exact images became locally available. The
 original qBraid and Fromager rows then failed their mandatory gold controls before any Claude cell
@@ -115,6 +146,11 @@ event, while declaring that private history is not a retention dependency.
   materialization, builder-workspace removal, and cold bundle verification.
 - The Docker executable is wrapped by a host-space guard. P3b remains responsible for digest
   pre-stage followed by child-local-only `--pull never`; grader network stays disabled.
+- OCI image preparation now distinguishes the runtime's image-not-found status from every other
+  nonzero inspection result. An unexpected host-policy exit such as the P5 wrapper's exit 78 is
+  preserved in the operational error and cannot be reinterpreted as permission to pull. The OCI
+  package passes 76 tests, typecheck, build, pack smoke, and its architecture/source-boundary
+  guards with this correction.
 - Future pre-stage stop output uses local operational schema `demo1.p5-green-baseline-stop/2`
   (not a platform record kind). Its injected child observer must capture `startedAt`,
   `completedAt`, monotonic elapsed, configured timeout, the direct `timedOut` boolean, and a
@@ -170,9 +206,11 @@ Claude Code `2.1.222`, exact model inventory `claude-haiku-4-5-20251001`, and di
 wrapper and Claude-binary digests. This proves the former ambient-vs-isolated authentication gap is
 closed without weakening per-attempt state isolation.
 
-The new run must still repeat the disk gate and real three-task gold-PASS/empty-FAIL baseline before
-dispatch, account all 12 newly locked cells, emit the local immutable bundle, delete the builder
-workspace, and pass cold verification. The earlier locked Run remains terminal and is never
+The authenticated recovery run repeated the disk gate and real three-task gold-PASS/empty-FAIL
+baseline, but the host did not retain enough space for all twelve later grading operations. A
+future wholly new run therefore needs materially more than the bare 40-GiB start threshold, must
+again account all twelve newly locked cells, emit the local immutable bundle, delete the builder
+workspace, and pass cold verification. Both earlier locked Runs remain terminal and are never
 resumed, retried, or topped up.
 
 ## Publication boundary
@@ -180,4 +218,4 @@ resumed, retried, or topped up.
 This packet may emit only a local immutable bundle. It did not create a public report URL, signed
 Record Discovery source, archive mirror, Explorer view, local report bundle, or publication claim.
 This evidence is a blocked implementation checkpoint, not a published benchmark and not a
-capability result. The partial run's zero judged cells cannot support an arm-effect claim.
+capability result. Neither partial run can support an arm-effect claim.
