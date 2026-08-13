@@ -241,6 +241,29 @@ function makePublicationFixture(
   return { ...fixture, subjectBytes, accountingBytes };
 }
 
+function rebindAccountingCloseBoundary(
+  fixture: PublicationFixture,
+  closeBoundary: {
+    readonly at: string;
+    readonly anchor?: { readonly chain: string; readonly blockNumber: number; readonly blockHash: string };
+  },
+): PublicationFixture {
+  const accountingBytes: Uint8Array[] = [];
+  const subjectBytes = fixture.subjectBytes.map((subjectBytes, index) => {
+    const matrix = parseMatrix(subjectBytes);
+    const accounting = parseBenchmarkAccounting(fixture.accountingBytes[index]!);
+    const reboundAccounting = sealBenchmarkAccounting({ ...accounting, closeBoundary });
+    accountingBytes.push(reboundAccounting.bytes);
+    return sealMatrix(withMatrixPublicationExtension(matrix, {
+      accounting: {
+        name: `accounting-${index}`,
+        digest: { sha256: reboundAccounting.digest.slice("sha256:".length) },
+      },
+    })).bytes;
+  });
+  return { ...fixture, subjectBytes, accountingBytes };
+}
+
 function crossVersionPairedFixture(sharedTask: boolean): Fixture {
   const registry = createMethodRegistry();
   const verdictMap = new Map<string, Uint8Array>();
@@ -1029,6 +1052,73 @@ describe("byte-first produceReport / verifyReport", () => {
       ok: true,
       reportPayloadSha256: produced.reportPayloadSha256,
       reportRecordSha256: produced.reportRecordSha256,
+    });
+  });
+
+  test("v2 production rejects descriptor-bound accounting whose closeBoundary anchor differs from the Matrix", async () => {
+    const fixture = rebindAccountingCloseBoundary(makePublicationFixture(), {
+      at: "2026-08-04T00:00:00Z",
+      anchor: { chain: "eip155:1", blockNumber: 42, blockHash: `0x${"a".repeat(64)}` },
+    });
+    let signerCalls = 0;
+    await expect(produceReportV2({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, async (request) => {
+      signerCalls += 1;
+      return signer(request);
+    })).rejects.toThrow(/accounting closeBoundary must exactly match the Matrix closeBoundary/);
+    expect(signerCalls).toBe(0);
+  });
+
+  test("v2 verification rejects a signed Report over descriptor-rebound accounting with a different closeBoundary", async () => {
+    const fixture = rebindAccountingCloseBoundary(makePublicationFixture(), {
+      at: "2026-08-04T00:00:00Z",
+      anchor: { chain: "eip155:1", blockNumber: 42, blockHash: `0x${"b".repeat(64)}` },
+    });
+    const legacy = await produce(fixture);
+    const publicationExtension = {
+      publicRegistration: {
+        perSubject: fixture.subjectBytes.map((subjectBytes, index) => ({
+          subjectSha256: recordDigest(subjectBytes).slice("sha256:".length),
+          status: "post-hoc",
+          accounting: {
+            name: `accounting-${index}`,
+            digest: { sha256: recordDigest(fixture.accountingBytes[index]!).slice("sha256:".length) },
+          },
+          check: { status: "pass" },
+        })),
+      },
+    };
+    const forgedPayload = sealReport({
+      ...legacy.record,
+      [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension,
+    }).bytes;
+    const forgedEnvelope = sealDsseEnvelope({
+      payloadType: REPORT_MEDIA_TYPE,
+      payloadBytes: forgedPayload,
+      signatures: [{
+        keyid: REPORT_KEY,
+        signature: fixtureSignature(dssePreAuthEncoding(REPORT_MEDIA_TYPE, forgedPayload)),
+      }],
+    });
+
+    const result = await verifyReportV2({
+      envelopeBytes: forgedEnvelope,
+      subjects: fixture.subjectBytes,
+      effectiveTime: EFFECTIVE_TIME,
+      recordKind: REPORT_V2_RECORD_KIND,
+      recordMediaType: SIGNED_REPORT_MEDIA_TYPE,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, verificationPorts(fixture.ports));
+    expect(result).toEqual({
+      ok: false,
+      check: "publication-disclosure",
+      detail: expect.stringContaining("accounting closeBoundary must exactly match the Matrix closeBoundary"),
     });
   });
 

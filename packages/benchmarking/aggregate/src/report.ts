@@ -379,6 +379,9 @@ function derivePublicationExtension(
     if (accounting.record.run.digest.sha256 !== subject.record.run.digest.sha256) {
       throw new Error(`Report v2 subject ${subject.digest} accounting Run does not match the Matrix Run`);
     }
+    if (!exactJsonEqual(accounting.record.closeBoundary, subject.record.closeBoundary)) {
+      throw new Error(`Report v2 subject ${subject.digest} accounting closeBoundary must exactly match the Matrix closeBoundary`);
+    }
     return {
       subjectSha256: stripSha256Prefix(subject.digest),
       status: accounting.record.publicRegistration.status,
