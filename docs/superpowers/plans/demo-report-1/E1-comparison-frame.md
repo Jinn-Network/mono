@@ -18,7 +18,7 @@ Two things this document does not do. It does not design engineering (that is R1
 
 | Question | Decision |
 |---|---|
-| **Frame** | **Mechanism vs mechanism** — same agent, same bytes, delivery varied. The higher-pull public-skill on/off alternative is declined for this report and stays available as a second report (§2.6). |
+| **Frame** | **Mechanism vs mechanism** — same agent, same instruction-body bytes, delivery varied. The Skill wrapper retains its required upstream frontmatter; only the instruction body is byte-identical. The higher-pull public-skill on/off alternative is declined for this report and stays available as a second report (§2.6). |
 | **Arm count** | **Three arms.** Arm C is the manipulation check (§2.2). The two-arm fallback is not taken. |
 | **Content source** | **`anthropics/skills`** (the four source-available document skills excluded; the selected folder requires its own compatible license). The SWE-Skills-Bench C1 path is formally withdrawn for Demo-1 (§2.3). |
 | **Public pre-registration (E4)** | **Committed**, conditional on the P5 e2e gate being green (§2.10). |
@@ -243,7 +243,7 @@ Exclusion and infra-failure retry rules are proposed by R5 **before anyone sees 
 
 ## 2.6 Blast-radius rationale: why this frame embarrasses no one
 
-- **No third party's artifact is on trial.** The same bytes appear in both arms. A negative result for arm A is a result about progressive-disclosure *delivery*, not about anyone's writing. This is the structural reason the frame is safe, and it holds even if the content is an Anthropic-authored skill.
+- **No third party's artifact is on trial.** The same instruction-body bytes appear in both arms; the Skill wrapper additionally carries its required upstream frontmatter. A negative result for arm A is a result about progressive-disclosure *delivery*, not about anyone's writing. This is the structural reason the frame is safe, and it holds even if the content is an Anthropic-authored skill.
 - **The result cannot be read as vendor-versus-vendor.** Both arms run on the same vendor's agent. There is no "X beats Y" headline available to a careless reader, because there is no X and Y.
 - **Both mechanisms are native to the selected runtime.** `CLAUDE.md` and Agent Skills are documented Claude Code loading mechanisms. The broader AGENTS.md standard remains the public motivation, not the literal baseline executed here.
 - **The genre is already established as a contribution, not an attack.** Vercel published a directionally negative result about skills and it was received as research. We are refining the comparison, not contradicting a person.

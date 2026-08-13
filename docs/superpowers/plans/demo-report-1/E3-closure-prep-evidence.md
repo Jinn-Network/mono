@@ -1,6 +1,6 @@
 # E3 Closure-Preparation Evidence
 
-**Date:** 2026-08-13  
+**Date:** 2026-08-13
 **Scope:** documentation-only re-attack and register preparation; no model, Docker, release, lock, preregistration, official run, or publication action
 
 ## Pinned inputs
@@ -22,9 +22,9 @@ affected attack surfaces explicitly.
 
 | Artifact after closure preparation | Version | Git blob | SHA-256 |
 |---|---|---|---|
-| `E1-comparison-frame.md` | v0.7 | `a966584e57ef612bcaf1904a1c9e64edc3ad3acb` | `d59b7e67feee79c25dcdae714f84cb27b5f8e860c2d7c92b1c5c5dec98a52d71` |
+| `E1-comparison-frame.md` | v0.7 + exact-head review correction | `dedc157d39933742d97c8e088ce744f1a1cc050b` | `fb691b45329aa980ac87958feb0a0b916c95339e186f0022888e204f8f553090` |
 | Demo-1 program | closure-prep sequence | `baf5e4369080c6c0ac8563c615ab54c262189412` | `9e418331965e9f38d6fcbde4bdae0f2710fce5aab85c494c213374e721eb2593` |
-| `E3-attack-checklist.md` | v0.5 | `d81b105a1d1b446cc714064acb1fcb5ad586415e` | `aeca07b2d9a728f0609e26e6b067e1b568be479452169feba6d8348d97f22a53` |
+| `E3-attack-checklist.md` | v0.5 + exact-head review correction | `af1ab1ffb64c0551350e660cf7fefe022622f509` | `2e401a4ec81e07de499d7ba1bb76e224971e8aa18c7ab81dfd436a5e67e7cd68` |
 
 The register digest is recorded outside the register because embedding a file's own
 digest would mutate the file and invalidate that digest. K3 requires the operator's
@@ -44,6 +44,8 @@ C1, C2, and E1 retain named post-run guards. Fourteen open items name a distinct
 post-lock/pre-dispatch equality or ordering guard: B1, B2, B8, C8, D1, D2, E4,
 H1, H3, H8, H9, H13, I3, and I6. The split does not weaken the gate: every such
 guard must pass after Benchmark/Run sealing and before the first official dispatch.
+B2, E4, H1, and I3 additionally retain explicit handoff or post-run guards; their
+pre-dispatch evidence alone cannot close the full item at K1.
 
 ## Deliberately unresolved
 
@@ -73,7 +75,7 @@ pre-registered Run, a completed report, or publication.
   temporary path; both generated architecture files passed `--check`.
 - Canonical-doc scope: passed; no root canonical document changed, so the canonical
   Discussion-link gate is not triggered.
-- `git diff --check`: passed.
+- `git diff --check`: passed after the exact-head review removed trailing whitespace.
 - Stale-wording scan: passed for the old publication-framing question, C1 upgrade
   path, unqualified instruction-byte claim, and published-artifact-only cold verify.
 

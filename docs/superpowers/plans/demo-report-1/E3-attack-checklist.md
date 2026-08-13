@@ -4,7 +4,7 @@
 **Date:** 2026-08-13
 **Author:** E3 method-stream agent
 **Program:** `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` (Stage 2, packet E3)
-**Objects under attack:** `docs/superpowers/plans/demo-report-1/E1-comparison-frame.md` at Git blob `a966584e57ef612bcaf1904a1c9e64edc3ad3acb` / SHA-256 `d59b7e67feee79c25dcdae714f84cb27b5f8e860c2d7c92b1c5c5dec98a52d71` (E1 v0.7), and `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` at Git blob `baf5e4369080c6c0ac8563c615ab54c262189412` / SHA-256 `9e418331965e9f38d6fcbde4bdae0f2710fce5aab85c494c213374e721eb2593`. A version label is not a pin. K3 asserts the frozen drafts at lock equal these objects, or that every later delta has been re-attacked and new pins recorded.
+**Objects under attack:** `docs/superpowers/plans/demo-report-1/E1-comparison-frame.md` at Git blob `dedc157d39933742d97c8e088ce744f1a1cc050b` / SHA-256 `fb691b45329aa980ac87958feb0a0b916c95339e186f0022888e204f8f553090` (E1 v0.7 plus exact-head review correction), and `docs/superpowers/plans/2026-08-11-demo-report-1-skill-ab-program.md` at Git blob `baf5e4369080c6c0ac8563c615ab54c262189412` / SHA-256 `9e418331965e9f38d6fcbde4bdae0f2710fce5aab85c494c213374e721eb2593`. A version label is not a pin. K3 asserts the frozen drafts at lock equal these objects, or that every later delta has been re-attacked and new pins recorded.
 
 **Recorded re-attack of the E1 v0.3 → v0.7 delta.** The changed surfaces are: native root `CLAUDE.md` replaces the unsupported `AGENTS.md` arm; P2 supplies deterministic source/Skill/CLAUDE construction and symmetric patch exclusion; P2b preserves the true-no-file arm's unverifiable loadout axis; C1 is withdrawn and the C2 repository source is fixed; report framing names Vercel/Hacker News respectfully; network publication is separated from the sealed handoff; the conflict-of-interest and self-run sentences are strengthened. Those changes are attacked by B1–B9, C1–C2, I1–I6, J3, J6–J10, and K3 below. They close no item merely by existing; only the five evidence-backed dispositions recorded in this version are terminal.
 
@@ -118,9 +118,9 @@ A terminal disposition with a pending guard counts as closed for the pre-lock de
 
 ### B2 — Byte provenance from one source is asserted, not audited
 - **Attack:** the report claims both arms derive from one `source.md` via a deterministic transform. A reader has no way to check that the transform was actually run, or that it was run against the version that was sealed.
-- **Check:** pre-lock, re-run the committed transform from a clean checkout and derive the three expected digests (`source.md`, `SKILL.md`, `CLAUDE.md`). Post-lock/pre-dispatch, assert those values equal the digests in the sealed Benchmark. Assert the handoff `CLAUDE.md` digest equals `sha256(source.md)` exactly — arm B is the source bytes unchanged, so this is a strict equality, not a re-derivation.
-- **Pass:** CI job green on a clean checkout; `sha256(CLAUDE.md) === sha256(source.md)`; `SKILL.md` = frontmatter block ++ `source.md` byte-for-byte, provable by a byte-slice comparison.
-- **Stage:** pre-lock transform disposition; post-lock/pre-dispatch Benchmark equality `standing-guard`
+- **Check:** pre-lock, re-run the committed transform from a clean checkout and derive the three expected digests (`source.md`, `SKILL.md`, `CLAUDE.md`). Post-lock/pre-dispatch, assert those values equal the digests in the sealed Benchmark. At handoff, assert the supplied `CLAUDE.md` digest equals `sha256(source.md)` exactly — arm B is the source bytes unchanged, so this is a strict equality, not a re-derivation — and reproduce the Skill byte-slice proof from handoff-only artifacts.
+- **Pass:** CI job green on a clean checkout; `sha256(CLAUDE.md) === sha256(source.md)`; `SKILL.md` = frontmatter block ++ `source.md` byte-for-byte, provable by a byte-slice comparison; the cold verifier repeats both equalities from the handoff packet.
+- **Stage:** pre-lock transform disposition; post-lock/pre-dispatch Benchmark equality `standing-guard`; handoff/cold-verification guard
 - **Status:** open · **Origin:** novel
 
 ### B3 — Nobody verified the delivered text ever reached the model `blocker-candidate`
@@ -315,9 +315,9 @@ A terminal disposition with a pending guard counts as closed for the pre-lock de
 
 ### E4 — The completeness floor is chosen to make the run look complete
 - **Attack:** `runOutcome: "complete"` requires the declared floor to pass. If the floor is declared late or loosely, "complete" is a label the owner granted itself.
-- **Check:** choose and freeze the floor value in the method before lock. Post-lock/pre-dispatch, assert the sealed Run carries that exact value and record its relationship to the first dispatch.
-- **Pass:** floor sealed pre-execution; value published; if the floor was ever changed, the run is a re-lock and is disclosed as one.
-- **Stage:** pre-lock disposition; post-lock/pre-dispatch sealed-Run equality guard
+- **Check:** choose and freeze the floor value in the method before lock. Post-lock/pre-dispatch, assert the sealed Run carries that exact value and record its relationship to the first dispatch. Post-run, assert the sealed Report and handoff method disclose the frozen value and any re-lock.
+- **Pass:** floor sealed pre-execution; value present in the sealed Report and handoff packet; if the floor was ever changed, the run is a re-lock and is disclosed as one.
+- **Stage:** pre-lock disposition; post-lock/pre-dispatch sealed-Run equality guard; post-run report/handoff guard
 - **Status:** open · **Origin:** novel
 
 ### E5 — `replacements` quietly restores the denominator
@@ -404,10 +404,10 @@ A terminal disposition with a pending guard counts as closed for the pre-lock de
 
 ### H1 — Singleton clusters made the intervals ~3× too narrow
 - **Attack:** the importer keys task provenance on `repo@base_commit` (`packages/benchmarking/interop/src/import/swebench.ts:70`), so every task is its own cluster — measured 100/100 singletons against 77 distinct repositories. A cluster bootstrap over singleton clusters is just an i.i.d. bootstrap, and the published interval understates uncertainty by roughly the square root of the design effect.
-- **Check:** after the interop fix, derive the candidate slate's ordered repository cluster manifest pre-lock and assert `clusterCount < taskCount`. Post-lock/pre-dispatch, assert it equals the sealed Benchmark/Run task set. The e2e gate carries the standing regression guard `draws === resamples × clusterCount` — the identity is exact and a silent regression to singletons breaks it.
-- **Pass:** clusterCount equals the distinct-repository count on the locked slate; the e2e assertion is present and green; the cluster manifest (keys and members) appears in the report's method disclosures.
+- **Check:** after the interop fix, derive the candidate slate's ordered repository cluster manifest pre-lock and assert `clusterCount < taskCount`. Post-lock/pre-dispatch, assert it equals the sealed Benchmark/Run task set. The e2e gate carries the standing regression guard `draws === resamples × clusterCount` — the identity is exact and a silent regression to singletons breaks it. Post-run, compare the sealed Report disclosure byte-for-byte with the locked manifest.
+- **Pass:** clusterCount equals the distinct-repository count on the locked slate; the e2e assertion is present and green; the cluster manifest (keys and members) appears unchanged in the sealed Report's method disclosures and handoff packet.
 - **Ratified mitigation:** the clustering-key fix lands in the interop packet pre-lock, and the `draws === resamples × clusterCount` assertion becomes a standing e2e guard so a regression to singleton clusters cannot pass CI silently.
-- **Stage:** pre-lock manifest/disposition; post-lock/pre-dispatch sealed-slate equality `standing-guard`
+- **Stage:** pre-lock manifest/disposition; post-lock/pre-dispatch sealed-slate equality `standing-guard`; post-run report/handoff guard
 - **Status:** open — mitigation ratified, verification pending · **Origin:** seeded
 
 ### H2 — Design effect and paired ICC assumed rather than measured
@@ -515,9 +515,9 @@ A terminal disposition with a pending guard counts as closed for the pre-lock de
 
 ### I3 — Pre-registration ordering rests on local append order and a local clock
 - **Attack:** on the local venue, pre-registration is structural plus append-order only. The lock timestamp is the run owner's wall clock, which the run owner controls. "Pre-registered" therefore means "appears earlier in a file the owner writes."
-- **Check:** pre-lock, freeze the mandatory E4 procedure and fallback sentence. After the Run seals and before dispatch, anchor the exact Run digest to an externally timestamped surface, read it back, and assert that timestamp precedes the first official dispatch.
-- **Pass:** external witness exists and precedes execution, or the report states that the ordering guarantee is local-only and the owner could in principle have retro-registered. One of the two, explicitly.
-- **Stage:** pre-lock procedure disposition; post-lock/pre-dispatch external-ordering guard
+- **Check:** pre-lock, freeze the mandatory E4 procedure and fallback sentence. After the Run seals and before dispatch, anchor the exact Run digest to an externally timestamped surface, read it back, and assert that timestamp precedes the first official dispatch. Post-run, require the Report and handoff packet to carry the exact witness facts or the exact frozen local-only fallback sentence.
+- **Pass:** external witness exists and precedes execution, with its CID/transaction/timestamp reproduced in the handoff, or the sealed Report and handoff state that the ordering guarantee is local-only and the owner could in principle have retro-registered. One of the two, explicitly.
+- **Stage:** pre-lock procedure disposition; post-lock/pre-dispatch external-ordering guard; post-run report/handoff guard
 - **Status:** open — post-lock/pre-dispatch evidence pending · **Origin:** novel
 
 ### I4 — Run-owner key custody
@@ -671,7 +671,7 @@ All figures below are recounted programmatically from this file's own headings a
 
 **By earliest stage:** design 4, pre-lock 52, post-run 20 (unchanged; items with multiple stages count at the earliest). Fourteen items now name a separate post-lock/pre-dispatch sealed-record or ordering guard: B1, B2, B8, C8, D1, D2, E4, H1, H3, H8, H9, H13, I3, I6.
 
-**Status:** 71 open, 5 terminal — 60 plain `open`, 11 `open — mitigation ratified/evidence pending`; 2 `fixed` (B5, E1), 2 `disclosed-limitation` (C1, C2), and 1 `withdrawn` (J6). C1, C2, and E1 retain named post-run guards. This is closure preparation, not a claim that the method is ready to lock.
+**Status:** 71 open, 5 terminal — 59 literal plain `open` statuses and 12 qualified `open — …` statuses (11 mitigation-ratified qualifications plus I3's post-lock/pre-dispatch evidence-pending qualification); 2 `fixed` (B5, E1), 2 `disclosed-limitation` (C1, C2), and 1 `withdrawn` (J6). C1, C2, and E1 retain named post-run guards. This is closure preparation, not a claim that the method is ready to lock.
 
 **Ratified mitigations folded in (v0.2–v0.3), by the item they answer:**
 
