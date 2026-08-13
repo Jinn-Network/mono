@@ -39,7 +39,11 @@ describe('native projector submission resolution', () => {
     const lookup = vi.fn(async () => SUBMISSION);
     const resolveRecord = buildNativeResolveRecord(BASE_SEPOLIA_TODAY, lookup);
 
-    await expect(resolveRecord(event(), 'delivery')).rejects.toThrow(/no production implementation/i);
+    // Defect #45 implemented the delivery roles, so a `delivery` request no longer refuses "no
+    // production implementation" — but a TaskCreated event names no delivery anchor, so it still
+    // refuses, and still never falls back to the submission association.
+    await expect(resolveRecord(event(), 'delivery'))
+      .rejects.toThrow(/no revised-generation delivery anchor/i);
     await expect(resolveRecord({
       ...event(),
       projection: { ...event().projection, taskCoordinator: '0x1111111111111111111111111111111111111111' },

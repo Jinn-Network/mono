@@ -2594,6 +2594,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
       profileStore: nativeProfileStore,
       store: sharedStore,
+      // Defect #45, same class as finding E39 below. `CompositionRootInput.logger` is optional and
+      // this call site never supplied it, so `buildProjector` omitted it in turn and EVERY
+      // `logger?.warn` inside `ProjectorLoop` and `createProjectorEnrich` was a no-op in
+      // production — including the one that reports a failed announcement publication. A verdict
+      // announcement could be suppressed on every single tick with nothing whatsoever in the
+      // daemon log. Same console-based shape every other loop in this file wires up.
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
       ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
     });
 

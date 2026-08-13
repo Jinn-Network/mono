@@ -59,14 +59,32 @@
  *     `verifyVerdictObservation`'s real form needs the SAME Phase-B binding-resolver backing
  *     stores (`BindingStore`/`AnchorReadClient`/policy) already named absent by the old gap 2 --
  *     confirmed again independently via `VerdictObservationGatePorts`
- *     (`packages/marketplace/binding/src/named-checks.ts`). `resolveRecord` for delivery roles has
- *     no lookup mechanism anywhere (no local cache of this operator's own delivered bytes keyed
- *     by the claiming event). Both loudly throw a named error rather than returning empty/fake
- *     material; `projectAnnouncements` treats a `verifyVerdictObservation` throw as a refusal
- *     (fail-closed) and a `resolveRecord` throw as a failed (non-fatal, logged, retried) tick.
- *     Because of (a), `transition.events` is always empty in this composition today, so neither
- *     of these is actually reachable yet -- they exist so a FUTURE fix to (a) fails loud instead
- *     of silently fabricating discovery entries.
+ *     (`packages/marketplace/binding/src/named-checks.ts`). It still loudly throws on the LEGACY
+ *     path (`refuseLegacyVerdictObservation`); the NATIVE path supplies the real M4b adapter
+ *     through `installVerdictObservation` (`native-fleet-runtime.ts`'s late-bound port).
+ *
+ *     `resolveRecord` for the `"delivery"` / `"evaluation-delivery"` roles CLOSED on the NATIVE
+ *     path (defect #45). The premise above -- "no lookup mechanism anywhere" -- stopped being
+ *     true once the native serving plane landed: `native-fleet-serving-plane.ts` serves every
+ *     record this operator publishes under `config.publicBaseUrl`, and peers' records resolve
+ *     over `config.recordSources` through the digest-verifying record transport. The lookup key
+ *     is the ON-CHAIN anchor (`SolutionDeliveryClaimed.deliveryDigest`,
+ *     `VerdictDeliveryClaimed.evaluationDeliveryDigest`) -- the same fact `announce.ts`'s own
+ *     `expectedMaterialDigest` checks against -- so nothing is keyed off a claim-time cache.
+ *     `buildNativeResolveRecord` below implements both roles; the LEGACY path still refuses
+ *     every delivery role by construction (`buildResolveRecord`, submission only).
+ *
+ *     This was gate-critical while it stood: the ratified DR-2026-08-05 G-loop criterion is a
+ *     verdict announcement with `decisionGrade: true` plus a requester-side adopted delivery, and
+ *     the announce leg asks for `"evaluation-delivery"` BEFORE it ever runs the verdict gate. A
+ *     refusal there meant no native operator could publish any verdict announcement at all.
+ *
+ *     One correction to what this note used to claim: a `resolveRecord` throw is NOT a "retried"
+ *     tick. `projector-loop.ts` catches it, publishes nothing for the whole tick, and still
+ *     advances the cursor; `hasCanonicalEvent` then filters those events out of every later
+ *     tick's `publicationEvents`. The announcements are dropped for good, so the throw is now a
+ *     named `NativeAnnouncementRecordError` (role + anchor digest + cause) and the loop's warn
+ *     names the loss.
  *  c. Native role identities: the caller supplies the persistent, effective-time-trusted
  *     `RoleIdentitySet`. Its solver-delivery and solver-discovery identities are the only keys
  *     this native composition exposes to delivery verification and discovery signing. Omission
@@ -147,6 +165,7 @@ import {
   sealTaskProfile,
 } from '@jinn-network/task-execution-profiles';
 import type { JsonValue, ProtocolObservation } from '@jinn-network/task-execution-protocol';
+import { documentDigest } from '@jinn-network/task-execution-protocol';
 import { DISCOVERY_SIGNING_SCOPE, RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import { legacyPredictionV1BaselineLauncher } from './legacy-prediction-v1-launcher.js';
 import type {
@@ -823,22 +842,96 @@ export function buildResolveSubmissionBytes(input: {
 }
 
 /**
- * Native-only `projectAnnouncements.resolveRecord` path. Its resolver reads a local, requester-
- * signed canonical association; there is deliberately no IPFS retrieval, CreatorLoop document,
- * SignedTaskV1 parser, or synthesized projection on this path.
+ * A native `resolveRecord` refusal, named so the projector loop's catch can report the ROLE, the
+ * anchor DIGEST and the CAUSE rather than an anonymous message (defect #45, the #33/#36/#43
+ * opacity class at the projector layer). Never carries bytes: a refusal is a refusal.
+ */
+export class NativeAnnouncementRecordError extends Error {
+  override readonly name = 'NativeAnnouncementRecordError';
+
+  constructor(
+    readonly role: AnnouncementRecordRole,
+    readonly reason: string,
+    readonly digest?: `sha256:${string}`,
+  ) {
+    super(
+      `native resolveRecord refused the "${role}" record`
+      + `${digest === undefined ? '' : ` (anchor ${digest})`}: ${reason}`,
+    );
+  }
+}
+
+/**
+ * The on-chain anchor a delivery-family record must equal, read from the SAME revised-generation
+ * event fact `announce.ts`'s own `expectedMaterialDigest` reads — `SolutionDeliveryClaimed.
+ * deliveryDigest` and `VerdictDeliveryClaimed.evaluationDeliveryDigest`. Deriving it here (rather
+ * than fetching by some other key and letting the announce plane's anchor check catch a mismatch)
+ * is what makes this resolver content-addressed: the chain names the bytes, and only bytes that
+ * re-derive to that name are ever returned.
+ */
+function deliveryAnchorDigest(
+  event: ObservationMarketplaceEvent,
+  role: 'delivery' | 'evaluation-delivery',
+): `sha256:${string}` | undefined {
+  const anchor = role === 'delivery'
+    ? (event.event === 'SolutionDeliveryClaimed' && 'deliveryDigest' in event.facts
+      ? event.facts.deliveryDigest
+      : undefined)
+    : (event.event === 'VerdictDeliveryClaimed' && 'evaluationDeliveryDigest' in event.facts
+      ? event.facts.evaluationDeliveryDigest
+      : undefined);
+  if (typeof anchor !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(anchor) || /^0x0{64}$/iu.test(anchor)) {
+    return undefined;
+  }
+  return `sha256:${anchor.slice(2).toLowerCase()}`;
+}
+
+/**
+ * Digest-keyed retrieval over this operator's own native serving plane and its configured peers.
+ * Contract (mirroring `buildFleetDeliveryBytesResolver`, `native-fleet-runtime.ts`): returns bytes
+ * ONLY when they re-derive to the requested digest, and `undefined` on any miss, transport failure
+ * or mismatch. Never throws for a miss.
+ */
+export type NativeRecordBytesResolver =
+  (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+
+/**
+ * Native-only `projectAnnouncements.resolveRecord` path. Its submission leg reads a local,
+ * requester-signed canonical association; there is deliberately no IPFS retrieval, CreatorLoop
+ * document, SignedTaskV1 parser, or synthesized projection on this path.
+ *
+ * Its DELIVERY legs (`"delivery"`, `"evaluation-delivery"` — defect #45, previously the file
+ * header's gap b) resolve content-addressed bytes from the native serving plane: the operator's
+ * own published records and its configured peers', through `resolveRecordBytes`. Both are real
+ * announce-plane requests on the native path — `announce.ts` asks for `"delivery"` on
+ * `SolutionDeliveryClaimed` and `"evaluation-delivery"` on `VerdictDeliveryClaimed` — and while
+ * this refused them BOTH, no verdict announcement could ever be published, which is exactly the
+ * `decisionGrade: true` announcement the ratified DR-2026-08-05 G-loop criterion requires
+ * (`log/decisions/2026-08-05-cutover-one-swap-collapse.md`).
+ *
+ * Fail-closed is unchanged in strength and only more legible: an unresolvable or non-matching
+ * record still yields NO announcement. The refusal is now a named
+ * `NativeAnnouncementRecordError` carrying the role, the on-chain anchor digest and the cause, so
+ * the projector loop's non-fatal catch logs something an operator can act on instead of a bare
+ * "no production implementation".
  */
 export function buildNativeResolveRecord(
   chain: MarketplaceChainConfig,
   resolveAssociation: (lookup: NativeRequesterSubmissionLookup) => Promise<Uint8Array | undefined>,
+  resolveRecordBytes?: NativeRecordBytesResolver,
 ): (event: ObservationMarketplaceEvent, role: AnnouncementRecordRole) => Promise<AnnouncementRecordMaterial> {
+  const assertCanonical = (event: ObservationMarketplaceEvent): void => {
+    if (
+      event.derivation.chainId !== chain.chainId
+      || event.projection.taskCoordinator.toLowerCase() !== chain.taskCoordinator.toLowerCase()
+    ) {
+      throw new Error('native resolveRecord refuses a projection outside the canonical Base Sepolia coordinator');
+    }
+  };
+
   return async (event, role) => {
     if (role === 'submission' && 'taskId' in event.facts) {
-      if (
-        event.derivation.chainId !== chain.chainId
-        || event.projection.taskCoordinator.toLowerCase() !== chain.taskCoordinator.toLowerCase()
-      ) {
-        throw new Error('native resolveRecord refuses a projection outside the canonical Base Sepolia coordinator');
-      }
+      assertCanonical(event);
       const bytes = await resolveAssociation({
         chainId: chain.chainId,
         coordinator: chain.taskCoordinator,
@@ -846,10 +939,51 @@ export function buildNativeResolveRecord(
         taskDigest: event.projection.taskDigest,
       });
       if (bytes !== undefined) return { kind: RECORD_KINDS.submission, bytes };
+      throw new NativeAnnouncementRecordError(
+        role,
+        'no canonical requester association is held for this task',
+      );
     }
-    throw new Error(
-      `resolveRecord has no production implementation for role "${role}" (composition-root.ts `
-      + 'file header gap b)',
+    if (role === 'delivery' || role === 'evaluation-delivery') {
+      assertCanonical(event);
+      const anchorDigest = deliveryAnchorDigest(event, role);
+      if (anchorDigest === undefined) {
+        // A V3 (pre-revised) event, or a zero anchor: the chain names no bytes, so there is
+        // nothing content-addressed to fetch and nothing honest to announce.
+        throw new NativeAnnouncementRecordError(
+          role,
+          `${event.event} carries no revised-generation delivery anchor`,
+        );
+      }
+      if (resolveRecordBytes === undefined) {
+        throw new NativeAnnouncementRecordError(
+          role,
+          'no native record serving plane is wired into this composition',
+          anchorDigest,
+        );
+      }
+      const bytes = await resolveRecordBytes(anchorDigest);
+      if (bytes === undefined) {
+        throw new NativeAnnouncementRecordError(
+          role,
+          'no digest-verified bytes on this operator\'s serving plane or its configured peers',
+          anchorDigest,
+        );
+      }
+      // Second, independent check. `resolveRecordBytes` verifies too, but this resolver is the
+      // party that names the anchor, so it does not delegate the last line of defense.
+      if (documentDigest(bytes) !== anchorDigest) {
+        throw new NativeAnnouncementRecordError(
+          role,
+          'resolved bytes do not re-derive to the on-chain anchor',
+          anchorDigest,
+        );
+      }
+      return { kind: RECORD_KINDS.delivery, bytes };
+    }
+    throw new NativeAnnouncementRecordError(
+      role,
+      'no production implementation for this role on the native path',
     );
   };
 }

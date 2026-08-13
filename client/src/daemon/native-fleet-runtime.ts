@@ -77,9 +77,10 @@ export class NativeFleetAssemblyError extends Error {
 }
 
 /**
- * HTTP-first delivery-content resolver for the projector's today-mode delivery correspondence.
- * Native deliveries are HTTP-served and may never land on the projector's IPFS gateway, so the
- * enrich path must try the configured record-source serving planes (`byLocation`) first. Mirrors
+ * HTTP-first delivery-content resolver for the projector's today-mode delivery correspondence and
+ * (defect #45) for the announce leg's `delivery` / `evaluation-delivery` record resolution.
+ * Native deliveries are HTTP-served and may never land on the projector's IPFS gateway, so both
+ * legs must try the record-source serving planes (`byLocation`) first. Mirrors
  * `native-evaluator-opportunity-source.ts`'s `recordFetcher`, and stays untrusted: bytes are
  * returned only when they re-derive to the requested digest. Undefined on any miss so composition
  * can layer the IPFS gateway after it.
@@ -418,6 +419,21 @@ export async function buildFleetNativeRuntime(
   // adapter through `installVerdictObservation` once that state exists; until then the stable port
   // refuses fail-closed. See `createLateBoundVerdictObservation`.
   const lateBoundVerdict = createLateBoundVerdictObservation();
+  // ONE digest-keyed reader over the native serving plane, shared by the two consumers that need
+  // it (defect #45): the projector's ANNOUNCE leg (`resolveRecord` for the `delivery` /
+  // `evaluation-delivery` roles) and its ENRICH leg (`resolveDeliveryBytes`, the today-mode
+  // delivery correspondence). Both want the same bytes under the same content address, so they
+  // read the same origins.
+  //
+  // `publicBaseUrl` LEADS the list. `native-fleet-serving-plane.ts` serves every source this
+  // operator owns — requester, solver AND evaluator records — under that one origin, and the
+  // announce leg's most common request is for a record this operator itself just published (its
+  // own solution delivery, its own verdict). Reading only `config.recordSources` made that
+  // self-resolution depend on the operator having listed itself as a peer.
+  const nativeRecordBytes = buildFleetDeliveryBytesResolver(
+    (url) => records.byLocation(url),
+    [publicBaseUrl, ...(config.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
+  );
   const projectorPorts: NativeProjectorExactPorts = {
     resolveRecord: buildNativeResolveRecord(
       chain,
@@ -425,12 +441,10 @@ export async function buildFleetNativeRuntime(
         stateDir: nativeRequesterStateDir,
         requesterSubmission: identities.get('requester-submission'),
       }),
+      nativeRecordBytes,
     ),
     verifyVerdictObservation: lateBoundVerdict.port,
-    resolveDeliveryBytes: buildFleetDeliveryBytesResolver(
-      (url) => records.byLocation(url),
-      (config.recordSources ?? []).map(({ baseUrl }) => baseUrl),
-    ),
+    resolveDeliveryBytes: nativeRecordBytes,
   };
 
   const discovery = await buildFleetNativeDiscovery({
