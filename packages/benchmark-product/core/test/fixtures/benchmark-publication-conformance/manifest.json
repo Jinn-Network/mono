@@ -21,6 +21,6 @@
     { "id": "15-omitted-in-scope-dispatch-fails", "status": "partial", "remaining": "Accounting refuses missing exact capture; independent discovery of an omitted authoritative stream is not yet exercised end-to-end.", "tests": ["src/operations/publication-accounting.test.ts"] },
     { "id": "16-unavailable-authoritative-stream-indeterminate", "status": "partial", "remaining": "Missing Harbor archive is reported indeterminate before publication; an unavailable declared authoritative stream fixture remains absent.", "tests": ["src/operations/publication-accounting.test.ts"] },
     { "id": "17-observation-conflicts-and-gaps", "status": "partial", "remaining": "Ordering components cover observation handling; overlapping multi-source duplicate/conflict/gap fixture is not yet combined.", "tests": ["../../benchmarking/run/src/ordering-conformance.test.ts"] },
-    { "id": "18-stage-crash-and-idempotency", "status": "partial", "remaining": "Registration and accounting crash recovery are executable; Matrix and Report-stage crash recovery are not both represented in one matrix.", "tests": ["src/operations/publication-accounting.test.ts", "src/operations/publication-register.test.ts"] }
+    { "id": "18-stage-crash-and-idempotency", "status": "partial", "remaining": "Registration, accounting, and Report recovery are executable; they are not yet represented in one cross-stage fault matrix.", "tests": ["src/operations/publication-accounting.test.ts", "src/operations/publication-register.test.ts", "src/operations/report.test.ts"] }
   ]
 }
