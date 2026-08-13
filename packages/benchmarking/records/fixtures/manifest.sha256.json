@@ -2,20 +2,28 @@
   "version": 1,
   "entries": [
     {
+      "id": "benchmark-accounting/invalid-authorization-after-close.json",
+      "sha256": "462bba12175a9052d369f6d824e66dcf0da69dfd5b3024136eff56a892824362"
+    },
+    {
       "id": "benchmark-accounting/invalid-missing-protocol.json",
-      "sha256": "3bfd0451bcf248c3526388ddfa95e2f855f468e74090427273a78938f08ae4c3"
+      "sha256": "95ae45cb09b417fa2ea17414d4c7613c9f8a8d4c0043ea791584244dbf5b131e"
+    },
+    {
+      "id": "benchmark-accounting/invalid-missing-publisher-authority.json",
+      "sha256": "9f71020242f339837081216f2f719bcff08ac085bbc6d8c7f7573aa859789f5f"
     },
     {
       "id": "benchmark-accounting/invalid-unsorted-cells.json",
-      "sha256": "c1c393973c67f4f172b214b84a6502137811f6c69e60e523e78247a4de5bf122"
+      "sha256": "504922fd107400f224c65d791b1497c532efbdce2cea9d95b87e6fc907241613"
     },
     {
       "id": "benchmark-accounting/valid.json",
-      "sha256": "68c4949c6fcdef86a7d714f6a66fa2a2de973d22bce228afc16ebb695df5ef0f"
+      "sha256": "613d116445d5daa77458aa47e9b2590c5518b33ae91593c064529ea0aa9900f7"
     },
     {
       "id": "benchmark-accounting/valid.sha256",
-      "sha256": "cbc9cef533a0b7638e472fb7a20f920d4006def2a571c1cc3cfd4873615c6ef3"
+      "sha256": "1bae3910a216cd331b2c3d8ad74fa543edb75ec7260d24bdfa5a36f3d76f8d51"
     },
     {
       "id": "benchmark/invalid-bad-version.json",

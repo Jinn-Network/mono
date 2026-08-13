@@ -1,5 +1,6 @@
 import { ProtocolObservationSchema, type ProtocolObservation } from "@jinn-network/task-execution-protocol";
 import { z } from "zod";
+import { serializeCanonicalJson } from "../canonical.js";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
 import { topLevelRecordSchema } from "../extensions.js";
 import {
@@ -7,10 +8,11 @@ import {
   BENCHMARK_ACCOUNTING_PROCEDURE_VERSION,
   BENCHMARKING_PROTOCOL,
   BENCHMARK_OBSERVATION_ARCHIVE_PROFILE,
+  TRUST_AUTHORIZATION_RECORD_KIND,
 } from "../identifiers.js";
-import { isJsonValue } from "../json.js";
+import { isJsonValue, type JsonValue } from "../json.js";
 import { compareCodeUnitStrings } from "../order.js";
-import { isCalendarStrictRfc3339 } from "../rfc3339.js";
+import { compareCalendarStrictRfc3339Instants, isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 import { CellKeySchema } from "../run/cells.js";
 
@@ -95,6 +97,20 @@ const CloseBoundarySchema = z.object({
   }).optional(),
 });
 
+export const PublisherAuthorizationReferenceSchema = z.object({
+  kind: z.literal(TRUST_AUTHORIZATION_RECORD_KIND),
+  record: DigestBearingResourceDescriptorSchema,
+});
+
+export const PublisherAuthoritySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("run-owner") }),
+  z.object({
+    kind: z.literal("authorization"),
+    authorization: PublisherAuthorizationReferenceSchema,
+    effectiveBoundary: CloseBoundarySchema,
+  }),
+]);
+
 const ArtifactReferenceSchema = z.object({
   role: AbsoluteIriSchema,
   artifact: DigestBearingResourceDescriptorSchema,
@@ -143,6 +159,7 @@ export const BenchmarkAccountingRecordSchema = topLevelRecordSchema({
   protocol: z.literal(BENCHMARKING_PROTOCOL),
   run: DigestBearingResourceDescriptorSchema,
   publisher: AgentIriSchema,
+  publisherAuthority: PublisherAuthoritySchema,
   procedure: z.object({
     id: z.literal(BENCHMARK_ACCOUNTING_PROCEDURE),
     version: z.literal(BENCHMARK_ACCOUNTING_PROCEDURE_VERSION),
@@ -152,6 +169,19 @@ export const BenchmarkAccountingRecordSchema = topLevelRecordSchema({
   closeBoundary: CloseBoundarySchema,
   cells: z.array(AccountingCellSchema),
 }).superRefine((accounting, ctx) => {
+  if (
+    accounting.publisherAuthority.kind === "authorization"
+    && compareCalendarStrictRfc3339Instants(
+      accounting.publisherAuthority.effectiveBoundary.at,
+      accounting.closeBoundary.at,
+    ) === 1
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["publisherAuthority", "effectiveBoundary", "at"],
+      message: "delegate authorization must be effective no later than the accounting close boundary",
+    });
+  }
   if (!sortedBy(accounting.scope.streams, (stream) => `${stream.role}\u001f${stream.kind}\u001f${stream.kind === "record-discovery" ? `${stream.source.agent}\u001f${stream.source.name}` : `${stream.profile}\u001f${stream.authority}`}`)) {
     ctx.addIssue({ code: "custom", path: ["scope", "streams"], message: "scope.streams must be deterministically sorted and unique" });
   }
@@ -178,6 +208,8 @@ export const BenchmarkAccountingRecordSchema = topLevelRecordSchema({
 export type TypedRecordReference = z.infer<typeof TypedRecordReferenceSchema>;
 export type RegistrationBoundary = z.infer<typeof RegistrationBoundarySchema>;
 export type AccountingScopeStream = z.infer<typeof AccountingScopeStreamSchema>;
+export type PublisherAuthorizationReference = z.infer<typeof PublisherAuthorizationReferenceSchema>;
+export type PublisherAuthority = z.infer<typeof PublisherAuthoritySchema>;
 export type BenchmarkAccountingRecord = z.infer<typeof BenchmarkAccountingRecordSchema>;
 export type BenchmarkAccountingCell = BenchmarkAccountingRecord["cells"][number];
 export type BenchmarkAccountingDispatch = BenchmarkAccountingCell["dispatches"][number];
@@ -214,6 +246,10 @@ const ObservationArchiveStreamSchema = z.object({
   exactEnvelopes: z.array(DigestBearingResourceDescriptorSchema),
 });
 
+function deterministicJsonKey(value: unknown): string {
+  return new TextDecoder().decode(serializeCanonicalJson(value as JsonValue));
+}
+
 /** A deterministic, sealed projection of validated observations, not a mutable protocol log. */
 export const ObservationArchiveSchema = z.object({
   profile: z.literal(BENCHMARK_OBSERVATION_ARCHIVE_PROFILE),
@@ -248,9 +284,20 @@ export const ObservationArchiveSchema = z.object({
       if (!conflict.observations.every((observation) => observation.source === stream.source && observation.subject === stream.subject && observation.source === conflict.source && observation.id === conflict.id)) {
         ctx.addIssue({ code: "custom", path: ["streams", streamIndex, "conflicts", conflictIndex], message: "conflict observations must retain one source/id within their stream" });
       }
-      if (new Set(conflict.observations.map((value) => JSON.stringify(value))).size < 2) {
-        ctx.addIssue({ code: "custom", path: ["streams", streamIndex, "conflicts", conflictIndex], message: "a conflict must contain non-equivalent observations" });
+      if (!sortedBy(conflict.observations, deterministicJsonKey)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["streams", streamIndex, "conflicts", conflictIndex, "observations"],
+          message: "conflict observations must be deterministically sorted and unique by canonical JSON value",
+        });
       }
+    }
+    if (!sortedBy(stream.conflicts, (conflict) => `${conflict.source}\u001f${conflict.id}`)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["streams", streamIndex, "conflicts"],
+        message: "conflicts must be sorted and unique by source then id (UTF-16 code-unit order)",
+      });
     }
     if (!sortedBy(stream.exactEnvelopes, (descriptor) => `${descriptor.digest.sha256}\u001f${descriptor.name ?? ""}`)) {
       ctx.addIssue({ code: "custom", path: ["streams", streamIndex, "exactEnvelopes"], message: "exactEnvelopes must be sorted and unique by sha256 then name" });

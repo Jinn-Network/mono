@@ -1,6 +1,6 @@
 // @jinn-network/benchmarking-records — public surface (frozen at the design §14.1-.6 granularity).
 // The four sealed benchmarking record kinds (Benchmark, Run, Matrix, Report), their sealing, and
-// their record-level checks. Tier 2; imports task-execution-protocol only (plan Finding F3).
+// their record-level checks. Tier 2; imports task-execution-protocol and trust-core only.
 
 // --- pinned identifiers (protocol, media types, record-kind URIs, method URIs, scope) ---
 export {
@@ -29,6 +29,7 @@ export {
   RUN_MEDIA_TYPE,
   RUN_RECORD_KIND,
   SIGNED_REPORT_MEDIA_TYPE,
+  TRUST_AUTHORIZATION_RECORD_KIND,
   TRUST_POLICY_PURPOSE_BENCHMARK_PUBLISHER,
   TRUST_POLICY_PURPOSE_RUN_OWNER,
 } from "./identifiers.js";
@@ -134,6 +135,8 @@ export {
   AccountingScopeStreamSchema,
   BenchmarkAccountingRecordSchema,
   ObservationArchiveSchema,
+  PublisherAuthorizationReferenceSchema,
+  PublisherAuthoritySchema,
   RegistrationBoundarySchema,
   TypedRecordReferenceSchema,
   parseBenchmarkAccounting,
@@ -149,6 +152,8 @@ export type {
   ObservationArchive,
   ObservationArchiveStream,
   ObservationConflict,
+  PublisherAuthorizationReference,
+  PublisherAuthority,
   RegistrationBoundary,
   TypedRecordReference,
 } from "./accounting/schema.js";

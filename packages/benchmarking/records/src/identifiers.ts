@@ -32,6 +32,8 @@ export const MATRIX_RECORD_KIND = "https://spec.jinn.network/records/benchmark-m
 export const REPORT_RECORD_KIND = "https://spec.jinn.network/records/benchmark-report/v1";
 export const REPORT_V2_RECORD_KIND = "https://spec.jinn.network/records/benchmark-report/v2";
 export const BENCHMARK_ACCOUNTING_RECORD_KIND = "https://spec.jinn.network/records/benchmark-accounting/v1";
+/** Local protocol-layer mirror; importing Discovery here would invert the frozen dependency. */
+export const TRUST_AUTHORIZATION_RECORD_KIND = "https://spec.jinn.network/records/authorization/v1";
 
 export const BENCHMARK_OBSERVATION_ARCHIVE_PROFILE =
   "https://spec.jinn.network/profiles/benchmark-observation-archive/v1";

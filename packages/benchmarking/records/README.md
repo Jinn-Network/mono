@@ -26,7 +26,9 @@ Four sealed, content-addressed record kinds that together let a skeptical third 
   completeness, attrition) — a report that hides attrition is malformed.
 - **BenchmarkAccounting** (publication profile §7) — the sealed publisher claim over complete
   dispatch/evidence inputs within frozen, authoritative stream cutoffs. It never chooses an
-  outcome or carries a score; Matrix remains the terminal outcome account.
+  outcome or carries a score; Matrix remains the terminal outcome account. Its
+  `publisherAuthority` freezes whether authority derives directly from Run ownership or from a
+  typed Trust authorization record, including the authorization's effective boundary.
 - **Observation archive** (publication profile §7.4) — a sealed, deterministic partition of
   accepted TEP observations by CloudEvents `source` and `subject`, with capture cutoff,
   authority designation, retained conflicts, and descriptors for exact signed/native envelopes.

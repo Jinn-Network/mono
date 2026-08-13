@@ -72,6 +72,149 @@
     "publisher": {
       "type": "string"
     },
+    "publisherAuthority": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run-owner"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "authorization"
+            },
+            "authorization": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "https://spec.jinn.network/records/authorization/v1"
+                },
+                "record": {
+                  "allOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "uri": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "downloadLocation": {
+                          "type": "string"
+                        },
+                        "annotations": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        },
+                        "content": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "digest": {
+                          "type": "object",
+                          "properties": {
+                            "sha256": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          },
+                          "required": [
+                            "sha256"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "digest"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "record"
+              ],
+              "additionalProperties": false
+            },
+            "effectiveBoundary": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "anchor": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string"
+                    },
+                    "blockNumber": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "blockHash": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "blockNumber",
+                    "blockHash"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "at"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "authorization",
+            "effectiveBoundary"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
     "procedure": {
       "type": "object",
       "properties": {
@@ -1170,6 +1313,7 @@
     "protocol",
     "run",
     "publisher",
+    "publisherAuthority",
     "procedure",
     "scope",
     "publicRegistration",
@@ -1184,6 +1328,7 @@
           "protocol",
           "run",
           "publisher",
+          "publisherAuthority",
           "procedure",
           "scope",
           "publicRegistration",
@@ -1196,5 +1341,5 @@
       }
     ]
   },
-  "$comment": "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants."
+  "$comment": "Runtime checks: canonical byte equality, deterministic accounting order, comparable registration boundaries, and delegate authorization effective no later than close."
 }
