@@ -120,12 +120,15 @@ publish because it can finally see the events — which is the point of the proc
    worse than a 404: the resolver refuses it and you have spent the rewind either way.
 
    **Confirm RPC health too, immediately before `--apply`.** The requester's role gate reads the
-   coordinator twice per `SolutionDeliveryClaimed` — and the announce leg's counterparty resolver
-   reads `getAttempt` for the same anchor — and `buildReadTodayDeliveryFacts`
-   (`client/src/daemon/composition-root.ts`) currently returns `undefined` on a read *failure* the
-   same way it does for a requestId that genuinely is not ours. That reads as "not the requester",
-   which is the one remaining path to a false rejection. Round-trip both reads against the
-   configured endpoint first:
+   coordinator twice per `SolutionDeliveryClaimed`, and the announce leg's counterparty resolver
+   reads the same anchor. Since #2647 a failed read is no longer mistaken for absence:
+   `buildReadTodayDeliveryFacts` (`client/src/daemon/composition-root.ts`) reports `'unavailable'`
+   distinctly from `undefined`, and the role now settles *before* that read, so a mid-tick blip on
+   the OBSERVE side is a replayable drop rather than a false `rejected`/`invalid-reference`
+   terminal. The pre-flight is still mandatory, for the leg that has no such affordance: the
+   ANNOUNCE side refuses on the same unavailable read, and per #2649 an announcement refused in a
+   tick that journaled its events is lost permanently. Round-trip both reads against the configured
+   endpoint first:
 
    ```bash
    cast call <coordinator> 'getRequestRef(bytes32)(uint256,uint32,bool)' <requestId> --rpc-url <rpc>
@@ -145,8 +148,10 @@ publish because it can finally see the events — which is the point of the proc
    **5th field**, `solutionCidDigest`, must be the non-zero anchor you are hunting the record for —
    decoded output looks like
    `(1236, 0, 0xc679BD…, 0x594af10a…, 0x743a947f…, 1000000000000000000, 1, 4)`. A revert, a timeout
-   or a 429 here means **do not apply yet** — the replay is one-shot, and a flaky read spends it. See
-   PR #2644's body follow-up 9 on gate 1's chain-read leg for the structural fix.
+   or a 429 here means **do not apply yet** — the replay is one-shot, and a flaky read spends it.
+   Neither view can revert for an unknown key (`contracts/src/tasks/TaskCoordinator.sol:437-465`
+   — both are plain mapping reads returning a zero record or `exists: false`), so anything that
+   throws here is your endpoint, not the chain's answer.
 
    The delivery digest is not on the coordinator (today generation anchors only its keccak), so read
    it off the counterparty's catalog. If the daemon already tried and dropped, its log names both the
@@ -156,6 +161,10 @@ publish because it can finally see the events — which is the point of the proc
    [projector-enrich] role=requester DROPPING SolutionDeliveryClaimed for task 1236 attempt 0
      (requestId 0x…, anchor 0x…): no record-plane Delivery witness -- …
    ```
+
+   `role=undetermined` with `anchor unread` is the #2647 variant: the chain read that establishes
+   the role failed, so there is no anchor to hunt yet. Fix the RPC and rewind — that drop says
+   nothing about either serving plane.
 
    Live example from the two-operator gate (#2644): `http://127.0.0.1:7402/records/ed1ba7ab…908c`
    for the delivery and `http://127.0.0.1:7401/records/c0c3d703…1204` for the task.

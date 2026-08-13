@@ -148,11 +148,15 @@ export interface ProjectorEnrichPorts {
    * `getAttempt.solutionCidDigest` (mirrors `packages/marketplace/venue-base/src/writers/
    * settlement.ts`'s `readMechDeliveryFacts`/`readRouterDeliveryFacts`, which are not exported
    * from that package -- read via this host-injected port instead of duplicating the ABI/read
-   * logic here). Undefined when the requestId has no on-chain reference yet.
+   * logic here).
+   *
+   * THREE answers, not two (#2647). `undefined` is reserved for a genuine ABSENCE -- the requestId
+   * has no on-chain reference in either map yet -- and `'unavailable'` says the read itself failed.
+   * The distinction is decidable rather than a guess: every view behind this port is a plain
+   * mapping read (`contracts/src/tasks/TaskCoordinator.sol:437-465`) that returns a zero record or
+   * `exists: false` for an unknown key and CANNOT revert, so a throw is always transport.
    */
-  readonly readTodayDeliveryFacts: (requestId: Hex) => Promise<
-    { readonly taskId: bigint; readonly attemptIndex: number; readonly onChainKeccak: Hex } | undefined
-  >;
+  readonly readTodayDeliveryFacts: (requestId: Hex) => Promise<TodayDeliveryFacts | 'unavailable' | undefined>;
   /**
    * Defect #48, Gate C. Resolves the COUNTERPARTY's published solution-Delivery record for one
    * today-generation `SolutionDeliveryClaimed`, from the record plane rather than from a Mech
@@ -177,6 +181,13 @@ export interface ProjectorEnrichPorts {
   readonly logger?: { warn(message: string): void };
 }
 
+/** The on-chain delivery facts one requestId resolves to. */
+export type TodayDeliveryFacts = {
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly onChainKeccak: Hex;
+};
+
 /**
  * Defect #48, fix round. The resolver's answer is discriminated by ROLE, not by whether content
  * resolution happened to succeed.
@@ -195,6 +206,13 @@ export interface ProjectorEnrichPorts {
  * verdict's own terminal, folds the Attempt `contradictory`, and makes `adoptPostedTask` throw
  * `attempt-contradictory` forever. `enrich` DROPS the event instead, which leaves the canonical log
  * clean and the event replayable once the plane is back.
+ *
+ * `{ role: 'undetermined', witness: undefined }` (#2647) — the role determination itself could not
+ * complete, because a chain read it needs failed. Same DROP, and for the same reason: the resolver
+ * may not report a role it does not know, and the one answer it must never give is the
+ * not-the-requester `undefined`, which would hand the reducer a permanent false rejection on the
+ * strength of a momentary RPC failure. Reached only after the free claimant gate has already ruled
+ * this operator out as the solver, so dropping cannot cost a solver its own settlement.
  */
 export type RecordPlaneDeliveryResolution =
   | {
@@ -206,10 +224,13 @@ export type RecordPlaneDeliveryResolution =
     };
   }
   | {
-    readonly role: 'requester';
+    readonly role: 'requester' | 'undetermined';
     readonly witness: undefined;
-    /** The coordinator's anchor the missing record must hash to — the operator's search key. */
-    readonly onChainKeccak: Hex;
+    /**
+     * The coordinator's anchor the missing record must hash to — the operator's search key. Absent
+     * when the failure happened before that anchor was read, which is every `'undetermined'` case.
+     */
+    readonly onChainKeccak?: Hex;
     /** Diagnosable cause, logged verbatim at the drop site. */
     readonly reason: string;
   };
@@ -452,6 +473,16 @@ export function createProjectorEnrich(
     readonly correspondence: ObservationProjectionContext['deliveryCorrespondence'];
   } | undefined> {
     const facts = await ports.readTodayDeliveryFacts(requestId);
+    if (facts === 'unavailable') {
+      // Distinct from the absence below (#2647): the chain never answered, so nothing has been
+      // learned about this requestId. Same drop -- the difference is what the operator goes and
+      // fixes, and re-offering the event on the next replay is the whole point either way.
+      ports.logger?.warn(
+        `[projector-enrich] on-chain delivery facts for requestId ${requestId} unavailable (the `
+          + 'request-reference read failed) -- dropping Deliver so a later tick can retry',
+      );
+      return undefined;
+    }
     if (facts === undefined) {
       ports.logger?.warn(
         `[projector-enrich] no on-chain solution OR verdict request reference for requestId `
@@ -558,7 +589,8 @@ export function createProjectorEnrich(
       // two non-witness answers are NOT the same fact:
       //   - `undefined` (not the requester) is a MISS — the reducer's pre-existing mech-fact branch
       //     runs and still decides. The solver path is untouched.
-      //   - `{ role: 'requester', witness: undefined }` is a DROP — a requester never witnesses the
+      //   - `{ witness: undefined }` (role `requester` or, since #2647, `undetermined`) is a DROP —
+      //     a requester never witnesses the
       //     Mech `Deliver`, so handing the event to the reducer would emit `rejected`/
       //     `invalid-reference` on a delivery the coordinator itself settled. That terminal is
       //     permanent, folds the Attempt `contradictory` beside the verdict's terminal, and wedges
@@ -596,9 +628,9 @@ export function createProjectorEnrich(
         if (resolution !== undefined) {
           if (resolution.witness === undefined) {
             ports.logger?.warn(
-              `[projector-enrich] role=requester DROPPING ${event.event} for task ${taskId} `
+              `[projector-enrich] role=${resolution.role} DROPPING ${event.event} for task ${taskId} `
                 + `attempt ${attemptIndex} (requestId ${event.facts.requestId}, anchor `
-                + `${resolution.onChainKeccak}): no record-plane Delivery witness -- `
+                + `${resolution.onChainKeccak ?? 'unread'}): no record-plane Delivery witness -- `
                 + `${resolution.reason}. The event is NOT journaled and will be re-offered on the `
                 + `next replay; bring the counterparty's serving plane up and rewind (defect #48).`,
             );

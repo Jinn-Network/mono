@@ -875,6 +875,18 @@ function buildFetchIpfsBytes(gatewayUrl: string): (digest: `sha256:${string}`) =
 /**
  * Real (gap 1 CLOSED): today-generation on-chain delivery-fact read via `TaskCoordinator`.
  *
+ * FAILURE IS NOT ABSENCE (#2647). Both legs used to collapse into one `undefined`, which the
+ * requester-side resolver then could not tell apart from the genuine "this requestId is not on
+ * this chain's books" answer — so one 503 on `getRequestRef` read as "not the requester" and
+ * produced a permanent false rejection. The two are decidable, not a judgment call: every view
+ * read here is a plain mapping read (`TaskCoordinator.sol:437-465`) returning `exists: false` or a
+ * zero record for an unknown key, and none of them can revert. A THROW is therefore always
+ * transport, never absence.
+ *
+ *   - `{ taskId, attemptIndex, onChainKeccak }` — the reference resolved.
+ *   - `undefined` — genuine absence: the requestId is in NEITHER map, both reads answered.
+ *   - `'unavailable'` — a read failed; nothing was learned about this requestId.
+ *
  * Exported so `client/test/daemon/*` can drive this exact production resolver against the deployed
  * contract's real two-map shape, matching the `buildResolveSubmissionBytes` precedent below.
  */
@@ -883,6 +895,7 @@ export function buildReadTodayDeliveryFacts(
   taskCoordinator: Address,
 ): ProjectorEnrichPorts['readTodayDeliveryFacts'] {
   return async (requestId) => {
+    let solutionLegFailed = false;
     try {
       const [taskId, attemptIndex, exists] = await publicClient.readContract({
         address: taskCoordinator,
@@ -901,7 +914,10 @@ export function buildReadTodayDeliveryFacts(
       }
     } catch {
       // A solution-leg read failure must not hide the verdict leg: the two maps are disjoint and
-      // a requestId absent from one is expected, not an error. Fall through and ask the other.
+      // a requestId absent from one is expected, not an error. Fall through and ask the other --
+      // but REMEMBER the failure, because a later verdict-leg `exists: false` then answers only
+      // half the question and must not be reported as the whole-chain absence.
+      solutionLegFailed = true;
     }
     try {
       const [taskId, attemptIndex, verdictIndex, exists] = await publicClient.readContract({
@@ -910,7 +926,7 @@ export function buildReadTodayDeliveryFacts(
         functionName: 'getVerdictRequestRef',
         args: [requestId],
       });
-      if (!exists) return undefined;
+      if (!exists) return solutionLegFailed ? 'unavailable' : undefined;
       const verdict = await publicClient.readContract({
         address: taskCoordinator,
         abi: GET_VERDICT_VIEW_ABI,
@@ -919,7 +935,7 @@ export function buildReadTodayDeliveryFacts(
       });
       return { taskId, attemptIndex, onChainKeccak: verdict.verdictCidDigest };
     } catch {
-      return undefined;
+      return 'unavailable';
     }
   };
 }
@@ -936,18 +952,25 @@ export function buildReadTodayDeliveryFacts(
  * off the coordinator restores the key for those classes without weakening anything: the
  * association resolver re-checks the digest against its stored Task bytes, and `resolveTaskProjection`
  * independently re-derives it from the fetched content, so a wrong anchor here can only ever fail
- * closed. Undefined on any failure — an unknown task, a reverting read, an all-zero record.
+ * closed.
+ *
+ * Three answers, for the reason spelled out on {@link buildReadTodayDeliveryFacts} (#2647):
+ * `getTask` is a plain mapping read that returns an all-zero record for an unknown task and cannot
+ * revert, so `undefined` is reserved for the anchor genuinely not being there (unknown task, or the
+ * all-zero record of a creation not yet included) and `'unavailable'` says the read failed. Neither
+ * is ever memoized — a task created, or an RPC recovered, after this read must resolve later.
  *
  * Exported so `client/test/daemon/*` can drive this exact production resolver.
  */
 export function buildReadOnChainTaskDigest(
   publicClient: PublicClient,
   taskCoordinator: Address,
-): (taskId: bigint) => Promise<`sha256:${string}` | undefined> {
-  const memo = new Map<string, `sha256:${string}` | undefined>();
+): (taskId: bigint) => Promise<`sha256:${string}` | 'unavailable' | undefined> {
+  const memo = new Map<string, `sha256:${string}`>();
   return async (taskId) => {
     const key = taskId.toString();
-    if (memo.has(key)) return memo.get(key);
+    const memoized = memo.get(key);
+    if (memoized !== undefined) return memoized;
     let digest: `sha256:${string}` | undefined;
     try {
       const task = await publicClient.readContract({
@@ -961,8 +984,7 @@ export function buildReadOnChainTaskDigest(
         digest = `sha256:${anchor.slice(2).toLowerCase()}`;
       }
     } catch {
-      // A miss is never memoized as a negative: a task created after this read must resolve later.
-      return undefined;
+      return 'unavailable';
     }
     if (digest !== undefined) memo.set(key, digest);
     return digest;
@@ -1424,7 +1446,7 @@ export function buildEngagementLedgerDispatchContextPort(
  */
 export function buildDerivedRequesterDispatchContextPort(input: {
   readonly resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'];
-  readonly readOnChainTaskDigest: (taskId: bigint) => Promise<`sha256:${string}` | undefined>;
+  readonly readOnChainTaskDigest: OnChainTaskDigestReader;
   readonly generation: ContractGeneration;
 }): ProjectorEnrichPorts['resolveDispatchContext'] {
   return async ({ chainId, taskCoordinator, taskId, attemptIndex }) => {
@@ -1432,7 +1454,9 @@ export function buildDerivedRequesterDispatchContextPort(input: {
     // attempt to name. `createProjectorEnrich` gives those an explicitly unengaged descriptor.
     if (attemptIndex === undefined) return undefined;
     const taskDigest = await input.readOnChainTaskDigest(taskId);
-    if (taskDigest === undefined) return undefined;
+    // No descriptor without an anchor, whichever way the read came back — the caller's own
+    // fallback is a drop either way, so #2647's failure/absence split changes nothing here.
+    if (taskDigest === undefined || taskDigest === 'unavailable') return undefined;
     const submissionBytes = await input.resolveSubmissionBytes({
       chainId,
       taskCoordinator,
@@ -1471,6 +1495,12 @@ export function buildDerivedRequesterDispatchContextPort(input: {
     };
   };
 }
+
+/**
+ * The canonical Task-anchor read, as {@link buildReadOnChainTaskDigest} produces it: the digest,
+ * `undefined` for a genuine absence, or `'unavailable'` when the read itself failed (#2647).
+ */
+export type OnChainTaskDigestReader = (taskId: bigint) => Promise<`sha256:${string}` | 'unavailable' | undefined>;
 
 /**
  * How many record-plane content addresses one requester-side delivery resolution will try before
@@ -1580,6 +1610,19 @@ export function buildRecordPlaneCounterpartyDeliveryResolver(input: {
   return async ({ chainId, coordinator, taskId, attemptIndex, requestId, taskDigest }) => {
     // Gate 1 — the on-chain request reference, and the anchor it points at.
     const facts = await input.readTodayDeliveryFacts(requestId);
+    if (facts === 'unavailable') {
+      // #2647's split reaches here too, but the announce leg has no role to protect and no drop to
+      // reclassify: `todayDeliveryMaterial` turns every miss into the same bounded refusal either
+      // way. What it CAN do is stop the operator debugging the wrong plane — the refusal message
+      // downstream says "no record-plane candidate re-derives to the anchor", which is not what
+      // happened when the anchor was never read.
+      input.logger?.warn(
+        `[record-plane-delivery] on-chain delivery facts for requestId ${requestId} unavailable `
+          + `(the request-reference read failed) -- refusing the counterparty announce leg for `
+          + `task ${taskId} attempt ${attemptIndex}; the record plane was never consulted`,
+      );
+      return undefined;
+    }
     if (
       facts === undefined
       || facts.taskId !== taskId
@@ -1652,29 +1695,44 @@ export function buildRecordPlaneCounterpartyDeliveryResolver(input: {
  *
  * FOUR GATES, split into a ROLE half and a CONTENT half — and the split is load-bearing:
  *
- * ROLE (gates 1–3, all of which must pass). Failing any of them returns `undefined`, meaning "this
- * operator is not the requester for this attempt": the reducer's mech-fact logic decides, exactly
- * as it did before #48.
- *   1. On-chain identity — `readTodayDeliveryFacts(requestId)` must resolve to exactly this
- *      `(taskId, attemptIndex)`, and its anchor must be non-zero. This binds the requestId the
- *      event carries to the attempt the record will be recorded against.
+ * ROLE (gates 3, the anchor read, and 2 — in that order, see below). Failing any of them returns
+ * `undefined`, meaning "this operator is not the requester for this attempt": the reducer's
+ * mech-fact logic decides, exactly as it did before #48.
+ *   3. Not the claimant — an engagement-ledger row naming this exact attempt means this operator
+ *      claimed it, i.e. it is the SOLVER and does subscribe to the delivering mech. The
+ *      mech-fact requirement is preserved untouched for that case; this resolver refuses. FIRST,
+ *      because it is free and because everything after it reads the chain.
  *   2. Requester role — the native association resolver must produce this operator's own signed
  *      Submission for `(chainId, coordinator, taskId, on-chain taskDigest)`. Positive evidence
  *      that this operator POSTED the task, not an inference from a missing seal. Purely local: the
  *      association and its records are on this operator's own disk, so this is a durable fact about
- *      role, never a network outcome.
- *   3. Not the claimant — an engagement-ledger row naming this exact attempt means this operator
- *      claimed it, i.e. it is the SOLVER and does subscribe to the delivering mech. The
- *      mech-fact requirement is preserved untouched for that case; this resolver refuses.
+ *      role, never a network outcome. THE ROLE SETTLES HERE.
  *
- * CONTENT (gate 4). Reached only once the role is settled as REQUESTER, so its failures are
- * reported as `{ role: 'requester', witness: undefined }`, never as the same `undefined` gates 1–3
- * return.
+ * CONTENT (gates 1 and 4). Reached only once the role is settled as REQUESTER, so their failures
+ * are reported as `{ role: 'requester', witness: undefined }`, never as the same `undefined` the
+ * role gates return.
+ *   1. On-chain identity — `readTodayDeliveryFacts(requestId)` must resolve to exactly this
+ *      `(taskId, attemptIndex)`, and its anchor must be non-zero. This binds the requestId the
+ *      event carries to the attempt the record will be recorded against.
  *   4. The fetched bytes must re-derive to the candidate digest (the transport already enforces
  *      this), hash to the on-chain keccak anchor, parse as a canonical `DeliveryRecord`, and name
  *      this exact Attempt URI and Task digest.
  *
- * Collapsing the two halves into one `undefined` was the #48 fix's own defect: a momentary
+ * GATE 1 IS DELIBERATELY LAST AMONG THE FOUR (#2647), and that ordering is the fix, not a
+ * micro-optimization. It is a chain read; the #48 fix ran it first, so a 503 on `getRequestRef`
+ * came back as the not-the-requester `undefined` before this operator had established it WAS the
+ * requester. `readOnChainTaskDigest` memoizes its successes for the process, so once an earlier
+ * event in the same replay warmed the anchor the Submission still resolved locally, the event
+ * still reached the reducer, and the reducer still emitted the permanent false rejection — the one
+ * path #2644's split did not cover. With the role settled first, the same 503 is a drop.
+ *
+ * The anchor read that gate 2 depends on runs BEFORE the role is known and can fail the same way.
+ * It cannot claim a role it has not established, so it answers `{ role: 'undetermined', witness:
+ * undefined }` — a drop for the same reason, and safe because gate 3 has already ruled this
+ * operator out as the solver by then. A genuine absence there (unknown task, all-zero record)
+ * stays the plain `undefined` miss it always was.
+ *
+ * Collapsing role and content into one `undefined` was the #48 fix's own defect: a momentary
  * serving-plane outage during gate 4 read as "not the requester", the reducer emitted
  * `rejected`/`invalid-reference`, and that terminal — permanent, and `contradictory` beside the
  * verdict's — wedged `adoptPostedTask` forever. A requester that cannot witness must not emit a
@@ -1686,7 +1744,7 @@ export function buildRecordPlaneCounterpartyDeliveryResolver(input: {
  */
 export function buildRecordPlaneSolutionDeliveryPort(input: {
   readonly resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'];
-  readonly readOnChainTaskDigest: (taskId: bigint) => Promise<`sha256:${string}` | undefined>;
+  readonly readOnChainTaskDigest: OnChainTaskDigestReader;
   readonly readTodayDeliveryFacts: ProjectorEnrichPorts['readTodayDeliveryFacts'];
   readonly fetchDeliveryBytes: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
   readonly listRecordPlaneDigests: (limit: number) => readonly `sha256:${string}`[];
@@ -1710,26 +1768,33 @@ export function buildRecordPlaneSolutionDeliveryPort(input: {
       attemptIndex,
     });
 
-    // ---- ROLE half. Every exit below is `undefined` = "not the requester". ----
+    // ---- ROLE half. Every exit below is `undefined` = "not the requester", EXCEPT the one read
+    // failure that leaves the role genuinely unknown. ----
 
     // Gate 3 — this operator claimed the attempt, so it IS the solver and does witness the mech.
     // First because it is the only gate that costs nothing: a solver settling its own delivery
-    // (the overwhelmingly common reason this resolver is reached at all) must not pay two chain
-    // reads per settlement to be told it is not the requester.
+    // (the overwhelmingly common reason this resolver is reached at all) must not pay a chain read
+    // per settlement to be told it is not the requester — and, since #2647, must never be exposed
+    // to a chain read whose failure would drop its own settlement.
     const row = input.engagementLedger.get(`${chainId}:${taskCoordinator}:${taskId.toString()}`);
     if (row?.attemptUri === attempt) return undefined;
 
-    // Gate 1 — the on-chain request reference, and the anchor it points at.
-    const facts = await input.readTodayDeliveryFacts(requestId);
-    if (
-      facts === undefined
-      || facts.taskId !== taskId
-      || facts.attemptIndex !== attemptIndex
-      || !/^0x[0-9a-fA-F]{64}$/.test(facts.onChainKeccak)
-      || /^0x0{64}$/i.test(facts.onChainKeccak)
-    ) return undefined;
-
+    // The anchor gate 2 keys its association on. Reached only for a non-claimant, so the role is
+    // still open: a failed read here is `undetermined`, not "not the requester" (#2647). A genuine
+    // absence stays the miss it always was — an unknown task is not this operator's to witness.
     const taskDigest = await input.readOnChainTaskDigest(taskId);
+    if (taskDigest === 'unavailable') {
+      input.logger?.warn(
+        `[record-plane-delivery] on-chain Task anchor for task ${taskId} unavailable -- role `
+          + `undetermined for attempt ${attempt}, dropping rather than reporting not-the-requester`,
+      );
+      return {
+        role: 'undetermined',
+        witness: undefined,
+        reason: `the on-chain Task anchor read for task ${taskId} is unavailable, so this `
+          + 'operator cannot establish whether it is the requester',
+      };
+    }
     if (taskDigest === undefined) return undefined;
 
     // Gate 2 — positive proof this operator posted the task. `generation` is pinned to `today`
@@ -1745,15 +1810,51 @@ export function buildRecordPlaneSolutionDeliveryPort(input: {
     if (submissionBytes === undefined) return undefined;
 
     // ---- The role is now settled: this operator IS the requester for this attempt. Every exit
-    // below therefore says so, whatever happens to the content. It never returns `undefined`
-    // again, because `undefined` means "not the requester" and would send the reducer down the
-    // mech-fact path this operator can never satisfy. ----
-    const unwitnessed = (reason: string): RecordPlaneDeliveryResolution => ({
+    // below therefore says so, whatever happens to the content or to the chain. It never returns
+    // `undefined` again, because `undefined` means "not the requester" and would send the reducer
+    // down the mech-fact path this operator can never satisfy. ----
+    const unwitnessed = (reason: string, onChainKeccak?: Hex): RecordPlaneDeliveryResolution => ({
       role: 'requester',
       witness: undefined,
-      onChainKeccak: facts.onChainKeccak,
+      ...(onChainKeccak === undefined ? {} : { onChainKeccak }),
       reason,
     });
+
+    // Gate 1 — the on-chain request reference, and the anchor it points at. LAST among the role/
+    // identity reads, because it is the chain read whose failure used to masquerade as
+    // not-the-requester (#2647). Three distinct answers, all of them drops now that the role is
+    // known, and none of them ever a rejection.
+    const facts = await input.readTodayDeliveryFacts(requestId);
+    if (facts === 'unavailable') {
+      // Transport. Says nothing about the attempt; the next replay asks again.
+      return unwitnessed(
+        `the on-chain delivery facts for requestId ${requestId} are unavailable (the `
+          + 'request-reference read failed)',
+      );
+    }
+    if (facts === undefined) {
+      // Absence, and a surprising one: gate 2 just proved this operator posted the task, yet the
+      // coordinator has no reference for the requestId its own event carried. A read racing ahead
+      // of a reorged-out block is the benign explanation and resolves itself on the next replay;
+      // a persistent one means the wrong coordinator address. Either way there is no witness to
+      // find and no basis to reject.
+      return unwitnessed(
+        `the coordinator holds no solution OR verdict request reference for requestId ${requestId}`,
+      );
+    }
+    if (
+      facts.taskId !== taskId
+      || facts.attemptIndex !== attemptIndex
+      || !/^0x[0-9a-fA-F]{64}$/.test(facts.onChainKeccak)
+      || /^0x0{64}$/i.test(facts.onChainKeccak)
+    ) {
+      // The reference resolved but does not bind to this attempt, or carries no anchor yet. A
+      // contradiction with the event, not a role signal.
+      return unwitnessed(
+        `requestId ${requestId} references task ${facts.taskId} attempt ${facts.attemptIndex} `
+          + `anchor ${facts.onChainKeccak}, not task ${taskId} attempt ${attemptIndex}`,
+      );
+    }
 
     // Gate 4 — the record plane, newest first.
     let scanned = 0;
@@ -1784,6 +1885,7 @@ export function buildRecordPlaneSolutionDeliveryPort(input: {
         return unwitnessed(
           `candidate ${digest} hashes to the anchor but names attempt ${candidate.attempt} / `
             + `task ${candidate.task}`,
+          facts.onChainKeccak,
         );
       }
       return {
@@ -1798,6 +1900,7 @@ export function buildRecordPlaneSolutionDeliveryPort(input: {
     return unwitnessed(
       `no record-plane candidate hashes to the anchor (scanned ${scanned} of at most ${limit}, `
         + `${unavailable} unfetchable)`,
+      facts.onChainKeccak,
     );
   };
 }
@@ -1902,7 +2005,7 @@ function buildProjector(input: {
       // reason `projector_observations` stayed empty through the whole of round 28 and the verdict
       // announcement never projected (defect #47). Read the same anchor back off the coordinator.
       const anchor = taskDigest ?? await readOnChainTaskDigest(taskId);
-      if (anchor === undefined) return undefined;
+      if (anchor === undefined || anchor === 'unavailable') return undefined;
       return resolveAssociation({ chainId, coordinator: taskCoordinator, taskId, taskDigest: anchor });
     }
     : buildResolveSubmissionBytes({
