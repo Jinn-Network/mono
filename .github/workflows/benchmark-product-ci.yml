@@ -4,10 +4,34 @@ on:
   pull_request:
     paths:
       - "packages/benchmark-product/**"
+      - "packages/benchmarking/aggregate/**"
+      - "packages/benchmarking/interop/**"
+      - "packages/benchmarking/local/**"
+      - "packages/benchmarking/records/**"
+      - "packages/benchmarking/run/**"
+      - "packages/environments/record/**"
+      - "packages/evidence/attestation-issuer/**"
+      - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/protocol/**"
+      - "packages/evidence/repository/**"
+      - "packages/task-supply/admission/**"
+      - "packages/task-execution/backend/**"
+      - "packages/task-execution/backend-local/assembly/**"
+      - "packages/task-execution/backend-local/launchers/**"
+      - "packages/task-execution/backend-local/supervisor/**"
+      - "packages/task-execution/backend-local/workspace/**"
+      - "packages/task-execution/evaluation-harness/**"
+      - "packages/task-execution/evaluator-adapters/**"
+      - "packages/task-execution/oci-grader/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
+      - "packages/trust/core/**"
       - ".github/scripts/benchmark-product-package-inventory.test.mjs"
       - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
       - ".github/scripts/benchmark-product-packed-types.test.mjs"
       - ".github/workflows/benchmark-product-ci.yml"
+      - "spec/2026-08-13-colophon-self-serve.md"
       - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
       - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
       - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
@@ -17,10 +41,34 @@ on:
     branches: [next]
     paths:
       - "packages/benchmark-product/**"
+      - "packages/benchmarking/aggregate/**"
+      - "packages/benchmarking/interop/**"
+      - "packages/benchmarking/local/**"
+      - "packages/benchmarking/records/**"
+      - "packages/benchmarking/run/**"
+      - "packages/environments/record/**"
+      - "packages/evidence/attestation-issuer/**"
+      - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/protocol/**"
+      - "packages/evidence/repository/**"
+      - "packages/task-supply/admission/**"
+      - "packages/task-execution/backend/**"
+      - "packages/task-execution/backend-local/assembly/**"
+      - "packages/task-execution/backend-local/launchers/**"
+      - "packages/task-execution/backend-local/supervisor/**"
+      - "packages/task-execution/backend-local/workspace/**"
+      - "packages/task-execution/evaluation-harness/**"
+      - "packages/task-execution/evaluator-adapters/**"
+      - "packages/task-execution/oci-grader/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
+      - "packages/trust/core/**"
       - ".github/scripts/benchmark-product-package-inventory.test.mjs"
       - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
       - ".github/scripts/benchmark-product-packed-types.test.mjs"
       - ".github/workflows/benchmark-product-ci.yml"
+      - "spec/2026-08-13-colophon-self-serve.md"
       - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
       - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
       - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
@@ -101,7 +149,17 @@ jobs:
           (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn vitest run src/backend.shutdown.test.ts && yarn build)
           (cd packages/benchmarking/run && yarn install --immutable && yarn build)
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
-      - name: Verify Benchmark Product core
+      # The public family is ordered by its public dependencies: verify is standalone,
+      # core consumes verify, and cli consumes both. The private web is CLI build input,
+      # so its dependency tree must be installed after core and before the CLI packs it.
+      - name: Verify public bundle verifier
+        working-directory: packages/benchmark-product/verify
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn pack:smoke
+      - name: Verify Colophon core
         working-directory: packages/benchmark-product/core
         env:
           JINN_INSPECT_PYTHON: ${{ steps.inspect-python.outputs.python-path }}
@@ -112,6 +170,18 @@ jobs:
           yarn build
           yarn check:parity
           yarn pack:smoke
+      - name: Prepare private Colophon web build input
+        working-directory: packages/benchmark-product/web
+        run: yarn install --immutable
+      - name: Verify Colophon CLI
+        working-directory: packages/benchmark-product/cli
+        env:
+          COLOPHON_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
       - name: Verify the real OCI Inspect and fake-broker boundaries
         working-directory: packages/benchmark-product/core
         run: |
@@ -133,7 +203,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # BP-31: web is a server-side client of core's public built entry. The product
+  # Web is a server-side client of core's public built entry. The product
   # job builds the complete portal graph in dependency order; this job restores
   # those exact distributions before installing or compiling the web package.
   web:
@@ -161,7 +231,7 @@ jobs:
         with:
           name: benchmark-product-runtime-dists
           path: packages
-      - name: Verify Benchmark Product web
+      - name: Verify private Colophon web
         run: |
           yarn install --immutable
           # Vite intentionally resolves portal packages to their real source paths. Give every
@@ -220,5 +290,6 @@ jobs:
         with:
           name: benchmark-product-runtime-dists
           path: packages
-      - name: Compile the packed public entrypoint consumer
+      # This is a local-registry packaging proof, not the future public-registry release proof.
+      - name: Cold-install and compile public Colophon packages through a local registry
         run: node .github/scripts/benchmark-product-packed-types.test.mjs

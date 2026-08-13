@@ -3,14 +3,17 @@ import "server-only";
 import {
   armList,
   authorityShow,
+  doctorAgent,
   getDraft,
   inspectDraft,
+  listAgentProfiles,
   listDrafts,
   runStatus,
   runResults,
   type OperationResult,
+  type AgentRuntimeReadinessCode,
   type RunStatusResult,
-} from "@jinn-network/benchmark-product-core";
+} from "@colophon-claims/core";
 import { projectProductErrorForGui } from "./gui-error";
 import {
   createProductOperationContext,
@@ -25,6 +28,59 @@ function projectOutcomeForGui<T>(outcome: OperationResult<T>): OperationResult<T
   return outcome.ok
     ? outcome
     : { ...outcome, error: projectProductErrorForGui(outcome.error) };
+}
+
+/**
+ * Deliberately browser-safe projection of the machine-local agent store.  In particular, do
+ * not pass a profile through here: a profile contains the executable locator, while its
+ * companion grant contains protected-file information.  The browser needs only a friendly
+ * choice and a local readiness signal.
+ */
+export interface AgentProfileForGui {
+  readonly agentId: string;
+  readonly adapter: "claude-code" | "codex";
+  readonly model: string;
+  readonly effort: string;
+  readonly readiness: "ready" | "needs-credential" | "needs-attention";
+}
+
+export interface AgentArmReadinessForGui {
+  readonly armId: string;
+  readonly adapter: "claude-code" | "codex";
+  readonly ready: boolean;
+  readonly code: AgentRuntimeReadinessCode;
+  readonly detail: string;
+  readonly remediation?: string;
+}
+
+export function loadAgentProfilesForGui(agentDataDir: string): {
+  readonly status: "available" | "unavailable";
+  readonly profiles: readonly AgentProfileForGui[];
+} {
+  try {
+    return {
+      status: "available",
+      profiles: listAgentProfiles(agentDataDir).map((profile) => {
+        const finding = doctorAgent(agentDataDir, profile);
+        return {
+          agentId: profile.agentId,
+          adapter: profile.adapter,
+          model: profile.model,
+          effort: profile.effort,
+          readiness: finding.ready
+            ? "ready"
+            : finding.executable !== "ready"
+              ? "needs-attention"
+              : finding.credential === "missing"
+                ? "needs-credential"
+                : "needs-attention",
+        };
+      }),
+    };
+  } catch {
+    // The exact local failure can include a filesystem path. Keep it server-side.
+    return { status: "unavailable", profiles: [] };
+  }
 }
 
 /** Durable driver diagnostics can originate in launchers, subprocesses, and filesystem code.
@@ -65,12 +121,33 @@ export function loadWorkspaceView() {
 
 export function loadDraftView(draftId: string) {
   try {
-    const context = createProductOperationContext();
+    const configuration = readProductServerConfiguration();
+    const context = createProductOperationContext(configuration);
+    const draft = projectOutcomeForGui(getDraft(context, { draftId }));
+    const agentFindings = draft.ok
+      ? context.runtimeHost?.assessAgentReadiness(
+          draft.result.draft.spec.arms.map((arm) => ({ armId: arm.armId, pinning: arm.pinning })),
+        ) ?? []
+      : [];
+    const agentReadiness = {
+      required: agentFindings.length > 0,
+      ready: agentFindings.every((finding) => finding.ready),
+      findings: agentFindings.map((finding): AgentArmReadinessForGui => ({
+        armId: finding.armId,
+        adapter: finding.adapter,
+        ready: finding.ready,
+        code: finding.code,
+        detail: finding.detail,
+        ...(finding.remediation === undefined ? {} : { remediation: finding.remediation }),
+      })),
+    };
     return {
       ok: true as const,
-      draft: projectOutcomeForGui(getDraft(context, { draftId })),
+      draft,
       inspection: projectOutcomeForGui(inspectDraft(context, { draftId })),
       arms: projectOutcomeForGui(armList(context, { draftId })),
+      agentProfiles: loadAgentProfilesForGui(configuration.agentDataDir),
+      agentReadiness,
     };
   } catch {
     return { ok: false as const, detail: safeFailureDetail() };

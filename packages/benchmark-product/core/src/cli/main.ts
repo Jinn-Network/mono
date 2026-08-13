@@ -30,6 +30,7 @@
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
+import { doctorAgent, listAgentProfiles, profileArmPinning, profileMatchesArmPinning, readAgentProfile, requireQualifiedHarnessLogin, storeAgentProfile, storeApiKeyCredential } from "../agent/index.js";
 import { refuse, toErrorEnvelope, type ProductErrorCode, type ProductErrorEnvelope } from "../errors.js";
 import {
   armAdd,
@@ -71,6 +72,7 @@ import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
+import { readDraftDocument } from "../operations/drafts.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
@@ -97,15 +99,23 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --arm <armId> [--pinning <json>] [--notes <text>]
   arm remove       --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   arm list         --workspace <dir> --principal <id> --draft <draftId>
+  agent add        --file <colophon-agent.json>
+  agent credentials --agent <agentId> --api-key-file <path>
+  agent login      --agent <agentId>
+  doctor           --workspace <dir> --principal <id> --draft <draftId>
   authority grant  --workspace <dir> --principal <id> --grantee <id>
                    [--role sponsor|delegated-agent] [--operations <csv>]
   authority revoke --workspace <dir> --principal <id> --grantee <id> [--operations <csv>]
   authority show   --workspace <dir> --principal <id>
   preview          --workspace <dir> --principal <id> --draft <draftId> [--items <n>]
   quote            --workspace <dir> --principal <id> --draft <draftId>
+                   [--ack-provider-network-costs]
   lock             --workspace <dir> --principal <id> --draft <draftId>
+                   [--ack-provider-network-costs]
   launch           --workspace <dir> --principal <id> --draft <draftId>
+                   [--ack-provider-network-costs]
   resume           --workspace <dir> --principal <id> --draft <draftId>
+                   [--ack-provider-network-costs]
   cancel           --workspace <dir> --principal <id> --draft <draftId>
   status           --workspace <dir> --principal <id> --draft <draftId>
   collect          --workspace <dir> --principal <id> --draft <draftId>
@@ -134,18 +144,23 @@ const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
 const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
-const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
+const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "agent", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const ARM_LIST_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const AGENT_ADD_FLAGS = ["file", "json"] as const;
+const AGENT_CREDENTIALS_FLAGS = ["agent", "api-key-file", "json"] as const;
+const AGENT_LOGIN_FLAGS = ["agent", "json"] as const;
+const DOCTOR_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const AUTHORITY_GRANT_FLAGS = ["workspace", "principal", "json", "grantee", "role", "operations"] as const;
 const AUTHORITY_REVOKE_FLAGS = ["workspace", "principal", "json", "grantee", "operations"] as const;
 const AUTHORITY_SHOW_FLAGS = ["workspace", "principal", "json"] as const;
 const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as const;
-const QUOTE_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const LOCK_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const RESUME_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PROVIDER_ACK_FLAG = "ack-provider-network-costs" as const;
+const QUOTE_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
+const LOCK_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
+const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
+const RESUME_FLAGS = ["workspace", "principal", "json", "draft", PROVIDER_ACK_FLAG] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const COLLECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -208,6 +223,56 @@ function parsePinningFlag(raw: string): unknown {
   } catch {
     refuse("invalid-invocation", "--pinning", "--pinning must be valid JSON");
   }
+}
+
+function agentDataDir(context: CliContext): string {
+  if (context.agentDataDir === undefined) {
+    refuse("execution", "agent-data", "Colophon OS user-data directory is unavailable; no agent profile or credential was read");
+  }
+  return context.agentDataDir;
+}
+
+const PROVIDER_NETWORK_COST_DISCLOSURE = "This run uses your existing Claude Code or Codex credential and contacts its provider. Provider calls may create charges. Colophon does not create the account, hold funds, or pay those charges. The published bundle identifies the harness and disclosed configuration, but does not contain your credentials.";
+
+function draftUsesProviderAgent(workspaceDir: string, draftId: string): boolean {
+  const draft = readDraftDocument(workspaceDir, draftId);
+  return draft.spec.arms.some((arm) => {
+    const harness = arm.pinning.harness;
+    const id = typeof harness === "string"
+      ? harness
+      : typeof harness === "object" && harness !== null
+        ? (harness as { readonly id?: unknown }).id
+        : undefined;
+    return id === "claude-code" || id === "codex";
+  });
+}
+
+/** Returns true only for a provider-backed draft whose caller explicitly acknowledged the boundary. */
+function requireProviderNetworkCostAcknowledgement(
+  args: ParsedArgs,
+  context: CliContext,
+  workspaceDir: string,
+  draftId: string,
+  jsonMode: boolean,
+): boolean {
+  if (!draftUsesProviderAgent(workspaceDir, draftId)) return false;
+  if (!present(args, PROVIDER_ACK_FLAG)) {
+    refuse(
+      "invalid-invocation",
+      `--${PROVIDER_ACK_FLAG}`,
+      `${PROVIDER_NETWORK_COST_DISCLOSURE} Review this boundary, then repeat the command with --${PROVIDER_ACK_FLAG}.`,
+    );
+  }
+  if (!jsonMode) context.progress?.(PROVIDER_NETWORK_COST_DISCLOSURE);
+  return true;
+}
+
+function withProviderAcknowledgement<T>(
+  outcome: OperationResult<T>,
+  acknowledged: boolean,
+): OperationResult<T & { readonly providerNetworkCostAcknowledged?: true }> {
+  if (!acknowledged || !outcome.ok) return outcome as OperationResult<T & { readonly providerNetworkCostAcknowledged?: true }>;
+  return { ok: true, result: { ...outcome.result, providerNetworkCostAcknowledged: true } };
 }
 
 /** Refuses `"invalid-invocation"` naming `--role` unless it is one of the two valid role names. */
@@ -359,7 +424,18 @@ function handleArmAdd(args: ParsedArgs, context: CliContext, jsonMode: boolean):
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
   const armId = required(args, "arm");
-  const pinning = parsePinningFlag(required(args, "pinning"));
+  const agentId = optional(args, "agent");
+  const pinningRaw = optional(args, "pinning");
+  if ((agentId === undefined) === (pinningRaw === undefined)) {
+    refuse("invalid-invocation", "arm add", "supply exactly one of --pinning or --agent");
+  }
+  const pinning = agentId === undefined
+    ? parsePinningFlag(pinningRaw!)
+    : (() => {
+      const profile = readAgentProfile(agentDataDir(context), agentId);
+      if (profile === undefined) refuse("not-found", "agent", `agent profile ${agentId} does not exist`);
+      return profileArmPinning(profile);
+    })();
   const notes = optional(args, "notes");
 
   const result = armAdd(opContext, { draftId, armId, pinning, ...(notes !== undefined ? { notes } : {}) });
@@ -367,6 +443,53 @@ function handleArmAdd(args: ParsedArgs, context: CliContext, jsonMode: boolean):
     const lines = [`added arm ${armId} to draft ${draftId}`, ...armWarningLines(value.warnings)];
     return `${lines.join("\n")}\n`;
   });
+}
+
+function handleAgentAdd(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, AGENT_ADD_FLAGS);
+  const profile = storeAgentProfile(agentDataDir(context), readJsonFile(pathFrom(context.cwd, required(args, "file"))));
+  return renderResult({ ok: true, result: profile }, jsonMode, (value) => `stored ${value.adapter} agent profile ${value.agentId}; no credentials were stored\n`);
+}
+
+function handleAgentCredentials(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, AGENT_CREDENTIALS_FLAGS);
+  const dataDir = agentDataDir(context);
+  const agentId = required(args, "agent");
+  if (readAgentProfile(dataDir, agentId) === undefined) refuse("not-found", "agent", `agent profile ${agentId} does not exist`);
+  const grant = storeApiKeyCredential(dataDir, agentId, pathFrom(context.cwd, required(args, "api-key-file")));
+  return renderResult({ ok: true, result: grant }, jsonMode, (value) => `stored protected ${value.kind} grant for ${value.agentId}; its value is never recorded in a workspace or launch plan\n`);
+}
+
+function handleAgentLogin(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, AGENT_LOGIN_FLAGS);
+  const dataDir = agentDataDir(context);
+  const agentId = required(args, "agent");
+  const profile = readAgentProfile(dataDir, agentId);
+  if (profile === undefined) refuse("not-found", "agent", `agent profile ${agentId} does not exist`);
+  // This is intentionally a fail-closed qualification seam, not a fake successful login.
+  requireQualifiedHarnessLogin(profile);
+}
+
+function handleDoctor(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, DOCTOR_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const draft = getDraft(opContext, { draftId });
+  if (!draft.ok) return renderResult(draft, jsonMode, () => "");
+  const dataDir = agentDataDir(context);
+  const configured = listAgentProfiles(dataDir);
+  const findings = draft.result.draft.spec.arms.flatMap((arm) => {
+    const matches = configured.filter((profile) => profileMatchesArmPinning(profile, arm.pinning));
+    if (matches.length === 0) return [];
+    if (matches.length > 1) {
+      return [{ agentId: arm.armId, adapter: "ambiguous", ready: false, executable: "invalid" as const, credential: "missing" as const, detail: `arm ${arm.armId} matches multiple local agent profiles; configure one profile per harness identity` }];
+    }
+    return [doctorAgent(dataDir, matches[0]!)];
+  });
+  if (findings.length === 0) refuse("validation", "spec.arms", "doctor found no locally configured Claude Code or Codex arm on this draft");
+  const ok = findings.every((finding) => finding.ready);
+  const result = ok ? { ok: true as const, result: { findings } } : { ok: false as const, error: { code: "venue-unavailable" as const, detail: findings.find((finding) => !finding.ready)!.detail } };
+  return renderResult(result, jsonMode, (value) => `${value.findings.map((finding) => `${finding.agentId}\t${finding.ready ? "ready" : "not ready"}\t${finding.detail}`).join("\n")}\n`);
 }
 
 function handleArmUpdate(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -523,8 +646,11 @@ async function handleQuote(args: ParsedArgs, context: CliContext, jsonMode: bool
   assertKnownFlags(args, QUOTE_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
+  const acknowledged = requireProviderNetworkCostAcknowledgement(
+    args, context, opContext.workspaceDir, draftId, jsonMode,
+  );
 
-  const result = await runQuote(opContext, { draftId });
+  const result = withProviderAcknowledgement(await runQuote(opContext, { draftId }), acknowledged);
   return renderResult(result, jsonMode, (value) => {
     const lines = [`quoted draft ${value.draft.draftId}: ${value.quote.expectedCellCount} cells, ok=${value.quote.ok}`];
     for (const error of value.quote.errors) {
@@ -539,8 +665,11 @@ function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): C
   assertKnownFlags(args, LOCK_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
+  const acknowledged = requireProviderNetworkCostAcknowledgement(
+    args, context, opContext.workspaceDir, draftId, jsonMode,
+  );
 
-  const result = runLock(opContext, { draftId });
+  const result = withProviderAcknowledgement(runLock(opContext, { draftId }), acknowledged);
   return renderResult(
     result,
     jsonMode,
@@ -558,8 +687,14 @@ async function handleLaunch(args: ParsedArgs, context: CliContext, jsonMode: boo
   assertKnownFlags(args, LAUNCH_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
+  const acknowledged = requireProviderNetworkCostAcknowledgement(
+    args, context, opContext.workspaceDir, draftId, jsonMode,
+  );
 
-  const result = await runLaunch(opContext, { draftId }, launchDeps(context, jsonMode));
+  const result = withProviderAcknowledgement(
+    await runLaunch(opContext, { draftId }, launchDeps(context, jsonMode)),
+    acknowledged,
+  );
   return renderResult(result, jsonMode, (value) => `launched draft ${value.draft.draftId}: run complete\n`);
 }
 
@@ -567,8 +702,14 @@ async function handleResume(args: ParsedArgs, context: CliContext, jsonMode: boo
   assertKnownFlags(args, RESUME_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
+  const acknowledged = requireProviderNetworkCostAcknowledgement(
+    args, context, opContext.workspaceDir, draftId, jsonMode,
+  );
 
-  const result = await runResume(opContext, { draftId }, launchDeps(context, jsonMode));
+  const result = withProviderAcknowledgement(
+    await runResume(opContext, { draftId }, launchDeps(context, jsonMode)),
+    acknowledged,
+  );
   return renderResult(
     result,
     jsonMode,
@@ -719,6 +860,10 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],
   ["arm list", handleArmList],
+  ["agent add", handleAgentAdd],
+  ["agent credentials", handleAgentCredentials],
+  ["agent login", handleAgentLogin],
+  ["doctor", handleDoctor],
   ["authority grant", handleAuthorityGrant],
   ["authority revoke", handleAuthorityRevoke],
   ["authority show", handleAuthorityShow],

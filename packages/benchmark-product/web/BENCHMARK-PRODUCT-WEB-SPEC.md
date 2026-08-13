@@ -9,7 +9,7 @@
 | **Status** | draft |
 | **Depends on** | [`../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md`](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md) (the product design spec — domain model, surfaces, presets, venue honesty, branding isolation; this document formalizes none of its decisions and reopens none of them) |
 
-This is the app spec for `@jinn-network/benchmark-product-web`
+This is the app spec for `@colophon-claims/web`
 (`packages/benchmark-product/web`), required by the repo frontend rules
 (root `CLAUDE.md` §Frontends): every frontend ships a spec, and every
 component in it is described on four axes — **State**, **State messages**,
@@ -21,7 +21,7 @@ it cites them and adds only web-surface presentation detail.
 
 The web app is the product's **human surface** — design spec §5.3: a
 Next.js App Router + shadcn/ui application that imports the operations
-library exported by `@jinn-network/benchmark-product-core` **server-side, in
+library exported by `@colophon-claims/core` **server-side, in
 process**.
 
 **Central commitment (normative):** every action this GUI exposes is a
@@ -59,7 +59,7 @@ Design spec §5.3 names the web app "milestone M3." BP-30 shipped the
   existing `benchmark-product-ci` gate.
 
 BP-31 now realizes the setup half of M3. The web app has one production
-Jinn dependency edge, `web` → `@jinn-network/benchmark-product-core`, and
+product dependency edge, `web` → `@colophon-claims/core`, and
 imports only that package's public entry from server-only modules. Its
 fail-closed product context requires an explicit absolute workspace path
 and principal. No private-key, credential, or ambient environment material

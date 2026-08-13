@@ -133,13 +133,14 @@ async function acquireFreeVenue(
   workspaceDir: string,
   now: () => string,
   evaluatorCount: number,
+  agentProfileRequirements: readonly Readonly<Record<string, unknown>>[],
 ): Promise<
   | { readonly ok: true; readonly venue: LocalVenue }
   | { readonly ok: false; readonly reason: "contention" | "unavailable"; readonly detail: string }
 > {
   let venue: LocalVenue | undefined;
   try {
-    venue = createVenue({ workspaceDir, now, evaluatorCount });
+    venue = createVenue({ workspaceDir, now, evaluatorCount, agentProfileRequirements });
     const preflight = await venue.backend.preflight({});
     if (!preflight.ready) {
       const detail = preflight.detail ?? preflight.error?.message ?? "local venue is not ready";
@@ -270,7 +271,13 @@ export function runCancel(
       // From the SEALED Run record, never the draft — same reasoning as runLaunch/runResume.
       const minVerdicts = runRecord.policy.evaluation?.minVerdicts ?? 1;
 
-      const acquired = await acquireFreeVenue(createVenue, clockedContext.workspaceDir, context.clock, minVerdicts);
+      const acquired = await acquireFreeVenue(
+        createVenue,
+        clockedContext.workspaceDir,
+        context.clock,
+        minVerdicts,
+        runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
+      );
       if (!acquired.ok) {
         if (acquired.reason === "contention") {
           return { phase: "requested", reason: "venue-contention", detail: acquired.detail };

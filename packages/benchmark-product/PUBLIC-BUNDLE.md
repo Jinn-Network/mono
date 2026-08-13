@@ -60,7 +60,13 @@ version 1's closed schema in place.
 
 ## Portable verification
 
-Use the shipped built CLI, without the source workspace:
+Use the smaller reader package, without the product or source workspace:
+
+```bash
+npx @colophon-claims/verify@1 <bundle-dir>
+```
+
+The full installed product exposes the same implementation through:
 
 ```bash
 colophon bundle verify --bundle <bundle-dir> --json

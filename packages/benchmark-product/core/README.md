@@ -1,12 +1,13 @@
-# Colophon core — `@jinn-network/benchmark-product-core`
+# Colophon core — `@colophon-claims/core`
 
-The private Tier 4 core package is the single trusted product boundary. It owns
+The public Tier 4 core package is the single trusted product boundary. It owns
 workspace and draft state, lifecycle transitions, authority checks, the audit
-journal, real local-venue composition, Report and claim production, local
-public-bundle emission, and portable verification. The CLI and private web app
+journal, real local-venue composition, Report and claim production, and local
+public-bundle emission. Portable verification is owned by the smaller
+`@colophon-claims/verify` package and re-exported here. The CLI and private web app
 are clients of these public operations; neither is a second implementation.
-The preferred CLI command is `colophon`; `benchmark-product` remains an
-internal compatibility alias while packages keep their established names.
+The user-facing `colophon` executable is owned by `@colophon-claims/cli`; core
+retains the advanced command library used by that endpoint.
 
 Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
 Start at the [product overview](../README.md); see the
@@ -14,7 +15,7 @@ Start at the [product overview](../README.md); see the
 [threat model](../SECURITY.md), and
 [Demo-1 E4 adapter runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
 
-This package is `private: true`, unpublished, and requires Node 22. The complete
+This package is public-shaped, not yet published, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
 dependency order is maintained in
 [Benchmark Product CI](../../../.github/workflows/benchmark-product-ci.yml);

@@ -40,17 +40,20 @@ const privateResponseHeaders = [
  * @type {import('next').NextConfig}
  */
 const config = {
+  // The private source application is copied into the CLI's published tarball
+  // as a production-only standalone runtime. `web` itself remains private.
+  output: "standalone",
   reactStrictMode: true,
   async headers() {
     return [{ source: "/:path*", headers: privateResponseHeaders }];
   },
-  serverExternalPackages: ["@jinn-network/benchmark-product-core"],
+  serverExternalPackages: ["@colophon-claims/core"],
   outputFileTracingRoot: resolve(import.meta.dirname, "../../.."),
   turbopack: { root: resolve(import.meta.dirname, "../../..") },
   webpack(webpackConfig, { isServer }) {
     if (isServer) {
       webpackConfig.externals.push(({ request }, callback) => {
-        if (request === "@jinn-network/benchmark-product-core") {
+        if (request === "@colophon-claims/core") {
           callback(null, `commonjs ${request}`);
           return;
         }

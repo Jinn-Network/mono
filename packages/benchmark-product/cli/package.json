@@ -1,0 +1,80 @@
+{
+  "name": "@colophon-claims/cli",
+  "version": "1.0.0",
+  "description": "Installable Colophon command: run, inspect, and publish locally verifiable benchmark bundles.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/benchmark-product/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "colophon": "./dist/bin.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run src",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@colophon-claims/core": "1.0.0",
+    "@colophon-claims/verify": "1.0.0",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "resolutions": {
+    "@noble/hashes": "2.2.0",
+    "@colophon-claims/core": "portal:../core",
+    "@colophon-claims/verify": "portal:../verify",
+    "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
+    "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
+    "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
+    "@jinn-network/benchmarking-local": "portal:../../benchmarking/local",
+    "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
+    "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
+    "@jinn-network/environment-record": "portal:../../environments/record",
+    "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/evidence-repository": "portal:../../evidence/repository",
+    "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
+    "@jinn-network/task-admission": "portal:../../task-supply/admission",
+    "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
+    "@jinn-network/task-execution-backend-local": "portal:../../task-execution/backend-local/assembly",
+    "@jinn-network/task-execution-evaluation-harness": "portal:../../task-execution/evaluation-harness",
+    "@jinn-network/task-execution-evaluator-adapters": "portal:../../task-execution/evaluator-adapters",
+    "@jinn-network/task-execution-launchers": "portal:../../task-execution/backend-local/launchers",
+    "@jinn-network/task-execution-oci-grader": "portal:../../task-execution/oci-grader",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
+    "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
+    "@jinn-network/trust-core": "portal:../../trust/core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

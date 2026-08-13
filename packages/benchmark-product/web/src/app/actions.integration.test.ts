@@ -1,9 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { GuiActionState } from "@/lib/action-state";
 import {
+  AGENT_DATA_ENV,
   ENABLE_TEST_CONTROLS_ENV,
   PRINCIPAL_ENV,
   readRunDriverTestingDeps,
@@ -13,9 +15,11 @@ import {
   WORKSPACE_ENV,
 } from "@/lib/server/product-context";
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
+import { agentProfileArmAddAction } from "@/app/actions";
 import { executeOperation } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
-import { loadDraftView, loadResultsView, loadWorkspaceView } from "@/lib/server/view-models";
+import { loadAgentProfilesForGui, loadDraftView, loadResultsView, loadWorkspaceView } from "@/lib/server/view-models";
+import { storeAgentProfile } from "@colophon-claims/core";
 
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -28,6 +32,7 @@ vi.mock("next/server", () => ({
 
 const IDLE: GuiActionState = { status: "idle" };
 const workspaces: string[] = [];
+const agentDataDir = join(tmpdir(), "colophon-web-agent-data-test");
 
 function form(fields: Readonly<Record<string, string>> = {}): FormData {
   const data = new FormData();
@@ -56,12 +61,18 @@ async function invoke(action: keyof typeof GUI_SERVER_ACTIONS, fields: Readonly<
 afterEach(async () => {
   await Promise.allSettled(afterState.tasks.splice(0));
   delete process.env[WORKSPACE_ENV];
+  delete process.env[AGENT_DATA_ENV];
   delete process.env[PRINCIPAL_ENV];
   delete process.env[ENABLE_TEST_CONTROLS_ENV];
   delete process.env[TEST_SOLVE_DELAY_MS_ENV];
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
+  rmSync(agentDataDir, { recursive: true, force: true });
   revalidatePathMock.mockClear();
 }, 120_000);
+
+beforeEach(() => {
+  process.env[AGENT_DATA_ENV] = agentDataDir;
+});
 
 async function prepareLockedDraft(draftId: string): Promise<void> {
   expect(await invoke("draft.create", { draftId, name: `Run ${draftId}` })).toMatchObject({ status: "success" });
@@ -125,16 +136,26 @@ describe.sequential("server action layer against a real workspace", () => {
     expect(JSON.stringify(view)).not.toContain(PRINCIPAL_ENV);
   });
 
-  test("configuration exposes only workspace and principal, never ambient secrets", () => {
+  test("configuration retains agent data server-side and never exposes ambient secrets", () => {
     const workspace = mkdtempSync(join(tmpdir(), "bp31-context-"));
     workspaces.push(workspace);
     const configuration = readProductServerConfiguration({
       [WORKSPACE_ENV]: workspace,
+      [AGENT_DATA_ENV]: agentDataDir,
       [PRINCIPAL_ENV]: "sponsor-1",
       PRIVATE_SIGNING_KEY: "-----BEGIN PRIVATE KEY-----",
     });
-    expect(configuration).toEqual({ workspaceDir: workspace, principal: "sponsor-1" });
+    expect(configuration).toEqual({ workspaceDir: workspace, agentDataDir, principal: "sponsor-1" });
     expect(JSON.stringify(configuration)).not.toContain("PRIVATE KEY");
+  });
+
+  test("refuses a missing or relative agent-data path", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "bp-agent-data-"));
+    workspaces.push(workspace);
+    expect(() => readProductServerConfiguration({ [WORKSPACE_ENV]: workspace, [PRINCIPAL_ENV]: "sponsor-1" }))
+      .toThrow(AGENT_DATA_ENV);
+    expect(() => readProductServerConfiguration({ [WORKSPACE_ENV]: workspace, [AGENT_DATA_ENV]: "relative", [PRINCIPAL_ENV]: "sponsor-1" }))
+      .toThrow(`${AGENT_DATA_ENV} must be absolute`);
   });
 
   test("OpenAI readiness exposes only a configured bit", () => {
@@ -142,6 +163,55 @@ describe.sequential("server action layer against a real workspace", () => {
     expect(openAIConnectionReadiness({ BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE: "/private/path/key" })).toBe("configured");
     expect(JSON.stringify(openAIConnectionReadiness({ BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE: "/private/path/key" })))
       .not.toContain("/private/path/key");
+  });
+
+  test("guided agent Arm setup projects local readiness safely and seals only credential-free pinning", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "bp-guided-agent-"));
+    const privateSentinel = "PRIVATE_AGENT_PATH_SENTINEL";
+    const executable = join(workspace, `private-${privateSentinel}-codex`);
+    workspaces.push(workspace);
+    writeFileSync(executable, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'codex-cli 0.1.0'\nelse\n  echo codex\nfi\n", { mode: 0o700 });
+    chmodSync(executable, 0o700);
+    storeAgentProfile(agentDataDir, {
+      format: "colophon-agent/1",
+      agentId: "codex-main",
+      adapter: "codex",
+      executable: {
+        path: executable,
+        sha256: createHash("sha256").update(readFileSync(executable)).digest("hex"),
+        version: "0.1.0",
+      },
+      model: "gpt-5.6",
+      effort: "high",
+      network: "provider-required",
+    });
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    expect(await invoke("workspace.init")).toMatchObject({ status: "success" });
+    expect(await invoke("draft.create", { draftId: "guided-agent", name: "Guided agent" })).toMatchObject({ status: "success" });
+
+    const profiles = loadAgentProfilesForGui(agentDataDir);
+    expect(profiles).toEqual({
+      status: "available",
+      profiles: [{ agentId: "codex-main", adapter: "codex", model: "gpt-5.6", effort: "high", readiness: "needs-credential" }],
+    });
+    expect(JSON.stringify(profiles)).not.toContain(executable);
+    expect(JSON.stringify(profiles)).not.toContain(privateSentinel);
+
+    const action = await agentProfileArmAddAction(IDLE, form({
+      draftId: "guided-agent",
+      agentId: "codex-main",
+      armId: "codex-high",
+    }));
+    expect(action).toMatchObject({ status: "success" });
+    expect(JSON.stringify(action)).not.toContain(executable);
+    const arms = await invoke("arm.list", { draftId: "guided-agent" });
+    expect(arms).toMatchObject({
+      status: "success",
+      result: { arms: [{ armId: "codex-high", pinning: { harness: { id: "codex", version: "0.1.0" }, model: { id: "gpt-5.6" }, effort: "high" } }] },
+    });
+    expect(JSON.stringify(arms)).not.toContain(executable);
+    expect(JSON.stringify(arms)).not.toContain("credential");
   });
 
   test("the browser workspace view never exposes its absolute server path or ambient secret sentinel", () => {

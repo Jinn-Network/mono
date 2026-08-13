@@ -5,6 +5,26 @@ import {
   PINNED_PERMISSIONS_POLICY_FEATURES,
 } from "./chromium-policy";
 
+test("packaged local-server boundary requires and consumes the one-time launch capability", async ({ playwright }) => {
+  const capability = process.env.COLOPHON_LOCAL_APP_CAPABILITY;
+  if (capability === undefined) throw new Error("production browser run did not receive the local-app capability");
+  const client = await playwright.request.newContext({
+    baseURL: "http://127.0.0.1:3017",
+    storageState: { cookies: [], origins: [] },
+  });
+  try {
+    expect((await client.get("/")).status()).toBe(403);
+    const launch = await client.get(`/__colophon_launch?capability=${encodeURIComponent(capability)}`, { maxRedirects: 0 });
+    expect(launch.status()).toBe(303);
+    expect(launch.headers()["set-cookie"]).toContain("HttpOnly");
+    expect(launch.headers()["set-cookie"]).toContain("SameSite=Strict");
+    expect((await client.get(`/__colophon_launch?capability=${encodeURIComponent(capability)}`, { maxRedirects: 0 })).status()).toBe(403);
+    expect((await client.get("/workspace")).status()).toBe(200);
+  } finally {
+    await client.dispose();
+  }
+});
+
 test("skip navigation leaves the main target with a computed visible indicator", async ({ page }) => {
   await page.goto("/workspace");
   await page.keyboard.press("Tab");

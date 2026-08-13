@@ -39,12 +39,12 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         {status.driver.status === "active" ? <p>A server restart may have interrupted this generation. Resume safely from the durable journal if progress stops.</p> : null}
         {status.driver.error ? <div role="alert" className="mt-3 rounded-md border border-destructive p-3"><p className="font-semibold">{status.driver.error.code}</p><p>{status.driver.error.detail}</p><p>Correct the condition, then retry with Resume.</p></div> : null}
       </CardContent></Card> : null}
-      <Card><CardHeader><CardTitle>Run controls</CardTitle></CardHeader><CardContent className="grid min-w-0 gap-5 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
+      <Card><CardHeader><CardTitle>Run controls</CardTitle></CardHeader><CardContent className="grid min-w-0 gap-5 [&>*]:min-w-0"><p role="note" className="rounded-md border border-amber-600/40 bg-amber-50 p-3 text-sm text-foreground dark:bg-amber-950/20"><strong>Provider network and possible charges.</strong> Launching a provider-backed Arm contacts its provider using your local Colophon credential and may create provider charges. The bundled sample needs no account, API key, funds, or provider connection.</p><div className="grid min-w-0 gap-5 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
         <ActionForm action={GUI_SERVER_ACTIONS["run.launch"]} submitLabel="Launch" gated disabled={state !== "locked"}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.resume"]} submitLabel="Resume" disabled={state !== "running" || status?.cancelRequested === true}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.cancel"]} submitLabel="Request / finalize cancel" gated disabled={state !== "running" && !(state === "closed" && status?.cancelRequested === true)}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.collect"]} submitLabel="Collect" disabled={state !== "running" || status?.cancelRequested === true}><HiddenDraft draftId={draftId} /></ActionForm>
-      </CardContent></Card>
+      </div></CardContent></Card>
       <Card><CardHeader><CardTitle>Cells</CardTitle></CardHeader><CardContent><div tabIndex={0} role="region" aria-label="Run cells table" className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th scope="col">Arm</th><th scope="col">Replicate</th><th scope="col">Status</th><th scope="col">Dispatches</th><th scope="col">Failure / blame</th></tr></thead><tbody>{status?.cells.map((cell) => <tr key={cell.cellKey} className="border-t"><td className="py-2">{cell.armId}</td><td>{cell.replicate}</td><td>{cell.status}</td><td>{cell.dispatches}</td><td>{cell.detail ?? "—"}{cell.blame ? ` (${cell.blame})` : ""}</td></tr>)}</tbody></table></div></CardContent></Card>
     </>}
   </main>;

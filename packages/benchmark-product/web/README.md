@@ -1,7 +1,7 @@
-# Colophon web — `@jinn-network/benchmark-product-web`
+# Colophon web — `@colophon-claims/web`
 
 This private Next.js App Router application is Colophon's human surface. It is a server-only, in-process client of the public
-`@jinn-network/benchmark-product-core` entry. It contains no second lifecycle,
+`@colophon-claims/core` entry. It contains no second lifecycle,
 orchestrator, statistic, verifier, record reader, HTTP API route, or browser-side
 core import.
 

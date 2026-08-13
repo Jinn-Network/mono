@@ -73,6 +73,17 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         );
       }
 
+      const unreadyAgent = context.runtimeHost?.assessAgentReadiness(
+        document.spec.arms.map((arm) => ({ armId: arm.armId, pinning: arm.pinning })),
+      ).find((finding) => !finding.ready);
+      if (unreadyAgent !== undefined) {
+        refuse(
+          "venue-unavailable",
+          `arms.${unreadyAgent.armId}.pinning`,
+          `${unreadyAgent.detail}${unreadyAgent.remediation === undefined ? "" : ` ${unreadyAgent.remediation}`}`,
+        );
+      }
+
       const closeAt = computeCloseAt(at, document.spec.policy.closeAfterMs);
       const compiled = compileDraft({
         workspaceDir: clockedContext.workspaceDir,

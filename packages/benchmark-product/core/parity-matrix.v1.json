@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedFrom": "@jinn-network/benchmark-product-core@0.1.0",
+  "generatedFrom": "@colophon-claims/core@1.0.0",
   "entries": [
     {
       "operation": "armAdd",
@@ -295,6 +295,22 @@
     {
       "name": "demo1 prereg verify",
       "reason": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access"
+    },
+    {
+      "name": "agent add",
+      "reason": "stores a strict machine-local built-in agent profile outside every workspace"
+    },
+    {
+      "name": "agent credentials",
+      "reason": "copies an explicitly selected API-key file into protected Colophon machine storage"
+    },
+    {
+      "name": "agent login",
+      "reason": "fails closed unless the exact harness version has a qualified isolated login-artifact flow"
+    },
+    {
+      "name": "doctor",
+      "reason": "checks local agent identity and credential readiness without making a provider request"
     }
   ]
 }

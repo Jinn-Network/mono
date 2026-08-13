@@ -156,7 +156,7 @@ describe("product documentation consistency", () => {
     }
     expect(webReadme).toContain("`BENCHMARK_PRODUCT_WORKSPACE_DIR`");
     expect(webReadme).toContain("`BENCHMARK_PRODUCT_PRINCIPAL`");
-    expect(webReadme).toMatch(/server-only.*public.*benchmark-product-core/is);
+    expect(webReadme).toMatch(/server-only.*public.*@colophon-claims\/core/is);
     expect(webReadme).toMatch(/private.*local.*deployment status.*none/is);
     expect(webReadme).toMatch(/typed.*redact|redact.*typed/is);
   });

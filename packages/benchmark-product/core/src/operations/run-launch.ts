@@ -225,6 +225,7 @@ export function runLaunch(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          agentProfileRequirements: loaded.runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
           ...(deps.solveStartDelayMsForTesting !== undefined
             ? { solveStartDelayMsForTesting: deps.solveStartDelayMsForTesting }
             : {}),
@@ -353,6 +354,7 @@ export function runResume(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          agentProfileRequirements: loaded.runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
           ...(deps.solveStartDelayMsForTesting !== undefined
             ? { solveStartDelayMsForTesting: deps.solveStartDelayMsForTesting }
             : {}),

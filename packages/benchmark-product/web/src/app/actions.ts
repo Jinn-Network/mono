@@ -28,9 +28,11 @@ import {
   runVerify,
   sampleInit,
   selectInspectEvaluation,
+  profileArmPinning,
+  readAgentProfile,
   updateDraft,
   type SelectInspectEvaluationInput,
-} from "@jinn-network/benchmark-product-core";
+} from "@colophon-claims/core";
 import type { GuiActionState } from "@/lib/action-state";
 import {
   executeOperation,
@@ -40,7 +42,11 @@ import {
   positiveIntegerField,
 } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
-import { ProductContextConfigurationError, readRunDriverTestingDeps } from "@/lib/server/product-context";
+import {
+  ProductContextConfigurationError,
+  readProductServerConfiguration,
+  readRunDriverTestingDeps,
+} from "@/lib/server/product-context";
 import { projectRunStatusForGui } from "@/lib/server/view-models";
 import { projectPublishErrorForGui } from "@/lib/server/gui-error";
 
@@ -113,6 +119,28 @@ export async function armAddAction(_previous: GuiActionState, formData: FormData
     pinning: jsonField(formData, "pinning", {}),
     ...(optionalField(formData, "notes") !== undefined ? { notes: optionalField(formData, "notes") } : {}),
   }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
+}
+
+/**
+ * Guided own-work seam. The browser selects only a stored profile identifier; the server reads
+ * the machine-local profile and compiles its credential-free, digest-bound arm pinning. This is
+ * intentionally separate from the advanced raw-pinning action above.
+ */
+export async function agentProfileArmAddAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  const agentId = field(formData, "agentId");
+  return executeOperation((context) => {
+    const { agentDataDir } = readProductServerConfiguration();
+    const profile = readAgentProfile(agentDataDir, agentId);
+    if (profile === undefined) {
+      throw new ProductContextConfigurationError("selected Colophon agent profile is no longer configured");
+    }
+    return armAdd(context, {
+      draftId,
+      armId: field(formData, "armId"),
+      pinning: profileArmPinning(profile),
+    });
+  }, { revalidate: ["/workspace", `/workspace/${draftId}`] });
 }
 
 export async function armUpdateAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {

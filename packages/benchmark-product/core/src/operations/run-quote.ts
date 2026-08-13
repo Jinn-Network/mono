@@ -253,6 +253,17 @@ export function runQuote(
         ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
       const nextState = ensureQuotable(document.state, input.draftId);
 
+      const unreadyAgent = context.runtimeHost?.assessAgentReadiness(
+        document.spec.arms.map((arm) => ({ armId: arm.armId, pinning: arm.pinning })),
+      ).find((finding) => !finding.ready);
+      if (unreadyAgent !== undefined) {
+        refuse(
+          "venue-unavailable",
+          `arms.${unreadyAgent.armId}.pinning`,
+          `${unreadyAgent.detail}${unreadyAgent.remediation === undefined ? "" : ` ${unreadyAgent.remediation}`}`,
+        );
+      }
+
       const closeAt = computeCloseAt(at, document.spec.policy.closeAfterMs);
       const workspaceMetadata = assertWorkspace(clockedContext.workspaceDir);
       const owner = deriveRunOwner(workspaceMetadata.createdAt, input.draftId);
@@ -270,7 +281,11 @@ export function runQuote(
       // audit timestamps are pinned to one instant.
       let venue: LocalVenue;
       try {
-        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock });
+        venue = createVenue({
+          workspaceDir: clockedContext.workspaceDir,
+          now: context.clock,
+          agentProfileRequirements: document.spec.arms.map((arm) => arm.pinning),
+        });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }
