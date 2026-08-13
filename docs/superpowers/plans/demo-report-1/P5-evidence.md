@@ -8,7 +8,7 @@
 
 **Integrated through:** `b91bd0679`, including the merged P2/P2b/P3b/P4/E2/preregistration packets
 
-## Current outcome: recovered green baseline; fresh run authorized
+## Current outcome: fresh run stopped on isolated Claude authentication
 
 The operator authorized a fresh P5 run after the exact images became locally available. The
 original qBraid and Fromager rows then failed their mandatory gold controls before any Claude cell
@@ -24,6 +24,31 @@ digest-pinned gold patches passed and all three empty patches failed; grader net
 disabled. The transcript is `p5-artifacts/green-baseline-recovery-pass.json`, digest
 `sha256:f5bec9dcf80da5a312724167351ab4496e2f2e9e6627d093e3a0b6cf59c00e83`.
 No Claude cell had been dispatched when this recovered slate was frozen.
+
+The authorized fresh run then passed the runtime inventory probe, repeated the green baseline,
+quoted 12 cells, locked, and dispatched every fixed cell exactly once. All 12 isolated Claude
+processes initialized with exact model `claude-haiku-4-5-20251001` and Claude Code `2.1.222`.
+All six baseline processes had no plugin and all six Skill processes loaded only
+`jinn-demo1-skill`, so the intended arm delivery occurred. However, every process also reported
+`apiKeySource: none` and stopped immediately with `authentication_failed` and
+`Not logged in · Please run /login`. No process consumed input or output tokens.
+
+The ambient readiness probe had checked the operator's default Claude configuration. Execution
+then set `CLAUDE_CONFIG_DIR` to each attempt's isolated, initially empty harness-state directory,
+and the launcher declared no secret forwarding. The operator's host login therefore was not
+available to the attempts. Copying host configuration or extracting credentials into experiment
+workspaces was not attempted: that would expand the credential and isolation contract rather than
+recover the already locked run.
+
+The Run closed `partial`; Matrix accounting contains all 12 cells as expired, zero judged, and no
+replacements. No retry or cell top-up is permitted after dispatch, and no report bundle was
+emitted. The normalized stop evidence is
+`p5-artifacts/fresh-run-auth-stop-2026-08-13.json`, digest
+`sha256:3a3e50f1e7d96eabefec2ecd7c7f3330a81b1dae28ae490325b48eb06e9aacae`.
+Its Run digest is
+`sha256:00f9ffc80f46bd28f2aee477c86624d8b9ce6d90bb60e13027f466d45b13faf9`
+and Matrix digest is
+`sha256:bc3edf382edf7649726bfbe87b640ed19b17434a71b2c8cb6ccf6fbd60c7d76c`.
 
 ## Historical outcome: stopped at the digest-pinned image pre-stage
 
@@ -113,7 +138,7 @@ for `provenance.json`. The strict post-P3b fixture suite passes all 11 assertion
 
 Final non-Docker reruns on Node 22 passed:
 
-- P5 pure/injected tests: 17/17;
+- P5 pure/injected tests: 19/19;
 - strict final-fixture tests: 11/11;
 - benchmark-product core full suite: 78 files passed, 3 skipped; 819 tests passed,
   13 skipped;
@@ -123,15 +148,17 @@ Final non-Docker reruns on Node 22 passed:
 
 ## Required continuation
 
-The exact images are now locally available and the operator authorized the fresh run. The
-recovered green baseline has passed under the frozen grader. The remaining P5 work is the
-readiness probe, exact 12-cell execution, all-cell/per-axis accounting, sealed Report and local
-immutable bundle, builder-workspace deletion, and cold verification. Any new failure remains a
-terminal stop for that fresh run; there is no task replacement or cell top-up after dispatch.
+The pinned-image and grader-valid-slate issues are resolved. Continuation now requires an explicit,
+attempt-safe Claude credential path whose readiness probe runs under the same isolated environment
+as execution. Host login state must not be copied into attempt workspaces implicitly. After that
+contract is implemented and independently verified, the operator must authorize a wholly new P5
+run: the locked Run recorded above cannot be resumed, retried, or topped up. A new run must again
+perform the green baseline before dispatch, account all 12 newly locked cells, emit the local
+immutable bundle, delete the builder workspace, and pass cold verification.
 
 ## Publication boundary
 
 This packet may emit only a local immutable bundle. It did not create a public report URL, signed
 Record Discovery source, archive mirror, Explorer view, local report bundle, or publication claim.
 This evidence is a blocked implementation checkpoint, not a published benchmark and not a
-capability result.
+capability result. The partial run's zero judged cells cannot support an arm-effect claim.
