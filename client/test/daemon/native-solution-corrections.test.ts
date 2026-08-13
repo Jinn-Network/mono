@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeAbiParameters, encodeEventTopics } from 'viem';
 import { JINN_ROUTER_V3_ABI } from '@jinn-network/marketplace-binding';
 import { archivePagePath } from '@jinn-network/record-discovery-protocol';
+import { SourceAnnouncementConflictError } from '@jinn-network/record-discovery-serve';
 import { Store } from '../../src/store/store.js';
 import { NativeMarketplaceEventRepository } from '../../src/daemon/native-canonical-observations.js';
 import {
@@ -142,6 +143,7 @@ function publisher() {
   return {
     publish: vi.fn(async () => ({ sequence: '2', entryDigest: `sha256:${'7'.repeat(64)}` as const })),
     withdraw: vi.fn(async () => ({ sequence: '1', entryDigest: `sha256:${'6'.repeat(64)}` as const })),
+    committedAnnouncement: vi.fn(async () => undefined),
   };
 }
 
@@ -214,6 +216,65 @@ describe('buildNativeSolutionCorrections', () => {
 
     expect(sink.publish).not.toHaveBeenCalled();
     expect(sink.withdraw).not.toHaveBeenCalled();
+  });
+
+  it('recovers a conflict thrown by a different module instance of the source-writer', async () => {
+    // The client resolves @jinn-network/record-discovery-serve both directly (portal) and nested
+    // under other workspace packages (registry), so the conflict the writer throws is not
+    // reliably an `instanceof` the class this module could import — CI's module graph produced
+    // exactly that split (#2636). Recovery must key on the error NAME, which survives any number
+    // of module instances. This foreign-class error is one.
+    class ForeignConflict extends Error {
+      override readonly name = 'SourceAnnouncementConflictError';
+    }
+    seedPublishedDelivery();
+    const events = new NativeMarketplaceEventRepository(store);
+    events.apply({ events: [settlementEvent()] as never });
+    events.apply({ events: [], orphanedBlockHashes: [BLOCK_HASH] });
+    const sink = publisher();
+    const corrections = buildNativeSolutionCorrections({ store, publisher: sink, marketplaceEvents: events });
+    await corrections.reconcile();
+    events.apply({ events: [settlementEvent(`0x${'f'.repeat(64)}`)] as never });
+    sink.publish.mockRejectedValueOnce(new ForeignConflict('already committed different exact input bytes'));
+    sink.committedAnnouncement.mockResolvedValueOnce({
+      action: 'available' as const,
+      sequence: '9',
+      entryDigest: `sha256:${'d'.repeat(64)}` as const,
+    } as never);
+
+    await corrections.reconcile();
+
+    expect(store.db.prepare(
+      `SELECT action, source_sequence FROM native_solution_discovery_corrections ORDER BY rowid`,
+    ).all()).toEqual([
+      { action: 'withdrawn', source_sequence: '1' },
+      { action: 'available', source_sequence: '9' },
+    ]);
+  });
+
+  it('rethrows a re-announce conflict when the source holds no committed announcement', async () => {
+    // Recovery from `SourceAnnouncementConflictError` (#2636) is only for the crash window where
+    // the source already committed OUR announcement. A conflict the source cannot account for is a
+    // real divergence and must stay loud, and no correction row may pretend it reconciled.
+    seedPublishedDelivery();
+    const events = new NativeMarketplaceEventRepository(store);
+    events.apply({ events: [settlementEvent()] as never });
+    events.apply({ events: [], orphanedBlockHashes: [BLOCK_HASH] });
+    const sink = publisher();
+    const corrections = buildNativeSolutionCorrections({ store, publisher: sink, marketplaceEvents: events });
+    await corrections.reconcile();
+    events.apply({ events: [settlementEvent(`0x${'f'.repeat(64)}`)] as never });
+    const conflict = new SourceAnnouncementConflictError(
+      `sha256:${'c'.repeat(64)}`,
+      'the source already committed different exact input bytes',
+    );
+    sink.publish.mockRejectedValueOnce(conflict);
+
+    await expect(corrections.reconcile()).rejects.toBe(conflict);
+
+    expect(store.db.prepare(
+      `SELECT action FROM native_solution_discovery_corrections ORDER BY rowid`,
+    ).all()).toEqual([{ action: 'withdrawn' }]);
   });
 });
 
@@ -400,6 +461,88 @@ describe('buildNativeSolutionCorrections on the real signed source', () => {
     for (let index = 1; index < timestamps.length; index += 1) {
       expect(Date.parse(timestamps[index]!)).toBeGreaterThan(Date.parse(timestamps[index - 1]!));
     }
+  });
+
+  // Regression for #2636. A re-announcement's identity is deterministic
+  // (`available:<blockHash>`), but its timestamp is wall-clock, so a daemon crash between a
+  // committed `publish` and the correction-row INSERT leaves the source holding the announcement
+  // under a fingerprint no later pass can recompute. Every resumed pass then throws
+  // `SourceAnnouncementConflictError` — permanently, and aborting the pass's remaining
+  // corrections with it.
+  it('heals a crash between a committed re-announce publish and its correction record', async () => {
+    const opened = await realPublisher();
+    const events = await seedTwoOrphanedDeliveries(opened);
+    const corrections = buildNativeSolutionCorrections({
+      store, publisher: opened, marketplaceEvents: events,
+    });
+    await corrections.reconcile();
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const returned = `0x${'f'.repeat(64)}` as const;
+    events.apply({
+      events: [
+        settlementEvent(returned),
+        settlementEvent(returned, { taskId: 8n, logIndex: 1 }),
+      ] as never,
+    });
+
+    // The first re-announce COMMITS to the signed source (sequence 5), then the daemon dies
+    // before its correction row is recorded.
+    const crash = new Error('daemon crashed before the correction row was recorded');
+    let committed: { announcementId: string; sequence: string; entryDigest: string } | undefined;
+    const crashing = {
+      ...opened,
+      publish: async (value: Parameters<typeof opened.publish>[0]) => {
+        const receipt = await opened.publish(value);
+        committed = {
+          announcementId: value.publication.publicationKey,
+          sequence: receipt.sequence,
+          entryDigest: receipt.entryDigest,
+        };
+        throw crash;
+      },
+    };
+    await expect(
+      buildNativeSolutionCorrections({ store, publisher: crashing, marketplaceEvents: events })
+        .reconcile(),
+    ).rejects.toBe(crash);
+    expect(committed).toBeDefined();
+    expect(store.db.prepare(
+      `SELECT action FROM native_solution_discovery_corrections ORDER BY rowid`,
+    ).all()).toEqual([{ action: 'withdrawn' }, { action: 'withdrawn' }]);
+
+    // The resumed pass stamps a strictly later base, so its recomputed bytes can never match the
+    // committed announcement. It must adopt the committed receipt and still re-announce the
+    // other returned delivery.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await corrections.reconcile();
+
+    const rows = store.db.prepare(
+      `SELECT announcement_id, source_sequence, entry_digest
+         FROM native_solution_discovery_corrections WHERE action = 'available' ORDER BY rowid`,
+    ).all() as Array<{ announcement_id: string; source_sequence: string; entry_digest: string }>;
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.announcement_id === committed!.announcementId)).toMatchObject({
+      source_sequence: committed!.sequence,
+      entry_digest: committed!.entryDigest,
+    });
+
+    // Exactly ONE entry beyond the crashed publish (the other delivery's re-announcement): the
+    // healed correction adopted the committed entry instead of appending a duplicate.
+    const timestamps = await announcementTimestamps(opened, 6);
+    for (let index = 1; index < timestamps.length; index += 1) {
+      expect(Date.parse(timestamps[index]!)).toBeGreaterThan(Date.parse(timestamps[index - 1]!));
+    }
+    const beyond = await opened.handler(new Request(
+      `https://operator.example/native${archivePagePath('solver-records', String(7).padStart(16, '0'))}`,
+    ));
+    expect(beyond.status).toBe(404);
+
+    // Healed state is terminal: a further pass changes nothing.
+    await corrections.reconcile();
+    expect(store.db.prepare(
+      `SELECT COUNT(*) AS n FROM native_solution_discovery_corrections`,
+    ).get()).toEqual({ n: 4 });
   });
 });
 
