@@ -40,7 +40,7 @@
 | PUB-10 | Harbor selection, execution, archive, verification | PUB-08 | complete |
 | PUB-11 | Terminal-Bench 2 selection, migration, smoke | PUB-10 | pending |
 | PUB-12 | Colophon public source, authorization, registration | PUB-09, PUB-07 | complete |
-| PUB-13 | Accounting/report publication and bundle v3 | PUB-10..12 | pending |
+| PUB-13 | Accounting/report publication and bundle v3 | PUB-10..12 | in progress (bundle v3 complete) |
 | PUB-14 | CLI, HTTP, and web UX | PUB-13 | pending |
 | PUB-15 | Conformance, architecture, final review and handoff | PUB-14 | pending |
 
@@ -64,3 +64,4 @@ The repository pins Node 22 and Yarn 4.13.0 (`.nvmrc`, `.node-version`, package 
 | PUB-09 | `91c47f70d` | `2ff4be724`, `a00bfe1bd` | 99 focused tests; run-path/report/results/bundle; core typecheck | APPROVE after compatibility/receipt blockers fixed | `22d8e17a8`, `4df67c0cf` |
 | PUB-10 | `91c47f70d` | `16d225f2a`..`29524a3b4` | 18 focused Harbor/adapter/facade tests; dataset and partial-failure lifecycle; core typecheck | APPROVE after official v0.21 layout, JobConfig, serializer-default, provenance, retry, and validator blockers fixed | `878e80a51`..`e466b521b` |
 | PUB-12 | `4df67c0cf` | `bbb2a7658`, `dd1a83450`, `745fd7cef` | 103 focused tests across publication, state, key identity, authority, lock/launch; typecheck; build; parity; pack smoke | APPROVE after provenance, authority, concurrency, and exact-closure blockers fixed | `92d8ff9e2`, `e3021aab7`, `1fe6399b8`; architecture `3c7034fe8` |
+| PUB-13b | `272385753` | `b69084cea`, `c019fe0a9`, `d653bc9c1`, `4d38d2ee1` | 21 focused v3/manifest tests; legacy relabel regression; scoped TypeScript; architecture; diff check | APPROVE after receipt/descriptor closure, atomicity, close-boundary, shared-artifact, and legacy-format blockers fixed | `0b8df709f`, `0c4eb647a`, `cef08d3e6`, `4d7f375c2` |
