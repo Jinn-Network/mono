@@ -14,9 +14,10 @@
  * (`buildAnnouncementProjectionPorts`), and the REAL reducer + announce plane over a full
  * revised-generation settlement sequence.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Address, Hex } from 'viem';
 import {
@@ -43,7 +44,14 @@ import {
   NativeAnnouncementRecordError,
   buildNativeResolveRecord,
 } from '../../src/daemon/composition-root.js';
-import { buildFleetDeliveryBytesResolver } from '../../src/daemon/native-fleet-runtime.js';
+import {
+  buildFleetDeliveryBytesResolver,
+  buildFleetOwnSolutionDeliveryResolver,
+} from '../../src/daemon/native-fleet-runtime.js';
+import {
+  buildNativeEvaluationDeliveryRecordResolver,
+  buildNativeVerdictObservationAdapter,
+} from '../../src/daemon/native-verdict-observation.js';
 import { buildAnnouncementProjectionPorts } from '../../src/daemon/projector-ports.js';
 
 const COORDINATOR = BASE_SEPOLIA_TODAY.taskCoordinator;
@@ -328,9 +336,15 @@ afterEach(() => {
 function announcePorts(input: {
   readonly resolveRecord: ReturnType<typeof buildNativeResolveRecord>;
   readonly decisionGrade?: boolean;
+  /** Drive the REAL M4b gate instead of the stub — see the today-generation suite below. */
+  readonly verifyVerdictObservation?: (
+    event: never,
+    material: { readonly kind: string; readonly bytes: Uint8Array },
+  ) => Promise<unknown>;
 }) {
   const pageCounts = new Map<string, number>();
   const verified: unknown[] = [];
+  const gate = input.verifyVerdictObservation;
   return {
     verified,
     ports: buildAnnouncementProjectionPorts({
@@ -338,8 +352,9 @@ function announcePorts(input: {
       signer: fakeDiscoverySigner(),
       archiveRoot,
       resolveRecord: input.resolveRecord,
-      verifyVerdictObservation: async (_event, material) => {
+      verifyVerdictObservation: async (event, material) => {
         verified.push(material);
+        if (gate !== undefined) return await gate(event as never, material) as never;
         return {
           gate: { decisionGrade: input.decisionGrade ?? true, failures: [] },
           statementVerdict: 'pass' as const,
@@ -465,19 +480,56 @@ describe('native announce path — delivery record resolution (#45)', () => {
     expect(plane.requested).toEqual([]);
   });
 
-  it('refuses a delivery role with no revised-generation anchor rather than guessing', async () => {
+  it('refuses a REVISED claim missing its anchor instead of falling back to the engagement key', async () => {
+    // The today-generation leg keys off the engagement because the chain names no digest there.
+    // A revised claim DOES name one, so a revised claim without it is a defect, not an invitation
+    // to use the weaker key — this is the guard that keeps the stronger generation strong.
     const plane = servingPlane(new Map(servedAt(SELF_BASE_URL, EVALUATION_DELIVERY_BYTES)));
-    const resolveRecord = nativeResolveRecord(plane);
+    const resolveRecord = buildNativeResolveRecord(
+      BASE_SEPOLIA_TODAY,
+      async () => SUBMISSION_BYTES,
+      buildFleetDeliveryBytesResolver(plane.byLocation, [SELF_BASE_URL, PEER_BASE_URL]),
+      { solutionDelivery: async () => SOLUTION_DELIVERY_BYTES, evaluationDelivery: async () => EVALUATION_DELIVERY_BYTES },
+    );
     const verdict = settlementSequence().at(-1)!;
     const { evaluationDeliveryDigest: _dropped, ...factsWithoutAnchor } =
       verdict.facts as Record<string, unknown>;
-    const v3 = { ...verdict, facts: factsWithoutAnchor } as ObservationMarketplaceEvent;
+    const anchorless = { ...verdict, facts: factsWithoutAnchor } as ObservationMarketplaceEvent;
 
-    const error = await resolveRecord(v3, 'evaluation-delivery').catch((cause) => cause);
+    const error = await resolveRecord(anchorless, 'evaluation-delivery').catch((cause) => cause);
     expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
     expect(error.digest).toBeUndefined();
-    expect(error.message).toContain('no revised-generation delivery anchor');
+    expect(error.message).toContain('revised-generation claim with no usable delivery anchor');
     expect(plane.requested).toEqual([]);
+  });
+
+  it('keeps BOTH digest checks on the revised path — the transport\'s and the resolver\'s', async () => {
+    // The two checks are independently deletable and each masks the other's absence, so one
+    // assertion cannot pin both. This test pins them by their DISTINCT refusal messages:
+    //   - delete `buildFleetDeliveryBytesResolver`'s `documentDigest(bytes) === digest` and case
+    //     one's refusal becomes the resolver's "do not re-derive" message;
+    //   - delete `buildNativeResolveRecord`'s `documentDigest(bytes) !== anchorDigest` and case
+    //     two resolves material instead of refusing.
+    const claimed = settlementSequence().find((event) => event.event === 'SolutionDeliveryClaimed')!;
+    const wrongBytes = encodeJson({ substituted: true });
+
+    // Case one: the SERVING PLANE answers the anchor's locator with content that is not the
+    // anchored record. The transport must swallow it, so the resolver reports a plain miss.
+    const lying = new Map([[`${SELF_BASE_URL}${recordPath(SOLUTION_DELIVERY_DIGEST)}`, wrongBytes]]);
+    const transportError = await nativeResolveRecord(servingPlane(lying))(claimed, 'delivery')
+      .catch((cause) => cause);
+    expect(transportError).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(transportError.message).toContain('no digest-verified bytes');
+
+    // Case two: a record-bytes resolver that returns non-matching bytes directly, with the
+    // transport's own check out of the path. The resolver must not delegate the last check.
+    const resolverError = await buildNativeResolveRecord(
+      BASE_SEPOLIA_TODAY,
+      async () => SUBMISSION_BYTES,
+      async () => wrongBytes,
+    )(claimed, 'delivery').catch((cause) => cause);
+    expect(resolverError).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(resolverError.message).toContain('do not re-derive to the on-chain anchor');
   });
 
   it('refuses every delivery role when no serving plane is wired into the composition', async () => {
@@ -508,5 +560,371 @@ describe('native announce path — delivery record resolution (#45)', () => {
       kind: RECORD_KINDS.delivery,
       bytes: SOLUTION_DELIVERY_BYTES,
     });
+  });
+});
+
+// --- TODAY generation (JinnRouterV3) — the generation the native fleet actually pins ------------
+//
+// `main.ts` and `native-fleet-runtime.ts` both hardcode `BASE_SEPOLIA_TODAY`, and today-generation
+// `SolutionDeliveryClaimed` / `VerdictDeliveryClaimed` carry NO delivery digest at all
+// (`packages/marketplace/projector/src/events.ts`'s `todayEvent`). A resolver that keys only off
+// those fields refuses every live event, which is behaviorally identical to refusing every role.
+// These fixtures are the real V3 fact shapes; the resolution key is the engagement, and the anchor
+// check for each role is asserted where it actually lives.
+
+const TODAY_KECCAK = `0x${'b'.repeat(64)}` satisfies Hex;
+
+function todayDerivation(event: string, blockNumber: number, logIndex = 0, contract: Address = BASE_SEPOLIA_TODAY.jinnRouter) {
+  return { ...derivation(event, blockNumber, logIndex, contract), contractGeneration: 'today' as const };
+}
+
+/** The V3 settlement sequence: no `deliveryDigest`, no `evaluationDeliveryDigest`, anywhere. */
+function todaySettlementSequence(input: {
+  readonly deliveredBytes?: Uint8Array;
+} = {}): readonly ObservationMarketplaceEvent[] {
+  const delivered = input.deliveredBytes ?? SOLUTION_DELIVERY_BYTES;
+  const deliveredDigest = documentDigest(delivered);
+  return [
+    projectable({
+      event: 'TaskCreated',
+      facts: {
+        creator: CREATOR,
+        taskId: TASK_ID,
+        manifestDigest: `0x${'0'.repeat(64)}` as Hex,
+        taskCidDigest: `0x${'7'.repeat(64)}` as Hex,
+        maxClaims: 2,
+        solutionBudget: 100n,
+        verdictBudget: 20n,
+      },
+      derivation: todayDerivation('TaskCreated', 300),
+    } as MarketplaceEvent),
+    projectable({
+      event: 'TaskAttemptCreated',
+      facts: {
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+        operator: OPERATOR,
+        requestId: SOLUTION_REQUEST_ID,
+        priorityMech: OPERATOR,
+        deliveryRate: 10n,
+      },
+      derivation: todayDerivation('TaskAttemptCreated', 301),
+    } as MarketplaceEvent),
+    projectable({
+      event: 'Deliver',
+      facts: {
+        mech: OPERATOR,
+        mechServiceMultisig: OPERATOR,
+        requestId: SOLUTION_REQUEST_ID,
+        deliveryRate: 10n,
+        data: bytes32(deliveredDigest),
+      },
+      derivation: todayDerivation('Deliver', 302, 0, OPERATOR),
+    } as MarketplaceEvent, {
+      // The today-mode sha256<->keccak mech correspondence. `observe.ts` emits
+      // `delivery-recorded.v1` with `correspondence.sha256Digest` ONLY when this checks out, and
+      // that observation is what `announce.ts` then anchors the resolved delivery bytes against.
+      deliveryCorrespondence: {
+        sha256Digest: deliveredDigest,
+        keccakEvidenceHash: TODAY_KECCAK,
+        onChainSha256CidDigest: deliveredDigest,
+        onChainKeccak: TODAY_KECCAK,
+      },
+    }),
+    projectable({
+      event: 'SolutionDeliveryClaimed',
+      facts: {
+        operator: OPERATOR,
+        requestId: SOLUTION_REQUEST_ID,
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+      },
+      derivation: todayDerivation('SolutionDeliveryClaimed', 303),
+    } as MarketplaceEvent),
+    projectable({
+      event: 'EvaluationAttemptCreated',
+      facts: {
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+        verdictIndex: VERDICT_INDEX,
+        requestId: VERDICT_REQUEST_ID,
+        evaluator: EVALUATOR,
+        priorityMech: EVALUATOR,
+        deliveryRate: 20n,
+      },
+      derivation: todayDerivation('EvaluationAttemptCreated', 304),
+    } as MarketplaceEvent),
+    projectable({
+      event: 'VerdictDeliveryClaimed',
+      facts: {
+        evaluator: EVALUATOR,
+        requestId: VERDICT_REQUEST_ID,
+        taskId: TASK_ID,
+        attemptIndex: ATTEMPT_INDEX,
+        verdictIndex: VERDICT_INDEX,
+        verdictCode: VERDICT_CODE,
+      },
+      derivation: todayDerivation('VerdictDeliveryClaimed', 305),
+    } as MarketplaceEvent),
+  ];
+}
+
+const ENGAGEMENT_ID = 'urn:jinn:native:engagement:today-fixture';
+const EVALUATION_ID = 'urn:jinn:native:evaluation:today-fixture';
+
+/** The narrow solver-state reader `buildFleetOwnSolutionDeliveryResolver` consumes. */
+function solverState(input: {
+  readonly deliveryBytes?: Uint8Array;
+  readonly attemptIndex?: number | null;
+} = {}) {
+  const bytes = input.deliveryBytes ?? SOLUTION_DELIVERY_BYTES;
+  return {
+    listEngagements: () => [{
+      engagementId: ENGAGEMENT_ID,
+      chainId: BASE_SEPOLIA_TODAY.chainId,
+      coordinator: COORDINATOR,
+      taskId: TASK_ID,
+      attemptIndex: input.attemptIndex === undefined ? ATTEMPT_INDEX : input.attemptIndex,
+    }],
+    listSolutionArtifacts: (engagement: string) => engagement === ENGAGEMENT_ID
+      ? [
+        { engagementId: ENGAGEMENT_ID, role: 'output', digest: documentDigest(bytes), bytes },
+        { engagementId: ENGAGEMENT_ID, role: 'delivery', digest: documentDigest(bytes), bytes },
+      ]
+      : [],
+  } as unknown as Parameters<typeof buildFleetOwnSolutionDeliveryResolver>[0];
+}
+
+/**
+ * The narrow evaluator-state reader BOTH the today record resolver AND the real M4b gate consume.
+ * One fake, two consumers, deliberately: it is the same durable row the resolver returns bytes from
+ * and the gate then binds `documentDigest(material.bytes)` to.
+ */
+function evaluatorState(input: {
+  readonly deliveryBytes?: Uint8Array;
+  readonly verdictCode?: number;
+} = {}) {
+  const bytes = input.deliveryBytes ?? EVALUATION_DELIVERY_BYTES;
+  const subjectRoles = [
+    'task', 'submission', 'requester-envelope', 'admission-receipt',
+    'solution-delivery', 'solution-delivery-envelope', 'evaluation-spec',
+  ];
+  return {
+    listEvaluations: () => [{
+      evaluationId: EVALUATION_ID,
+      chainId: BASE_SEPOLIA_TODAY.chainId,
+      coordinator: COORDINATOR,
+      taskId: TASK_ID,
+      solutionAttemptIndex: ATTEMPT_INDEX,
+      evaluationRequestId: VERDICT_REQUEST_ID,
+      verdictCode: input.verdictCode ?? VERDICT_CODE,
+    }],
+    listEvaluationArtifacts: (evaluation: string) => evaluation === EVALUATION_ID
+      ? [{ evaluationId: EVALUATION_ID, role: 'evaluation-delivery', name: 'delivery', digest: documentDigest(bytes), bytes }]
+      : [],
+    listSubjectArtifacts: () => subjectRoles.map((role) => ({
+      role, name: role, digest: documentDigest(SUBMISSION_BYTES), bytes: SUBMISSION_BYTES,
+    })),
+    getAdmissionAuthority: () => ({ ok: true }),
+    getDerivedEvaluation: () => ({ ok: true }),
+    getEvaluation: () => undefined,
+  };
+}
+
+/** The production resolver wired for the TODAY generation, exactly as the fleet runtime wires it. */
+function todayResolveRecord(input: {
+  readonly solver?: ReturnType<typeof solverState>;
+  readonly evaluator?: ReturnType<typeof evaluatorState>;
+  readonly plane?: ReturnType<typeof servingPlane>;
+} = {}) {
+  const plane = input.plane ?? servingPlane(new Map());
+  return buildNativeResolveRecord(
+    BASE_SEPOLIA_TODAY,
+    async () => SUBMISSION_BYTES,
+    buildFleetDeliveryBytesResolver(plane.byLocation, [SELF_BASE_URL]),
+    {
+      solutionDelivery: buildFleetOwnSolutionDeliveryResolver(input.solver ?? solverState()),
+      evaluationDelivery: buildNativeEvaluationDeliveryRecordResolver(
+        (input.evaluator ?? evaluatorState()) as never,
+      ),
+    },
+  );
+}
+
+/** The REAL M4b gate over the same durable rows — the today generation's integrity check. */
+function m4bGate(state: ReturnType<typeof evaluatorState>) {
+  const adapter = buildNativeVerdictObservationAdapter({
+    state: state as never,
+    verification: {
+      verify: async () => ({ ok: true as const, verdictCode: VERDICT_CODE }),
+    },
+  });
+  return async (event: never, material: { readonly kind: string; readonly bytes: Uint8Array }) =>
+    adapter(event, material as never);
+}
+
+describe('native announce path — TODAY generation (V3) delivery records (#45)', () => {
+  it('publishes a decision-grade verdict announcement with no on-chain delivery digest anywhere', async () => {
+    const sequence = todaySettlementSequence();
+    // The premise: not one V3 event names a delivery digest.
+    expect(sequence.every((event) => !('deliveryDigest' in event.facts)
+      && !('evaluationDeliveryDigest' in event.facts))).toBe(true);
+
+    const evaluator = evaluatorState();
+    const { ports, verified } = announcePorts({
+      resolveRecord: todayResolveRecord({ evaluator }),
+      verifyVerdictObservation: m4bGate(evaluator),
+    });
+    const transition = reduceMarketplaceProjection(sequence, createMarketplaceProjectionState());
+    const result = await projectAnnouncements(transition, ports);
+
+    // RED BEFORE THIS FIX: the resolver keyed exclusively off the revised-only digest facts, so
+    // both delivery roles threw `…carries no revised-generation delivery anchor`, the loop caught
+    // it, and every announcement on the live path was suppressed.
+    expect(result.refusals).toEqual([]);
+    expect(result.announcements.find(
+      (announcement) => announcement.derivation.event === 'VerdictDeliveryClaimed',
+    )).toMatchObject({
+      action: 'available',
+      record: { kind: RECORD_KINDS.delivery, digest: EVALUATION_DELIVERY_DIGEST },
+      facts: {
+        'https://spec.jinn.network/facts/marketplace-verdict-correspondence/v1': {
+          onChainVerdictCode: VERDICT_CODE,
+          statementVerdict: 'pass',
+        },
+      },
+    });
+    expect(result.announcements.find(
+      (announcement) => announcement.derivation.event === 'SolutionDeliveryClaimed',
+    )).toMatchObject({
+      action: 'available',
+      record: { kind: RECORD_KINDS.delivery, digest: SOLUTION_DELIVERY_DIGEST },
+    });
+    // The real M4b gate saw the exact resolved material.
+    expect(verified).toEqual([{ kind: RECORD_KINDS.delivery, bytes: EVALUATION_DELIVERY_BYTES }]);
+  });
+
+  it('refuses a tampered today solution delivery at the delivery-recorded anchor', async () => {
+    // The chain named no digest, so nothing stops the resolver returning these bytes — the anchor
+    // check is `announce.ts`'s, against the `delivery-recorded.v1` observation digest, which
+    // `observe.ts` derives from the mech correspondence and not from anything this operator says.
+    const tampered = encodeJson({ tampered: 'solution delivery' });
+    const { ports } = announcePorts({
+      resolveRecord: todayResolveRecord({ solver: solverState({ deliveryBytes: tampered }) }),
+    });
+    const transition = reduceMarketplaceProjection(
+      todaySettlementSequence(),
+      createMarketplaceProjectionState(),
+    );
+    const result = await projectAnnouncements(transition, ports);
+
+    expect(result.announcements.some(
+      (announcement) => announcement.derivation.event === 'SolutionDeliveryClaimed',
+    )).toBe(false);
+    expect(result.refusals).toContainEqual(expect.objectContaining({
+      kind: 'announcement-material-refused',
+      role: 'delivery',
+      expectedDigest: SOLUTION_DELIVERY_DIGEST,
+      actualDigest: documentDigest(tampered),
+    }));
+  });
+
+  it('refuses a tampered today evaluation delivery at the M4b durable-artifact bind', async () => {
+    // Same shape one layer over: the resolver returns bytes the durable row does not name, and the
+    // M4b gate — which re-derives `documentDigest(material.bytes)` and demands exactly one joining
+    // row — refuses. The announcement is a verdict refusal, never a `decisionGrade: true`.
+    const evaluator = evaluatorState();
+    const substituted = encodeJson({ tampered: 'evaluation delivery' });
+    const { ports } = announcePorts({
+      resolveRecord: buildNativeResolveRecord(
+        BASE_SEPOLIA_TODAY,
+        async () => SUBMISSION_BYTES,
+        undefined,
+        {
+          solutionDelivery: buildFleetOwnSolutionDeliveryResolver(solverState()),
+          evaluationDelivery: async () => substituted,
+        },
+      ),
+      verifyVerdictObservation: m4bGate(evaluator),
+    });
+    const transition = reduceMarketplaceProjection(
+      todaySettlementSequence(),
+      createMarketplaceProjectionState(),
+    );
+    const result = await projectAnnouncements(transition, ports);
+
+    expect(result.announcements.some(
+      (announcement) => announcement.derivation.event === 'VerdictDeliveryClaimed'
+        && announcement.action === 'available',
+    )).toBe(false);
+    expect(JSON.stringify(result.refusals)).toContain('joins 0 durable evaluation aggregates');
+  });
+
+  it('refuses by name when this operator holds no durable record for the engagement', async () => {
+    const sequence = todaySettlementSequence();
+    const claimed = sequence.find((event) => event.event === 'SolutionDeliveryClaimed')!;
+    const verdict = sequence.at(-1)!;
+    // A solver engagement for a DIFFERENT attempt, and an evaluator with no rows at all.
+    const resolveRecord = todayResolveRecord({
+      solver: solverState({ attemptIndex: ATTEMPT_INDEX + 1 }),
+      evaluator: { ...evaluatorState(), listEvaluations: () => [] } as ReturnType<typeof evaluatorState>,
+    });
+
+    const deliveryError = await resolveRecord(claimed, 'delivery').catch((cause) => cause);
+    expect(deliveryError).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(deliveryError.role).toBe('delivery');
+    expect(deliveryError.message).toContain('no single durable solution-delivery record');
+    expect(deliveryError.message).toContain(`attempt=${ATTEMPT_INDEX}`);
+
+    const verdictError = await resolveRecord(verdict, 'evaluation-delivery').catch((cause) => cause);
+    expect(verdictError).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(verdictError.role).toBe('evaluation-delivery');
+    expect(verdictError.message).toContain('no single durable evaluation-delivery record');
+    expect(verdictError.message).toContain(`verdictCode=${VERDICT_CODE}`);
+  });
+
+  it('refuses a today delivery role when no durable record store is wired in', async () => {
+    const sequence = todaySettlementSequence();
+    const resolveRecord = buildNativeResolveRecord(BASE_SEPOLIA_TODAY, async () => SUBMISSION_BYTES);
+    const error = await resolveRecord(sequence.at(-1)!, 'evaluation-delivery').catch((cause) => cause);
+    expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(error.message).toContain('no native durable record store is wired');
+  });
+
+  it('refuses to answer a today lookup off a foreign coordinator, by NAME and with the role', async () => {
+    // Fix-round item 5: this refusal used to be a bare `Error`, so the loop's warn could not say
+    // which role it lost.
+    const resolveRecord = todayResolveRecord();
+    const verdict = todaySettlementSequence().at(-1)!;
+    const foreign = {
+      ...verdict,
+      projection: { ...verdict.projection, taskCoordinator: '0x1111111111111111111111111111111111111111' },
+    } as ObservationMarketplaceEvent;
+
+    const error = await resolveRecord(foreign, 'evaluation-delivery').catch((cause) => cause);
+    expect(error).toBeInstanceOf(NativeAnnouncementRecordError);
+    expect(error.role).toBe('evaluation-delivery');
+    expect(error.message).toContain('canonical Base Sepolia coordinator');
+  });
+});
+
+describe('the projector composition is wired with a real logger (#45)', () => {
+  // Every refusal above is only useful if it reaches an operator. `CompositionRootInput.logger` is
+  // OPTIONAL, so its omission at `main.ts`'s call site turned every `logger?.warn` inside
+  // `ProjectorLoop` and `createProjectorEnrich` into a no-op — a verdict announcement could be
+  // suppressed on every tick with nothing in the daemon log. A source scan is the cheap pin: the
+  // regression is a deleted property in one object literal, not a behavior a unit test can reach
+  // without booting `main()`.
+  it('passes a logger into buildOperatorComposition', () => {
+    const main = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), '../../src/main.ts'),
+      'utf8',
+    );
+    const call = main.slice(main.indexOf('buildOperatorComposition({'));
+    expect(call).not.toBe('');
+    // The property, inside the composition call, ahead of its closing `});`.
+    const body = call.slice(0, call.indexOf('\n    });'));
+    expect(body).toMatch(/\n\s+logger: \{/u);
+    expect(body).toMatch(/warn: \(message\) => console\.warn\(message\)/u);
   });
 });
