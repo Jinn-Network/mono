@@ -30,6 +30,27 @@
       "decode": "accept"
     },
     {
+      "path": "issue-relay-adoption.v1.json",
+      "schema": "IssueRelayAdoptionReceiptV1Schema",
+      "disposition": "accepted",
+      "sha256": "4f8a60bc5bf1a9f6c4cd67034fdc43b9e81b2405d401ed1efde10484b4d6c740",
+      "decode": "accept"
+    },
+    {
+      "path": "issue-relay-assurance.v1.md",
+      "schema": "IssueRelayAssuranceComment",
+      "disposition": "ready",
+      "sha256": "013df236ab8c37d1e20ac1706052cd9feeb1aa9aea67fd1e9d498c5b6bc55376",
+      "decode": "accept"
+    },
+    {
+      "path": "issue-relay-round.v1.json",
+      "schema": "IssueRelayRoundV1Schema",
+      "disposition": "repair",
+      "sha256": "df3b9f8cf8db25bc1a0273f5b4a02efb93623d3e356ea32a6b5da40877b845c6",
+      "decode": "accept"
+    },
+    {
       "path": "malformed-submit-request.json",
       "schema": "TaskSubmitRequestV1Schema",
       "disposition": "malformed",

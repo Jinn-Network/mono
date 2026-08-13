@@ -52,9 +52,12 @@ try {
         AutopilotMutationResultSchema,
         AutopilotReviewResultSchema,
         AutopilotSessionCapsuleSchema,
+        IssueRelayAdoptionReceiptV1Schema,
+        IssueRelayRoundV1Schema,
         TaskSubmitRequestV1Schema,
         TaskSubmitResultV1Schema,
         parseAutopilotAdoptionReceiptComment,
+        parseIssueRelayAssuranceComment,
       } from '@jinn-network/sdk/autopilot';
       import {
         AutopilotDeliveryExpectationSchema as SolverNetDeliveryExpectationSchema,
@@ -88,6 +91,8 @@ try {
         AutopilotReviewResultSchema,
         AutopilotAdoptionReceiptSchema,
         AutopilotCorrelationSchema,
+        IssueRelayAdoptionReceiptV1Schema,
+        IssueRelayRoundV1Schema,
         TaskSubmitRequestV1Schema,
         TaskSubmitResultV1Schema,
         AutopilotDeliveryExpectationSchema,
@@ -97,7 +102,23 @@ try {
         const bytes = readFileSync(join(fixtureRoot, entry.path));
         const digest = createHash('sha256').update(bytes).digest('hex');
         if (digest !== entry.sha256) throw new Error('fixture hash mismatch: ' + entry.path);
-        if (entry.schema === 'AutopilotAdoptionReceiptComment') {
+        if (entry.schema === 'IssueRelayAssuranceComment') {
+          const parsed = parseIssueRelayAssuranceComment(
+            bytes.toString('utf8').trimEnd(),
+            {
+              generation: 'R_kgDOExample:101:sha256:dd2241a3f2e4865b572fc038b6d52fd91823f7c534c6672507c3a31a46d152b1',
+              round: 1,
+              snapshotDigest: 'sha256:dd2241a3f2e4865b572fc038b6d52fd91823f7c534c6672507c3a31a46d152b1',
+              taskId: '124',
+              attemptIndex: 0,
+              requestId: '0x${'9'.repeat(64)}',
+              deliveryEnvelopeCid: 'f01551220${'4'.repeat(64)}',
+            },
+          );
+          if (parsed?.anchor === undefined) {
+            throw new Error('Issue Relay assurance fixture does not decode');
+          }
+        } else if (entry.schema === 'AutopilotAdoptionReceiptComment') {
           if (parseAutopilotAdoptionReceiptComment(bytes.toString('utf8').trimEnd()) === null) {
             throw new Error('comment fixture does not decode');
           }

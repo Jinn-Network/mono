@@ -102,6 +102,8 @@ import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js'
 import { createAutopilotEvaluationContextResolver } from './autopilot/autopilot-evaluation-context-resolver.js';
 import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github-adoption-receipt-observer.js';
 import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
+import { createIssueRelayEvaluationContextResolver } from './issue-relay/evaluation-context-resolver.js';
+import { createIssueRelayGitHubRestReadPort } from './issue-relay/github-receipt-observer.js';
 import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
 import { protocolExecutorMode } from './erc8004/identity.js';
@@ -1734,6 +1736,23 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     createAutopilotEvaluationContextResolver({ github: autopilotGitHubRead });
   const autopilotAdoptionReceiptObserver =
     createAutopilotGitHubAdoptionReceiptObserver({ github: autopilotGitHubRead });
+  const issueRelayBotLogin =
+    process.env['JINN_ISSUE_RELAY_BOT_LOGIN']?.trim();
+  const issueRelayRequiredChecks =
+    process.env['JINN_ISSUE_RELAY_REQUIRED_CHECKS']
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+    ?? [];
+  const issueRelayEvaluationContextResolver =
+    issueRelayBotLogin === undefined || issueRelayBotLogin.length === 0
+      ? undefined
+      : createIssueRelayEvaluationContextResolver({
+          relayBotLogin: issueRelayBotLogin,
+          github: createIssueRelayGitHubRestReadPort({
+            requiredCheckNames: issueRelayRequiredChecks,
+          }),
+        });
 
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrls,
@@ -1750,7 +1769,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evictionRecovery,
     taskDiscovery,
     evaluatorEnabled,
-    autopilotEvaluationContextResolver,
+    evaluationContextResolvers: {
+      autopilot: autopilotEvaluationContextResolver,
+      ...(issueRelayEvaluationContextResolver === undefined
+        ? {}
+        : { issueRelay: issueRelayEvaluationContextResolver }),
+    },
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────

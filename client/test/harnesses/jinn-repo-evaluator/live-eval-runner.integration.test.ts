@@ -15,14 +15,18 @@
  * test` suite.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, cp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, cp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { runJinnRepoLiveEval } from '../../../src/harnesses/impls/jinn-repo-evaluator/live-eval-runner.js';
+import {
+  liveIssueWorkspaceRepository,
+  runJinnRepoLiveEval,
+} from '../../../src/harnesses/impls/jinn-repo-evaluator/live-eval-runner.js';
 import type { PackageSpec } from '../../../src/harnesses/impls/jinn-repo-evaluator/scope-tests.js';
+import type { JinnRepoLiveIssueTask } from '@jinn-network/sdk/solvernets/jinn-repo';
 
 const sh = promisify(execFile);
 
@@ -39,6 +43,111 @@ const FIXTURE_PACKAGE: PackageSpec = {
   typecheckScript: 'typecheck',
   testScript: 'test',
 };
+
+const LIVE_BASE_COMMIT = 'a'.repeat(40);
+
+function liveIssueSpec(relay?: JinnRepoLiveIssueTask['relay']): JinnRepoLiveIssueTask {
+  return {
+    schemaVersion: 'jinn-repo.v1',
+    source: 'live-issue',
+    instance_id: 'Jinn-Network__mono-1889',
+    repo: relay?.targetRepository ?? 'Jinn-Network/mono',
+    base_commit: relay?.inputHead ?? LIVE_BASE_COMMIT,
+    language: 'typescript',
+    problem_statement: 'Exercise live issue workspace selection.',
+    issue_number: 1889,
+    ...(relay === undefined ? {} : { relay }),
+  };
+}
+
+describe('liveIssueWorkspaceRepository', () => {
+  it('selects the outer repository for legacy live issues, the upstream target for initial Relay, and the managed fork for repair Relay', () => {
+    const initialRelay = {
+      schemaVersion: 'jinn-issue-relay-round.v1' as const,
+      generation: 'relay:initial',
+      round: 0,
+      snapshotDigest: `sha256:${'b'.repeat(64)}` as const,
+      targetRepository: 'upstream-org/upstream-repo',
+      workspaceRepository: 'upstream-org/upstream-repo',
+      inputHead: LIVE_BASE_COMMIT,
+      purpose: 'initial' as const,
+      findings: [],
+    };
+    const repairRelay = {
+      schemaVersion: 'jinn-issue-relay-round.v1' as const,
+      generation: 'relay:repair',
+      round: 1,
+      snapshotDigest: `sha256:${'c'.repeat(64)}` as const,
+      targetRepository: 'upstream-org/upstream-repo',
+      workspaceRepository: 'managed-fork/relay-repair',
+      inputHead: LIVE_BASE_COMMIT,
+      purpose: 'repair' as const,
+      findings: [{ code: 'ci', title: 'CI failure', detail: 'Repair the failed check.' }],
+      prNumber: 42,
+    };
+
+    expect(liveIssueWorkspaceRepository(liveIssueSpec())).toBe('Jinn-Network/mono');
+    expect(liveIssueWorkspaceRepository(liveIssueSpec(initialRelay))).toBe('upstream-org/upstream-repo');
+    expect(liveIssueWorkspaceRepository(liveIssueSpec(repairRelay))).toBe('managed-fork/relay-repair');
+  });
+});
+
+describe('runJinnRepoLiveEval workspace boundary', () => {
+  it('supplies the Relay workspace GitHub URL and outer base commit to the repro checkout', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'jinn-repo-live-eval-workspace-boundary-'));
+    const binDir = join(sandbox, 'bin');
+    const gitLog = join(sandbox, 'git.log');
+    const originalPath = process.env.PATH;
+    const originalGitLog = process.env.GIT_LOG;
+    const baseCommit = 'd'.repeat(40);
+    const relay = {
+      schemaVersion: 'jinn-issue-relay-round.v1' as const,
+      generation: 'relay:repair-boundary',
+      round: 1,
+      snapshotDigest: `sha256:${'e'.repeat(64)}` as const,
+      targetRepository: 'upstream-org/upstream-repo',
+      workspaceRepository: 'managed-fork/relay-repair',
+      inputHead: baseCommit,
+      purpose: 'repair' as const,
+      findings: [{ code: 'ci', title: 'CI failure', detail: 'Repair the failed check.' }],
+      prNumber: 42,
+    };
+
+    try {
+      await mkdir(binDir);
+      await writeFile(
+        join(binDir, 'git'),
+        [
+          '#!/usr/bin/env bash',
+          'printf "%s\\n" "$*" >> "$GIT_LOG"',
+        ].join('\n'),
+      );
+      await chmod(join(binDir, 'git'), 0o755);
+      process.env.PATH = `${binDir}:${originalPath ?? ''}`;
+      process.env.GIT_LOG = gitLog;
+
+      const result = await runJinnRepoLiveEval({
+        spec: liveIssueSpec(relay),
+        patch: '',
+        packages: [],
+      });
+      const gitArgs = (await readFile(gitLog, 'utf8')).trim().split('\n').filter(Boolean);
+
+      expect(result).toMatchObject({ applies: true, typecheck: true, tests: true, passed: true });
+      expect(gitArgs.some((args) => args.endsWith(
+        'remote add origin https://github.com/managed-fork/relay-repair.git',
+      ))).toBe(true);
+      expect(gitArgs.some((args) => args.endsWith(
+        `fetch -q --depth 1 origin ${baseCommit}`,
+      ))).toBe(true);
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalGitLog === undefined) delete process.env.GIT_LOG;
+      else process.env.GIT_LOG = originalGitLog;
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+});
 
 // A patch against a file that does not exist in the base commit, and is not
 // marked as a new-file creation (no `--- /dev/null`) — `git apply` refuses
@@ -106,9 +215,9 @@ describe.runIf(RUN)('runJinnRepoLiveEval (local file:// fixture repo)', () => {
 
   function grade(patch: string) {
     return runJinnRepoLiveEval({
-      spec: { base_commit: baseCommit },
+      spec: { ...liveIssueSpec(), base_commit: baseCommit },
       patch,
-      monoRepoUrl: `file://${repoDir}`,
+      workspaceRepoUrl: `file://${repoDir}`,
       packages: [FIXTURE_PACKAGE],
     });
   }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../../../src/types/task.js';
@@ -285,6 +286,145 @@ function autopilotHarnessFixtures() {
     },
   };
   return { task, context, mutation };
+}
+
+function relayHarnessFixtures() {
+  const snapshotDigest = `sha256:${'a'.repeat(64)}` as const;
+  const baseOid = '1'.repeat(40);
+  const head = '2'.repeat(40);
+  const solutionSafe = `0x${'2'.repeat(40)}`;
+  const evaluatorSafe = `0x${'6'.repeat(40)}`;
+  const patch = 'diff --git a/client/src/a.ts b/client/src/a.ts\n';
+  const round = {
+    schemaVersion: 'jinn-issue-relay-round.v1' as const,
+    generation: `R_kgDOExample:42:${snapshotDigest}`,
+    round: 0,
+    snapshotDigest,
+    targetRepository: 'Jinn-Network/mono',
+    workspaceRepository: 'Jinn-Network/mono',
+    inputHead: baseOid,
+    purpose: 'initial' as const,
+    findings: [],
+  };
+  const correlation = {
+    generation: round.generation,
+    round: round.round,
+    snapshotDigest,
+    taskId: '501',
+    attemptIndex: 0,
+    requestId: '0xsolution',
+    deliveryEnvelopeCid: 'bafy-solution',
+  };
+  const receipt = {
+    schemaVersion: 'jinn-issue-relay-adoption.v1' as const,
+    disposition: 'accepted' as const,
+    correlation,
+    targetRepository: round.targetRepository,
+    workspaceRepository: 'Jinn-Network/mono-relay',
+    issueNumber: 42,
+    prNumber: 314,
+    headRef: 'jinn/issue-relay/example',
+    inputHead: baseOid,
+    resultingHead: head,
+    patchDigest:
+      `sha256:${createHash('sha256').update(patch).digest('hex')}` as const,
+    solutionSafe,
+    adoptedAt: '2026-07-28T12:10:00.000Z',
+  };
+  const canonicalJson = (value: unknown): string => {
+    if (typeof value === 'string') return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+    if (value !== null && typeof value === 'object') {
+      return `{${Object.keys(value as Record<string, unknown>).sort()
+        .map((key) => `${JSON.stringify(key)}:${canonicalJson(
+          (value as Record<string, unknown>)[key],
+        )}`)
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
+  };
+  const checksDigest = `sha256:${'b'.repeat(64)}` as const;
+  const anchor = {
+    schemaVersion: 'jinn-issue-relay-evaluation-anchor.v1' as const,
+    correlation,
+    targetRepository: receipt.targetRepository,
+    workspaceRepository: receipt.workspaceRepository,
+    prNumber: receipt.prNumber,
+    targetBase: 'main',
+    baseOid,
+    headRef: receipt.headRef,
+    evaluatedHead: head,
+    adoptionReceiptDigest:
+      `sha256:${createHash('sha256').update(canonicalJson(receipt)).digest('hex')}` as const,
+    checksDigest,
+    anchoredAt: '2026-07-28T12:12:00.000Z',
+  };
+  const spec = {
+    schemaVersion: 'jinn-repo.v1' as const,
+    source: 'live-issue' as const,
+    instance_id: `issue-relay:${round.generation}:round:0`,
+    repo: 'Jinn-Network/mono',
+    base_commit: baseOid,
+    language: 'typescript' as const,
+    problem_statement: 'Frozen Relay goal.',
+    issue_number: 42,
+    relay: round,
+  };
+  const context = {
+    schemaVersion: 'jinn-issue-relay-evaluation-context.v1' as const,
+    goal: {
+      snapshotDigest,
+      problemStatement: spec.problem_statement,
+      acceptanceEvidence: ['The exact cumulative head passes.'],
+      verificationProfile: 'jinn-mono.v1' as const,
+    },
+    operators: { solutionSafe, evaluatorSafe },
+    round,
+    correlation,
+    reviewTarget: {
+      targetRepository: receipt.targetRepository,
+      workspaceRepository: receipt.workspaceRepository,
+      issueNumber: receipt.issueNumber,
+      prNumber: receipt.prNumber,
+      targetBase: anchor.targetBase,
+      baseOid,
+      headRef: receipt.headRef,
+      evaluatedHead: head,
+    },
+    adoptionReceipt: receipt,
+    evaluationAnchor: anchor,
+    checks: {
+      digest: checksDigest,
+      required: [{ name: 'relay/typecheck', status: 'passed' as const }],
+      optional: [],
+    },
+  };
+  const envelope = buildSolverEnvelope({
+    participant: {
+      safeAddress: solutionSafe,
+      agentEoa: `0x${'3'.repeat(40)}`,
+    },
+    payload: {
+      schemaVersion: 'jinn-repo-solution.v1',
+      patch,
+    },
+  });
+  const task: Task = {
+    id: `${correlation.taskId}:evaluation:0`,
+    description: 'Relay exact-head evaluation',
+    solverType: 'jinn-repo.v1',
+    role: 'evaluation',
+    attemptNumber: 0,
+    restorationRequestId: correlation.requestId,
+    solverNetManifestCid: 'bafy-relay-net',
+    spec,
+    context: {
+      restorationResult: envelope,
+      solutionEnvelopeCid: correlation.deliveryEnvelopeCid,
+      issueRelayEvaluation: context,
+    },
+  };
+  return { task, context };
 }
 
 describe('JinnRepoEvaluatorHarness — supports', () => {
@@ -616,6 +756,166 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
       reason: 'autopilot_eval_pending',
       message: expect.stringContaining('not configured for SolverNet'),
     });
+  });
+});
+
+describe('JinnRepoEvaluatorHarness — Issue Relay exact-head evaluation', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'jinn-repo-relay-evaluator-test-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('keeps a Relay task without accepted strict context ungradeable', async () => {
+    const { task } = relayHarnessFixtures();
+    task.context = { restorationResult: task.context!['restorationResult'] };
+    const h = new JinnRepoEvaluatorHarness();
+
+    await expect(h.canAttempt(task)).resolves.toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('issueRelayEvaluation'),
+    });
+  });
+
+  it('rejects an accepted Relay context replayed onto another evaluation task', async () => {
+    const { task } = relayHarnessFixtures();
+    task.id = `different-source-task:evaluation:${task.attemptNumber}`;
+    const h = new JinnRepoEvaluatorHarness({
+      issueRelayMechanicalRunner: vi.fn(),
+      issueRelaySemanticRunner: vi.fn(),
+    });
+
+    await expect(h.canAttempt(task)).resolves.toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/task id/i),
+    });
+  });
+
+  it('runs independent Relay full-head evaluation without invoking legacy live grading', async () => {
+    const { task, context } = relayHarnessFixtures();
+    const grade = vi.fn();
+    const gradeLive = vi.fn();
+    const git = vi.fn(async (input: { readonly args: readonly string[] }) => {
+      if (input.args.includes('rev-parse')) return `${context.reviewTarget.evaluatedHead}\n`;
+      if (input.args.includes('diff')) return 'diff --git a/client/src/a.ts b/client/src/a.ts\n+fixed\n';
+      return '';
+    });
+    const runMechanical = vi.fn().mockResolvedValue({
+      passed: true,
+      summary: 'Mechanical checks passed.',
+      findings: [],
+    });
+    const runSemantic = vi.fn().mockResolvedValue({
+      outcome: 'pass',
+      summary: 'The complete cumulative head satisfies the frozen goal.',
+      findings: [],
+    });
+    const h = new JinnRepoEvaluatorHarness({
+      grade,
+      gradeLive,
+      issueRelayGit: git,
+      issueRelayMechanicalRunner: runMechanical,
+      issueRelaySemanticRunner: runSemantic,
+    });
+
+    await expect(h.canAttempt(task)).resolves.toEqual({ ok: true });
+    const result = await h.run(buildHarnessContext(task, dir));
+
+    expect(result.verdictPayload).toEqual({
+      schemaVersion: 'jinn-issue-relay-verdict.v1',
+      outcome: 'pass',
+      correlation: context.correlation,
+      evaluatedHead: context.reviewTarget.evaluatedHead,
+      summary: 'The complete cumulative head satisfies the frozen goal.',
+      findings: [],
+    });
+    expect(result.gating).toMatchObject({
+      passed: true,
+      verdict: 'PASS',
+      verdictCode: 1,
+    });
+    expect(result.artifacts).toEqual([
+      expect.objectContaining({
+        path: 'jinn-issue-relay-verdict.json',
+        artifactType: 'jinn_issue_relay_verdict',
+      }),
+    ]);
+    expect(grade).not.toHaveBeenCalled();
+    expect(gradeLive).not.toHaveBeenCalled();
+  });
+
+  it('uses the configured production verifier and SolverNet semantic runtime for Relay', async () => {
+    const { task, context } = relayHarnessFixtures();
+    const verify = vi.fn().mockResolvedValue({
+      kind: 'passed',
+      checks: ['jinn-mono.v1'],
+    });
+    const agentRun = vi.fn().mockResolvedValue(JSON.stringify({
+      outcome: 'pass',
+      summary: 'Production Relay evaluation passed.',
+      findings: [],
+    }));
+    const semanticAgentRunnerResolver = {
+      resolve: vi.fn().mockReturnValue({
+        provider: 'anthropic',
+        runner: { run: agentRun },
+        model: 'relay-review-model',
+      }),
+    };
+    const git = vi.fn(async (input: { readonly args: readonly string[] }) => {
+      if (input.args.includes('rev-parse')) return `${context.reviewTarget.evaluatedHead}\n`;
+      if (input.args.includes('diff')) return 'diff --git a/client/src/a.ts b/client/src/a.ts\n+fixed\n';
+      return '';
+    });
+    const h = new JinnRepoEvaluatorHarness({
+      immutableMechanicalVerifier: { verify },
+      semanticAgentRunnerResolver,
+      issueRelayGit: git,
+    });
+
+    await expect(h.canAttempt(task)).resolves.toEqual({ ok: true });
+    await expect(h.run(buildHarnessContext(task, dir))).resolves.toMatchObject({
+      verdictPayload: {
+        outcome: 'pass',
+        summary: 'Production Relay evaluation passed.',
+      },
+    });
+    expect(verify).toHaveBeenCalledWith(expect.objectContaining({
+      checkoutDir: expect.any(String),
+      changedFiles: expect.arrayContaining(['client', 'packages/sdk']),
+    }));
+    expect(semanticAgentRunnerResolver.resolve).toHaveBeenCalledWith({
+      manifestCid: 'bafy-relay-net',
+      solverNet: undefined,
+    });
+    expect(agentRun).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'relay-review-model',
+      prompt: expect.stringContaining(
+        'BEGIN INERT UNTRUSTED REQUIREMENTS DATA JSON',
+      ),
+    }));
+    expect(agentRun.mock.calls[0]![0]).not.toHaveProperty('cwd');
+  });
+
+  it('never routes a Relay task with contradictory context to legacy live grading', async () => {
+    const { task } = relayHarnessFixtures();
+    const gradeLive = vi.fn();
+    task.context = {
+      ...task.context,
+      issueRelayEvaluation: {
+        ...(task.context!['issueRelayEvaluation'] as Record<string, unknown>),
+        schemaVersion: 'jinn-issue-relay-evaluation-context.v2',
+      },
+    };
+    const h = new JinnRepoEvaluatorHarness({ gradeLive });
+
+    await expect(h.canAttempt(task)).resolves.toMatchObject({ ok: false });
+    await expect(h.run(buildHarnessContext(task, dir))).rejects.toMatchObject({
+      reason: 'issue_relay_eval_pending',
+    });
+    expect(gradeLive).not.toHaveBeenCalled();
   });
 });
 

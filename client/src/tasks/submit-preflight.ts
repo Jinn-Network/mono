@@ -3,6 +3,16 @@ import { createHttpDiscoveryAPI } from '../discovery/http.js';
 
 export const MARKETPLACE_TASK_FRESHNESS_RESERVE_MS = 60_000;
 
+export function marketplaceTaskBudgetWei(args: {
+  solutionMaxDeliveryRateWei: bigint;
+  verdictMaxDeliveryRateWei: bigint;
+  maxClaims: number;
+}): bigint {
+  return (
+    args.solutionMaxDeliveryRateWei + args.verdictMaxDeliveryRateWei
+  ) * BigInt(args.maxClaims);
+}
+
 export class MarketplaceTaskRequestExpiredError extends Error {
   readonly name = 'MarketplaceTaskRequestExpiredError';
 }
@@ -68,10 +78,7 @@ export function assertMarketplaceTaskFunding(args: {
   maxClaims: number;
   agentGasReserveWei: bigint;
 }): void {
-  const maxClaims = BigInt(args.maxClaims);
-  const taskBudgetWei =
-    args.solutionMaxDeliveryRateWei * maxClaims
-    + args.verdictMaxDeliveryRateWei * maxClaims;
+  const taskBudgetWei = marketplaceTaskBudgetWei(args);
   if (args.safeBalanceWei < taskBudgetWei) {
     throw new Error(
       `creator Safe requires ${taskBudgetWei} wei task budget but has ${args.safeBalanceWei} wei`,

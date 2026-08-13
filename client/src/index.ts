@@ -29,6 +29,42 @@ export {
   type VerifiedAutopilotMarketplaceDelivery,
 } from './autopilot/marketplace-delivery-observer.js';
 export {
+  createIssueRelayDeliveryObserver,
+  parseIssueRelayTaskCid,
+  type IssueRelayDeliveryExpectation,
+  type IssueRelayDeliveryObservation,
+  type IssueRelayDeliveryObserver,
+  type IssueRelayDeliveryObserverDeps,
+  type IssueRelayMarketplaceDeliveryExpectation,
+} from './issue-relay/delivery-observer.js';
+export {
+  createApplicationDeliveryObserver,
+  parseApplicationTaskCid,
+  type ApplicationDeliveryExpectation,
+  type ApplicationDeliveryObservation,
+  type ApplicationDeliveryObserver,
+  type ApplicationDeliveryObserverDeps,
+  type ApplicationMarketplaceDeliveryExpectation,
+} from './application-delivery/delivery-observer.js';
+export {
+  createIssueRelayGitHubRestReadPort,
+  observeExactIssueRelayEvaluationReceipts,
+  type IssueRelayCheckSummary,
+  type IssueRelayEvaluationReceiptObservation,
+  type IssueRelayGenerationMarker,
+  type IssueRelayGitHubComment,
+  type IssueRelayGitHubCommentPage,
+  type IssueRelayGitHubReadPort,
+  type IssueRelayGitHubRestReadOptions,
+  type IssueRelayPullRequestFacts,
+} from './issue-relay/github-receipt-observer.js';
+export {
+  createIssueRelayEvaluationContextResolver,
+  type IssueRelayEvaluationContextObservation,
+  type IssueRelayEvaluationContextResolver,
+  type IssueRelayEvaluationContextResolverInput,
+} from './issue-relay/evaluation-context-resolver.js';
+export {
   createAutopilotGitHubAdoptionReceiptObserver,
   observeExactAutopilotAdoptionReceipt,
   type AutopilotGitHubReadPort,

@@ -1,4 +1,6 @@
 export {
+  JinnRepoApplicationRefSchema,
+  JinnRepoApplicationTaskExtensionSchema,
   JINN_REPO_SCHEMA_VERSION,
   JinnRepoTaskSchema,
   JinnRepoMergedPrTaskSchema,
@@ -16,14 +18,20 @@ export type {
 } from '../jinn-repo.js';
 
 export {
+  JinnRepoApplicationSolutionPayloadSchema,
+  JinnRepoApplicationVerdictPayloadSchema,
   JinnRepoLegacySolutionPayloadSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
+  JinnRepoIssueRelayAdoptionPayloadSchema,
   JinnRepoSolutionPayloadSchema,
   JinnRepoVerdictPayloadSchema,
   JinnRepoVerdictV2PayloadSchema,
   JinnRepoAutopilotVerdictPayloadSchema,
+  JinnRepoIssueRelayVerdictPayloadSchema,
 } from '../payloads/jinn-repo.js';
 export type {
+  JinnRepoApplicationSolutionPayload,
+  JinnRepoApplicationVerdictPayload,
   JinnRepoSolutionPayload,
   JinnRepoVerdictPayload,
   JinnRepoVerdictV2Payload,
@@ -89,3 +97,51 @@ export type {
 export type {
   ParsedAutopilotAdoptionReceiptComment,
 } from '../autopilot-adoption-comment.js';
+
+export {
+  GitOidSchema,
+  ISSUE_RELAY_MAX_ACCEPTANCE_ITEMS,
+  ISSUE_RELAY_MAX_CHECKS,
+  ISSUE_RELAY_MAX_FINDINGS,
+  ISSUE_RELAY_MAX_FINDING_DETAIL_BYTES,
+  ISSUE_RELAY_MAX_FINDING_TITLE_BYTES,
+  ISSUE_RELAY_MAX_REPOSITORY_BYTES,
+  IssueRelayAdoptionReceiptV1Schema,
+  IssueRelayCorrelationV1Schema,
+  IssueRelayEvaluationAnchorV1Schema,
+  IssueRelayEvaluationContextV1Schema,
+  IssueRelayFindingV1Schema,
+  IssueRelayPurposeSchema,
+  IssueRelayRoundV1Schema,
+  IssueRelayVerdictV1Schema,
+  Sha256DigestSchema,
+} from '../issue-relay.js';
+export type {
+  IssueRelayAdoptionReceiptV1,
+  IssueRelayCorrelationV1,
+  IssueRelayEvaluationAnchorV1,
+  IssueRelayEvaluationContextV1,
+  IssueRelayFindingV1,
+  IssueRelayPurpose,
+  IssueRelayRoundV1,
+  IssueRelayVerdictV1,
+} from '../issue-relay.js';
+
+export {
+  formatIssueRelayAdoptionReceiptComment,
+  formatIssueRelayEvaluationAnchorComment,
+  parseIssueRelayAssuranceComment,
+  parseIssueRelayAdoptionReceiptComment,
+  parseIssueRelayEvaluationAnchorComment,
+} from '../issue-relay-comment.js';
+export type {
+  ParsedIssueRelayAssuranceComment,
+} from '../issue-relay-comment.js';
+
+export {
+  MARKETPLACE_EVALUATION_PROVENANCE_CONTEXT_KEY,
+  MarketplaceEvaluationProvenanceV1Schema,
+} from '../marketplace-evaluation.js';
+export type {
+  MarketplaceEvaluationProvenanceV1,
+} from '../marketplace-evaluation.js';

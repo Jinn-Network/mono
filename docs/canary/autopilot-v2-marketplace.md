@@ -3,6 +3,12 @@
 This is a deliberately narrow canary for the marketplace session backend. It
 does not authorize unrestricted issue routing.
 
+The separate maintainer-self-labelled Jinn mono Issue Relay uses the
+[Autopilot Issue Relay runbook](https://github.com/Jinn-Network/autopilot/blob/main/docs/runbooks/jinn-issue-relay-jinn-mono.md).
+That procedure owns its GitHub admission, state, repair, and assurance
+lifecycle; use this document only for the shared creator Safe, escrow,
+SolverNet, discovery, RPC, IPFS, and verifier infrastructure.
+
 ## Eligibility
 
 Choose exactly one disposable issue for the first run. Before starting, verify

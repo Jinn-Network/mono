@@ -54,6 +54,7 @@ import {
   KNOWN_LIVE_EVAL_PACKAGES,
   type PackageSpec,
 } from './scope-tests.js';
+import type { JinnRepoLiveIssueTask } from '@jinn-network/sdk/solvernets/jinn-repo';
 
 const sh = promisify(execFile);
 
@@ -139,16 +140,22 @@ function logOf(e: unknown): string {
   return `${out?.stdout ?? ''}\n${out?.stderr ?? ''}`.slice(0, LOG_LIMIT);
 }
 
+export function liveIssueWorkspaceRepository(spec: JinnRepoLiveIssueTask): string {
+  return spec.relay?.workspaceRepository ?? spec.repo;
+}
+
 export async function runJinnRepoLiveEval(args: {
-  spec: { base_commit: string };
+  spec: JinnRepoLiveIssueTask;
   patch: string;
-  monoRepoUrl: string;
+  workspaceRepoUrl?: string;
   packages?: readonly PackageSpec[];
 }): Promise<JinnRepoLiveEvalResult> {
   let repro;
   try {
     repro = await prepareRepro({
-      monoRepoUrl: args.monoRepoUrl,
+      monoRepoUrl:
+        args.workspaceRepoUrl
+        ?? `https://github.com/${liveIssueWorkspaceRepository(args.spec)}.git`,
       baseCommit: args.spec.base_commit,
       patch: args.patch,
       goldTestFiles: {}, // no gold for a live-issue task — no-ops in prepareRepro
