@@ -39,7 +39,7 @@
 | PUB-09 | Colophon durable capture and state migration | PUB-08 | complete |
 | PUB-10 | Harbor selection, execution, archive, verification | PUB-08 | pending |
 | PUB-11 | Terminal-Bench 2 selection, migration, smoke | PUB-10 | pending |
-| PUB-12 | Colophon public source, authorization, registration | PUB-09, PUB-07 | pending |
+| PUB-12 | Colophon public source, authorization, registration | PUB-09, PUB-07 | complete |
 | PUB-13 | Accounting/report publication and bundle v3 | PUB-10..12 | pending |
 | PUB-14 | CLI, HTTP, and web UX | PUB-13 | pending |
 | PUB-15 | Conformance, architecture, final review and handoff | PUB-14 | pending |
@@ -62,3 +62,4 @@ The repository pins Node 22 and Yarn 4.13.0 (`.nvmrc`, `.node-version`, package 
 | PUB-07 | `5ad001499` | `9393b1a9e`, `c9bef1c8b`, `e25861d3c` | 6 tests; typecheck; build; pack smoke; benchmarking guards; architecture | APPROVE after closure/media blockers fixed | `3826364d6`, `f854a55a1`, `b7862f06c` |
 | PUB-08 | `f48ff4158` | `2d8f19383`, `54131eb6b` | 10 focused tests; core typecheck; build; pack smoke | APPROVE after Inspect binding/API blockers fixed | `828863d6f`, `22531a7ea` |
 | PUB-09 | `91c47f70d` | `2ff4be724`, `a00bfe1bd` | 99 focused tests; run-path/report/results/bundle; core typecheck | APPROVE after compatibility/receipt blockers fixed | `22d8e17a8`, `4df67c0cf` |
+| PUB-12 | `4df67c0cf` | `bbb2a7658`, `dd1a83450`, `745fd7cef` | 103 focused tests across publication, state, key identity, authority, lock/launch; typecheck; build; parity; pack smoke | APPROVE after provenance, authority, concurrency, and exact-closure blockers fixed | `92d8ff9e2`, `e3021aab7`, `1fe6399b8`; architecture `3c7034fe8` |
