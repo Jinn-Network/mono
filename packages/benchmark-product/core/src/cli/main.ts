@@ -49,8 +49,10 @@ import {
   runCancel,
   runLaunch,
   runLock,
+  publicationAccounting,
   publicationConfigure,
   publicationRegister,
+  publicationReport,
   runPreview,
   runPublish,
   runQuote,
@@ -119,6 +121,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   lock             --workspace <dir> --principal <id> --draft <draftId>
   publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
   publication register  --workspace <dir> --principal <id> --draft <draftId> [--public-base-url <url>]
+  publication accounting --workspace <dir> --principal <id> --draft <draftId>
+  publication report     --workspace <dir> --principal <id> --draft <draftId>
   launch           --workspace <dir> --principal <id> --draft <draftId>
   resume           --workspace <dir> --principal <id> --draft <draftId>
   cancel           --workspace <dir> --principal <id> --draft <draftId>
@@ -164,6 +168,8 @@ const QUOTE_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LOCK_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
 const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
+const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -611,6 +617,22 @@ async function handlePublicationRegister(args: ParsedArgs, context: CliContext, 
   return renderResult(result, jsonMode, (value) => `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence}${value.postHoc ? " (post-hoc)" : ""}\n`);
 }
 
+async function handlePublicationAccounting(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_ACCOUNTING_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = await publicationAccounting(opContext, { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) =>
+    `published accounting ${value.accountingSha256} and Matrix v2 ${value.matrixV2Sha256} at ${value.source.agent}/${value.source.name}\n`);
+}
+
+async function handlePublicationReport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_REPORT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = await publicationReport(opContext, { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) =>
+    `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`);
+}
+
 /** `launch`'s `RunLaunchDeps`: `onProgress` streams to `context.progress` in human mode only —
  * `--json` mode's stdout stays the single machine-parseable envelope (module header). */
 function launchDeps(context: CliContext, jsonMode: boolean): RunLaunchDeps {
@@ -793,6 +815,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["lock", handleLock],
   ["publication configure", handlePublicationConfigure],
   ["publication register", handlePublicationRegister],
+  ["publication accounting", handlePublicationAccounting],
+  ["publication report", handlePublicationReport],
   ["launch", handleLaunch],
   ["resume", handleResume],
   ["cancel", handleCancel],

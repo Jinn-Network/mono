@@ -96,6 +96,11 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       status: "shipped",
       action: "run.report",
     });
+    expect(gui.find((entry) => entry.operation === "publicationReport")?.gui).toEqual({
+      status: "unavailable",
+      followUp: "PUB-14",
+      reason: "PUB-13 exposes signed Report v2 publication through the CLI; PUB-14 owns its consent-aware GUI action.",
+    });
     expect(gui.find((entry) => entry.operation === "runVerify")?.gui).toEqual({
       status: "shipped",
       action: "run.verify",

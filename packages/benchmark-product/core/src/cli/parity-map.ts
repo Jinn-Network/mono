@@ -28,8 +28,7 @@
  * tally the results document builds; it is not itself an operation with an
  * `OperationContext`/`OperationResult` shape.
  */
-// `publicationReport` is intentionally programmatic until PUB-14 adds its consent/UI surface.
-export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCounts", "publicationReport"];
+export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCounts"];
 
 /** Standalone filesystem helpers deliberately outside the workspace operations/audit boundary. */
 export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
@@ -67,6 +66,8 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runLock: "lock",
   publicationConfigure: "publication configure",
   publicationRegister: "publication register",
+  publicationAccounting: "publication accounting",
+  publicationReport: "publication report",
   runLaunch: "launch",
   runResume: "resume",
   runCancel: "cancel",
@@ -106,6 +107,8 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runLock: "lock",
   publicationConfigure: "publication.configure",
   publicationRegister: "publication.register",
+  publicationAccounting: "publication.accounting",
+  publicationReport: "publication.report",
   runLaunch: "launch",
   runResume: "run.resume",
   runCancel: "cancel",
@@ -145,6 +148,8 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
   runLock: "Seals the Run record and transitions the draft to locked (authority-gated).",
   publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
   publicationRegister: "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
+  publicationAccounting: "Publishes the exact complete dispatch accounting closure and its terminal Matrix v2 without rerunning work.",
+  publicationReport: "Produces, independently verifies, and publishes the signed Report v2 envelope after its exact accounting closure.",
   runLaunch: "Launches the locked run on the real local venue (authority-gated).",
   runResume: "Resumes an interrupted run, dispatching only outstanding work.",
   runCancel:
@@ -165,7 +170,8 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
  */
 export type GuiCapability =
   | { readonly status: "shipped"; readonly action: string }
-  | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" | "PUB-14" };
+  | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" | "PUB-14" }
+  | { readonly status: "unavailable"; readonly followUp: "PUB-14"; readonly reason: string };
 
 export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   initWorkspace: { status: "shipped", action: "workspace.init" },
@@ -192,6 +198,8 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runLock: { status: "shipped", action: "run.lock" },
   publicationConfigure: { status: "deferred", deferredTo: "PUB-14" },
   publicationRegister: { status: "deferred", deferredTo: "PUB-14" },
+  publicationAccounting: { status: "unavailable", followUp: "PUB-14", reason: "PUB-13 exposes the accounting stage through the CLI; PUB-14 owns its consent-aware GUI action." },
+  publicationReport: { status: "unavailable", followUp: "PUB-14", reason: "PUB-13 exposes signed Report v2 publication through the CLI; PUB-14 owns its consent-aware GUI action." },
   runLaunch: { status: "shipped", action: "run.launch" },
   runResume: { status: "shipped", action: "run.resume" },
   runCancel: { status: "shipped", action: "run.cancel" },

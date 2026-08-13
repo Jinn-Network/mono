@@ -127,7 +127,7 @@ export const RunStateSchema = z.object({
   reportSha256: Sha256HexSchema.optional(),
   /** sha256 hex of the sealed Report's DSSE ENVELOPE bytes, set at `report` (BP-13). */
   reportEnvelopeSha256: Sha256HexSchema.optional(),
-  /** Profile names. The legacy aliases above remain readable indefinitely. */
+  /** Signed Report v2 identities. These are independent from the legacy Report v1 fields. */
   reportPayloadSha256: Sha256HexSchema.optional(),
   reportRecordSha256: Sha256HexSchema.optional(),
   reportedAt: Rfc3339Schema.optional(),
@@ -147,23 +147,39 @@ export const RunStateSchema = z.object({
   ])).optional(),
   publishedAt: Rfc3339Schema.optional(),
 }).superRefine((state, context) => {
-  if (state.reportSha256 !== undefined && state.reportPayloadSha256 !== undefined
-    && state.reportSha256 !== state.reportPayloadSha256) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["reportPayloadSha256"], message: "conflicts with legacy reportSha256" });
+  if ((state.reportPayloadSha256 === undefined) !== (state.reportRecordSha256 === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [state.reportPayloadSha256 === undefined ? "reportPayloadSha256" : "reportRecordSha256"],
+      message: "signed Report v2 payload and record identities must be established together",
+    });
   }
-  if (state.reportEnvelopeSha256 !== undefined && state.reportRecordSha256 !== undefined
-    && state.reportEnvelopeSha256 !== state.reportRecordSha256) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["reportRecordSha256"], message: "conflicts with legacy reportEnvelopeSha256" });
+  if (state.publication?.report.state === "complete"
+    && (state.reportPayloadSha256 === undefined || state.reportRecordSha256 === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["publication", "report"],
+      message: "a complete signed Report v2 publication stage requires both v2 identities",
+    });
   }
-}).transform((state) => ({
-  ...state,
-  ...(state.reportPayloadSha256 === undefined && state.reportSha256 !== undefined
-    ? { reportPayloadSha256: state.reportSha256 }
-    : {}),
-  ...(state.reportRecordSha256 === undefined && state.reportEnvelopeSha256 !== undefined
-    ? { reportRecordSha256: state.reportEnvelopeSha256 }
-    : {}),
-}));
+}).transform((state) => {
+  // PUB-09 temporarily serialized the legacy v1 identities under both name pairs. Such a state
+  // predates a completed Report-v2 stage, so normalize those duplicate aliases away in memory.
+  // The file is not rewritten merely by reading it. A later v2 publication may then establish
+  // its genuinely independent payload/envelope identities without losing the v1 bytes.
+  const historicalAliases = state.publication?.report.state !== "complete"
+    && state.reportPayloadSha256 !== undefined
+    && state.reportPayloadSha256 === state.reportSha256
+    && state.reportRecordSha256 !== undefined
+    && state.reportRecordSha256 === state.reportEnvelopeSha256;
+  if (!historicalAliases) return state;
+  const {
+    reportPayloadSha256: _historicalPayloadAlias,
+    reportRecordSha256: _historicalRecordAlias,
+    ...normalized
+  } = state;
+  return normalized as typeof state;
+});
 
 export type RunState = z.infer<typeof RunStateSchema>;
 
@@ -217,6 +233,12 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
   const currentBytes = readFileIfExistsSync(runStatePath(workspaceDir, draftId));
   if (currentBytes !== undefined) {
     const current = readRunState(workspaceDir, draftId);
+    if (current?.reportPayloadSha256 !== undefined && (
+      result.data.reportPayloadSha256 !== current.reportPayloadSha256
+      || result.data.reportRecordSha256 !== current.reportRecordSha256
+    )) {
+      refuse("conflict", `runs.${draftId}.reportRecordSha256`, "signed Report v2 identities cannot be removed or changed once established");
+    }
     if (current?.publication !== undefined) {
       const stages = [current.publication.registration, current.publication.accounting, current.publication.matrixV2, current.publication.report];
       const hasReceipt = stages.some((stage) => stage.receipt !== undefined);

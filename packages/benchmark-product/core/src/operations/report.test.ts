@@ -11,10 +11,13 @@ import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, Submi
 import { sealDelivery, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { deriveEvaluationTask } from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import type { ProxiedBackend } from "../run/drive.js";
+import { readRunJournalEntries } from "../run/journal.js";
+import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { createWorkspacePublicationHttpHandler, createWorkspacePublicationSource, recordPath } from "../run/publication-source.js";
-import { claimPackageArtifactPath, publicationServeRoot, publicBundlesDir } from "../workspace/layout.js";
+import { claimPackageArtifactPath, publicationDir, publicationServeRoot, publicBundlesDir, runStatePath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { LEGACY_VERDICT_EVALUATOR_ID, createVerdictDsseSigner, loadOrCreateVerdictSigningKey, sealVerdictStatement } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -368,6 +371,7 @@ async function setUpClosedRun(
  * fixture's backend. Registration after close is deliberately post-hoc. */
 async function setUpPublishedAccounting(clock: () => string): Promise<void> {
   await setUpClosedRun(clock);
+  recordRunPublicationAuthorship("draft-1");
   const publicBaseUrl = await servePublicationWorkspace();
   const configured = await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl });
   expect(configured.ok, JSON.stringify(configured)).toBe(true);
@@ -377,7 +381,71 @@ async function setUpPublishedAccounting(clock: () => string): Promise<void> {
   expect(accounted.ok, JSON.stringify(accounted)).toBe(true);
 }
 
+/** The fake backend predates publication authority capture. Bind its exact locally-created
+ * Deliveries and verdict envelopes to the workspace owner before accounting publishes them. */
+function recordRunPublicationAuthorship(draftId: string): void {
+  for (const entry of readRunJournalEntries(workspaceDir, draftId)) {
+    if (entry.kind === "delivery") {
+      recordWorkspaceAuthorship({
+        workspaceDir,
+        recordSha256: entry.deliverySha256,
+        recordKind: RECORD_KINDS.delivery,
+        authoredAt: entry.at,
+      });
+    }
+    if (entry.kind === "evaluation" && entry.verdictSha256 !== undefined) {
+      recordWorkspaceAuthorship({
+        workspaceDir,
+        recordSha256: entry.verdictSha256,
+        recordKind: RECORD_KINDS.resultEvaluation,
+        authoredAt: entry.at,
+      });
+    }
+  }
+}
+
 describe("publication.report — signed Report v2", () => {
+  test("preserves an existing legacy Report v1 while publishing and retrying an independent signed Report v2", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    const legacy = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(legacy.ok, JSON.stringify(legacy)).toBe(true);
+    if (!legacy.ok) return;
+    const legacyPayload = new Uint8Array(getSealedBytes(workspaceDir, legacy.result.reportSha256));
+    const legacyEnvelope = new Uint8Array(getSealedBytes(workspaceDir, legacy.result.reportEnvelopeSha256));
+    const afterV1 = readRunState(workspaceDir, "draft-1")!;
+    expect(afterV1.reportPayloadSha256).toBeUndefined();
+    expect(afterV1.reportRecordSha256).toBeUndefined();
+
+    recordRunPublicationAuthorship("draft-1");
+    const publicBaseUrl = await servePublicationWorkspace();
+    expect((await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl })).ok).toBe(true);
+    expect((await publicationRegister(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    expect((await publicationAccounting(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+    const v2 = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(v2.ok, JSON.stringify(v2)).toBe(true);
+    if (!v2.ok) return;
+
+    const coexist = readRunState(workspaceDir, "draft-1")!;
+    expect(coexist.reportSha256).toBe(legacy.result.reportSha256);
+    expect(coexist.reportEnvelopeSha256).toBe(legacy.result.reportEnvelopeSha256);
+    expect(getSealedBytes(workspaceDir, coexist.reportSha256!)).toEqual(legacyPayload);
+    expect(getSealedBytes(workspaceDir, coexist.reportEnvelopeSha256!)).toEqual(legacyEnvelope);
+    expect(coexist.reportPayloadSha256).toBe(v2.result.reportPayloadSha256);
+    expect(coexist.reportRecordSha256).toBe(v2.result.reportRecordSha256);
+    expect(v2.result.reportPayloadSha256).not.toBe(legacy.result.reportSha256);
+    expect(v2.result.reportRecordSha256).not.toBe(legacy.result.reportEnvelopeSha256);
+    expect(parseReport(legacyPayload)).not.toHaveProperty("https://spec.jinn.network/extensions/benchmark-publication/v1");
+    const signedV2 = parseSignedReportRecord(getSealedBytes(workspaceDir, v2.result.reportRecordSha256));
+    expect(signedV2.payloadBytes).toEqual(getSealedBytes(workspaceDir, v2.result.reportPayloadSha256));
+    expect((signedV2.payload as Record<string, unknown>)["https://spec.jinn.network/extensions/benchmark-publication/v1"]).toBeDefined();
+
+    const retried = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(retried).toEqual(v2);
+    expect(getSealedBytes(workspaceDir, legacy.result.reportSha256)).toEqual(legacyPayload);
+    expect(getSealedBytes(workspaceDir, legacy.result.reportEnvelopeSha256)).toEqual(legacyEnvelope);
+  }, 60_000);
+
   test("publishes exact payload before the owned envelope, derives post-hoc disclosure, and is idempotent", async () => {
     const clock = makeClock();
     await setUpPublishedAccounting(clock);
@@ -435,6 +503,65 @@ describe("publication.report — signed Report v2", () => {
     expect(after.publication!.report.state).toBe("not-started");
   }, 60_000);
 
+  test("requires exact durable stage receipts, digest bindings, and registration < accounting < Matrix order", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock);
+    const original = readRunState(workspaceDir, "draft-1")!;
+    const overwriteState = (value: typeof original) => writeFileSync(runStatePath(workspaceDir, "draft-1"), JSON.stringify(value));
+
+    const missingReceipt = structuredClone(original);
+    delete missingReceipt.publication!.accounting.receipt;
+    overwriteState(missingReceipt);
+    const missing = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error.detail).toMatch(/receipt/);
+
+    const corruptReceipt = structuredClone(original);
+    corruptReceipt.publication!.accounting.receipt!.entrySha256 = "f".repeat(64);
+    overwriteState(corruptReceipt);
+    const corrupt = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(corrupt.ok).toBe(false);
+    if (!corrupt.ok) expect(corrupt.error.detail).toMatch(/receipt.*bind/);
+
+    const wrongDigest = structuredClone(original);
+    wrongDigest.publication!.matrixV2.digests!.matrixV2 = "f".repeat(64);
+    overwriteState(wrongDigest);
+    const digest = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(digest.ok).toBe(false);
+    if (!digest.ok) expect(digest.error.detail).toMatch(/digest/);
+
+    overwriteState(original);
+    const sourceStatePath = join(publicationDir(workspaceDir), "sources", readdirSync(join(publicationDir(workspaceDir), "sources")).find((name) => name.endsWith(".state.json"))!);
+    const sourceState = JSON.parse(readFileSync(sourceStatePath, "utf8")) as { announcements: Record<string, { receipt: { sequence: string; entryDigest: string; record?: { digest: string } } }> };
+    const accountingAnnouncement = Object.values(sourceState.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${original.accountingSha256}`)!;
+    const matrixAnnouncement = Object.values(sourceState.announcements).find((entry) => entry.receipt.record?.digest === `sha256:${original.matrixV2Sha256}`)!;
+    const accountingReceipt = structuredClone(accountingAnnouncement.receipt);
+    accountingAnnouncement.receipt.sequence = matrixAnnouncement.receipt.sequence;
+    accountingAnnouncement.receipt.entryDigest = matrixAnnouncement.receipt.entryDigest;
+    matrixAnnouncement.receipt.sequence = accountingReceipt.sequence;
+    matrixAnnouncement.receipt.entryDigest = accountingReceipt.entryDigest;
+    writeFileSync(sourceStatePath, JSON.stringify(sourceState));
+    const wrongOrder = structuredClone(original);
+    wrongOrder.publication!.accounting.receipt = { sourceSequence: accountingAnnouncement.receipt.sequence, entrySha256: accountingAnnouncement.receipt.entryDigest.slice(7) };
+    wrongOrder.publication!.matrixV2.receipt = { sourceSequence: matrixAnnouncement.receipt.sequence, entrySha256: matrixAnnouncement.receipt.entryDigest.slice(7) };
+    overwriteState(wrongOrder);
+    const ordered = await publicationReport(contextFor(clock), { draftId: "draft-1" });
+    expect(ordered.ok).toBe(false);
+    if (!ordered.ok) expect(ordered.error.detail).toMatch(/order|registration < BenchmarkAccounting < Matrix v2/);
+  }, 60_000);
+
+  test("freezes a Report timestamp strictly after the source head when the operation clock is equal", async () => {
+    const clock = makeClock();
+    await setUpPublishedAccounting(clock);
+    const source = createWorkspacePublicationSource(workspaceDir, "colophon-benchmarks");
+    const before = await source.head.getExact();
+    if (before === undefined) throw new Error("fixture source has no head");
+    const published = await publicationReport(contextFor(() => before.issuedAt), { draftId: "draft-1" });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    const announcedAt = readRunState(workspaceDir, "draft-1")!.publication!.report.announcedAt!;
+    expect(Date.parse(announcedAt)).toBeGreaterThan(Date.parse(before.issuedAt));
+  }, 60_000);
+
   test("recovers the same source receipt after a crash following append", async () => {
     const clock = makeClock();
     await setUpPublishedAccounting(clock);
@@ -467,6 +594,8 @@ describe("runReport — happy path", () => {
       expect(outcome.result.preregistered).toBe(true);
       expect(outcome.result.reportSha256).toMatch(/^[a-f0-9]{64}$/);
       expect(outcome.result.reportEnvelopeSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(outcome.result).not.toHaveProperty("reportPayloadSha256");
+      expect(outcome.result).not.toHaveProperty("reportRecordSha256");
 
       // The sealed Report is genuinely readable back from the workspace's own sealed-bytes store.
       const reportBytes = getSealedBytes(workspaceDir, outcome.result.reportSha256);

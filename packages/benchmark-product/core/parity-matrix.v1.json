@@ -143,6 +143,17 @@
       }
     },
     {
+      "operation": "publicationAccounting",
+      "cliVerb": "publication accounting",
+      "authorityGated": true,
+      "description": "Publishes the exact complete dispatch accounting closure and its terminal Matrix v2 without rerunning work.",
+      "gui": {
+        "status": "unavailable",
+        "followUp": "PUB-14",
+        "reason": "PUB-13 exposes the accounting stage through the CLI; PUB-14 owns its consent-aware GUI action."
+      }
+    },
+    {
       "operation": "publicationConfigure",
       "cliVerb": "publication configure",
       "authorityGated": true,
@@ -160,6 +171,17 @@
       "gui": {
         "status": "deferred",
         "deferredTo": "PUB-14"
+      }
+    },
+    {
+      "operation": "publicationReport",
+      "cliVerb": "publication report",
+      "authorityGated": true,
+      "description": "Produces, independently verifies, and publishes the signed Report v2 envelope after its exact accounting closure.",
+      "gui": {
+        "status": "unavailable",
+        "followUp": "PUB-14",
+        "reason": "PUB-13 exposes signed Report v2 publication through the CLI; PUB-14 owns its consent-aware GUI action."
       }
     },
     {
@@ -336,10 +358,6 @@
   "exclusions": [
     {
       "name": "unverifiableAxisCounts",
-      "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
-    },
-    {
-      "name": "publicationReport",
       "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
     },
     {

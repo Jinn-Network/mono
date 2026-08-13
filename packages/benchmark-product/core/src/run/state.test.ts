@@ -12,6 +12,7 @@ import {
   requireRunState,
   specDigest,
   writeRunState,
+  type PublicationState,
   type RunState,
 } from "./state.js";
 
@@ -89,7 +90,7 @@ describe("publication state migration", () => {
     expect(readRunState(workspaceDir, "draft-v2")?.matrixV2Sha256).toBeUndefined();
   });
 
-  test("reads a legacy report state without rewriting it and exposes profile digest names", () => {
+  test("reads a legacy report state without rewriting or inventing signed-v2 identities", () => {
     const path = runStatePath(workspaceDir, "draft-legacy");
     const legacy = {
       ...minimalState({ reportSha256: "b".repeat(64), reportEnvelopeSha256: "c".repeat(64) }),
@@ -99,18 +100,37 @@ describe("publication state migration", () => {
     writeFileSync(path, exact);
 
     const read = readRunState(workspaceDir, "draft-legacy");
-    expect(read?.reportPayloadSha256).toBe("b".repeat(64));
-    expect(read?.reportRecordSha256).toBe("c".repeat(64));
+    expect(read?.reportSha256).toBe("b".repeat(64));
+    expect(read?.reportEnvelopeSha256).toBe("c".repeat(64));
+    expect(read?.reportPayloadSha256).toBeUndefined();
+    expect(read?.reportRecordSha256).toBeUndefined();
     expect(read?.publication).toBeUndefined();
     expect(new TextDecoder().decode(readFileSync(path))).toBe(exact);
   });
 
-  test("refuses conflicting legacy and profile report digest aliases", () => {
-    writeRunState(workspaceDir, "draft-conflict", minimalState());
-    writeFileSync(runStatePath(workspaceDir, "draft-conflict"), JSON.stringify({
-      ...minimalState(), reportSha256: "b".repeat(64), reportPayloadSha256: "c".repeat(64),
+  test("normalizes historical duplicate aliases while allowing independent signed-v2 identities", () => {
+    const path = runStatePath(workspaceDir, "draft-aliases");
+    writeRunState(workspaceDir, "draft-aliases", minimalState());
+    writeFileSync(path, JSON.stringify({
+      ...minimalState(),
+      reportSha256: "b".repeat(64), reportEnvelopeSha256: "c".repeat(64),
+      reportPayloadSha256: "b".repeat(64), reportRecordSha256: "c".repeat(64),
     }));
-    expect(() => readRunState(workspaceDir, "draft-conflict")).toThrow(/conflicts/);
+    const aliases = readRunState(workspaceDir, "draft-aliases");
+    expect(aliases?.reportPayloadSha256).toBeUndefined();
+    expect(aliases?.reportRecordSha256).toBeUndefined();
+    expect(aliases).not.toHaveProperty("reportPayloadSha256");
+    expect(aliases).not.toHaveProperty("reportRecordSha256");
+
+    const publication = createPublicationState();
+    publication.report = { state: "complete", receipt: { sourceSequence: "0001", entrySha256: "d".repeat(64) } };
+    writeRunState(workspaceDir, "draft-v2", minimalState({ publication,
+      reportSha256: "b".repeat(64), reportEnvelopeSha256: "c".repeat(64),
+      reportPayloadSha256: "e".repeat(64), reportRecordSha256: "f".repeat(64),
+    }));
+    const v2 = readRunState(workspaceDir, "draft-v2");
+    expect(v2?.reportSha256).toBe("b".repeat(64));
+    expect(v2?.reportPayloadSha256).toBe("e".repeat(64));
   });
 
   test("makes source identity immutable after a receipt while leaving public URL mutable", () => {
@@ -157,24 +177,29 @@ describe("publication state migration", () => {
         digests: { record: String(index + 4).repeat(64) },
       };
     });
-    writeRunState(workspaceDir, "draft-1", minimalState({ publication }));
+    const stateWithReportV2 = (nextPublication: PublicationState) => minimalState({
+      publication: nextPublication,
+      reportPayloadSha256: "a".repeat(64),
+      reportRecordSha256: "b".repeat(64),
+    });
+    writeRunState(workspaceDir, "draft-1", stateWithReportV2(publication));
 
     for (const stageName of stageNames) {
       const noReceipt = structuredClone(publication);
       delete noReceipt[stageName].receipt;
-      expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: noReceipt })), stageName).toThrow(/receipt cannot be removed or changed/);
+      expect(() => writeRunState(workspaceDir, "draft-1", stateWithReportV2(noReceipt)), stageName).toThrow(/receipt cannot be removed or changed/);
 
       const changedReceipt = structuredClone(publication);
       changedReceipt[stageName].receipt!.entrySha256 = "f".repeat(64);
-      expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: changedReceipt })), stageName).toThrow(/receipt cannot be removed or changed/);
+      expect(() => writeRunState(workspaceDir, "draft-1", stateWithReportV2(changedReceipt)), stageName).toThrow(/receipt cannot be removed or changed/);
 
       const noDigest = structuredClone(publication);
       noDigest[stageName].digests = {};
-      expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: noDigest })), stageName).toThrow(/digest cannot be removed or changed/);
+      expect(() => writeRunState(workspaceDir, "draft-1", stateWithReportV2(noDigest)), stageName).toThrow(/digest cannot be removed or changed/);
 
       const changedDigest = structuredClone(publication);
       changedDigest[stageName].digests!.record = "f".repeat(64);
-      expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: changedDigest })), stageName).toThrow(/digest cannot be removed or changed/);
+      expect(() => writeRunState(workspaceDir, "draft-1", stateWithReportV2(changedDigest)), stageName).toThrow(/digest cannot be removed or changed/);
     }
   });
 

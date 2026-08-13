@@ -11,16 +11,25 @@
 
 import {
   BENCHMARKING_METHOD_IDS,
+  BENCHMARK_ACCOUNTING_MEDIA_TYPE,
+  BENCHMARK_ACCOUNTING_RECORD_KIND,
+  MATRIX_MEDIA_TYPE,
+  MATRIX_RECORD_KIND,
   REPORT_MEDIA_TYPE,
   REPORT_V2_RECORD_KIND,
+  RUN_MEDIA_TYPE,
+  RUN_RECORD_KIND,
   SIGNED_REPORT_MEDIA_TYPE,
   type BenchmarkAccountingRecord,
   parseBenchmarkAccounting,
   parseMatrix,
   parseRun,
   parseSignedReportRecord,
+  readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { produceReportV2, verifyReportV2 } from "@jinn-network/benchmarking-aggregate";
+import { buildBenchmarkPublicationPlan, type PublicationArtifactInput, type PublicationRecordInput } from "@jinn-network/benchmarking-publication";
+import type { DurableSourceState } from "@jinn-network/record-discovery-serve";
 import { executePublicationPlan, type PublicationArtifact, type PublicationPlan, type PublicationRecord } from "@jinn-network/record-publication";
 import { resolveAssurance } from "../domain/draft.js";
 import { refuse } from "../errors.js";
@@ -31,7 +40,7 @@ import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { recordWorkspaceAuthorship, requireWorkspaceAuthorship, WORKSPACE_AUTHORSHIP_ROLE } from "../run/publication-authority.js";
 import { acquirePublicationLock } from "../run/publication-lock.js";
 import { createWorkspacePublicationJournal, createWorkspacePublicationSource, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
-import { requireRunState, writeRunState } from "../run/state.js";
+import { requireRunState, writeRunState, type PublicationStage, type RunState } from "../run/state.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
@@ -110,6 +119,105 @@ function receiptFor(source: Awaited<ReturnType<typeof createWorkspacePublication
   });
 }
 
+function timestampAfter(clockAt: string, priorIssuedAt: string | undefined): string {
+  const clockMs = Date.parse(clockAt);
+  const priorMs = priorIssuedAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(priorIssuedAt) + 1;
+  return new Date(Math.max(clockMs, priorMs)).toISOString();
+}
+
+function requireStageReceipt(input: {
+  readonly label: string;
+  readonly stage: PublicationStage;
+  readonly digestKey: string;
+  readonly digest: string;
+  readonly durable: DurableSourceState;
+}): string {
+  if (input.stage.receipt === undefined) throw new Error(`${input.label} stage is complete without a durable source receipt`);
+  if (input.stage.digests?.[input.digestKey] !== input.digest) {
+    throw new Error(`${input.label} stage digest does not match RunState ${input.digestKey}`);
+  }
+  const expectedEntry = `sha256:${input.stage.receipt.entrySha256}`;
+  const matches = Object.values(input.durable.announcements).filter((entry) =>
+    entry.action === "available"
+    && entry.receipt.record?.digest === `sha256:${input.digest}`
+    && entry.receipt.sequence === input.stage.receipt!.sourceSequence
+    && entry.receipt.entryDigest === expectedEntry);
+  if (matches.length !== 1) {
+    throw new Error(`${input.label} stage receipt does not bind its exact source announcement`);
+  }
+  const receipt = matches[0]!.receipt;
+  if (receipt.source.agent !== input.durable.source.agent || receipt.source.name !== input.durable.source.name) {
+    throw new Error(`${input.label} stage receipt belongs to a different source`);
+  }
+  return receipt.sequence;
+}
+
+function requireDurableClosure(
+  state: RunState,
+  durable: DurableSourceState,
+  includeReport: boolean,
+): void {
+  const publication = state.publication!;
+  const registration = requireStageReceipt({ label: "registration", stage: publication.registration, digestKey: "run", digest: state.runSha256!, durable });
+  const accounting = requireStageReceipt({ label: "BenchmarkAccounting", stage: publication.accounting, digestKey: "accounting", digest: state.accountingSha256!, durable });
+  const matrix = requireStageReceipt({ label: "Matrix v2", stage: publication.matrixV2, digestKey: "matrixV2", digest: state.matrixV2Sha256!, durable });
+  if (!(registration < accounting && accounting < matrix)) {
+    throw new Error("source receipt order must be registration < BenchmarkAccounting < Matrix v2");
+  }
+  let lastRequired = matrix;
+  if (includeReport) {
+    const report = requireStageReceipt({ label: "signed Report v2", stage: publication.report, digestKey: "record", digest: state.reportRecordSha256!, durable });
+    if (!(matrix < report)) throw new Error("source receipt order must place signed Report v2 after Matrix v2");
+    if (publication.report.digests?.payload !== state.reportPayloadSha256) throw new Error("signed Report v2 stage payload digest does not match RunState");
+    lastRequired = report;
+  }
+  if (durable.last === null || durable.last.sequence < lastRequired) {
+    throw new Error("durable source head does not include the required benchmark publication closure");
+  }
+}
+
+function validateSemanticClosure(input: {
+  readonly workspaceDir: string;
+  readonly state: RunState;
+  readonly runBytes: Uint8Array;
+  readonly accountingBytes: Uint8Array;
+  readonly matrixBytes: Uint8Array;
+  readonly reportBytes: Uint8Array;
+  readonly reportRecordSha256: string;
+  readonly reportTimestamp: string;
+}): void {
+  const run = parseRun(input.runBytes);
+  const registrationAt = input.state.publication!.registration.announcedAt;
+  const accountingAt = input.state.publication!.accounting.announcedAt;
+  const matrixAt = input.state.publication!.matrixV2.announcedAt;
+  if (registrationAt === undefined || accountingAt === undefined || matrixAt === undefined) {
+    throw new Error("completed registration, BenchmarkAccounting, and Matrix v2 stages require frozen announcement timestamps");
+  }
+  const registration: Array<PublicationRecordInput | PublicationArtifactInput> = [{
+    id: "run", kind: RUN_RECORD_KIND, digest: `sha256:${input.state.runSha256!}`,
+    bytes: input.runBytes, mediaType: RUN_MEDIA_TYPE, authority: { mode: "owner" },
+    announcementTimestamp: registrationAt,
+  }];
+  for (const required of readRunPublicationExtension(run)?.registrationArtifacts ?? []) {
+    const digest = required.artifact.digest.sha256;
+    const stateKey = `runtime:${required.role}:${digest}`;
+    if (input.state.publication!.registration.digests?.[stateKey] !== digest) {
+      throw new Error(`registration stage does not bind required Run artifact ${required.role}/${digest}`);
+    }
+    registration.push({ id: stateKey, role: required.role, digest: `sha256:${digest}`, bytes: getSealedBytes(input.workspaceDir, digest), mediaType: required.artifact.mediaType ?? "application/octet-stream" });
+  }
+  buildBenchmarkPublicationPlan({
+    id: `benchmark-report-v2:${input.state.draftId}:${input.reportRecordSha256}`,
+    runId: "run",
+    registration,
+    accounting: {
+      accounting: { id: "benchmark-accounting", kind: BENCHMARK_ACCOUNTING_RECORD_KIND, digest: `sha256:${input.state.accountingSha256!}`, bytes: input.accountingBytes, mediaType: BENCHMARK_ACCOUNTING_MEDIA_TYPE, authority: { mode: "owner" }, announcementTimestamp: accountingAt },
+      matrix: { id: "matrix-v2", kind: MATRIX_RECORD_KIND, digest: `sha256:${input.state.matrixV2Sha256!}`, bytes: input.matrixBytes, mediaType: MATRIX_MEDIA_TYPE, authority: { mode: "owner" }, announcementTimestamp: matrixAt },
+    },
+    report: { record: { id: "signed-report-v2", kind: REPORT_V2_RECORD_KIND, digest: `sha256:${input.reportRecordSha256}`, bytes: input.reportBytes, mediaType: SIGNED_REPORT_MEDIA_TYPE, authority: { mode: "owner" }, announcementTimestamp: input.reportTimestamp } },
+  });
+}
+
 /**
  * Announces the v2 envelope only after accounting and Matrix v2 are complete and retrievable.
  * It never invokes a backend or venue, so it is equally valid for post-hoc managed-run closure.
@@ -132,34 +240,50 @@ export function publicationReport(
       if (publication.registration.state !== "complete" || publication.accounting.state !== "complete" || publication.matrixV2.state !== "complete") {
         refuse("conflict", `runs.${input.draftId}.publication`, "registration, accounting, and Matrix v2 publication must complete before signed report publication");
       }
-      if (publication.report.state === "complete") {
-        if (state.reportPayloadSha256 === undefined || state.reportRecordSha256 === undefined || publication.report.receipt === undefined) {
-          refuse("record-integrity", `runs.${input.draftId}.publication.report`, "completed report stage is missing its identities or durable receipt");
-        }
-        const source = createWorkspacePublicationSource(context.workspaceDir, publication.source.name);
-        return {
-          reportPayloadSha256: state.reportPayloadSha256,
-          reportRecordSha256: state.reportRecordSha256,
-          source: source.source,
-          receipt: publication.report.receipt,
-          preregistered: parseSignedReportRecord(getSealedBytes(context.workspaceDir, state.reportRecordSha256)).payload.preregistered ?? false,
-        };
-      }
+      const runSha256 = state.runSha256;
+      const accountingSha256 = state.accountingSha256;
+      const matrixV2Sha256 = state.matrixV2Sha256;
       const publicBaseUrl = publication.source.publicBaseUrl;
       if (publicBaseUrl === undefined) refuse("validation", "publicBaseUrl", "configure a publicBaseUrl before signed report publication");
       const source = createWorkspacePublicationSource(context.workspaceDir, publication.source.name);
       if (source.source.agent !== publication.source.agentKeyRef || source.source.agent !== state.owner) {
         refuse("conflict", `runs.${input.draftId}.publication.source`, "Run owner and publication source must remain the same workspace did:key");
       }
+      return await withWorkspacePublicationSourceLock(context.workspaceDir, async () => {
+        await source.writer.recover();
+        const durable = await source.writer.readState();
+        if (durable === undefined) refuse("record-integrity", "publication.report.receipts", "publication source has no durable state");
+        try {
+          requireDurableClosure(state, durable, publication.report.state === "complete");
+        } catch (cause) {
+          refuse("record-integrity", "publication.report.receipts", cause instanceof Error ? cause.message : String(cause));
+        }
+        const head = await source.head.getExact();
+        if (head === undefined || durable.last === null || head.sequence !== durable.last.sequence || head.entry !== durable.last.entryDigest) {
+          refuse("record-integrity", "publication.report.sourceHead", "signed source head does not match the durable source position");
+        }
+        const stageAt = publication.report.announcedAt ?? timestampAfter(at, head.issuedAt);
+        if (publication.report.state === "complete") {
+          if (state.reportPayloadSha256 === undefined || state.reportRecordSha256 === undefined || publication.report.receipt === undefined) {
+            refuse("record-integrity", `runs.${input.draftId}.publication.report`, "completed report stage is missing its identities or durable receipt");
+          }
+          return {
+            reportPayloadSha256: state.reportPayloadSha256,
+            reportRecordSha256: state.reportRecordSha256,
+            source: source.source,
+            receipt: publication.report.receipt,
+            preregistered: parseSignedReportRecord(getSealedBytes(context.workspaceDir, state.reportRecordSha256)).payload.preregistered ?? false,
+          };
+        }
 
       // These exact-public probes are a report policy gate, not a best-effort presentation check.
-      const accountingBytes = getSealedBytes(context.workspaceDir, state.accountingSha256);
-      const matrixBytes = getSealedBytes(context.workspaceDir, state.matrixV2Sha256);
+      const accountingBytes = getSealedBytes(context.workspaceDir, accountingSha256);
+      const matrixBytes = getSealedBytes(context.workspaceDir, matrixV2Sha256);
       try {
         const accounting = parseBenchmarkAccounting(accountingBytes);
         parseMatrix(matrixBytes);
-        await probeRecord(publicBaseUrl, state.accountingSha256, accountingBytes, "BenchmarkAccounting");
-        await probeRecord(publicBaseUrl, state.matrixV2Sha256, matrixBytes, "Matrix v2");
+        await probeRecord(publicBaseUrl, accountingSha256, accountingBytes, "BenchmarkAccounting");
+        await probeRecord(publicBaseUrl, matrixV2Sha256, matrixBytes, "Matrix v2");
         await probeAccountingSupport(publicBaseUrl, context.workspaceDir, accounting);
       } catch (cause) {
         refuse("record-integrity", "publication.report.dependencies", cause instanceof Error ? cause.message : String(cause));
@@ -167,7 +291,7 @@ export function publicationReport(
 
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (document.spec.taskSet.kind !== "benchmark") refuse("conflict", `drafts.${input.draftId}.taskSet`, "signed report publication requires a benchmark run");
-      const run = parseRun(getSealedBytes(context.workspaceDir, state.runSha256));
+      const run = parseRun(getSealedBytes(context.workspaceDir, runSha256));
       const selected = run.analysisPlan?.[run.analysisPlan.length - 1];
       if (selected === undefined) refuse("record-integrity", "run", "sealed Run carries no analysisPlan entry to report from");
       const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
@@ -196,7 +320,7 @@ export function publicationReport(
       const verified = await verifyReportV2({
         envelopeBytes: produced.envelope,
         subjects: [matrixBytes],
-        effectiveTime: at,
+        effectiveTime: stageAt,
         recordKind: REPORT_V2_RECORD_KIND,
         recordMediaType: SIGNED_REPORT_MEDIA_TYPE,
         publicRegistration: { accountingBytes: [accountingBytes] },
@@ -208,13 +332,26 @@ export function publicationReport(
       if (verified.reportPayloadSha256 !== produced.reportPayloadSha256 || verified.reportRecordSha256 !== produced.reportRecordSha256) {
         refuse("record-integrity", "publication.report.verify", "independent v2 verification returned different payload or envelope identities");
       }
+      try {
+        validateSemanticClosure({
+          workspaceDir: context.workspaceDir,
+          state,
+          runBytes: getSealedBytes(context.workspaceDir, runSha256),
+          accountingBytes,
+          matrixBytes,
+          reportBytes: produced.envelope,
+          reportRecordSha256: produced.reportRecordSha256,
+          reportTimestamp: stageAt,
+        });
+      } catch (cause) {
+        refuse("record-integrity", "publication.report.closure", cause instanceof Error ? cause.message : String(cause));
+      }
       for (const [field, value] of [["reportPayloadSha256", state.reportPayloadSha256], ["reportRecordSha256", state.reportRecordSha256]] as const) {
         if (value !== undefined && value !== (field === "reportPayloadSha256" ? produced.reportPayloadSha256 : produced.reportRecordSha256)) {
           refuse("conflict", `runs.${input.draftId}.${field}`, "report identity is immutable once established");
         }
       }
 
-      const stageAt = publication.report.announcedAt ?? at;
       if (publication.report.state === "not-started") {
         state = { ...state, publication: { ...publication, report: { state: "in-progress", announcedAt: stageAt } } };
         writeRunState(context.workspaceDir, input.draftId, state);
@@ -235,9 +372,7 @@ export function publicationReport(
         { id: "signed-report-v2", kind: REPORT_V2_RECORD_KIND, digest: `sha256:${recordSha256}`, bytes: produced.envelope, mediaType: SIGNED_REPORT_MEDIA_TYPE, authority: { mode: "owner" }, actions: ["store", "announce"], announcementTimestamp: stageAt, dependsOn: ["report-payload", "report-authorship"] },
       ];
       const plan: PublicationPlan = { id: `benchmark-report-v2:${input.draftId}:${payloadSha256}:${recordSha256}`, stages: [{ stage: "report", members }] };
-      await withWorkspacePublicationSourceLock(context.workspaceDir, async () => {
-        await source.writer.recover();
-        await executePublicationPlan(plan, {
+      await executePublicationPlan(plan, {
           objects: source.artifactStore,
           journal: createWorkspacePublicationJournal(context.workspaceDir, input.draftId, "report"),
           authority: { async authorizeAnnouncement({ record }) {
@@ -251,7 +386,6 @@ export function publicationReport(
             announcement: { announcementId: `benchmark-report-v2:${input.draftId}:${recordSha256}`, action: "available", record: { kind: value.record.kind, digest: value.record.digest, mediaType: value.record.mediaType } },
             record: { bytes: value.record.bytes, contentType: value.record.mediaType },
           }); } },
-        });
       });
       await probeRecord(publicBaseUrl, recordSha256, produced.envelope, "signed Report v2");
       const receipt = await receiptFor(source, recordSha256);
@@ -271,6 +405,7 @@ export function publicationReport(
       });
       return { reportPayloadSha256: payloadSha256, reportRecordSha256: recordSha256, source: source.source,
         receipt: { sourceSequence: receipt.sequence, entrySha256: receipt.entryDigest.slice(7) }, preregistered: produced.record.preregistered ?? false };
+      });
     } finally { lock.release(); }
   } });
 }

@@ -8,7 +8,19 @@
 import { createHash, verify as cryptoVerify } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
-import { DISCOVERY_SIGNING_SCOPE, recordPath, type SourceIdentity } from "@jinn-network/record-discovery-protocol";
+import {
+  DISCOVERY_SIGNING_SCOPE,
+  MEDIA_HEAD,
+  dssePreAuthEncoding,
+  formatOrigin,
+  headPath,
+  parseSourceHead,
+  parseWireDsseEnvelope,
+  recordPath,
+  sealJson,
+  type SourceHead,
+  type SourceIdentity,
+} from "@jinn-network/record-discovery-protocol";
 import {
   createDurableSourceWriter,
   type CasSnapshot,
@@ -93,6 +105,10 @@ export interface WorkspacePublicationSource {
   readonly recordStore: {
     getExact(digest: `sha256:${string}`): Promise<Uint8Array | undefined>;
   };
+  /** Exact signed source head, used to allocate a strictly later frozen append timestamp. */
+  readonly head: {
+    getExact(): Promise<SourceHead | undefined>;
+  };
 }
 
 /** Creates/reopens the one stable source for this workspace. */
@@ -136,6 +152,25 @@ export function createWorkspacePublicationSource(workspaceDir: string, sourceNam
         if (stored === undefined) return undefined;
         if (publicationSha256(stored.bytes) !== digest) throw new Error(`source record ${digest} fails its recordPath digest`);
         return stored.bytes;
+      },
+    },
+    head: {
+      async getExact() {
+        const stored = await blobs.get(headPath(source.name));
+        if (stored === undefined) return undefined;
+        if (stored.contentType !== MEDIA_HEAD) throw new Error(`source head content type must be ${MEDIA_HEAD}`);
+        const envelope = parseWireDsseEnvelope(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored.bytes)));
+        if (envelope.envelope.payloadType !== MEDIA_HEAD) throw new Error(`source head payloadType must be ${MEDIA_HEAD}`);
+        const pae = dssePreAuthEncoding(MEDIA_HEAD, envelope.payloadBytes);
+        let valid = false;
+        for (const signature of envelope.signatures) {
+          if (signature.keyid === signer.keyId && await signer.verify(pae, signature.signatureBytes)) valid = true;
+        }
+        if (!valid) throw new Error("source head signature does not verify under the workspace source key");
+        const head = parseSourceHead(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(envelope.payloadBytes)));
+        if (head.origin !== formatOrigin(source.agent, source.name)) throw new Error("source head origin does not match the workspace source");
+        if (publicationSha256(envelope.payloadBytes) !== sealJson(head).digest) throw new Error("source head payload is not exact canonical JSON");
+        return head;
       },
     },
   };
