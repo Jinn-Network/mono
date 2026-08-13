@@ -104,20 +104,15 @@ export {
   HARBOR_LOGS_ROLE,
   HARBOR_ARTIFACT_MANIFEST_ROLE,
   HARBOR_COLLECTED_ARTIFACTS_ROLE,
-  HarborDirectVenue,
-  processHarborCommandRunner,
-  readHarborArchiveOnly,
-  harborEvidenceContribution,
+  readHarborDispatchArchive,
+  harborEvidenceContributionFromArchive,
 } from "./runtime/harbor/venue.js";
-export { resolveHarborSelection, createHarborDirectVenue } from "./runtime/harbor/host.js";
+export { resolveHarborSelection } from "./runtime/harbor/host.js";
 export type {
   HarborSelectionManifest,
 } from "./runtime/harbor/manifest.js";
 export type {
-  HarborCommandRunner,
-  HarborDispatchLineage,
   HarborDispatchArchive,
-  HarborArchivedArtifact,
 } from "./runtime/harbor/venue.js";
 export type { HarborRuntimeSelectionRequest, HarborRuntimeSelectionResolution } from "./runtime/harbor/host.js";
 

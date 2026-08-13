@@ -12,8 +12,7 @@ import type {
 } from "./inspect/manifest.js";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import type { Demo1ClaudeRuntimeBinding } from "../venue/demo1-claude.js";
-import { createHarborDirectVenue, resolveHarborSelection, type HarborRuntimeSelectionRequest, type HarborRuntimeSelectionResolution } from "./harbor/host.js";
-import type { HarborCommandRunner, HarborDirectVenue } from "./harbor/venue.js";
+import { resolveHarborSelection, type HarborRuntimeSelectionRequest, type HarborRuntimeSelectionResolution } from "./harbor/host.js";
 
 interface InspectRuntimeSelectionBase {
   readonly projectDir: string;
@@ -44,7 +43,6 @@ export interface InspectRuntimeSelectionResolution {
 export interface BenchmarkRuntimeHost {
   resolveInspectSelection(input: InspectRuntimeSelectionRequest, signal?: AbortSignal): Promise<InspectRuntimeSelectionResolution>;
   resolveHarborSelection(input: HarborRuntimeSelectionRequest, signal?: AbortSignal): Promise<HarborRuntimeSelectionResolution>;
-  createHarborVenue(input: { readonly workspaceDir: string; readonly binding: HarborRuntimeSelectionResolution["binding"]; readonly runner?: HarborCommandRunner }): HarborDirectVenue;
   createVenue(
     binding: EvaluationRuntimeBinding | undefined,
     options: Omit<LocalVenueOptions, "evaluationRuntime">,
@@ -130,7 +128,6 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
   const repositoryRoot = realpathSync(hostOptions.repositoryRoot ?? fileURLToPath(new URL("../../../../..", import.meta.url)));
   return {
     resolveHarborSelection,
-    createHarborVenue: createHarborDirectVenue,
     async resolveInspectSelection(input, signal) {
       if (input.execution === "oci") {
         return probeInspectOciSelection({

@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { z } from "zod";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../../fs/atomic.js";
 import { runtimeHostPath } from "../../workspace/layout.js";
 import { HarborSelectionManifestSchema, assertSupportedHarborVersion, type HarborSelectionManifest } from "./manifest.js";
-import { HarborDirectVenue, processHarborCommandRunner, type HarborCommandRunner } from "./venue.js";
 
 export interface HarborRuntimeSelectionRequest {
   readonly executable: string;
@@ -13,7 +13,6 @@ export interface HarborRuntimeSelectionRequest {
   readonly agent: HarborSelectionManifest["agent"];
   readonly model: HarborSelectionManifest["model"];
   readonly environment: HarborSelectionManifest["environment"];
-  readonly runner?: HarborCommandRunner;
 }
 
 export const HarborHostBindingSchema = z.object({ executable: z.string().min(1) }).strict();
@@ -28,10 +27,12 @@ export async function resolveHarborSelection(input: HarborRuntimeSelectionReques
   const executable = realpathSync(input.executable);
   if (!lstatSync(executable).isFile()) throw new TypeError("Harbor executable must be a regular file");
   const executableSha256 = createHash("sha256").update(readFileSync(executable)).digest("hex");
-  const runner = input.runner ?? processHarborCommandRunner;
-  const version = await runner.run(executable, ["--version"], undefined, signal);
-  if (version.code !== 0) throw new Error("Harbor version probe failed");
-  const resolvedVersion = new TextDecoder().decode(version.stdout).trim().replace(/^harbor\s+/iu, "");
+  const resolvedVersion = await new Promise<string>((resolve, reject) => {
+    execFile(executable, ["--version"], { encoding: "utf8", signal, env: { PATH: process.env.PATH ?? "", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1" } }, (error, stdout) => {
+      if (error !== null) reject(new Error("Harbor version probe failed", { cause: error }));
+      else resolve(stdout.trim().replace(/^harbor\s+/iu, ""));
+    });
+  });
   assertSupportedHarborVersion(resolvedVersion);
   const manifest = HarborSelectionManifestSchema.parse({
     schema: "jinn.network/benchmark-product/harbor-selection/1",
@@ -53,9 +54,4 @@ export function readHarborHostBinding(workspaceDir: string, selectionManifestSha
   if (bytes === undefined) throw new TypeError("the private Harbor executable binding is missing");
   try { return HarborHostBindingSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes))); }
   catch { throw new TypeError("the private Harbor executable binding is invalid"); }
-}
-
-/** Narrow host seam for direct Harbor; lifecycle wiring deliberately remains a later packet. */
-export function createHarborDirectVenue(input: { readonly workspaceDir: string; readonly binding: HarborHostBinding; readonly runner?: HarborCommandRunner }): HarborDirectVenue {
-  return new HarborDirectVenue({ workspaceDir: input.workspaceDir, executable: input.binding.executable, runner: input.runner });
 }

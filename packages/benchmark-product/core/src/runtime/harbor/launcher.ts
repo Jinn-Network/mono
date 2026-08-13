@@ -39,6 +39,7 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
       runPinning: { keys: [
         { key: "harness", inventory: [HARBOR_LAUNCHER_ID], posture: "enforced" },
         { key: "model", inventory: [input.manifest.model.id], posture: "enforced" },
+        { key: "harborArm", inventory: ["*"], posture: "enforced" },
         { key: "isolationPolicy", inventory: ["unrestricted"], posture: "enforced" },
       ] },
     }),
