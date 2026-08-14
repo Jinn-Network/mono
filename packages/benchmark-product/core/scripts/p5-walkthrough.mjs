@@ -62,15 +62,20 @@ function expectOk(label, result) {
   return result.result;
 }
 
+export function p5BuildEntrypoint() {
+  return join(packageRoot, "scripts", "build.mjs");
+}
+
 function ensureBuilt() {
   const tsc = join(packageRoot, "node_modules", "typescript", "bin", "tsc");
   if (!existsSync(tsc)) fail("dependencies are not installed; run the package's immutable install first");
-  rmSync(distRoot, { recursive: true, force: true });
-  const built = spawnSync(process.execPath, [tsc, "-p", "tsconfig.build.json"], {
+  const buildEntrypoint = p5BuildEntrypoint();
+  if (!existsSync(buildEntrypoint)) fail("the package's canonical build entrypoint is missing");
+  const built = spawnSync(process.execPath, [buildEntrypoint], {
     cwd: packageRoot,
     stdio: "inherit",
   });
-  if (built.status !== 0) fail(`clean build exited ${String(built.status)}`);
+  if (built.status !== 0) fail(`canonical clean build exited ${String(built.status)}`);
 }
 
 export function createDockerGateWrapper(root, dockerPath) {

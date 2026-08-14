@@ -7,10 +7,17 @@ import {
   assertP5ReadyToCollect,
   finishStagedBundle,
   p5ArmPinning,
+  p5BuildEntrypoint,
   p5CheckpointAction,
   p5ResumeNeeded,
   runCanonicalP5GreenBaseline,
 } from "./p5-walkthrough.mjs";
+
+test("walkthrough rebuilds through the package entrypoint that copies runtime assets", () => {
+  const buildEntrypoint = p5BuildEntrypoint();
+  assert.equal(buildEntrypoint.endsWith("/scripts/build.mjs"), true);
+  assert.equal(existsSync(buildEntrypoint), true);
+});
 
 test("canonical walkthrough always wires v2 pre-stage stop capture with attempt identity", async () => {
   let received;
