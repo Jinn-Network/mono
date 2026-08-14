@@ -447,6 +447,14 @@ function authenticatedWinnerSource(candidate: Demo1CandidateInput): ParsedDemo1U
   return parsed;
 }
 
+/** Authenticates candidate bytes without selecting a winner or authorizing any execution. */
+export function authenticateDemo1CandidateInstructionSource(
+  candidate: Omit<Demo1CandidateInput, "tasks">,
+): ParsedDemo1UpstreamSkill {
+  validateCandidateSource(candidate.source);
+  return authenticatedWinnerSource({ ...candidate, tasks: [] });
+}
+
 function inspectTask(task: Demo1TaskEligibilityInput): Demo1TaskInventory {
   assertExactKeys(task, ["taskId", "repository", "pool", "taskSha256", "image", "checks"], `${task.taskId} task`);
   nonEmpty(task.taskId, "taskId");

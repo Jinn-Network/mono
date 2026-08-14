@@ -1928,7 +1928,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2978,
       "generatedOutputSources": 1330,
-      "generatorSources": 639,
+      "generatorSources": 642,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -19452,6 +19452,36 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/demo1-task-evidence-freeze.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/demo1-task-evidence-runner.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/demo1-task-evidence-runner.test.mjs"
       },
       {
         "categories": [
