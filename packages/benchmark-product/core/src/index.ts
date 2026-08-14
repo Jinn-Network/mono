@@ -170,7 +170,9 @@ export {
   DEMO1_CLAUDE_OAUTH_SECRET_TARGET,
   DEMO1_EXPERIMENT_PATHS,
   DEMO1_SKILL_PATH,
+  createDemo1ClaudeCandidateRuntimeBinding,
   createDemo1ClaudeRuntimeBinding,
+  createDemo1ClaudeSelectedRuntimeBinding,
   demo1ClaudeArmRequirements,
   generateDemo1InstructionArtifacts,
 } from "./venue/demo1-claude.js";
@@ -231,6 +233,27 @@ export type {
   Demo1TaskInventory,
 } from "./method/demo1-prerun.js";
 
+// Demo-1 v2 selects the cheapest runtime that can produce an informative benchmark before any
+// official freeze. The accepted v1 Haiku/high artifacts remain unchanged and independently
+// verifiable.
+export {
+  DEMO1_PROVIDER_CALL_LIMITS,
+  DEMO1_RUNTIME_CANDIDATES,
+  DEMO1_RUNTIME_POLICY_SCHEMA,
+  DEMO1_RUNTIME_SELECTION_SCHEMA,
+  buildDemo1RuntimeSelection,
+  decideDemo1Runtime,
+  demo1RuntimePolicyDecisionDigest,
+  verifyDemo1RuntimeSelection,
+} from "./method/demo1-runtime-policy.js";
+export type {
+  Demo1RuntimeCandidate,
+  Demo1RuntimeDisposition,
+  Demo1RuntimePolicyDecision,
+  Demo1RuntimeSelection,
+  Demo1RuntimeSuitabilitySummary,
+} from "./method/demo1-runtime-policy.js";
+
 // Demo-1 suitability and E2 sizing are local method artifacts, not new evidence record kinds.
 // They schedule only task identities already frozen by the pre-run method and cannot execute
 // Docker/model cells or claim power without complete rehearsal observations.
@@ -282,11 +305,13 @@ export type {
 } from "./method/demo1-e2-design.js";
 export type {
   Demo1ClaudeArm,
+  Demo1ClaudeCandidateRuntimeOptions,
   Demo1ClaudeCommand,
   Demo1ClaudeOAuthCredentialOptions,
   Demo1ClaudeReadiness,
   Demo1ClaudeRuntimeBinding,
   Demo1ClaudeRuntimeOptions,
+  Demo1ClaudeSelectedRuntimeOptions,
   Demo1InstructionArtifacts,
   Demo1SkillFrontmatter,
 } from "./venue/demo1-claude.js";

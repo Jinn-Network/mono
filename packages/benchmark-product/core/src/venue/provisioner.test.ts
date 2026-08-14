@@ -287,6 +287,41 @@ describe("createLocalProvisioner — repository-work cells", () => {
     expect(() => gitIn(paths.work, "symbolic-ref", "-q", "HEAD")).toThrow();
   });
 
+  it.each(["claude-code", "codex"])("provisions and harvests a normal profile-backed %s arm without Demo-1 instruction inventory", async (harnessId) => {
+    const upstream = makeUpstreamRepository();
+    const root = mkdtempSync(join(tmpdir(), "provisioner-profiled-claude-"));
+    const paths = workspacePathsUnder(root);
+    const task = repositoryWorkTask(upstream.uri, upstream.oid);
+    const requirements = {
+      harness: { id: harnessId, version: "2.1.222", digest: "a".repeat(64) },
+      model: { id: "claude-haiku-4-5-20251001" },
+      effort: "low",
+      isolationPolicy: "unrestricted",
+    };
+    const selected = createLocalProvisioner({
+      registry: createEvaluationCellRegistry(),
+      evaluators: [],
+      repositoryMirror: createGitRepositoryMirror(join(root, "mirrors")),
+    })({
+      task,
+      sealedTaskBytes: new TextEncoder().encode("{}"),
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+      submission: { requirements },
+      attempt: { attemptUri: "urn:uuid:x", nonce: "n", attemptNumber: 1 },
+    } as never);
+
+    await selected.contract.setup({ task, effectiveRequirements: requirements } as never, paths, []);
+
+    expect(existsSync(join(paths.work, "README.md"))).toBe(true);
+    expect(existsSync(join(paths.work, DEMO1_CLAUDE_MD_PATH))).toBe(false);
+    expect(existsSync(join(paths.work, DEMO1_SKILL_PATH))).toBe(false);
+    writeFileSync(join(paths.work, "README.md"), "upstream\nprofile-backed change\n");
+    await selected.contract.harvest(paths, [
+      { name: "patch", mediaType: "text/x-diff", required: true },
+    ] as never);
+    expect(readFileSync(join(paths.out, "patch"), "utf8")).toContain("+profile-backed change");
+  });
+
   it("places native Claude instructions and extracts byte-identical clean patches for A, B, and no-file C", async () => {
     const upstream = makeUpstreamRepository();
     const artifacts = generateDemo1InstructionArtifacts(

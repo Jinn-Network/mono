@@ -1,9 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { QUALIFIED_HARNESS_LOGIN_ARTIFACTS } from "@colophon-claims/core";
 import { describe, expect, test } from "vitest";
-import { browserCommand, runColophonCli, writeQuickstartCompanions } from "./main.js";
 import { BUILD_METADATA_KIND, DEFAULT_QUALIFIED_TARGETS, type ColophonBuildMetadata } from "./build-metadata.js";
+import { browserCommand, runColophonCli, writeQuickstartCompanions } from "./main.js";
 
 const TEST_BUILD: ColophonBuildMetadata = {
   kind: BUILD_METADATA_KIND,
@@ -67,6 +68,53 @@ describe("Colophon install surface", () => {
     const answer = await runColophonCli(["demo", "--output", "--json"], context);
     expect(answer).toMatchObject({ exitCode: 2, stderr: "" });
     expect(JSON.parse(answer.stdout)).toMatchObject({ ok: false, error: { code: "invalid-invocation" } });
+  });
+
+  test("forwards subscription login only from an interactive public CLI terminal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "colophon-public-login-"));
+    const agents = join(root, "agents");
+    mkdirSync(agents, { recursive: true });
+    const qualification = QUALIFIED_HARNESS_LOGIN_ARTIFACTS[0]!;
+    writeFileSync(join(agents, "qualified.json"), JSON.stringify({
+      format: "colophon-agent/1",
+      agentId: "qualified",
+      adapter: qualification.adapter,
+      executable: {
+        path: "/qualified/harness",
+        sha256: qualification.executableSha256,
+        version: qualification.executableVersion,
+      },
+      model: "provider-model-exact",
+      effort: "low",
+      network: "provider-required",
+    }));
+    let captures = 0;
+    const subscriptionLogin = async () => {
+      captures += 1;
+      return {
+        format: "colophon-agent-credential/1" as const,
+        agentId: "qualified",
+        kind: "credential-artifact" as const,
+        secretBasename: "qualified.login-artifact",
+      };
+    };
+
+    const refused = await runColophonCli(["agent", "login", "--agent", "qualified"], {
+      ...context,
+      agentDataDir: root,
+      subscriptionLogin,
+    });
+    expect(refused.exitCode).toBe(2);
+    expect(captures).toBe(0);
+
+    const accepted = await runColophonCli(["agent", "login", "--agent", "qualified"], {
+      ...context,
+      interactive: true,
+      agentDataDir: root,
+      subscriptionLogin,
+    });
+    expect(accepted.exitCode).toBe(0);
+    expect(captures).toBe(1);
   });
 
   test("writes a non-secret receipt and next steps beside, not inside, the bundle", () => {

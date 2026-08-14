@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -64,11 +64,77 @@ function claudeToken(output: string): string {
   return matches[0]!;
 }
 
-function codexArtifact(home: string): string {
-  const entries = readdirSync(home).sort();
-  if (entries.length !== 1 || entries[0] !== "auth.json") {
-    throw new Error("Codex device login wrote files other than the qualified auth.json artifact");
+function validateCodexRuntimeDirectory(home: string, executable: string): void {
+  const temporaryDirectory = join(home, "tmp");
+  const temporaryStat = lstatSync(temporaryDirectory);
+  if (!temporaryStat.isDirectory() || temporaryStat.isSymbolicLink()) {
+    throw new Error("Codex device login temporary path is not a regular directory");
   }
+  const temporaryEntries = readdirSync(temporaryDirectory).sort();
+  if (temporaryEntries.length !== 1 || temporaryEntries[0] !== "arg0") {
+    throw new Error("Codex device login wrote an unqualified temporary artifact");
+  }
+  const arg0Directory = join(temporaryDirectory, "arg0");
+  const arg0Stat = lstatSync(arg0Directory);
+  if (!arg0Stat.isDirectory() || arg0Stat.isSymbolicLink() || (arg0Stat.mode & 0o077) !== 0) {
+    throw new Error("Codex device login arg0 path is not a private regular directory");
+  }
+  const sessions = readdirSync(arg0Directory).sort();
+  if (sessions.length !== 1 || !/^codex-arg0[A-Za-z0-9_-]+$/u.test(sessions[0]!)) {
+    throw new Error("Codex device login wrote an unqualified arg0 session");
+  }
+  const sessionDirectory = join(arg0Directory, sessions[0]!);
+  const sessionStat = lstatSync(sessionDirectory);
+  if (!sessionStat.isDirectory() || sessionStat.isSymbolicLink()) {
+    throw new Error("Codex device login arg0 session is not a regular directory");
+  }
+  const expectedHelpers = [
+    ".lock",
+    "apply_patch",
+    "applypatch",
+    "codex-execve-wrapper",
+    ...(process.platform === "linux" ? ["codex-linux-sandbox"] : []),
+  ].sort();
+  const helpers = readdirSync(sessionDirectory).sort();
+  if (helpers.length !== expectedHelpers.length
+    || helpers.some((entry, index) => entry !== expectedHelpers[index])) {
+    throw new Error("Codex device login wrote an unqualified arg0 helper");
+  }
+  const lockStat = lstatSync(join(sessionDirectory, ".lock"));
+  if (!lockStat.isFile() || lockStat.isSymbolicLink() || lockStat.size > 4_096) {
+    throw new Error("Codex device login arg0 lock is not a bounded regular file");
+  }
+  const expectedExecutable = realpathSync(executable);
+  for (const helper of expectedHelpers.filter((entry) => entry !== ".lock")) {
+    const helperPath = join(sessionDirectory, helper);
+    if (!lstatSync(helperPath).isSymbolicLink() || realpathSync(helperPath) !== expectedExecutable) {
+      throw new Error("Codex device login arg0 helper does not resolve to the qualified executable");
+    }
+  }
+}
+
+function codexArtifact(home: string, executable: string): string {
+  const entries = readdirSync(home).sort();
+  if (entries.some((entry) => entry !== "auth.json" && entry !== "log" && entry !== "tmp")
+    || !entries.includes("auth.json")) {
+    throw new Error("Codex device login wrote an unqualified filesystem artifact");
+  }
+  if (entries.includes("log")) {
+    const logDirectory = join(home, "log");
+    const directoryStat = lstatSync(logDirectory);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+      throw new Error("Codex device login log path is not a regular private directory");
+    }
+    const logEntries = readdirSync(logDirectory).sort();
+    if (logEntries.length !== 1 || logEntries[0] !== "codex-login.log") {
+      throw new Error("Codex device login wrote an unqualified log artifact");
+    }
+    const logStat = lstatSync(join(logDirectory, "codex-login.log"));
+    if (!logStat.isFile() || logStat.isSymbolicLink() || logStat.size > 1_048_576) {
+      throw new Error("Codex device login log is not a bounded regular file");
+    }
+  }
+  if (entries.includes("tmp")) validateCodexRuntimeDirectory(home, executable);
   const artifact = join(home, "auth.json");
   const stat = lstatSync(artifact);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 2 || stat.size > 1_048_576) {
@@ -129,7 +195,7 @@ export function captureQualifiedSubscriptionLogin(
     });
     if (outcome.status !== 0) throw new Error("Codex subscription login was not completed");
     if (!existsSync(codexHome)) throw new Error("Codex subscription login did not create its isolated home");
-    return storeQualifiedLoginArtifact(dataDir, profile, codexArtifact(codexHome));
+    return storeQualifiedLoginArtifact(dataDir, profile, codexArtifact(codexHome, profile.executable.path));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

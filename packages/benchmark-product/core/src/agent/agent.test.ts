@@ -111,7 +111,7 @@ describe("machine-local agent profiles", () => {
     expect(readdirSync(temporaryBase)).toEqual([]);
   });
 
-  it("accepts only auth.json from an isolated qualified Codex device login", () => {
+  it("accepts auth.json plus Codex's bounded login log from an isolated qualified device login", () => {
     const temporaryBase = join(root, "codex-login-tmp");
     mkdirSync(temporaryBase, { mode: 0o700 });
     const qualified = {
@@ -132,6 +132,18 @@ describe("machine-local agent profiles", () => {
         expect(invocation.args).toEqual(["login", "--device-auth"]);
         expect(invocation.captureStdout).toBe(false);
         writeFileSync(join(invocation.env.CODEX_HOME!, "auth.json"), JSON.stringify({ tokens: { access_token: "private" } }), { mode: 0o600 });
+        mkdirSync(join(invocation.env.CODEX_HOME!, "log"), { mode: 0o700 });
+        writeFileSync(join(invocation.env.CODEX_HOME!, "log", "codex-login.log"), "login completed\n", { mode: 0o600 });
+        const arg0 = join(invocation.env.CODEX_HOME!, "tmp", "arg0", "codex-arg0fixture");
+        mkdirSync(arg0, { recursive: true, mode: 0o700 });
+        chmodSync(join(invocation.env.CODEX_HOME!, "tmp", "arg0"), 0o700);
+        writeFileSync(join(arg0, ".lock"), "", { mode: 0o600 });
+        for (const helper of [
+          "apply_patch",
+          "applypatch",
+          "codex-execve-wrapper",
+          ...(process.platform === "linux" ? ["codex-linux-sandbox"] : []),
+        ]) symlinkSync(executable, join(arg0, helper));
         return { status: 0, stdout: "" };
       },
     });
@@ -144,6 +156,7 @@ describe("machine-local agent profiles", () => {
     mkdirSync(temporaryBase, { mode: 0o700 });
     const qualified = {
       ...profile(),
+      agentId: "codex-subscription",
       executable: {
         path: executable,
         version: "0.147.0",
@@ -160,7 +173,68 @@ describe("machine-local agent profiles", () => {
         writeFileSync(join(invocation.env.CODEX_HOME!, "config.toml"), "unexpected", { mode: 0o600 });
         return { status: 0, stdout: "" };
       },
-    })).toThrow(/files other than/u);
+    })).toThrow(/unqualified filesystem artifact/u);
+    expect(readdirSync(temporaryBase)).toEqual([]);
+  });
+
+  it("refuses and cleans an unexpected file inside the Codex login log directory", () => {
+    const temporaryBase = join(root, "codex-login-extra-log-tmp");
+    mkdirSync(temporaryBase, { mode: 0o700 });
+    const qualified = {
+      ...profile(),
+      executable: {
+        path: executable,
+        version: "0.147.0",
+        sha256: "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+      },
+      model: "gpt-5.3-codex-mini",
+      effort: "low" as const,
+    };
+    expect(() => captureQualifiedSubscriptionLogin(dataDir, qualified, {
+      temporaryBase,
+      validateExecutable() {},
+      runner(invocation) {
+        writeFileSync(join(invocation.env.CODEX_HOME!, "auth.json"), "{}", { mode: 0o600 });
+        mkdirSync(join(invocation.env.CODEX_HOME!, "log"), { mode: 0o700 });
+        writeFileSync(join(invocation.env.CODEX_HOME!, "log", "codex-login.log"), "login completed\n", { mode: 0o600 });
+        writeFileSync(join(invocation.env.CODEX_HOME!, "log", "unexpected.log"), "unexpected\n", { mode: 0o600 });
+        return { status: 0, stdout: "" };
+      },
+    })).toThrow(/unqualified log artifact/u);
+    expect(readdirSync(temporaryBase)).toEqual([]);
+  });
+
+  it("refuses and cleans an unexpected Codex arg0 helper", () => {
+    const temporaryBase = join(root, "codex-login-extra-helper-tmp");
+    mkdirSync(temporaryBase, { mode: 0o700 });
+    const qualified = {
+      ...profile(),
+      agentId: "codex-subscription",
+      executable: {
+        path: executable,
+        version: "0.147.0",
+        sha256: "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+      },
+      model: "gpt-5.3-codex-mini",
+      effort: "low" as const,
+    };
+    expect(() => captureQualifiedSubscriptionLogin(dataDir, qualified, {
+      temporaryBase,
+      validateExecutable() {},
+      runner(invocation) {
+        writeFileSync(join(invocation.env.CODEX_HOME!, "auth.json"), "{}", { mode: 0o600 });
+        const arg0 = join(invocation.env.CODEX_HOME!, "tmp", "arg0", "codex-arg0fixture");
+        mkdirSync(arg0, { recursive: true, mode: 0o700 });
+        chmodSync(join(invocation.env.CODEX_HOME!, "tmp", "arg0"), 0o700);
+        writeFileSync(join(arg0, ".lock"), "", { mode: 0o600 });
+        symlinkSync(executable, join(arg0, "apply_patch"));
+        symlinkSync(executable, join(arg0, "applypatch"));
+        symlinkSync(executable, join(arg0, "codex-execve-wrapper"));
+        if (process.platform === "linux") symlinkSync(executable, join(arg0, "codex-linux-sandbox"));
+        symlinkSync(executable, join(arg0, "unexpected-helper"));
+        return { status: 0, stdout: "" };
+      },
+    })).toThrow(/unqualified arg0 helper/u);
     expect(readdirSync(temporaryBase)).toEqual([]);
   });
 
