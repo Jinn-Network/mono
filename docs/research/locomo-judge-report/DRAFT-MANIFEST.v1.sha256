@@ -1,0 +1,6 @@
+# Manifest version: v1
+# Created before the 2026-08-14 operator rulings and human-attestation amendment.
+# SHA-256 of the original DRAFT-MANIFEST.sha256: efb7d59530e2710e3a461709c731a42cadcdca35a7fc63df09deced83e72f614
+002a520cf5c5bcd06e2b43552b811c3011050ff148a174e58a02584d8c888a17  DESIGN.md
+dfeb0d8b88a9641750c40090c1d47fca58c423ddc491a523d2ebd190a7df6e9f  ITEM-BANK-PLAN.md
+c7ba6fddb16f691adcbddc2981e249baef0afb8b9c5b78a0bdad3f1916378d4a  OPEN-QUESTIONS.md

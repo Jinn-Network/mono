@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:colophon:locomo-judge-report:task-core:1",
+  "title": "LoCoMo human-evaluation task core",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "item_id",
+    "source_question_id",
+    "source_dataset_sha256",
+    "question",
+    "reference_released",
+    "reference_for_review",
+    "source_context_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "locomo-task-core@1"},
+    "item_id": {"type": "string", "minLength": 1},
+    "source_question_id": {"type": "string", "minLength": 1},
+    "source_dataset_sha256": {"$ref": "#/$defs/sha256"},
+    "question": {"type": "string", "minLength": 1},
+    "reference_released": {"type": "string", "minLength": 1},
+    "reference_for_review": {"type": "string", "minLength": 1},
+    "source_context_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

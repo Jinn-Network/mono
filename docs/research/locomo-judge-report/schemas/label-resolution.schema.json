@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:colophon:locomo-judge-report:label-resolution:1",
+  "title": "LoCoMo deterministic label-resolution projection",
+  "description": "A verifier-recomputable application projection, not an additional source-of-truth evidence record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_core_sha256",
+    "candidate_sha256",
+    "evidence_packet_sha256",
+    "policy_sha256",
+    "primary_evaluation_sha256",
+    "derivation",
+    "truth_label"
+  ],
+  "properties": {
+    "schema_version": {"const": "locomo-label-resolution@1"},
+    "task_core_sha256": {"$ref": "#/$defs/sha256"},
+    "candidate_sha256": {"$ref": "#/$defs/sha256"},
+    "evidence_packet_sha256": {"$ref": "#/$defs/sha256"},
+    "policy_sha256": {"$ref": "#/$defs/sha256"},
+    "primary_evaluation_sha256": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/sha256"}
+    },
+    "derivation": {"const": "unanimous-primary-pair"},
+    "truth_label": {"enum": ["accept", "reject"]}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

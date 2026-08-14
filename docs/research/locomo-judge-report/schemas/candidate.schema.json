@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:colophon:locomo-judge-report:candidate:1",
+  "title": "LoCoMo candidate answer artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "item_id", "task_core_sha256", "candidate_answer"],
+  "properties": {
+    "schema_version": {"const": "locomo-candidate@1"},
+    "item_id": {"type": "string", "minLength": 1},
+    "task_core_sha256": {"$ref": "#/$defs/sha256"},
+    "candidate_answer": {"type": "string", "minLength": 1, "maxLength": 4000}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}
