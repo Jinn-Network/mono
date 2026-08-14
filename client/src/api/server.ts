@@ -61,7 +61,7 @@ import {
 import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
 import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 import { addDiscoveryRoutes } from './discovery-endpoint.js';
-import type { DiscoveryAPI } from '../discovery/types.js';
+import type { ArchiveReads } from '../archive/reads.js';
 import type { PluginPublicationReader } from '../plugin-registry/publication-reader.js';
 import { addDebugReportRoutes, type DebugReportRoutesConfig } from './debug-report-endpoint.js';
 import { addRewardsRoutes } from './rewards-endpoint.js';
@@ -182,34 +182,21 @@ export interface ApiServerConfig {
   /** Operator review API for pending captures. */
   captures?: CapturesRoutesDeps;
   /**
-   * Discovery API. Mounts GET /v1/discovery/* routes that proxy DiscoveryAPI
-   * methods (listPluginPublications, listBuilderArtifacts, getPluginScores)
-   * so the SPA's /build route can fetch them without direct GraphQL or RPC
-   * access.
-   *
-   * Accepts either a direct instance or a holder ref (same pattern as
-   * solverNetsLauncher / harnessReadinessRegistry). main.ts uses the holder
-   * shape because the daemon's DiscoveryAPI is constructed post-bootstrap;
-   * routes register eagerly at server start so Hono's matcher includes them
-   * before the first request. Without this, every /v1/discovery/* request
-   * gets a 404 forever, and the /build page renders "Discovery unavailable"
-   * permanently (jinn-mono-u34i field repro).
-   */
-  discovery?:
-    | DiscoveryAPI
-    | { holder: { current: DiscoveryAPI | undefined } };
-  /**
-   * One-swap R3 (#2461): the plugin-publication reader backing the /build
-   * page's plug-in routes (`plugin-publications` / `builder-artifacts` /
-   * `plugin-scores`), carved off `discovery/` onto the IdentityRegistry log
-   * source so those routes survive the D-wave deletion. When set it supersedes
-   * `discovery` for those three routes; when absent they fall back to
-   * `discovery`. Direct instance or holder ref (same lazy pattern as
-   * `discovery`).
+   * Plugin-publication reader backing the /build page's plug-in routes
+   * (`plugin-publications` / `builder-artifacts` / `plugin-scores`). Direct
+   * instance or holder ref (eager-register / late-populate). Required for
+   * those routes after Wave-4 D4 — there is no DiscoveryAPI fallback.
    */
   pluginReader?:
     | PluginPublicationReader
     | { holder: { current: PluginPublicationReader | undefined } };
+  /**
+   * Archive/projector reads backing `GET /v1/discovery/task-post-counts`
+   * (and launcher `getTaskStatuses`). Direct instance or holder ref.
+   */
+  archiveReads?:
+    | ArchiveReads
+    | { holder: { current: ArchiveReads | undefined } };
   /**
    * One-click operator debug report (issue #420). When set, mounts
    * `GET /v1/debug-report/manifest` + `POST /v1/debug-report` under the UI
@@ -558,16 +545,9 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     const reg = config.harnessReadinessRegistry;
     const getRegistry = (): HarnessReadinessRegistry | null =>
       reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
-    // Resolve the live DiscoveryAPI (holder pattern, same as the registry above) so status
-    // reads can enrich task-relative outcomes (#502). When the holder is empty
-    // (pre-bootstrap) this is undefined and gather-status leaves outcomes null.
-    const disc = config.discovery;
-    const liveDiscovery: DiscoveryAPI | undefined =
-      disc && 'holder' in disc ? disc.holder.current : disc;
     return liveStatus
       ? {
           ...liveStatus,
-          discovery: liveDiscovery,
           harnessReadiness: () => {
             const live = getRegistry();
             if (!live) return null;
@@ -712,41 +692,27 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     getBootstrapExtras: () => config.bootstrap?.configReader?.(),
   });
 
-  if (config.discovery || config.pluginReader) {
-    // One-swap R3 (#2461): resolve the plugin-publication reader provider that
-    // backs the three /build plug-in routes. Direct instance or holder ref;
-    // when unset the routes fall back to `discovery` inside addDiscoveryRoutes.
+  if (config.pluginReader || config.archiveReads) {
     const pr = config.pluginReader;
-    const pluginReader: (() => PluginPublicationReader | null) | undefined =
+    const pluginReader: () => PluginPublicationReader | null =
       pr === undefined
-        ? undefined
+        ? () => null
         : 'holder' in pr
           ? () => pr.holder.current ?? null
           : () => pr;
 
-    const disc = config.discovery;
-    if (disc && 'holder' in disc) {
-      // Lazy holder shape — register routes eagerly; handler returns 503
-      // subsystem_not_ready until main.ts populates holder.current after
-      // bootstrap. Same pattern as harnessReadinessRegistry.
-      addDiscoveryRoutes(app, {
-        getDiscovery: () => disc.holder.current ?? null,
-        ...(pluginReader ? { pluginReader } : {}),
-      });
-    } else if (disc) {
-      const discoveryInstance = disc;
-      addDiscoveryRoutes(app, {
-        discovery: () => discoveryInstance,
-        ...(pluginReader ? { pluginReader } : {}),
-      });
-    } else {
-      // pluginReader-only: no DiscoveryAPI. The plugin routes work; the
-      // operator-count / task-post-counts routes 503 (getDiscovery → null).
-      addDiscoveryRoutes(app, {
-        getDiscovery: () => null,
-        ...(pluginReader ? { pluginReader } : {}),
-      });
-    }
+    const ar = config.archiveReads;
+    const archiveReads: (() => ArchiveReads | null) | undefined =
+      ar === undefined
+        ? undefined
+        : 'holder' in ar
+          ? () => ar.holder.current ?? null
+          : () => ar;
+
+    addDiscoveryRoutes(app, {
+      pluginReader,
+      ...(archiveReads ? { archiveReads } : {}),
+    });
   }
 
   if (config.solverNets) {
@@ -765,8 +731,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/solvernets/drafts/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
     app.use('/v1/solvernets/launched', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
     app.use('/v1/solvernets/launched/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/registry', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/registry/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
     // Build a Proxy whose property reads dereference the holder. Route
     // handlers in solvernets-endpoints.ts read deps.store, deps.launch,
     // etc. eagerly inside each handler, so per-request dereference is

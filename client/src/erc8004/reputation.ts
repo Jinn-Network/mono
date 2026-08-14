@@ -38,15 +38,9 @@
  * ── Harness-agentId resolution ─────────────────────────────────────────────
  *
  * Resolving the harness's `agentId` from the evaluator's perspective is
- * deferred to `resolveAgentIdForManifest` in `./identity.js`. The hook here
- * takes `harnessAgentId` as a direct input. The two natural resolution paths:
- *
- *   (b) DiscoveryAPI: `queryEnvelopes({ manifestHash })` → operator.agentId
- *   (c) on-chain scan of `IdentityRegistry.Registered` events for the
- *       harness's Safe (`getAgentByWallet` is not exposed on-chain).
- *
- * Path (b) via the Ponder indexer is O(1) and the recommended route;
- * (c) is the fallback when the discovery indexer is unavailable.
+ * the caller's job. The hook here takes `harnessAgentId` as a direct input.
+ * Wave-4 D4 deleted the DiscoveryAPI envelope lookup
+ * (`resolveAgentIdForManifest`).
  *
  * ── Score-mapping policy ─────────────────────────────────────────────────────
  *

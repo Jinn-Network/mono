@@ -20,10 +20,12 @@
  *   The `PATCH .../lifecycle` route (pause/resume/retire) retired with Wave-4
  *   D3 together with its transition state machine.
  *
- *   Catalog (Task 15):
+ *   Catalog:
  *     GET    /v1/solvernets/launched                            — list owned launched records.
- *     GET    /v1/solvernets/registry                            — list global launched SolverNets (cached).
- *     GET    /v1/solvernets/registry/:cid                       — fetch a manifest from the registry.
+ *
+ * Wave-4 D4 retired `GET /v1/solvernets/registry` and `GET /v1/solvernets/registry/:cid`
+ * with the ERC-8004 registry client. Owned records still enrich with a local
+ * `summary` (and, on `GET .../launched/:id`, a cached `manifest`) from disk.
  *
  * Auth: route mounting is handled by server.ts (UI-token gate via
  * `requireUiToken`). This module assumes the gate is in place upstream
@@ -71,20 +73,14 @@ import {
   type UnsignedSolverNetManifestV1,
 } from '../solvernets/manifest.js';
 import { LaunchAction } from '../solvernets/launch-state-machine.js';
-import type {
-  PendingGeneratorSpawn,
-  SolverNetCatalogCache,
-} from '../solvernets/daemon-init.js';
+import type { PendingGeneratorSpawn } from '../solvernets/daemon-init.js';
 import {
   resolveLaunchedRecordContract,
   type LaunchedRecordContractRef,
 } from '../solvernets/launched-record-contract.js';
 import type { LauncherGeneratorStateSnapshot } from './launcher-status.js';
-import type {
-  SignerWithAgentEoa,
-  SolverNetManifestSummary,
-  SolverNetRegistryClient,
-} from '../solvernets/registry-client.js';
+import type { SignerWithAgentEoa } from '../solvernets/launch-publisher.js';
+import type { SolverNetManifestSummary } from '../discovery-client/types.js';
 
 /**
  * Optional Task-14 deps that turn on the launch + generator-config endpoints.
@@ -128,20 +124,6 @@ export interface SolverNetsEndpointsDeps {
   store: SolverNetStore;
   /** Optional Task 14 launch + generator-config wiring. */
   launch?: SolverNetsLaunchDeps;
-  /**
-   * Optional Task 15 catalog cache (from `daemon-init.ts`). Surfaces the
-   * global SolverNet registry to `GET /v1/solvernets/registry`. When omitted
-   * the registry list endpoint returns 503; the owned-list endpoint
-   * (`/launched`) still works because it reads only from `store`.
-   */
-  catalog?: SolverNetCatalogCache;
-  /**
-   * Optional Task 15 registry client. Used by `GET /v1/solvernets/registry/:cid`
-   * to resolve a manifest body and its lifecycle status from the global
-   * registry. Independently optional from `catalog` so a daemon could expose
-   * one but not the other (in practice they ship together).
-   */
-  registry?: SolverNetRegistryClient;
 }
 
 /**
@@ -244,28 +226,6 @@ const OwnedStatusFilterSchema = z.enum([
   'retired',
   'failed',
 ]);
-
-const RegistryStatusFilterSchema = z.enum(['launched', 'paused', 'retired']);
-
-/**
- * Loose CIDv0 / CIDv1 sniff. We are not validating the full multihash —
- * that is the registry client's job — but rejecting trivial garbage here
- * (slashes from path traversal, hyphens, empty strings) keeps the IPFS
- * round-trip away from obvious attacks. CIDv0 = `Qm` + base58btc; CIDv1 in
- * the dag-pb codec we use here is base32-lower and starts with `bafy`.
- *
- * We accept any sufficiently-long alphanumeric tail without enforcing the
- * exact alphabet — the registry client's hash check against the on-chain
- * advertised hash is the canonical gate; this regex only filters obviously
- * non-CID inputs.
- */
-// CIDv0 (Qm-base58) or CIDv1 (any multicodec — multibase prefix `b` is
-// base32 lowercase alphanumeric). Earlier this regex anchored to `bafy`,
-// the dag-pb codec prefix; the IPFS adapter actually pins manifests as
-// raw bytes (codec `raw`), producing `bafkrei...`. See jinn-mono-wkzp.
-// Loose by design — the registry client does the canonical decode. This only
-// blocks obviously invalid/path-like input before an IPFS round-trip.
-const CID_SHAPE_REGEX = /^(Qm[A-Za-z0-9]{10,}|b[A-Za-z0-9]{10,})$/u;
 
 // ── Generator-config validation schemas ─────────────────────────────────────
 
@@ -579,19 +539,14 @@ function summarizeLaunchedRecord(
  */
 async function tryGetSummary(
   record: LaunchedSolverNetRecord,
-  registry: SolverNetRegistryClient | undefined,
+  store: SolverNetStore,
 ): Promise<SolverNetManifestSummary | undefined> {
-  if (!registry) return undefined;
+  if (!record.manifestPath) return undefined;
   try {
-    const manifest = await registry.getManifestFromCache({
-      manifestCid: record.manifestCid,
-    });
-    if (manifest === null) return undefined;
+    const manifest = await store.loadManifestCache(record.manifestPath);
+    if (!manifest) return undefined;
     return summarizeLaunchedRecord(record, manifest);
   } catch {
-    // Defensive — the cache lookup is supposed to be infallible, but a
-    // future async-backed cache could throw (storage error). We surface
-    // an undefined summary rather than failing the entire list response.
     return undefined;
   }
 }
@@ -613,29 +568,6 @@ async function tryGetOwnedCachedManifest(
     return { record, manifest };
   }
   return null;
-}
-
-function localLifecycleForRecord(record: LaunchedSolverNetRecord): {
-  status: 'launched' | 'paused' | 'retired';
-  statusUpdatedAt: string;
-  sourceBlock: number;
-} {
-  // For records whose lifecycle has not yet been anchored on chain
-  // (status === 'launching' or 'failed' — `metadataBlockNumber` undefined),
-  // synthesise a `launched` display-lifecycle with `sourceBlock: 0`. The
-  // manifest body IS real (hash-verified by `tryGetOwnedCachedManifest`),
-  // so the launched dashboard can render names + prices instead of
-  // placeholders. The record-level `status` field (queried separately by
-  // the SPA via `/v1/solvernets/launched/:id`) continues to carry the
-  // `launching`/`failed` signal for the status pill.
-  return {
-    status:
-      record.status === 'paused' || record.status === 'retired'
-        ? record.status
-        : 'launched',
-    statusUpdatedAt: record.statusUpdatedAt,
-    sourceBlock: record.registry.metadataBlockNumber ?? 0,
-  };
 }
 
 // ── Implementation ──────────────────────────────────────────────────────────
@@ -1094,10 +1026,12 @@ export function registerSolverNetsEndpoints(
           entry.recordRef.current,
           deps.launch.getGeneratorState,
         );
-        const summary = await tryGetSummary(liveRecord, deps.registry);
+        const summary = await tryGetSummary(liveRecord, store);
+        const owned = await tryGetOwnedCachedManifest(store, liveRecord.manifestCid);
         return c.json({
           ...liveRecord,
           ...(summary !== undefined ? { summary } : {}),
+          ...(owned ? { manifest: owned.manifest } : {}),
         });
       }
     }
@@ -1118,10 +1052,12 @@ export function registerSolverNetsEndpoints(
       return c.json({ error: 'record_not_found', message: `Unknown record: ${id}` }, 404);
     }
     const liveRecord = withLiveGeneratorState(record, deps.launch?.getGeneratorState);
-    const summary = await tryGetSummary(liveRecord, deps.registry);
+    const summary = await tryGetSummary(liveRecord, store);
+    const owned = await tryGetOwnedCachedManifest(store, liveRecord.manifestCid);
     return c.json({
       ...liveRecord,
       ...(summary !== undefined ? { summary } : {}),
+      ...(owned ? { manifest: owned.manifest } : {}),
     });
   });
 
@@ -1295,199 +1231,11 @@ export function registerSolverNetsEndpoints(
     const enriched = await Promise.all(
       records.map(async (record) => {
         const liveRecord = withLiveGeneratorState(record, deps.launch?.getGeneratorState);
-        const summary = await tryGetSummary(liveRecord, deps.registry);
+        const summary = await tryGetSummary(liveRecord, store);
         return summary !== undefined ? { ...liveRecord, summary } : liveRecord;
       }),
     );
 
     return c.json({ records: enriched });
-  });
-
-  // GET /v1/solvernets/registry — list global launched SolverNets from the
-  // catalog cache (populated by the daemon's registry-catalog refresh loop
-  // wired in `daemon-init.ts`).
-  //
-  // Behaviour:
-  //   - Default filter is `launched + paused`; retired entries are excluded
-  //     unless the caller explicitly asks for `?status=retired`. This matches
-  //     the join-flow's "useful surface" — operators picking a SolverNet to
-  //     join shouldn't have to scroll past tombstoned ones.
-  //   - `?refresh=1` forces a refresh before reading the snapshot. The SPA
-  //     uses this on user-initiated reload; the auto-tick keeps the cache
-  //     warm in the background.
-  //   - Cache metadata (`lastRefreshedAt`, `lastError`) is always returned
-  //     so the SPA can render a "stale" indicator and surface errors.
-  app.get('/v1/solvernets/registry', async (c) => {
-    if (!deps.catalog) {
-      return c.json(
-        {
-          error: 'registry_unavailable',
-          message: 'registry catalog cache is not configured',
-        },
-        503,
-      );
-    }
-    const catalog = deps.catalog;
-
-    const statusQuery = c.req.query('status');
-    let statusFilter: Array<z.infer<typeof RegistryStatusFilterSchema>>;
-    if (statusQuery !== undefined) {
-      const parsed = RegistryStatusFilterSchema.safeParse(statusQuery);
-      if (!parsed.success) {
-        return c.json(
-          {
-            error: 'invalid_query',
-            message: `unknown status filter: ${statusQuery}`,
-          },
-          400,
-        );
-      }
-      statusFilter = [parsed.data];
-    } else {
-      // Default: launched + paused. Retired is excluded from the default
-      // surface — operators see those only via explicit ?status=retired.
-      statusFilter = ['launched', 'paused'];
-    }
-
-    if (c.req.query('refresh') === '1') {
-      // Force a refresh before reading the snapshot. The cache itself
-      // suppresses errors — they land in `lastError` which we surface in
-      // the response, so the SPA can show "couldn't refresh, here's the
-      // last cached snapshot" rather than a blank page.
-      await catalog.refresh();
-    }
-
-    const snapshot = catalog.getCatalog();
-    const summaries = snapshot.filter((s) => statusFilter.includes(s.status));
-
-    const lastRefreshedAt = catalog.lastRefreshedAt();
-    const lastError = catalog.lastError();
-    return c.json({
-      summaries,
-      lastRefreshedAt: lastRefreshedAt === null ? null : lastRefreshedAt.toISOString(),
-      lastError:
-        lastError === null
-          ? null
-          : {
-              message: lastError.message,
-              at: lastError.at.toISOString(),
-              // Forward the typed reason (currently only `rpc_rate_limited`)
-              // so the SPA can render an operator-actionable message rather
-              // than a generic "catalog failed" string. See jinn-mono #325.
-              ...(lastError.code !== undefined ? { code: lastError.code } : {}),
-            },
-    });
-  });
-
-  // GET /v1/solvernets/registry/:cid — fetch a specific manifest from the
-  // registry, with its current lifecycle status.
-  //
-  // The registry client validates the manifest's canonical hash against the
-  // on-chain advertised hash; if it throws (missing IPFS body, schema
-  // mismatch, hash mismatch), we surface 404 — the manifest is "not found"
-  // from a useful-surface perspective regardless of which leg failed. The
-  // exact failure reason is in the response message for debugging.
-  //
-  // CID validation here is intentionally loose: we reject obvious garbage
-  // (path-traversal, decimals, empty) so we never round-trip them to IPFS,
-  // but the registry client does the canonical check.
-  app.get('/v1/solvernets/registry/:cid', async (c) => {
-    const cid = c.req.param('cid');
-    if (!cid) {
-      return c.json(
-        {
-          error: 'invalid_cid',
-          message: `cid does not look like a CID: ${cid ?? '<empty>'}`,
-        },
-        400,
-      );
-    }
-
-    // CID shape validation runs before the owned-cache lookup and the
-    // no-registry 503 guard so garbage cids never reach those branches.
-    // Pre-#114 the no-registry 503 short-circuited first, but the owned-cache
-    // short-circuit added by #114 would otherwise let malformed cids return
-    // 503 instead of 400 in no-registry mode.
-    if (!CID_SHAPE_REGEX.test(cid)) {
-      return c.json(
-        {
-          error: 'invalid_cid',
-          message: `cid does not look like a CID: ${cid}`,
-        },
-        400,
-      );
-    }
-
-    let ownedCached: Awaited<ReturnType<typeof tryGetOwnedCachedManifest>>;
-    try {
-      ownedCached = await tryGetOwnedCachedManifest(store, cid);
-    } catch (err) {
-      return c.json(
-        {
-          error: 'store_read_failed',
-          message: err instanceof Error ? err.message : String(err),
-        },
-        500,
-      );
-    }
-    if (ownedCached) {
-      return c.json({
-        manifest: ownedCached.manifest,
-        lifecycle: localLifecycleForRecord(ownedCached.record),
-      });
-    }
-
-    if (!deps.registry) {
-      return c.json(
-        {
-          error: 'registry_unavailable',
-          message:
-            'registry client is not configured and no owned cached manifest matched this cid',
-        },
-        503,
-      );
-    }
-    const registry = deps.registry;
-
-    let manifest: SolverNetManifestV1;
-    try {
-      manifest = await registry.getManifest({ manifestCid: cid });
-    } catch (err) {
-      return c.json(
-        {
-          error: 'manifest_not_found',
-          message: err instanceof Error ? err.message : String(err),
-        },
-        404,
-      );
-    }
-
-    let lifecycle: {
-      status: 'launched' | 'paused' | 'retired';
-      statusUpdatedAt: string;
-      sourceBlock: number;
-    };
-    try {
-      lifecycle = await registry.getLifecycleStatus({ manifestCid: cid });
-    } catch (err) {
-      // The manifest body exists on IPFS but no lifecycle events were found
-      // on chain — surface as 404 with the real reason in the message.
-      // This is genuinely unusual (the launcher must have setMetadata'd the
-      // initial cid for the manifest to be discoverable at all), but it can
-      // happen during the brief window between IPFS pin and on-chain confirm.
-      // For records owned by this operator the early `ownedCached`
-      // short-circuit above already serves the locally-cached manifest
-      // with a synthesised lifecycle, so non-owned manifests are the
-      // only ones that reach this path (#114).
-      return c.json(
-        {
-          error: 'manifest_not_found',
-          message: err instanceof Error ? err.message : String(err),
-        },
-        404,
-      );
-    }
-
-    return c.json({ manifest, lifecycle });
   });
 }

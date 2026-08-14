@@ -1224,12 +1224,10 @@ export function loadConfig(configPath?: string): JinnConfig {
       : undefined;
     // A URL only makes sense in http mode — when the operator points
     // JINN_DISCOVERY_URL at a host but doesn't say JINN_DISCOVERY_MODE,
-    // default mode to 'http' so the URL is actually consulted (and isn't
-    // silently dropped by the on-chain default in createDiscoveryAPI).
-    // `fallbackToOnchain` is NOT defaulted on here (since the 2026-05-23
-    // substrate incident): silent fall-through hides indexer outages and
-    // storms shared RPC. Operators opt in via JINN_DISCOVERY_FALLBACK=1 or
-    // the config file when they want it.
+    // default mode to 'http' so the URL is actually consulted by
+    // createHttpCorpusDiscovery and discovery-client. `fallbackToOnchain`
+    // remains parseable after Wave-4 D4 but is not consulted (`with-fallback`
+    // retired with `client/src/discovery/`).
     const inferredHttp = !!env['JINN_DISCOVERY_URL'] && !env['JINN_DISCOVERY_MODE'] && !prevDiscovery['mode'];
     const mode = env['JINN_DISCOVERY_MODE'] ?? (inferredHttp ? 'http' : undefined);
     const resolvedFallback = fallbackToOnchain;

@@ -46,7 +46,6 @@ import {
   decodeDeliverLogs,
   MECH_DELIVER_EVENT,
   callDeliverToMarketplace,
-  canClaimTask,
   type RouterTaskPolicy,
   scanTasks,
   PendingTaskSubmissionError,
@@ -54,7 +53,6 @@ import {
 import { type MechAdapterConfig } from './types.js';
 import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
-import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
 import { TaskRunPersistence } from '../../store/task-run-persistence.js';
 import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
@@ -588,101 +586,6 @@ export class MechAdapter implements ExecutionAdapter {
     }
     return windowEndTs !== undefined && windowEndTs <= Date.now();
   }
-
-  private async *discoverSubgraphRestorationTasks(): AsyncIterable<TaskAnnouncement> {
-    const discovery = this.config.taskDiscovery;
-    const discoveryApi: DiscoveryAPI | undefined = discovery?.discoveryApi;
-    const solverNetManifestCids = discovery?.solverNetManifestCids ?? [];
-
-    // Without a DiscoveryAPI or SolverNet manifest CIDs there is nothing to
-    // discover via this path. A DiscoveryAPI is injected by the daemon from
-    // the shared discovery client (Ponder HTTP or onchain floor).
-    if (!discoveryApi || solverNetManifestCids.length === 0) return;
-
-    let candidates;
-    try {
-      candidates = await discoveryApi.findClaimableTasks({
-        solverNetManifestCids,
-        operatorAddress: this.config.safeAddress,
-        pageSize: discovery?.pageSize,
-        maxPages: discovery?.maxPages,
-      });
-    } catch (err) {
-      console.error(
-        '[mech] task discovery (DiscoveryAPI) failed:',
-        err instanceof Error ? err.message : err,
-      );
-      return;
-    }
-
-    const discoveryFloorBlock = this.taskAdmissionFloorBlock();
-
-    for (const candidate of candidates) {
-      if (!this.isDiscoveryTaskAllowed(candidate.taskId)) continue;
-
-      // gh #300 ghost-task floor — same floor as the on-chain TaskCreated
-      // backlog scan, applied to the DiscoveryAPI path too. Without this,
-      // the Ponder indexer (or onchain floor's listClaimableTasks) returns
-      // pre-floor tasks that are still claimable on-chain but unscorable
-      // under the current admission regime, defeating the floor's
-      // intent. Candidates without `createdAtBlock` are passed through
-      // (DiscoveryAPI is allowed to omit that field; we can't filter
-      // without it).
-      if (
-        discoveryFloorBlock != null &&
-        candidate.createdAtBlock != null &&
-        BigInt(candidate.createdAtBlock) < discoveryFloorBlock
-      ) {
-        continue;
-      }
-
-      // Verify claimability per backend: HttpSubgraphDiscoveryAPI cannot run
-      // canClaimTask (no on-chain simulation), so this check is load-bearing
-      // for that path. OnchainDiscoveryAPI already filters internally; this
-      // is redundant there. TODO: add a DiscoveryAPI capability flag so the
-      // onchain path can skip the extra simulateContract round-trip.
-      const claimable = await canClaimTask(
-        this.publicClient,
-        this.config.safeAddress,
-        this.config.routerAddress,
-        candidate.taskId,
-        this.config.mechContractAddress,
-      );
-      if (!claimable.ok) {
-        continue;
-      }
-
-      try {
-        // Yield every hydrated candidate per cycle rather than returning after
-        // the first. The engine-watcher (daemon._runEngineWatcherLoop) is the
-        // single point of skip-state truth — when its in-flight admission gate
-        // fast-skips a candidate (~30s TTL), that skip state never flows back
-        // into the adapter's iteration cursor. Yielding only the first
-        // candidate per cycle meant a fast-skipped slot starved every
-        // subsequent candidate in the round-robin (`fc05f686`) ordering for
-        // the duration of the TTL. By driving the full candidate list per
-        // cycle we let the engine apply its gate to each one, preserving the
-        // round-robin fairness across joined SolverNets. See task 212 live
-        // verification in the fix's commit body.
-        const announcement = await this.restorationAnnouncementFromDigest({
-          taskId: candidate.taskId,
-          taskCidDigest: candidate.taskCidDigest,
-          transactionHash: candidate.createdAtTx,
-          blockNumber: candidate.createdAtBlock,
-        });
-
-        if (this.hasExpiredExecutionWindow(announcement)) continue;
-
-        yield announcement;
-      } catch (err) {
-        console.error(
-          `[mech] failed to hydrate subgraph task ${candidate.taskId}:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    }
-  }
-
 
   async *watchForTasks(): AsyncIterable<TaskAnnouncement> {
     // The solution path retired with cutover stage 1 (watchForTasks stopped calling

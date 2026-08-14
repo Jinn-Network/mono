@@ -51,8 +51,8 @@ import {
   encodeLifecyclePayload,
   LIFECYCLE_PAYLOAD_SCHEMA_VERSION,
   SOLVERNET_MANIFEST_KEY_PREFIX,
-} from './registry-client-erc8004.js';
-import type { SignerWithAgentEoa } from './registry-client.js';
+} from './launch-publisher.js';
+import type { SignerWithAgentEoa } from './launch-publisher.js';
 import {
   type LaunchedSolverNetRecord,
   type SolverNetStore,

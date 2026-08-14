@@ -120,16 +120,15 @@ describe('discovery-client survives the discovery/ deletion', () => {
   });
 
   it('detects a leak when one is introduced', () => {
-    // Guard the guard. The seed must sit OUTSIDE discovery/ and import into it,
-    // or the walker is never exercised: seeding from a file already inside the
-    // forbidden directory makes the assertion pass on the entry point itself.
-    // `adapters/mech/types.ts` is that real edge — it takes `DiscoveryAPI` as
-    // the Mech adapter's optional task-discovery port.
-    const probe = join(SRC, 'adapters/mech/types.ts');
-    expect(existsSync(probe)).toBe(true);
-    expect(relativeImports(readFileSync(probe, 'utf-8')))
-      .toContain('../../discovery/types.js');
-    expect(leaksInto(importClosure([probe]))).not.toEqual([]);
+    // Guard the guard. After Wave-4 D4 there is no live file under
+    // `src/discovery/`, so the walker cannot be seeded from a real import.
+    // `leaksInto` itself must still flag a trail that lands in the retired
+    // directory, or the production scan above is a tautology.
+    const fake = new Map<string, string[]>([
+      [join(FORBIDDEN_DIR, 'types.ts'), ['probe.ts', 'discovery/types.ts']],
+    ]);
+    expect(leaksInto(fake)).toEqual(['probe.ts -> discovery/types.ts']);
+    expect(leaksInto(new Map([[join(MODULE_DIR, 'http.ts'), ['discovery-client/http.ts']]]))).toEqual([]);
   });
 
   /**
@@ -158,26 +157,21 @@ describe('discovery-client survives the discovery/ deletion', () => {
     expect(leaksInto(importClosure([VERB], { valueOnly: true }))).toEqual([]);
   });
 
-  it('holds the verb type-only residue to the known Mech-adapter edge', () => {
-    // The verb pulls `fetchRawBytesFromIpfs`, and `adapters/mech/ipfs.ts` takes
-    // its types from `adapters/mech/types.ts`, which types the Mech adapter's
-    // optional task-discovery port as `DiscoveryAPI`. That edge is erased at
-    // runtime (hence the value-only assertion above is the load-bearing one),
-    // predates R3b, and belongs to the daemon adapter the D-wave repoints on
-    // its own schedule. Pinned exactly so a NEW coupling fails this guard.
-    expect(leaksInto(importClosure([VERB]))).toEqual([
-      'cli/commands/tasks-observe-autopilot.ts -> adapters/mech/ipfs.ts'
-      + ' -> adapters/mech/types.ts -> discovery/types.ts',
-    ]);
+  it('the delivery verb has no type-only path into the retired discovery tree', () => {
+    // Wave-4 D4 deleted `adapters/mech/types.ts`'s `DiscoveryAPI` import.
+    // A NEW coupling from the published verb into the retired tree must fail.
+    expect(leaksInto(importClosure([VERB]))).toEqual([]);
   });
 
-  it('keeps the legacy DiscoveryAPI on one relocated error class', () => {
-    // `instanceof DiscoveryUnavailableError` is checked in both trees. A second
-    // class declaration would make those checks silently disagree.
-    const legacy = readFileSync(join(FORBIDDEN_DIR, 'types.ts'), 'utf-8');
-    expect(legacy).not.toMatch(/class\s+DiscoveryUnavailableError/u);
-    expect(legacy).toMatch(
-      /export\s*\{\s*DiscoveryUnavailableError\s*\}\s*from\s*'\.\.\/discovery-client\/types\.js'/u,
-    );
+  it('declares DiscoveryUnavailableError once, in discovery-client', () => {
+    // `instanceof DiscoveryUnavailableError` is checked at the HTTP and corpus
+    // seams. A second class declaration would make those checks silently disagree.
+    const owner = readFileSync(join(MODULE_DIR, 'types.ts'), 'utf-8');
+    expect(owner).toMatch(/export class DiscoveryUnavailableError/u);
+    const duplicates = moduleFiles(SRC)
+      .filter((file) => !file.startsWith(`${MODULE_DIR}/`))
+      .filter((file) => /export class DiscoveryUnavailableError/u.test(readFileSync(file, 'utf-8')))
+      .map((file) => relative(SRC, file));
+    expect(duplicates).toEqual([]);
   });
 });

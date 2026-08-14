@@ -5,7 +5,7 @@
  * generator hits admission-required-no-data and posts 0 tasks. The pool was
  * previously published to IPFS; we recover it via the indexer (Option B):
  *
- *   1. discoveryApi.getMostRecentTaskCidDigest(manifestCid) → a recent task digest
+ *   1. getMostRecentTaskCidDigest(manifestCid) → a recent task digest
  *   2. reconstruct the IPFS task CID (f01551220 + digest), fetch the task doc
  *   3. read the vetted-pool ref from the task's eligibility.vettedPoolRef
  *   4. fetch the artifact, verify hashVettedPoolArtifact === ref.artifactHash
@@ -29,7 +29,6 @@ import {
   hashVettedPoolArtifact,
   type SweRebenchV2VettedPoolArtifact,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
-import type { DiscoveryAPI } from '../../src/discovery/types.js';
 
 const tmps: string[] = [];
 function tmpDir(): string {
@@ -69,13 +68,11 @@ async function buildArtifactAndRef(): Promise<{
   return { artifact, artifactHash: hashVettedPoolArtifact(artifact) };
 }
 
-/** A discovery stub returning a recent task digest (or undefined). */
-function discoveryStub(
+/** Recent-task lookup stub (Wave-4 D4 retired DiscoveryAPI). */
+function digestStub(
   result: { taskCidDigest: `0x${string}`; taskId: string } | undefined,
-): DiscoveryAPI {
-  return {
-    getMostRecentTaskCidDigest: async () => result,
-  } as unknown as DiscoveryAPI;
+): (manifestCid: string) => Promise<{ taskCidDigest: `0x${string}`; taskId: string } | null> {
+  return async () => result ?? null;
 }
 
 /**
@@ -112,7 +109,7 @@ describe('recoverVettedPoolFromNetwork (#957)', () => {
     const result = await recoverVettedPoolFromNetwork({
       stateDir,
       manifestCid: MANIFEST_CID,
-      discoveryApi: discoveryStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
+      getMostRecentTaskCidDigest: digestStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
       ipfsGatewayUrl: 'https://gateway.example',
       store,
       fetchFromIpfs: ipfsStub({ ref, artifact }),
@@ -148,7 +145,7 @@ describe('recoverVettedPoolFromNetwork (#957)', () => {
     const result = await recoverVettedPoolFromNetwork({
       stateDir,
       manifestCid: MANIFEST_CID,
-      discoveryApi: discoveryStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
+      getMostRecentTaskCidDigest: digestStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
       ipfsGatewayUrl: 'https://gateway.example',
       store,
       fetchFromIpfs: ipfsStub({ ref, artifact: tampered }),
@@ -167,7 +164,7 @@ describe('recoverVettedPoolFromNetwork (#957)', () => {
     const result = await recoverVettedPoolFromNetwork({
       stateDir,
       manifestCid: MANIFEST_CID,
-      discoveryApi: discoveryStub(undefined),
+      getMostRecentTaskCidDigest: digestStub(undefined),
       ipfsGatewayUrl: 'https://gateway.example',
       store,
       fetchFromIpfs: async () => {
@@ -202,7 +199,7 @@ describe('recoverVettedPoolFromNetwork (#957)', () => {
     const result = await recoverVettedPoolFromNetwork({
       stateDir,
       manifestCid: MANIFEST_CID,
-      discoveryApi: discoveryStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
+      getMostRecentTaskCidDigest: digestStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
       ipfsGatewayUrl: 'https://gateway.example',
       store,
       fetchFromIpfs: ipfsStub({ ref, artifact }),
@@ -223,7 +220,7 @@ describe('recoverVettedPoolFromNetwork (#957)', () => {
     const result = await recoverVettedPoolFromNetwork({
       stateDir,
       manifestCid: MANIFEST_CID,
-      discoveryApi: discoveryStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
+      getMostRecentTaskCidDigest: digestStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
       ipfsGatewayUrl: 'https://gateway.example',
       store,
       fetchFromIpfs: ipfsStub({ ref: null, artifact: null, failTaskFetch: true }),
@@ -242,7 +239,7 @@ describe('recoverVettedPoolFromNetwork (#957)', () => {
     const result = await recoverVettedPoolFromNetwork({
       stateDir,
       manifestCid: MANIFEST_CID,
-      discoveryApi: discoveryStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
+      getMostRecentTaskCidDigest: digestStub({ taskCidDigest: TASK_CID_DIGEST, taskId: '5' }),
       ipfsGatewayUrl: 'https://gateway.example',
       store,
       // task doc carries no eligibility.vettedPoolRef.

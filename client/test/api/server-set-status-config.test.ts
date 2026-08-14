@@ -8,11 +8,10 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { Store } from '../../src/store/store.js';
 import { startApiServer, type ApiServer } from '../../src/api/server.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
-import type { DiscoveryAPI } from '../../src/discovery/types.js';
 
 function freshStore(): Store {
   return new Store(join(mkdtempSync(join(tmpdir(), 'set-status-config-')), 'jinn.db'));
@@ -94,7 +93,7 @@ describe('ApiServer.setStatusConfig', () => {
     expect(after.aiUnits).toBeUndefined();
   });
 
-  it('threads the configured DiscoveryAPI into /v1/status so outcomes are enriched (#502)', async () => {
+  it('enriches COMPLETE solve outcomes from the native verdict tally store (#502)', async () => {
     store = freshStore();
     const persistence = new TaskRunPersistence(store.db);
     persistence.insertDiscovered({
@@ -118,16 +117,49 @@ describe('ApiServer.setStatusConfig', () => {
       `UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`,
     ).run(2_500, 'swe-complete');
 
-    const getVerdictTallies = vi.fn(async () =>
-      new Map([['77', { pass: 2, fail: 0 }]]),
-    );
-    const discovery = { getVerdictTallies } as unknown as DiscoveryAPI;
+    const digest = `sha256:${'a'.repeat(64)}`;
+    store.db.exec(`
+      CREATE TABLE IF NOT EXISTS native_canonical_observations (
+        observation_id TEXT PRIMARY KEY, observation_json TEXT NOT NULL, accepted_at TEXT NOT NULL
+      );
+    `);
+    store.db
+      .prepare(
+        `INSERT INTO native_engagements
+          (engagement_id, chain_id, coordinator, task_id, role, operator_agent, task_digest,
+           submission_uri, submission_digest, state, attempt_index, attempt_uri, request_id,
+           policy_json, capability_json, created_at, updated_at)
+         VALUES ('eng-77', '84532', '0xcoord', '77', 'solver', '0xop', ?,
+                 'urn:uuid:00000000-0000-0000-0000-000000000077', 'sha256:${'b'.repeat(64)}',
+                 'solution-settled', 0, NULL, '0xreq77', '{}', '{}',
+                 '2026-08-01T00:00:02.000Z', '2026-08-01T00:00:05.000Z')`,
+      )
+      .run(digest);
+    store.db
+      .prepare(
+        `INSERT INTO native_canonical_observations (observation_id, observation_json, accepted_at)
+         VALUES ('obs-77a', ?, '2026-08-01T00:00:06.000Z'),
+                ('obs-77b', ?, '2026-08-01T00:00:07.000Z')`,
+      )
+      .run(
+        JSON.stringify({
+          id: 'obs-77a',
+          type: 'network.jinn.task-execution.attempt-terminal.v1',
+          taskdigest: digest,
+          data: { state: 'delivered' },
+        }),
+        JSON.stringify({
+          id: 'obs-77b',
+          type: 'network.jinn.task-execution.attempt-terminal.v1',
+          taskdigest: digest,
+          data: { state: 'delivered' },
+        }),
+      );
 
     server = await startApiServer({
       port: 0,
       store,
       apiToken: 't',
-      discovery,
       status: {
         earningDir: mkdtempSync(join(tmpdir(), 'set-status-earn-')),
         rpcUrl: 'http://127.0.0.1:0',
@@ -138,7 +170,6 @@ describe('ApiServer.setStatusConfig', () => {
     });
 
     const body = await fetchStatus(server);
-    expect(getVerdictTallies).toHaveBeenCalledWith({ taskIds: ['77'] });
     const taskRuns = body.taskRuns as { recentTasks: Array<{ requestId: string; outcome: string | null }> };
     const row = taskRuns.recentTasks.find((r) => r.requestId === 'swe-complete');
     expect(row?.outcome).toBe('pass');

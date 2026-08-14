@@ -90,7 +90,7 @@ function machinePreflightChecks(args: {
 }) {
   const signer = async () => args.signerContext;
   // One-swap R3b (issue #2494) retired this function's own
-  // `createHttpDiscoveryAPI(...).listLaunchedSolverNets(...)` leg. The read is
+  // `createHttpDiscoveryClient(...).listLaunchedSolverNets(...)` leg. The read is
   // unchanged, but `tasks/submit-preflight.ts` is now its single owner, so
   // `jinn tasks submit` reaches the indexer through exactly one call site.
   // The memo stays: `indexer` and `solverNet` both consume it within one run.

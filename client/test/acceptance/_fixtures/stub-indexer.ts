@@ -23,7 +23,7 @@ import type { Server as HttpServer } from 'node:http';
 import { decodeAbiParameters, createPublicClient, http, defineChain } from 'viem';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import type { PluginPublication, PluginScoreHistoryRow } from '../../../src/discovery/types.js';
+import type { PluginPublication, PluginScoreHistoryRow } from '../../../src/plugin-registry/publication-reader.js';
 import { PLUGIN_PAYLOAD_TUPLE } from '../../../src/erc8004/abis.js';
 import { IDENTITY_REGISTRY_STUB_ABI } from './identity-registry-deploy.js';
 

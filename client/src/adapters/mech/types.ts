@@ -1,6 +1,5 @@
 import type { Address, WalletClient } from 'viem';
 import type { VenueBroadcaster } from './safe.js';
-import type { DiscoveryAPI } from '../../discovery/types.js';
 import type {
   AutopilotMutationResult,
   JinnRepoAutopilotSessionTask,
@@ -45,11 +44,6 @@ export interface MechAdapterConfig {
    * the adapter still verifies claimability on-chain before yielding work.
    */
   taskDiscovery?: {
-    /**
-     * DiscoveryAPI instance for finding claimable tasks. When provided,
-     * replaces direct subgraph calls in discoverSubgraphRestorationTasks.
-     */
-    discoveryApi?: DiscoveryAPI;
     solverNetManifestCids?: string[];
     /**
      * Lower bound for the canonical on-chain TaskCreated scan. The subgraph is

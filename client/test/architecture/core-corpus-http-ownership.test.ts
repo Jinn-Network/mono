@@ -3,24 +3,16 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { codeOnly } from './_support/source-text.js';
 
-const discoveryHttpSource = codeOnly(readFileSync(
-  fileURLToPath(new URL('../../src/discovery/http.ts', import.meta.url)),
-  'utf-8',
-));
-// One-swap R3b (issue #2494) relocated `queryEnvelopes` — and with it the
-// delegation to core's HTTP corpus port — onto the neutral `discovery-client/`.
-// The ownership assertion follows it there; `discovery/http.ts` must still not
-// hand-roll the query it gave up.
 const discoveryClientHttpSource = codeOnly(readFileSync(
   fileURLToPath(new URL('../../src/discovery-client/http.ts', import.meta.url)),
   'utf-8',
 ));
-const discoveryFactorySource = codeOnly(readFileSync(
-  fileURLToPath(new URL('../../src/discovery/factory.ts', import.meta.url)),
-  'utf-8',
-));
 const mcpServerSource = codeOnly(readFileSync(
   fileURLToPath(new URL('../../src/mcp/server.ts', import.meta.url)),
+  'utf-8',
+));
+const mainSource = codeOnly(readFileSync(
+  fileURLToPath(new URL('../../src/main.ts', import.meta.url)),
   'utf-8',
 ));
 
@@ -48,19 +40,12 @@ describe('core owns corpus HTTP discovery', () => {
     expect(discoveryClientHttpSource).not.toContain('query QueryEnvelopes');
   });
 
-  it('leaves no second envelope-query implementation behind in discovery/', () => {
-    expect(discoveryHttpSource).not.toContain('QUERY_ENVELOPES_QUERY');
-    expect(discoveryHttpSource).not.toContain('query QueryEnvelopes');
-    expect(discoveryHttpSource).not.toContain('createHttpCorpusDiscovery');
-  });
-
-  it('keeps daemon and MCP compatibility entry points on the composed client adapter', () => {
-    // The daemon still composes the full legacy `DiscoveryAPI`; MCP moved to
-    // the relocated slice (R3b) because `queryEnvelopes` and
-    // `getCodeDigestRewards` are all it ever drove.
-    expect(discoveryFactorySource).toContain('createHttpDiscoveryAPI');
+  it('keeps daemon corpus and MCP on core / discovery-client, not a second HTTP client', () => {
+    expect(mainSource).toContain('createHttpCorpusDiscovery');
     expect(mcpServerSource).toContain('createHttpDiscoveryClient');
     expect(mcpServerSource).toContain("from '../discovery-client/http.js'");
     expect(mcpServerSource).not.toContain("from '../discovery/http.js'");
+    expect(mainSource).not.toContain('createHttpDiscoveryAPI');
+    expect(mainSource).not.toContain('createDiscoveryAPI');
   });
 });

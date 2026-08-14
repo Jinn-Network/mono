@@ -15,9 +15,8 @@
  * on-chain implementation (over venue-base's log source) lives in
  * `./publication-host.ts`.
  *
- * `discovery/types.ts` re-exports these types for back-compat so the legacy
- * `DiscoveryAPI` interface and its HTTP / on-chain backings keep compiling
- * unchanged until the D-wave removes them.
+ * `discovery/types.ts` used to re-export these types for back-compat. Wave-4 D4
+ * deleted that tree; this module is the only home for the shapes.
  */
 
 // ── Result shapes ──────────────────────────────────────────────────────────────

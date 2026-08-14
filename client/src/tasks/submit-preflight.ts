@@ -1,6 +1,6 @@
 import type { JinnConfig } from '../config.js';
 import { createHttpDiscoveryClient } from '../discovery-client/http.js';
-import type { SolverNetManifestSummary } from '../solvernets/registry-client.js';
+import type { SolverNetManifestSummary } from '../discovery-client/types.js';
 
 export const MARKETPLACE_TASK_FRESHNESS_RESERVE_MS = 60_000;
 
