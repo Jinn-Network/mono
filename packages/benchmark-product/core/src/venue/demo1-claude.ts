@@ -15,6 +15,12 @@ import {
   type WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
+import {
+  DEMO1_RUNTIME_CANDIDATES,
+  verifyDemo1RuntimeSelection,
+  type Demo1RuntimePolicyDecision,
+  type Demo1RuntimeSelection,
+} from "../method/demo1-runtime-policy.js";
 
 export const DEMO1_CLAUDE_MODEL_ID = "claude-haiku-4-5-20251001";
 export const DEMO1_CLAUDE_EFFORT = "high";
@@ -133,10 +139,19 @@ export interface Demo1ClaudeRuntimeOptions {
 export interface Demo1ClaudeRuntimeBinding {
   readonly executable: { readonly path: string; readonly digest: string };
   readonly harnessVersion: string;
-  readonly modelId: typeof DEMO1_CLAUDE_MODEL_ID;
-  readonly effort: typeof DEMO1_CLAUDE_EFFORT;
+  readonly modelId: string;
+  readonly effort: "low" | "medium" | "high" | "xhigh" | "max";
   readonly artifacts: Demo1InstructionArtifacts;
   probe(): Promise<Demo1ClaudeReadiness>;
+}
+
+export interface Demo1ClaudeCandidateRuntimeOptions extends Demo1ClaudeRuntimeOptions {
+  readonly candidateIndex: number;
+}
+
+export interface Demo1ClaudeSelectedRuntimeOptions extends Demo1ClaudeRuntimeOptions {
+  readonly selection: Demo1RuntimeSelection;
+  readonly decision: Demo1RuntimePolicyDecision;
 }
 
 function defaultCommand(executablePath: string, args: readonly string[]) {
@@ -144,8 +159,9 @@ function defaultCommand(executablePath: string, args: readonly string[]) {
 }
 
 /** Product-owned, binary/auth/version readiness binding. No ambient executable-path discovery. */
-export function createDemo1ClaudeRuntimeBinding(
+function createRuntimeBinding(
   options: Demo1ClaudeRuntimeOptions,
+  selected: { readonly model: string; readonly effort: Demo1ClaudeRuntimeBinding["effort"] },
 ): Demo1ClaudeRuntimeBinding {
   const executable = {
     path: options.executablePath,
@@ -159,8 +175,8 @@ export function createDemo1ClaudeRuntimeBinding(
   return {
     executable,
     harnessVersion: options.harnessVersion,
-    modelId: DEMO1_CLAUDE_MODEL_ID,
-    effort: DEMO1_CLAUDE_EFFORT,
+    modelId: selected.model,
+    effort: selected.effort,
     artifacts: options.artifacts,
     async probe() {
       let observedVersion: string | undefined;
@@ -169,7 +185,7 @@ export function createDemo1ClaudeRuntimeBinding(
         detail,
         executable,
         harnessVersions: observedVersion === undefined ? [] : [observedVersion],
-        models: [DEMO1_CLAUDE_MODEL_ID],
+        models: [selected.model],
         loadouts: inventory,
       });
       try {
@@ -177,8 +193,8 @@ export function createDemo1ClaudeRuntimeBinding(
           return unavailable("claude-code executable digest changed after runtime binding");
         }
         const versionOutput = (await command(executable.path, [
-          "--model", DEMO1_CLAUDE_MODEL_ID,
-          "--effort", DEMO1_CLAUDE_EFFORT,
+          "--model", selected.model,
+          "--effort", selected.effort,
           "--version",
         ])).stdout.trim();
         const parsed = CLAUDE_VERSION_OUTPUT.exec(versionOutput);
@@ -199,7 +215,7 @@ export function createDemo1ClaudeRuntimeBinding(
           ready: true,
           executable,
           harnessVersions: [observedVersion],
-          models: [DEMO1_CLAUDE_MODEL_ID],
+          models: [selected.model],
           loadouts: inventory,
         };
       } catch (cause) {
@@ -209,13 +225,48 @@ export function createDemo1ClaudeRuntimeBinding(
   };
 }
 
-function exactCapabilities(base: LauncherCapabilities): LauncherCapabilities {
+/** Historical v1 binding. Its accepted Haiku/high pins remain unchanged. */
+export function createDemo1ClaudeRuntimeBinding(
+  options: Demo1ClaudeRuntimeOptions,
+): Demo1ClaudeRuntimeBinding {
+  return createRuntimeBinding(options, {
+    model: DEMO1_CLAUDE_MODEL_ID,
+    effort: DEMO1_CLAUDE_EFFORT,
+  });
+}
+
+/** Candidate-only v2 binding for the paid suitability phase; it is not an official freeze. */
+export function createDemo1ClaudeCandidateRuntimeBinding(
+  options: Demo1ClaudeCandidateRuntimeOptions,
+): Demo1ClaudeRuntimeBinding {
+  if (!Number.isSafeInteger(options.candidateIndex) || options.candidateIndex < 0
+    || options.candidateIndex >= DEMO1_RUNTIME_CANDIDATES.length) {
+    throw new TypeError("candidateIndex is outside the frozen runtime ladder");
+  }
+  return createRuntimeBinding(options, DEMO1_RUNTIME_CANDIDATES[options.candidateIndex]!);
+}
+
+/** Official v2 binding: the observed executable and selected policy bytes must match exactly. */
+export function createDemo1ClaudeSelectedRuntimeBinding(
+  options: Demo1ClaudeSelectedRuntimeOptions,
+): Demo1ClaudeRuntimeBinding {
+  verifyDemo1RuntimeSelection(options.selection, options.decision);
+  const observedDigest = sha256(readFileSync(options.executablePath));
+  if (options.selection.harness.version !== options.harnessVersion
+    || options.selection.harness.executableSha256 !== observedDigest
+    || options.selection.skillSha256 !== options.artifacts.skill.digest.sha256) {
+    throw new TypeError("selected runtime does not match the observed Claude Code executable and skill identities");
+  }
+  return createRuntimeBinding(options, options.selection.selected);
+}
+
+function exactCapabilities(base: LauncherCapabilities, runtime: Demo1ClaudeRuntimeBinding): LauncherCapabilities {
   return {
     ...base,
     runPinning: {
       keys: base.runPinning.keys.map((support) => {
-        if (support.key === "effort") return { ...support, inventory: [DEMO1_CLAUDE_EFFORT] };
-        if (support.key === "model") return { ...support, inventory: [DEMO1_CLAUDE_MODEL_ID] };
+        if (support.key === "effort") return { ...support, inventory: [runtime.effort] };
+        if (support.key === "model") return { ...support, inventory: [runtime.modelId] };
         if (support.key === "loadout") return { ...support, inventory: ["jinn.skill.v1"] };
         return support;
       }),
@@ -245,7 +296,7 @@ export function makeDemo1ClaudeLauncher(runtime: Demo1ClaudeRuntimeBinding): Lau
   });
   return {
     id: platform.id,
-    capabilities: () => exactCapabilities(platform.capabilities()),
+    capabilities: () => exactCapabilities(platform.capabilities(), runtime),
     probe: platform.probe,
     plan(view: TaskView, paths: WorkspacePaths, attempt: AttemptIdentity): LaunchPlan {
       const planned = platform.plan(view, paths, attempt);
@@ -277,8 +328,8 @@ export function demo1ClaudeArmRequirements(
       version: runtime.harnessVersion,
       digest: runtime.executable.digest,
     },
-    model: { id: DEMO1_CLAUDE_MODEL_ID },
-    effort: DEMO1_CLAUDE_EFFORT,
+    model: { id: runtime.modelId },
+    effort: runtime.effort,
     isolationPolicy: "unrestricted",
     ...(arm === "no-file"
       ? {}

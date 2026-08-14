@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
@@ -7,11 +9,17 @@ import {
   DEMO1_CLAUDE_MODEL_ID,
   DEMO1_SKILL_PATH,
   DEMO1_SKILL_PLUGIN_DIRECTORY,
+  createDemo1ClaudeCandidateRuntimeBinding,
   createDemo1ClaudeRuntimeBinding,
+  createDemo1ClaudeSelectedRuntimeBinding,
   demo1ClaudeArmRequirements,
   generateDemo1InstructionArtifacts,
   makeDemo1ClaudeLauncher,
 } from "./demo1-claude.js";
+import {
+  buildDemo1RuntimeSelection,
+  decideDemo1Runtime,
+} from "../method/demo1-runtime-policy.js";
 
 const source = new TextEncoder().encode("# Frozen instructions\n\nDo the exact task.\n");
 const artifacts = generateDemo1InstructionArtifacts(source, {
@@ -128,6 +136,65 @@ describe("Demo-1 real Claude runtime inventory", () => {
     expect(readiness.harnessVersions).toEqual([]);
     expect(readiness.detail).toMatch(/malformed version output/u);
   });
+
+  it("uses Haiku low for the first v2 suitability candidate without changing v1", async () => {
+    const calls: string[][] = [];
+    const binding = createDemo1ClaudeCandidateRuntimeBinding({
+      executablePath: process.execPath,
+      harnessVersion: HARNESS_VERSION,
+      artifacts,
+      candidateIndex: 0,
+      command: async (_path, args) => {
+        calls.push([...args]);
+        return args[0] === "auth"
+          ? { stdout: JSON.stringify({ loggedIn: true }) }
+          : { stdout: `${HARNESS_VERSION} (Claude Code)\n` };
+      },
+    });
+    expect(await binding.probe()).toMatchObject({ ready: true, models: ["claude-haiku-4-5-20251001"] });
+    expect(binding.effort).toBe("low");
+    expect(calls[0]).toEqual([
+      "--model", "claude-haiku-4-5-20251001", "--effort", "low", "--version",
+    ]);
+    expect(runtime().binding.effort).toBe(DEMO1_CLAUDE_EFFORT);
+  });
+
+  it("binds a selected v2 runtime only to the executable measured by the selection", () => {
+    const decision = decideDemo1Runtime(0, {
+      expectedCells: 12,
+      accountedCells: 12,
+      validGraderOutcomes: 12,
+      passes: 5,
+      timeoutFails: 0,
+      unresolvedInfrastructure: 0,
+      incompatibilities: 0,
+      skillLoaderCanary: "pass",
+    });
+    const executableSha256 = createHash("sha256").update(readFileSync(process.execPath)).digest("hex");
+    const selection = buildDemo1RuntimeSelection({
+      decision,
+      harnessVersion: HARNESS_VERSION,
+      executableSha256,
+      skillSha256: artifacts.skill.digest.sha256,
+      taskPoolSha256: "c".repeat(64),
+    });
+    const binding = createDemo1ClaudeSelectedRuntimeBinding({
+      executablePath: process.execPath,
+      harnessVersion: HARNESS_VERSION,
+      artifacts,
+      selection,
+      decision,
+      command: async () => ({ stdout: "" }),
+    });
+    expect(binding).toMatchObject({ modelId: "claude-haiku-4-5-20251001", effort: "low" });
+    expect(() => createDemo1ClaudeSelectedRuntimeBinding({
+      executablePath: process.execPath,
+      harnessVersion: "2.1.223",
+      artifacts,
+      selection,
+      decision,
+    })).toThrow(/does not match/u);
+  });
 });
 
 describe("Demo-1 Claude arm plans", () => {
@@ -154,5 +221,28 @@ describe("Demo-1 Claude arm plans", () => {
     const keys = makeDemo1ClaudeLauncher(runtime().binding).capabilities().runPinning.keys;
     expect(keys.find((entry) => entry.key === "model")?.inventory).toEqual([DEMO1_CLAUDE_MODEL_ID]);
     expect(keys.find((entry) => entry.key === "effort")?.inventory).toEqual([DEMO1_CLAUDE_EFFORT]);
+  });
+
+  it("keeps every v2 arm identical except for the frozen instruction loadout", () => {
+    const binding = createDemo1ClaudeCandidateRuntimeBinding({
+      executablePath: process.execPath,
+      harnessVersion: HARNESS_VERSION,
+      artifacts,
+      candidateIndex: 0,
+      command: async () => ({ stdout: "" }),
+    });
+    const skill = demo1ClaudeArmRequirements(binding, "skill");
+    const baseline = demo1ClaudeArmRequirements(binding, "claude-md");
+    const noFile = demo1ClaudeArmRequirements(binding, "no-file");
+    const withoutLoadout = (requirements: Readonly<Record<string, unknown>>) => {
+      const { loadout: _loadout, ...shared } = requirements;
+      return shared;
+    };
+    expect(withoutLoadout(skill)).toEqual(withoutLoadout(baseline));
+    expect(withoutLoadout(skill)).toEqual(noFile);
+    expect(skill).toMatchObject({ model: { id: "claude-haiku-4-5-20251001" }, effort: "low" });
+    expect(skill.loadout).toBe(artifacts.skill);
+    expect(baseline.loadout).toBe(artifacts.baseline);
+    expect(noFile).not.toHaveProperty("loadout");
   });
 });

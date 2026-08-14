@@ -102,6 +102,7 @@ function fixture(
     provisionerId?: string;
     launcher?: LauncherContract;
     secretForwardResolver?: LocalTaskExecutionBackendConfig["secretForwardResolver"];
+    hostSecretResolver?: LocalTaskExecutionBackendConfig["hostSecretResolver"];
     capabilityGrants?: LocalTaskExecutionBackendConfig["capabilityGrants"];
     launcherDeployments?: LocalTaskExecutionBackendConfig["launcherDeployments"];
   } = {},
@@ -112,7 +113,10 @@ function fixture(
       if (options.provisioningRejectReason !== undefined) {
         throw new ProvisioningRejectedError(options.provisioningRejectReason);
       }
-      await Promise.all(Object.values(workspace).map((path) => mkdir(path, { recursive: true })));
+      await Promise.all(Object.values(workspace)
+        .filter((path) => path !== workspace.secrets)
+        .map((path) => mkdir(path, { recursive: true })));
+      await mkdir(workspace.secrets, { recursive: true, mode: 0o700 });
     },
     executionEnv: (launch) => ({ ...launch.env }),
     async harvest() {
@@ -173,6 +177,9 @@ function fixture(
     ...(options.secretForwardResolver === undefined
       ? {}
       : { secretForwardResolver: options.secretForwardResolver }),
+    ...(options.hostSecretResolver === undefined
+      ? {}
+      : { hostSecretResolver: options.hostSecretResolver }),
     ...(options.capabilityGrants === undefined
       ? {}
       : { capabilityGrants: options.capabilityGrants }),
@@ -543,6 +550,62 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
       .filter((path) => path.endsWith("journal.jsonl"))
       .map((path) => readFile(path, "utf8")))).join("\n");
     expect(events).not.toContain('"type":"spawn-intended"');
+  });
+
+  test("admits an environment reference backed by one deployment-owned host secret forward", async () => {
+    type HostResolveInput = Parameters<NonNullable<LocalTaskExecutionBackendConfig["hostSecretResolver"]>["resolve"]>[0];
+    const resolve = vi.fn(async (_input: HostResolveInput) => new TextEncoder().encode("host-owned-secret"));
+    const hostForward = { handle: "agent-claude", target: "claude-token", role: "harness" as const };
+    const launcher: LauncherContract = {
+      id: "fixture",
+      capabilities: () => ({
+        taskProfiles: [profile.profile], inputMediaTypes: [], outputMediaTypes: [], structuredOutput: false,
+        resume: false, interruptionBehaviorDefault: "repeatable", secretForwards: [],
+        hostSecretForwards: [hostForward],
+        runPinning: { keys: [{ key: "harness", inventory: ["fixture"], posture: "enforced" }] },
+      }),
+      probe: async () => ({ ready: true }),
+      plan(_view, paths) {
+        return {
+          argv: [process.execPath, "-e", "process.exit(0)"],
+          env: { PROVIDER_CREDENTIAL: "secrets/claude-token" },
+          cwd: paths.work,
+          validExitCodes: [0],
+          resultContract: { envelopeFormat: "fixture" },
+          interruptionBehavior: "repeatable",
+          secretForwards: [],
+          hostSecretForwards: [hostForward],
+        };
+      },
+    };
+    const root = await stateRoot("host-secret-environment-reference");
+    const executable = { path: process.execPath, digest: "a".repeat(64) };
+    const backend = fixture(root, {
+      launcher,
+      hostSecretResolver: { resolve },
+      launcherDeployments: {
+        fixture: { executable, probe: async () => ({ ready: true, executable }) },
+      },
+    });
+    const task = taskBytes();
+    const ack = await backend.submit(task, submissionBytes(task, {
+      requirements: { harness: { id: "fixture" } },
+    }));
+    if (!ack.accepted) throw new Error(`expected accepted Submission: ${JSON.stringify(ack.error)}`);
+    expect(ack).toMatchObject({ accepted: true });
+    for (let poll = 0; poll < 200 && resolve.mock.calls.length === 0; poll += 1) {
+      await new Promise<void>((done) => setTimeout(done, 10));
+    }
+    await backend.drain();
+
+    const events = (await Promise.all((await allFiles(root))
+      .filter((path) => path.endsWith("journal.jsonl"))
+      .map((path) => readFile(path, "utf8")))).join("\n");
+    if (resolve.mock.calls.length === 0) throw new Error(`host secret was not resolved:\n${events}`);
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(resolve.mock.calls[0]?.[0]).toMatchObject(hostForward);
+    expect(events).toContain('"type":"spawned"');
+    expect(events).not.toContain("host-owned-secret");
   });
 
   test.runIf(process.platform === "linux")("fails preflight closed and withdraws custody claims when the Linux probe fails", async () => {
