@@ -254,6 +254,17 @@ export function runQuote(
         ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
       const nextState = ensureQuotable(document.state, input.draftId);
 
+      const unreadyAgent = context.runtimeHost?.assessAgentReadiness(
+        document.spec.arms.map((arm) => ({ armId: arm.armId, pinning: arm.pinning })),
+      ).find((finding) => !finding.ready);
+      if (unreadyAgent !== undefined) {
+        refuse(
+          "venue-unavailable",
+          `arms.${unreadyAgent.armId}.pinning`,
+          `${unreadyAgent.detail}${unreadyAgent.remediation === undefined ? "" : ` ${unreadyAgent.remediation}`}`,
+        );
+      }
+
       const closeAt = computeCloseAt(at, document.spec.policy.closeAfterMs);
       // One real workspace-held did:key is both Run owner and public source agent. This avoids
       // inventing an unverifiable delegation from a deterministic URN with no private key.
@@ -278,6 +289,7 @@ export function runQuote(
           now: context.clock,
           evaluatorCount: resolvedAssurance.minVerdicts,
           inspectEvaluationStrategy: deriveInspectEvaluationStrategy(resolvedAssurance),
+          agentProfileRequirements: document.spec.arms.map((arm) => arm.pinning),
         });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));

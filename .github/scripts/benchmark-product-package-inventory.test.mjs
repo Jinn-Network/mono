@@ -1,307 +1,232 @@
-// The Benchmark Product's inventory and Jinn-dependency graph.
+// The Colophon claims product inventory and its deliberately narrow package graph.
 //
-// Same shape as `policy-optimization-package-inventory.test.mjs`: the row list is explicit, the
-// cardinality is derived from the live tree, and a package added under
-// `packages/benchmark-product/` without a row here fails rather than being silently admitted.
-//
-// The product is tier 4 (product design §2, program plan §4.1): it lives under the two mechanical
-// tier-4 rules (nothing in tiers 1-3 imports it; no tier-1-3 kit, guard, or fixture references it).
-// Its consumption contract (product design §3) is REUSE-only, so unlike a tier-1-3 package this
-// tree's own approved Jinn dependency graph is a short, deliberately-grown list -- every edge here
-// is a decision made once, and the source-boundary guard enforces the same list at the import
-// level.
+// Colophon is a Tier 4 product identity.  The platform packages it consumes remain
+// @jinn-network packages; no Tier 1-3 package may adopt this product namespace.
 
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const root = resolve(import.meta.dirname, '../..');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const packageRoot = join(root, 'packages', 'benchmark-product');
-const DEPENDENCY_SECTIONS = [
-  'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
-];
+const architectureCatalogPath = join(root, 'architecture', 'platform-packages.v1.json');
+const DEPENDENCY_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
+const COLOPHON_SCOPE = '@colophon-claims/';
 
 const PRODUCT_PACKAGES = [
-  ['core', '@jinn-network/benchmark-product-core'],
-  ['web', '@jinn-network/benchmark-product-web'],
+  ['core', '@colophon-claims/core', 'public'],
+  ['cli', '@colophon-claims/cli', 'public'],
+  ['verify', '@colophon-claims/verify', 'public'],
+  ['web', '@colophon-claims/web', 'private'],
 ];
 
-// The approved runtime graph. BP-01 wired `benchmarking-records`; BP-11 (task intake) added
-// `benchmarking-interop` (SWE-bench import + defineBenchmark), `task-admission` (golden
-// prediction-snapshot fixture + admission receipts for the bundled sample), and
-// `task-execution-protocol` (sealTask for the sample's re-sealed Tasks). BP-12 (the official run
-// path) promoted `task-execution-launchers` from devDependency to a real runtime dependency (the
-// real local venue's real subprocess-spawning solve launchers) and added the rest of the real
-// local-venue stack as runtime dependencies: `benchmarking-run` (quote/launch/resume/assemble/
-// verify), `benchmarking-local` (`localAssemblyPorts`), `task-execution-backend` +
-// `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor`
-// + `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
-// sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters`
-// (the real evaluation leg), and `trust-core` (DSSE verdict signing). Demo-1 P3b adds the
-// `task-execution-oci-grader` product consumer edge. BP-13 (Report production/
-// verification) added `benchmarking-aggregate` for `produceReport`/`verifyReport` and the §9.2
-// method registry. BP-30 registered the second family member, `web`; BP-31 adds its sole direct
-// production Jinn edge, `@jinn-network/benchmark-product-core`. The matching portal resolutions
-// Inspect runtime integration adds `attestation-issuer` so the same-execution scorer can produce
-// the canonical attributable Result Evaluation payload without reimplementing evidence semantics.
-// are core's full private runtime closure so an isolated immutable web install can resolve the
-// public core entry. New edges are added deliberately, in this map and in the source-boundary
-// guard's per-member allow-list together.
-const JINN_DEPENDENCY_GRAPH = new Map([
-  ['core', {
-    dependencies: [
-      '@jinn-network/attestation-issuer',
-      '@jinn-network/benchmarking-aggregate',
-      '@jinn-network/benchmarking-interop',
-      '@jinn-network/benchmarking-local',
-      '@jinn-network/benchmarking-publication',
-      '@jinn-network/benchmarking-records',
-      '@jinn-network/benchmarking-run',
-      '@jinn-network/record-discovery-protocol',
-      '@jinn-network/record-discovery-serve',
-      '@jinn-network/record-discovery-transport-http',
-      '@jinn-network/record-publication',
-      '@jinn-network/task-admission',
-      '@jinn-network/task-execution-backend',
-      '@jinn-network/task-execution-backend-local',
-      '@jinn-network/task-execution-evaluation-harness',
-      '@jinn-network/task-execution-evaluator-adapters',
-      '@jinn-network/task-execution-launchers',
-      '@jinn-network/task-execution-oci-grader',
-      '@jinn-network/task-execution-profiles',
-      '@jinn-network/task-execution-protocol',
-      '@jinn-network/task-execution-supervisor',
-      '@jinn-network/task-execution-workspace',
-      '@jinn-network/trust-core',
-    ],
-    devDependencies: [],
-    optionalDependencies: [], peerDependencies: [],
-    // Portals whose own edges must resolve inside this project. `attestation-issuer` is now a
-    // direct approved edge; the other five remain transitive-only. The declared dependencies above
-    // depend on them, and none is published to a registry, so their portal resolutions have to be
-    // declared too or `install` sends them to versions that do not exist.
-    portalResolutions: [
-      '@jinn-network/environment-record',
-      '@jinn-network/evidence-discovery',
-      '@jinn-network/evidence-protocol',
-      '@jinn-network/evidence-repository',
-      '@jinn-network/execution-recorder',
-      '@jinn-network/record-discovery-client',
-    ],
-  }],
-  // BP-31: the private GUI is a server-side public-entry client of core. These transitive portal
-  // resolutions are install plumbing, not additional source-import allowances.
-  ['web', {
-    dependencies: ['@jinn-network/benchmark-product-core'],
-    devDependencies: [],
-    optionalDependencies: [],
-    peerDependencies: [],
-    portalResolutions: [
-      '@jinn-network/attestation-issuer',
-      '@jinn-network/benchmarking-aggregate',
-      '@jinn-network/benchmarking-interop',
-      '@jinn-network/benchmarking-local',
-      '@jinn-network/benchmarking-publication',
-      '@jinn-network/benchmarking-records',
-      '@jinn-network/benchmarking-run',
-      '@jinn-network/environment-record',
-      '@jinn-network/evidence-discovery',
-      '@jinn-network/evidence-protocol',
-      '@jinn-network/evidence-repository',
-      '@jinn-network/execution-recorder',
-      '@jinn-network/record-discovery-client',
-      '@jinn-network/record-discovery-protocol',
-      '@jinn-network/record-discovery-serve',
-      '@jinn-network/record-discovery-transport-http',
-      '@jinn-network/record-publication',
-      '@jinn-network/task-admission',
-      '@jinn-network/task-execution-backend',
-      '@jinn-network/task-execution-backend-local',
-      '@jinn-network/task-execution-evaluation-harness',
-      '@jinn-network/task-execution-evaluator-adapters',
-      '@jinn-network/task-execution-launchers',
-      '@jinn-network/task-execution-oci-grader',
-      '@jinn-network/task-execution-profiles',
-      '@jinn-network/task-execution-protocol',
-      '@jinn-network/task-execution-supervisor',
-      '@jinn-network/task-execution-workspace',
-      '@jinn-network/trust-core',
-    ],
-  }],
+const CORE_JINN = [
+  '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-publication', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run',
+  '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication',
+  '@jinn-network/task-admission', '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-evaluation-harness',
+  '@jinn-network/task-execution-evaluator-adapters', '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-workspace', '@jinn-network/trust-core',
+];
+const VERIFY_JINN = [
+  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records',
+  '@jinn-network/benchmarking-run', '@jinn-network/task-admission',
+  '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
+  '@jinn-network/trust-core',
+];
+const TRANSITIVE_PORTALS = [
+  '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run',
+  '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
+  '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository',
+  '@jinn-network/execution-recorder', '@jinn-network/task-admission',
+  '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness', '@jinn-network/task-execution-evaluator-adapters',
+  '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-oci-grader',
+  '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+  '@jinn-network/trust-core',
+];
+const PUBLICATION_PORTALS = [
+  '@jinn-network/benchmarking-publication', '@jinn-network/record-discovery-client',
+  '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication',
+];
+const VERIFY_PORTALS = [
+  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records',
+  '@jinn-network/benchmarking-run', '@jinn-network/environment-record',
+  '@jinn-network/task-admission',
+  '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
+  '@jinn-network/trust-core',
+];
+
+const APPROVED = new Map([
+  ['core', { colophon: ['@colophon-claims/verify'], jinn: CORE_JINN, portals: [
+    '@colophon-claims/verify', ...CORE_JINN, '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
+    '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
+    '@jinn-network/record-discovery-client',
+  ] }],
+  ['cli', { colophon: ['@colophon-claims/core', '@colophon-claims/verify'], jinn: [], portals: [
+    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
+  ] }],
+  ['verify', { colophon: [], jinn: VERIFY_JINN, portals: VERIFY_PORTALS }],
+  ['web', { colophon: ['@colophon-claims/core'], jinn: [], portals: [
+    // Verify is core's public runtime dependency. Web resolves it only as portal plumbing;
+    // source-boundaries still permits web to import core alone.
+    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
+  ] }],
 ]);
 
 const SIBLING_TREE_DIRS = new Map([
-  ['@jinn-network/benchmark-product-core', join(root, 'packages', 'benchmark-product', 'core')],
-  ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
-  ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
-  ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
-  ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
-  ['@jinn-network/benchmarking-publication', join(root, 'packages', 'benchmarking', 'publication')],
-  ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
-  ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
-  ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
-  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
-  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
-  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
-  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
-  ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
-  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
-  ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
-  ['@jinn-network/record-discovery-transport-http', join(root, 'packages', 'discovery', 'transport-http')],
-  ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
-  ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
-  ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
-  ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
-  ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
-  ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
-  ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
-  ['@jinn-network/task-execution-oci-grader', join(root, 'packages', 'task-execution', 'oci-grader')],
-  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
-  ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
-  ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
-  ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
-  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ...PRODUCT_PACKAGES.map(([directory, name]) => [name, join(packageRoot, directory)]),
+  ['@jinn-network/attestation-issuer', join(root, 'packages/evidence/attestation-issuer')],
+  ['@jinn-network/benchmarking-aggregate', join(root, 'packages/benchmarking/aggregate')],
+  ['@jinn-network/benchmarking-interop', join(root, 'packages/benchmarking/interop')],
+  ['@jinn-network/benchmarking-local', join(root, 'packages/benchmarking/local')],
+  ['@jinn-network/benchmarking-publication', join(root, 'packages/benchmarking/publication')],
+  ['@jinn-network/benchmarking-records', join(root, 'packages/benchmarking/records')],
+  ['@jinn-network/benchmarking-run', join(root, 'packages/benchmarking/run')],
+  ['@jinn-network/environment-record', join(root, 'packages/environments/record')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages/evidence/discovery')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages/evidence/protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages/evidence/repository')],
+  ['@jinn-network/execution-recorder', join(root, 'packages/evidence/execution-recorder')],
+  ['@jinn-network/record-discovery-client', join(root, 'packages/discovery/client')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages/discovery/protocol')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages/discovery/serve')],
+  ['@jinn-network/record-discovery-transport-http', join(root, 'packages/discovery/transport-http')],
+  ['@jinn-network/record-publication', join(root, 'packages/discovery/publication')],
+  ['@jinn-network/task-admission', join(root, 'packages/task-supply/admission')],
+  ['@jinn-network/task-execution-backend', join(root, 'packages/task-execution/backend')],
+  ['@jinn-network/task-execution-backend-local', join(root, 'packages/task-execution/backend-local/assembly')],
+  ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages/task-execution/evaluation-harness')],
+  ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages/task-execution/evaluator-adapters')],
+  ['@jinn-network/task-execution-launchers', join(root, 'packages/task-execution/backend-local/launchers')],
+  ['@jinn-network/task-execution-oci-grader', join(root, 'packages/task-execution/oci-grader')],
+  ['@jinn-network/task-execution-profiles', join(root, 'packages/task-execution/profiles')],
+  ['@jinn-network/task-execution-protocol', join(root, 'packages/task-execution/protocol')],
+  ['@jinn-network/task-execution-supervisor', join(root, 'packages/task-execution/backend-local/supervisor')],
+  ['@jinn-network/task-execution-workspace', join(root, 'packages/task-execution/backend-local/workspace')],
+  ['@jinn-network/trust-core', join(root, 'packages/trust/core')],
 ]);
 
 function readPackage(directory) {
-  const packageJson = join(packageRoot, directory, 'package.json');
-  assert.ok(existsSync(packageJson), `missing package manifest: ${packageJson}`);
-  return JSON.parse(readFileSync(packageJson, 'utf8'));
+  const path = join(packageRoot, directory, 'package.json');
+  assert.ok(existsSync(path), `missing package manifest: ${path}`);
+  return JSON.parse(readFileSync(path, 'utf8'));
 }
-
 function packageManifests(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
+    if (!entry.isDirectory() || ['.next', 'dist', 'node_modules'].includes(entry.name)) return [];
     const child = join(directory, entry.name);
-    const packageJson = join(child, 'package.json');
-    return [
-      ...(existsSync(packageJson) ? [packageJson] : []),
-      ...packageManifests(child),
-    ];
+    const manifest = join(child, 'package.json');
+    return [...(existsSync(manifest) ? [manifest] : []), ...packageManifests(child)];
   });
 }
-
-function jinnDependencyNames(manifest, section) {
-  return Object.keys(manifest[section] ?? {})
-    .filter((name) => name.startsWith('@jinn-network/')).sort();
+function dependencyNames(manifest, scope) {
+  return DEPENDENCY_SECTIONS.flatMap((section) => Object.keys(manifest[section] ?? {})
+    .filter((name) => name.startsWith(scope))).sort();
+}
+function expectedPortal(directory, name) {
+  const target = SIBLING_TREE_DIRS.get(name);
+  assert.ok(target, `${directory} declares an unknown first-party dependency ${name}`);
+  return `portal:${relative(join(packageRoot, directory), target) || '.'}`;
 }
 
-function expectedPortal(directory, dependencyName) {
-  const inTree = PRODUCT_PACKAGES.find(([, name]) => name === dependencyName);
-  const targetDir = inTree ? join(packageRoot, inTree[0]) : SIBLING_TREE_DIRS.get(dependencyName);
-  assert.ok(targetDir, `${directory} declares unknown Jinn dependency ${dependencyName}`);
-  return `portal:${relative(join(packageRoot, directory), targetDir) || '.'}`;
-}
-
-test('the benchmark-product inventory is explicit and derives cardinality from the live tree', () => {
-  for (const [directory, expectedName] of PRODUCT_PACKAGES) {
-    const manifest = readPackage(directory);
-    assert.equal(manifest.name, expectedName);
-    assert.equal(
-      manifest.repository?.directory,
-      `packages/benchmark-product/${directory}`,
-      `${expectedName} has a stale repository directory`,
-    );
-  }
+test('the Colophon claims inventory is explicit and derives its membership from the live tree', () => {
   const actual = packageManifests(packageRoot).flatMap((manifestPath) => {
     const { name } = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    return typeof name === 'string' && /^@jinn-network\/benchmark-product-/.test(name)
-      ? [[relative(packageRoot, dirname(manifestPath)), name]]
-      : [];
-  }).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
-  assert.deepEqual(actual, [...PRODUCT_PACKAGES].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)));
-  assert.equal(actual.length, PRODUCT_PACKAGES.length);
+    return typeof name === 'string' && name.startsWith(COLOPHON_SCOPE)
+      ? [[relative(packageRoot, dirname(manifestPath)), name]] : [];
+  }).sort();
+  assert.deepEqual(actual, PRODUCT_PACKAGES.map(([directory, name]) => [directory, name]).sort());
+  for (const [directory, name, visibility] of PRODUCT_PACKAGES) {
+    const manifest = readPackage(directory);
+    assert.equal(manifest.name, name);
+    assert.equal(manifest.repository?.directory, `packages/benchmark-product/${directory}`);
+    assert.equal(manifest.type, 'module');
+    assert.equal(manifest.version, visibility === 'public' ? '1.0.0' : '0.1.0');
+    assert.equal(manifest.private === true, visibility === 'private', `${name} visibility drifted`);
+    for (const dependency of dependencyNames(manifest, COLOPHON_SCOPE)) {
+      assert.equal(manifest.dependencies?.[dependency], '1.0.0', `${name} must pin public sibling ${dependency} exactly`);
+    }
+  }
 });
 
-test('the inventory guard itself contains no hardcoded package-cardinality assertion', () => {
-  const source = readFileSync(import.meta.filename, 'utf8');
-  assert.doesNotMatch(source, /PRODUCT_PACKAGES\.length\s*,\s*\d+/);
+test('the public Colophon members and private web have the intended publication posture', () => {
+  const expectedBins = new Map([
+    ['core', undefined],
+    ['cli', { colophon: './dist/bin.js' }],
+    ['verify', { 'colophon-verify': './dist/bin.js' }],
+  ]);
+  for (const [directory, name, visibility] of PRODUCT_PACKAGES) {
+    const manifest = readPackage(directory);
+    if (visibility === 'public') {
+      assert.notEqual(manifest.private, true, `${name} must be packable and publishable`);
+      assert.ok(manifest.exports?.['.'], `${name} must expose a public package entry`);
+      assert.deepEqual(manifest.bin, expectedBins.get(directory), `${name} has an unexpected executable surface`);
+      const installScripts = Object.keys(manifest.scripts ?? {}).filter((script) => /^(?:pre|post)?install$/.test(script));
+      assert.deepEqual(installScripts, [], `${name} must not execute an install lifecycle script`);
+    } else {
+      assert.equal(manifest.private, true, `${name} must remain private`);
+      assert.equal(manifest.exports, undefined, `${name} must not acquire a public package entry`);
+    }
+  }
 });
 
-test('benchmark-product Jinn dependencies and portal resolutions match the approved graph', () => {
+test('the CLI packages web as private build input rather than a public runtime dependency', () => {
+  const cli = readPackage('cli');
+  assert.equal(cli.dependencies?.['@colophon-claims/web'], undefined);
+  const buildScript = readFileSync(join(packageRoot, 'cli', 'scripts', 'build.mjs'), 'utf8');
+  assert.match(buildScript, /buildPrivateWeb\(\)/, 'CLI build must build the private web input');
+  assert.match(buildScript, /dist["'],\s*["']local-web/, 'CLI build must embed the private web output');
+  assert.match(buildScript, /webRoot,\s*["']build/, 'CLI build must invoke the private web build before packing');
+});
+
+test('Colophon and Jinn dependencies and portal resolutions match the approved graph', () => {
   for (const [directory] of PRODUCT_PACKAGES) {
     const manifest = readPackage(directory);
-    const approved = JINN_DEPENDENCY_GRAPH.get(directory);
+    const approved = APPROVED.get(directory);
     assert.ok(approved, `missing dependency graph entry for ${directory}`);
-    for (const section of DEPENDENCY_SECTIONS) {
-      assert.deepEqual(jinnDependencyNames(manifest, section), approved[section],
-        `${directory} has unapproved Jinn ${section}`);
-    }
-    const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
-    const portalResolutions = [...(approved.portalResolutions ?? [])].sort();
-    const resolutions = manifest.resolutions ?? {};
-    const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();
-    assert.deepEqual(resolved, [...declared, ...portalResolutions].sort(),
-      `${directory} has unmatched Jinn resolutions`);
-    for (const dependencyName of [...declared, ...portalResolutions]) {
-      assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
-        `${directory} must resolve ${dependencyName} through its matching portal`);
+    assert.deepEqual(dependencyNames(manifest, COLOPHON_SCOPE), [...approved.colophon].sort(), `${directory} has unapproved Colophon dependencies`);
+    assert.deepEqual(dependencyNames(manifest, '@jinn-network/'), [...approved.jinn].sort(), `${directory} has unapproved Jinn dependencies`);
+    const resolved = Object.keys(manifest.resolutions ?? {})
+      .filter((name) => name.startsWith(COLOPHON_SCOPE) || name.startsWith('@jinn-network/')).sort();
+    assert.deepEqual(resolved, [...approved.portals].sort(), `${directory} has unmatched first-party resolutions`);
+    for (const name of approved.portals) {
+      assert.equal(manifest.resolutions[name], expectedPortal(directory, name), `${directory} must resolve ${name} through its matching portal`);
     }
   }
 });
 
-test('the product never publishes', () => {
-  // Product design §2: classification `product`, release group `transitional-or-private`,
-  // publication disabled (`publishPolicy: "never"`). Unlike policy-optimization (public,
-  // `publishConfig.access: "restricted"`), this product is `private: true` -- npm refuses to
-  // publish it at all. A package that quietly dropped `private` would be the first sign that
-  // posture slipped.
-  for (const [directory, expectedName] of PRODUCT_PACKAGES) {
-    const manifest = readPackage(directory);
-    assert.match(manifest.version, /^0\./, `${expectedName} claims a non-experimental version`);
-    assert.equal(manifest.type, 'module');
-    assert.equal(manifest.engines?.node, '>=22');
-    assert.equal(manifest.private, true, `${expectedName} must be marked private`);
-  }
+test('Tier 1-3 packages do not adopt the Tier 4 Colophon identity', () => {
+  const catalog = JSON.parse(readFileSync(architectureCatalogPath, 'utf8'));
+  const offenders = catalog.packages.filter((entry) => [1, 2, 3].includes(entry.tier)).flatMap((entry) => {
+    const manifestPath = join(root, entry.path, 'package.json');
+    if (!existsSync(manifestPath)) return [];
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const references = [manifest.name, ...DEPENDENCY_SECTIONS.flatMap((section) => Object.keys(manifest[section] ?? {}))]
+      .filter((value) => typeof value === 'string' && value.startsWith(COLOPHON_SCOPE));
+    return references.map((reference) => `${entry.path} -> ${reference}`);
+  });
+  assert.deepEqual(offenders.sort(), [], 'only Tier 4 packages may use the Colophon package identity');
 });
 
-test('the benchmark-publication profile kit is product-local acceptance coverage, not a shipped protocol surface', () => {
-  const fixture = join(packageRoot, 'core', 'test', 'fixtures', 'benchmark-publication-conformance', 'manifest.json');
-  assert.ok(existsSync(fixture), 'missing benchmark-publication conformance manifest');
-  const manifest = JSON.parse(readFileSync(fixture, 'utf8'));
-  assert.equal(manifest.profile, 'https://spec.jinn.network/profiles/benchmark-publication/v1');
-  assert.equal(manifest.owner, '@jinn-network/benchmark-product-core');
-  assert.match(manifest.scope, /application acceptance/i);
-  assert.equal(manifest.cases.length, 18);
-  const catalog = JSON.parse(readFileSync(join(root, 'architecture', 'platform-packages.v1.json'), 'utf8'));
-  const core = catalog.packages.find((entry) => entry.name === '@jinn-network/benchmark-product-core');
-  assert.deepEqual(core.publicSurface.conformance, [], 'private product acceptance coverage must not masquerade as a public conformance export');
-});
-
-test('no other package in the repository depends on the product', () => {
-  // The tier boundary, from the other side (product design §2: "nothing in tiers 1-3 imports it").
-  // Stated as a repository-wide sweep rather than as trust in the tier-4 packages' own restraint.
-  // Family-wide: any `@jinn-network/benchmark-product-*` name is checked, not only today's row, so
-  // a future family package is covered without editing this test.
-  const offenders = [];
-  const walk = (directory) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue;
-      const child = join(directory, entry.name);
-      const manifestPath = join(child, 'package.json');
-      if (existsSync(manifestPath)) {
-        const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-        if (typeof manifest.name === 'string' && /^@jinn-network\/benchmark-product-/.test(manifest.name)) {
-          walk(child);
-          continue;
-        }
-        for (const section of DEPENDENCY_SECTIONS) {
-          for (const name of jinnDependencyNames(manifest, section)) {
-            if (/^@jinn-network\/benchmark-product/.test(name)) {
-              offenders.push(`${relative(root, child)} (${section}: ${name})`);
-            }
-          }
-        }
-      }
-      walk(child);
-    }
-  };
-  walk(join(root, 'packages'));
-  for (const adjacent of ['client', 'apps', 'plugin', 'scripts']) {
-    const directory = join(root, adjacent);
-    if (existsSync(directory)) walk(directory);
-  }
-  assert.deepEqual(offenders.sort(), [], 'a package depends on the tier-4 product');
+test('no package outside this Tier 4 product depends on Colophon', () => {
+  const offenders = packageManifests(join(root, 'packages')).flatMap((manifestPath) => {
+    if (manifestPath.startsWith(`${packageRoot}/`)) return [];
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    return dependencyNames(manifest, COLOPHON_SCOPE).map((name) => `${relative(root, manifestPath)} -> ${name}`);
+  });
+  assert.deepEqual(offenders.sort(), [], 'a non-product package depends on a Tier 4 Colophon package');
 });

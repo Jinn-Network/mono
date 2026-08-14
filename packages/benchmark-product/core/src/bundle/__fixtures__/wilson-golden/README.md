@@ -128,9 +128,13 @@ Source: authenticated [verification assembly](verification/assembly.jsonl).
 
 ## Portable verification
 
-Copy the complete bundle directory and run:
+Copy the complete bundle directory. Reproduce publication with the exact verifier:
 
-    colophon bundle verify --bundle <bundle-dir> --json
+    npx @colophon-claims/verify@1.0.0 <bundle-dir>
+
+Use the compatible major line to receive fixes that preserve this bundle-format contract:
+
+    npx @colophon-claims/verify@1 <bundle-dir>
 
 The verifier authenticates the manifest, records, evidence graph, Matrix, Report, claim consistency, and every presentation byte using only bundle-carried public trust material. See [index.html#verification](index.html#verification). Built on Jinn.
 

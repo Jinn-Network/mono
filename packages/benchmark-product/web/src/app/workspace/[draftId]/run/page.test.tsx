@@ -61,6 +61,8 @@ describe("durable run monitor cancellation language", () => {
     }));
     expect(markup).toContain("Cancellation requested; driver is draining.");
     expect(markup).not.toContain("Cancellation finalized; run is cancelled.");
+    expect(markup).toContain("Provider network and possible charges.");
+    expect(markup).toContain("The bundled sample needs no account, API key, funds, or provider connection.");
   });
 
   test("calls a closed run with a valid marker finalized and cancelled", async () => {

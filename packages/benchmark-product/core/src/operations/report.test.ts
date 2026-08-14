@@ -874,7 +874,7 @@ describe("portable public bundle", () => {
     }
   }, 30_000);
 
-  test("legacy verification refuses a canonical v2 bundle relabeled as v3", async () => {
+  test("verification refuses a canonical v2 bundle relabeled as v3 at the manifest boundary", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
     const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
@@ -895,7 +895,10 @@ describe("portable public bundle", () => {
     writeCanonical(manifestPath, manifest);
 
     await expect(verifyPublicBundle(bundleDir)).rejects.toMatchObject({
-      issues: [expect.objectContaining({ path: "bundle.json", message: expect.stringMatching(/not a v2 bundle/i) })],
+      issues: [expect.objectContaining({
+        path: "bundle.json",
+        message: "bundle.json does not satisfy the manifest schema",
+      })],
     });
   }, 30_000);
 

@@ -1,9 +1,58 @@
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import { canonicalLoadoutPath, type TaskView, type WorkspacePaths } from "@jinn-network/task-execution-workspace";
+import { isAbsolute } from "node:path";
 import type { LauncherCapabilities, ProbeResult } from "./contract.js";
 
 export interface LauncherOptions {
   readonly probe?: () => Promise<ProbeResult>;
+  /** Deployment-qualified executable. Absent preserves PATH-based compatibility callers. */
+  readonly executablePath?: string;
+}
+
+export function executablePath(options: LauncherOptions, fallback: string): string {
+  if (options.executablePath === undefined) return fallback;
+  if (!isAbsolute(options.executablePath)) throw new Error(`${fallback}: executablePath must be absolute`);
+  return options.executablePath;
+}
+
+/**
+ * A credential file supplied by the platform after the launch intent is durable.  This is
+ * deliberately a basename, rather than a path: a planner can only ever publish the stable
+ * `secrets/<basename>` handle, never a host path or credential bytes.
+ */
+export type PortableSecretBasename = string & { readonly __portableSecretBasename: unique symbol };
+
+export type HarnessCredentialMode =
+  | { readonly kind: "api-key"; readonly secretBasename: string }
+  | { readonly kind: "credential-artifact"; readonly secretBasename: string };
+
+/** Host-selected credential: the handle is opaque and never a requester capability grant. */
+export type HarnessHostCredential = HarnessCredentialMode & { readonly handle: string };
+
+const PORTABLE_SECRET_BASENAME = /^[A-Za-z0-9._-]+$/u;
+
+export function portableSecretBasename(value: string): PortableSecretBasename {
+  if (!PORTABLE_SECRET_BASENAME.test(value) || value === "." || value === "..") {
+    throw new Error("credential secretBasename must be a portable basename");
+  }
+  return value as PortableSecretBasename;
+}
+
+export function credentialReference(value: string): `secrets/${string}` {
+  return `secrets/${portableSecretBasename(value)}`;
+}
+
+export function credentialForwards(credential: HarnessCredentialMode | undefined): readonly { readonly grantKey: string; readonly target: string }[] {
+  if (credential === undefined) return [];
+  const basename = portableSecretBasename(credential.secretBasename);
+  return [{ grantKey: basename, target: basename }];
+}
+
+export function hostCredentialForwards(credential: HarnessHostCredential | undefined): readonly import("./contract.js").HostSecretForwardDeclaration[] {
+  if (credential === undefined) return [];
+  const basename = portableSecretBasename(credential.secretBasename);
+  const handle = portableSecretBasename(credential.handle);
+  return [{ handle, target: basename, role: "harness" }];
 }
 
 export function probeFrom(options: LauncherOptions, id: string): () => Promise<ProbeResult> {
@@ -75,6 +124,7 @@ export function capabilities(
     "https://spec.jinn.network/task-profiles/repository-work/1.0",
     "https://spec.jinn.network/task-profiles/evaluation-task/1.0",
   ],
+  hostSecretForwards: readonly import("./contract.js").HostSecretForwardDeclaration[] = [],
 ): LauncherCapabilities {
   return {
     taskProfiles,
@@ -84,6 +134,7 @@ export function capabilities(
     resume,
     interruptionBehaviorDefault: resume ? "recoverable" : "repeatable",
     secretForwards,
+    ...(hostSecretForwards.length === 0 ? {} : { hostSecretForwards }),
     runPinning: { keys: keys.map((entry) => ({ ...entry, posture: "enforced" })) },
   };
 }

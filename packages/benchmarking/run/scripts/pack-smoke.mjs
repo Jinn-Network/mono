@@ -72,7 +72,6 @@ const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoo
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expectedJinnDependencies = [
   "@jinn-network/benchmarking-records",
-  "@jinn-network/task-execution-backend",
   "@jinn-network/task-execution-profiles",
   "@jinn-network/task-execution-protocol",
 ];

@@ -16,14 +16,15 @@ describe("PRODUCT_BRANDING", () => {
     });
   });
 
-  test("ships the preferred CLI name and the compatibility alias", () => {
-    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+  test("keeps the public command in the Colophon-owned CLI package", () => {
+    const corePackage = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
       readonly bin?: Readonly<Record<string, string>>;
     };
-    expect(packageJson.bin).toEqual({
-      colophon: "./dist/cli/bin.js",
-      "benchmark-product": "./dist/cli/bin.js",
-    });
+    const cliPackage = JSON.parse(readFileSync(new URL("../../cli/package.json", import.meta.url), "utf8")) as {
+      readonly bin?: Readonly<Record<string, string>>;
+    };
+    expect(corePackage.bin).toBeUndefined();
+    expect(cliPackage.bin).toEqual({ colophon: "./dist/bin.js" });
   });
 
   test("no Jinn lexicon term appears in any branding value", () => {

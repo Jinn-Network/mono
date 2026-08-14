@@ -134,6 +134,7 @@ async function acquireFreeVenue(
   workspaceDir: string,
   now: () => string,
   evaluatorCount: number,
+  agentProfileRequirements: readonly Readonly<Record<string, unknown>>[],
   inspectEvaluationStrategy: InspectEvaluationStrategy,
 ): Promise<
   | { readonly ok: true; readonly venue: LocalVenue }
@@ -141,7 +142,13 @@ async function acquireFreeVenue(
 > {
   let venue: LocalVenue | undefined;
   try {
-    venue = createVenue({ workspaceDir, now, evaluatorCount, inspectEvaluationStrategy });
+    venue = createVenue({
+      workspaceDir,
+      now,
+      evaluatorCount,
+      agentProfileRequirements,
+      inspectEvaluationStrategy,
+    });
     const preflight = await venue.backend.preflight({});
     if (!preflight.ready) {
       const detail = preflight.detail ?? preflight.error?.message ?? "local venue is not ready";
@@ -277,6 +284,7 @@ export function runCancel(
         clockedContext.workspaceDir,
         context.clock,
         minVerdicts,
+        runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
         deriveInspectEvaluationStrategy(runRecord.policy.evaluation),
       );
       if (!acquired.ok) {

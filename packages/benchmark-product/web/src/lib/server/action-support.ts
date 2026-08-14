@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { OperationContext, OperationResult } from "@jinn-network/benchmark-product-core";
+import type { OperationContext, OperationResult } from "@colophon-claims/core";
 import { revalidatePath } from "next/cache";
 import type { GuiActionState } from "@/lib/action-state";
 import { projectProductErrorForGui } from "./gui-error";

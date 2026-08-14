@@ -48,8 +48,11 @@ export async function materializeHostSecretForwards(input: {
   for (const forward of input.forwards) {
     if (!validTarget(forward.target)) throw new Error("host secret target must be a portable basename");
     if (!validTarget(forward.handle)) throw new Error("host secret handle must be a portable logical handle");
-    if (forward.role !== "evaluator" || forward.evaluator.trim().length === 0) {
-      throw new Error("host secret authority must name a deployment-owned evaluator");
+    if (forward.role === "evaluator" && (forward.evaluator === undefined || forward.evaluator.trim().length === 0)) {
+      throw new Error("evaluator host secret authority must name a deployment-owned evaluator");
+    }
+    if (forward.role !== "evaluator" && forward.role !== "harness") {
+      throw new Error("host secret authority role is unsupported");
     }
     if (targets.has(forward.target) || handles.has(forward.handle)) {
       throw new Error("host secret declarations must have unique targets and handles");

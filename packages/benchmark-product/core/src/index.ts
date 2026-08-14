@@ -10,6 +10,7 @@
 
 export type { ProductBranding } from "./branding.js";
 export { PRODUCT_BRANDING } from "./branding.js";
+export * from "./agent/index.js";
 export { BENCHMARKING_PROTOCOL } from "./platform.js";
 export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js";
 export type { GuiCapability } from "./cli/parity-map.js";
@@ -75,6 +76,7 @@ export {
 } from "./runtime/adapter.js";
 export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary, RuntimeEvidenceAdapterOptions, RuntimeEvidenceDispatchInput, RuntimePublicationAdapter } from "./runtime/adapter.js";
 export { createDefaultBenchmarkRuntimeHost } from "./runtime/host-port.js";
+export { assessAgentRuntimeReadiness } from "./runtime/agent-readiness.js";
 export type {
   BenchmarkRuntimeHost,
   BenchmarkRuntimeHostOptions,
@@ -145,6 +147,11 @@ export type {
   TerminalBenchMigrationRequest,
   TerminalBenchMigrationResolution,
 } from "./runtime/terminal-bench-2/host.js";
+export type {
+  AgentRuntimeReadiness,
+  AgentRuntimeReadinessCode,
+  AgentRuntimeReadinessRequest,
+} from "./runtime/agent-readiness.js";
 export type {
   InspectRuntimeMethodDisclosure,
   InspectScoringProjectionDisclosure,
@@ -473,4 +480,4 @@ export { USAGE, runCli } from "./cli/main.js";
 export type { CliContext, CliResult } from "./cli/result.js";
 
 /** The product core's own version, mirrored from package.json. */
-export const PRODUCT_VERSION = "0.1.0";
+export const PRODUCT_VERSION = "1.0.0";

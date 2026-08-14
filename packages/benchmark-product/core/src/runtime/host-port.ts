@@ -14,6 +14,12 @@ import type {
 } from "./inspect/manifest.js";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import type { Demo1ClaudeRuntimeBinding } from "../venue/demo1-claude.js";
+import { configuredAgentRuntimes, profileMatchesArmPinning } from "../agent/index.js";
+import {
+  assessAgentRuntimeReadiness,
+  type AgentRuntimeReadiness,
+  type AgentRuntimeReadinessRequest,
+} from "./agent-readiness.js";
 import { resolveHarborSelection, type HarborRuntimeSelectionRequest, type HarborRuntimeSelectionResolution } from "./harbor/host.js";
 
 interface InspectRuntimeSelectionBase {
@@ -49,6 +55,8 @@ export interface BenchmarkRuntimeHost {
     binding: EvaluationRuntimeBinding | undefined,
     options: Omit<LocalVenueOptions, "evaluationRuntime">,
   ): LocalVenue;
+  /** Local, non-executing doctor gate for v1 provider-backed agent arms. */
+  assessAgentReadiness(requests: readonly AgentRuntimeReadinessRequest[]): readonly AgentRuntimeReadiness[];
 }
 
 export interface OpenAIHostConnection {
@@ -64,6 +72,8 @@ export interface BenchmarkRuntimeHostOptions {
   readonly repositoryRoot?: string;
   /** Explicit real Claude Code deployment used by Demo-1 repository-work arms. */
   readonly demo1ClaudeRuntime?: Demo1ClaudeRuntimeBinding;
+  /** Colophon OS user-data root; profiles and grants stay outside workspaces and repositories. */
+  readonly agentDataDir?: string;
 }
 
 function inside(path: string, root: string): boolean {
@@ -129,6 +139,9 @@ function createOpenAIConnectionDescriptor(
 export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeHostOptions = {}): BenchmarkRuntimeHost {
   const repositoryRoot = realpathSync(hostOptions.repositoryRoot ?? fileURLToPath(new URL("../../../../..", import.meta.url)));
   return {
+    assessAgentReadiness(requests) {
+      return assessAgentRuntimeReadiness(hostOptions.agentDataDir, requests);
+    },
     resolveHarborSelection,
     async resolveInspectSelection(input, signal) {
       if (input.execution === "oci") {
@@ -174,6 +187,12 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
             : { demo1ClaudeRuntime: hostOptions.demo1ClaudeRuntime }),
           ...(binding === undefined ? {} : { evaluationRuntime: binding }),
           ...(descriptor.path === undefined ? {} : { inspectHostConnectionDescriptor: descriptor.path }),
+          ...(hostOptions.agentDataDir === undefined || venueOptions.agentProfileRequirements === undefined
+            ? {}
+            : {
+              agentRuntimes: configuredAgentRuntimes(hostOptions.agentDataDir).filter((binding) =>
+                venueOptions.agentProfileRequirements!.some((requirements) => profileMatchesArmPinning(binding.profile, requirements))),
+            }),
         });
         return {
           ...venue,

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createWorkspacePublicationHttpHandler } from "@jinn-network/benchmark-product-core";
+import { createWorkspacePublicationHttpHandler } from "@colophon-claims/core";
 import { readProductServerConfiguration } from "@/lib/server/product-context";
 
 export const dynamic = "force-dynamic";
