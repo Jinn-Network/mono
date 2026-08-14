@@ -37,7 +37,7 @@ function authenticated(files: Readonly<Record<string, string>>): VerifiedPublicB
       sampleKind: "bundled-prediction",
       tasks: [{
         digest: "2".repeat(64),
-        profileUri: "https://jinn.network/task-execution/profiles/prediction-forecast/v1",
+        profileUri: "https://spec.jinn.network/task-execution/profiles/prediction-forecast/v1",
         label: "Will the sample event happen?",
         summary: "Synthetic sample resolution: Yes.",
         evidencePath: `records/${"2".repeat(64)}.bin`,
