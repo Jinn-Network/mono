@@ -57,8 +57,19 @@ describe('lifecycle publishing retirement (Wave-4 D3)', () => {
 
   it('the API no longer exposes a lifecycle-transition route', () => {
     const endpoints = read('../../src/api/solvernets-endpoints.ts');
-    expect(endpoints).not.toContain('/lifecycle');
-    expect(endpoints).not.toContain('lifecycleTransition');
+    // Assert the MUTATION producer is gone, not the word. The read plane
+    // legitimately reports lifecycle status (headless design §4.2 puts posting
+    // and lifecycle status on the read plane), and the surviving prose comments
+    // are the record of this retirement -- neither may resurrect the producer.
+    const routeRegistrations = endpoints.match(/app\.(get|post|put|patch|delete)\([^)]*/g) ?? [];
+    expect(routeRegistrations.filter((r) => r.includes('/lifecycle'))).toEqual([]);
+    // The dependency injection point and its call site are what actually drove
+    // setMetadata transitions; a mention inside a comment is not a producer.
+    const code = endpoints
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('*') && !l.trimStart().startsWith('//'))
+      .join('\n');
+    expect(code).not.toContain('lifecycleTransition');
   });
 
   it('the lifecycle wire vocabulary survives for record consumers', () => {
