@@ -27,6 +27,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   axisObservationsFromRuntimeObservations,
+  requirementsDigest,
   runPinningPropertyId,
 } from "@jinn-network/benchmarking-local";
 import type { AttemptWaitPort } from "@jinn-network/benchmarking-run";
@@ -240,6 +241,7 @@ function evidencePort(plan: WavePlan, options: { readonly swap?: boolean } = {})
     evidenceFor(cellKey: string): WaveCellEvidence | undefined {
       const [taskDigest, armId] = cellKey.split("/");
       const candidate = byArm.get(armId!)!;
+      const plannedArm = plan.arms.find((arm) => arm.armId === armId)!;
       const taskIndex = taskOrder.indexOf(taskDigest!);
       const swapped = options.swap === true && cellKey === swappedCellKey();
       const outcome = plan.kind === "promotion"
@@ -252,7 +254,10 @@ function evidencePort(plan: WavePlan, options: { readonly swap?: boolean } = {})
         verdicts: [verdictFor(cellKey, outcome)],
         pinning: {
           dispatches: 1,
-          admission: { ready: true },
+          admission: {
+            ready: true,
+            checkedRequirementsDigest: requirementsDigest(plannedArm.pinning),
+          },
           observations: fidelityObservations(swapped ? PARENT : candidate),
         },
         cost: { value: "0.25", unit: "USD" },
