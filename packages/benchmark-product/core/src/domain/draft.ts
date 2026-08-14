@@ -60,6 +60,8 @@ export const AssuranceOverridesSchema = z.object({
   minVerdicts: z.number().int().positive().optional(),
   distinctEvaluator: z.boolean().optional(),
   verdictRule: z.enum(["sole", "majority", "unanimous"]).optional(),
+  /** Pre-lock opt-in for one provider-outage-only evaluation retry. */
+  maxInfrastructureRetries: z.union([z.literal(0), z.literal(1)]).optional(),
 });
 
 export const AssuranceSchema = z.object({
@@ -74,6 +76,7 @@ export interface ResolvedAssurance {
   readonly minVerdicts: number;
   readonly distinctEvaluator: boolean;
   readonly verdictRule: "sole" | "majority" | "unanimous";
+  readonly maxInfrastructureRetries?: 0 | 1;
 }
 
 /**

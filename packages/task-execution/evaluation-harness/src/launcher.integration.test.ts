@@ -601,6 +601,12 @@ describe("evaluationLauncher", () => {
         reasonCode: "invalid-evaluation-input",
       },
       {
+        match: { exitCode: 71 },
+        blame: "infrastructure",
+        reasonCode: "evaluation-provider-unavailable",
+        category: "dependency-unavailable",
+      },
+      {
         match: { exitCode: 70 },
         blame: "infrastructure",
         reasonCode: "evaluation-operational-failure",

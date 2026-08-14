@@ -165,6 +165,9 @@ export {
   DEMO1_CLAUDE_HARNESS_ID,
   DEMO1_CLAUDE_MODEL_ID,
   DEMO1_CLAUDE_MD_PATH,
+  DEMO1_CLAUDE_OAUTH_FILE_ENV,
+  DEMO1_CLAUDE_OAUTH_GRANT_KEY,
+  DEMO1_CLAUDE_OAUTH_SECRET_TARGET,
   DEMO1_EXPERIMENT_PATHS,
   DEMO1_SKILL_PATH,
   createDemo1ClaudeRuntimeBinding,
@@ -280,6 +283,7 @@ export type {
 export type {
   Demo1ClaudeArm,
   Demo1ClaudeCommand,
+  Demo1ClaudeOAuthCredentialOptions,
   Demo1ClaudeReadiness,
   Demo1ClaudeRuntimeBinding,
   Demo1ClaudeRuntimeOptions,

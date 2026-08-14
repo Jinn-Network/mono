@@ -1,0 +1,99 @@
+{
+  "schema": "demo1.p5-green-baseline/1",
+  "startedAt": "2026-08-13T08:44:06.338Z",
+  "completedAt": "2026-08-13T08:44:25.925Z",
+  "diskGate": {
+    "availableBytes": "59399389184",
+    "availableGiB": "55.32",
+    "minimumGiB": "40.00"
+  },
+  "graderProgramDigest": "sha256:8194eb47ad010d8e1ce2f5f4a5becd3354102f80c138aad836cfd3b0e8b2ab11",
+  "networkPolicy": "disabled (no sealed public-network extension; no host opt-in)",
+  "rows": [
+    {
+      "instanceId": "gerlero__foamlib-329",
+      "image": "swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781",
+      "diskBeforeImage": {
+        "availableBytes": "59395301376",
+        "availableGiB": "55.32",
+        "minimumGiB": "40.00"
+      },
+      "imageSetupMs": 90,
+      "gold": {
+        "verdict": "pass",
+        "diskGate": {
+          "availableBytes": "59395268608",
+          "availableGiB": "55.32",
+          "minimumGiB": "40.00"
+        },
+        "elapsedMs": 2042
+      },
+      "empty": {
+        "verdict": "fail",
+        "diskGate": {
+          "availableBytes": "59392081920",
+          "availableGiB": "55.31",
+          "minimumGiB": "40.00"
+        },
+        "elapsedMs": 1964
+      }
+    },
+    {
+      "instanceId": "conan-io__conan-19604",
+      "image": "swerebench/sweb.eval.x86_64.conan-io_1776_conan-19604@sha256:a79eb716bef039cf4b3fa094ea7aca74067fcc3730412c90377a8501569a7b7b",
+      "diskBeforeImage": {
+        "availableBytes": "59389583360",
+        "availableGiB": "55.31",
+        "minimumGiB": "40.00"
+      },
+      "imageSetupMs": 22,
+      "gold": {
+        "verdict": "pass",
+        "diskGate": {
+          "availableBytes": "59389583360",
+          "availableGiB": "55.31",
+          "minimumGiB": "40.00"
+        },
+        "elapsedMs": 3065
+      },
+      "empty": {
+        "verdict": "fail",
+        "diskGate": {
+          "availableBytes": "59334680576",
+          "availableGiB": "55.26",
+          "minimumGiB": "40.00"
+        },
+        "elapsedMs": 2936
+      }
+    },
+    {
+      "instanceId": "nesquena__hermes-webui-1818",
+      "image": "swerebench/sweb.eval.x86_64.nesquena_1776_hermes-webui-1818@sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6",
+      "diskBeforeImage": {
+        "availableBytes": "59279859712",
+        "availableGiB": "55.21",
+        "minimumGiB": "40.00"
+      },
+      "imageSetupMs": 21,
+      "gold": {
+        "verdict": "pass",
+        "diskGate": {
+          "availableBytes": "59279859712",
+          "availableGiB": "55.21",
+          "minimumGiB": "40.00"
+        },
+        "elapsedMs": 2931
+      },
+      "empty": {
+        "verdict": "fail",
+        "diskGate": {
+          "availableBytes": "59249184768",
+          "availableGiB": "55.18",
+          "minimumGiB": "40.00"
+        },
+        "elapsedMs": 2904
+      }
+    }
+  ],
+  "passed": true
+}

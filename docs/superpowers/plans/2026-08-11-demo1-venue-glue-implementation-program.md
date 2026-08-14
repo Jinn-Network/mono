@@ -31,7 +31,14 @@ Additional locked constraints:
 - P2b removes fabricated admission readiness; only real `verifyRunPinning` evidence and its references may yield Matrix `match`. Missing proof remains `unverifiable`; contradictory proof remains `mismatch`.
 - P3 is split into P3a (the pinned OCI grader package) and P3b (the benchmark-product binding). P3b owns the product dependency, boundary, and build-order edge; seals test material, image, parser, timeout, and grader-program identities; pre-stages images for `--pull never` grading; keeps grader networking disabled unless declared; and re-mints the P5 fixture after the final material contract lands.
 - Before the first canary publication of `@jinn-network/task-execution-oci-grader`, verify the npm-side trusted-publisher binding for this repository's protected `npm-publish` workflow. Repository configuration alone is not proof of the npm-side binding; if it cannot be verified, stop for operator action. Stable publication is not required by this program.
-- P5 remains a 3-task × 2-arm × 2-replicate **plumbing** gate and starts only with at least 40 GiB free. It proves all twelve cells accounted, gold PASS / empty FAIL, three repository clusters, and `draws === resamples × clusterCount`; it does not estimate capability.
+- P5 remains a 3-task × 2-arm × 2-replicate **plumbing** gate. A fresh recovery-capable run starts
+  with at least 60 GiB free, establishes a 16-GiB run-owned reserve, targets 44 GiB during Docker
+  work, and retains the 40-GiB hard floor. It proves all twelve cells accounted, gold PASS / empty
+  FAIL, three repository clusters, and zero executed bootstrap draws because the interval is
+  withheld below `minN`; it seals planned `resamples` and the cluster manifest separately and does not estimate
+  capability. P5 seals at most one same-cell evaluation-only retry for typed provider/transport
+  unavailability. It never repeats a completed Claude solve, replaces a task, adds a replicate, or
+  deletes shared caches automatically.
 - The subsequent three-arm official design has a hard ceiling of 600 cells. The engineering packets must not bake in a larger run or automatic post-lock top-ups.
 - Insufficient disk, missing execution credentials, a failed or inconclusive Haiku gate, no eligible content artifact, or a required platform-semantics change produces a stop-and-evidence handoff. The program does not delete caches or user data, switch models or sources, or weaken a gate automatically.
 
@@ -304,13 +311,14 @@ reference-only — different stability obligations, never unified.
 
 ### P5 — End-to-end gate (`test(benchmark-product)`)
 
-**Acceptance:** with at least 40 GiB free, exactly 3 SWE-shaped tasks from
+**Acceptance:** with the 60-GiB reserve start gate and 40-GiB hard floor satisfied, exactly 3 SWE-shaped tasks from
 three repository clusters × 2 arms × 2 replicates run
 draft→import→arms→quote→lock→launch→collect→report→verify on the local
 venue with container grading and immutable local bundle emission, zero
 manual intervention; all 12 cells accounted in the Matrix; real per-axis
 evidence; `verifyMatrix` + `verifyReport` + bundle verification green;
-`draws === resamples × clusterCount`; and every task's gold patch passes
+zero executed draws for the below-`minN` withheld interval while locked `resamples` and the exact
+cluster manifest remain separately authenticated; and every task's gold patch passes
 while its empty patch fails in the real grader. The undersized micro-slate
 emits no interval and explicitly proves plumbing, not capability. A runbook
 and recorded evidence artifact are committed. R5 (slate recon) additionally delivers: 2–3

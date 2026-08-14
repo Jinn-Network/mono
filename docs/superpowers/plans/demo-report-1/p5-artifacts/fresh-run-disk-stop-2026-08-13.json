@@ -1,0 +1,85 @@
+{
+  "schema": "demo1.p5-fresh-run-disk-stop/1",
+  "recordedAt": "2026-08-13T11:03:51Z",
+  "source": {
+    "branch": "codex/demo1-p5-plumbing",
+    "head": "2320313b9999fea970c6eecb4d4a751f063c8820",
+    "integratedBase": "128a539bd9da8238b53361f8edf997f898a20719"
+  },
+  "run": {
+    "lockedAt": "2026-08-13T10:09:18.799Z",
+    "launchedAt": "2026-08-13T10:09:18.850Z",
+    "closedAt": "2026-08-13T10:54:51.044Z",
+    "runSha256": "fb43d4d560cfa02555fb65c12ac284f85a43f1537472088db27c5df1bb360a8f",
+    "matrixSha256": "4ea47bf74ab50393e8d462a29b9562035d2664deefa69a37617c2411cf61944f",
+    "reportSha256": "f6d13f11928fb3d0972a2bcb2aaf9cb4989a0e691d4ff23775eb25c876f29fcd",
+    "reportEnvelopeSha256": "32603ea84a5b698c0848f8769b4a0296615399a99cd3bed46967a47733955b6a",
+    "journalBytesSha256": "bdb18fcb9665778a838d6f46c58bac3ea4f8df46bcc1eb7d26e03b8450ea5f82",
+    "resultsBytesSha256": "ac51c841d484050ec6588ab9417febc667e097553b128da49a51e8bcab31f0b7",
+    "runOutcome": "partial"
+  },
+  "runtime": {
+    "model": "claude-haiku-4-5-20251001",
+    "harnessVersion": "2.1.222",
+    "harnessWrapperSha256": "5abe57c923588e67a5b922a07555190f129e93d800ac6397b04c83de51a22d4e",
+    "claudeExecutableSha256": "c66a6cc6fa2e8145bb1a6e77831f2caf4b83690ff04650500dfa6e2c05ca997c",
+    "authenticationFailures": 0,
+    "secretPathOrBytesIncluded": false
+  },
+  "greenBaseline": {
+    "startedAt": "2026-08-13T10:08:46.780Z",
+    "completedAt": "2026-08-13T10:09:16.950Z",
+    "availableGiBAtStart": "43.76",
+    "minimumGiB": "40.00",
+    "goldPassCount": 3,
+    "emptyFailCount": 3,
+    "bytesSha256": "f53d66c74f4a35d26fc4865af4c9bf3c079ee5da7ed1643efa3d2e7bae7c9eba"
+  },
+  "accounting": {
+    "expected": 12,
+    "dispatched": 12,
+    "delivered": 12,
+    "judged": 10,
+    "pass": 6,
+    "fail": 4,
+    "unscorable": 2,
+    "allPinningAxesMatched": true,
+    "replacements": 0,
+    "bundleEmitted": false,
+    "coldVerificationRun": false
+  },
+  "unscorableCells": [
+    {
+      "cellKey": "b74eb714c227dd67aa81536583f9da8e10bf7dafc2ef6466c98f534e2244f416/skill-candidate/1",
+      "evaluationTerminal": "could-not-grade",
+      "detail": "oci grader unavailable: pinned grader image is unavailable",
+      "image": "swerebench/sweb.eval.x86_64.nesquena_1776_hermes-webui-1818@sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6"
+    },
+    {
+      "cellKey": "b74eb714c227dd67aa81536583f9da8e10bf7dafc2ef6466c98f534e2244f416/skill-candidate/2",
+      "evaluationTerminal": "could-not-grade",
+      "detail": "oci grader unavailable: pinned grader image is unavailable",
+      "image": "swerebench/sweb.eval.x86_64.nesquena_1776_hermes-webui-1818@sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6"
+    }
+  ],
+  "postStopReproduction": {
+    "observedAt": "2026-08-13T11:03:51Z",
+    "gatedInspect": {
+      "availableGiB": "34.54",
+      "minimumGiB": "40.00",
+      "exitCode": 78
+    },
+    "directDigestInspect": {
+      "exitCode": 0,
+      "imageId": "sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6"
+    }
+  },
+  "classification": {
+    "terminal": "disk-gate-stop",
+    "historicalLimitation": "The evaluation adapter discarded the failed inspect exit code and stderr, so the two historical evaluation entries say only that the pinned image was unavailable.",
+    "attribution": "The exclusive Docker wrapper refuses below 40 GiB with exit 78; live disk observations crossed below that threshold before both failed grading operations; the exact image remained directly inspectable after the stop. This strongly attributes both failures to the disk gate, but does not fabricate a historical exit code that the journal failed to retain.",
+    "noRetryOrTopUp": true,
+    "safeForCapabilityInference": false,
+    "published": false
+  }
+}

@@ -357,6 +357,38 @@ async function terminalState(backend: LocalTaskExecutionBackend, attempt: `urn:u
 }
 
 describe("restart reconstruction and §6.4 actions", () => {
+  test("a launcher blame rule preserves its typed provider category in the terminal observation", async () => {
+    const root = await stateRoot("typed-provider-category");
+    const backend = fixture(root, {
+      plan: (_view, workspace) => ({
+        argv: [process.execPath, "-e", "process.exit(71)"],
+        env: {},
+        cwd: workspace.work,
+        validExitCodes: [0],
+        blameExitCodes: [{
+          match: { exitCode: 71 },
+          blame: "infrastructure",
+          reasonCode: "evaluation-provider-unavailable",
+          category: "dependency-unavailable",
+        }],
+        resultContract: { envelopeFormat: "typed-provider-category" },
+        interruptionBehavior: "repeatable",
+      }),
+    });
+    const { attempt } = await submit(backend);
+    expect(await terminalState(backend, attempt)).toBe("failed");
+    const snapshot = await backend.observe(attempt);
+    expect(snapshot.descriptor.derived.blame).toBe("infrastructure");
+    expect(snapshot.observations.at(-1)).toMatchObject({
+      type: "network.jinn.task-execution.attempt-terminal.v1",
+      data: {
+        state: "failed",
+        blame: "infrastructure",
+        category: "dependency-unavailable",
+      },
+    });
+  });
+
   test("matching live supervision reconstructs exact inputs, never replans, and resumes the same Evidence execution", async () => {
     const root = await stateRoot("matching-evidence");
     const pause = barrier();

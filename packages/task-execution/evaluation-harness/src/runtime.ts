@@ -54,6 +54,8 @@ import {
 
 export const EVALUATION_HARNESS_EXIT_INVALID_INPUT = 65;
 export const EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE = 70;
+/** A provider outage that the sealed run policy may retry as a fresh evaluation attempt. */
+export const EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE = 71;
 export const EVALUATION_HARNESS_EXIT_CONFIGURATION = 78;
 
 const encoder = new TextEncoder();
@@ -963,10 +965,18 @@ export async function runEvaluationHarness(
     // `EVALUATION_OPERATIONAL_ERROR_BRAND`. This line is the whole difference between a readable
     // refusal and `refused (evaluation-operational-failure)` with no reason at all; the backend
     // carries this stderr text into the attempt journal's terminal detail and the audit row.
+    const operational = isEvaluationOperationalError(cause) ? cause : undefined;
     reportRefusal(
       "evaluation-operational-failure",
-      isEvaluationOperationalError(cause) ? cause.safeDetail : undefined,
+      operational?.safeDetail,
     );
+    if (
+      operational?.canonicalCode === "UNAVAILABLE"
+      && operational.reason === "provider-unavailable"
+      && operational.recoveryAdvice === "new-attempt-required"
+    ) {
+      return EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE;
+    }
     return EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE;
   }
 }

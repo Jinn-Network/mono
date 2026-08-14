@@ -1054,4 +1054,96 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     expect(entries.map((entry) => entry.kind)).toEqual(["evaluation"]);
     expect(entries[0]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
   });
+
+  test("a typed provider outage retries the same derived Task once without re-running solve", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const solveDeliveryBytes = utf8({ outputs: [{ name: "prediction", digest: { sha256: "e".repeat(64) } }] });
+    const deliverySha256 = putSealedBytes(workspaceDir, solveDeliveryBytes);
+    const predictionBytes = utf8({ probabilityYes: "0.5" });
+    const predictionSha256 = putSealedBytes(workspaceDir, predictionBytes);
+    const evalDeliveryDigestHex = "1".repeat(64);
+    const verdictEnvelopeHex = "2".repeat(64);
+    const submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] = [];
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: { "att-eval-2": [fakeDeliveryRef("att-eval-2", evalDeliveryDigestHex)] },
+      deliveryBytesByDigest: {
+        [`sha256:${evalDeliveryDigestHex}`]: utf8({ outputs: [{ name: "verdict", digest: { sha256: verdictEnvelopeHex } }] }),
+      },
+      artifactBytesByDigest: { [verdictEnvelopeHex]: utf8({ envelope: true }) },
+      observeResult: fakeSnapshot("att-eval-2", "delivered"),
+      calls: { submits },
+    });
+    let submissionAttempt = 0;
+    backend.submit = async (taskBytes, submissionBytes) => {
+      submits.push({ taskBytes, submissionBytes });
+      submissionAttempt += 1;
+      return submissionAttempt === 1
+        ? {
+            accepted: false,
+            error: new TaskExecutionError("dependency-unavailable", {
+              detail: "pinned image provider unavailable",
+            }),
+          }
+        : {
+            accepted: true,
+            submission: "urn:uuid:00000000-0000-4000-8000-000000000099" as SubmissionUri,
+            digest: `sha256:${"9".repeat(64)}` as const,
+          };
+    };
+    const preparedTaskBytes = new Uint8Array([4, 5]);
+    const venue = fakeVenue({ taskBytes: preparedTaskBytes, taskSha256: sha256Hex(preparedTaskBytes) });
+    const deps = {
+      workspaceDir,
+      draftId: "draft-1",
+      venue,
+      backend,
+      runSha256: "r".repeat(64),
+      owner: "urn:uuid:owner",
+      cellWindowMs: 3_600_000,
+      minVerdicts: 1,
+      maxInfrastructureRetries: 1 as const,
+      liveClock: clock,
+    };
+    const gap = {
+      cellKey,
+      lastDispatch: 1,
+      deliverySha256,
+      deliveryOutputs: [{ name: "prediction", sha256: predictionSha256 }],
+      missingEvalIndexes: [1],
+    };
+
+    await driveEvaluationCatchUp(deps, [gap]);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual([
+      expect.objectContaining({
+        kind: "evaluation-retryable-failure",
+        cellKey,
+        dispatch: 1,
+        evalIndex: 1,
+        evaluationAttempt: 1,
+        category: "dependency-unavailable",
+      }),
+    ]);
+
+    await driveEvaluationCatchUp(deps, [{
+      ...gap,
+      nextEvaluationAttempts: { 1: 2 },
+    }]);
+
+    expect(submits).toHaveLength(2);
+    expect(submits[0]?.taskBytes).toEqual(preparedTaskBytes);
+    expect(submits[1]?.taskBytes).toEqual(preparedTaskBytes);
+    const first = JSON.parse(new TextDecoder().decode(submits[0]!.submissionBytes));
+    const second = JSON.parse(new TextDecoder().decode(submits[1]!.submissionBytes));
+    expect(first.nonce).toBe(`eval:${deps.runSha256}:e1:${cellKey}:1`);
+    expect(second.nonce).toBe(`eval:${deps.runSha256}:e1:r2:${cellKey}:1`);
+    expect(readRunJournalEntries(workspaceDir, "draft-1").at(-1)).toMatchObject({
+      kind: "evaluation",
+      cellKey,
+      evalIndex: 1,
+      evaluationAttempt: 2,
+      verdictSha256: sha256Hex(utf8({ envelope: true })),
+    });
+  });
 });

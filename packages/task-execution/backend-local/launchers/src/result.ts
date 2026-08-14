@@ -1,4 +1,5 @@
 import type { LaunchPlan } from "./contract.js";
+import type { TaskExecutionErrorCategory } from "@jinn-network/task-execution-protocol";
 
 export interface ResultEnvelope {
   readonly subtype?: string;
@@ -14,6 +15,7 @@ export interface InterpretedResult {
   readonly outcome?: "fulfilled" | "partial";
   readonly blame?: "task" | "infrastructure";
   readonly reasonCode?: string;
+  readonly category?: TaskExecutionErrorCategory;
   readonly recoveryAdvice?: "resume-with-session";
   readonly structuredOutput?: unknown;
   readonly correlation?: {
@@ -35,7 +37,12 @@ export function interpretResult(plan: LaunchPlan, exit: { exitCode?: number; sig
   const valid = exit.signal === undefined && exit.exitCode !== undefined && plan.validExitCodes.includes(exit.exitCode);
   if (!valid) {
     const match = plan.blameExitCodes?.find((rule) => blameRuleMatches(rule, exit));
-    return { state: "failed", blame: match?.blame ?? "task", reasonCode: match?.reasonCode ?? (exit.signal ? "death-by-signal" : "invalid-exit") };
+    return {
+      state: "failed",
+      blame: match?.blame ?? "task",
+      reasonCode: match?.reasonCode ?? (exit.signal ? "death-by-signal" : "invalid-exit"),
+      ...(match?.category === undefined ? {} : { category: match.category }),
+    };
   }
   const correlation = envelope && (envelope.sessionId || envelope.harnessVersion || envelope.capabilities)
     ? { sessionId: envelope.sessionId, harnessVersion: envelope.harnessVersion, capabilities: envelope.capabilities }
