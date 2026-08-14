@@ -77,6 +77,7 @@ cd packages/marketplace/testing
 yarn vitest run src/venue-conformance.test.ts
 ```
 
-The fork slice needs Foundry's `anvil` on `PATH` and network access to a Base Sepolia RPC
-(override with `JINN_MARKETPLACE_FORK_RPC_URL`). Without `anvil` those blocks report skipped,
-never failed.
+The Anvil slice needs Foundry's `anvil` on `PATH` and loads the repository's committed Base-state
+fixture. It performs no live RPC calls. Without `anvil`, local runs report those blocks skipped;
+Marketplace CI installs the pinned Anvil version and always executes them. Live Base Sepolia
+coverage belongs to the separately scheduled environment suite.

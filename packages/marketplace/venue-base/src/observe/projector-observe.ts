@@ -69,18 +69,32 @@ export function createProjectorObservePort(input: CreateProjectorObservePortInpu
    * resolved first through a canonical `attempt-engaged` fact and, failing that, through the
    * durable requester-scope's recorded two-party engagement (TEP Addendum 2026-07-28-b) -- the
    * case where the scope is resolved before the projector has ingested the matching chain log.
+   *
+   * THE SUBMISSION READING IS TRIED FIRST (defect #48). Attempt URIs and Submission URIs are both
+   * `urn:uuid:`, so a ref cannot be classified by shape -- only by what the log says about it. The
+   * subject-identity branch used to run first, and observations ARE emitted against a Submission
+   * subject: `submission-closed.v1`, from `TaskAttemptCreated`'s capacity close and from
+   * `VerdictDeliveryClaimed`. A requester calling `observe(submissionUri)` on a task that had
+   * closed therefore got its own Submission URI back AS the Attempt, `observationsFor` filtered to
+   * the one `submission-closed` fact, and the `attempt-engaged` precondition below threw
+   * `attempt-not-found` -- for an Attempt that was engaged, delivered and judged.
+   *
+   * Reordering cannot mis-resolve the other direction: this branch matches only an engagement
+   * whose `data.submission` equals the ref, and an Attempt URI is never any engagement's
+   * `submission` value. So an Attempt ref falls through to the subject-identity branch exactly as
+   * it did before.
    */
   function resolveAttempt(
     canonical: readonly ProtocolObservation[],
     ref: SubmissionUri | AttemptUri,
   ): AttemptUri | undefined {
-    if (canonical.some((observation) => observation.subject === ref) || driven.has(ref as AttemptUri)) {
-      return ref as AttemptUri;
-    }
     const engagedBySubmission = canonical.find(
       (observation): observation is EngagedObservation => isEngaged(observation) && observation.data.submission === ref,
     );
     if (engagedBySubmission !== undefined) return engagedBySubmission.subject as AttemptUri;
+    if (canonical.some((observation) => observation.subject === ref) || driven.has(ref as AttemptUri)) {
+      return ref as AttemptUri;
+    }
     return store.findResolvedScope(ref as SubmissionUri)?.engagementAttempt;
   }
 

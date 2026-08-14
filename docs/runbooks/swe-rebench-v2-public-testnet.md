@@ -174,7 +174,7 @@ yarn vitest run \
   test/mcp/search-records-corpus.test.ts \
   test/mcp/acquire-artifact-fast-path.test.ts \
   test/api/daemon-api-auth.test.ts \
-  test/smoke/donation-mode-smoke.test.ts \
+  test/smoke/donation-ipfs-http-smoke.test.ts \
   test/solver-types/swe-rebench-v2-auto.test.ts \
   test/e2e/swe-rebench-v2.test.ts \
   test/adapters/mech/safe-revert.test.ts \

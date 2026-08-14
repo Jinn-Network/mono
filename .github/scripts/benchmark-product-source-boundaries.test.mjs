@@ -20,12 +20,16 @@
 // `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor` +
 // `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
 // sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters` (the
-// real evaluation leg), and `trust-core` (DSSE verdict signing). BP-13 (Report production/
+// real evaluation leg), and `trust-core` (DSSE verdict signing). Demo-1 P3b adds
+// `task-execution-oci-grader`, the product-owned SWE-rebench grader source and pinned-image
+// pre-staging edge. BP-13 (Report production/
 // verification) added `benchmarking-aggregate` (`produceReport`/`verifyReport`, the §9.2 method
 // registry). Everything else the design's §3 table names (`benchmarking-marketplace`, the
 // `evidence-*` family, `environment-record`) is scope for a later packet and stays refused here
 // until a packet adds it. Marketplace, every other product, and the client are denied outright,
 // same as the policy-optimization precedent.
+// The optional Inspect adapter additionally admits `attestation-issuer` solely to construct the
+// canonical same-execution Result Evaluation payload; this avoids product-owned evidence schema.
 //
 // **No deep imports (product design §3, "no deep imports — public package entries only").** A
 // specifier that reaches past a Jinn package's public root -- `@jinn-network/<name>/src/...` or
@@ -50,6 +54,56 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packageRoot = join(root, 'packages', 'benchmark-product');
+const architectureCatalogPath = join(root, 'architecture', 'platform-packages.v1.json');
+
+// Product-private runtime identifiers may be sealed into a Colophon method, but that does not
+// promote them into a protocol, platform API, or conformance surface. Keep the exact identifiers
+// here so any Tier 1-3 adoption requires an explicit architecture change rather than an ambient
+// copy from the reference product.
+const PRIVATE_RUNTIME_IDENTIFIERS = [
+  'jinn.network/benchmark-product/host-connection/1',
+  'jinn.network/benchmark-product/inspect-cell-summary/1',
+  'jinn.network/benchmark-product/inspect-sandbox/1',
+  'jinn.network/benchmark-product/inspect-selection/1',
+  'jinn.network/benchmark-product/inspect-selection/2',
+  'jinn.network/inspect-arm',
+  'jinn.network/inspect-sandbox-host/1',
+  'jinn.network/model-broker/1',
+  'jinn.network/profiles/inspect-evaluation/1',
+];
+
+const FIRST_PARTY_SCAN_IGNORES = new Set([
+  '.git', '.next', '.yarn', 'build', 'coverage', 'dist', 'node_modules',
+]);
+
+function firstPartyFiles(directory) {
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory() && FIRST_PARTY_SCAN_IGNORES.has(entry.name)) return [];
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return firstPartyFiles(path);
+    return entry.isFile() ? [path] : [];
+  });
+}
+
+function privateRuntimeIdentifierViolations(roots) {
+  return roots.flatMap(firstPartyFiles).flatMap((file) => {
+    const bytes = readFileSync(file);
+    if (bytes.includes(0)) return [];
+    const source = bytes.toString('utf8');
+    return PRIVATE_RUNTIME_IDENTIFIERS
+      .filter((identifier) => source.includes(identifier))
+      .map((identifier) => `${relative(root, file)} -> ${identifier}`);
+  }).sort();
+}
+
+function tierOneToThreePackageRoots() {
+  const catalog = JSON.parse(readFileSync(architectureCatalogPath, 'utf8'));
+  assert.ok(Array.isArray(catalog.packages), 'architecture catalog has no package inventory');
+  return catalog.packages
+    .filter((entry) => [1, 2, 3].includes(entry.tier))
+    .map((entry) => resolve(root, entry.path));
+}
 
 // Every direct child directory of packages/benchmark-product/ (excluding node_modules) that has a
 // `src/` -- today only `core/src`, automatically covering a future `web/src` without editing this
@@ -65,17 +119,24 @@ function sourceRoots() {
 }
 
 const CORE_ALLOWED_JINN_PACKAGES = [
+  '@jinn-network/attestation-issuer',
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-publication',
   '@jinn-network/benchmarking-records',
   '@jinn-network/benchmarking-run',
+  '@jinn-network/record-discovery-protocol',
+  '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-transport-http',
+  '@jinn-network/record-publication',
   '@jinn-network/task-admission',
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-backend-local',
   '@jinn-network/task-execution-evaluation-harness',
   '@jinn-network/task-execution-evaluator-adapters',
   '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-oci-grader',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-supervisor',
@@ -225,6 +286,37 @@ test('the allow-list admits its members and refuses everything else, wildcards a
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('the private runtime identifier scanner catches every product interface', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmark-product-private-runtime-'));
+  try {
+    const source = join(fixture, 'tier-3');
+    mkdirSync(source);
+    for (const [index, identifier] of PRIVATE_RUNTIME_IDENTIFIERS.entries()) {
+      writeFileSync(join(source, `leak-${index}.json`), JSON.stringify({ identifier }));
+    }
+    assert.deepEqual(
+      privateRuntimeIdentifierViolations([source]).map((entry) => entry.slice(entry.indexOf(' -> ') + 4)),
+      [...PRIVATE_RUNTIME_IDENTIFIERS].sort(),
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('private Inspect runtime interfaces remain in the Tier 4 product', () => {
+  assert.deepEqual(
+    privateRuntimeIdentifierViolations(tierOneToThreePackageRoots()),
+    [],
+    'a Tier 1-3 package treats a private Benchmark Product runtime interface as normative',
+  );
+  const productSource = firstPartyFiles(packageRoot)
+    .map((file) => readFileSync(file))
+    .filter((bytes) => !bytes.includes(0))
+    .map((bytes) => bytes.toString('utf8'))
+    .join('\n');
+  for (const identifier of PRIVATE_RUNTIME_IDENTIFIERS) {
+    assert.ok(productSource.includes(identifier), `private runtime guard is vacuous for ${identifier}`);
+  }
+});
+
 test('source boundaries are per-member: web has one server-only public core edge', () => {
   assert.deepEqual(MEMBER_ALLOWED_JINN_PACKAGES.get('web'), ['@jinn-network/benchmark-product-core']);
   assert.ok(MEMBER_ALLOWED_JINN_PACKAGES.get('core').length > 1);
@@ -265,7 +357,7 @@ test('benchmark-product actually imports the dependencies it declares (positive 
   }
 });
 
-test('web keeps the core edge server-only, has no API routes, and does not duplicate product semantics', () => {
+test('web keeps the core edge server-only, exposes only its fixed public archive route, and does not duplicate product semantics', () => {
   const webRoot = join(packageRoot, 'web', 'src');
   const webFiles = files(webRoot);
   const clientCoreImports = webFiles.flatMap((file) => {
@@ -296,7 +388,9 @@ test('web keeps the core edge server-only, has no API routes, and does not dupli
   const apiRoutes = webFiles
     .filter((file) => /(?:^|\/)app(?:\/.*)?\/route\.[cm]?[jt]sx?$/.test(file))
     .map((file) => relative(root, file));
-  assert.deepEqual(apiRoutes, [], 'v1 forbids HTTP API route handlers');
+  assert.deepEqual(apiRoutes, [
+    'packages/benchmark-product/web/src/app/publication/[...path]/route.ts',
+  ], 'only the fixed same-workspace public archive route is allowed');
 
   const duplicated = webFiles.flatMap((file) => {
     const source = readFileSync(file, 'utf8');

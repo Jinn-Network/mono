@@ -3,10 +3,10 @@ import { z } from "zod";
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const Rfc3339Schema = z.string().datetime({ offset: true });
 
-export const BUNDLE_TRUST_FORMAT = "benchmark-product-public-trust/1" as const;
-export const BUNDLE_EVIDENCE_FORMAT = "benchmark-product-evidence-catalog/1" as const;
-export const BUNDLE_VERDICTS_FORMAT = "benchmark-product-verdict-catalog/1" as const;
-export const BUNDLE_ASSEMBLY_FORMAT = "benchmark-product-assembly/1" as const;
+export const BUNDLE_TRUST_FORMAT = "benchmark-product-public-trust/2" as const;
+export const BUNDLE_EVIDENCE_FORMAT = "benchmark-product-evidence-catalog/2" as const;
+export const BUNDLE_VERDICTS_FORMAT = "benchmark-product-verdict-catalog/2" as const;
+export const BUNDLE_ASSEMBLY_FORMAT = "benchmark-product-assembly/2" as const;
 
 const PublicKeySchema = z.object({
   keyId: z.string().min(1),
@@ -36,9 +36,11 @@ export const BundleEvidenceCatalogSchema = z.object({
     sha256: Sha256HexSchema,
     roles: z.array(z.enum([
       "task",
+      "runtime-selection",
       "evaluation-spec",
       "admission-receipt",
       "solve-submission",
+      "run-pinning-evidence",
       "evaluation-submission",
       "solve-delivery",
       "solve-output",
@@ -63,10 +65,11 @@ export type BundleVerdictCatalog = z.infer<typeof BundleVerdictCatalogSchema>;
 
 const AssemblyVerdictSchema = z.object({
   sha256: Sha256HexSchema,
-  evalTaskSha256: Sha256HexSchema,
-  evalSubmissionSha256: Sha256HexSchema,
-  evalDeliverySha256: Sha256HexSchema,
-  evalAttempt: z.string().min(1),
+  relationship: z.enum(["same-execution-scorer", "separate-log-verifier"]).optional(),
+  evalTaskSha256: Sha256HexSchema.optional(),
+  evalSubmissionSha256: Sha256HexSchema.optional(),
+  evalDeliverySha256: Sha256HexSchema.optional(),
+  evalAttempt: z.string().min(1).optional(),
   evalIndex: z.number().int().positive(),
   evaluator: z.string().min(1),
   verdict: z.enum(["pass", "fail", "inconclusive"]),
@@ -90,6 +93,7 @@ export const BundleAssemblyHeaderSchema = z.object({
       cellKey: z.string().min(1),
       dispatch: z.number().int().positive(),
       sha256: Sha256HexSchema,
+      pinningEvidenceSha256: Sha256HexSchema.optional(),
     })),
     evaluationSubmissions: z.array(z.object({
       cellKey: z.string().min(1),
@@ -109,6 +113,7 @@ export const BundleAssemblyHeaderSchema = z.object({
     evaluations: z.array(z.object({
       cellKey: z.string().min(1),
       evalIndex: z.number().int().positive(),
+      relationship: z.enum(["same-execution-scorer", "separate-log-verifier"]).optional(),
       evaluator: z.string().optional(),
       evalTaskSha256: Sha256HexSchema.optional(),
       evalSubmissionSha256: Sha256HexSchema.optional(),
@@ -130,6 +135,7 @@ export const BundleAssemblyCellSchema = z.object({
   dispatches: z.number().int().nonnegative(),
   accounted: z.number().int().positive().optional(),
   submissionSha256: Sha256HexSchema.optional(),
+  pinningEvidenceSha256: Sha256HexSchema.optional(),
   attempt: z.string().min(1).optional(),
   deliverySha256: Sha256HexSchema.optional(),
   solveOutputs: z.array(z.object({ name: z.string(), sha256: Sha256HexSchema })).optional(),

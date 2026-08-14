@@ -62,7 +62,8 @@ describe("runQuote — lifecycle transition (real venue)", () => {
 
     const state = readRunState(workspaceDir, "draft-1");
     expect(state).toBeDefined();
-    expect(state?.owner.startsWith("urn:uuid:")).toBe(true);
+    expect(state?.owner.startsWith("did:key:z")).toBe(true);
+    expect(state?.publication?.source.agentKeyRef).toBe(state?.owner);
     expect(state?.specSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(state?.quote?.expectedCellCount).toBe(outcome.result.quote.expectedCellCount);
     expect(state?.quotedAt).toBeDefined();

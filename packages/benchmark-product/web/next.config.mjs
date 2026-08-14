@@ -42,7 +42,12 @@ const privateResponseHeaders = [
 const config = {
   reactStrictMode: true,
   async headers() {
-    return [{ source: "/:path*", headers: privateResponseHeaders }];
+    return [
+      // Negative lookahead is the separation boundary: the private no-store rule never matches
+      // the public archive, whose handler owns immutable cache semantics.
+      { source: "/:path((?!publication).*)", headers: privateResponseHeaders },
+      { source: "/publication/:path*", headers: privateResponseHeaders.filter((header) => header.key !== "Cache-Control") },
+    ];
   },
   serverExternalPackages: ["@jinn-network/benchmark-product-core"],
   outputFileTracingRoot: resolve(import.meta.dirname, "../../.."),

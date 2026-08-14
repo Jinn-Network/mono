@@ -16,15 +16,21 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
-import { sealRun } from "@jinn-network/benchmarking-records";
-import type { DraftDocument } from "../domain/draft.js";
+import { RUN_RECORD_KIND, sealRun, withRunPublicationExtension } from "@jinn-network/benchmarking-records";
+import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { compileDraft } from "../run/compile.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
+import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
+import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
@@ -38,6 +44,7 @@ export interface RunLockResult {
   readonly draft: DraftDocument;
   readonly runSha256: string;
   readonly closeAt: string;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 function computeCloseAt(at: string, closeAfterMs: number): string {
@@ -62,6 +69,11 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
           `draft ${input.draftId} is in state "${document.state}" — only a quoted draft can be locked`,
         );
       }
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        clockedContext.workspaceDir,
+        document.spec.evaluationRuntime,
+        resolveAssurance(document.spec.assurance),
+      );
 
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
       const currentSpecSha256 = specDigest(document.spec);
@@ -81,8 +93,20 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         closeAt,
       });
 
-      const sealed = sealRun(compiled.plannedRun.record);
+      const runWithPublicationAuthorization = withRunPublicationExtension(
+        compiled.plannedRun.record as unknown as Record<string, unknown>,
+        {
+          registrationArtifacts: [...runtimeRegistrationArtifacts(clockedContext.workspaceDir, document.spec.evaluationRuntime)],
+        },
+      );
+      const sealed = sealRun(runWithPublicationAuthorization);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
+      recordWorkspaceAuthorship({
+        workspaceDir: clockedContext.workspaceDir,
+        recordSha256: runSha256,
+        recordKind: RUN_RECORD_KIND,
+        authoredAt: at,
+      });
 
       const transitioned = transition("quoted", "lock");
       if (!transitioned.ok) {
@@ -101,7 +125,12 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const draft: DraftDocument = { ...document, state: transitioned.state, updatedAt: at };
       atomicWriteFileSync(draftPath(clockedContext.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
 
-      return { draft, runSha256, closeAt };
+      return {
+        draft,
+        runSha256,
+        closeAt,
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+      };
     },
   });
 }

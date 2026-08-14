@@ -3,7 +3,14 @@
 Recoverable, medium-neutral publication for exact Jinn evidence records and
 artifacts.
 
-The root entrypoint defines publication contracts and orchestration.
+The root entrypoint defines publication contracts and orchestration. Internally it
+adapts its closed evidence record families to `@jinn-network/record-publication`:
+evidence records become kind-bearing neutral records, stored evidence artifacts
+become role-bearing neutral artifacts, and prepared legacy announcement frames
+become neutral mirror actions. The v1 evidence journal and receipts remain the
+durable compatibility and recovery authority, including pending-placement
+reconciliation; callers therefore retain the exact existing API and partition
+semantics.
 `@jinn-network/evidence-publication/testing` provides contract kits and
 in-memory doubles. The durable filesystem journal is available only from
 `@jinn-network/evidence-publication/fs`.

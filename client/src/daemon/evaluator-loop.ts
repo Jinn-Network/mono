@@ -41,6 +41,17 @@ export class EvaluatorLoop {
       if (result.kind === 'failed') {
         this.logger().warn(`[evaluator] evaluation failed: ${result.reason}`);
       }
+      // A PAUSE is the other durable stall, and it was equally silent: defect #46 (a verdict graph
+      // whose six records all carried one announcement timestamp, so five were refused by the
+      // signed source) paused the evaluation on every tick, and `SourceWriterIntegrityError`
+      // appeared ZERO times in the daemon log — the reason lived only in `native_evaluation_audit`
+      // and had to be recovered by DB spelunking. The reason already names the throwing class and
+      // its message (`dependencyFailureDetail`), so one line per non-quiescent pause is enough.
+      // `retry-not-due` is excluded deliberately: it is the ordinary "backoff has not elapsed"
+      // answer emitted every tick of a scheduled retry, and it names no cause.
+      if (result.kind === 'paused' && result.reason !== 'retry-not-due') {
+        this.logger().warn(`[evaluator] evaluation paused: ${result.reason}`);
+      }
     }
     this.logger().info(
       `[evaluator] tick: sourceEvents=${outcome.sourceEvents} coordinator=${outcome.coordinator.length}`,

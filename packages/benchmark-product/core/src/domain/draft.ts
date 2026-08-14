@@ -140,8 +140,47 @@ export const TaskSetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("pendingSample") }),
 ]);
 
+/**
+ * Opaque, digest-bound selection of an evaluation runtime. Product lifecycle code owns only
+ * this stable adapter reference; the adapter owns the sealed manifest's runtime-specific shape.
+ * Absence means the backwards-compatible built-in runtime.
+ */
+export const EvaluationRuntimeBindingSchema = z.object({
+  adapterId: z.string().regex(
+    /^[a-z0-9][a-z0-9._-]{0,63}$/,
+    "adapterId must be lowercase alphanumeric with dots, underscores, or hyphens, at most 64 characters",
+  ),
+  selectionManifestSha256: z.string().regex(
+    /^[a-f0-9]{64}$/,
+    "selectionManifestSha256 must be 64 lowercase hex digits",
+  ),
+  isolationPolicy: z.enum(["unrestricted", "oci-container"]).optional(),
+});
+
+export type EvaluationRuntimeBinding = z.infer<typeof EvaluationRuntimeBindingSchema>;
+
 /** Fixed for M1 — the only supported venue is local self-run. */
 export const VenueSchema = z.literal("self-run");
+
+/**
+ * Which registered §9.2 method produces this run's Report. Optional and additive: an absent
+ * block means `wilson@1`, exactly the behavior every draft had before this field existed, so
+ * no default is added to DRAFT_SPEC_DEFAULTS and no stored draft needs migrating.
+ *
+ * `baseline`/`candidate` are explicit rather than positional over `arms` (ratified decision
+ * §5.1): arms are unordered, and a positional reading would silently reinterpret the comparison
+ * if they were ever reordered. `parameters` are sealed verbatim into the Run's analysisPlan, so
+ * fractional values must be decimal strings — sealed records admit only I-JSON integers.
+ */
+export const AnalysisSchema = z.object({
+  method: z.string().min(1),
+  version: z.string().min(1),
+  baseline: z.string().min(1).optional(),
+  candidate: z.string().min(1).optional(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+});
+
+export type Analysis = z.infer<typeof AnalysisSchema>;
 
 export const DraftSpecSchema = z.object({
   name: z.string().min(1),
@@ -154,6 +193,8 @@ export const DraftSpecSchema = z.object({
   policy: DraftPolicySchema,
   budget: BudgetSchema.optional(),
   venue: VenueSchema,
+  evaluationRuntime: EvaluationRuntimeBindingSchema.optional(),
+  analysis: AnalysisSchema.optional(),
 });
 
 export type DraftSpec = z.infer<typeof DraftSpecSchema>;

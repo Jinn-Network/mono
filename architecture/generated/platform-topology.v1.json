@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 84,
+    "inventory": 87,
     "otherPackagesRootEntries": 19,
-    "packagesRootEntries": 78,
-    "platformV1": 51
+    "packagesRootEntries": 81,
+    "platformV1": 54
   },
   "graph": {
     "edgeSections": {
@@ -32,6 +32,11 @@
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
+        "to": "@jinn-network/attestation-issuer"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
         "to": "@jinn-network/benchmarking-aggregate"
       },
       {
@@ -47,12 +52,37 @@
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
+        "to": "@jinn-network/benchmarking-publication"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
         "to": "@jinn-network/benchmarking-records"
       },
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
         "to": "@jinn-network/benchmarking-run"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-serve"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-transport-http"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/record-publication"
       },
       {
         "from": "@jinn-network/benchmark-product-core",
@@ -83,6 +113,11 @@
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-launchers"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-oci-grader"
       },
       {
         "from": "@jinn-network/benchmark-product-core",
@@ -175,9 +210,29 @@
         "to": "@jinn-network/task-execution-protocol"
       },
       {
+        "from": "@jinn-network/benchmarking-publication",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-records"
+      },
+      {
+        "from": "@jinn-network/benchmarking-publication",
+        "kind": "runtime",
+        "to": "@jinn-network/record-publication"
+      },
+      {
+        "from": "@jinn-network/benchmarking-publication",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
         "from": "@jinn-network/benchmarking-records",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/benchmarking-records",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
       },
       {
         "from": "@jinn-network/benchmarking-run",
@@ -528,6 +583,11 @@
         "from": "@jinn-network/evidence-publication",
         "kind": "runtime",
         "to": "@jinn-network/evidence-repository"
+      },
+      {
+        "from": "@jinn-network/evidence-publication",
+        "kind": "runtime",
+        "to": "@jinn-network/record-publication"
       },
       {
         "from": "@jinn-network/evidence-repository",
@@ -915,6 +975,11 @@
         "to": "@jinn-network/record-discovery-protocol"
       },
       {
+        "from": "@jinn-network/record-discovery-facts-benchmarking",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
+      },
+      {
         "from": "@jinn-network/record-discovery-facts-chain-environments",
         "kind": "runtime",
         "to": "@jinn-network/chain-environment-record"
@@ -1026,6 +1091,16 @@
       },
       {
         "from": "@jinn-network/record-discovery-transport-http",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-serve"
+      },
+      {
+        "from": "@jinn-network/record-publication",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
+        "from": "@jinn-network/record-publication",
         "kind": "runtime",
         "to": "@jinn-network/record-discovery-serve"
       },
@@ -1185,6 +1260,21 @@
         "to": "@jinn-network/task-execution-workspace"
       },
       {
+        "from": "@jinn-network/task-execution-oci-grader",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluation-harness"
+      },
+      {
+        "from": "@jinn-network/task-execution-oci-grader",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluator-adapters"
+      },
+      {
+        "from": "@jinn-network/task-execution-oci-grader",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
         "from": "@jinn-network/task-execution-profiles",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-protocol"
@@ -1279,6 +1369,7 @@
       "@jinn-network/benchmarking-interop",
       "@jinn-network/benchmarking-local",
       "@jinn-network/benchmarking-marketplace",
+      "@jinn-network/benchmarking-publication",
       "@jinn-network/benchmarking-records",
       "@jinn-network/benchmarking-run",
       "@jinn-network/benchmarking-testing",
@@ -1335,6 +1426,7 @@
       "@jinn-network/record-discovery-source-evidence-journal",
       "@jinn-network/record-discovery-testing",
       "@jinn-network/record-discovery-transport-http",
+      "@jinn-network/record-publication",
       "@jinn-network/sdk",
       "@jinn-network/task-admission",
       "@jinn-network/task-curation",
@@ -1344,6 +1436,7 @@
       "@jinn-network/task-execution-evaluation-harness",
       "@jinn-network/task-execution-evaluator-adapters",
       "@jinn-network/task-execution-launchers",
+      "@jinn-network/task-execution-oci-grader",
       "@jinn-network/task-execution-profiles",
       "@jinn-network/task-execution-protocol",
       "@jinn-network/task-execution-supervisor",
@@ -1370,14 +1463,16 @@
         "@jinn-network/benchmarking-interop": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-local": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/benchmarking-run",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-marketplace": [
           "@jinn-network/benchmarking-records",
@@ -1392,19 +1487,30 @@
           "@jinn-network/trust-core",
           "@jinn-network/trust-resolve"
         ],
+        "@jinn-network/benchmarking-publication": [
+          "@jinn-network/benchmarking-records",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/record-publication",
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
+        ],
         "@jinn-network/benchmarking-records": [
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-run": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/benchmarking-testing": [
           "@jinn-network/benchmarking-records",
           "@jinn-network/task-execution-profiles",
-          "@jinn-network/task-execution-protocol"
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/evidence-catalog-sqlite": [
           "@jinn-network/evidence-discovery",
@@ -1415,7 +1521,11 @@
           "@jinn-network/evidence-derivation",
           "@jinn-network/evidence-protocol",
           "@jinn-network/evidence-publication",
-          "@jinn-network/evidence-repository"
+          "@jinn-network/evidence-repository",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/record-publication",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/evidence-derivation": [
           "@jinn-network/evidence-protocol"
@@ -1436,7 +1546,11 @@
         "@jinn-network/evidence-protocol": [],
         "@jinn-network/evidence-publication": [
           "@jinn-network/evidence-protocol",
-          "@jinn-network/evidence-repository"
+          "@jinn-network/evidence-repository",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/record-publication",
+          "@jinn-network/trust-core"
         ],
         "@jinn-network/evidence-repository": [
           "@jinn-network/evidence-protocol"
@@ -1575,6 +1689,11 @@
           "@jinn-network/record-discovery-serve",
           "@jinn-network/trust-core"
         ],
+        "@jinn-network/record-publication": [
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/trust-core"
+        ],
         "@jinn-network/task-execution-backend": [
           "@jinn-network/task-execution-protocol"
         ],
@@ -1615,6 +1734,19 @@
         ],
         "@jinn-network/task-execution-launchers": [
           "@jinn-network/task-execution-backend",
+          "@jinn-network/task-execution-profiles",
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/task-execution-supervisor",
+          "@jinn-network/task-execution-workspace"
+        ],
+        "@jinn-network/task-execution-oci-grader": [
+          "@jinn-network/attestation-issuer",
+          "@jinn-network/evidence-protocol",
+          "@jinn-network/evidence-repository",
+          "@jinn-network/task-execution-backend",
+          "@jinn-network/task-execution-evaluation-harness",
+          "@jinn-network/task-execution-evaluator-adapters",
+          "@jinn-network/task-execution-launchers",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
           "@jinn-network/task-execution-supervisor",
@@ -1681,7 +1813,6 @@
           "@jinn-network/benchmarking-run",
           "@jinn-network/benchmarking-testing",
           "@jinn-network/evidence-discovery",
-          "@jinn-network/evidence-publication",
           "@jinn-network/evidence-repository-ipfs",
           "@jinn-network/evidence-repository-oci",
           "@jinn-network/evidence-trace-decode",
@@ -1700,45 +1831,49 @@
         [
           "@jinn-network/benchmarking-local",
           "@jinn-network/evidence-catalog-sqlite",
-          "@jinn-network/evidence-contribution",
           "@jinn-network/evidence-retrieval",
           "@jinn-network/execution-recorder-bridge",
           "@jinn-network/marketplace-projector",
           "@jinn-network/record-discovery-facts-evidence",
           "@jinn-network/record-discovery-source-evidence-journal",
           "@jinn-network/record-discovery-transport-http",
+          "@jinn-network/record-publication",
           "@jinn-network/task-execution-launchers"
         ],
         [
           "@jinn-network/benchmarking-marketplace",
+          "@jinn-network/benchmarking-publication",
           "@jinn-network/evidence-local-runtime",
+          "@jinn-network/evidence-publication",
           "@jinn-network/marketplace-venue-base",
           "@jinn-network/task-execution-backend-local",
           "@jinn-network/task-execution-evaluation-harness"
         ],
         [
+          "@jinn-network/evidence-contribution",
           "@jinn-network/task-execution-evaluator-adapters",
           "@jinn-network/task-execution-testing"
         ],
         [
-          "@jinn-network/marketplace-testing"
+          "@jinn-network/marketplace-testing",
+          "@jinn-network/task-execution-oci-grader"
         ]
       ]
     }
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 28,
+      "authorityDocuments": 29,
       "boundaryPolicies": 23,
-      "catalogManifests": 84,
-      "catalogPublicSurfaces": 1252,
+      "catalogManifests": 87,
+      "catalogPublicSurfaces": 1274,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2957,
-      "generatedOutputSources": 1308,
-      "generatorSources": 613,
+      "discoveredFirstPartySurfaces": 2966,
+      "generatedOutputSources": 1330,
+      "generatorSources": 622,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -2198,6 +2333,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/layer-publish-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/marketplace-hermetic-anvil.test.mjs"
       },
       {
         "categories": [
@@ -4721,6 +4866,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/scripts/projector-replay.ts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/scripts/publish-curated-seed-batch.ts"
       },
       {
@@ -5761,26 +5916,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/_support/engine.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/_support/engine.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/_support/fixtures"
       },
       {
@@ -5902,6 +6037,16 @@
           "@ritsukai"
         ],
         "path": "client/test/_support/native-config-fixture.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/_support/pack-probe.ts"
       },
       {
         "categories": [
@@ -6961,6 +7106,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/architecture/_support/source-text.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/_support/source-text.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/architecture/api-cli-boundary.test.ts"
       },
       {
@@ -7031,6 +7196,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/architecture/discovery-client-neutrality.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/architecture/evaluator-primitives.test.ts"
       },
       {
@@ -7092,6 +7267,16 @@
           "@ritsukai"
         ],
         "path": "client/test/architecture/native-solution-boundaries.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/no-legacy-task-engine.test.ts"
       },
       {
         "categories": [
@@ -7452,16 +7637,6 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/checkpoint-publish.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/cli/codedigest-revert-check.test.ts"
       },
       {
         "categories": [
@@ -8271,6 +8446,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/config/joined-solver-nets-tolerated.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/config/migrate-shape-v2-native-collision.test.ts"
       },
       {
@@ -8671,16 +8856,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/_engine-fixtures.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/daemon/ai-units-gate.test.ts"
       },
       {
@@ -8721,27 +8896,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/claim-failed-emit.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/daemon/claim-gate.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/claim-readiness-gate.test.ts"
       },
       {
         "categories": [
@@ -8762,16 +8917,6 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/creator.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/daemon-recovery-nonblocking.test.ts"
       },
       {
         "categories": [
@@ -8821,16 +8966,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/delivery-watcher.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/daemon/engagement-ledger.test.ts"
       },
       {
@@ -8841,27 +8976,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/evaluation-path-regression.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/daemon/evaluator-loop.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/event-loop-lag-under-backlog.test.ts"
       },
       {
         "categories": [
@@ -8912,26 +9027,6 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/harvest-loop.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/hot-apply-join-integration.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/join-applier.test.ts"
       },
       {
         "categories": [
@@ -9081,6 +9176,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/daemon/native-evaluator-assembly.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/daemon/native-evaluator-association-index.test.ts"
       },
       {
@@ -9152,6 +9257,16 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/native-evaluator-state.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-evaluator-verdict-ready.test.ts"
       },
       {
         "categories": [
@@ -9351,6 +9466,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/daemon/native-projector-announce-delivery-records.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/daemon/native-projector-resolve-record.test.ts"
       },
       {
@@ -9442,6 +9567,16 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/native-solution-verification.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-solver-backend.test.ts"
       },
       {
         "categories": [
@@ -9581,7 +9716,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/race-loss-classification.test.ts"
+        "path": "client/test/daemon/projector-replay.test.ts"
       },
       {
         "categories": [
@@ -9591,7 +9726,17 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/daemon/readiness-gate.test.ts"
+        "path": "client/test/daemon/requester-adoption-defect-48.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/requester-role-before-anchor-2647.test.ts"
       },
       {
         "categories": [
@@ -9642,16 +9787,6 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/skip-log-dedup.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/daemon/solution-path-retired.test.ts"
       },
       {
         "categories": [
@@ -9892,16 +10027,6 @@
           "@ritsukai"
         ],
         "path": "client/test/dashboard/helpers/mock-daemon-api.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/dashboard/join.e2e.test.ts"
       },
       {
         "categories": [
@@ -10521,17 +10646,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/e2e/freeze-mode.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces",
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/e2e/hermes-agent-full-cycle.ts"
       },
       {
@@ -10709,17 +10823,6 @@
           "@ritsukai"
         ],
         "path": "client/test/e2e/task-first-helpers.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces",
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/e2e/task-first-local.ts"
       },
       {
         "categories": [
@@ -11872,6 +11975,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/fixtures/native-evaluator"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-evaluator/round-26-verdict-ready.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/fixtures/native-recovery-matrix.v1.json"
       },
       {
@@ -11982,26 +12105,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/adoption-delivery.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/artifact-invariant.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/artifact-scrub.test.ts"
       },
       {
@@ -12013,26 +12116,6 @@
           "@ritsukai"
         ],
         "path": "client/test/harnesses/engine/backfill-failed-deliveries.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/bug-fixes.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/claim-gate.test.ts"
       },
       {
         "categories": [
@@ -12062,76 +12145,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/engine-identity-publisher.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-mode.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-packaging.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-reputation-feedback.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-tick-admission.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine-work-dir-cleanup.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/engine.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/envelope-assembly.test.ts"
       },
       {
@@ -12142,117 +12155,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/execution-request.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/generator-model.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/impl-state-dir.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/in-flight-gate-manifest-scope.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/intermediate-failure-diffs.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/joined-eligibility.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/learner-attribution.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/legacy-claude-skip.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/manifest-resolver-stub.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/mineable-producer.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/mutable-joined-view.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/official-autopilot-profile-policy.test.ts"
       },
       {
         "categories": [
@@ -12312,36 +12215,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/prediction-v1-runtime-gate.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/race-loss-pruning.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/recovery.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/registry.test.ts"
       },
       {
@@ -12362,57 +12235,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/synthetic-claim.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/task-provenance-fields.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/transient-rpc-stall.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/transition-log-dedup.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/validate-manifest.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/harnesses/engine/window-expiry-single-flight.test.ts"
       },
       {
         "categories": [
@@ -14083,16 +13906,6 @@
           "@ritsukai"
         ],
         "path": "client/test/learner/revert-stats.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/learner/verification-gate.test.ts"
       },
       {
         "categories": [
@@ -15863,16 +15676,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/smoke/donation-mode-smoke.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/solver-nets"
       },
       {
@@ -16914,16 +16717,6 @@
           "@ritsukai"
         ],
         "path": "client/test/task-creator/public-repo-e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/task-first-local.test.ts"
       },
       {
         "categories": [
@@ -18154,6 +17947,16 @@
           "@ritsukai"
         ],
         "path": "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
       },
       {
         "categories": [
@@ -19817,6 +19620,96 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance/harbor-direct-publication.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance/publication-profile.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures/benchmark-publication-conformance"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures/benchmark-publication-conformance/manifest.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures/inspect-project"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/test/fixtures/inspect-project/hermetic_eval.py"
+      },
+      {
+        "categories": [
           "authorityDocuments"
         ],
         "owners": [
@@ -19844,6 +19737,26 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/web/src/test"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/src/test/dynamic-response-audit.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/src/test/dynamic-response-audit.ts"
       },
       {
         "categories": [
@@ -19884,6 +19797,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/aggregate/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/aggregate/scripts/generate-paired-delta-oracles.py"
       },
       {
         "categories": [
@@ -19953,7 +19876,31 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmarking/interop/fixtures/swebench/expected.v2.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmarking/interop/fixtures/swebench/row.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/interop/fixtures/swebench/rows.multi-repo.json"
       },
       {
         "categories": [
@@ -20137,6 +20084,46 @@
       },
       {
         "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/publication/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/publication/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/publication/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/publication/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
           "catalogPublicSurfaces",
           "discoveredFirstPartySurfaces",
           "generatedOutputSources"
@@ -20158,6 +20145,90 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/records/fixtures/benchmark"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-authorization-after-close.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-protocol.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-publisher-authority.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-unsorted-cells.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/valid.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/valid.sha256"
       },
       {
         "categories": [
@@ -20422,6 +20493,66 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/records/fixtures/matrix/valid.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/invalid-missing-profile.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/invalid-unsorted-streams.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/valid.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/valid.sha256"
       },
       {
         "categories": [
@@ -20791,6 +20922,18 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmarking/records/schemas/benchmark-accounting.schema.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmarking/records/schemas/benchmark.schema.json"
       },
       {
@@ -20804,6 +20947,18 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/records/schemas/matrix.schema.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/records/schemas/observation-archive.schema.json"
       },
       {
         "categories": [
@@ -20988,6 +21143,18 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/testing/fixtures/exports/eval-log.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/exports/matrix-projection.json"
       },
       {
         "categories": [
@@ -21192,6 +21359,42 @@
           "@ritsukai"
         ],
         "path": "packages/benchmarking/testing/fixtures/methods/paired-contract.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/methods/paired-delta-shared-ensemble.v2.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/methods/paired-delta-withheld.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmarking/testing/fixtures/methods/paired-delta.json"
       },
       {
         "categories": [
@@ -21899,6 +22102,126 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/benchmark-accounting"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/benchmark-accounting/valid.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/manifest.sha256.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/README.md"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v1"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v1/legacy-raw-payload.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2/raw-v1-under-v2-kind.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2/valid-envelope.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2/wrong-media-envelope.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/fixtures/report-v2/wrong-payload-envelope.json"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -21918,6 +22241,18 @@
           "@ritsukai"
         ],
         "path": "packages/discovery/facts/benchmarking/profiles"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json"
       },
       {
         "categories": [
@@ -21954,6 +22289,18 @@
           "@ritsukai"
         ],
         "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v2.json"
       },
       {
         "categories": [
@@ -22680,6 +23027,46 @@
           "@ritsukai"
         ],
         "path": "packages/discovery/protocol/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/publication/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/publication/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/publication/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/publication/scripts/pack-smoke.mjs"
       },
       {
         "categories": [
@@ -35855,6 +36242,36 @@
       },
       {
         "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/oci-grader/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/oci-grader/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/oci-grader/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
           "conformancePackedTargets",
           "generatedOutputSources"
         ],
@@ -41858,17 +42275,24 @@
           "@fontsource-variable/newsreader",
           "@fontsource-variable/public-sans",
           "@fontsource/ibm-plex-mono",
+          "@jinn-network/attestation-issuer",
           "@jinn-network/benchmarking-aggregate",
           "@jinn-network/benchmarking-interop",
           "@jinn-network/benchmarking-local",
+          "@jinn-network/benchmarking-publication",
           "@jinn-network/benchmarking-records",
           "@jinn-network/benchmarking-run",
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve",
+          "@jinn-network/record-discovery-transport-http",
+          "@jinn-network/record-publication",
           "@jinn-network/task-admission",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-backend-local",
           "@jinn-network/task-execution-evaluation-harness",
           "@jinn-network/task-execution-evaluator-adapters",
           "@jinn-network/task-execution-launchers",
+          "@jinn-network/task-execution-oci-grader",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
           "@jinn-network/task-execution-supervisor",
@@ -42114,7 +42538,46 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/benchmarking-records",
+          "@jinn-network/record-publication",
+          "@jinn-network/task-execution-protocol"
+        ]
+      },
+      "domain": "benchmarking",
+      "name": "@jinn-network/benchmarking-publication",
+      "ownerGroup": "architecture-control",
+      "path": "packages/benchmarking/publication",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-only",
+      "releaseGroup": "platform-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "role": "benchmark publication planning and accounting verification",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
           "@jinn-network/task-execution-protocol",
+          "@jinn-network/trust-core",
           "@noble/hashes",
           "zod"
         ]
@@ -42328,7 +42791,8 @@
         "peer": [],
         "runtime": [
           "@jinn-network/benchmarking-records",
-          "@jinn-network/record-discovery-protocol"
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/trust-core"
         ]
       },
       "domain": "discovery",
@@ -42594,6 +43058,43 @@
       "stability": "candidate",
       "supersedes": [],
       "tier": 1,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@jinn-network/record-discovery-protocol",
+          "@jinn-network/record-discovery-serve"
+        ]
+      },
+      "domain": "discovery",
+      "name": "@jinn-network/record-publication",
+      "ownerGroup": "architecture-control",
+      "path": "packages/discovery/publication",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-only",
+      "releaseGroup": "platform-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "role": "kind-neutral recoverable record publication coordinator",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
       "transition": null,
       "version": "0.1.0"
     },
@@ -43415,7 +43916,8 @@
           "vitest"
         ],
         "runtime": [
-          "@jinn-network/evidence-repository"
+          "@jinn-network/evidence-repository",
+          "@jinn-network/record-publication"
         ]
       },
       "domain": "evidence",
@@ -44607,6 +45109,44 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/task-execution-evaluation-harness",
+          "@jinn-network/task-execution-evaluator-adapters",
+          "@jinn-network/task-execution-profiles"
+        ]
+      },
+      "domain": "task-execution",
+      "name": "@jinn-network/task-execution-oci-grader",
+      "ownerGroup": "architecture-control",
+      "path": "packages/task-execution/oci-grader",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-only",
+      "releaseGroup": "platform-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "role": "host-owned OCI grader execution",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
           "@jinn-network/task-execution-protocol",
           "@noble/hashes",
           "ajv",
@@ -45389,8 +45929,26 @@
         "kind": "fixtures",
         "package": "@jinn-network/benchmarking-interop",
         "packedTargets": [],
+        "path": "packages/benchmarking/interop/fixtures/swebench/expected.v2.json",
+        "relativeSource": "fixtures/swebench/expected.v2.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-interop",
+        "packedTargets": [],
         "path": "packages/benchmarking/interop/fixtures/swebench/row.json",
         "relativeSource": "fixtures/swebench/row.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-interop",
+        "packedTargets": [],
+        "path": "packages/benchmarking/interop/fixtures/swebench/rows.multi-repo.json",
+        "relativeSource": "fixtures/swebench/rows.multi-repo.json"
       },
       {
         "claim": null,
@@ -45409,6 +45967,60 @@
         "packedTargets": [],
         "path": "packages/benchmarking/marketplace/fixtures/projector/golden-events/revised-task-created.json",
         "relativeSource": "fixtures/projector/golden-events/revised-task-created.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-authorization-after-close.json",
+        "relativeSource": "fixtures/benchmark-accounting/invalid-authorization-after-close.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-protocol.json",
+        "relativeSource": "fixtures/benchmark-accounting/invalid-missing-protocol.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-missing-publisher-authority.json",
+        "relativeSource": "fixtures/benchmark-accounting/invalid-missing-publisher-authority.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/invalid-unsorted-cells.json",
+        "relativeSource": "fixtures/benchmark-accounting/invalid-unsorted-cells.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/valid.json",
+        "relativeSource": "fixtures/benchmark-accounting/valid.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/benchmark-accounting/valid.sha256",
+        "relativeSource": "fixtures/benchmark-accounting/valid.sha256"
       },
       {
         "claim": null,
@@ -45589,6 +46201,42 @@
         "packedTargets": [],
         "path": "packages/benchmarking/records/fixtures/matrix/valid.sha256",
         "relativeSource": "fixtures/matrix/valid.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/invalid-missing-profile.json",
+        "relativeSource": "fixtures/observation-archive/invalid-missing-profile.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/invalid-unsorted-streams.json",
+        "relativeSource": "fixtures/observation-archive/invalid-unsorted-streams.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/valid.json",
+        "relativeSource": "fixtures/observation-archive/valid.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/fixtures/observation-archive/valid.sha256",
+        "relativeSource": "fixtures/observation-archive/valid.sha256"
       },
       {
         "claim": null,
@@ -45794,6 +46442,15 @@
         "kind": "schemas",
         "package": "@jinn-network/benchmarking-records",
         "packedTargets": [],
+        "path": "packages/benchmarking/records/schemas/benchmark-accounting.schema.json",
+        "relativeSource": "schemas/benchmark-accounting.schema.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
         "path": "packages/benchmarking/records/schemas/benchmark.schema.json",
         "relativeSource": "schemas/benchmark.schema.json"
       },
@@ -45805,6 +46462,15 @@
         "packedTargets": [],
         "path": "packages/benchmarking/records/schemas/matrix.schema.json",
         "relativeSource": "schemas/matrix.schema.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "schemas",
+        "package": "@jinn-network/benchmarking-records",
+        "packedTargets": [],
+        "path": "packages/benchmarking/records/schemas/observation-archive.schema.json",
+        "relativeSource": "schemas/observation-archive.schema.json"
       },
       {
         "claim": null,
@@ -45841,6 +46507,15 @@
         "packedTargets": [],
         "path": "packages/benchmarking/testing/fixtures/exports/eval-log.json",
         "relativeSource": "fixtures/exports/eval-log.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/exports/matrix-projection.json",
+        "relativeSource": "fixtures/exports/matrix-projection.json"
       },
       {
         "claim": null,
@@ -45985,6 +46660,33 @@
         "packedTargets": [],
         "path": "packages/benchmarking/testing/fixtures/methods/paired-contract.json",
         "relativeSource": "fixtures/methods/paired-contract.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/paired-delta-shared-ensemble.v2.json",
+        "relativeSource": "fixtures/methods/paired-delta-shared-ensemble.v2.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/paired-delta-withheld.json",
+        "relativeSource": "fixtures/methods/paired-delta-withheld.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/benchmarking-testing",
+        "packedTargets": [],
+        "path": "packages/benchmarking/testing/fixtures/methods/paired-delta.json",
+        "relativeSource": "fixtures/methods/paired-delta.json"
       },
       {
         "claim": null,
@@ -46217,6 +46919,19 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v1",
+          "servedPath": "facts/benchmark-accounting/v1"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json",
+        "relativeSource": "profiles/benchmark-accounting.v1.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://spec.jinn.network/facts/benchmark/v1",
           "servedPath": "facts/benchmark/v1"
         },
@@ -46252,6 +46967,19 @@
         "packedTargets": [],
         "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json",
         "relativeSource": "profiles/report.v1.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
+          "identifier": "https://spec.jinn.network/facts/benchmark-report/v2",
+          "servedPath": "facts/benchmark-report/v2"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v2.json",
+        "relativeSource": "profiles/report.v2.json"
       },
       {
         "claim": {
@@ -53244,6 +53972,15 @@
       },
       {
         "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/benchmarking-publication",
+        "path": "packages/benchmarking/publication",
+        "profiles": [],
+        "releaseGroup": "platform-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [],
         "fixtures": [
           "fixtures"
         ],
@@ -53368,6 +54105,15 @@
         ],
         "name": "@jinn-network/record-discovery-protocol",
         "path": "packages/discovery/protocol",
+        "profiles": [],
+        "releaseGroup": "platform-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/record-publication",
+        "path": "packages/discovery/publication",
         "profiles": [],
         "releaseGroup": "platform-v1",
         "schemas": []
@@ -53897,6 +54643,15 @@
         "schemas": []
       },
       {
+        "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/task-execution-oci-grader",
+        "path": "packages/task-execution/oci-grader",
+        "profiles": [],
+        "releaseGroup": "platform-v1",
+        "schemas": []
+      },
+      {
         "conformance": [
           "./testing"
         ],
@@ -54067,6 +54822,13 @@
       },
       {
         "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-accounting/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark-accounting.v1.json"
+      },
+      {
+        "field": "profile",
         "identifier": "https://spec.jinn.network/facts/benchmark-matrix/v1",
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
@@ -54078,6 +54840,13 @@
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
         "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-report/v2",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v2.json"
       },
       {
         "field": "profile",
@@ -54379,6 +55148,7 @@
         "@jinn-network/benchmarking-interop",
         "@jinn-network/benchmarking-local",
         "@jinn-network/benchmarking-marketplace",
+        "@jinn-network/benchmarking-publication",
         "@jinn-network/benchmarking-records",
         "@jinn-network/benchmarking-run",
         "@jinn-network/benchmarking-testing",
@@ -54411,11 +55181,13 @@
         "@jinn-network/record-discovery-source-evidence-journal",
         "@jinn-network/record-discovery-testing",
         "@jinn-network/record-discovery-transport-http",
+        "@jinn-network/record-publication",
         "@jinn-network/task-execution-backend",
         "@jinn-network/task-execution-backend-local",
         "@jinn-network/task-execution-evaluation-harness",
         "@jinn-network/task-execution-evaluator-adapters",
         "@jinn-network/task-execution-launchers",
+        "@jinn-network/task-execution-oci-grader",
         "@jinn-network/task-execution-profiles",
         "@jinn-network/task-execution-protocol",
         "@jinn-network/task-execution-supervisor",
@@ -54487,6 +55259,17 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/benchmarking-marketplace",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
+          "package": "@jinn-network/benchmarking-publication",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -54849,6 +55632,17 @@
           ],
           "environment": "npm-publish",
           "organization": "Jinn-Network",
+          "package": "@jinn-network/record-publication",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-backend",
           "provider": "GitHub Actions",
           "repository": "mono",
@@ -54894,6 +55688,17 @@
           "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-launchers",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
+          "package": "@jinn-network/task-execution-oci-grader",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -55128,13 +55933,14 @@
         "platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 51,
+      "expectedPackageCount": 54,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/benchmarking-aggregate",
         "@jinn-network/benchmarking-interop",
         "@jinn-network/benchmarking-local",
         "@jinn-network/benchmarking-marketplace",
+        "@jinn-network/benchmarking-publication",
         "@jinn-network/benchmarking-records",
         "@jinn-network/benchmarking-run",
         "@jinn-network/benchmarking-testing",
@@ -55167,11 +55973,13 @@
         "@jinn-network/record-discovery-source-evidence-journal",
         "@jinn-network/record-discovery-testing",
         "@jinn-network/record-discovery-transport-http",
+        "@jinn-network/record-publication",
         "@jinn-network/task-execution-backend",
         "@jinn-network/task-execution-backend-local",
         "@jinn-network/task-execution-evaluation-harness",
         "@jinn-network/task-execution-evaluator-adapters",
         "@jinn-network/task-execution-launchers",
+        "@jinn-network/task-execution-oci-grader",
         "@jinn-network/task-execution-profiles",
         "@jinn-network/task-execution-protocol",
         "@jinn-network/task-execution-supervisor",

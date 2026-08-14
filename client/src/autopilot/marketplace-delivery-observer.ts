@@ -21,15 +21,21 @@ import {
   type DecodedTaskCreated,
 } from '../adapters/mech/contracts.js';
 import { authenticateExecutionEnvelope } from '../conformance/execution-envelope-authenticator.js';
+// One-swap R3b (issue #2494) relocated the indexer read this observer drives
+// (`getAutopilotDeliveryCandidates`) onto `discovery-client/`. Typing against
+// the relocated client — not the legacy `DiscoveryAPI` — is what keeps the
+// `jinn tasks observe-autopilot-delivery` verb free of any path into
+// `client/src/discovery/`, so the D-wave can delete that tree without taking
+// the published external boundary down with it.
 import type {
   AutopilotDeliveryCandidateLookup,
   AutopilotDeliveryRole,
-  DiscoveryAPI,
-} from '../discovery/types.js';
+  DiscoveryClient,
+} from '../discovery-client/types.js';
 import type { SignedEnvelope } from '../types/envelope.js';
 
 export interface AutopilotMarketplaceDeliveryObserverDeps {
-  discovery: Pick<DiscoveryAPI, 'getAutopilotDeliveryCandidates'>;
+  discovery: Pick<DiscoveryClient, 'getAutopilotDeliveryCandidates'>;
   publicClient: PublicClient;
   mechMarketplaceAddress: Address;
   routerAddress: Address;

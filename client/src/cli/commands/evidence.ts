@@ -19,8 +19,8 @@ import { getConfigPathFromArgs, loadConfig } from '../../config.js';
 import { fetchSignedEnvelopeBytesRaw } from '../../adapters/mech/ipfs.js';
 import { runConformance } from '../../conformance/harness.js';
 import { SignedEnvelopeSchema, type SignedEnvelope } from '../../types/envelope.js';
-import { createHttpDiscoveryAPI } from '../../discovery/http.js';
-import type { AutopilotDeliveryRole } from '../../discovery/types.js';
+import { createHttpDiscoveryClient } from '../../discovery-client/http.js';
+import type { AutopilotDeliveryRole } from '../../discovery-client/types.js';
 
 const SHOW_EXAMPLE = 'jinn evidence show --envelope-cid bafybeiabc123...';
 const FIND_EXAMPLE = 'jinn evidence find --task-id 42 --role solution';
@@ -38,11 +38,14 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Both indexer-backed subverbs require `discovery.mode: 'http'` with a url —
- * the same requirement `tasks observe-autopilot-delivery` enforces. There is no
- * silent fall-through to the on-chain floor: the floor cannot answer a
- * taskId → envelope lookup, so degrading to it would answer "not found" for a
- * task that was in fact delivered.
+ * Both indexer-backed subverbs require `discovery.mode: 'http'` with a url.
+ * There is no silent fall-through to the on-chain floor: the floor cannot
+ * answer a taskId → envelope lookup, so degrading to it would answer "not
+ * found" for a task that was in fact delivered.
+ *
+ * `tasks observe-autopilot-delivery` used to enforce the same requirement; it
+ * was retired by one-swap R3b (issue #2494), leaving `evidence find` and
+ * `tasks watch` as the exact-delivery reads.
  */
 function requireHttpDiscoveryUrl(
   ctx: CommandContext,
@@ -425,7 +428,7 @@ async function runFind(ctx: CommandContext): Promise<void> {
 
   let lookup;
   try {
-    lookup = await createHttpDiscoveryAPI({ url: discoveryUrl })
+    lookup = await createHttpDiscoveryClient({ url: discoveryUrl })
       .getAutopilotDeliveryCandidates({ chainId, taskId, role });
   } catch (err) {
     emitEnvelope(

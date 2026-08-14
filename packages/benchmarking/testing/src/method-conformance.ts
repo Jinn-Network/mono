@@ -105,10 +105,21 @@ async function loadJson<T>(name: string): Promise<T> {
 
 async function computeFixtureNames(): Promise<string[]> {
   const names = await fixtureNames();
+  const manifest = await loadBenchmarkingManifest();
+  const superseded = new Set((manifest.errata ?? []).map((erratum) => erratum.id));
   const fixtures = await Promise.all(names.map(async (name) => [name, await loadJson<Record<string, unknown>>(name)] as const));
   return fixtures
-    .filter(([, fixture]) => Array.isArray(fixture["matrices"]) && Object.hasOwn(fixture, "expectedResults"))
+    .filter(([name, fixture]) => !superseded.has(`methods/${name}`)
+      && Array.isArray(fixture["matrices"])
+      && Object.hasOwn(fixture, "expectedResults"))
     .map(([name]) => name);
+}
+
+async function loadBenchmarkingManifest(): Promise<{
+  readonly errata?: readonly { readonly id: string; readonly supersededBy: string }[];
+}> {
+  const url = new URL("../fixtures/manifest.sha256.json", import.meta.url);
+  return JSON.parse(await readFile(fileURLToPath(url), "utf8"));
 }
 
 /** Validates + parses each fixture's raw matrix documents through the real records schema, so a
@@ -170,7 +181,7 @@ function verdictEnvelopeBytes(labelDigest: string, outcome: VerdictOutcome): Uin
         : { limitations: [`inconclusiveClass:${outcome.inconclusiveClass}`] }),
     },
   };
-  return canonicalJsonBytes(buildVerdictEnvelope(statement, [{ keyid: "did:key:zFixture", sig: "AA==" }]));
+  return buildVerdictEnvelope(statement, [{ keyid: "did:key:zFixture", sig: "AA==" }]);
 }
 
 interface MutableFixtureCell {
@@ -1038,6 +1049,21 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
         });
         expect(results, `${fixture.methodId}@${fixture.methodVersion} (fixture ${name})`).toEqual(prepared.expectedResults);
       }
+    });
+
+    test("paired-delta reports one shared bootstrap ensemble's cluster draws", async () => {
+      const fixture = await loadFixture("paired-delta-shared-ensemble.v2.json");
+      const prepared = prepareFixture(fixture);
+      const method = registry.get(fixture.methodId, fixture.methodVersion)!;
+      const results = onlySubjectResults(method.compute!({
+        subjects: prepared.subjects,
+        parameters: { ...fixture.parameters, verdictRule: fixture.verdictRule },
+        verdictRule: fixture.verdictRule,
+        registry,
+        ...prepared.ports,
+      })) as { bootstrap: { draws: number; resamples: number; count: number } };
+
+      expect(results.bootstrap.draws).toBe(results.bootstrap.resamples * results.bootstrap.count);
     });
 
     test("registry entries reproduce the declarative method-spec fixture", async () => {

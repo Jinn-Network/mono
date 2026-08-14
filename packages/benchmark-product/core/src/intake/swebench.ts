@@ -25,6 +25,7 @@
 
 import { importSweBench, type ImportedBenchmark, type SweBenchRow } from "@jinn-network/benchmarking-interop";
 import { checkItemDistinctness } from "@jinn-network/benchmarking-records";
+import { sealEvaluationSpec, sweRebenchRowToTaskAndSpec } from "@jinn-network/task-execution-profiles";
 import { z } from "zod";
 import { refuse, refuseWithIssues } from "../errors.js";
 
@@ -58,6 +59,17 @@ export interface ConvertSweBenchRowsOptions {
   readonly version: string;
   /** Omitted keeps the platform importer's own deterministic default (see `importSweBench`). */
   readonly provenanceTimestamp?: string;
+  /** Per-instance RFC 3339 timestamps keyed by `instance_id`; each falls back to
+   *  `provenanceTimestamp`, then the importer's default. Omitting the map preserves today's
+   *  behavior exactly, so the default path stays byte-deterministic. */
+  readonly provenanceTimestamps?: Readonly<Record<string, string>>;
+}
+
+export interface ConvertedSweBenchRows {
+  readonly imported: ImportedBenchmark;
+  /** One entry per row, keyed by its own digest. The platform's `ImportedBenchmark` deliberately
+   *  carries only the digest, so the product re-seals to retain the bytes the venue requires. */
+  readonly evaluationSpecs: readonly { readonly digest: string; readonly bytes: Uint8Array }[];
 }
 
 function issuesFromZodError(error: z.ZodError) {
@@ -76,7 +88,7 @@ function issuesFromZodError(error: z.ZodError) {
  *  - with a single `"benchmark-item-distinctness"` issue naming the duplicate task
  *    digest when two rows import to the same Task.
  */
-export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRowsOptions): ImportedBenchmark {
+export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRowsOptions): ConvertedSweBenchRows {
   const parsedRows = SweBenchRowsFileSchema.safeParse(rowsInput);
   if (!parsedRows.success) {
     refuseWithIssues("validation", issuesFromZodError(parsedRows.error));
@@ -106,5 +118,28 @@ export function convertSweBenchRows(rowsInput: unknown, opts: ConvertSweBenchRow
     ]);
   }
 
-  return imported;
+  const rows = parsedRows.data as unknown as readonly SweBenchRow[];
+  const evaluationSpecs = rows.map((row, index) => {
+    const sealed = sealEvaluationSpec(sweRebenchRowToTaskAndSpec(row).evaluationSpec);
+    const digest = sealed.digest.slice("sha256:".length);
+    // The binding property is agreement with the digest the SEALED TASK actually references —
+    // comparing the re-seal against the mapper's own digest would only restate that
+    // `sealEvaluationSpec` is deterministic, which proves nothing about the Task. Reading the
+    // Task's own bytes is what catches persisting a spec under a digest no Task points at, which
+    // is silent at import and would surface only as an ungradeable cell mid-run.
+    const taskDoc = JSON.parse(new TextDecoder().decode(imported.tasks[index]!.bytes)) as {
+      evaluation?: { digest?: { sha256?: string } };
+    };
+    const referenced = taskDoc.evaluation?.digest?.sha256;
+    if (referenced !== digest) {
+      refuse(
+        "record-integrity",
+        `rows.${index}`,
+        `re-sealed EvaluationSpec digest ${digest} does not match the digest task ${row.instance_id} references (${String(referenced)})`,
+      );
+    }
+    return { digest, bytes: sealed.bytes };
+  });
+
+  return { imported, evaluationSpecs };
 }

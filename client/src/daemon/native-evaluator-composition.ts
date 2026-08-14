@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -38,7 +39,8 @@ import {
   SubmissionRecordSchema,
   documentDigest,
 } from "@jinn-network/task-execution-protocol";
-import { sealSignedRecord } from "@jinn-network/trust-core";
+import { sealSignedPayload } from "@jinn-network/trust-core";
+import { canonicalAttestationJsonBytes } from "@jinn-network/attestation-issuer";
 import {
   makeDirProvisioner,
   type TaskView,
@@ -69,6 +71,7 @@ import {
   type NativeEvaluatorCoordinatorResult,
   type NativeEvaluatorVerdictVerificationPort,
 } from "./native-evaluator-coordinator.js";
+import { nativeEvaluationHostInputs } from "./native-evaluation-context.js";
 import {
   openNativeEvaluatorPublisher,
   type NativeEvaluatorPublisher,
@@ -522,6 +525,24 @@ function stateBackedProvisioner(input: {
     if (specification.length !== 1) {
       throw new NativeEvaluatorCompositionError("durable evaluation has no unique EvaluationSpec");
     }
+    // Everything the HOST owes the workspace on top of the evaluation Task's own subject graph:
+    // the bound EvaluationSpec, plus -- for a prediction-parsed specification -- the evaluation
+    // context that specification's adapter reads. Built here, before provisioning, out of durable
+    // artifacts this evaluation has already verified. A specification whose context cannot be
+    // derived refuses the Attempt naming the exact field at fault, instead of staging nothing and
+    // letting the harness's optional read degrade it to an empty context (#41).
+    const hostInputs = nativeEvaluationHostInputs({
+      specification: parseEvaluationSpec(specification[0]!.bytes),
+      specificationBytes: specification[0]!.bytes,
+      specificationMediaType: EVALUATION_SPEC_MEDIA_TYPE,
+      subjectTaskBytes: () => {
+        const subjectTask = artifacts.filter(({ role }) => role === "task");
+        if (subjectTask.length !== 1) {
+          throw new NativeEvaluatorCompositionError("durable evaluation has no unique subject Task");
+        }
+        return subjectTask[0]!.bytes;
+      },
+    });
     const provisioner = makeDirProvisioner({
       sealedTaskBytes: local.sealedTaskBytes,
       dispatchContextBytes: local.dispatchContextBytes,
@@ -531,6 +552,12 @@ function stateBackedProvisioner(input: {
       ...(input.diskFloorBytes === undefined ? {} : { diskFloorBytes: input.diskFloorBytes }),
       async fetchInput(descriptor) {
         const digest = digestFromDescriptor(descriptor);
+        // A host-staged input is served by its own exact digest. It is not a durable subject
+        // artifact (the context is derived, not stored), so it is resolved before the subject
+        // lookup and never widens what a Task-declared input can reach.
+        const staged = hostInputs.find((candidate) =>
+          candidate.name === descriptor.name && candidate.digest === digest);
+        if (staged !== undefined) return staged.bytes;
         const matches = artifacts.filter((artifact) => artifact.digest === digest);
         if (matches.length !== 1) {
           throw new NativeEvaluatorCompositionError(`evaluation input ${descriptor.name} has no unique exact artifact`);
@@ -546,22 +573,31 @@ function stateBackedProvisioner(input: {
           if (grants.length !== 0) {
             throw new NativeEvaluatorCompositionError("evaluator-sealed Submission must remain grant-free");
           }
-          const evaluationSpecInput = {
-            name: "evaluation-spec.json",
-            digest: { sha256: specification[0]!.digest.slice("sha256:".length) },
-            mediaType: EVALUATION_SPEC_MEDIA_TYPE,
-          } as NonNullable<typeof view.task.inputs>[number];
+          const hostInputDescriptors = hostInputs.map((staged) => ({
+            name: staged.name,
+            digest: { sha256: staged.digest.slice("sha256:".length) },
+            mediaType: staged.mediaType,
+          }) as NonNullable<typeof view.task.inputs>[number]);
           await provisioner.setup({
             ...view,
             task: {
               ...view.task,
-              inputs: [...(view.task.inputs ?? []), evaluationSpecInput],
+              inputs: [...(view.task.inputs ?? []), ...hostInputDescriptors],
             },
           }, paths, grants);
         },
         executionEnv: provisioner.executionEnv,
         async harvest(paths, outputs) {
           const verdictPath = join(paths.out, "verdict");
+          // #39b(b): harvest is contracted to run "after success, failure, cancellation, and
+          // expiry", so it must not presuppose a verdict. A harness that REFUSED its subject exits
+          // 65 having written nothing, and the launch plan already maps 65 to blame `task` /
+          // `invalid-evaluation-input`. Reading unconditionally made that read's ENOENT propagate
+          // into the backend's `harvest failed:` catch, which overwrote the correct classification
+          // with `infrastructure` / `backend-unavailable` -- aiming a live diagnosis at the host
+          // instead of at the refused subject. With no verdict there is nothing to seal: delegate,
+          // let the omission be recorded, and let the exit code classify.
+          if (!existsSync(verdictPath)) return provisioner.harvest(paths, outputs);
           const payloadBytes = new Uint8Array(await readFile(verdictPath));
           const statement = ResultEvaluationStatementSchema.parse(JSON.parse(
             new TextDecoder("utf-8", { fatal: true }).decode(payloadBytes),
@@ -591,14 +627,22 @@ function stateBackedProvisioner(input: {
             throw new NativeEvaluatorCompositionError("unsigned evaluator statement is outside its exact Attempt authority");
           }
           const identity = input.roles.get("evaluator-verdict");
-          const sealed = await sealSignedRecord({
-            record: statement,
+          // What was graded is what gets signed, byte for byte. The harness writes `out/verdict`
+          // with the attestation family's exact deterministic spelling (sorted keys, two-space
+          // indent, trailing LF) via `buildResultEvaluationPayload`; pinning the file to that
+          // spelling still refuses any hand-rolled or tampered serialization, and the DSSE payload
+          // is then the graded file itself rather than a re-encoding of it (#35). Re-serializing
+          // through `sealSignedRecord`'s COMPACT trust-core canonical form and byte-comparing that
+          // against the file could never agree for a real harness run, so this threw on every live
+          // evaluation one step past the subject-authority check.
+          if (!Buffer.from(canonicalAttestationJsonBytes(statement)).equals(Buffer.from(payloadBytes))) {
+            throw new NativeEvaluatorCompositionError("unsigned evaluator statement is not canonical exact bytes");
+          }
+          const sealed = await sealSignedPayload({
+            payloadBytes,
             payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
             signer: async ({ preAuthEncoding }) => [{ keyid: identity.keyId, signature: identity.sign(preAuthEncoding) }],
           });
-          if (!Buffer.from(sealed.payloadBytes).equals(Buffer.from(payloadBytes))) {
-            throw new NativeEvaluatorCompositionError("unsigned evaluator statement is not canonical exact bytes");
-          }
           const temporary = `${verdictPath}.sealed`;
           await writeFile(temporary, sealed.envelopeBytes, { mode: 0o600, flag: "wx" });
           await rename(temporary, verdictPath);

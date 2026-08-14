@@ -59,14 +59,48 @@
  *     `verifyVerdictObservation`'s real form needs the SAME Phase-B binding-resolver backing
  *     stores (`BindingStore`/`AnchorReadClient`/policy) already named absent by the old gap 2 --
  *     confirmed again independently via `VerdictObservationGatePorts`
- *     (`packages/marketplace/binding/src/named-checks.ts`). `resolveRecord` for delivery roles has
- *     no lookup mechanism anywhere (no local cache of this operator's own delivered bytes keyed
- *     by the claiming event). Both loudly throw a named error rather than returning empty/fake
- *     material; `projectAnnouncements` treats a `verifyVerdictObservation` throw as a refusal
- *     (fail-closed) and a `resolveRecord` throw as a failed (non-fatal, logged, retried) tick.
- *     Because of (a), `transition.events` is always empty in this composition today, so neither
- *     of these is actually reachable yet -- they exist so a FUTURE fix to (a) fails loud instead
- *     of silently fabricating discovery entries.
+ *     (`packages/marketplace/binding/src/named-checks.ts`). It still loudly throws on the LEGACY
+ *     path (`refuseLegacyVerdictObservation`); the NATIVE path supplies the real M4b adapter
+ *     through `installVerdictObservation` (`native-fleet-runtime.ts`'s late-bound port).
+ *
+ *     `resolveRecord` for the `"delivery"` / `"evaluation-delivery"` roles CLOSED on the NATIVE
+ *     path (defect #45). The premise above -- "no lookup mechanism anywhere" -- stopped being
+ *     true once the native serving plane landed: `native-fleet-serving-plane.ts` serves every
+ *     record this operator publishes under `config.publicBaseUrl`, and peers' records resolve
+ *     over `config.recordSources` through the digest-verifying record transport.
+ *
+ *     Two lookup keys, because the two contract generations name the record differently, and the
+ *     one the native fleet actually runs against is `BASE_SEPOLIA_TODAY` (JinnRouterV3):
+ *       - REVISED (V4): the ON-CHAIN anchor (`SolutionDeliveryClaimed.deliveryDigest`,
+ *         `VerdictDeliveryClaimed.evaluationDeliveryDigest`) keys a content-addressed fetch off
+ *         the serving plane. Strictly the stronger path -- the chain names the bytes -- and it is
+ *         taken whenever those facts are present.
+ *       - TODAY (V3): those fields DO NOT EXIST on either event (`events.ts`'s `todayEvent`), so
+ *         there is no digest to key off. The lookup key is the ENGAGEMENT instead, and the bytes
+ *         come from this operator's own durable record store. Anchoring is NOT weakened, it just
+ *         lives one layer downstream: for `"delivery"`, `announce.ts`'s `expectedMaterialDigest`
+ *         reads the `delivery-recorded.v1` OBSERVATION digest (`observe.ts`, the today-mode
+ *         sha256<->keccak mech correspondence) and `anchorCheckedMaterial` refuses on mismatch;
+ *         for `"evaluation-delivery"`, the M4b gate (`native-verdict-observation.ts`) binds
+ *         `documentDigest(material.bytes)` to exactly one durable evaluation-delivery artifact row
+ *         and throws otherwise. Neither is a self-attestation: both re-derive the digest from the
+ *         returned bytes and join it against something this resolver does not author.
+ *
+ *     `buildNativeResolveRecord` below implements both roles across both generations; the LEGACY
+ *     path still refuses every delivery role by construction (`buildResolveRecord`, submission
+ *     only).
+ *
+ *     This was gate-critical while it stood: the ratified DR-2026-08-05 G-loop criterion is a
+ *     verdict announcement with `decisionGrade: true` plus a requester-side adopted delivery, and
+ *     the announce leg asks for `"evaluation-delivery"` BEFORE it ever runs the verdict gate. A
+ *     refusal there meant no native operator could publish any verdict announcement at all.
+ *
+ *     One correction to what this note used to claim: a `resolveRecord` throw is NOT a "retried"
+ *     tick. `projector-loop.ts` catches it, publishes nothing for the whole tick, and still
+ *     advances the cursor; `hasCanonicalEvent` then filters those events out of every later
+ *     tick's `publicationEvents`. The announcements are dropped for good, so the throw is now a
+ *     named `NativeAnnouncementRecordError` (role + anchor digest + cause) and the loop's warn
+ *     names the loss.
  *  c. Native role identities: the caller supplies the persistent, effective-time-trusted
  *     `RoleIdentitySet`. Its solver-delivery and solver-discovery identities are the only keys
  *     this native composition exposes to delivery verification and discovery signing. Omission
@@ -102,9 +136,14 @@ import {
 } from '@jinn-network/marketplace-venue-base';
 import type {
   ClaimPorts,
+  ContractGeneration,
   MarketplaceChainConfig,
 } from '@jinn-network/marketplace-binding';
-import { createRegistryPinPort } from '@jinn-network/marketplace-binding';
+import {
+  createRegistryPinPort,
+  deriveMarketplaceAttemptUri,
+  keccakEvidenceHash,
+} from '@jinn-network/marketplace-binding';
 import {
   CLAIM_NOTHING,
   matchLegacyManifestDigest,
@@ -147,6 +186,12 @@ import {
   sealTaskProfile,
 } from '@jinn-network/task-execution-profiles';
 import type { JsonValue, ProtocolObservation } from '@jinn-network/task-execution-protocol';
+import {
+  DeliveryRecordSchema,
+  documentDigest,
+  serializeCanonicalJson,
+  SubmissionRecordSchema,
+} from '@jinn-network/task-execution-protocol';
 import { DISCOVERY_SIGNING_SCOPE, RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import { legacyPredictionV1BaselineLauncher } from './legacy-prediction-v1-launcher.js';
 import type {
@@ -170,7 +215,11 @@ import { EngagementLedger } from './engagement-ledger.js';
 import { buildVerifySettlementGrade as buildRealVerifySettlementGrade } from './settlement-grade.js';
 import { createProjectorCatchUpGate, type ClaimGate } from './claim-gate.js';
 import { createCanonicalBlockHashReader, createFinalizedHeadReader } from './projector-log-source.js';
-import { createProjectorEnrich, type ProjectorEnrichPorts } from './projector-enrich.js';
+import {
+  createProjectorEnrich,
+  type ProjectorEnrichPorts,
+  type RecordPlaneDeliveryResolution,
+} from './projector-enrich.js';
 import { ProjectorCursorStore } from './projector-cursor.js';
 import { ProjectorLoop } from './projector-loop.js';
 import type { ProjectorPortsInput } from './projector-ports.js';
@@ -706,6 +755,16 @@ export function buildLegacyDeliveryExtensions(input: {
 // `readRouterDeliveryFacts` today-generation read exactly, per that module's own doc comment
 // directing a host-injected port to do this read rather than duplicate it inside the enrich
 // module itself.
+//
+// PRODUCER/VERIFIER PARITY (defect #47): the producing side registers a SOLUTION request and a
+// VERDICT request in two disjoint on-chain maps — `TaskCoordinator._requestRefs` (written by
+// `registerRequest`, read by `getRequestRef`) and `TaskCoordinator._verdictRequestRefs` (written
+// by `registerVerdictRequest`, read by `getVerdictRequestRef`, `TaskCoordinator.sol:359/458`).
+// A verifier that consults only `getRequestRef` therefore reports "no on-chain request reference"
+// for every verdict delivery that ever settled, and enrich drops the Mech `Deliver` that carries
+// the evaluator's verdict — the reason the round-28 verdict announcement never projected. The
+// verdict maps' own anchor is `VerdictRecord.verdictCidDigest` (`getVerdict`), the exact analogue
+// of `AttemptRecord.solutionCidDigest` for the solution leg.
 const REQUEST_REF_VIEW_ABI = [{
   name: 'getRequestRef', type: 'function', stateMutability: 'view',
   inputs: [{ name: 'requestId', type: 'bytes32' }],
@@ -737,6 +796,69 @@ const GET_ATTEMPT_VIEW_ABI = [{
   }],
 }] as const;
 
+const VERDICT_REQUEST_REF_VIEW_ABI = [{
+  name: 'getVerdictRequestRef', type: 'function', stateMutability: 'view',
+  inputs: [{ name: 'requestId', type: 'bytes32' }],
+  outputs: [
+    { name: 'taskId', type: 'uint256' },
+    { name: 'attemptIndex', type: 'uint32' },
+    { name: 'verdictIndex', type: 'uint32' },
+    { name: 'exists', type: 'bool' },
+  ],
+}] as const;
+
+/**
+ * `TaskCoordinator.getVerdict` — `verdictCidDigest` is the exact digest argument the evaluator's
+ * `claimVerdictDelivery(verdictRequestId, verdictDigest, verdictCode)` wrote through
+ * `recordVerdict` (`TaskCoordinator.sol:403`), the verdict-leg counterpart of the solution leg's
+ * `AttemptRecord.solutionCidDigest`.
+ */
+const GET_VERDICT_VIEW_ABI = [{
+  name: 'getVerdict', type: 'function', stateMutability: 'view',
+  inputs: [
+    { name: 'taskId', type: 'uint256' },
+    { name: 'attemptIndex', type: 'uint32' },
+    { name: 'verdictIndex', type: 'uint32' },
+  ],
+  outputs: [{
+    name: 'verdict', type: 'tuple',
+    components: [
+      { name: 'taskId', type: 'uint256' },
+      { name: 'attemptIndex', type: 'uint32' },
+      { name: 'verdictIndex', type: 'uint32' },
+      { name: 'evaluator', type: 'address' },
+      { name: 'requestId', type: 'bytes32' },
+      { name: 'verdictCidDigest', type: 'bytes32' },
+      { name: 'verdictCode', type: 'uint8' },
+      { name: 'status', type: 'uint8' },
+    ],
+  }],
+}] as const;
+
+/**
+ * `TaskCoordinator.getTask` — read directly off the coordinator this composition already holds,
+ * not through `getTaskCidDigest`'s router→`taskCoordinator()`→`getTask` two-hop (that indirection
+ * exists only for the legacy adapter, which is handed a router address).
+ */
+const GET_TASK_VIEW_ABI = [{
+  name: 'getTask', type: 'function', stateMutability: 'view',
+  inputs: [{ name: 'taskId', type: 'uint256' }],
+  outputs: [{
+    name: 'task', type: 'tuple',
+    components: [
+      { name: 'creator', type: 'address' },
+      { name: 'taskCidDigest', type: 'bytes32' },
+      { name: 'manifestDigest', type: 'bytes32' },
+      { name: 'status', type: 'uint8' },
+      { name: 'policy', type: 'uint8' },
+      { name: 'claimCount', type: 'uint32' },
+      { name: 'submittedCount', type: 'uint32' },
+      { name: 'finalizedAttemptCount', type: 'uint32' },
+      { name: 'creatorCredited', type: 'bool' },
+    ],
+  }],
+}] as const;
+
 /** Real (gap 1 CLOSED): a raw sha256-digest IPFS fetch, reusing the existing gateway machinery
  * (`client/src/adapters/mech/ipfs.ts`) already proven for the rest of the daemon. */
 function buildFetchIpfsBytes(gatewayUrl: string): (digest: `sha256:${string}`) => Promise<Uint8Array | undefined> {
@@ -750,12 +872,30 @@ function buildFetchIpfsBytes(gatewayUrl: string): (digest: `sha256:${string}`) =
   };
 }
 
-/** Real (gap 1 CLOSED): today-generation on-chain delivery-fact read via `TaskCoordinator`. */
-function buildReadTodayDeliveryFacts(
+/**
+ * Real (gap 1 CLOSED): today-generation on-chain delivery-fact read via `TaskCoordinator`.
+ *
+ * FAILURE IS NOT ABSENCE (#2647). Both legs used to collapse into one `undefined`, which the
+ * requester-side resolver then could not tell apart from the genuine "this requestId is not on
+ * this chain's books" answer — so one 503 on `getRequestRef` read as "not the requester" and
+ * produced a permanent false rejection. The two are decidable, not a judgment call: every view
+ * read here is a plain mapping read (`TaskCoordinator.sol:437-465`) returning `exists: false` or a
+ * zero record for an unknown key, and none of them can revert. A THROW is therefore always
+ * transport, never absence.
+ *
+ *   - `{ taskId, attemptIndex, onChainKeccak }` — the reference resolved.
+ *   - `undefined` — genuine absence: the requestId is in NEITHER map, both reads answered.
+ *   - `'unavailable'` — a read failed; nothing was learned about this requestId.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver against the deployed
+ * contract's real two-map shape, matching the `buildResolveSubmissionBytes` precedent below.
+ */
+export function buildReadTodayDeliveryFacts(
   publicClient: PublicClient,
   taskCoordinator: Address,
 ): ProjectorEnrichPorts['readTodayDeliveryFacts'] {
   return async (requestId) => {
+    let solutionLegFailed = false;
     try {
       const [taskId, attemptIndex, exists] = await publicClient.readContract({
         address: taskCoordinator,
@@ -763,17 +903,91 @@ function buildReadTodayDeliveryFacts(
         functionName: 'getRequestRef',
         args: [requestId],
       });
-      if (!exists) return undefined;
-      const attempt = await publicClient.readContract({
-        address: taskCoordinator,
-        abi: GET_ATTEMPT_VIEW_ABI,
-        functionName: 'getAttempt',
-        args: [taskId, attemptIndex],
-      });
-      return { taskId, attemptIndex, onChainKeccak: attempt.solutionCidDigest };
+      if (exists) {
+        const attempt = await publicClient.readContract({
+          address: taskCoordinator,
+          abi: GET_ATTEMPT_VIEW_ABI,
+          functionName: 'getAttempt',
+          args: [taskId, attemptIndex],
+        });
+        return { taskId, attemptIndex, onChainKeccak: attempt.solutionCidDigest };
+      }
     } catch {
-      return undefined;
+      // A solution-leg read failure must not hide the verdict leg: the two maps are disjoint and
+      // a requestId absent from one is expected, not an error. Fall through and ask the other --
+      // but REMEMBER the failure, because a later verdict-leg `exists: false` then answers only
+      // half the question and must not be reported as the whole-chain absence.
+      solutionLegFailed = true;
     }
+    try {
+      const [taskId, attemptIndex, verdictIndex, exists] = await publicClient.readContract({
+        address: taskCoordinator,
+        abi: VERDICT_REQUEST_REF_VIEW_ABI,
+        functionName: 'getVerdictRequestRef',
+        args: [requestId],
+      });
+      if (!exists) return solutionLegFailed ? 'unavailable' : undefined;
+      const verdict = await publicClient.readContract({
+        address: taskCoordinator,
+        abi: GET_VERDICT_VIEW_ABI,
+        functionName: 'getVerdict',
+        args: [taskId, attemptIndex, verdictIndex],
+      });
+      return { taskId, attemptIndex, onChainKeccak: verdict.verdictCidDigest };
+    } catch {
+      return 'unavailable';
+    }
+  };
+}
+
+/**
+ * The canonical on-chain Task anchor (`TaskCoordinator.getTask(taskId).taskCidDigest`) — the exact
+ * value `TaskCreated` carries in its `taskCidDigest` field, written once by `createTask`
+ * (`TaskCoordinator.sol:227`) and never mutated afterwards, which is why the per-process memo below
+ * is sound.
+ *
+ * The native Submission resolver keys its association on `(chainId, coordinator, taskId,
+ * taskDigest)`, but `eventIdentity` only surfaces a `taskDigest` for `TaskCreated` — every other
+ * event class reaches `resolveTaskProjection` with the anchor absent (defect #47). Reading it back
+ * off the coordinator restores the key for those classes without weakening anything: the
+ * association resolver re-checks the digest against its stored Task bytes, and `resolveTaskProjection`
+ * independently re-derives it from the fetched content, so a wrong anchor here can only ever fail
+ * closed.
+ *
+ * Three answers, for the reason spelled out on {@link buildReadTodayDeliveryFacts} (#2647):
+ * `getTask` is a plain mapping read that returns an all-zero record for an unknown task and cannot
+ * revert, so `undefined` is reserved for the anchor genuinely not being there (unknown task, or the
+ * all-zero record of a creation not yet included) and `'unavailable'` says the read failed. Neither
+ * is ever memoized — a task created, or an RPC recovered, after this read must resolve later.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver.
+ */
+export function buildReadOnChainTaskDigest(
+  publicClient: PublicClient,
+  taskCoordinator: Address,
+): (taskId: bigint) => Promise<`sha256:${string}` | 'unavailable' | undefined> {
+  const memo = new Map<string, `sha256:${string}`>();
+  return async (taskId) => {
+    const key = taskId.toString();
+    const memoized = memo.get(key);
+    if (memoized !== undefined) return memoized;
+    let digest: `sha256:${string}` | undefined;
+    try {
+      const task = await publicClient.readContract({
+        address: taskCoordinator,
+        abi: GET_TASK_VIEW_ABI,
+        functionName: 'getTask',
+        args: [taskId],
+      });
+      const anchor = task.taskCidDigest;
+      if (/^0x[0-9a-fA-F]{64}$/.test(anchor) && !/^0x0{64}$/i.test(anchor)) {
+        digest = `sha256:${anchor.slice(2).toLowerCase()}`;
+      }
+    } catch {
+      return 'unavailable';
+    }
+    if (digest !== undefined) memo.set(key, digest);
+    return digest;
   };
 }
 
@@ -823,22 +1037,280 @@ export function buildResolveSubmissionBytes(input: {
 }
 
 /**
- * Native-only `projectAnnouncements.resolveRecord` path. Its resolver reads a local, requester-
- * signed canonical association; there is deliberately no IPFS retrieval, CreatorLoop document,
- * SignedTaskV1 parser, or synthesized projection on this path.
+ * A native `resolveRecord` refusal, named so the projector loop's catch can report the ROLE, the
+ * anchor DIGEST and the CAUSE rather than an anonymous message (defect #45, the #33/#36/#43
+ * opacity class at the projector layer). Never carries bytes: a refusal is a refusal.
+ */
+export class NativeAnnouncementRecordError extends Error {
+  override readonly name = 'NativeAnnouncementRecordError';
+
+  constructor(
+    readonly role: AnnouncementRecordRole,
+    readonly reason: string,
+    readonly digest?: `sha256:${string}`,
+  ) {
+    super(
+      `native resolveRecord refused the "${role}" record`
+      + `${digest === undefined ? '' : ` (anchor ${digest})`}: ${reason}`,
+    );
+  }
+}
+
+/**
+ * The on-chain anchor a delivery-family record must equal, read from the revised-generation event
+ * facts `SolutionDeliveryClaimed.deliveryDigest` / `VerdictDeliveryClaimed.
+ * evaluationDeliveryDigest`. Deriving it here (rather than fetching by some other key and letting
+ * the announce plane's check catch a mismatch) is what makes THIS leg content-addressed: the chain
+ * names the bytes, and only bytes that re-derive to that name are ever returned.
+ *
+ * Precisely on what `announce.ts` then re-checks, because the two roles differ:
+ *   - `"evaluation-delivery"`: `expectedMaterialDigest` reads `evaluationDeliveryDigest` off the
+ *     event, so it is literally the same fact.
+ *   - `"delivery"`: `expectedMaterialDigest` reads the `delivery-recorded.v1` OBSERVATION's digest,
+ *     never the event fact. On a revised claim `observe.ts` emits that observation as
+ *     `digestFromBytes32(event.facts.deliveryDigest)`, so the two coincide — but the announce
+ *     plane's anchor is the observation, and on a today claim that observation carries the mech
+ *     correspondence digest instead. Same check, different provenance.
+ *
+ * `undefined` on a today-generation event, whose facts carry no such field at all — see
+ * {@link todayDeliveryMaterial}, which keys off the engagement instead and leaves the anchoring to
+ * that observation join / the M4b gate.
+ */
+function deliveryAnchorDigest(
+  event: ObservationMarketplaceEvent,
+  role: 'delivery' | 'evaluation-delivery',
+): `sha256:${string}` | undefined {
+  const anchor = role === 'delivery'
+    ? (event.event === 'SolutionDeliveryClaimed' && 'deliveryDigest' in event.facts
+      ? event.facts.deliveryDigest
+      : undefined)
+    : (event.event === 'VerdictDeliveryClaimed' && 'evaluationDeliveryDigest' in event.facts
+      ? event.facts.evaluationDeliveryDigest
+      : undefined);
+  if (typeof anchor !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(anchor) || /^0x0{64}$/iu.test(anchor)) {
+    return undefined;
+  }
+  return `sha256:${anchor.slice(2).toLowerCase()}`;
+}
+
+/**
+ * Digest-keyed retrieval over this operator's own native serving plane and its configured peers.
+ * Contract (mirroring `buildFleetDeliveryBytesResolver`, `native-fleet-runtime.ts`): returns bytes
+ * ONLY when they re-derive to the requested digest, and `undefined` on any miss, transport failure
+ * or mismatch. Never throws for a miss.
+ */
+export type NativeRecordBytesResolver =
+  (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+
+/**
+ * The ENGAGEMENT this operator's own solution-delivery record hangs off. Today-generation
+ * `SolutionDeliveryClaimed` carries no `deliveryDigest`, so `(taskId, attemptIndex)` on the
+ * canonical coordinator is the only key the chain gives — and it is enough, because the record is
+ * one this operator itself produced and durably stored.
+ */
+export interface NativeOwnSolutionDeliveryLookup {
+  readonly chainId: number;
+  readonly coordinator: Address;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+}
+
+/**
+ * The ENGAGEMENT this operator's own evaluation-delivery record hangs off. Deliberately the SAME
+ * narrowing the M4b gate (`native-verdict-observation.ts`) applies before it binds on the artifact
+ * digest — task, solution attempt, verdict code, evaluation request id — so a row this resolver
+ * returns is a row that gate can then bind, and a row it cannot bind is refused there.
+ */
+export interface NativeOwnEvaluationDeliveryLookup {
+  readonly chainId: number;
+  readonly coordinator: Address;
+  readonly taskId: bigint;
+  readonly solutionAttemptIndex: number;
+  readonly verdictCode: number;
+  readonly evaluationRequestId: string;
+}
+
+/**
+ * Engagement-keyed retrieval over this operator's OWN durable record stores, for the
+ * today-generation legs where the chain names no digest. Each returns `undefined` on a miss and on
+ * an ambiguous match (more than one durable row for one on-chain engagement is a derivation defect,
+ * not a record to guess between) — never throws for a miss.
+ */
+export interface NativeOwnDeliveryRecords {
+  readonly solutionDelivery:
+    (lookup: NativeOwnSolutionDeliveryLookup) => Promise<Uint8Array | undefined>;
+  readonly evaluationDelivery:
+    (lookup: NativeOwnEvaluationDeliveryLookup) => Promise<Uint8Array | undefined>;
+}
+
+/**
+ * A solution-delivery record ANOTHER operator produced, resolved off the record plane and bound to
+ * the coordinator's own anchor. Deliberately a separate port from {@link NativeOwnDeliveryRecords}:
+ * that one is named "own" because its bytes come from this operator's durable stores and need no
+ * network, and wiring a counterparty lookup behind that name would make both the type and its
+ * refusal message lie. Carries `requestId` and `taskDigest` because the anchor and the record's
+ * self-description are what make a counterparty's bytes admissible at all.
+ *
+ * `undefined` for "no admissible record", never a throw — the caller owns the refusal.
+ */
+export type NativeCounterpartySolutionDeliveryResolver = (lookup: {
+  readonly chainId: number;
+  readonly coordinator: Address;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly requestId: Hex;
+  readonly taskDigest: `sha256:${string}`;
+}) => Promise<Uint8Array | undefined>;
+
+/**
+ * The TODAY-generation (JinnRouterV3) delivery legs — the generation the native fleet actually
+ * pins (`main.ts`'s `BASE_SEPOLIA_TODAY`, `native-fleet-runtime.ts`'s `chain`). Neither
+ * `SolutionDeliveryClaimed` nor `VerdictDeliveryClaimed` carries a delivery digest in this
+ * generation (`packages/marketplace/projector/src/events.ts`'s `todayEvent`), so the ENGAGEMENT is
+ * the lookup key and the bytes come from this operator's own durable stores.
+ *
+ * That is a lookup key, not a trust boundary. The anchor check for each role lives downstream and
+ * is unchanged in strength:
+ *   - `"delivery"`: `announce.ts`'s `expectedMaterialDigest` reads the `delivery-recorded.v1`
+ *     observation digest — which `observe.ts` emits ONLY after the today-mode sha256<->keccak mech
+ *     correspondence check passes — and `anchorCheckedMaterial` refuses on mismatch. The announce
+ *     leg is itself gated on that same observation existing, so the check is never skipped.
+ *   - `"evaluation-delivery"`: the M4b gate binds `documentDigest(material.bytes)` to exactly one
+ *     durable evaluation-delivery artifact row and re-verifies the whole graph through the
+ *     coordinator's verdict gate, refusing on any other count.
+ */
+async function todayDeliveryMaterial(
+  event: ObservationMarketplaceEvent,
+  role: 'delivery' | 'evaluation-delivery',
+  ownRecords: NativeOwnDeliveryRecords | undefined,
+  chain: MarketplaceChainConfig,
+  resolveCounterpartyDelivery?: NativeCounterpartySolutionDeliveryResolver,
+): Promise<AnnouncementRecordMaterial> {
+  // A composition with NO way at all to reach a delivery record is a wiring fault, and saying so
+  // outranks any refusal about the event's own shape — the operator has to fix the composition
+  // before the event matters. Ahead of every other check for exactly that reason.
+  if (ownRecords === undefined && resolveCounterpartyDelivery === undefined) {
+    throw new NativeAnnouncementRecordError(
+      role,
+      'no native durable record store is wired into this composition',
+    );
+  }
+  if (role === 'delivery') {
+    if (event.event !== 'SolutionDeliveryClaimed') {
+      throw new NativeAnnouncementRecordError(
+        role,
+        `${event.event} is not a solution-delivery claim`,
+      );
+    }
+    const { taskId, attemptIndex, requestId } = event.facts;
+    // This operator's OWN durable record first. It needs no network and no chain read, and it is
+    // the answer for the overwhelmingly common case: the solver announcing its own delivery.
+    const own = await ownRecords?.solutionDelivery({
+      chainId: chain.chainId,
+      coordinator: chain.taskCoordinator,
+      taskId,
+      attemptIndex,
+    });
+    if (own !== undefined) return { kind: RECORD_KINDS.delivery, bytes: own };
+    // Then the counterparty leg (#2644 parity): a requester announcing a delivery ANOTHER operator
+    // produced holds no such record and never will, but can anchor the published one against the
+    // coordinator. Strictly additive — every check the own-record path relies on downstream is
+    // unchanged, and this leg adds the on-chain keccak anchor on top.
+    const counterparty = await resolveCounterpartyDelivery?.({
+      chainId: chain.chainId,
+      coordinator: chain.taskCoordinator,
+      taskId,
+      attemptIndex,
+      requestId,
+      taskDigest: event.projection.taskDigest,
+    });
+    if (counterparty !== undefined) return { kind: RECORD_KINDS.delivery, bytes: counterparty };
+    throw new NativeAnnouncementRecordError(
+      role,
+      'this operator holds no single durable solution-delivery record for '
+      + `task=${taskId} attempt=${attemptIndex}`
+      + (resolveCounterpartyDelivery === undefined
+        ? ''
+        : ', and no record-plane candidate re-derives to the coordinator\'s solution anchor'),
+    );
+  }
+  if (ownRecords === undefined) {
+    throw new NativeAnnouncementRecordError(
+      role,
+      'no native durable record store is wired into this composition',
+    );
+  }
+  if (event.event !== 'VerdictDeliveryClaimed') {
+    throw new NativeAnnouncementRecordError(role, `${event.event} is not a verdict-delivery claim`);
+  }
+  const { taskId, attemptIndex, verdictCode, requestId } = event.facts;
+  const bytes = await ownRecords.evaluationDelivery({
+    chainId: chain.chainId,
+    coordinator: chain.taskCoordinator,
+    taskId,
+    solutionAttemptIndex: attemptIndex,
+    verdictCode,
+    evaluationRequestId: requestId,
+  });
+  if (bytes === undefined) {
+    throw new NativeAnnouncementRecordError(
+      role,
+      'this operator holds no single durable evaluation-delivery record for '
+      + `task=${taskId} attempt=${attemptIndex} verdictCode=${verdictCode} requestId=${requestId}`,
+    );
+  }
+  return { kind: RECORD_KINDS.delivery, bytes };
+}
+
+/**
+ * Native-only `projectAnnouncements.resolveRecord` path. Its submission leg reads a local,
+ * requester-signed canonical association; there is deliberately no IPFS retrieval, CreatorLoop
+ * document, SignedTaskV1 parser, or synthesized projection on this path.
+ *
+ * Its DELIVERY legs (`"delivery"`, `"evaluation-delivery"` — defect #45, previously the file
+ * header's gap b) resolve by GENERATION. On a revised (V4) claim the on-chain anchor names the
+ * bytes and `resolveRecordBytes` fetches them content-addressed off the native serving plane (this
+ * operator's own published records and its configured peers'). On a today (V3) claim — the
+ * generation this fleet actually pins — no such fact exists, so the engagement keys
+ * `ownRecords` (see {@link todayDeliveryMaterial} for where each anchor check then lives). Both are real
+ * announce-plane requests on the native path — `announce.ts` asks for `"delivery"` on
+ * `SolutionDeliveryClaimed` and `"evaluation-delivery"` on `VerdictDeliveryClaimed` — and while
+ * this refused them BOTH, no verdict announcement could ever be published, which is exactly the
+ * `decisionGrade: true` announcement the ratified DR-2026-08-05 G-loop criterion requires
+ * (`log/decisions/2026-08-05-cutover-one-swap-collapse.md`).
+ *
+ * Fail-closed is unchanged in strength and only more legible: an unresolvable or non-matching
+ * record still yields NO announcement. The refusal is now a named
+ * `NativeAnnouncementRecordError` carrying the role, the on-chain anchor digest and the cause, so
+ * the projector loop's non-fatal catch logs something an operator can act on instead of a bare
+ * "no production implementation".
  */
 export function buildNativeResolveRecord(
   chain: MarketplaceChainConfig,
   resolveAssociation: (lookup: NativeRequesterSubmissionLookup) => Promise<Uint8Array | undefined>,
+  resolveRecordBytes?: NativeRecordBytesResolver,
+  ownRecords?: NativeOwnDeliveryRecords,
+  resolveCounterpartyDelivery?: NativeCounterpartySolutionDeliveryResolver,
 ): (event: ObservationMarketplaceEvent, role: AnnouncementRecordRole) => Promise<AnnouncementRecordMaterial> {
+  // Named like every other refusal on this path (defect #45 fix-round item 5): a projection from
+  // the wrong chain or coordinator is a refusal, and the loop's warn should say which ROLE was
+  // refused, not just that "something" was outside the coordinator.
+  const assertCanonical = (event: ObservationMarketplaceEvent, role: AnnouncementRecordRole): void => {
+    if (
+      event.derivation.chainId !== chain.chainId
+      || event.projection.taskCoordinator.toLowerCase() !== chain.taskCoordinator.toLowerCase()
+    ) {
+      throw new NativeAnnouncementRecordError(
+        role,
+        'native resolveRecord refuses a projection outside the canonical Base Sepolia coordinator '
+        + `(chain ${event.derivation.chainId}, coordinator ${event.projection.taskCoordinator})`,
+      );
+    }
+  };
+
   return async (event, role) => {
     if (role === 'submission' && 'taskId' in event.facts) {
-      if (
-        event.derivation.chainId !== chain.chainId
-        || event.projection.taskCoordinator.toLowerCase() !== chain.taskCoordinator.toLowerCase()
-      ) {
-        throw new Error('native resolveRecord refuses a projection outside the canonical Base Sepolia coordinator');
-      }
+      assertCanonical(event, role);
       const bytes = await resolveAssociation({
         chainId: chain.chainId,
         coordinator: chain.taskCoordinator,
@@ -846,10 +1318,56 @@ export function buildNativeResolveRecord(
         taskDigest: event.projection.taskDigest,
       });
       if (bytes !== undefined) return { kind: RECORD_KINDS.submission, bytes };
+      throw new NativeAnnouncementRecordError(
+        role,
+        'no canonical requester association is held for this task',
+      );
     }
-    throw new Error(
-      `resolveRecord has no production implementation for role "${role}" (composition-root.ts `
-      + 'file header gap b)',
+    if (role === 'delivery' || role === 'evaluation-delivery') {
+      assertCanonical(event, role);
+      const anchorDigest = deliveryAnchorDigest(event, role);
+      if (anchorDigest !== undefined) {
+        // REVISED (V4): the chain names the bytes. Content-addressed fetch off the serving plane.
+        if (resolveRecordBytes === undefined) {
+          throw new NativeAnnouncementRecordError(
+            role,
+            'no native record serving plane is wired into this composition',
+            anchorDigest,
+          );
+        }
+        const bytes = await resolveRecordBytes(anchorDigest);
+        if (bytes === undefined) {
+          throw new NativeAnnouncementRecordError(
+            role,
+            'no digest-verified bytes on this operator\'s serving plane or its configured peers',
+            anchorDigest,
+          );
+        }
+        // Second, independent check. `resolveRecordBytes` verifies too, but this resolver is the
+        // party that names the anchor, so it does not delegate the last line of defense.
+        if (documentDigest(bytes) !== anchorDigest) {
+          throw new NativeAnnouncementRecordError(
+            role,
+            'resolved bytes do not re-derive to the on-chain anchor',
+            anchorDigest,
+          );
+        }
+        return { kind: RECORD_KINDS.delivery, bytes };
+      }
+      if (event.derivation.contractGeneration === 'revised') {
+        // A revised claim MUST carry its anchor; `deliveryAnchorDigest` also rejects a zero or
+        // malformed one. Falling through to the engagement-keyed leg here would silently weaken
+        // the stronger generation, so this refuses instead.
+        throw new NativeAnnouncementRecordError(
+          role,
+          `${event.event} is a revised-generation claim with no usable delivery anchor`,
+        );
+      }
+      return todayDeliveryMaterial(event, role, ownRecords, chain, resolveCounterpartyDelivery);
+    }
+    throw new NativeAnnouncementRecordError(
+      role,
+      'no production implementation for this role on the native path',
     );
   };
 }
@@ -887,6 +1405,503 @@ export function buildEngagementLedgerDispatchContextPort(
       uri: `urn:jinn:marketplace:dispatch-context:${row.attemptUri}`,
       digest: { sha256: row.dispatchContextDigest.slice('sha256:'.length) },
     };
+  };
+}
+
+/**
+ * Defect #48, Gate A: the REQUESTER's half of `resolveDispatchContext`.
+ *
+ * The engagement-ledger resolver above is a CLAIMANT's resolver — its row exists because
+ * `work-loop.ts` claimed, and only a claiming operator ever writes one. A requester holds no such
+ * row for a task another operator claimed, so `TaskAttemptCreated` dropped for want of a document
+ * the requester can never have sealed, `attempt-engaged` was never emitted, and every
+ * `adoptPostedTask` on that task threw `attempt-not-found` (`projector-observe.ts`'s precondition,
+ * which the ruling deliberately keeps).
+ *
+ * This does not fabricate the missing seal, and it does not relax the precondition. The
+ * dispatch-context document is `{ taskDigest, submission, nonce, attempt }`
+ * (`packages/marketplace/binding/src/claim.ts`), and a requester holds a verified provenance for
+ * every one of those four fields:
+ *
+ *   - `taskDigest` — the coordinator's own `getTask(taskId).taskCidDigest` anchor, read back here
+ *     (the #2638 pattern) and independently re-derived from the fetched Task bytes downstream.
+ *   - `submission` / `nonce` — the SIGNED Submission this requester posted, resolved through the
+ *     same native association resolver `resolveSubmissionBytes` already uses. That resolver admits
+ *     bytes only when the local association matches `(chainId, coordinator, taskId, taskDigest)`
+ *     exactly, every stored record digest re-derives, and the requester DSSE envelope verifies.
+ *   - `attempt` — `deriveMarketplaceAttemptUri` over the on-chain `(chainId, coordinator, taskId,
+ *     attemptIndex)` tuple carried by the event being enriched.
+ *
+ * Because the document and its canonicalization are identical to the claimant's, the digest this
+ * DERIVES is bit-for-bit the digest the solver SEALED. It is a re-derivation of a known document,
+ * not a new assertion — which is exactly why it is admissible where a fabrication would not be.
+ *
+ * THE ROLE DISCRIMINATOR IS POSITIVE, NEVER "no seal found". A ledger row is consulted first and
+ * always wins, so a claiming operator keeps the sealed descriptor. This leg then requires the
+ * native association to resolve, which is possible only for a task THIS operator posted and holds
+ * the sealed Submission for. An operator that is neither claimant nor poster resolves neither leg
+ * and the event still drops, exactly as before.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver.
+ */
+export function buildDerivedRequesterDispatchContextPort(input: {
+  readonly resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'];
+  readonly readOnChainTaskDigest: OnChainTaskDigestReader;
+  readonly generation: ContractGeneration;
+}): ProjectorEnrichPorts['resolveDispatchContext'] {
+  return async ({ chainId, taskCoordinator, taskId, attemptIndex }) => {
+    // A task-level event (`TaskCreated`, `TaskClosed`, …) precedes any attempt, so there is no
+    // attempt to name. `createProjectorEnrich` gives those an explicitly unengaged descriptor.
+    if (attemptIndex === undefined) return undefined;
+    const taskDigest = await input.readOnChainTaskDigest(taskId);
+    // No descriptor without an anchor, whichever way the read came back — the caller's own
+    // fallback is a drop either way, so #2647's failure/absence split changes nothing here.
+    if (taskDigest === undefined || taskDigest === 'unavailable') return undefined;
+    const submissionBytes = await input.resolveSubmissionBytes({
+      chainId,
+      taskCoordinator,
+      taskId,
+      generation: input.generation,
+      taskDigest,
+    });
+    if (submissionBytes === undefined) return undefined;
+    let submission: { readonly submission: string; readonly nonce: string };
+    try {
+      const parsed: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(submissionBytes));
+      const candidate = SubmissionRecordSchema.safeParse(parsed);
+      if (!candidate.success) return undefined;
+      submission = { submission: candidate.data.submission, nonce: candidate.data.nonce };
+    } catch {
+      return undefined;
+    }
+    const attempt = deriveMarketplaceAttemptUri({
+      chainId,
+      coordinator: taskCoordinator,
+      taskId,
+      attemptIndex,
+    });
+    const dispatchContext = {
+      taskDigest,
+      submission: submission.submission,
+      nonce: submission.nonce,
+      attempt,
+    };
+    const digest = documentDigest(
+      serializeCanonicalJson(dispatchContext as unknown as JsonValue),
+    );
+    return {
+      uri: `urn:jinn:marketplace:dispatch-context:${attempt}`,
+      digest: { sha256: digest.slice('sha256:'.length) },
+    };
+  };
+}
+
+/**
+ * The canonical Task-anchor read, as {@link buildReadOnChainTaskDigest} produces it: the digest,
+ * `undefined` for a genuine absence, or `'unavailable'` when the read itself failed (#2647).
+ */
+export type OnChainTaskDigestReader = (taskId: bigint) => Promise<`sha256:${string}` | 'unavailable' | undefined>;
+
+/**
+ * How many record-plane content addresses one requester-side delivery resolution will try before
+ * giving up. Bounded because the catalog grows without limit while the answer is almost always the
+ * newest entry; an exhausted scan leaves the requester without a witness, which `enrich` turns into
+ * a drop so the next replay can try again.
+ */
+const RECORD_PLANE_CANDIDATE_LIMIT = 256;
+
+/** Facts derived from one record-plane candidate's exact bytes. Permanent for its content address. */
+type InspectedCandidate = { readonly keccak: Hex; readonly attempt: string; readonly task: string };
+
+/**
+ * Fetch-and-derive over one record-plane content address, shared by the two resolvers that scan the
+ * catalog: {@link buildRecordPlaneSolutionDeliveryPort} (the ENRICH/adoption side, defect #48) and
+ * {@link buildRecordPlaneCounterpartyDeliveryResolver} (the ANNOUNCE side). One implementation
+ * because the rule it encodes is subtle and belongs in exactly one place:
+ *
+ * ONLY PERMANENT facts are memoized. A content address is immutable, so "these exact bytes are not
+ * a canonical `DeliveryRecord`" holds for the life of the process and is safe to cache. A fetch
+ * that threw or missed is a NETWORK fact wearing a content fact's clothes: caching it would freeze
+ * one momentary serving-plane outage into a permanent verdict for this digest, and every later
+ * replay inside the same process — the very rewind that recovers from a drop — would re-read the
+ * cached miss instead of the record that is now being served.
+ *
+ * Each built inspector owns its own cache, so the two resolvers never share a verdict.
+ */
+function buildRecordPlaneCandidateInspector(input: {
+  readonly fetchDeliveryBytes: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+  readonly logger?: { warn(message: string): void };
+}): (digest: `sha256:${string}`) => Promise<InspectedCandidate | 'not-a-delivery' | 'unavailable'> {
+  const inspected = new Map<string, InspectedCandidate | 'not-a-delivery'>();
+  return async (digest) => {
+    const cached = inspected.get(digest);
+    if (cached !== undefined) return cached;
+    let bytes: Uint8Array | undefined;
+    try {
+      bytes = await input.fetchDeliveryBytes(digest);
+    } catch (error) {
+      input.logger?.warn(
+        `[record-plane-delivery] fetch failed for candidate ${digest} `
+          + `(${error instanceof Error ? error.message : String(error)}) -- transient, not memoized`,
+      );
+      return 'unavailable';
+    }
+    if (bytes === undefined) return 'unavailable';
+    let derived: InspectedCandidate | 'not-a-delivery' = 'not-a-delivery';
+    try {
+      const document: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      const parsed = DeliveryRecordSchema.safeParse(document);
+      if (parsed.success) {
+        derived = {
+          keccak: keccakEvidenceHash(bytes),
+          attempt: parsed.data.attempt,
+          task: parsed.data.task,
+        };
+      }
+    } catch {
+      derived = 'not-a-delivery';
+    }
+    inspected.set(digest, derived);
+    return derived;
+  };
+}
+
+/**
+ * The requester's ANNOUNCE-side counterparty solution-delivery resolver — the #2644 parity gap.
+ *
+ * PR #2644 gave the enrich/observe path and the adoption port the ability to resolve a Delivery
+ * another operator produced: read the coordinator's own anchor, enumerate the record-plane catalog,
+ * and keep only the candidate whose bytes re-derive to that anchor. The announce path never got it.
+ * Its today leg keys `ownRecords` — this operator's OWN durable solver store — so a requester
+ * publishing announcements for a counterparty's settled delivery threw
+ * `…holds no single durable solution-delivery record`, and (before the per-record isolation in
+ * `announce.ts`) took every other announcement in the tick down with it.
+ *
+ * The gates are the CONTENT half of {@link buildRecordPlaneSolutionDeliveryPort}'s four, and no
+ * weaker. The ROLE half is deliberately absent: reaching here already means this operator's own
+ * durable store held nothing for the engagement, and bytes that hash to the coordinator's anchor
+ * for this exact attempt are the right bytes whoever produced them. Concretely:
+ *
+ *   1. `readTodayDeliveryFacts(requestId)` must resolve to exactly this `(taskId, attemptIndex)`
+ *      with a non-zero anchor — binding the requestId the event carries to the attempt.
+ *   2. A candidate's bytes must re-derive to its content address (the transport enforces this),
+ *      keccak-hash to that anchor, parse as a canonical `DeliveryRecord`, and name this exact
+ *      Attempt URI and Task digest.
+ *
+ * `undefined` on every failure, never a throw: the caller ({@link todayDeliveryMaterial}) owns the
+ * refusal, so one named `NativeAnnouncementRecordError` covers both the own-store miss and this.
+ * Fail-closed is unchanged — an unresolvable record still yields NO announcement.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver.
+ */
+export function buildRecordPlaneCounterpartyDeliveryResolver(input: {
+  readonly readTodayDeliveryFacts: ProjectorEnrichPorts['readTodayDeliveryFacts'];
+  readonly fetchDeliveryBytes: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+  readonly listRecordPlaneDigests: (limit: number) => readonly `sha256:${string}`[];
+  readonly candidateLimit?: number;
+  readonly logger?: { warn(message: string): void };
+}): NativeCounterpartySolutionDeliveryResolver {
+  const limit = input.candidateLimit ?? RECORD_PLANE_CANDIDATE_LIMIT;
+  const inspect = buildRecordPlaneCandidateInspector({
+    fetchDeliveryBytes: input.fetchDeliveryBytes,
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+
+  return async ({ chainId, coordinator, taskId, attemptIndex, requestId, taskDigest }) => {
+    // Gate 1 — the on-chain request reference, and the anchor it points at.
+    const facts = await input.readTodayDeliveryFacts(requestId);
+    if (facts === 'unavailable') {
+      // #2647's split reaches here too, but the announce leg has no role to protect and no drop to
+      // reclassify: `todayDeliveryMaterial` turns every miss into the same bounded refusal either
+      // way. What it CAN do is stop the operator debugging the wrong plane — the refusal message
+      // downstream says "no record-plane candidate re-derives to the anchor", which is not what
+      // happened when the anchor was never read.
+      input.logger?.warn(
+        `[record-plane-delivery] on-chain delivery facts for requestId ${requestId} unavailable `
+          + `(the request-reference read failed) -- refusing the counterparty announce leg for `
+          + `task ${taskId} attempt ${attemptIndex}; the record plane was never consulted`,
+      );
+      return undefined;
+    }
+    if (
+      facts === undefined
+      || facts.taskId !== taskId
+      || facts.attemptIndex !== attemptIndex
+      || !/^0x[0-9a-fA-F]{64}$/.test(facts.onChainKeccak)
+      || /^0x0{64}$/iu.test(facts.onChainKeccak)
+    ) return undefined;
+
+    const attempt = deriveMarketplaceAttemptUri({ chainId, coordinator, taskId, attemptIndex });
+
+    // Gate 2 — the record plane, newest first. Candidates are hints; the anchor decides.
+    for (const digest of input.listRecordPlaneDigests(limit)) {
+      // eslint-disable-next-line no-await-in-loop -- deliberately sequential: the common case
+      // terminates on the first candidate, and a parallel fan-out would fetch the whole catalog.
+      const candidate = await inspect(digest);
+      if (candidate === 'unavailable' || candidate === 'not-a-delivery') continue;
+      if (candidate.keccak.toLowerCase() !== facts.onChainKeccak.toLowerCase()) continue;
+      if (candidate.attempt !== attempt || candidate.task !== taskDigest) {
+        // Hashes to this attempt's on-chain anchor but describes a different Attempt/Task — a
+        // contradiction the chain itself asserts against, never something to admit.
+        input.logger?.warn(
+          `[record-plane-delivery] ${digest} matches the on-chain anchor for attempt ${attempt} but `
+            + `names attempt ${candidate.attempt} / task ${candidate.task} -- refusing`,
+        );
+        // Deliberately `continue` rather than `buildRecordPlaneSolutionDeliveryPort`'s (enrich's)
+        // immediate `unwitnessed` return on the same collision: this resolver never settles a role
+        // the way that leg's gate 3 does, so there is no "answer" to commit to yet. Either way is
+        // inert under keccak collision resistance — no other candidate will hash to this exact
+        // anchor for a genuinely different attempt.
+        continue;
+      }
+      // Re-fetch the bytes the inspector deliberately did not retain (caching them would hold the
+      // whole scanned catalog in memory). Content-addressed, so this returns the same bytes the
+      // checks above passed or nothing at all — and both checks are re-run on the exact bytes
+      // being returned, against the ON-CHAIN anchor rather than the cached derivation of it, so
+      // this leg never trusts its own memo for the value that decides admission.
+      // eslint-disable-next-line no-await-in-loop -- reached at most once, on the match.
+      const bytes = await input.fetchDeliveryBytes(digest).catch(() => undefined);
+      if (bytes === undefined) return undefined;
+      if (
+        documentDigest(bytes) !== digest
+        || keccakEvidenceHash(bytes).toLowerCase() !== facts.onChainKeccak.toLowerCase()
+      ) {
+        return undefined;
+      }
+      return bytes;
+    }
+    return undefined;
+  };
+}
+
+/**
+ * Defect #48, Gate C: the REQUESTER's replacement for a Mech `Deliver` fact it can never hold.
+ *
+ * Today generation puts the delivered content's sha256 anchor in exactly one place — the Mech
+ * `Deliver` event's `data`. The projector's log filter scans the router, the coordinator, and this
+ * operator's OWN mech(es) (`projector-log-source.ts`), so a requester observing another operator's
+ * `SolutionDeliveryClaimed` has no sha256 and no `pendingMechDeliveries` entry. The reducer read
+ * that absence as `rejected`/`invalid-reference` — a false terminal for a delivery the coordinator
+ * itself settled, which then folded the Attempt `contradictory` beside the verdict's terminal.
+ *
+ * What the requester DOES hold is the coordinator's own anchor:
+ * `getAttempt(taskId, attemptIndex).solutionCidDigest` is keccak256 over the exact sealed Delivery
+ * bytes (`packages/marketplace/venue-base/src/writers/settlement.ts` documents the misleading
+ * field name), written by `TaskCoordinator.recordSubmission` from the digest the solver passed to
+ * `JinnRouterV3.claimSolutionDelivery`. That anchor binds the bytes as tightly as the sha256 one
+ * does — it just is not a content address, so it cannot be used to FETCH. This resolver therefore
+ * enumerates the record-plane catalog for candidate content addresses and keeps the one whose
+ * bytes hash to that anchor. Every candidate is untrusted: the catalog only decides what to try.
+ *
+ * FOUR GATES, split into a ROLE half and a CONTENT half — and the split is load-bearing:
+ *
+ * ROLE (gates 3, the anchor read, and 2 — in that order, see below). Failing any of them returns
+ * `undefined`, meaning "this operator is not the requester for this attempt": the reducer's
+ * mech-fact logic decides, exactly as it did before #48.
+ *   3. Not the claimant — an engagement-ledger row naming this exact attempt means this operator
+ *      claimed it, i.e. it is the SOLVER and does subscribe to the delivering mech. The
+ *      mech-fact requirement is preserved untouched for that case; this resolver refuses. FIRST,
+ *      because it is free and because everything after it reads the chain.
+ *   2. Requester role — the native association resolver must produce this operator's own signed
+ *      Submission for `(chainId, coordinator, taskId, on-chain taskDigest)`. Positive evidence
+ *      that this operator POSTED the task, not an inference from a missing seal. Purely local: the
+ *      association and its records are on this operator's own disk, so this is a durable fact about
+ *      role, never a network outcome. THE ROLE SETTLES HERE.
+ *
+ * CONTENT (gates 1 and 4). Reached only once the role is settled as REQUESTER, so their failures
+ * are reported as `{ role: 'requester', witness: undefined }`, never as the same `undefined` the
+ * role gates return.
+ *   1. On-chain identity — `readTodayDeliveryFacts(requestId)` must resolve to exactly this
+ *      `(taskId, attemptIndex)`, and its anchor must be non-zero. This binds the requestId the
+ *      event carries to the attempt the record will be recorded against.
+ *   4. The fetched bytes must re-derive to the candidate digest (the transport already enforces
+ *      this), hash to the on-chain keccak anchor, parse as a canonical `DeliveryRecord`, and name
+ *      this exact Attempt URI and Task digest.
+ *
+ * GATE 1 IS DELIBERATELY LAST AMONG THE FOUR (#2647), and that ordering is the fix, not a
+ * micro-optimization. It is a chain read; the #48 fix ran it first, so a 503 on `getRequestRef`
+ * came back as the not-the-requester `undefined` before this operator had established it WAS the
+ * requester. `readOnChainTaskDigest` memoizes its successes for the process, so once an earlier
+ * event in the same replay warmed the anchor the Submission still resolved locally, the event
+ * still reached the reducer, and the reducer still emitted the permanent false rejection — the one
+ * path #2644's split did not cover. With the role settled first, the same 503 is a drop.
+ *
+ * The anchor read that gate 2 depends on runs BEFORE the role is known and can fail the same way.
+ * It cannot claim a role it has not established, so it answers `{ role: 'undetermined', witness:
+ * undefined }` — a drop for the same reason, and safe because gate 3 has already ruled this
+ * operator out as the solver by then. A genuine absence there (unknown task, all-zero record)
+ * stays the plain `undefined` miss it always was.
+ *
+ * Collapsing role and content into one `undefined` was the #48 fix's own defect: a momentary
+ * serving-plane outage during gate 4 read as "not the requester", the reducer emitted
+ * `rejected`/`invalid-reference`, and that terminal — permanent, and `contradictory` beside the
+ * verdict's — wedged `adoptPostedTask` forever. A requester that cannot witness must not emit a
+ * rejection; `enrich` drops the event instead, and a later replay re-offers it.
+ *
+ * The reducer re-checks gate 4's keccak leg itself, so a bug here cannot admit a wrong record.
+ *
+ * Exported so `client/test/daemon/*` can drive this exact production resolver.
+ */
+export function buildRecordPlaneSolutionDeliveryPort(input: {
+  readonly resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'];
+  readonly readOnChainTaskDigest: OnChainTaskDigestReader;
+  readonly readTodayDeliveryFacts: ProjectorEnrichPorts['readTodayDeliveryFacts'];
+  readonly fetchDeliveryBytes: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+  readonly listRecordPlaneDigests: (limit: number) => readonly `sha256:${string}`[];
+  readonly engagementLedger: Pick<EngagementLedger, 'get'>;
+  readonly candidateLimit?: number;
+  readonly logger?: { warn(message: string): void };
+}): NonNullable<ProjectorEnrichPorts['resolveRecordPlaneDelivery']> {
+  const limit = input.candidateLimit ?? RECORD_PLANE_CANDIDATE_LIMIT;
+  // Shared with the announce-side resolver; see `buildRecordPlaneCandidateInspector` for the
+  // permanent-vs-transient memoization rule this leg depends on.
+  const inspect = buildRecordPlaneCandidateInspector({
+    fetchDeliveryBytes: input.fetchDeliveryBytes,
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+
+  return async ({ chainId, taskCoordinator, taskId, attemptIndex, requestId }) => {
+    const attempt = deriveMarketplaceAttemptUri({
+      chainId,
+      coordinator: taskCoordinator,
+      taskId,
+      attemptIndex,
+    });
+
+    // ---- ROLE half. Every exit below is `undefined` = "not the requester", EXCEPT the one read
+    // failure that leaves the role genuinely unknown. ----
+
+    // Gate 3 — this operator claimed the attempt, so it IS the solver and does witness the mech.
+    // First because it is the only gate that costs nothing: a solver settling its own delivery
+    // (the overwhelmingly common reason this resolver is reached at all) must not pay a chain read
+    // per settlement to be told it is not the requester — and, since #2647, must never be exposed
+    // to a chain read whose failure would drop its own settlement.
+    const row = input.engagementLedger.get(`${chainId}:${taskCoordinator}:${taskId.toString()}`);
+    if (row?.attemptUri === attempt) return undefined;
+
+    // The anchor gate 2 keys its association on. Reached only for a non-claimant, so the role is
+    // still open: a failed read here is `undetermined`, not "not the requester" (#2647). A genuine
+    // absence stays the miss it always was — an unknown task is not this operator's to witness.
+    const taskDigest = await input.readOnChainTaskDigest(taskId);
+    if (taskDigest === 'unavailable') {
+      input.logger?.warn(
+        `[record-plane-delivery] on-chain Task anchor for task ${taskId} unavailable -- role `
+          + `undetermined for attempt ${attempt}, dropping rather than reporting not-the-requester`,
+      );
+      return {
+        role: 'undetermined',
+        witness: undefined,
+        reason: `the on-chain Task anchor read for task ${taskId} is unavailable, so this `
+          + 'operator cannot establish whether it is the requester',
+      };
+    }
+    if (taskDigest === undefined) return undefined;
+
+    // Gate 2 — positive proof this operator posted the task. `generation` is pinned to `today`
+    // rather than threaded: `enrich` reaches this resolver only for a `SolutionDeliveryClaimed`
+    // with no `deliveryDigest` on its facts, which is today generation by definition.
+    const submissionBytes = await input.resolveSubmissionBytes({
+      chainId,
+      taskCoordinator,
+      taskId,
+      generation: 'today',
+      taskDigest,
+    });
+    if (submissionBytes === undefined) return undefined;
+
+    // ---- The role is now settled: this operator IS the requester for this attempt. Every exit
+    // below therefore says so, whatever happens to the content or to the chain. It never returns
+    // `undefined` again, because `undefined` means "not the requester" and would send the reducer
+    // down the mech-fact path this operator can never satisfy. ----
+    const unwitnessed = (reason: string, onChainKeccak?: Hex): RecordPlaneDeliveryResolution => ({
+      role: 'requester',
+      witness: undefined,
+      ...(onChainKeccak === undefined ? {} : { onChainKeccak }),
+      reason,
+    });
+
+    // Gate 1 — the on-chain request reference, and the anchor it points at. LAST among the role/
+    // identity reads, because it is the chain read whose failure used to masquerade as
+    // not-the-requester (#2647). Three distinct answers, all of them drops now that the role is
+    // known, and none of them ever a rejection.
+    const facts = await input.readTodayDeliveryFacts(requestId);
+    if (facts === 'unavailable') {
+      // Transport. Says nothing about the attempt; the next replay asks again.
+      return unwitnessed(
+        `the on-chain delivery facts for requestId ${requestId} are unavailable (the `
+          + 'request-reference read failed)',
+      );
+    }
+    if (facts === undefined) {
+      // Absence, and a surprising one: gate 2 just proved this operator posted the task, yet the
+      // coordinator has no reference for the requestId its own event carried. A read racing ahead
+      // of a reorged-out block is the benign explanation and resolves itself on the next replay;
+      // a persistent one means the wrong coordinator address. Either way there is no witness to
+      // find and no basis to reject.
+      return unwitnessed(
+        `the coordinator holds no solution OR verdict request reference for requestId ${requestId}`,
+      );
+    }
+    if (
+      facts.taskId !== taskId
+      || facts.attemptIndex !== attemptIndex
+      || !/^0x[0-9a-fA-F]{64}$/.test(facts.onChainKeccak)
+      || /^0x0{64}$/i.test(facts.onChainKeccak)
+    ) {
+      // The reference resolved but does not bind to this attempt, or carries no anchor yet. A
+      // contradiction with the event, not a role signal.
+      return unwitnessed(
+        `requestId ${requestId} references task ${facts.taskId} attempt ${facts.attemptIndex} `
+          + `anchor ${facts.onChainKeccak}, not task ${taskId} attempt ${attemptIndex}`,
+      );
+    }
+
+    // Gate 4 — the record plane, newest first.
+    let scanned = 0;
+    let unavailable = 0;
+    for (const digest of input.listRecordPlaneDigests(limit)) {
+      scanned += 1;
+      // eslint-disable-next-line no-await-in-loop -- deliberately sequential: the common case
+      // terminates on the first candidate, and a parallel fan-out would fetch the whole catalog.
+      const candidate = await inspect(digest);
+      if (candidate === 'unavailable') {
+        // The catalog names it but the plane would not serve it. Transient by construction — the
+        // one shape that USED to read as "not the requester" and produce the permanent false
+        // rejection this split exists to prevent.
+        unavailable += 1;
+        continue;
+      }
+      if (candidate === 'not-a-delivery') continue;
+      if (candidate.keccak.toLowerCase() !== facts.onChainKeccak.toLowerCase()) continue;
+      if (candidate.attempt !== attempt || candidate.task !== taskDigest) {
+        // The bytes hash to this attempt's on-chain anchor but describe a different Attempt/Task.
+        // That is a contradiction the chain itself asserts against, never something to admit. Still
+        // reported as the requester with no witness: this operator is no more able to witness the
+        // mech here than anywhere else, so the answer is a drop, not a rejection.
+        input.logger?.warn(
+          `[record-plane-delivery] ${digest} matches the on-chain anchor for attempt ${attempt} but `
+            + `names attempt ${candidate.attempt} / task ${candidate.task} -- refusing`,
+        );
+        return unwitnessed(
+          `candidate ${digest} hashes to the anchor but names attempt ${candidate.attempt} / `
+            + `task ${candidate.task}`,
+          facts.onChainKeccak,
+        );
+      }
+      return {
+        role: 'requester',
+        witness: {
+          sha256Digest: digest,
+          keccakEvidenceHash: candidate.keccak,
+          onChainKeccak: facts.onChainKeccak,
+        },
+      };
+    }
+    return unwitnessed(
+      `no record-plane candidate hashes to the anchor (scanned ${scanned} of at most ${limit}, `
+        + `${unavailable} unfetchable)`,
+      facts.onChainKeccak,
+    );
   };
 }
 
@@ -980,17 +1995,41 @@ function buildProjector(input: {
       throw new Error('native projector requires a requester association directory and B2 requester-submission identity');
     })())
     : undefined;
+  const readOnChainTaskDigest = buildReadOnChainTaskDigest(input.publicClient, input.chain.taskCoordinator);
   const resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'] = input.mode === 'native'
     ? async ({ chainId, taskCoordinator, taskId, taskDigest }) => {
-      if (taskDigest === undefined || resolveAssociation === undefined) return undefined;
-      return resolveAssociation({ chainId, coordinator: taskCoordinator, taskId, taskDigest });
+      if (resolveAssociation === undefined) return undefined;
+      // `taskDigest` is present only for `TaskCreated`, which carries the anchor in its own facts.
+      // Every other class (`Deliver`, `SolutionDeliveryClaimed`, `VerdictDeliveryClaimed`, the
+      // attempt events) arrives without it, and refusing on absence dropped 100% of them — the
+      // reason `projector_observations` stayed empty through the whole of round 28 and the verdict
+      // announcement never projected (defect #47). Read the same anchor back off the coordinator.
+      const anchor = taskDigest ?? await readOnChainTaskDigest(taskId);
+      if (anchor === undefined || anchor === 'unavailable') return undefined;
+      return resolveAssociation({ chainId, coordinator: taskCoordinator, taskId, taskDigest: anchor });
     }
     : buildResolveSubmissionBytes({
       publicClient: input.publicClient,
       jinnRouter: input.chain.jinnRouter,
       fetchIpfsBytes,
     });
-  const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(input.engagementLedger);
+  const sealedDispatchContext = buildEngagementLedgerDispatchContextPort(input.engagementLedger);
+  // Defect #48, Gate A. The claim-time SEAL is always preferred; the requester derivation is a
+  // strict fallback for the case it cannot cover — a task this operator posted and another
+  // operator claimed. Native only: the legacy composition has no association store to prove
+  // authorship with, so it keeps exactly its prior behavior (seal or drop).
+  const derivedRequesterDispatchContext = input.mode === 'native'
+    ? buildDerivedRequesterDispatchContextPort({
+      resolveSubmissionBytes,
+      readOnChainTaskDigest,
+      generation: input.chain.generation,
+    })
+    : undefined;
+  const resolveDispatchContext: ProjectorEnrichPorts['resolveDispatchContext'] = async (lookup) => {
+    const sealed = await sealedDispatchContext(lookup);
+    if (sealed !== undefined) return sealed;
+    return derivedRequesterDispatchContext?.(lookup);
+  };
   // HTTP-first delivery resolution for native mode (the record-source serving plane), IPFS gateway
   // after it. Native deliveries are HTTP-served and may never reach the gateway, so an IPFS-only
   // resolver leaves the today-mode delivery correspondence CP7 adopt reads permanently null. Legacy
@@ -999,15 +2038,42 @@ function buildProjector(input: {
   const fetchDeliveryBytes: ProjectorEnrichPorts['fetchDeliveryBytes'] = resolveDeliveryBytes === undefined
     ? undefined
     : async (digest) => (await resolveDeliveryBytes(digest)) ?? fetchIpfsBytes(digest);
+  // The Task document is on exactly the same serving plane as the delivery records (the requester
+  // publishes it there), and equally may never reach the IPFS gateway. Without this the digest
+  // join's second leg — `resolveTaskProjection`'s fetch of the Task content — misses for every
+  // native task and drops the event even after its Submission resolves (defect #47, the
+  // #23/#2559/#2561 class). Same resolver, same origins, same digest re-derivation by the caller.
+  const fetchTaskBytes: ProjectorEnrichPorts['fetchTaskBytes'] = resolveDeliveryBytes === undefined
+    ? undefined
+    : async (digest) => (await resolveDeliveryBytes(digest)) ?? fetchIpfsBytes(digest);
+  const readTodayDeliveryFacts = buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator);
+  // Defect #48, Gate C. Native only, and only when the fleet supplied a record-plane catalog:
+  // without one there is nothing to key a content-addressed fetch off, and the reducer's
+  // mech-fact requirement remains the whole behavior.
+  const listRecordPlaneDigests = input.nativeProjectorPorts?.listRecordPlaneDigests;
+  const resolveRecordPlaneDelivery: ProjectorEnrichPorts['resolveRecordPlaneDelivery'] | undefined =
+    input.mode === 'native' && listRecordPlaneDigests !== undefined && fetchDeliveryBytes !== undefined
+      ? buildRecordPlaneSolutionDeliveryPort({
+        resolveSubmissionBytes,
+        readOnChainTaskDigest,
+        readTodayDeliveryFacts,
+        fetchDeliveryBytes,
+        listRecordPlaneDigests,
+        engagementLedger: input.engagementLedger,
+        ...(input.logger === undefined ? {} : { logger: input.logger }),
+      })
+      : undefined;
   const enrich = createProjectorEnrich({
     chain: input.chain,
     publicClient: input.publicClient,
     fetchIpfsBytes,
     resolveSubmissionBytes,
     resolveDispatchContext,
-    readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator),
+    readTodayDeliveryFacts,
     allowLegacySignedTaskV1: input.mode === 'legacy',
     ...(fetchDeliveryBytes === undefined ? {} : { fetchDeliveryBytes }),
+    ...(fetchTaskBytes === undefined ? {} : { fetchTaskBytes }),
+    ...(resolveRecordPlaneDelivery === undefined ? {} : { resolveRecordPlaneDelivery }),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 

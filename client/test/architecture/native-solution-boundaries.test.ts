@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { codeOnly } from './_support/source-text.js';
 
 function source(path: string): string {
-  return readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+  return codeOnly(readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'));
 }
 
 const coordinator = source('../../src/daemon/native-solution-coordinator.ts');
@@ -15,6 +16,20 @@ const workLoop = source('../../src/daemon/work-loop.ts');
 const nativeModules = [coordinator, verification, settlement, publisher].join('\n');
 
 describe('Phase B native solution architecture boundaries', () => {
+  it('ignores dependency markers in prose without hiding executable bridge code', () => {
+    const prose = codeOnly([
+      '/** bridge-legacy-delivery and DeliveryWatcherLoop are historical terms. */',
+      '// synthesizeLegacyExecutionDocuments and verifyVerdictObservationGap',
+      'const safe = true;',
+    ].join('\n'));
+    expect(prose).not.toMatch(
+      /bridge-legacy-delivery|synthesizeLegacyExecutionDocuments|DeliveryWatcherLoop|verifyVerdictObservationGap/u,
+    );
+    expect(codeOnly('/** safe */\nDeliveryWatcherLoop.start();')).toMatch(
+      /bridge-legacy-delivery|synthesizeLegacyExecutionDocuments|DeliveryWatcherLoop|verifyVerdictObservationGap/u,
+    );
+  });
+
   it('keeps native execution free of bridge records, legacy watchers, and placeholder gap ports', () => {
     expect(nativeModules).not.toMatch(
       /bridge-legacy-delivery|synthesizeLegacyExecutionDocuments|DeliveryWatcherLoop|verifyVerdictObservationGap/u,

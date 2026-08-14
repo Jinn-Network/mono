@@ -4,6 +4,7 @@ import type {
 import {
   decodeMarketplaceLogs,
   marketplaceEventOriginAuthority,
+  type FinalityTier,
   type MarketplaceEvent,
   type MarketplaceProtocolObservation,
 } from '@jinn-network/marketplace-projector';
@@ -92,7 +93,30 @@ function decodeEvent(value: string): MarketplaceEvent {
   }) as MarketplaceEvent;
 }
 
-/** Product-owned raw canonical event journal. Reorgs mark provenance; history is never deleted. */
+/**
+ * Product-owned raw canonical event journal. Reorgs mark provenance; history is never deleted.
+ *
+ * FINALITY IS NOT A FACT ABOUT THE LOG (defect #47 review). `finalityTier` is not decoded from the
+ * log — `chain-log-source.ts`'s `fetchChunked` computes it per fetch as
+ * `blockNumber <= finalizedHeight ? "finalized" : "safe"`, i.e. it records how confident THIS
+ * OBSERVER was at THIS fetch, not anything the chain said. Every other byte in a `MarketplaceEvent`
+ * is derived from the log itself and must never change for a given `event_key`; the tier can and
+ * legitimately does, because the finalized head advances.
+ *
+ * That difference is load-bearing on the replay path. `rewindChainLogCursor` (defect #47) moves the
+ * cursor below an already-swept range; the next `poll()` takes the catch-up fast path, where every
+ * refetched log below the finalized head decodes as `finalized` — while the rows already in this
+ * table were written as `safe` when they were first seen near the tip. Treating that as a changed
+ * fact threw out of `apply()`, and because `apply()` runs in ONE transaction the whole batch rolled
+ * back — including the brand-new events above the old cursor, which are never re-listed. The
+ * operator's recovery step silently punched a hole in the read model it was meant to repair.
+ *
+ * So a `safe` → `finalized` PROMOTION on otherwise byte-identical bytes upgrades the row in place
+ * instead of throwing. The reverse (`finalized` → `safe`, reachable when a provider's `finalized`
+ * tag regresses) is ignored rather than written back: the mark is monotone, matching
+ * `chain-log-source.ts`'s own "a provider that regresses its `finalized` tag never moves it back".
+ * ANY other divergence still throws — the guard keeps its whole fail-closed job over real facts.
+ */
 export class NativeMarketplaceEventRepository {
   constructor(private readonly store: Store) {
     store.db.exec(`
@@ -123,19 +147,36 @@ export class NativeMarketplaceEventRepository {
         orphan.run(now, blockHash.toLowerCase());
       }
       const read = this.store.db.prepare(
-        `SELECT event_json FROM native_marketplace_events WHERE event_key = ?`,
+        `SELECT event_json, finality FROM native_marketplace_events WHERE event_key = ?`,
       );
       const insert = this.store.db.prepare(
         `INSERT INTO native_marketplace_events
           (event_key, block_hash, finality, event_json, accepted_at)
          VALUES (?, ?, ?, ?, ?)`,
       );
+      const promote = this.store.db.prepare(
+        `UPDATE native_marketplace_events SET finality = ?, event_json = ? WHERE event_key = ?`,
+      );
       for (const event of input.events) {
         const key = eventKey(event);
         const json = encode(event);
-        const existing = read.get(key) as { event_json: string } | undefined;
+        const existing = read.get(key) as { event_json: string; finality: string } | undefined;
         if (existing !== undefined) {
-          if (existing.event_json !== json) throw new Error(`native marketplace event ${key} changed bytes`);
+          // Re-encode the incoming event AT THE STORED TIER and compare bytes. Identical to the
+          // plain `encode(event)` comparison whenever the tiers agree, and it normalizes exactly
+          // one field out of the check when they do not — no field list to drift, no decode of the
+          // stored bytes, and a `finality` column value outside the union simply fails to match and
+          // still throws.
+          const atStoredTier = encode({
+            ...event,
+            derivation: { ...event.derivation, finalityTier: existing.finality as FinalityTier },
+          });
+          if (existing.event_json !== atStoredTier) {
+            throw new Error(`native marketplace event ${key} changed bytes`);
+          }
+          if (existing.finality === 'safe' && event.derivation.finalityTier === 'finalized') {
+            promote.run(event.derivation.finalityTier, json, key);
+          }
           continue;
         }
         insert.run(key, event.derivation.blockHash, event.derivation.finalityTier, json, now);

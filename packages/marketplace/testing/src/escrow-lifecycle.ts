@@ -4,7 +4,7 @@ import type { MarketplaceChainConfig } from "@jinn-network/marketplace-binding";
 import type { ContractGeneration } from "@jinn-network/marketplace-binding";
 
 /**
- * Transaction adapter for an ephemeral Anvil fork. Every method sends or reads the deployed
+ * Transaction adapter for ephemeral snapshot-backed Anvil. Every method sends or reads the deployed
  * today-generation contract; the suite owns ordering and assertions, while setup (funding and
  * impersonation) remains local to the fork implementation.
  */
@@ -19,7 +19,7 @@ export interface ForkEscrowContext {
 
 /**
  * The §13 today-generation escrow lifecycle. The context is deliberately transaction-shaped so
- * a real Anvil fork cannot replace post/claim/deliver/settle/verdict/refund with a state oracle.
+ * real Anvil cannot replace post/claim/deliver/settle/verdict/refund with a state oracle.
  */
 export async function describeEscrowLifecycle(
   config: MarketplaceChainConfig,

@@ -114,6 +114,14 @@ export interface DaemonClaim {
   txHash: `0x${string}`;
 }
 
+export interface SolutionSettlement {
+  requestId: `0x${string}`;
+  operator: `0x${string}`;
+  taskId: bigint;
+  attemptIndex: number;
+  txHash: `0x${string}`;
+}
+
 export interface DeliveredTask {
   /** RequestId from the daemon claim. */
   requestId: `0x${string}`;
@@ -2178,6 +2186,69 @@ export async function waitForDaemonClaim(
   throw new Error(
     `waitForDaemonClaim: timed out after ${timeoutMs}ms waiting for TaskAttemptCreated ` +
     `(taskId=${task.taskId}, operator=${operator.safeAddress})`,
+  );
+}
+
+/**
+ * Poll the locally deployed V3 router for the solution-settlement event that
+ * corresponds to a daemon claim. Unlike the Mech `Deliver` event observed by
+ * `waitForDelivery`, this is the authoritative proof that the router accepted
+ * the delivery for the claimed request and operator.
+ */
+export async function waitForSolutionSettlement(
+  fixture: DaemonHarnessFixture,
+  claim: DaemonClaim,
+  operator: BootstrappedOperator,
+  v3Env: TaskV3Env,
+  timeoutMs = 60_000,
+): Promise<SolutionSettlement> {
+  const claimBlock = claim.txHash === '0x'
+    ? await fixture.publicClient.getBlockNumber()
+    : (await fixture.publicClient.getTransactionReceipt({ hash: claim.txHash })).blockNumber;
+  let scannedUpTo = claimBlock > 0n ? claimBlock - 1n : 0n;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const currentBlock = await fixture.publicClient.getBlockNumber();
+    const fromBlock = scannedUpTo + 1n;
+    if (fromBlock <= currentBlock) {
+      const logs = await fixture.publicClient.getLogs({
+        address: v3Env.routerAddress,
+        fromBlock,
+        toBlock: currentBlock,
+      });
+      for (const log of logs as Log[]) {
+        try {
+          const decoded = decodeEventLog({
+            abi: JINN_ROUTER_ABI,
+            data: log.data,
+            topics: log.topics,
+          });
+          if (decoded.eventName !== 'SolutionDeliveryClaimed') continue;
+          const args = decoded.args as {
+            operator: `0x${string}`;
+            requestId: `0x${string}`;
+            taskId: bigint;
+            attemptIndex: number;
+          };
+          if (args.requestId.toLowerCase() !== claim.requestId.toLowerCase()) continue;
+          if (getAddress(args.operator) !== getAddress(operator.safeAddress)) continue;
+          return {
+            ...args,
+            txHash: (log.transactionHash ?? '0x') as `0x${string}`,
+          };
+        } catch {
+          // Not a SolutionDeliveryClaimed event for this ABI.
+        }
+      }
+      scannedUpTo = currentBlock;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+  }
+
+  throw new Error(
+    `waitForSolutionSettlement: timed out after ${timeoutMs}ms waiting for `
+    + `SolutionDeliveryClaimed (requestId=${claim.requestId}, operator=${operator.safeAddress})`,
   );
 }
 

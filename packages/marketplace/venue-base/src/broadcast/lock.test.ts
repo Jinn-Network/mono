@@ -3,7 +3,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Address } from "viem";
 import { openVenueState, type VenueStateDatabase } from "../state/database.js";
 import { createBroadcastLock } from "./lock.js";
@@ -133,7 +133,21 @@ describe("broadcast lock (design §6.1 cross-process lock)", () => {
   // `executeSafeTxBatch` now holds this lock across (retries + backoff can
   // plausibly exceed 60s). A live holder must keep its lease alive for as
   // long as its critical section is actually open.
+  //
+  // FAKE TIMERS, deliberately (#2440/#2457). The property under test is a race between two real
+  // schedules -- the holder's renewal `setInterval` at `leaseMs / 2` and the challenger's 25ms
+  // `acquireLease` retry -- decided by the SQL guard `expires_at_ms <= now`. On real timers with a
+  // 30ms lease, ONE event-loop stall longer than the lease window (a CI runner executing ~70
+  // matrix jobs does this routinely) lets the row go stale between renewals: B's next retry
+  // legitimately wins, and A's next renewal matches zero rows. That reddened the whole marketplace
+  // verification lane on PRs touching nothing near this code. Reproduced deterministically by
+  // starving the timer past the window -- it is jitter, not a defect in the lock.
+  //
+  // A controlled clock removes the jitter WITHOUT weakening the assertion: every renewal tick and
+  // every retry still executes, against the same guard, in the same order. Deleting the renewal
+  // still fails this test -- the lease expires at t=30 and B's retry at t=50 steals the row.
   test("a slow critical section renews its lease so a second process cannot steal it mid-flight", async () => {
+    vi.useFakeTimers();
     const otherState = openVenueState(dbPath);
     try {
       const lockA = createBroadcastLock(state, { holderId: "holder-a", leaseMs: 30 });
@@ -149,7 +163,7 @@ describe("broadcast lock (design §6.1 cross-process lock)", () => {
         order.push("a-end");
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await vi.advanceTimersByTimeAsync(10);
       expect(order).toEqual(["a-start"]);
 
       // Without renewal, this 30ms lease is trivially stealable well before
@@ -159,14 +173,19 @@ describe("broadcast lock (design §6.1 cross-process lock)", () => {
         order.push("b-start");
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Five full lease windows. A renews at 15/30/45/... and B retries at 25/50/75/...; each
+      // retry finds an expiry the preceding renewal already pushed past it.
+      await vi.advanceTimersByTimeAsync(150);
       expect(order).toEqual(["a-start"]);
 
       releaseFirst();
+      // B is parked in a faked `sleep(25)`; its next retry only runs once the clock moves.
+      await vi.advanceTimersByTimeAsync(50);
       await Promise.all([first, second]);
       expect(order).toEqual(["a-start", "a-end", "b-start"]);
     } finally {
       otherState.close();
+      vi.useRealTimers();
     }
   });
 

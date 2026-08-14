@@ -13,6 +13,7 @@
 import { appendAuditEntry, inputsDigest } from "../audit/journal.js";
 import { foundingAuthorityPolicy, writeAuthorityPolicy } from "../authority/policy.js";
 import { toErrorEnvelope } from "../errors.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import { createWorkspaceLayout, isWorkspace, type WorkspaceMetadata } from "../workspace/workspace.js";
 import type { OperationContext } from "./context.js";
 import type { OperationResult } from "./result.js";
@@ -43,6 +44,9 @@ export function initWorkspace(context: OperationContext): OperationResult<{ work
   }
 
   try {
+    // The workspace identity must predate every Task/Benchmark it authors. Creating the key at
+    // init removes the quote-time identity cycle while keeping one stable report/source key.
+    loadOrCreateReportSigningKey(workspaceDir);
     writeAuthorityPolicy(workspaceDir, foundingAuthorityPolicy(principal));
   } catch (cause) {
     // The layout exists now, so the journal does too: this failure IS audited.

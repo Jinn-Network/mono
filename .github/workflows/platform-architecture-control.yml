@@ -36,6 +36,7 @@ jobs:
             .github/scripts/observation-reader-gate-boundary.test.mjs \
             .github/scripts/architecture-control.test.mjs \
             .github/scripts/branch-protection-audit.test.mjs \
+            .github/scripts/benchmark-product-source-boundaries.test.mjs \
             .github/scripts/architecture-control-workflow.test.mjs \
             .github/scripts/platform-verification-selection.test.mjs
           node .github/scripts/architecture-control.mjs \
@@ -135,7 +136,6 @@ jobs:
       source_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       lane: canary
     secrets:
-      JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
       JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
       JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
 

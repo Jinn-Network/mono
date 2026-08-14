@@ -9,6 +9,7 @@ import type { ScopedDiscoverySigner } from '@jinn-network/marketplace-projector'
 import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import { openVenueState, type VenueStateDatabase } from '@jinn-network/marketplace-venue-base';
 import { Store } from '../../src/store/store.js';
+import { NativeAnnouncementRecordError } from '../../src/daemon/composition-root.js';
 import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
 import { ProjectorLoop, type ProjectorLoopConfig } from '../../src/daemon/projector-loop.js';
 import {
@@ -166,6 +167,7 @@ function loop(input: {
   archiveRoot?: string;
   logger?: { info(m: string): void; warn(m: string): void };
   resolveRecord?: ProjectorLoopConfig['ports']['resolveRecord'];
+  signer?: ProjectorLoopConfig['ports']['signer'];
   overrides?: Partial<ProjectorLoopConfig>;
 }): {
   readonly projector: ProjectorLoop;
@@ -189,7 +191,7 @@ function loop(input: {
     cursorStore,
     ports: {
       source: { agent: 'urn:jinn:operator:test', name: 'test-operator' },
-      signer: fakeDiscoverySigner(),
+      signer: input.signer ?? fakeDiscoverySigner(),
       archiveRoot,
       resolveRecord: input.resolveRecord ?? (async () => ({
         kind: RECORD_KINDS.submission,
@@ -467,7 +469,40 @@ describe('projector loop', () => {
     expect(cursorStore.readObservations()).toHaveLength(1);
   });
 
+  // A `resolveRecord` throw is now scoped per record, so it no longer reaches this catch. Signing
+  // is not scoped and never should be — a signer that cannot sign fails the whole publication —
+  // so it drives the whole-call path the catch still exists for.
   it('persists observations when announcement publication throws', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(120);
+    chain.setFinalized(120n);
+    chain.addLog(120n, taskCreatedLog());
+
+    const warn = vi.fn();
+    const { projector, cursorStore } = loop({
+      chain,
+      state,
+      logger: { info: vi.fn(), warn },
+      signer: {
+        scope: DISCOVERY_SIGNING_SCOPE,
+        async sign() {
+          throw new Error('discovery signing key is unavailable');
+        },
+      },
+    });
+
+    const result = await projector.tick();
+
+    expect(result.announcements).toBe(0);
+    expect(warn.mock.calls.flat().join('\n')).toContain('announcement publication failed');
+    expect(cursorStore.readObservations()).toHaveLength(1);
+    expect(cursorStore.read()!.liveBlockNumber).toBe(120n);
+  });
+
+  // The per-record scoping (`AnnouncementRecordUnresolvedRefusal`) must not cost the tick its other
+  // announcements OR the operator its signal. Observations and cursor still advance; the refusal is
+  // recorded rather than thrown; and the warn below keeps it loud.
+  it('scopes an unresolvable record to itself instead of failing the whole publication', async () => {
     const chain = buildScriptedChain();
     chain.mine(120);
     chain.setFinalized(120n);
@@ -486,8 +521,51 @@ describe('projector loop', () => {
     const result = await projector.tick();
 
     expect(result.announcements).toBe(0);
-    expect(warn.mock.calls.flat().join('\n')).toContain('announcement publication failed');
+    expect(result.refusals).toBe(1);
+    const logged = warn.mock.calls.flat().join('\n');
+    // NOT the whole-tick message: this record failed alone.
+    expect(logged).not.toContain('announcement publication failed');
+    expect(logged).toContain('announcement record unresolved');
     expect(cursorStore.readObservations()).toHaveLength(1);
     expect(cursorStore.read()!.liveBlockNumber).toBe(120n);
+  });
+
+  // Defect #45: the swallow above is correct (observations and the cursor must survive) but it
+  // was OPAQUE — an operator saw nothing naming what was refused or what was lost, and because
+  // the cursor advances and `hasCanonicalEvent` filters these events out of every later tick, the
+  // announcements are gone for good rather than retried.
+  it('names the refusal and the announcements it permanently dropped', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(120);
+    chain.setFinalized(120n);
+    chain.addLog(120n, taskCreatedLog());
+
+    const warn = vi.fn();
+    const digest = `sha256:${'e'.repeat(64)}` as const;
+    const { projector } = loop({
+      chain,
+      state,
+      logger: { info: vi.fn(), warn },
+      resolveRecord: async () => {
+        throw new NativeAnnouncementRecordError(
+          'evaluation-delivery',
+          "no digest-verified bytes on this operator's serving plane or its configured peers",
+          digest,
+        );
+      },
+    });
+
+    await projector.tick();
+
+    const logged = warn.mock.calls.flat().join('\n');
+    expect(logged).toContain('NativeAnnouncementRecordError'); // the error NAME, not just its text
+    expect(logged).toContain('evaluation-delivery'); // the role
+    expect(logged).toContain(digest); // the on-chain anchor
+    expect(logged).toContain('serving plane'); // the cause
+    // The loss, now stated per record rather than per tick — and still stating that it is
+    // permanent, which is the fact an operator has to act on.
+    expect(logged).toContain('dropped the "submission" announcement for TaskCreated');
+    expect(logged).toContain('120');
+    expect(logged).toContain('projector_canonical_events row cleared/orphaned by event_key');
   });
 });

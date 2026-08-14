@@ -238,6 +238,11 @@ describe('tasks watch', () => {
     expect(made.exits).toEqual([40]);
   });
 
+  // `observe-autopilot-delivery` is a published external boundary
+  // (`Jinn-Network/autopilot` shells out to it). One-swap R3b (issue #2494)
+  // RELOCATES its indexer read onto `discovery-client/` rather than retiring
+  // the verb, so routing here must stay exactly as it was — reaching the verb's
+  // own argument validation, and exiting 11 on a missing expectation file.
   it('leaves observe-autopilot-delivery routing untouched', async () => {
     const made = makeCommandCtx({ argv: ['observe-autopilot-delivery', '--json'] });
     await tasksCommand.run(made.ctx);

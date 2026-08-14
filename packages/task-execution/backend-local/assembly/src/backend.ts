@@ -120,6 +120,7 @@ import {
   type RecorderAvailability,
   type TrustKeyConfig,
 } from "./capabilities.js";
+import { deliveryOutputsFromHarvest } from "./delivery-outputs.js";
 import { projectObservations } from "./observation.js";
 import {
   createEvidenceJoin,
@@ -128,7 +129,11 @@ import {
 } from "./evidence-join.js";
 import { materializeSecretForwards, type SecretForwardResolver } from "./secret-forwards.js";
 import { materializeHostSecretForwards, type HostSecretResolver } from "./host-secret-forwards.js";
-import { type LocalLauncherDeployment, verifyRunPinning } from "./pinning.js";
+import {
+  type LocalLauncherDeployment,
+  type RunPinningCheck,
+  verifyRunPinning,
+} from "./pinning.js";
 import { ObservationWatchRegistry } from "./watch-registry.js";
 
 // Core requirement comparison classes (profiles §5.1 / program §7.3). Profile-added entries
@@ -674,6 +679,8 @@ interface StoredSubmission {
   readonly parsed: SubmissionRecord;
   readonly taskDigest: `sha256:${string}`;
   readonly attempt: AttemptUri;
+  /** Exact result of the deployment gate that admitted this Submission, when one ran. */
+  readonly runPinning?: RunPinningCheck;
 }
 
 interface AttemptMeta {
@@ -694,6 +701,8 @@ interface PersistedSubmission {
   readonly submission: SubmissionUri;
   readonly requester: string;
   readonly idempotencyKey: string;
+  /** Optional for durable entries accepted before truthful pinning evidence was introduced. */
+  readonly runPinning?: RunPinningCheck;
 }
 
 interface PersistedAttempt extends AttemptMeta {}
@@ -753,11 +762,33 @@ function dssePreAuthEncoding(payloadType: string, payloadBytes: Uint8Array): Uin
 }
 
 /**
- * Signs the Delivery's own already-sealed bytes and wraps the result in a structurally-valid DSSE
- * envelope (a JSON object `{payloadType, payload, signatures}`, matching
- * `@jinn-network/trust-core`'s `DsseEnvelope` shape exactly, byte-for-byte JSON-compatible with
- * `parseDsseEnvelope`). `deliveryBytes` is passed through untouched as the envelope's `payload` --
- * seal-once: it is never re-encoded, re-ordered, or re-canonicalized here.
+ * Signs the Delivery's own already-sealed bytes and wraps the result in a DSSE envelope (a JSON
+ * object `{payload, payloadType, signatures}`, matching `@jinn-network/trust-core`'s
+ * `DsseEnvelope` shape exactly). `deliveryBytes` is passed through untouched as the envelope's
+ * `payload` -- seal-once: it is never re-encoded, re-ordered, or re-canonicalized here.
+ *
+ * The ENVELOPE's own encoding is RFC 8785 JCS (sorted keys, compact separators) via
+ * `serializeCanonicalJson` -- the same sealer every other canonical byte production in this
+ * file already uses -- byte-identical to what trust-core's `sealDsseEnvelope` emits. That is
+ * load-bearing, not cosmetic (defect #34): the authority-bearing consumer of
+ * these bytes is `parseExactDsseEnvelope` (reached via the client's `verifyNativeDsse` ->
+ * `client/src/evaluator/native-subject-authority.ts`), which accepts ONLY the sole producer
+ * encoding and rejects every alternate spelling by reconstructing through `sealDsseEnvelope`
+ * and comparing bytes. This previously emitted plain `JSON.stringify` in `payloadType, payload,
+ * signatures` insertion order -- structurally fine under the LOOSE `parseDsseEnvelope` the
+ * settlement-grade checker uses (so the producing operator's own side passed), but refused by
+ * the strict cross-operator parse, surfacing as `envelope-signature-invalid` even though the
+ * Ed25519 signature was perfectly valid. Loosening the strict parser would be the wrong repair;
+ * its fail-closed strictness is the design.
+ *
+ * `serializeCanonicalJson` is the protocol package's own JCS re-implementation (Global
+ * Constraints -- never a shared runtime dep with trust-core), the same
+ * cross-boundary-duplication precedent `dssePreAuthEncoding` above already follows. Both sort
+ * keys with an identical `compareCodeUnitStrings` and emit compact separators, so for this
+ * envelope's flat all-string shape the two serializers agree byte-for-byte;
+ * `backend.evidence.test.ts` pins the exact bytes against an independently hand-sorted
+ * expectation, and `client/test/daemon/settlement-grade.test.ts` round-trips these production
+ * bytes through the real `parseExactDsseEnvelope`/`verifyNativeDsse` path.
  */
 function sealExecutorBindingEnvelope(
   deliveryBytes: Uint8Array,
@@ -770,7 +801,7 @@ function sealExecutorBindingEnvelope(
     payload: Buffer.from(deliveryBytes).toString("base64"),
     signatures: [{ keyid: key.keyId, sig: Buffer.from(signature).toString("base64") }],
   };
-  return new TextEncoder().encode(JSON.stringify(envelope));
+  return serializeCanonicalJson(envelope as unknown as JsonValue);
 }
 
 /**
@@ -809,6 +840,18 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private readonly shutdownDrainFailures: Error[] = [];
 
   constructor(private readonly config: LocalTaskExecutionBackendConfig) {
+    // #36. When capture is on, `createEvidenceJoin` puts `executor` and `source` (as the
+    // recording's `producer`) into the evidence graph as two SEPARATE `agent`-kind identities
+    // under two differently-named descriptors, and the execution recorder correctly refuses one
+    // identity claiming both roles. A composition that passes one IRI twice can therefore never
+    // record an attempt -- which stayed latent until the first live run, where it surfaced as an
+    // opaque `dependency-unavailable` terminal after the attempt had already been claimed.
+    // Refuse the composition instead of every attempt it would go on to start.
+    if ((config.recorderAvailability ?? "none") !== "none" && config.source === config.executor) {
+      throw new Error(
+        "local backend source and executor must be distinct graph identities when evidence capture is enabled",
+      );
+    }
     this.writer = acquireStateRootWriter(config.stateRoot);
     this.capacity = new CapacityGate(config.maxConcurrentAttempts ?? 4);
     this.rebuildIndexes();
@@ -1078,6 +1121,18 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
 
   async capabilities(): Promise<BackendCapabilities> {
     return this.capabilitiesValue();
+  }
+
+  /**
+   * Returns the exact run-pinning gate result stored with an accepted Submission.
+   *
+   * This is a concrete local-backend evidence seam, deliberately not part of the frozen generic
+   * `TaskExecutionBackend`/`SubmissionAck` contract. Unknown, rejected, legacy, or deployments
+   * without a verification gate return `undefined`; callers must never manufacture a result.
+   */
+  pinningEvidenceForSubmission(ref: SubmissionUri): RunPinningCheck | undefined {
+    const evidence = this.submissionsByUri.get(ref)?.runPinning;
+    return evidence === undefined ? undefined : { ...evidence };
   }
 
   private preflightLaunchers(request: PreflightRequest): readonly LauncherContract[] {
@@ -1370,6 +1425,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     };
     let selectedLauncher: LauncherContract;
     let preplanned: LaunchPlan;
+    let runPinning: RunPinningCheck | undefined;
     try {
       selectedLauncher = this.selectLauncher(view);
       const deployment = this.config.launcherDeployments?.[selectedLauncher.id];
@@ -1382,14 +1438,15 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         });
       }
       if (deployment !== undefined) {
-        const pinning = await verifyRunPinning(
+        runPinning = await verifyRunPinning(
           deployment,
           merged.effective as Record<string, unknown>,
+          submission.requirements ?? {},
         );
-        if (!pinning.ready) {
+        if (!runPinning.ready) {
           this.capacity.release(attempt);
           return this.reject(submissionUri, "unsupported-requirement", {
-            detail: pinning.detail ?? "selected launcher is not ready for the requested pins",
+            detail: runPinning.detail ?? "selected launcher is not ready for the requested pins",
           });
         }
       }
@@ -1442,6 +1499,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       parsed: submission,
       taskDigest,
       attempt,
+      ...(runPinning === undefined ? {} : { runPinning }),
     };
     this.attempts.set(attempt, meta);
     this.submissionsByScope.set(scope, stored);
@@ -1891,7 +1949,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     // Reserved keys win: `extensions` spreads first so no extension can shadow a canonical
     // Delivery field below.
-    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://spec.jinn.network/profiles/task-execution/v1", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
+    // #39: the Delivery declares the Task's declared outputs, never the raw harvest manifest --
+    // see `deliveryOutputsFromHarvest` for why the manifest is deliberately wider.
+    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://spec.jinn.network/profiles/task-execution/v1", attempt, task: documentDigest(input.taskBytes), outputs: deliveryOutputsFromHarvest(harvest.manifest, input.task.outputs), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
     // Finding E31: sign the Delivery's own already-sealed bytes exactly once, never re-seal --
     // see the module-level comment above `sealExecutorBindingEnvelope`. Additive: with no
     // delivery-signing key configured, `deliveryBytes` above is computed identically to before
@@ -2145,6 +2205,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         submission: asSubmissionUri(stored.parsed.submission),
         requester: stored.parsed.requester,
         idempotencyKey: stored.parsed.idempotencyKey,
+        ...(stored.runPinning === undefined ? {} : { runPinning: stored.runPinning }),
       } satisfies PersistedSubmission as unknown as JsonValue),
     );
     this.persistAttemptMetadata(attempt);
@@ -2184,6 +2245,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
             parsed,
             taskDigest: metadata.taskDigest,
             attempt: metadata.attempt,
+            ...(metadata.runPinning === undefined ? {} : { runPinning: metadata.runPinning }),
           };
           this.submissionsByScope.set(
             scopeKey(metadata.requester, metadata.idempotencyKey),

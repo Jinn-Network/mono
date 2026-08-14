@@ -31,7 +31,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import {
   authenticateRequester,
-  parseDsseEnvelope,
+  parseExactDsseEnvelope,
   settlementJoinCheck,
   verifyEnvelopeBinding,
   type BindingResolver,
@@ -327,10 +327,20 @@ function parseSettlementContext(
   };
 }
 
+/**
+ * Reads the delivered verdict envelope with the STRICT `parseExactDsseEnvelope` (defect-#34
+ * follow-up). This gate owns a fail-closed decision, so it must not inherit its encoding floor
+ * from whichever `dsseVerifier` a composition happens to inject: under a loose structural parse
+ * a validly-signed envelope in an alternate JSON spelling reached full decision-grade whenever
+ * the injected verifier was itself loose. Every producer of these bytes seals canonically
+ * (`sealDsseEnvelope` / `sealSignedRecord` / task-execution-profiles' `buildVerdictEnvelope`),
+ * so an alternate spelling is never legitimate -- and refusing it here names the encoding as a
+ * `verdict-envelope` failure instead of surfacing it as an opaque `settlement-join` signature error.
+ */
 function parseVerdict(envelopeBytes: Uint8Array): ParsedVerdict {
   let parsedEnvelope;
   try {
-    parsedEnvelope = parseDsseEnvelope(envelopeBytes);
+    parsedEnvelope = parseExactDsseEnvelope(envelopeBytes);
   } catch (cause) {
     return { ok: false, check: "verdict-envelope", detail: String(cause) };
   }
@@ -457,6 +467,18 @@ async function admissionReceiptFailure(
     return `carried receipt digest ${String(carriedDigest)} does not match exact envelope digest ${actualDigest}`;
   }
 
+  // Completes this gate's encoding floor (see `parseVerdict`). This read differs from the other
+  // two: it interprets the envelope through a Zod SHAPE, which accepts any JSON spelling, so the
+  // strict parse is added as a gate rather than swapped in -- `checkAdmissionReceipt` below still
+  // consumes the shape-parsed envelope. Producer drift here is self-consistent (the carried
+  // descriptor digest is taken over whatever bytes the producer emitted, and the signature stays
+  // valid over the payload), so no other check on this path can catch it.
+  try {
+    parseExactDsseEnvelope(input.admissionReceipt.envelopeBytes);
+  } catch (cause) {
+    return `admission-receipt envelope is not the exact producer encoding: ${String(cause)}`;
+  }
+
   let envelope: unknown;
   try {
     envelope = parseJson(input.admissionReceipt.envelopeBytes, "admission-receipt envelope");
@@ -511,9 +533,12 @@ async function requesterAuthenticationFailure(
   if (!Rfc3339.safeParse(input.requesterAuthentication.sealingTime).success) {
     return "requester Submission sealing time is not RFC 3339";
   }
+  // Strict for the same reason as `parseVerdict` above: the requester Submission envelope has a
+  // single canonical producer (`native-requester`'s `sealDsseEnvelope`), so this gate refuses
+  // alternate spellings on its own rather than depending on the injected `dsseVerifier`.
   let signedSubmission;
   try {
-    signedSubmission = parseDsseEnvelope(input.requesterAuthentication.envelopeBytes);
+    signedSubmission = parseExactDsseEnvelope(input.requesterAuthentication.envelopeBytes);
   } catch (cause) {
     return String(cause);
   }

@@ -1,0 +1,26 @@
+{
+  "profile": "https://spec.jinn.network/profiles/benchmark-publication/v1",
+  "version": 1,
+  "owner": "@jinn-network/benchmark-product-core",
+  "scope": "application acceptance; this is not a protocol or backend-contract conformance claim",
+  "cases": [
+    { "id": "1-direct-harbor-pre-dispatch", "status": "covered", "tests": ["src/conformance/harbor-direct-publication.test.ts"] },
+    { "id": "2-terminal-bench-2-harbor", "status": "covered", "tests": ["src/runtime/terminal-bench-2/terminal-bench-2.test.ts"] },
+    { "id": "3-terminal-bench-legacy-migration", "status": "covered", "tests": ["src/runtime/terminal-bench-2/terminal-bench-2.test.ts"] },
+    { "id": "4-managed-harbor-post-hoc-no-rerun", "status": "covered", "tests": ["src/runtime/harbor/harbor.test.ts"] },
+    { "id": "5-arbitrary-completed-harbor-history", "status": "deferred", "disposition": "Retrospective import is deferred: the product refuses a legacy run without prospective capture and never synthesizes TEP history.", "tests": ["src/run/publication-compatibility.test.ts"] },
+    { "id": "6-marketplace-operator-harbor", "status": "deferred", "disposition": "Marketplace execution/product wiring is deferred; no fixture may imply an implemented marketplace Harbor runner.", "tests": [] },
+    { "id": "7-visible-replacement-no-harbor-retry", "status": "covered", "tests": ["src/runtime/harbor/harbor.test.ts", "../../benchmarking/run/src/launch.test.ts"] },
+    { "id": "8-cancelled-partial-accounting-without-report", "status": "covered", "tests": ["src/operations/publication-accounting.test.ts"] },
+    { "id": "9-independent-analysis-and-public-registration", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
+    { "id": "10-legacy-report-v1-and-signed-v2", "status": "covered", "tests": ["src/operations/report.test.ts", "../../benchmarking/records/src/publication-contracts.test.ts"] },
+    { "id": "11-native-disclosure-states", "status": "covered", "tests": ["src/bundle/v3.test.ts"] },
+    { "id": "12-byte-exact-atif-and-reward", "status": "covered", "tests": ["src/runtime/harbor/harbor.test.ts"] },
+    { "id": "13-equal-benchmark-identity-across-venues", "status": "partial", "disposition": "Direct identity coverage is implemented; the marketplace half remains deferred with marketplace execution/product wiring.", "tests": ["../../benchmarking/records/src/equivalence.test.ts"] },
+    { "id": "14-public-timing-ordering", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
+    { "id": "15-omitted-in-scope-dispatch-fails", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
+    { "id": "16-unavailable-authoritative-stream-indeterminate", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
+    { "id": "17-observation-conflicts-and-gaps", "status": "covered", "tests": ["../../benchmarking/publication/src/publication.test.ts"] },
+    { "id": "18-stage-crash-and-idempotency", "status": "covered", "tests": ["src/operations/publication-register.test.ts", "src/operations/publication-accounting.test.ts", "src/operations/report.test.ts", "../../discovery/publication/src/source-adapter.test.ts"] }
+  ]
+}

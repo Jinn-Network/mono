@@ -27,6 +27,28 @@ interface PresentedClaimHeadline {
   readonly wilsonInterval: { readonly low: string; readonly high: string };
 }
 
+interface PresentedComparisonInterval {
+  readonly alpha: string;
+  readonly low: string;
+  readonly high: string;
+}
+
+/** paired-delta@1's claim-package `comparison` block (P4b Task 7), sibling to
+ * `PresentedClaimHeadline`. Only the fields this page actually presents — see
+ * `core/src/report/claim.ts`'s `ComparisonSchema` for the full sealed shape. */
+interface PresentedComparison {
+  readonly pairs: number;
+  readonly delta: string | null;
+  readonly interval: PresentedComparisonInterval | null;
+  readonly reasons: readonly string[];
+}
+
+interface PresentedComparisonParameters {
+  readonly baseline: string;
+  readonly candidate: string;
+  readonly alpha: string;
+}
+
 function formatFact(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
@@ -113,15 +135,57 @@ function Venue({ results }: { readonly results: RunResultsDocument }) {
   </CardContent></Card>;
 }
 
+function comparisonParameters(value: unknown): PresentedComparisonParameters | undefined {
+  const parameters = recordOf(value);
+  if (
+    typeof parameters?.["baseline"] !== "string"
+    || typeof parameters["candidate"] !== "string"
+    || typeof parameters["alpha"] !== "string"
+  ) return undefined;
+  const alpha = Number(parameters["alpha"]);
+  if (!Number.isFinite(alpha)) return undefined;
+  return {
+    baseline: parameters["baseline"],
+    candidate: parameters["candidate"],
+    alpha: alpha.toFixed(4),
+  };
+}
+
+/** Operator-approved paired-delta copy: explicitly names candidate-minus-baseline direction and
+ * presents the estimate, interval state, exact alpha, and paired Task count together. */
+function ComparisonBlock({
+  comparison,
+  parameters,
+}: {
+  readonly comparison: PresentedComparison;
+  readonly parameters: PresentedComparisonParameters;
+}) {
+  const estimate = comparison.delta ?? "unavailable";
+  const interval = comparison.interval === null
+    ? "withheld"
+    : `${comparison.interval.low} to ${comparison.interval.high}`;
+  return <div tabIndex={0} aria-label="Paired comparison facts" className="min-w-0 max-w-full space-y-3 overflow-x-auto">
+    <h3 className="font-semibold">Paired comparison</h3>
+    <p className="font-medium">Candidate minus baseline estimate ({parameters.candidate} minus {parameters.baseline}): {estimate}. Interval: {interval}. Alpha: {parameters.alpha}. Paired task count: {comparison.pairs}.</p>
+    <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Paired task count</dt><dd>{comparison.pairs}</dd></div><div><dt className="font-medium">Candidate minus baseline estimate</dt><dd>{formatFact(comparison.delta)}</dd></div></dl>
+    {comparison.interval === null
+      ? <div><h4 className="font-medium">Interval withheld</h4>{comparison.reasons.length === 0 ? <p>No withheld reasons recorded.</p> : <ul className="list-disc pl-5">{comparison.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}</div>
+      : <dl className="grid min-w-0 gap-3 sm:grid-cols-3"><div><dt className="font-medium">Interval low</dt><dd>{comparison.interval.low}</dd></div><div><dt className="font-medium">Interval high</dt><dd>{comparison.interval.high}</dd></div><div><dt className="font-medium">Alpha</dt><dd>{parameters.alpha}</dd></div></dl>}
+  </div>;
+}
+
 function Claim({ report }: { readonly report: RunResultsReport }) {
   const claim = report.claimPackage;
+  const pairedParameters = claim.comparison === undefined
+    ? undefined
+    : comparisonParameters(claim.method.parameters);
   return <section aria-labelledby="claim-heading" className="min-w-0 space-y-6">
     <Card className="min-w-0 overflow-hidden"><CardHeader><h2 id="claim-heading" className="text-xl font-semibold">Claim package</h2></CardHeader><CardContent className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
       <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Schema</dt><dd>{claim.claimSchema}</dd></div><div><dt className="font-medium">Draft</dt><dd>{claim.scope.draftId}</dd></div><div><dt className="font-medium">Scope</dt><dd>{claim.scope.taskCount} tasks, {claim.scope.arms.length} arms, {claim.scope.replicates} replicates, {claim.scope.venue}</dd></div><div><dt className="font-medium">Assurance preset</dt><dd>{claim.assurance.preset}</dd></div></dl>
       <p>{claim.assurance.disclosure}</p>
       <div tabIndex={0} aria-label="Claim scope arms and pinning table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim scope arms and pinning</caption><thead><tr><th scope="col">Arm</th><th scope="col">Stored pinning</th></tr></thead><tbody>{claim.scope.arms.map((arm: PresentedClaimArm) => <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{formatFact(arm.pinning)}</td></tr>)}</tbody></table></div>
       <div tabIndex={0} aria-label="Claim record links table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim record links</caption><tbody>{Object.entries(claim.records).map(([name, digest]) => <tr key={name} className="border-t"><th scope="row" className="py-2 pr-4">{name}</th><td><Digest>{String(digest)}</Digest></td></tr>)}</tbody></table></div>
-      <div tabIndex={0} aria-label="Headline results by arm table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Headline results by arm</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{Object.entries(claim.headline).map(([arm, headlineValue]) => { const headline = headlineValue as PresentedClaimHeadline; return <tr key={arm} className="border-t"><th scope="row" className="py-2 pr-4">{arm}</th><td>{headline.n}</td><td>{headline.passRate}</td><td>{headline.wilsonInterval.low} to {headline.wilsonInterval.high}</td></tr>; })}</tbody></table></div>
+      {claim.headline ? <div tabIndex={0} aria-label="Headline results by arm table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Headline results by arm</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{Object.entries(claim.headline).map(([arm, headlineValue]) => { const headline = headlineValue as PresentedClaimHeadline; return <tr key={arm} className="border-t"><th scope="row" className="py-2 pr-4">{arm}</th><td>{headline.n}</td><td>{headline.passRate}</td><td>{headline.wilsonInterval.low} to {headline.wilsonInterval.high}</td></tr>; })}</tbody></table></div> : claim.comparison && pairedParameters ? <ComparisonBlock comparison={claim.comparison} parameters={pairedParameters} /> : claim.comparison ? <p role="alert">Paired comparison parameters cannot be presented. Run verification.</p> : null}
       <div><h3 className="font-semibold">Stored claim completeness</h3><p>{formatFact(claim.completeness)}</p></div>
       <div><h3 className="font-semibold">Stored claim attrition</h3><p>{formatFact(claim.attrition)}</p></div>
       <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Conflicted cells</dt><dd>{claim.conflicted.count}: {claim.conflicted.cellKeys.join(", ") || "none"}</dd></div><div><dt className="font-medium">Integrity tiers</dt><dd>{formatFact(claim.disclosures.integrityTierCounts)}</dd></div><div><dt className="font-medium">Pinning unverifiable counts</dt><dd>{formatFact(claim.disclosures.pinningUnverifiableCounts)}</dd></div><div><dt className="font-medium">Assurance primitives</dt><dd>{formatFact(claim.assurance.resolved)}</dd></div></dl>
@@ -240,7 +304,7 @@ export default async function ResultsPage({ params }: { readonly params: Promise
       <Card className="min-w-0"><CardHeader><h2 className="text-xl font-semibold">Result and report actions</h2></CardHeader><CardContent className="grid min-w-0 gap-6 md:grid-cols-2 [&>*]:min-w-0">
         <ActionForm action={GUI_SERVER_ACTIONS["run.results"]} submitLabel="Refresh sealed results" successMessage="Sealed results refreshed from the core operation."><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.report"]} submitLabel="Seal report" successMessage="Report and claim package sealed. Reloaded facts are shown on this route." gated disabled={draftState !== "closed"}><HiddenDraft draftId={draftId} /></ActionForm>
-        <ActionForm action={GUI_SERVER_ACTIONS["run.publish"]} submitLabel={draftState === "published-bundle" ? "Verify published bundle" : "Publish public bundle"} successMessage="The fixed draft-owned public bundle passed portable verification." gated disabled={draftState !== "reported" && draftState !== "published-bundle"}><HiddenDraft draftId={draftId} /></ActionForm>
+        <ActionForm action={GUI_SERVER_ACTIONS["run.publish"]} submitLabel={draftState === "published-bundle" ? "Verify published bundle" : "Publish public bundle"} successMessage="The fixed draft-owned public bundle passed portable verification." gated disabled={draftState !== "reported" && draftState !== "published-bundle"}><HiddenDraft draftId={draftId} /><label className="flex items-start gap-2 text-sm"><input type="checkbox" name="includeNativeArtifacts" disabled={draftState !== "reported"} /><span>Include complete native runtime logs and transcripts in this non-confidential public bundle.</span></label></ActionForm>
       </CardContent></Card>
       {results.report ? <Report report={results.report} /> : <Card><CardHeader><h2 className="text-xl font-semibold">Report not sealed</h2></CardHeader><CardContent><p>A gated report can be sealed once the draft is closed.</p></CardContent></Card>}
       <section aria-labelledby="verification-heading">

@@ -9,7 +9,7 @@ import {
 } from "@jinn-network/benchmarking-testing";
 import { expect, test } from "vitest";
 import { localAssemblyPorts } from "./assembly-ports.js";
-import { localPinningObservation, pinningObservationForCell } from "./pinning-bridge.js";
+import { localPinningObservation, pinningObservationForCell, requirementsDigest } from "./pinning-bridge.js";
 
 // The kit owns the assembly oracle; running its driver here proves the implementation this
 // package composes against is the conformant one.
@@ -74,7 +74,10 @@ test("the kit's miniature Matrix is not reachable through this bridge, and why",
 
   const pinning = { ...run.policy.submissionBaseline, ...run.arms[0]!.pinning };
   const venue = { isolationInventory: ["fixture"] };
-  const evidence = { dispatches: 1, admission: { ready: true } };
+  const evidence = {
+    dispatches: 1,
+    admission: { ready: true, checkedRequirementsDigest: requirementsDigest(pinning) },
+  };
   expect(pinningObservationForCell({ pinning, evidence, venue })).toEqual({
     // Reachable, and reached.
     harness: "match",

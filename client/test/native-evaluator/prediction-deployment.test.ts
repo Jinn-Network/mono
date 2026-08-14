@@ -1,10 +1,10 @@
 import { randomUUID, createHash } from "node:crypto";
-import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { packedDeploymentPaths } from "@test/pack-probe.js";
 import type { BindingResolver, ResolvedBinding } from "@jinn-network/trust-core";
 import { ResultEvaluationStatementSchema } from "@jinn-network/evidence-protocol";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
@@ -43,6 +43,8 @@ import {
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
   PREDICTION_PARSER,
+  contextResolutionSnapshotSource,
+  parsePredictionResult,
   predictionEvaluationSpecMeasurements,
   predictionEvaluationSpecVerdictRule,
 } from "@jinn-network/task-execution-evaluator-adapters";
@@ -54,6 +56,11 @@ import {
   buildNativeEvaluatorComposition,
   type NativeEvaluatorCompositionInput,
 } from "../../src/daemon/native-evaluator-composition.js";
+import {
+  EVALUATION_CONTEXT_INPUT_NAME,
+  derivePredictionEvaluationContext,
+  nativeEvaluationHostInputs,
+} from "../../src/daemon/native-evaluation-context.js";
 import { openRoleIdentitySet } from "../../src/daemon/role-identities.js";
 import {
   PREDICTION_EVALUATOR_DEPLOYMENT_MODULE_PATH,
@@ -71,7 +78,6 @@ const COORDINATOR = `0x${"3".repeat(40)}` as const;
 const SIGNER_HANDLE = "prediction-market-evaluator-verdict";
 const MODULE_HREF = pathToFileURL(PREDICTION_EVALUATOR_DEPLOYMENT_MODULE_PATH).href;
 const CLIENT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const execFileAsync = promisify(execFile);
 const roots: string[] = [];
 let claimEvidenceRoot: string;
 
@@ -405,17 +411,31 @@ interface PredictionDocuments {
   readonly subjectResult: Uint8Array;
   readonly specificationBytes: Uint8Array;
   readonly submission: Uint8Array;
-  readonly context: Record<string, unknown>;
 }
 
 function predictionDocuments(): PredictionDocuments {
   const spec = predictionSpec();
   const sealedSpecification = sealEvaluationSpec(spec);
+  // A real `prediction-forecast` payload, because the evaluation context this Attempt grades
+  // against is DERIVED from it by the production host (`nativeEvaluationHostInputs`). Before #41
+  // this fixture's subject Task carried no forecast at all and the context was a hand-written
+  // literal in the provisioner below -- so the spawned child was fed a workspace no live operator
+  // could produce, and the real staging path was never exercised. The window brackets the
+  // `submittedAt` stamped on the subject Result below.
   const subjectTask = sealTask({
     protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
       digest: { sha256: "4".repeat(64) },
+    },
+    payload: {
+      forecast: {
+        marketId: "market-spawn-1",
+        question: "Will the spawn-path fixture market resolve?",
+        consensusProbabilityYes: "0.500000",
+        observedAt: "2026-07-29T12:00:00Z",
+        resolvesAt: "2026-07-29T12:01:00Z",
+      },
     },
     instructions: "Submit a prediction.",
     outputs: [{ name: "result.json", mediaType: "application/json", required: true }],
@@ -464,19 +484,6 @@ function predictionDocuments(): PredictionDocuments {
     subjectResult,
     specificationBytes: sealedSpecification.bytes,
     submission,
-    context: {
-      resolutionSnapshot: {
-        status: "unresolved",
-        marketId: "market-spawn-1",
-        conditionId: "condition-spawn-1",
-      },
-      market: { marketId: "market-spawn-1", conditionId: "condition-spawn-1" },
-      window: {
-        startTs: Date.parse("2026-07-29T12:00:00.000Z"),
-        endTs: Date.parse("2026-07-29T12:01:00.000Z"),
-      },
-      consensusProbabilityYes: "0.500000",
-    },
   };
 }
 
@@ -522,14 +529,24 @@ async function spawnBackendFixture(root: string, docs: PredictionDocuments): Pro
             ),
           );
           expect(grants).toEqual([]);
+          // The host-contributed inputs come from the PRODUCTION function the daemon's own
+          // provisioner calls (`nativeEvaluationHostInputs`), never from literals restated here.
+          // That is the whole point of #41: the previous shadow copy wrote an
+          // `evaluation-context.json` the real `native-evaluation-dir-v1` provisioner never
+          // produced, so this spawn proof stayed green through every live refusal.
+          const hostInputs = nativeEvaluationHostInputs({
+            specification: predictionSpec(),
+            specificationBytes: docs.specificationBytes,
+            specificationMediaType: "application/json",
+            subjectTaskBytes: () => docs.subjectTask,
+          });
           await Promise.all([
             writeFile(join(paths.input, "task.sealed"), input.sealedTaskBytes),
             writeFile(join(paths.input, "dispatch-context.json"), input.dispatchContextBytes),
             writeFile(join(paths.input, "subject-task.json"), docs.subjectTask),
             writeFile(join(paths.input, "subject-delivery.json"), docs.subjectDelivery),
             writeFile(join(paths.input, "result.json"), docs.subjectResult),
-            writeFile(join(paths.input, "evaluation-spec.json"), docs.specificationBytes),
-            writeFile(join(paths.input, "evaluation-context.json"), JSON.stringify(docs.context)),
+            ...hostInputs.map((staged) => writeFile(join(paths.input, staged.name), staged.bytes)),
           ]);
         },
         executionEnv: ({ env }) => ({ ...env }),
@@ -635,15 +652,9 @@ describe("production prediction-market deployment module — npm packaging", () 
     // The sidecar written in this file's top-level beforeAll (at the same co-located
     // path the deployment module reads) is on disk for this entire suite -- exactly
     // the "real sidecar present" precondition this check must hold under, not an
-    // absence trivially passing.
-    const { stdout } = await execFileAsync("npm", ["pack", "--dry-run", "--json"], {
-      cwd: CLIENT_ROOT,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    const [entry] = JSON.parse(stdout) as readonly {
-      readonly files: readonly { readonly path: string }[];
-    }[];
-    const paths = entry!.files.map((file) => file.path);
+    // absence trivially passing. Probed via a throwaway copy, never a live-root
+    // `npm pack` — see pack-probe.ts for why the latter breaks the whole suite (#2641).
+    const paths = await packedDeploymentPaths(CLIENT_ROOT);
     expect(paths).toContain("deployments/evaluator/prediction-market-deployment.mjs");
     expect(paths).toContain("deployments/evaluator/prediction-market-evaluation-method.v1.json");
     expect(paths).not.toContain("deployments/evaluator/prediction-market-deployment.local.json");
@@ -668,8 +679,15 @@ describe("production prediction-market deployment module — harvest-time identi
       const bytes = new TextEncoder().encode(value);
       return { name, bytes, digest: documentDigest(bytes) };
     };
+    // The `task` and `evaluation-spec` artifacts must be REAL documents: since #41 the
+    // provisioner parses the durable EvaluationSpec and derives the staged evaluation context from
+    // the durable subject Task before it will provision anything, so placeholder strings in those
+    // two slots no longer reach the harvest contract this suite is about. Every other slot is
+    // opaque to the provisioner and stays a cheap literal.
+    const documents = predictionDocuments();
+    const bytesArtifact = (name: string, bytes: Uint8Array) => ({ name, bytes, digest: documentDigest(bytes) });
     const subject = {
-      task: artifact("task", "harvest-guard-subject-task"),
+      task: bytesArtifact("task", documents.subjectTask),
       submission: artifact("submission", "harvest-guard-subject-submission"),
       requesterEnvelope: artifact("requester-envelope", "harvest-guard-requester-envelope"),
       admissionReceipt: artifact("admission-receipt", "harvest-guard-admission-receipt"),
@@ -677,7 +695,7 @@ describe("production prediction-market deployment module — harvest-time identi
       deliveryEnvelope: artifact("delivery-envelope", "harvest-guard-solution-delivery-envelope"),
       evidenceRecords: [artifact("solution-evidence", "harvest-guard-solution-evidence")],
       results: [artifact("prediction", "harvest-guard-prediction-result")],
-      evaluationSpec: artifact("evaluation-spec", "harvest-guard-evaluation-spec"),
+      evaluationSpec: bytesArtifact("evaluation-spec", documents.specificationBytes),
     };
     const admitted = state.admitOpportunity({
       opportunity: {
@@ -832,15 +850,15 @@ describe("production prediction-market deployment module — harvest-time identi
         harnessState: outDir, secrets: outDir, tmp: outDir, meta: outDir,
       } as unknown as WorkspacePaths;
       // Identical statement construction to the previous test, with only `evaluator.id`
-      // changed to match `roles.agent`. It still doesn't harvest cleanly (this hand-built
-      // statement doesn't survive `sealSignedRecord`'s canonical re-encoding byte-for-byte
-      // -- a fixture-fidelity limit, not a real production path), but it now fails at the
-      // *next* check in sequence ("not canonical exact bytes", composition.ts:344) rather
-      // than the identity-authority guard (composition.ts:335). Reaching a check that only
-      // runs after the identity `if` block completes false is proof the identity guard
-      // specifically is what `evaluator.id` flips -- not a false positive tripped by some
-      // unrelated field this fixture also carries.
-      await expect(contract.harvest(paths, [])).rejects.toThrow(/not canonical exact bytes/);
+      // changed to match `roles.agent`. These are the real harness producer's bytes
+      // (`buildResultEvaluationPayload`) under the real prediction evaluation-method digest, so
+      // the whole harvest now completes: the statement is sealed verbatim into a DSSE envelope.
+      // Reaching the seal -- which only runs after the identity `if` block completes false -- is
+      // proof the identity guard specifically is what `evaluator.id` flips, not a false positive
+      // tripped by some unrelated field this fixture also carries. Before #35 this same call
+      // stopped one step later at "not canonical exact bytes", which every genuine harness run
+      // hit too.
+      await expect(contract.harvest(paths, [])).resolves.toBeDefined();
     } finally {
       await composition.close();
       value.store.close();
@@ -910,6 +928,241 @@ describe("production prediction-market deployment module — sidecar shape valid
         .rejects.toThrow(/is not valid UTF-8 JSON/);
     } finally {
       await restoreValidSidecar();
+    }
+  });
+});
+
+// --- #41: the REAL native provisioner must stage the evaluation context ---------------
+//
+// Round 25 of the DR-2026-08-05 gate got the harness all the way into the grade for the
+// first time and it refused in 0.4s, exit 70:
+//   EvaluationOperationalError: the evaluation context carries no resolutionSnapshot
+// The staged `input/` held `admission-receipt, delivery, dispatch-context.json,
+// evaluation-spec.json, prediction, task, task.sealed` -- no context file. The harness
+// reads `input/evaluation-context.json` OPTIONALLY (`runtime.ts`'s `optionalContext`
+// swallows ENOENT and returns `{}`), so the absence produced no staging error and no
+// input error; it surfaced one layer later as an adapter operational failure carrying a
+// retry advisory, which is the wrong diagnosis for a deterministic input gap.
+//
+// These tests drive the PRODUCTION `native-evaluation-dir-v1` provisioner -- the same
+// object `buildNativeEvaluatorComposition` hands the backend -- against a real durable
+// evaluation aggregate, and then feed the resulting workspace to the SAME
+// `contextResolutionSnapshotSource()` the shipped deployment wires. Delete the staging
+// and the first test reproduces the live message verbatim.
+describe("production prediction-market deployment module — native provisioner stages the evaluation context (#41)", () => {
+  function stagedArtifact(name: string, bytes: Uint8Array) {
+    return { name, bytes, digest: documentDigest(bytes) };
+  }
+
+  async function durablePredictionEvaluation(
+    state: NativeEvaluatorStateRepository,
+    docs: PredictionDocuments,
+  ): Promise<{ readonly attemptUri: string; readonly evaluationTask: Uint8Array }> {
+    const subject = {
+      task: stagedArtifact("subject-task.json", docs.subjectTask),
+      submission: stagedArtifact("submission", new TextEncoder().encode("context-fixture-submission")),
+      requesterEnvelope: stagedArtifact("requester-envelope", new TextEncoder().encode("context-fixture-envelope")),
+      admissionReceipt: stagedArtifact("admission-receipt", new TextEncoder().encode("context-fixture-receipt")),
+      delivery: stagedArtifact("subject-delivery.json", docs.subjectDelivery),
+      deliveryEnvelope: stagedArtifact("delivery-envelope", new TextEncoder().encode("context-fixture-delivery-envelope")),
+      evidenceRecords: [stagedArtifact("solution-evidence", new TextEncoder().encode("context-fixture-evidence"))],
+      results: [stagedArtifact("result.json", docs.subjectResult)],
+      evaluationSpec: stagedArtifact("evaluation-spec.json", docs.specificationBytes),
+    };
+    const admitted = state.admitOpportunity({
+      opportunity: {
+        source: "https://solver.example/context-fixture-source",
+        sourceSequence: "0000000000000002",
+        sourceEntryDigest: `sha256:${"a".repeat(64)}`,
+        canonical: true,
+        finality: "finalized",
+        chainId: 84532,
+        taskId: 41n,
+        attemptIndex: 1,
+        solutionRequestId: `0x${"b".repeat(64)}`,
+        operatorAddress: `0x${"1".repeat(40)}`,
+        deliveryCid: "bafycontextfixture",
+        advertisedDeliveryDigest: subject.delivery.digest,
+        blockHash: `0x${"c".repeat(64)}`,
+        blockNumber: 410n,
+        transactionHash: `0x${"d".repeat(64)}`,
+        logIndex: 1,
+        canonicalEventIdentity: `84532:0x${"c".repeat(64)}:1`,
+      },
+      evaluatorAgent: AGENT,
+      coordinator: COORDINATOR,
+      material: subject,
+    });
+    state.recordAdmissionVerified(admitted.evaluationId, {
+      requester: { signerKey: "did:key:context-fixture-requester", sealingTime: "2026-08-02T10:00:00Z" },
+      admission: { signerKey: "did:key:context-fixture-admission", effectiveTime: "2026-08-02T10:00:00Z" },
+      executor: {
+        signerKey: "did:key:context-fixture-executor",
+        agent: "https://agents.example/context-fixture-solver",
+        declarationKey: "did:key:context-fixture-solver-declaration",
+        effectiveTime: "2026-08-02T10:30:00Z",
+        address: `0x${"1".repeat(40)}`,
+      },
+      evaluator: {
+        signerKey: "did:key:context-fixture-evaluator",
+        agent: AGENT,
+        declarationKey: "did:key:context-fixture-evaluator-declaration",
+        address: EVALUATOR_ADDRESS,
+      },
+      verificationDigest: `sha256:${"e".repeat(64)}`,
+    });
+    const submissionBytes = sealSubmission({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      submission: "urn:uuid:00000000-0000-4000-8000-000000000041",
+      task: { digest: { sha256: documentDigest(docs.evaluationTask).slice("sha256:".length) } },
+      requester: AGENT,
+      idempotencyKey: admitted.evaluationId,
+      nonce: admitted.evaluationId,
+      deadline: "2026-08-03T00:00:00.000Z",
+    });
+    state.recordDerivedEvaluation(admitted.evaluationId, {
+      taskBytes: docs.evaluationTask,
+      taskDigest: documentDigest(docs.evaluationTask),
+      submissionBytes,
+      submissionDigest: documentDigest(submissionBytes),
+      submissionUri: "urn:uuid:00000000-0000-4000-8000-000000000041",
+    });
+    const claim = state.beginEvaluationClaim(admitted.evaluationId, `0x${"f".repeat(64)}`);
+    state.recordEvaluationClaimFinalized(claim.operationId, {
+      txHash: `0x${"1".repeat(64)}`,
+      blockHash: `0x${"2".repeat(64)}`,
+      blockNumber: 411n,
+      requestId: `0x${"9".repeat(64)}`,
+      verdictIndex: 1,
+      evaluatorAddress: EVALUATOR_ADDRESS,
+    });
+    const attemptUri = state.getEvaluation(admitted.evaluationId)!.evaluationAttemptUri!;
+    expect(attemptUri).toBeTruthy();
+    return { attemptUri, evaluationTask: docs.evaluationTask };
+  }
+
+  async function workspace(): Promise<WorkspacePaths> {
+    const root = await mkdtemp(join(tmpdir(), "jinn-native-provisioner-context-"));
+    roots.push(root);
+    return {
+      root,
+      input: join(root, "input"),
+      work: join(root, "work"),
+      out: join(root, "out"),
+      logs: join(root, "logs"),
+      harnessState: join(root, "harness-state"),
+      secrets: join(root, "secrets"),
+      tmp: join(root, "tmp"),
+      meta: join(root, "meta"),
+    } as WorkspacePaths;
+  }
+
+  function viewFor(evaluationTask: Uint8Array) {
+    const document = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(evaluationTask)) as {
+      readonly inputs?: readonly unknown[];
+    };
+    return {
+      task: { inputs: document.inputs ?? [] },
+      effectiveRequirements: {},
+      profile: { profile: "https://spec.jinn.network/task-profiles/evaluation-task/1.0" },
+    } as never;
+  }
+
+  it("stages input/evaluation-context.json, so the shipped resolution-snapshot source resolves instead of refusing", async () => {
+    const value = await fixture();
+    const composition = await buildNativeEvaluatorComposition(value.config);
+    try {
+      const docs = predictionDocuments();
+      const durable = await durablePredictionEvaluation(value.config.state, docs);
+      const selected = value.backendConfigs[0]!.provisioner({
+        attempt: { attemptUri: durable.attemptUri, nonce: "context-fixture-nonce", attemptNumber: 1 },
+        sealedTaskBytes: durable.evaluationTask,
+        dispatchContextBytes: new TextEncoder().encode("{}"),
+      } as unknown as LocalProvisionerInput);
+      expect(selected.id).toBe("native-evaluation-dir-v1");
+
+      const paths = await workspace();
+      try {
+        await selected.contract.setup(viewFor(durable.evaluationTask), paths, []);
+      } finally {
+        // `sealInputAndSnapshot` locks `input/` to 0o500, which is exactly right in production and
+        // makes the suite's `rm -rf` cleanup fail with EACCES. Unlock it as soon as the assertions
+        // can still see the sealed result (the mode itself is the dir-provisioner's own contract,
+        // covered in its own suite).
+        await chmod(paths.input, 0o700);
+      }
+
+      // What the live round-25 workspace was missing. Read exactly the way the harness runtime
+      // reads it -- `optionalContext` swallows ENOENT and yields `{}` -- so that removing the
+      // staging reproduces the live refusal here rather than a bland "file missing" assertion.
+      const contextPath = join(paths.input, EVALUATION_CONTEXT_INPUT_NAME);
+      const context = existsSync(contextPath)
+        ? JSON.parse(await readFile(contextPath, "utf8")) as Record<string, unknown>
+        : {};
+
+      // The exact call that threw at `prediction/adapter.ts:100` on 2026-08-12. With no staged
+      // file this rejects with "the evaluation context carries no resolutionSnapshot"; with it,
+      // the grade proceeds.
+      const inputs = await contextResolutionSnapshotSource().read({ context } as never);
+      expect(existsSync(contextPath)).toBe(true);
+      expect(context).toEqual(derivePredictionEvaluationContext(docs.subjectTask));
+      expect(inputs.market.marketId).toBe("market-spawn-1");
+      expect(inputs.consensusProbabilityYes).toBe("0.500000");
+      expect(inputs.window).toEqual({
+        startTs: Date.parse("2026-07-29T12:00:00Z"),
+        endTs: Date.parse("2026-07-29T12:01:00Z"),
+      });
+
+      // And the graded outcome the whole staging exists to produce: every integrity check
+      // passes, the market is honestly unresolved, so the verdict is `inconclusive` -- which
+      // settles as the decision-grade `VerdictCode.Unresolved(4)`.
+      const outcome = parsePredictionResult({
+        resultBytes: docs.subjectResult,
+        snapshot: inputs.snapshot,
+        market: inputs.market,
+        window: inputs.window,
+        consensusProbabilityYes: inputs.consensusProbabilityYes,
+      });
+      expect(outcome.integrity).toBe(true);
+      expect(outcome.resolved).toBe(false);
+      expect(outcome.verdict).toBe("inconclusive");
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+
+  it("refuses the Attempt with the exact field at fault when the subject Task carries no forecast payload", async () => {
+    const value = await fixture();
+    const composition = await buildNativeEvaluatorComposition(value.config);
+    try {
+      const docs = predictionDocuments();
+      // Same evaluation in every respect except the subject Task, which is a well-formed sealed
+      // Task with no `payload.forecast`. Nothing verified carries a market, so no context can be
+      // derived -- and the refusal must name that, not degrade into an empty context.
+      const forecastless = sealTask({
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+        profile: {
+          uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
+          digest: { sha256: "4".repeat(64) },
+        },
+        payload: { question: "Will the forecastless fixture resolve?" },
+        instructions: "Submit a prediction.",
+        outputs: [{ name: "result.json", mediaType: "application/json", required: true }],
+      });
+      const durable = await durablePredictionEvaluation(
+        value.config.state,
+        { ...docs, subjectTask: forecastless },
+      );
+      expect(() => value.backendConfigs[0]!.provisioner({
+        attempt: { attemptUri: durable.attemptUri, nonce: "context-fixture-nonce", attemptNumber: 1 },
+        sealedTaskBytes: durable.evaluationTask,
+        dispatchContextBytes: new TextEncoder().encode("{}"),
+      } as unknown as LocalProvisionerInput))
+        .toThrow(/subject Task payload carries no forecast object/);
+    } finally {
+      await composition.close();
+      value.store.close();
     }
   });
 });

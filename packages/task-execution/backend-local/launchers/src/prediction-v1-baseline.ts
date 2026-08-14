@@ -14,6 +14,16 @@ import {
  * deterministic `prediction` output. No legacy task syntax, ambient clock, or extra fields
  * are admitted on this native launcher path.
  *
+ * #39: the declared output is written to `out/prediction` -- the LOGICAL name, which is what
+ * `prediction-forecast/1.0`'s `outputConventions.slots[0].name` carries and therefore what the
+ * requester's signed Task declares. The workspace harvest binds each declared output to the file
+ * at `out/<name>`; writing `out/prediction.json` put a FILENAME into the sealed Delivery's
+ * `outputs`, which the evaluator's `verifyEvaluationSubject` refused with "subject Delivery output
+ * prediction.json is not declared by the Task" -- after four hours of the verdict window had
+ * already gone. The structured envelope stays at `out/structured-output.json` because the
+ * backend's `readResultEnvelope` requires a contained, harvested `out/` path; it is backend
+ * metadata and is never declared as a Task output (see `deliveryOutputsFromHarvest`).
+ *
  * #2538: the Task is read at the provisioner's contracted path
  * (`STAGED_SEALED_TASK_FILENAME`), not found by walking the input tree for `*.json`. The glob
  * never matched the staged `task.sealed`, so this launcher exited 2 on every real attempt while
@@ -34,7 +44,7 @@ export function makePredictionV1BaselineLauncher(options: LauncherOptions = {}):
       isolation(view);
       // Inline runner: locate the one sealed native Task and use the sealed observedAt value as
       // the deterministic submission time. The structured envelope remains backend metadata;
-      // the sole Task output is out/prediction.json.
+      // the sole Task output is out/prediction, named for the Task's declaration.
       const runner = `
 const fs = require('node:fs');
 const path = require('node:path');
@@ -57,7 +67,12 @@ function isPredictionOutput(output) {
     && isObject(properties.submittedAt) && keys(properties.submittedAt) === 'format,type' && properties.submittedAt.type === 'string' && properties.submittedAt.format === 'date-time';
 }
 function isNativeTask(doc) {
-  if (!isObject(doc) || keys(doc) !== 'evaluation,instructions,outputs,payload,profile,protocol' || doc.protocol !== 'https://spec.jinn.network/profiles/task-execution/v1' || typeof doc.instructions !== 'string' || doc.instructions.length === 0) return false;
+  if (!isObject(doc) || doc.protocol !== 'https://spec.jinn.network/profiles/task-execution/v1' || typeof doc.instructions !== 'string' || doc.instructions.length === 0) return false;
+  const required = ['evaluation','instructions','outputs','payload','profile','protocol'];
+  const documentKeys = Object.keys(doc);
+  if (!required.every((key) => documentKeys.includes(key))) return false;
+  if (documentKeys.some((key) => !required.includes(key) && key !== 'author' && !/^[a-z][a-z0-9+.-]*:/i.test(key))) return false;
+  if (doc.author !== undefined && (typeof doc.author !== 'string' || !/^[a-z][a-z0-9+.-]*:/i.test(doc.author))) return false;
   if (!isObject(doc.profile) || keys(doc.profile) !== 'digest,uri' || doc.profile.uri !== PROFILE_URI || !isObject(doc.profile.digest) || keys(doc.profile.digest) !== 'sha256' || doc.profile.digest.sha256 !== PROFILE_DIGEST) return false;
   if (!isObject(doc.evaluation) || keys(doc.evaluation) !== 'digest,name' || doc.evaluation.name !== 'evaluation-spec.json' || !isObject(doc.evaluation.digest) || keys(doc.evaluation.digest) !== 'sha256' || !/^[0-9a-f]{64}$/.test(doc.evaluation.digest.sha256)) return false;
   if (!Array.isArray(doc.outputs) || doc.outputs.length !== 1 || !isPredictionOutput(doc.outputs[0])) return false;
@@ -83,7 +98,7 @@ if (!isNativeTask(task)) {
 }
 const payload = { probabilityYes: task.payload.forecast.consensusProbabilityYes, submittedAt: task.payload.forecast.observedAt };
 fs.mkdirSync(out, { recursive: true });
-fs.writeFileSync(path.join(out, 'prediction.json'), JSON.stringify(payload));
+fs.writeFileSync(path.join(out, 'prediction'), JSON.stringify(payload));
 fs.writeFileSync(path.join(out, 'structured-output.json'), JSON.stringify({
   subtype: 'success', status: 'success', structuredOutput: payload,
   harnessVersion: '1.0.0', sessionId: process.env.JINN_ATTEMPT_ID || 'baseline',

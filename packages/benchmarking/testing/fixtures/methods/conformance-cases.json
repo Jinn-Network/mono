@@ -9,6 +9,7 @@
     "jinn.benchmarking.method/pass-at-k",
     "jinn.benchmarking.method/paired-mcnemar",
     "jinn.benchmarking.method/noninferiority-iut",
+    "jinn.benchmarking.method/paired-delta",
     "jinn.benchmarking.method/clean-subset"
   ],
   "pairedExclusions": true,

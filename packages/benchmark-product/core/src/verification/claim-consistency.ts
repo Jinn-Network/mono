@@ -1,9 +1,10 @@
 import type { BenchmarkRecord, MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
-import { buildLocalVenueHonesty } from "../operations/run-results.js";
+import { buildLocalVenueHonesty, localVenueLimitsForRun } from "../operations/run-results.js";
 import { buildClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { previewDisclosureSummaryLine } from "../run/preview-log.js";
+import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
 
 export interface ClaimRecordIdentities {
   readonly benchmarkSha256: string;
@@ -58,13 +59,21 @@ export function assertClaimConsistency(input: {
   readonly reportRecord: ReportRecord;
   readonly draftId: string;
   readonly assurancePreset: string;
+  /** Product-private disclosures whose applicability is proven by evidence outside the frozen
+   * Run schema (for example, the bundled Inspect task/selection closure). */
+  readonly additionalLimitations?: readonly string[];
   readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] };
 }): void {
   const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
   if (identities.reportSha256 === undefined) {
     refuse("record-integrity", "claim-consistency", "verified Report identity is absent");
   }
-  const verdictRule = (runRecord.analysisPlan?.[0]?.parameters as { verdictRule?: unknown } | undefined)?.verdictRule;
+  // The sealed plan may carry more than one entry (one per candidate method, P4b Task 5) — select
+  // the entry matching the produced Report's method, not a fixed index.
+  const matchingPlanEntry = runRecord.analysisPlan?.find(
+    (entry) => entry.method === reportRecord.method.id && entry.version === reportRecord.method.version,
+  );
+  const verdictRule = (matchingPlanEntry?.parameters as { verdictRule?: unknown } | undefined)?.verdictRule;
   if (verdictRule !== "sole" && verdictRule !== "majority" && verdictRule !== "unanimous") {
     refuse("record-integrity", "claim-consistency", "sealed Run carries no supported verdictRule");
   }
@@ -83,7 +92,7 @@ export function assertClaimConsistency(input: {
     reportRecord,
     reportSha256: identities.reportSha256,
     reportEnvelopeSha256: identities.reportEnvelopeSha256,
-    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells),
+    venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord),
     verificationCommandVerb: "bundle verify",
     assurance: {
       preset: input.assurancePreset,
@@ -107,6 +116,24 @@ export function assertClaimConsistency(input: {
 
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
   const reportLimitations = reportRecord.limitations ?? [];
+  const expectedLimitations = [
+    ...localVenueLimitsForRun(runRecord),
+    ...(input.additionalLimitations ?? []),
+    ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
+  ];
+  const isolationPosture = venueIsolationPostureForPolicy(
+    runRecord.policy.submissionBaseline?.["isolationPolicy"],
+  );
+  if (
+    (isolationPosture.inventory.length > 1 || (input.additionalLimitations?.length ?? 0) > 0)
+    && !bytesEqual(canonicalJsonBytes(reportLimitations), canonicalJsonBytes(expectedLimitations))
+  ) {
+    refuse(
+      "record-integrity",
+      "claim-consistency",
+      "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history",
+    );
+  }
   if (rehearsalLine === undefined) {
     if (reportLimitations.some((line) => line.includes("disposable preview rehearsal(s)"))) {
       refuse("record-integrity", "claim-consistency", "Report discloses a rehearsal absent from the claim");

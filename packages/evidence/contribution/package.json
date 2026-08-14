@@ -64,6 +64,10 @@
     "@jinn-network/evidence-protocol": "portal:../protocol",
     "@jinn-network/evidence-publication": "portal:../publication",
     "@jinn-network/evidence-repository": "portal:../repository",
+    "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
+    "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",
+    "@jinn-network/record-publication": "portal:../../discovery/publication",
+    "@jinn-network/trust-core": "portal:../../trust/core",
     "vite": "6.4.3"
   }
 }

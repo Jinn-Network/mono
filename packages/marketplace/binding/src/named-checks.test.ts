@@ -1,6 +1,7 @@
 import {
   EVALUATION_SPEC_FORMAT_URI,
   RESULT_EVALUATION_PREDICATE_TYPE,
+  ResultEvaluationStatementShape,
   canonicalJsonBytes,
   deriveEvaluationTask,
   sealEvaluationSpec,
@@ -226,7 +227,9 @@ function makeStatement(
   return statement as unknown as Record<string, unknown>;
 }
 
-function makeFixture(): {
+function makeFixture(
+  options: { readonly respellReceipt?: (bytes: Uint8Array) => Uint8Array } = {},
+): {
   input: VerdictObservationGateInput;
   statement: Record<string, unknown>;
 } {
@@ -281,10 +284,16 @@ function makeFixture(): {
     predicateType: "https://spec.jinn.network/attestations/admission-receipt/v1",
     predicate: { issuer: ADMISSION_AGENT },
   };
-  const receiptEnvelopeBytes = signedEnvelope(
+  const canonicalReceiptEnvelopeBytes = signedEnvelope(
     canonicalJsonBytes(admissionStatement),
     ADMISSION_KEY,
   );
+  // Producer drift is SELF-CONSISTENT: the descriptor below binds whatever bytes come out of
+  // here, so a re-spelled receipt still satisfies the carried-digest check and still carries a
+  // valid signature. The encoding gate is then the only check that can catch it -- which is
+  // precisely the defect-#34 shape, and why a digest-only test would prove nothing here.
+  const receiptEnvelopeBytes =
+    options.respellReceipt?.(canonicalReceiptEnvelopeBytes) ?? canonicalReceiptEnvelopeBytes;
   const receiptDescriptor = {
     name: "admission-receipt",
     digest: { sha256: documentDigest(receiptEnvelopeBytes).slice("sha256:".length) },
@@ -382,6 +391,25 @@ function withStatement(
   };
 }
 
+/**
+ * Re-spells an envelope in the exact defect-#34 encoding: structurally identical, emitted by
+ * plain `JSON.stringify` in `payloadType, payload, signatures` insertion order instead of the
+ * sole producer's code-unit-sorted compact JCS bytes. Signatures stay valid; only the envelope's
+ * own byte encoding differs.
+ */
+function nonCanonicalSpelling(envelopeBytes: Uint8Array): Uint8Array {
+  const envelope = JSON.parse(new TextDecoder().decode(envelopeBytes)) as {
+    payloadType: string;
+    payload: string;
+    signatures: unknown[];
+  };
+  return new TextEncoder().encode(JSON.stringify({
+    payloadType: envelope.payloadType,
+    payload: envelope.payload,
+    signatures: envelope.signatures,
+  }));
+}
+
 describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
   test("maps only the conforming Result Evaluation vocabulary with no Invalid default (§7.41)", () => {
     expect(decisionGradeVerdictCode("pass")).toBe(VerdictCode.Pass);
@@ -389,6 +417,38 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     expect(decisionGradeVerdictCode("inconclusive")).toBe(VerdictCode.Unresolved);
     expect(() => decisionGradeVerdictCode("invalid")).toThrow(/conforming Result Evaluation/);
     expect(() => decisionGradeVerdictCode(undefined)).toThrow(/conforming Result Evaluation/);
+  });
+
+  // Defect #41: this reader's accepted domain must be EXACTLY the set `ResultEvaluationStatementShape`
+  // admits -- no narrower (a ratified verdict the reader refuses cannot settle: `inconclusive` reached
+  // the evaluator's own pre-settlement path through a second, wider-but-different reader that had no
+  // case for it, was refused as `evaluation-record-graph-invalid`, and `recordVerdict` never ran) and
+  // no wider (a spelling the shape refuses must never acquire a code here). Widening either side reds.
+  test("accepts exactly the verdict vocabulary the ratified Statement shape admits (§7.41)", () => {
+    const statement = (verdict: unknown) => ({
+      _type: "https://in-toto.io/Statement/v1",
+      subject: [{ name: "result", digest: { sha256: "a".repeat(64) } }],
+      predicateType: RESULT_EVALUATION_PREDICATE_TYPE,
+      predicate: {
+        evaluatedAt: "2026-08-02T11:00:00Z",
+        evaluator: { id: "https://agents.example/evaluator" },
+        taskSubject: `sha256:${"b".repeat(64)}`,
+        resultSubjects: [`sha256:${"c".repeat(64)}`],
+        verdict,
+      },
+    });
+    for (const verdict of ["pass", "fail", "inconclusive"]) {
+      expect(ResultEvaluationStatementShape.safeParse(statement(verdict)).success).toBe(true);
+      expect(decisionGradeVerdictCode(verdict)).not.toBe(VerdictCode.None);
+    }
+    // The venue vocabulary (`verdictCodeFromValue`) and every case re-spelling are NOT this field's
+    // vocabulary: the shape refuses them, so the reader must refuse them too.
+    for (const verdict of [
+      "INCONCLUSIVE", "Pass", "unresolved", "indeterminate", "scored", "rejected", "invalid", "", undefined,
+    ]) {
+      expect(ResultEvaluationStatementShape.safeParse(statement(verdict)).success).toBe(false);
+      expect(() => decisionGradeVerdictCode(verdict)).toThrow(/conforming Result Evaluation/);
+    }
   });
 
   test("accepts a fully pair-fixed, authenticated, consistent verdict as decision-grade", async () => {
@@ -432,11 +492,46 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     });
   });
 
+  // The last loose read on this gate (residual named in the previous PR). Unlike the two above,
+  // this one is not a `parseDsseEnvelope` swap -- it parsed via a Zod envelope SHAPE, which
+  // accepts any JSON spelling. The receipt here is fully self-consistent: carried digest matches,
+  // signature valid, only the encoding differs, so nothing but an encoding gate can refuse it.
+  test("refuses a self-consistent admission receipt that is not the exact producer encoding", async () => {
+    const fixture = makeFixture({ respellReceipt: nonCanonicalSpelling });
+    expect(await gateVerdictObservation(fixture.input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{
+        check: "admission-receipt",
+        detail: expect.stringContaining("exact producer encoding") as unknown as string,
+      }],
+    });
+  });
+
   test("fails an admission receipt whose signer has no admission-agent binding", async () => {
     const fixture = makeFixture();
     expect(await gateVerdictObservation(fixture.input, makePorts(ADMISSION_KEY))).toEqual({
       decisionGrade: false,
       failures: [{ check: "admission-receipt", detail: expect.any(String) }],
+    });
+  });
+
+  // Defect-#34 class. This gate's structural verdict parse was loose, so its ONLY encoding
+  // guarantee came from whichever `dsseVerifier` the composition happened to inject -- a gate
+  // that owns a fail-closed decision must not depend on a port for that. `makePorts`'s verifier
+  // is deliberately loose (it accepts any structurally-parseable envelope), so before this check
+  // the gate granted full decision-grade to bytes the real strict verifier refuses.
+  test("refuses a validly-signed verdict envelope that is not the exact producer encoding", async () => {
+    const fixture = makeFixture();
+    const input = {
+      ...fixture.input,
+      verdict: {
+        ...fixture.input.verdict,
+        envelopeBytes: nonCanonicalSpelling(fixture.input.verdict.envelopeBytes),
+      },
+    };
+    expect(await gateVerdictObservation(input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "verdict-envelope", detail: expect.any(String) }],
     });
   });
 
@@ -625,6 +720,24 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     });
   });
 
+  // Same encoding floor as the verdict envelope above -- the requester Submission envelope is
+  // sealed by the sole canonical producer (`native-requester`'s `sealDsseEnvelope`), so an
+  // alternate spelling is never legitimate here either.
+  test("refuses a validly-signed requester envelope that is not the exact producer encoding", async () => {
+    const fixture = makeFixture();
+    const input = {
+      ...fixture.input,
+      requesterAuthentication: {
+        ...fixture.input.requesterAuthentication,
+        envelopeBytes: nonCanonicalSpelling(fixture.input.requesterAuthentication.envelopeBytes),
+      },
+    };
+    expect(await gateVerdictObservation(input, makePorts())).toEqual({
+      decisionGrade: false,
+      failures: [{ check: "requester-authentication", detail: expect.any(String) }],
+    });
+  });
+
   test("refuses a future-dated verdict relative to the canonical claim block", async () => {
     const fixture = makeFixture();
     const input = withStatement(fixture, (statement) => {
@@ -672,6 +785,52 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
     await expect(gateVerdictObservation(input, makePorts())).resolves.toEqual({
       decisionGrade: true,
       failures: [],
+    });
+  });
+
+  /**
+   * Defect #44, live round 27. The rule above is right and stays right; what broke live was the
+   * value the evaluator handed it as `claimBlockTime` while the claim it names was still in the
+   * FUTURE. It passed Base Sepolia's finalized head, which trails wall clock by two epochs, so an
+   * honest grade was measured against a time in its own past and `verdict-effective-time` refused
+   * every live evaluation. These are the instants round 27 measured, held against the real gate:
+   * the finalized head refuses the honest grade, the forward-looking bound the evaluator now
+   * derives (`preSettlementClaimTime` in `client/src/daemon/native-base-sepolia-infrastructure.ts`)
+   * admits it, and a grade dated past that bound still refuses. The last case is the one this
+   * check exists for, and it must survive any widening of the pre-settlement stand-in.
+   */
+  describe("live round-27 claim-time instants", () => {
+    const GRADE = "2026-08-13T02:51:55.896Z";
+    const FINALIZED_HEAD = "2026-08-13T02:30:02Z";
+    /** Live head 02:56:36Z plus the evaluator's five-minute skew allowance. */
+    const FORWARD_BOUND = "2026-08-13T03:01:36Z";
+
+    function gateInput(claimBlockTime: string, evaluatedAt: string): VerdictObservationGateInput {
+      const fixture = makeFixture();
+      const graded = withStatement(fixture, (statement) => {
+        (statement.predicate as Record<string, unknown>).evaluatedAt = evaluatedAt;
+      });
+      return { ...graded, verdict: { ...graded.verdict, claimBlockTime } };
+    }
+
+    test("refuses the honest grade against a claim time behind it", async () => {
+      expect(await gateVerdictObservation(gateInput(FINALIZED_HEAD, GRADE), makePorts())).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "verdict-effective-time", detail: expect.any(String) }],
+      });
+    });
+
+    test("accepts the honest grade against a forward-looking bound", async () => {
+      await expect(gateVerdictObservation(gateInput(FORWARD_BOUND, GRADE), makePorts()))
+        .resolves.toEqual({ decisionGrade: true, failures: [] });
+    });
+
+    test("still refuses a grade dated past the forward-looking bound", async () => {
+      const fabricated = gateInput(FORWARD_BOUND, "2026-08-13T04:01:36Z");
+      expect(await gateVerdictObservation(fabricated, makePorts())).toEqual({
+        decisionGrade: false,
+        failures: [{ check: "verdict-effective-time", detail: expect.any(String) }],
+      });
     });
   });
 

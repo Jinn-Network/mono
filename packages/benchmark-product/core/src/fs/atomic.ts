@@ -54,11 +54,11 @@ export function fsyncDirectorySync(directory: string): void {
   }
 }
 
-export function atomicWriteFileSync(path: string, data: string | Uint8Array): void {
+export function atomicWriteFileSync(path: string, data: string | Uint8Array, mode?: number): void {
   const directory = dirname(path);
   mkdirSync(directory, { recursive: true });
   const temporary = `${path}.tmp-${randomUUID()}`;
-  const fd = openSync(temporary, "w");
+  const fd = openSync(temporary, "w", mode);
   try {
     writeSync(fd, data as never);
     fsyncBestEffortSync(fd);

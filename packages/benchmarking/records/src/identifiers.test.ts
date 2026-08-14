@@ -16,6 +16,7 @@ import {
   RUN_RECORD_KIND,
   TRUST_POLICY_PURPOSE_BENCHMARK_PUBLISHER,
   TRUST_POLICY_PURPOSE_RUN_OWNER,
+  TRUST_AUTHORIZATION_RECORD_KIND,
 } from "./identifiers.js";
 
 const MEDIA_TYPES = [BENCHMARK_MEDIA_TYPE, RUN_MEDIA_TYPE, MATRIX_MEDIA_TYPE, REPORT_MEDIA_TYPE];
@@ -62,12 +63,13 @@ describe("pinned identifiers", () => {
     expect(ASSEMBLY_PROCEDURE_VERSION).toBe("1.0");
   });
 
-  test("the eight registered method URIs are pinned under jinn.benchmarking.method/ at version 1", () => {
+  test("the nine registered method URIs are pinned under jinn.benchmarking.method/ at version 1", () => {
     expect(Object.values(BENCHMARKING_METHOD_IDS).sort()).toEqual([
       "jinn.benchmarking.method/avg-at-k",
       "jinn.benchmarking.method/bradley-terry",
       "jinn.benchmarking.method/clean-subset",
       "jinn.benchmarking.method/noninferiority-iut",
+      "jinn.benchmarking.method/paired-delta",
       "jinn.benchmarking.method/paired-mcnemar",
       "jinn.benchmarking.method/pass-at-k",
       "jinn.benchmarking.method/provenance-cluster-sign",
@@ -84,6 +86,11 @@ describe("pinned identifiers", () => {
   test("trust-policy purposes are pinned strings", () => {
     expect(TRUST_POLICY_PURPOSE_BENCHMARK_PUBLISHER).toBe("benchmark-publisher");
     expect(TRUST_POLICY_PURPOSE_RUN_OWNER).toBe("run-owner");
+  });
+
+  test("the delegate authority record kind mirrors the tier-1 trust discovery kind", () => {
+    expect(TRUST_AUTHORIZATION_RECORD_KIND).toBe("https://spec.jinn.network/records/authorization/v1");
+    expect(TRUST_AUTHORIZATION_RECORD_KIND).toMatch(RECORD_KIND_GRAMMAR);
   });
 
   // The regression test for the C2 narrowing. While the mirror dual-accepted, a pre-re-seal

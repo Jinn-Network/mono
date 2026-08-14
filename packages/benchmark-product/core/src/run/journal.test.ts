@@ -8,6 +8,7 @@ import { runJournalPath } from "../workspace/layout.js";
 import {
   appendRunJournalEntry,
   evaluationGaps,
+  foldRunJournalLineage,
   foldRunJournal,
   outstandingCells,
   readRunJournalEntries,
@@ -70,7 +71,15 @@ describe("append / read round trip", () => {
     const entries: RunJournalEntry[] = [
       // Legacy shape — no leg.
       { kind: "submission-accepted", at: "2026-08-05T00:00:00Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9") },
-      { kind: "submission-accepted", at: "2026-08-05T00:00:01Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("8"), leg: "solve" },
+      {
+        kind: "submission-accepted",
+        at: "2026-08-05T00:00:01Z",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("8"),
+        pinningEvidenceSha256: HEX("6"),
+        leg: "solve",
+      },
       { kind: "submission-accepted", at: "2026-08-05T00:00:02Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("7"), leg: "evaluation" },
     ];
     for (const entry of entries) appendRunJournalEntry(workspaceDir, "draft-1", entry);
@@ -165,6 +174,26 @@ describe("append / read round trip", () => {
       expect(cause).toBeInstanceOf(BenchmarkProductError);
       expect((cause as BenchmarkProductError).code).toBe("journal-integrity");
     }
+  });
+});
+
+describe("publication dispatch lineage", () => {
+  test("preserves initial, replacement, and resumed dispatch captures while legacy fold selects current", () => {
+    const entries: RunJournalEntry[] = [
+      { kind: "submission-captured", at: "2026-08-13T00:00:00Z", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, submissionSha256: HEX("1") },
+      { kind: "submission-accepted", at: "2026-08-13T00:00:01Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("1"), leg: "solve" },
+      { kind: "observation-accepted", at: "2026-08-13T00:00:02Z", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, submissionSha256: HEX("1"), observationArchiveSha256: HEX("a"), attempt: "urn:uuid:attempt-1" },
+      { kind: "cell-event", at: "2026-08-13T00:00:03Z", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: true, replaceableReason: "expired" } },
+      { kind: "submission-captured", at: "2026-08-13T00:01:00Z", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 2, submissionSha256: HEX("2") },
+      { kind: "submission-accepted", at: "2026-08-13T00:01:01Z", cellKey: CELL_A, dispatch: 2, submissionSha256: HEX("2"), leg: "solve" },
+      { kind: "observation-accepted", at: "2026-08-13T00:01:02Z", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 2, submissionSha256: HEX("2"), observationArchiveSha256: HEX("b"), attempt: "urn:uuid:attempt-2" },
+      // A resumed generator reports the same durable dispatch rather than creating a third one.
+      { kind: "cell-event", at: "2026-08-13T00:01:03Z", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 2, kind: "delivered", attempt: "urn:uuid:attempt-2" } },
+    ];
+    const lineage = foldRunJournalLineage(entries).get(CELL_A);
+    expect(lineage).toHaveLength(2);
+    expect(lineage?.map((dispatch) => dispatch.observationArchiveSha256)).toEqual([HEX("a"), HEX("b")]);
+    expect(foldRunJournal(entries).get(CELL_A)?.lastDispatch).toBe(2);
   });
 });
 
@@ -299,6 +328,68 @@ describe("foldRunJournal — per-cell status", () => {
       { kind: "submission-accepted", at: "t0", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9") },
     ]);
     expect(fold.get(CELL_A)).toMatchObject({ status: "dispatched", lastDispatch: 1, submissionSha256: HEX("9") });
+  });
+
+  test("folds solve pinning evidence without letting evaluation legs overwrite it", () => {
+    const fold = foldRunJournal([
+      {
+        kind: "submission-accepted",
+        at: "t0",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("9"),
+        pinningEvidenceSha256: HEX("6"),
+        leg: "solve",
+      },
+      {
+        kind: "submission-accepted",
+        at: "t1",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("8"),
+        pinningEvidenceSha256: HEX("5"),
+        leg: "evaluation",
+      },
+    ]);
+    expect(fold.get(CELL_A)).toMatchObject({
+      submissionSha256: HEX("9"),
+      pinningEvidenceSha256: HEX("6"),
+    });
+  });
+
+  test("associates a separate append-only pinning evidence fact with prospective capture", () => {
+    const fold = foldRunJournal([
+      { kind: "submission-captured", at: "t0", cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, submissionSha256: HEX("9") },
+      { kind: "submission-pinning-evidence", at: "t1", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9"), pinningEvidenceSha256: HEX("6") },
+      { kind: "submission-accepted", at: "t2", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9"), leg: "solve" },
+    ]);
+    expect(fold.get(CELL_A)).toMatchObject({
+      submissionSha256: HEX("9"),
+      pinningEvidenceSha256: HEX("6"),
+    });
+  });
+
+  test("a later solve dispatch without proof clears the prior dispatch's evidence", () => {
+    const fold = foldRunJournal([
+      {
+        kind: "submission-accepted",
+        at: "t0",
+        cellKey: CELL_A,
+        dispatch: 1,
+        submissionSha256: HEX("9"),
+        pinningEvidenceSha256: HEX("6"),
+        leg: "solve",
+      },
+      {
+        kind: "submission-accepted",
+        at: "t1",
+        cellKey: CELL_A,
+        dispatch: 2,
+        submissionSha256: HEX("8"),
+        leg: "solve",
+      },
+    ]);
+    expect(fold.get(CELL_A)?.pinningEvidenceSha256).toBeUndefined();
   });
 });
 

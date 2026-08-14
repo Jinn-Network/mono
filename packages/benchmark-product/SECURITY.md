@@ -99,6 +99,41 @@ owner is outside the authorization boundary and can deny service or replace
 private mutable state; integrity checks make sealed-byte substitution and
 malformed durable state fail closed.
 
+### Optional evaluation-runtime worker
+
+The Inspect adapter executes user-selected Python tasks, solvers, tools,
+scorers, and providers only in a supervised worker. They never import into the
+web request process. Selection seals the worker, Python executable,
+installed-package environment, Inspect distribution, task source/project, and
+material run configuration; launch re-probes that identity before accepting a
+cell submission. The worker receives a minimal environment with no ambient
+credential variables. Optional OpenAI execution uses the separately sealed,
+allowlisted broker boundary documented in the
+[Inspect runtime guide](./INSPECT-RUNTIME.md); the credential is broker-only.
+
+This process boundary isolates the web lifecycle from imported Python code but
+is not a hostile-code or filesystem sandbox. Task code retains the product OS
+user's filesystem permissions. A customer running untrusted or secret-bearing
+code must use the OCI runtime or another customer-controlled worker host.
+
+The OCI runtime can host the narrow task-level default Docker sandbox through
+the public Inspect sandbox extension. The worker sends versioned sandbox
+operations over private standard I/O; only the trusted runtime host can invoke
+Docker. The nested task sandbox has no host mounts, Docker socket, credentials,
+or network, and runs as an unprivileged user under fixed resource and operation
+budgets. Custom providers, per-sample files/setup, multiple environments, and
+mutable sandbox definitions remain unsupported. These controls establish an
+operational boundary, not positive Jinn per-cell isolation evidence; OCI
+campaigns continue to disclose isolation as `unverifiable`.
+
+The worker, broker, sandbox-host protocol, provider names, and fixed controller
+policy are private Tier 4 adapter machinery. They are not a task-execution
+backend, protocol profile, reusable platform sandbox, or conformance surface.
+The product owns them only to enforce the locked local venue policy around its
+optional Inspect composition. A future move into Tier 3 requires a separate
+approved design and a conformance kit before implementation; a second consumer,
+not anticipated reuse, is the trigger for considering that move.
+
 ### Public disclosure
 
 `publish` authorizes disclosure of BP-40's fixed allowlisted closure. Mutable
@@ -109,6 +144,12 @@ is not a general PII scrubber. Portable verification authenticates one
 snapshot and independently checks manifest, graph, trust, Matrix, Report,
 claim, cancellation, and asset consistency after the source workspace is
 gone.
+
+Inspect native logs are private until an Inspect-backed publication receives
+an explicit `includeNativeArtifacts` approval. That approval copies the exact
+viewer-ready logs into the public bundle. Logs may contain prompts, responses,
+tool calls, transcripts, model metadata, or user data; the product does not
+silently scrub or reclassify them.
 
 ## Filesystem attack surface
 

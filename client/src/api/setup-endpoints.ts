@@ -50,7 +50,6 @@ import {
 } from '../setup/claude-code-install.js';
 import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
 import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
-import type { JoinedSolverNetConfig } from '../solver-nets/registry.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
 
@@ -145,19 +144,10 @@ export interface SetupRoutesConfig {
    */
   retryBootstrap?: () => Promise<void>;
   /**
-   * #1037: hot-apply a join to the running daemon. The route registers
-   * eagerly (Hono freezes its matcher), so the applier is passed via a holder
-   * populated by main.ts after the join-consuming subsystems are built. When
-   * `current` is undefined (pre-running) or the apply throws, the endpoint
-   * returns restartRequired:true so the operator restarts to pick up the
-   * on-disk write.
-   */
-  joinApplier?: { current?: (entry: JoinedSolverNetConfig) => Promise<void> };
-  /**
    * #983: called after POST /v1/operator/onboarding-complete persists the flag
    * to disk, so the daemon's in-memory config reflects it and GET /v1/bootstrap
    * (which reads the in-memory config) returns onboardingComplete:true without
-   * a restart. Mirrors the join-applier's in-memory mutation (join-applier.ts).
+   * a restart.
    */
   markOnboardingComplete?: () => void;
 }
@@ -630,378 +620,33 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   });
 
   // The legacy POST /v1/setup/solvernets/:name route persisted into the
-  // now-removed `solverNets` config field. Issue #421 retired the route;
-  // operators join SolverNets via POST /v1/operator/join/:cid (or the SPA
-  // Operator > SolverNets surface).
+  // now-removed `solverNets` config field. Issue #421 retired the route and
+  // left this tombstone so a stale caller gets 410 Gone (an explicit
+  // "retired") rather than a bare 404 ("never existed"). Headless design §4.2
+  // files it under "retire with the legacy shape" — i.e. it outlives the join
+  // lifecycle Wave-4 D1 removed and goes at cutover stage 5, with the rest of
+  // the legacy `joinedSolverNets` shape.
   app.post('/v1/setup/solvernets/:name', (c) =>
     c.json({
       error: 'route_retired',
       detail:
         'POST /v1/setup/solvernets/:name was retired in issue #421. ' +
-        'Use POST /v1/operator/join/:cid to join a SolverNet via the registry, ' +
-        'or open Operator > SolverNets in the dashboard.',
+        'SolverNet membership is operator config: edit `joinedSolverNets` in ' +
+        '~/.jinn-client/config.json and restart the daemon. ' +
+        '`jinn solver-nets list` prints the resulting entries, and ' +
+        'Settings > Memberships renders them read-only.',
     }, 410),
   );
 
-  // POST /v1/operator/join/:cid — operator joins a launched SolverNet.
-  //
-  // Writes a manifest-keyed entry to `config.joinedSolverNets[<cid>]` with
-  // the operator's chosen roles + (for solver role) harness/model/plugins.
-  // The entry is keyed by `manifestCid` rather than the SolverNet's short
-  // name — multiple launchers can launch a SolverNet with the same name on
-  // the same network, and the manifestCid is the only stable identifier
-  // that maps back to a launched-instance authority.
-  //
-  // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
-  //
-  // Note (Task 21 / Task 22 transition): the spec example shows
-  // `solverNets[<cid>]` directly, but the legacy `solverNets` zod entry has
-  // required `solverType` + role enum that conflicts with the new shape, and
-  // many daemon-side consumers read those fields without narrowing. Keeping
-  // the new shape under a structurally-separate `joinedSolverNets` block
-  // avoids touching every consumer; Task 22 collapses both into a single
-  // manifest-keyed shape once the legacy block is fully drained.
-  //
-  // The daemon does not hot-reload SolverNet config; the operator must follow
-  // up with /api/admin/restart for the change to take effect (same posture as
-  // /v1/setup/solvernets/:name).
-  app.post('/v1/operator/join/:cid', async (c) => {
-    const cid = c.req.param('cid');
-    if (!cid) {
-      return c.json({ error: 'invalid_invocation', detail: 'missing manifest cid' }, 400);
-    }
-
-    let body: {
-      name?: unknown;
-      roles?: unknown;
-      harness?: unknown;
-      model?: unknown;
-      provider?: unknown;
-      plugins?: unknown;
-      disabledDefaultPlugins?: unknown;
-      contract?: unknown;
-    };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: 'invalid_body', detail: 'expected JSON body' }, 400);
-    }
-
-    const KNOWN_ROLES = ['solver', 'evaluator'];
-    if (!Array.isArray(body.roles) || body.roles.length === 0) {
-      return c.json({
-        error: 'invalid_body',
-        detail: '`roles` must be a non-empty array',
-      }, 400);
-    }
-    if (!body.roles.every((r): r is string => typeof r === 'string' && KNOWN_ROLES.includes(r))) {
-      return c.json({
-        error: 'invalid_body',
-        detail: '`roles` entries must each be `solver` or `evaluator`',
-      }, 400);
-    }
-    const roles = Array.from(new Set(body.roles as string[]));
-
-    if (body.name !== undefined && typeof body.name !== 'string') {
-      return c.json({ error: 'invalid_body', detail: '`name` must be a string' }, 400);
-    }
-    if (body.harness !== undefined && typeof body.harness !== 'string') {
-      return c.json({ error: 'invalid_body', detail: '`harness` must be a string' }, 400);
-    }
-    if (body.model !== undefined && typeof body.model !== 'string') {
-      return c.json({ error: 'invalid_body', detail: '`model` must be a string' }, 400);
-    }
-    // `provider` (issue #1243): a named provider (string) OR a custom endpoint
-    // object `{ name, baseUrl?, authVar? }`. Mirrors the zod shape in config.ts.
-    let provider: string | { name: string; baseUrl?: string; authVar?: string } | undefined;
-    if (body.provider !== undefined) {
-      if (typeof body.provider === 'string') {
-        provider = body.provider.trim();
-        if (provider.length === 0) {
-          return c.json({
-            error: 'invalid_body',
-            detail: '`provider` must be a non-empty string',
-          }, 400);
-        }
-      } else if (isRecord(body.provider)) {
-        const p = body.provider;
-        const name = typeof p['name'] === 'string' ? p['name'].trim() : '';
-        if (name.length === 0) {
-          return c.json({
-            error: 'invalid_body',
-            detail: '`provider` object must have a non-empty string `name`',
-          }, 400);
-        }
-        const baseUrl =
-          typeof p['baseUrl'] === 'string' ? p['baseUrl'].trim() : undefined;
-        if (
-          p['baseUrl'] !== undefined
-          && (baseUrl === undefined || baseUrl.length === 0)
-        ) {
-          return c.json({
-            error: 'invalid_body',
-            detail: '`provider.baseUrl` must be a non-empty string',
-          }, 400);
-        }
-        const authVar =
-          typeof p['authVar'] === 'string' ? p['authVar'].trim() : undefined;
-        if (
-          p['authVar'] !== undefined
-          && (authVar === undefined || authVar.length === 0)
-        ) {
-          return c.json({
-            error: 'invalid_body',
-            detail: '`provider.authVar` must be a non-empty string',
-          }, 400);
-        }
-        provider = {
-          name,
-          ...(baseUrl !== undefined ? { baseUrl } : {}),
-          ...(authVar !== undefined ? { authVar } : {}),
-        };
-      } else {
-        return c.json({
-          error: 'invalid_body',
-          detail: '`provider` must be a string or an object with a `name`',
-        }, 400);
-      }
-    }
-    let contract: { id: string; version: string } | undefined;
-    if (body.contract !== undefined) {
-      if (
-        !isRecord(body.contract) ||
-        typeof body.contract['id'] !== 'string' ||
-        typeof body.contract['version'] !== 'string'
-      ) {
-        return c.json({
-          error: 'invalid_body',
-          detail: '`contract` must be an object with string id and version',
-        }, 400);
-      }
-      contract = {
-        id: body.contract['id'],
-        version: body.contract['version'],
-      };
-    }
-    if (body.plugins !== undefined) {
-      if (!Array.isArray(body.plugins) || !body.plugins.every((p): p is string => typeof p === 'string')) {
-        return c.json({
-          error: 'invalid_body',
-          detail: '`plugins` must be an array of plugin names',
-        }, 400);
-      }
-    }
-    if (body.disabledDefaultPlugins !== undefined) {
-      if (
-        !Array.isArray(body.disabledDefaultPlugins) ||
-        !body.disabledDefaultPlugins.every((p): p is string => typeof p === 'string')
-      ) {
-        return c.json({
-          error: 'invalid_body',
-          detail: '`disabledDefaultPlugins` must be an array of plugin names',
-        }, 400);
-      }
-    }
-
-    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
-    let current: Record<string, unknown> = {};
-    try {
-      if (existsSync(cfgPath)) {
-        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
-      }
-    } catch (err) {
-      return c.json({
-        error: 'config_unreadable',
-        detail: errorMessage(err),
-      }, 500);
-    }
-
-    const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
-    const joinedSolverNets: Record<string, Record<string, unknown>> = {};
-    for (const [k, v] of Object.entries(rawJoined)) {
-      if (!isRecord(v)) continue;
-      const entry = { ...v };
-      if (typeof entry['harness'] === 'string') {
-        entry['harness'] = canonicalHarnessName(entry['harness']);
-      }
-      joinedSolverNets[k] = entry;
-    }
-
-    const previous = joinedSolverNets[cid];
-    const previousName =
-      typeof previous?.['name'] === 'string' ? (previous['name'] as string) : undefined;
-    const previousContractRecord = isRecord(previous?.['contract'])
-      ? previous?.['contract']
-      : undefined;
-    const previousContract =
-      previousContractRecord &&
-      typeof previousContractRecord['id'] === 'string' &&
-      typeof previousContractRecord['version'] === 'string'
-        ? {
-            id: previousContractRecord['id'],
-            version: previousContractRecord['version'],
-          }
-        : undefined;
-
-    const entry: Record<string, unknown> = {
-      manifestCid: cid,
-      roles,
-    };
-    // A partial upsert (e.g. #983's Enter-dashboard second join, which sends
-    // only roles+harness+model) must not drop a `name` a prior join wrote:
-    // the live join applier (daemon/join-applier.ts) keys the in-memory
-    // SolverNet registry by `name`, so dropping it here makes the applier's
-    // `unregister(entry.name ?? cid)` miss the prior registration and insert a
-    // phantom duplicate keyed by cid — `forSolverType` then resolves the stale
-    // first entry, silently running the wrong harness/model live. Mirror the
-    // `previousContract` fallback below.
-    const nextName = typeof body.name === 'string' ? body.name : previousName;
-    if (nextName !== undefined) entry['name'] = nextName;
-    if (contract ?? previousContract) entry['contract'] = contract ?? previousContract;
-    // `harness` / `model` / `plugins` are solver-side. Persist whatever the
-    // SPA sent; the daemon-side runtime ignores them when only the
-    // `evaluator` role is selected (evaluator harness comes from
-    // `manifest.contract.evaluationFunction.implementation`).
-    //
-    // Unlike `name` / `contract` above, these are intentionally taken from the
-    // request body WITHOUT a previous-value fallback: the #983 onboarding
-    // Enter-dashboard step always sends harness+model, so this is correct for
-    // that flow. Callers doing a PARTIAL re-join that omits these fields will
-    // drop the prior values — any caller wanting them preserved must include
-    // them in the body.
-    if (typeof body.harness === 'string') entry['harness'] = canonicalHarnessName(body.harness);
-    if (typeof body.model === 'string') entry['model'] = body.model;
-    if (provider !== undefined) entry['provider'] = provider;
-    if (Array.isArray(body.plugins)) entry['plugins'] = body.plugins;
-    if (Array.isArray(body.disabledDefaultPlugins)) {
-      entry['disabledDefaultPlugins'] = Array.from(new Set(body.disabledDefaultPlugins));
-    }
-
-    joinedSolverNets[cid] = entry;
-
-    try {
-      persistConfigValue('joinedSolverNets', joinedSolverNets, cfgPath);
-    } catch (err) {
-      return c.json({
-        error: 'config_write_failed',
-        detail: errorMessage(err),
-      }, 500);
-    }
-
-    // #1037: hot-apply to the running daemon if the applier is wired and the
-    // daemon has reached running mode. The on-disk write above already
-    // succeeded, so any live-apply failure (holder empty pre-running, or the
-    // applier throwing) degrades gracefully to restartRequired:true.
-    let restartRequired = true;
-    const applier = config.joinApplier?.current;
-    if (applier) {
-      try {
-        await applier(entry as unknown as JoinedSolverNetConfig);
-        restartRequired = false;
-      } catch (err) {
-        console.error(
-          '[join] live apply failed; operator must restart to pick up the join:',
-          errorMessage(err),
-        );
-      }
-    }
-
-    // Only mark the shared flag when THIS join genuinely needs a restart (hot-apply failed or
-    // the applier wasn't wired yet) — a successful hot-apply must not trip the notification.
-    // See restart-required-state.ts (issue #2408 review F1).
-    if (restartRequired) markRestartRequired();
-
-    return c.json({
-      ok: true,
-      restartRequired,
-      manifestCid: cid,
-      config: entry,
-    });
-  });
-
-  // POST /v1/operator/onboarding-complete — #983. The operator clicked
-  // "Enter dashboard" at the end of the guided onboarding takeover (gated SPA-
-  // side on ≥1 join AND a ready solver harness AND a selected model). Persists
-  // the flag to disk and mutates the in-memory config so GET /v1/bootstrap
-  // reflects it live; App.tsx then drops the takeover for <Operating>.
-  //
-  // Thin front-end over `intents/onboarding-complete.ts` per spec §4.1/§11 —
-  // the CLI verb (`cli/commands/onboarding-complete.ts`) is the other
-  // front-end, running the same intent standalone (see that module's
-  // docstring for why it can, unlike bootstrap-retry).
-  app.post('/v1/operator/onboarding-complete', async (c) => {
-    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
-    const result = await onboardingCompleteIntent({
-      configPath: cfgPath,
-      persistConfigValue,
-      markOnboardingComplete: config.markOnboardingComplete,
-    });
-    if (!result.ok) {
-      // errorMessage() keeps #2402's masking on this path across the intent
-      // refactor — the intent's error string is produced outside this file's
-      // choke point.
-      return c.json({ error: 'config_write_failed', detail: errorMessage(result.error) }, 500);
-    }
-    return c.json({ ok: true, onboardingComplete: true });
-  });
-
-  // DELETE /v1/operator/join/:cid — operator leaves a joined SolverNet.
-  // Removes the manifest-keyed entry from `config.joinedSolverNets`. Returns
-  // 404 if no such entry exists so the SPA can distinguish "I left
-  // successfully" from "this entry was already gone" — useful for stale-tab
-  // detection.
-  app.delete('/v1/operator/join/:cid', async (c) => {
-    const cid = c.req.param('cid');
-    if (!cid) {
-      return c.json({ error: 'invalid_invocation', detail: 'missing manifest cid' }, 400);
-    }
-
-    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
-    let current: Record<string, unknown> = {};
-    try {
-      if (existsSync(cfgPath)) {
-        current = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, unknown>;
-      }
-    } catch (err) {
-      return c.json({
-        error: 'config_unreadable',
-        detail: errorMessage(err),
-      }, 500);
-    }
-
-    const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
-    if (!isRecord(rawJoined[cid])) {
-      return c.json({ error: 'join_not_found', manifestCid: cid }, 404);
-    }
-    const joinedSolverNets: Record<string, Record<string, unknown>> = {};
-    for (const [k, v] of Object.entries(rawJoined)) {
-      if (k === cid) continue;
-      if (isRecord(v)) joinedSolverNets[k] = { ...v };
-    }
-
-    try {
-      persistConfigValue('joinedSolverNets', joinedSolverNets, cfgPath);
-    } catch (err) {
-      return c.json({
-        error: 'config_write_failed',
-        detail: errorMessage(err),
-      }, 500);
-    }
-
-    // No hot-apply path for leaving a SolverNet — always restart-required. See
-    // restart-required-state.ts (issue #2408 review F1).
-    markRestartRequired();
-    return c.json({ ok: true, restartRequired: true, manifestCid: cid });
-  });
-
   // GET /v1/operator/joined — list the operator's joined SolverNets.
   //
-  // Returns the manifest-keyed `joinedSolverNets` dict from the operator
-  // config so the SPA's catalog cards (RegistryCatalog) can render a
-  // "JOINED" indicator alongside the Join CTA. Without this the SPA cannot
-  // distinguish a joined SolverNet from one the operator hasn't joined yet
-  // and operators see a stale "Join" CTA even after a successful join.
-  // (jinn-mono follow-up to dogfood walk.)
+  // Read-only projection of the manifest-keyed `joinedSolverNets` dict in the
+  // operator config. Wave-4 D1 (DR-2026-08-05) retired the join/leave WRITE
+  // routes with the claim gate; this read survives because
+  // `client/OPERATOR-APP-SPEC.md` §2.4 keeps Memberships as the legacy view
+  // until cutover stage 5 — the SPA still has to render which SolverNets the
+  // config declares. There is deliberately no write counterpart: memberships
+  // are edited in the config file, not through this API.
   app.get('/v1/operator/joined', async (c) => {
     const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
     let current: Record<string, unknown> = {};
@@ -1021,6 +666,36 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       if (isRecord(v)) joinedSolverNets[k] = { ...v };
     }
     return c.json({ joinedSolverNets });
+  });
+
+  // POST /v1/operator/onboarding-complete — #983. The operator clicked
+  // "Enter dashboard" at the end of the guided onboarding takeover. Persists
+  // the flag to disk and mutates the in-memory config so GET /v1/bootstrap
+  // reflects it live; App.tsx then drops the takeover for <Operating>.
+  //
+  // The SPA-side gate is no longer "≥1 join AND a ready solver harness AND a
+  // selected model": Wave-4 D1 removed the join write path, and with it the
+  // only thing the takeover could persist. The takeover's last step now
+  // confirms harness readiness and nothing more (OPERATOR-APP-SPEC §2.8).
+  //
+  // Thin front-end over `intents/onboarding-complete.ts` per spec §4.1/§11 —
+  // the CLI verb (`cli/commands/onboarding-complete.ts`) is the other
+  // front-end, running the same intent standalone (see that module's
+  // docstring for why it can, unlike bootstrap-retry).
+  app.post('/v1/operator/onboarding-complete', async (c) => {
+    const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+    const result = await onboardingCompleteIntent({
+      configPath: cfgPath,
+      persistConfigValue,
+      markOnboardingComplete: config.markOnboardingComplete,
+    });
+    if (!result.ok) {
+      // errorMessage() keeps #2402's masking on this path across the intent
+      // refactor — the intent's error string is produced outside this file's
+      // choke point.
+      return c.json({ error: 'config_write_failed', detail: errorMessage(result.error) }, 500);
+    }
+    return c.json({ ok: true, onboardingComplete: true });
   });
 
   // Edit the chain's RPC URL from the SPA's Configuration > Network section.

@@ -154,10 +154,14 @@ const PUBLICATION_FORBIDDEN_PACKAGES = [
 
 const PUBLICATION_ALLOWED_DEPENDENCIES = [
   '@jinn-network/evidence-repository',
+  '@jinn-network/record-publication',
 ];
 
 const PUBLICATION_ALLOWED_DEV_DEPENDENCIES = [
   '@jinn-network/evidence-protocol',
+  '@jinn-network/record-discovery-protocol',
+  '@jinn-network/record-discovery-serve',
+  '@jinn-network/trust-core',
   '@types/node',
   'typescript',
   'vitest',

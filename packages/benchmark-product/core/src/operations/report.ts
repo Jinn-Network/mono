@@ -4,13 +4,17 @@
  * its claim package from the closed run's own sealed Matrix, via
  * `@jinn-network/benchmarking-aggregate`'s `produceReport`.
  *
- * `produceReport` recomputes wilson@1 from exact subject bytes and resolved referenced records
- * (this workspace's own sealed-bytes store, via `../report/ports.ts`'s `buildMethodPorts`) —
- * this module never computes results itself, it only supplies the exact inputs and stores what
- * comes back. `verdictRule` is the SAME rule `../run/compile.ts` (BP-13 correction F2) already
- * sealed into the Run's `analysisPlan[0].parameters` — passing the identical value here is what
- * makes `derivePreregistered`'s exact-JSON comparison succeed, deriving `preregistered: true` for
- * a genuinely pre-registered analysis rather than merely a matching-by-accident one.
+ * `produceReport` recomputes whichever method the sealed Run's own `analysisPlan` selected — from
+ * exact subject bytes and resolved referenced records (this workspace's own sealed-bytes store,
+ * via `../report/ports.ts`'s `buildMethodPorts`) — this module never computes results itself, it
+ * only supplies the exact inputs and stores what comes back. `../run/compile.ts`'s
+ * `buildAnalysisPlan` seals `[wilson]` or `[wilson, selected]`; this operation reads the LAST
+ * entry (the selected method when present, wilson otherwise) and passes its EXACT sealed
+ * `parameters` straight through. Passing that identical tuple is what makes
+ * `derivePreregistered`'s exact-JSON comparison succeed, deriving `preregistered: true` for a
+ * genuinely pre-registered analysis rather than merely a matching-by-accident one — selecting the
+ * method is a pure read of the already-sealed Run, so it changes nothing about which analysis
+ * runs, only which one this operation asks the platform to recompute.
  *
  * The Report is signed with a SEPARATE workspace key from the venue's verdict-signing key (see
  * `../report/signing.ts`'s module header for why) — this operation loads or creates it, same as
@@ -38,12 +42,7 @@
  * the crash-safety ordering above.
  */
 
-import {
-  BENCHMARKING_METHOD_IDS,
-  BENCHMARKING_METHOD_VERSION,
-  parseMatrix,
-  parseRun,
-} from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
 import { produceReport, type ProducedReport } from "@jinn-network/benchmarking-aggregate";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
@@ -51,6 +50,15 @@ import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
+import {
+  deriveInspectEvaluationStrategy,
+  INSPECT_SEPARATE_ASSURANCE_LIMITATIONS,
+} from "../runtime/inspect/assurance.js";
+import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { requireRunState, writeRunState } from "../run/state.js";
@@ -60,7 +68,7 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
-import { LOCAL_VENUE_LIMITS, buildLocalVenueHonesty } from "./run-results.js";
+import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -68,14 +76,19 @@ export interface RunReportInput {
 
 export interface RunReportResult {
   readonly draft: DraftDocument;
+  /** Exact legacy Report v1 payload and envelope identities. */
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
   readonly preregistered: boolean;
   readonly claimPackage: ClaimPackage;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 /** The report's verb string for the claim package's `verification.command`. */
 const VERIFICATION_VERB = "verify";
+
+const PAIRED_ESTIMATE_LIMITATION =
+  "This method estimates an effect; it does not gate one — no verdict, threshold, or selection was registered.";
 
 export function runReport(
   context: OperationContext,
@@ -101,7 +114,6 @@ export function runReport(
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
       }
-
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
       if (runState.runSha256 === undefined || runState.matrixSha256 === undefined) {
         refuse(
@@ -114,6 +126,11 @@ export function runReport(
       const matrixBytes = getSealedBytes(clockedContext.workspaceDir, runState.matrixSha256);
       const matrixRecord = parseMatrix(matrixBytes);
       const runRecord = parseRun(getSealedBytes(clockedContext.workspaceDir, runState.runSha256));
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        clockedContext.workspaceDir,
+        document.spec.evaluationRuntime,
+        runRecord.policy.evaluation,
+      );
 
       const resolvedAssurance = resolveAssurance(document.spec.assurance);
       const verdictRule = resolvedAssurance.verdictRule;
@@ -121,15 +138,38 @@ export function runReport(
       const reportKey = loadOrCreateReportSigningKey(clockedContext.workspaceDir);
       const signer = createReportDsseSigner(reportKey);
 
+      // The sealed plan is [wilson] or [wilson, selected] (see run/compile.ts's buildAnalysisPlan).
+      // The selected method is the last entry; passing its EXACT sealed parameters is what makes
+      // derivePreregistered's exact-JSON comparison succeed.
+      const planEntries = runRecord.analysisPlan ?? [];
+      const selected = planEntries[planEntries.length - 1];
+      if (selected === undefined) {
+        refuse("record-integrity", "run", "sealed Run carries no analysisPlan entry to report from");
+      }
+
       // BP-20 (spec §7.2): a pure read of this draft's own preview log — every logged preview
       // necessarily precedes this run's lock (module header). `previewed` is `undefined`'s own
       // presence check narrowed alongside `count > 0`, so both branches below can trust
       // `previewLog` is defined wherever they read it.
       const previewLog = readPreviewLog(clockedContext.workspaceDir, input.draftId);
-      const limitations =
-        previewLog !== undefined && previewLog.count > 0
-          ? [...LOCAL_VENUE_LIMITS, previewDisclosureLine(previewLog)]
-          : LOCAL_VENUE_LIMITS;
+      const previewLimitation = previewLog !== undefined && previewLog.count > 0
+        ? previewDisclosureLine(previewLog)
+        : undefined;
+      const venueLimits = localVenueLimitsForRun(runRecord);
+      const inspectLimits = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+        && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
+        ? INSPECT_SEPARATE_ASSURANCE_LIMITATIONS
+        : [];
+      const limitations = selected.method === BENCHMARKING_METHOD_IDS.pairedDelta
+        ? [
+            ...venueLimits,
+            ...inspectLimits,
+            PAIRED_ESTIMATE_LIMITATION,
+            ...(previewLimitation === undefined ? [] : [previewLimitation]),
+          ]
+        : previewLimitation === undefined
+          ? [...venueLimits, ...inspectLimits]
+          : [...venueLimits, ...inspectLimits, previewLimitation];
 
       let produced: ProducedReport;
       try {
@@ -137,7 +177,7 @@ export function runReport(
           {
             ...ports,
             subjects: [matrixBytes],
-            method: { id: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: {} },
+            method: { id: selected.method, version: selected.version, parameters: selected.parameters },
             verdictRule,
             limitations,
             author: runState.owner,
@@ -161,7 +201,7 @@ export function runReport(
       // Step 3: build AND write the claim package. Both can throw (a results-shape mismatch in
       // buildClaimPackage, a schema violation or disk failure in writeClaimPackage) — that must
       // surface here, before the draft is transitioned, not after.
-      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells);
+      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells, runRecord);
 
       const claimPackage = buildClaimPackage({
         draftId: input.draftId,
@@ -212,6 +252,7 @@ export function runReport(
         reportEnvelopeSha256,
         preregistered: produced.record.preregistered ?? false,
         claimPackage,
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
       };
     },
   });

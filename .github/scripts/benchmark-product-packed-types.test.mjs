@@ -90,7 +90,7 @@ assertFamilyCoverage();
 // (none is on the registry), in dependency order (pack/install order): protocol + records (BP-01),
 // BP-11's intake edges (interop, task-admission, and their transitives environment-record /
 // trust-core / profiles), BP-12's real local-venue stack (backend, backend-local, supervisor,
-// workspace, launchers, the evaluation-harness + evaluator-adapters pair, benchmarking-run,
+// workspace, launchers, the evaluation-harness + evaluator-adapters + OCI-grader chain, benchmarking-run,
 // benchmarking-local, and the evidence-* / attestation-issuer transitives the evaluation-harness
 // pair pulls in), and BP-13's `benchmarking-aggregate` (Report production/verification -- depends
 // only on records + trust-core, both already earlier in this list). Each `npm pack` is independent,
@@ -99,10 +99,16 @@ assertFamilyCoverage();
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
+  ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/record-discovery-transport-http', join(root, 'packages', 'discovery', 'transport-http')],
+  ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
+  ['@jinn-network/benchmarking-publication', join(root, 'packages', 'benchmarking', 'publication')],
   ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
@@ -116,6 +122,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
   ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
   ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
+  ['@jinn-network/task-execution-oci-grader', join(root, 'packages', 'task-execution', 'oci-grader')],
   ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
   ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
   ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
@@ -236,11 +243,11 @@ export const productName: string = PRODUCT_BRANDING.displayName;
 const guiInitCapability = GUI_CAPABILITY_CATALOG.initWorkspace;
 export const guiInitOperation: string = guiInitCapability.status === 'shipped'
   ? guiInitCapability.action
-  : guiInitCapability.deferredTo;
+  : guiInitCapability.reason;
 const guiResultsCapability = GUI_CAPABILITY_CATALOG.runResults;
 export const guiResultsOperation: string = guiResultsCapability.status === 'shipped'
   ? guiResultsCapability.action
-  : guiResultsCapability.deferredTo;
+  : guiResultsCapability.reason;
 `,
   );
   await writeFile(join(consumerRoot, 'tsconfig.json'), JSON.stringify({

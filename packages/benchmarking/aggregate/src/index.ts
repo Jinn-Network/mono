@@ -39,6 +39,8 @@ export { avgAtOne, passAtK } from "./stats/pass-at-k.js";
 export { clusterBy } from "./stats/clustering.js";
 export { clusteredVariance, mcnemarExact, pairedMcnemar } from "./stats/paired-mcnemar.js";
 export type { ClusteredVariance, DiscordantPair, PairedMcnemarResult } from "./stats/paired-mcnemar.js";
+export { clusteredPairedDeltaInterval } from "./stats/paired-delta.js";
+export type { PairedDeltaIntervalOptions, PairedDeltaIntervalResult } from "./stats/paired-delta.js";
 export { provenanceClusterSign } from "./stats/provenance-cluster-sign.js";
 export type {
   ProvenanceClusterPair,
@@ -66,15 +68,25 @@ export { fitBradleyTerry } from "./stats/bradley-terry.js";
 export type { BradleyTerryResult, PairwiseWin } from "./stats/bradley-terry.js";
 
 // --- Report production + verification (design §9.1, §12.1) ---
-export { deriveDisclosures, produceReport, verifyReport } from "./report.js";
+export { deriveDisclosures, produceReport, produceReportV2, verifyReport, verifyReportV2 } from "./report.js";
 export type {
   Disclosures,
   DsseSigner,
   MethodPorts,
+  ProduceReportV2Input,
   ProduceReportInput,
   ProducedReport,
+  ProducedReportV2,
+  PublicRegistrationCheck,
+  PublicRegistrationDisclosure,
+  PublicRegistrationInput,
+  PublicRegistrationStatus,
+  ReportPublicationExtension,
   VerifyReportCheck,
   VerifyReportInput,
   VerifyReportPorts,
   VerifyReportResult,
+  VerifyReportV2Check,
+  VerifyReportV2Input,
+  VerifyReportV2Result,
 } from "./report.js";

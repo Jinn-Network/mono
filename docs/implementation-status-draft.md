@@ -117,7 +117,6 @@ Entry: [`client/src/main.ts`](client/src/main.ts). Long-running orchestrator:
 | `CreatorLoop` | [`daemon/creator.ts`](client/src/daemon/creator.ts) | always |
 | Engine watcher | [`daemon/daemon.ts`](client/src/daemon/daemon.ts) `_runEngineWatcherLoop` | always |
 | Engine tick | [`harnesses/engine/engine.ts`](client/src/harnesses/engine/engine.ts) `runTickLoop` | always |
-| `DeliveryWatcherLoop` | [`daemon/delivery-watcher.ts`](client/src/daemon/delivery-watcher.ts) | always |
 | `RewardClaimLoop` | [`daemon/reward-claim-loop.ts`](client/src/daemon/reward-claim-loop.ts) | `rewardClaimIntervalMs > 0` |
 | `BalanceTopupLoop` | [`daemon/balance-topup-loop.ts`](client/src/daemon/balance-topup-loop.ts) | testnet default on |
 | `EvictionLoop` | [`daemon/eviction-loop.ts`](client/src/daemon/eviction-loop.ts) | standard staking + distributor |

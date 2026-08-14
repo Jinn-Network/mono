@@ -7,10 +7,10 @@ import {
   sealDelivery,
 } from "@jinn-network/task-execution-protocol";
 import {
-  parseDsseEnvelope,
+  parseExactDsseEnvelope,
 } from "@jinn-network/trust-core";
 import {
-  verdictCodeFromValue,
+  decisionGradeVerdictCode,
   type VerdictCode,
   type VerdictObservationGate,
   type VerdictObservationGateInput,
@@ -53,13 +53,30 @@ function equal(left: Uint8Array, right: Uint8Array): boolean {
     && left.every((value, index) => value === right[index]);
 }
 
+/**
+ * Reads the delivered verdict's code from its DSSE envelope, using the STRICT
+ * `parseExactDsseEnvelope` -- the same authority-bearing parser the cross-operator consumer
+ * applies via `verifyNativeDsse` (defect-#34 follow-up). The loose structural parser accepted
+ * alternate JSON spellings the strict one refuses, so this operator's own pre-settlement path
+ * derived a verdict code from bytes that could never settle; the refusal surfaced later as an
+ * opaque `settlement-join` signature failure instead of naming the encoding. Refusing here
+ * returns `undefined`, which `verifyExactGraph` reports as `evaluation-record-graph-invalid`.
+ *
+ * The verdict itself is read with `decisionGradeVerdictCode` -- the same reader the named gate
+ * applies to this same field to derive its `verdict-correspondence` expectation. The code derived
+ * here becomes the gate's `onChainVerdictCode` pre-settlement, so a second reader with its own
+ * vocabulary is not an alternative spelling, it is a disagreement the gate cannot survive. The
+ * previous reader (`verdictCodeFromValue`) accepted a wider venue vocabulary yet had no case for
+ * the ratified `inconclusive`, so every honest `Unresolved(4)` verdict refused here as
+ * `evaluation-record-graph-invalid` and never reached `recordVerdict`.
+ */
 function codeFromVerdict(bytes: Uint8Array): VerdictCode | undefined {
   try {
-    const envelope = parseDsseEnvelope(bytes);
+    const envelope = parseExactDsseEnvelope(bytes);
     const statement = ResultEvaluationStatementShape.parse(JSON.parse(
       new TextDecoder("utf-8", { fatal: true }).decode(envelope.payloadBytes),
     ));
-    return verdictCodeFromValue(statement.predicate.verdict);
+    return decisionGradeVerdictCode(statement.predicate.verdict);
   } catch {
     return undefined;
   }

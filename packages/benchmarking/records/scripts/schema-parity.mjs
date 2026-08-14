@@ -7,6 +7,7 @@ import { BenchmarkRecordSchema } from "../dist/benchmark/schema.js";
 import { RunRecordSchema } from "../dist/run/schema.js";
 import { MatrixRecordSchema } from "../dist/matrix/schema.js";
 import { ReportRecordSchema } from "../dist/report/schema.js";
+import { BenchmarkAccountingRecordSchema, ObservationArchiveSchema } from "../dist/accounting/schema.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const schemas = join(root, "schemas");
@@ -19,12 +20,21 @@ const validate = async (family) => {
 };
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 
-const runtimeSchemas = { benchmark: BenchmarkRecordSchema, run: RunRecordSchema, matrix: MatrixRecordSchema, report: ReportRecordSchema };
+const runtimeSchemas = {
+  benchmark: BenchmarkRecordSchema,
+  run: RunRecordSchema,
+  matrix: MatrixRecordSchema,
+  report: ReportRecordSchema,
+  "benchmark-accounting": BenchmarkAccountingRecordSchema,
+  "observation-archive": ObservationArchiveSchema,
+};
 const corpus = {
   benchmark: { valid: ["minimal", "valid"], invalid: ["invalid-bad-version", "invalid-item-uri-only"] },
   run: { valid: ["minimal", "valid"], invalid: ["invalid-benchmark-uri-only", "invalid-missing-closeAt"] },
   matrix: { valid: ["minimal", "valid"], invalid: ["invalid-aggregate-field", "invalid-bad-outcome", "invalid-run-uri-only"] },
   report: { valid: ["minimal", "plural-valid", "valid"], invalid: ["invalid-missing-disclosures", "invalid-subject-uri-only"] },
+  "benchmark-accounting": { valid: ["valid"], invalid: ["invalid-missing-protocol", "invalid-missing-publisher-authority"] },
+  "observation-archive": { valid: ["valid"], invalid: ["invalid-missing-profile"] },
 };
 
 async function assertParity(kind, fixture, expected) {
@@ -42,6 +52,27 @@ for (const [kind, families] of Object.entries(corpus)) {
   for (const fixture of families.valid) await assertParity(kind, fixture, true);
   for (const fixture of families.invalid) await assertParity(kind, fixture, false);
 }
+
+const accountingAfterClose = await readJson(join(fixtures, "benchmark-accounting", "invalid-authorization-after-close.json"));
+const accountingCheck = await validate("benchmark-accounting");
+assert(!BenchmarkAccountingRecordSchema.safeParse(accountingAfterClose).success, "benchmark-accounting/authorization-after-close: runtime must reject delegate authority effective after close");
+assert(accountingCheck(accountingAfterClose), "benchmark-accounting/authorization-after-close: Draft 2020-12 accepts shape (instant ordering is runtime-only)");
+
+const observationArchive = await readJson(join(fixtures, "observation-archive", "valid.json"));
+const observationArchiveCheck = await validate("observation-archive");
+observationArchive.streams[0].observations = [{}];
+assert(!ObservationArchiveSchema.safeParse(observationArchive).success, "observation-archive/empty-observation: runtime must reject an empty observation object");
+assert(!observationArchiveCheck(observationArchive), "observation-archive/empty-observation: Draft 2020-12 must reject an empty observation object");
+
+const observationArchiveConflict = await readJson(join(fixtures, "observation-archive", "valid.json"));
+observationArchiveConflict.streams[0].observations = [];
+observationArchiveConflict.streams[0].conflicts = [{
+  source: observationArchiveConflict.streams[0].source,
+  id: "conflict",
+  observations: [{}, {}],
+}];
+assert(!ObservationArchiveSchema.safeParse(observationArchiveConflict).success, "observation-archive/empty-conflict-observation: runtime must reject empty conflict observations");
+assert(!observationArchiveCheck(observationArchiveConflict), "observation-archive/empty-conflict-observation: Draft 2020-12 must reject empty conflict observations");
 
 const run = await readJson(join(fixtures, "run", "minimal.json"));
 const runCheck = await validate("run");

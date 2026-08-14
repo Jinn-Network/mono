@@ -1,6 +1,6 @@
 # Public benchmark bundle
 
-The frozen format is `benchmark-product-public-bundle/1`. It is an immutable,
+The frozen format is `benchmark-product-public-bundle/2`. It is an immutable,
 digest-addressed directory containing a Report, the exact evidence needed to
 check it, public trust material, and five deterministic presentation assets.
 Its evidence remains verifiable after the originating product workspace and
@@ -38,10 +38,26 @@ The fixed files are:
 - `share.txt`
 
 The manifest also includes one exact `records/<sha256>.bin` member for every
-record in the authenticated evidence graph. A cancelled run additionally has
-the optional `verification/cancel-requested.json`. No other role is permitted
-in `benchmark-product-public-bundle/1`; an incompatible closure requires a new
+record in the authenticated evidence graph. For an Inspect-backed Task this
+closure includes the exact canonical Inspect selection manifest under the
+`runtime-selection` evidence role. The verifier checks that the Task, selected
+arm, complete ordered scorer definitions, selected projections, Jinn verdict
+rule, provider evidence, and native log all agree with that sealed selection; a
+bundle is not portable if it retains the Task and log but omits the method that
+selected them. A cancelled run additionally has the optional
+`verification/cancel-requested.json`. When publication explicitly authorizes
+native Inspect content, each delivered native log is duplicated byte-for-byte
+as `native/inspect/<sha256>.eval`. The verifier requires that set to exactly
+match the Inspect log outputs in the authenticated delivery graph; the `.eval`
+extension makes the artifact directly usable by the pinned Inspect reader and
+Inspect View. No other role is permitted in
+`benchmark-product-public-bundle/2`; an incompatible closure requires a new
 format version.
+
+Version 2 is the first format that permits runtime-native artifacts and
+same-execution scorer relationships. Version 1 remains a historical native-only
+format; this implementation emits and verifies version 2 rather than changing
+version 1's closed schema in place.
 
 ## Portable verification
 
@@ -51,7 +67,8 @@ Use the shipped built CLI, without the source workspace:
 colophon bundle verify --bundle <bundle-dir> --json
 ```
 
-Success returns the bundle identity, record digests, and exactly **six checks**
+Success returns the bundle identity, record digests, an Inspect runtime-method
+summary when applicable, and exactly **six checks**
 in this order:
 
 1. `manifest`
@@ -87,8 +104,18 @@ A citation should include at least:
 - the standalone verification command or a byte-preserving location of the
   complete directory.
 
-Do not cite a badge, card, or headline as if it were the full result. The current
-method states no comparative winner; no asset may infer one from point estimates.
+Do not cite a badge, card, or headline as if it were the full result. A `wilson@1`
+report states no comparative winner. A `paired-delta@1` full report spells out the
+candidate-minus-baseline direction and presents the estimate, interval or withheld
+state, exact alpha, and paired Task count together. Its compact badge, social card,
+and share text contain no result number and link relatively to `index.html`; they are
+signposts to the full report, never alternate conclusions.
+
+Every paired Report also carries a limitation stating that the method estimates an
+effect but does not gate one: no verdict, threshold, or selection was registered.
+That limitation stays separate from power or minimum-detectable-effect disclosures;
+an interval withheld for insufficient pairs or clusters is not the same claim as a
+completed interval whose sensitivity is below a target effect.
 
 ## Trust, privacy, and limitations
 
@@ -104,6 +131,11 @@ environment data, absolute workspace paths, credentials, and private PEM keys
 are excluded, but authenticated Task, Delivery, verdict, Report, and claim
 content is public. This is not a generic PII scanner, malware scanner, or
 arbitrary-content sanitizer.
+
+Inspect-backed drafts fail publication unless the caller explicitly approves
+including native artifacts. That approval includes complete Inspect logs and
+transcripts; it is never inferred from locking, launching, reporting, or an
+earlier preview.
 
 Filesystem and semantic integrity checks do not protect against a privileged
 actor rewriting the running process, memory, or storage after verification.

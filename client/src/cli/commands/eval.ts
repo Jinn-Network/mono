@@ -322,7 +322,9 @@ function buildEvalHarness(implName: string, config: ReturnType<typeof loadConfig
  * checkpoint publish/install verbs are factory-only; the pin/fetch format is a
  * future verification layer — spec §6.4, "Layer 4"). The realistic operator
  * workflow (#824) evaluates the operator's OWN frozen state, which already
- * lives on disk. Mirrors `codedigest-revert-check` (`--impl-state-dir`).
+ * lives on disk. The `--impl-state-dir` shape was set by the since-retired
+ * `codedigest-revert-check` verb (one-swap R3b, issue #2494); `jinn eval` is
+ * now its only user.
  */
 export function resolveLocalImplStateDir(
   explicit: string | undefined,

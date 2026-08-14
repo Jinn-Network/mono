@@ -31,7 +31,7 @@ const FORBIDDEN = [
   '/auth/handshake',
   '/v1/discovery/plugin-publications',
   '/v1/bootstrap',
-  '/v1/operator/joined',
+  '/v1/operator/execution-data',
   '/api/admin/restart',
   '/some/deep/spa/route',
 ];

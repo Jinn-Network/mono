@@ -95,6 +95,7 @@ describe("buildSampleBenchmark — launcher shape contract", () => {
     for (const task of sample.tasks) {
       const parsedTask = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(task.bytes)) as {
         payload: { forecast: { consensusProbabilityYes: string; observedAt: string } };
+        outputs: readonly { name: string }[];
       };
 
       const root = mkdtempSync(join(tmpdir(), "bp11-sample-launch-"));
@@ -137,7 +138,12 @@ describe("buildSampleBenchmark — launcher shape contract", () => {
       });
 
       expect(result.status, result.stderr).toBe(0);
-      const prediction = JSON.parse(readFileSync(join(outDir, "prediction.json"), "utf8"));
+      // #39: the output file is named for the sample Task's own DECLARATION, not a literal --
+      // pinning the launcher to a filename here is what let `prediction.json` diverge from the
+      // `prediction` every signed Delivery and every evaluator expected.
+      const declaredOutput = parsedTask.outputs[0].name;
+      expect(declaredOutput).toBe("prediction");
+      const prediction = JSON.parse(readFileSync(join(outDir, declaredOutput), "utf8"));
       expect(prediction).toStrictEqual({
         probabilityYes: parsedTask.payload.forecast.consensusProbabilityYes,
         submittedAt: parsedTask.payload.forecast.observedAt,

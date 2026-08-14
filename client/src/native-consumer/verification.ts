@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import {
   ADMISSION_RECEIPT_TRUST_SCOPE,
   VerdictCode,
+  decisionGradeVerdictCode,
   deriveMarketplaceAttemptUri,
   gateVerdictObservation,
-  verdictCodeFromValue,
   type VerdictCode as VerdictCodeValue,
 } from '@jinn-network/marketplace-binding';
 import {
@@ -360,7 +360,10 @@ export async function verifyNativeVertical(input: {
     input.graph.evaluation.delivery.bytes, (value) => DeliveryRecordSchema.parse(value), 'evaluation Delivery',
   );
   const statement = verdictStatement(input.graph.evaluation.verdict.bytes);
-  const verdictCode = verdictCodeFromValue(statement.predicate.verdict);
+  // Same reader as the named gate and the evaluator's own pre-settlement path: a Result Evaluation
+  // verdict has exactly one ratified vocabulary (`pass|fail|inconclusive`), so an honest
+  // `inconclusive` verifies as `Unresolved(4)` rather than throwing on an unrecognized value.
+  const verdictCode = decisionGradeVerdictCode(statement.predicate.verdict);
   const receiptEnvelope = parseExactDsseEnvelope(input.graph.admissionReceipt.bytes);
   const receiptStatement = exactJson(
     receiptEnvelope.payloadBytes,

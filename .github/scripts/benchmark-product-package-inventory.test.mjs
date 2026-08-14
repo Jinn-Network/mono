@@ -38,27 +38,37 @@ const PRODUCT_PACKAGES = [
 // `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor`
 // + `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
 // sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters`
-// (the real evaluation leg), and `trust-core` (DSSE verdict signing). BP-13 (Report production/
+// (the real evaluation leg), and `trust-core` (DSSE verdict signing). Demo-1 P3b adds the
+// `task-execution-oci-grader` product consumer edge. BP-13 (Report production/
 // verification) added `benchmarking-aggregate` for `produceReport`/`verifyReport` and the §9.2
 // method registry. BP-30 registered the second family member, `web`; BP-31 adds its sole direct
 // production Jinn edge, `@jinn-network/benchmark-product-core`. The matching portal resolutions
+// Inspect runtime integration adds `attestation-issuer` so the same-execution scorer can produce
+// the canonical attributable Result Evaluation payload without reimplementing evidence semantics.
 // are core's full private runtime closure so an isolated immutable web install can resolve the
 // public core entry. New edges are added deliberately, in this map and in the source-boundary
 // guard's per-member allow-list together.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', {
     dependencies: [
+      '@jinn-network/attestation-issuer',
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-interop',
       '@jinn-network/benchmarking-local',
+      '@jinn-network/benchmarking-publication',
       '@jinn-network/benchmarking-records',
       '@jinn-network/benchmarking-run',
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/record-discovery-transport-http',
+      '@jinn-network/record-publication',
       '@jinn-network/task-admission',
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-backend-local',
       '@jinn-network/task-execution-evaluation-harness',
       '@jinn-network/task-execution-evaluator-adapters',
       '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-oci-grader',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
       '@jinn-network/task-execution-supervisor',
@@ -67,17 +77,17 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     devDependencies: [],
     optionalDependencies: [], peerDependencies: [],
-    // Portals whose own edges must resolve inside this project: none of these six is imported here
-    // -- the source-boundary guard denies each by name -- but the declared dependencies above
+    // Portals whose own edges must resolve inside this project. `attestation-issuer` is now a
+    // direct approved edge; the other five remain transitive-only. The declared dependencies above
     // depend on them, and none is published to a registry, so their portal resolutions have to be
     // declared too or `install` sends them to versions that do not exist.
     portalResolutions: [
-      '@jinn-network/attestation-issuer',
       '@jinn-network/environment-record',
       '@jinn-network/evidence-discovery',
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
+      '@jinn-network/record-discovery-client',
     ],
   }],
   // BP-31: the private GUI is a server-side public-entry client of core. These transitive portal
@@ -92,6 +102,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-interop',
       '@jinn-network/benchmarking-local',
+      '@jinn-network/benchmarking-publication',
       '@jinn-network/benchmarking-records',
       '@jinn-network/benchmarking-run',
       '@jinn-network/environment-record',
@@ -99,12 +110,18 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
+      '@jinn-network/record-discovery-client',
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/record-discovery-transport-http',
+      '@jinn-network/record-publication',
       '@jinn-network/task-admission',
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-backend-local',
       '@jinn-network/task-execution-evaluation-harness',
       '@jinn-network/task-execution-evaluator-adapters',
       '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-oci-grader',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
       '@jinn-network/task-execution-supervisor',
@@ -120,6 +137,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
   ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
+  ['@jinn-network/benchmarking-publication', join(root, 'packages', 'benchmarking', 'publication')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
@@ -127,12 +145,18 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
+  ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/record-discovery-transport-http', join(root, 'packages', 'discovery', 'transport-http')],
+  ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
   ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
   ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
   ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
   ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
+  ['@jinn-network/task-execution-oci-grader', join(root, 'packages', 'task-execution', 'oci-grader')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
@@ -230,6 +254,19 @@ test('the product never publishes', () => {
     assert.equal(manifest.engines?.node, '>=22');
     assert.equal(manifest.private, true, `${expectedName} must be marked private`);
   }
+});
+
+test('the benchmark-publication profile kit is product-local acceptance coverage, not a shipped protocol surface', () => {
+  const fixture = join(packageRoot, 'core', 'test', 'fixtures', 'benchmark-publication-conformance', 'manifest.json');
+  assert.ok(existsSync(fixture), 'missing benchmark-publication conformance manifest');
+  const manifest = JSON.parse(readFileSync(fixture, 'utf8'));
+  assert.equal(manifest.profile, 'https://spec.jinn.network/profiles/benchmark-publication/v1');
+  assert.equal(manifest.owner, '@jinn-network/benchmark-product-core');
+  assert.match(manifest.scope, /application acceptance/i);
+  assert.equal(manifest.cases.length, 18);
+  const catalog = JSON.parse(readFileSync(join(root, 'architecture', 'platform-packages.v1.json'), 'utf8'));
+  const core = catalog.packages.find((entry) => entry.name === '@jinn-network/benchmark-product-core');
+  assert.deepEqual(core.publicSurface.conformance, [], 'private product acceptance coverage must not masquerade as a public conformance export');
 });
 
 test('no other package in the repository depends on the product', () => {

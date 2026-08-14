@@ -235,7 +235,7 @@ describe("runCollect — guards", () => {
     const [droppedCellKey] = deliveredCells;
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== droppedCellKey;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== droppedCellKey;
       }
       return true;
@@ -287,7 +287,7 @@ describe("runCollect — guards", () => {
     const [droppedCellKey] = deliveredCells;
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== droppedCellKey;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== droppedCellKey;
       }
       return true;
@@ -317,7 +317,7 @@ describe("runCollect — guards", () => {
 });
 
 describe("runCollect — full assembly (fake backend, driven run)", () => {
-  test("every cell judged; RunState.matrixSha256 set; solver/evaluator identities resolved; re-derivable integrity from the real admission receipt", async () => {
+  test("every cell judged; identities resolve; fake backend pinning stays unverifiable while task admission remains re-derivable", async () => {
     const clock = makeClock();
     await setUpDrivenRun(clock);
 
@@ -341,8 +341,13 @@ describe("runCollect — full assembly (fake backend, driven run)", () => {
     // unsigned or foreign-keyed verdict would resolve "unresolved" instead.
     for (const cell of matrix.cells) {
       expect(cell.outcome, cell.cellKey).toBe("judged");
-      expect(cell.verification.harness, cell.cellKey).toBe("match");
-      // The bundled sample's real admission receipt (BP-11) makes this a re-derivable cell.
+      // This intentionally minimal fake accepts and delivers work, but it does not expose the
+      // real backend's verifyRunPinning evidence. A dispatch alone must never earn "match".
+      // The real local-venue integration test covers the positive digest-bound proof path.
+      expect(cell.verification.harness, cell.cellKey).toBe("unverifiable");
+      // Integrity tier is an orthogonal Task-admission claim: sampleInit sealed a genuine
+      // deterministic prediction-snapshot receipt, so the cell remains re-derivable even though
+      // the fake backend cannot prove the identity of the harness that executed it.
       expect(cell.integrityTier, cell.cellKey).toBe("re-derivable");
       expect(cell.solver, cell.cellKey).toBe(runState?.owner);
       expect(cell.evaluator, cell.cellKey).toBe(LEGACY_VERDICT_EVALUATOR_ID);

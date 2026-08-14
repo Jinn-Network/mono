@@ -27,22 +27,19 @@ Anything that writes to `stateDir` happens here, including:
   > It never overrules the binary verdict, and it MUST NOT be used to size on-chain
   > reward — that path is gated on the withheld-test challenge (#1019, design §5.5).
 
-  2. **Quantitative trigger (#764)** — for each candidate Improve commit on recent `stateDir` git history (the commits since `implStateDirShaBefore`, identified from each `improvePromotionsDir/<n>.json` `implStateDirShaAfter`), ask the network-truth indexer whether the commit's per-codeDigest pass rate is significantly worse than its parent's. **Do not hand-roll the codeDigest hash or the statistics — shell out to the CLI**, which exports each commit's tree (`git archive`, no `.git`) and hashes it the way production stamps codeDigest, then runs the documented test:
+  2. **Quantitative trigger (#764) — RETIRED, do not attempt.** This step used to
+     shell out to `jinn codedigest-revert-check` to ask the network-truth indexer
+     whether a candidate Improve commit's per-codeDigest pass rate had regressed
+     against its parent's. That CLI was retired by one-swap R3b (issue #2494).
+     It is not a behavior change you need to compensate for: the HTTP indexer
+     serves **no authenticated reward rows** for this read, so the check could
+     only ever answer `insufficient_samples` — i.e. "do not revert". Trigger 1
+     above is the sole revert path. Do **not** substitute a hand-rolled
+     codeDigest hash, a hand-rolled statistical test, or any other CLI for it;
+     record `reason: "quantitative_trigger_retired"` on any
+     `promotionsReverted[]` entry you would otherwise have justified this way.
 
-     ```bash
-     STATE_DIR="<stateDir from spawn input>"
-     # $sha = a candidate Improve commit; $parent = its git parent ($sha^).
-     decision=$(jinn codedigest-revert-check \
-       --impl-state-dir "$STATE_DIR" \
-       --commit "$sha" \
-       --parent "$(cd "$STATE_DIR" && git rev-parse "$sha^")" \
-       --json)
-     # decision = { withCommit:{codeDigest,n,passRate}, atParent:{...}, delta, pValue, significant, recommendRevert, reason }
-     ```
-
-     Act ONLY on `recommendRevert === true` (then `git revert "$sha"`). Do NOT re-derive the thresholds here. On `reason: "discovery_unavailable"` or `"insufficient_samples"`, **do not revert** — the indexer is degraded, or the commit has not accumulated enough frozen-eval attempts yet (expected plateau, not a regression). Carry the decision's `reason` into the output record's `promotionsReverted[].reason`.
-
-  **Documented thresholds (canonical in `client/src/learner/revert-decision.ts` — do not redefine):** `min-samples = 30` per arm, `alpha = 0.05` (95% confidence), `window = 200` recent attempts. The test is a two-proportion z-test on pass/total (codeDigest-with-commit vs codeDigest-at-parent); a revert fires only when `delta < 0 AND p < alpha AND both arms ≥ min-samples`. These defaults are overridable via `stateDir/policy.json` `policy.revert.*` (and per-invocation via `--min-samples/--alpha/--window`).
+  **Thresholds** for the retired quantitative trigger remain documented in `client/src/learner/revert-decision.ts` (`min-samples = 30` per arm, `alpha = 0.05`, `window = 200`) for whoever re-backs that read on an authenticated source. They are **not** actionable from this prompt today — there is no CLI to invoke and you must not re-derive them here.
 - **Noisy notes / records** — if `stateDir/notes/` has accumulated more than `policy.maxNotesBytes` (default 1 MB), keep the last 50 by mtime, archive the rest.
 - **Conflicts between recent promotions** — Improve may have promoted two skills with conflicting prompts. Detect and resolve (favor newer; flag conflict in the output record).
 - **Migrate operator-private content from this run.** Operator-private session transcripts and operator-requests should be persisted into `stateDir` so the operator has a durable history across runs:

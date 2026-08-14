@@ -33,7 +33,7 @@ export function ActionForm({ action, submitLabel, gated = false, disabled = fals
   return (
     <form action={formAction} className="flex min-w-0 flex-col gap-3">
       {children}
-      <Button type="submit" variant={gated ? "destructive" : "default"} disabled={pending || disabled} className="self-start">
+      <Button type="submit" variant={gated ? "destructive" : "default"} disabled={pending || disabled} className="h-auto max-w-full self-start whitespace-normal text-left">
         {pending ? "Working" : submitLabel}
       </Button>
       {gated || notice !== undefined ? <p className="text-xs font-medium text-destructive">{notice ?? "Requires authority"}</p> : null}

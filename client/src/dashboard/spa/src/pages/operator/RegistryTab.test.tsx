@@ -10,7 +10,6 @@ import type { JSX } from 'react';
 vi.mock('../../api/client.js', () => ({
   api: {
     operator: {
-      listJoined: async () => ({ joinedSolverNets: {} }),
     },
     solvernets: {
       listRegistry: async () => ({
@@ -55,9 +54,6 @@ describe('RegistryTab', () => {
     expect(screen.getByText(/discover/i)).toBeTruthy();
     await waitFor(() =>
       expect(screen.getByText('Prediction Markets')).toBeTruthy(),
-    );
-    expect(screen.getByTestId('registry-join-cta').getAttribute('href')).toBe(
-      '/operator/join/bafybeiaaa',
     );
   });
 

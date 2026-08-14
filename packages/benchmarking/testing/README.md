@@ -16,7 +16,7 @@ running the relevant injected driver against the fixtures shipped here.
   reproduction of the kit-owned expected Matrix for the 3-task × 2-arm × 2-replicate miniature
   corpus. The corpus includes all six outcomes, replacement lineage, multiple verdicts, and an
   asymmetry flag.
-- **`describeExportConformance(exporters)`** injects EvalLog, Croissant, and static-bundle
+- **`describeExportConformance(exporters)`** injects Jinn Matrix-projection, Croissant, and static-bundle
   exporters and compares each projection with a canonical byte-exact oracle.
 - **`describeOrderingConformance(legs?)`** always checks structural Run commitment and the
   kit-owned positive, violation, and non-decision-grade local-order transcript oracles. Future
@@ -33,7 +33,9 @@ fixtures, oracles, and drivers are not deferred.
   implementations.
 - `fixtures/miniature-run/` contains the exact Benchmark, Run, tasks, submissions, deliveries,
   verdicts, evidence, injected assembly scope, and expected Matrix.
-- `fixtures/ordering/` and `fixtures/exports/` contain the ordering and export oracles.
+- `fixtures/ordering/` and `fixtures/exports/` contain the ordering and export oracles. The
+  append-only `exports/eval-log.json` fixture is retained as historical evidence only; its
+  manifest erratum points to the honest Jinn-owned Matrix projection that supersedes it.
 - `fixtures/methods/` contains method specifications plus compute, conflict, paired, clustering,
   comparability, and availability cases.
 - `scripts/generate-method-fixtures.mjs` derives the original closed-form reference-method

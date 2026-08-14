@@ -67,16 +67,6 @@ export interface MechAdapterConfig {
   routerClaimDeliveryVariant: 'v1' | 'v2' | 'v3';
   evictionRecovery?: EvictionRecoveryConfig;
   /**
-   * Whether this operator holds the `evaluator` role in a joined SolverNet.
-   * Omitted ⇒ enabled (opt-out default): a bare construction site keeps the
-   * historical scan-everything behaviour. Production callers (main.ts,
-   * join-applier.ts) always pass an explicit boolean. Gates three surfaces:
-   * ingest of delivery-claimed logs into the pending-evaluation set, the boot
-   * rehydrate of that set, and the per-cycle scan of evaluation opportunities.
-   * Ref #547.
-   */
-  evaluatorEnabled?: boolean;
-  /**
    * The single Safe broadcaster this operator's Safe transactions route through (finding E16 /
    * the C2 ruling: per-daemon state, not a process-global). May be supplied at construction when
    * the host already has one (CLI verbs); the daemon path (main.ts) supplies it later via

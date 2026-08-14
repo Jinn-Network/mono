@@ -11,6 +11,7 @@ import {
   serializeCanonicalJson,
   type DeliveryRecord,
   type ResourceDescriptor,
+  type TaskSpecification,
 } from '@jinn-network/task-execution-protocol';
 import { dssePreAuthEncoding, parseDsseEnvelope } from '@jinn-network/trust-core';
 import type {
@@ -80,6 +81,44 @@ function deliveryMatchesInput(parsed: DeliveryRecord, input: DeliveryRecord): bo
   } catch {
     return false;
   }
+}
+
+/**
+ * The produce-side mirror of the evaluator's `verifyEvaluationSubject` output rules (#39).
+ *
+ * The solver's self-verify checked the Delivery against its own persisted artifact rows but never
+ * against the Task's DECLARATIONS, so it happily passed eight consecutive deliveries whose outputs
+ * the requester's Task never declared. The evaluator refused the first one it saw, hours later,
+ * with the verdict window already spent. That is the #34 loose/strict asymmetry again: a producer
+ * that cannot self-detect its own drift exports the failure downstream, at the worst moment.
+ *
+ * These are the same rules `verifyEvaluationSubject` applies -- unique names, declared name,
+ * declared media type -- plus one the evaluator structurally cannot apply: a Delivery missing a
+ * REQUIRED Task output. The evaluator admits any SUBSET of the declarations (it iterates the
+ * Delivery, not the Task), so an empty Delivery would pass its subject check and only fail deep
+ * inside grading. Refusing it here is fail-closed and costs the solver nothing but a retry.
+ */
+function verifyTaskOutputDeclarations(
+  task: TaskSpecification,
+  delivery: DeliveryRecord,
+): VerificationDecision {
+  const declared = new Map(task.outputs.map((output) => [output.name, output]));
+  const delivered = new Set<string>();
+  for (const output of delivery.outputs) {
+    if (delivered.has(output.name)) return fail('output-name-not-unique');
+    delivered.add(output.name);
+    const declaration = declared.get(output.name);
+    if (declaration === undefined) return fail('output-not-declared-by-task');
+    if (output.mediaType === undefined || output.mediaType !== declaration.mediaType) {
+      return fail('output-media-type-not-declared-by-task');
+    }
+  }
+  for (const output of task.outputs) {
+    if (output.required === true && !delivered.has(output.name)) {
+      return fail('required-task-output-missing');
+    }
+  }
+  return { ok: true };
 }
 
 function verifyArtifactGraph(input: NativeSolutionVerificationInput): VerificationDecision {
@@ -200,6 +239,9 @@ export function buildNativeSolutionVerification(
         return fail('delivery-reference-mismatch');
       }
       if (input.effectiveTime !== delivery.createdAt) return fail('delivery-effective-time-mismatch');
+
+      const declarationDecision = verifyTaskOutputDeclarations(task, delivery);
+      if (!declarationDecision.ok) return declarationDecision;
 
       const artifactDecision = verifyArtifactGraph(input);
       if (!artifactDecision.ok) return artifactDecision;

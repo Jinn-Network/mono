@@ -14,7 +14,6 @@ export { ClaudeRunner } from './runner/claude.js';
 
 // Daemon
 export { Daemon, type DaemonConfig } from './daemon/daemon.js';
-export { DeliveryWatcherLoop } from './daemon/delivery-watcher.js';
 
 // Autopilot marketplace read-side verification
 export {

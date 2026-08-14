@@ -10,7 +10,9 @@ internal compatibility alias while packages keep their established names.
 
 Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
 Start at the [product overview](../README.md); see the
-[public-bundle guide](../PUBLIC-BUNDLE.md) and [threat model](../SECURITY.md).
+[public-bundle guide](../PUBLIC-BUNDLE.md), [Inspect runtime guide](../INSPECT-RUNTIME.md),
+[threat model](../SECURITY.md), and
+[Demo-1 E4 adapter runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
 
 This package is `private: true`, unpublished, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
@@ -33,8 +35,8 @@ and proves copied-bundle verification after source-workspace deletion.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **27 generated operations**, all shipped through the library, CLI, and
-GUI:
+contains **36 generated operations**, all shipped through the library and CLI
+with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
 |---|---|---|
@@ -51,6 +53,12 @@ GUI:
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
+| `migrateTerminalBenchLegacyTask` | `colophon runtime terminal-bench migrate` | Transform legacy Terminal-Bench material with pinned Harbor and preserve both byte histories. |
+| `publicationConfigure` | `colophon publication configure` | Configure the public locator and opt into prospective disclosure. |
+| `publicationRegister` | `colophon publication register` | Store, announce, and exact-probe the registration closure. |
+| `publicationStatus` | `colophon publication status` | Read timing assurance, stage receipts, compatibility, and recovery guidance without backend calls. |
+| `publicationAccounting` | `colophon publication accounting` | Publish retained complete or partial accounting and Matrix v2 without a Report or rerun. |
+| `publicationReport` | `colophon publication report` | Produce, verify, and publish the signed Report v2 envelope from the accounting closure. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
 | `runLaunch` | `colophon launch` | Drive the real local venue. |
@@ -64,6 +72,9 @@ GUI:
 | `runStatus` | `colophon status` | Read durable per-cell and driver status. |
 | `runVerify` | `colophon verify` | Re-derive Matrix, Report, and claim consistency. |
 | `sampleInit` | `colophon sample init` | Attach the bundled three-task benchmark. |
+| `selectInspectEvaluation` | `colophon runtime inspect select` | Select and bind a real Inspect evaluation. |
+| `selectHarborRuntime` | `colophon runtime harbor select` | Select and bind the managed Harbor runtime. |
+| `selectTerminalBench2Runtime` | `colophon runtime terminal-bench-2 select` | Resolve and bind one immutable Terminal-Bench 2 task through Harbor. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI
@@ -80,14 +91,28 @@ It reads only the caller-selected immutable bundle, needs no workspace or
 principal, and returns the six checks documented in the
 [public-bundle guide](../PUBLIC-BUNDLE.md).
 
+Demo-1's second read-only standalone verifier is the explicit post-lock/pre-dispatch E4 gate:
+
+```text
+colophon demo1 prereg verify --workspace <dir> --draft <draftId> \
+  --witness <witness.json> --method-summary-sha256 <sha256> \
+  --grader-program-sha256 <sha256> --source-commit <full-git-oid> --json
+```
+
+It reads the locked Run and empty run journal, verifies the exact external-anchor witness, and
+performs no network or credential access. It is an ordering gate, not publication; the exact
+contract and post-dispatch ordering check are in the
+[E4 runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
+
 Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 `--json`; command-specific flags are listed by `colophon help`.
 
 ## Authority and lifecycle behavior
 
-The **five gated operations** are `lock`, `launch`, `cancel`, `report`, and
-`publish`. The founding sponsor receives all five grants. A delegated agent may
-perform any of them only after a sponsor grants it. `authority grant` and
+The **nine gated operations** are `lock`, `launch`, `cancel`, `report`,
+`publish`, `publication.configure`, `publication.register`,
+`publication.accounting`, and `publication.report`. The founding sponsor receives all nine grants. A delegated agent may perform any of them
+only after a sponsor grants it. `authority grant` and
 `authority revoke` are separately sponsor-only, so a delegated agent cannot
 self-escalate. This is local-process policy and attribution, not operating-system
 or hosted authentication.
@@ -140,3 +165,7 @@ Mutable drafts, grants, journals, scratch state, and private signing keys remain
 inside the workspace. Sealed records are stored as exact digest-addressed bytes.
 `publish` is **local immutable emission only: no upload, no hosting, no deployment**, package publication, or remote write. The emitted closure is
 public and not a general PII or confidentiality scrubber.
+
+For staged publication, `publicBaseUrl` is the exact archive mount, not merely an origin. For
+example, `https://example.test/publication` resolves records beneath
+`https://example.test/publication/records/...`; an origin-root mount remains supported.

@@ -1,3 +1,5 @@
+import type { BenchmarkRuntimeHost } from "../runtime/host-port.js";
+
 /**
  * The CLI's return shape and its injected environment (spec §5.2).
  *
@@ -21,4 +23,5 @@ export interface CliContext {
    * per drive event, written as the run progresses. Distinct from the buffered `CliResult` the
    * verb eventually returns; optional, and absent in every verb that isn't long-running. */
   readonly progress?: (line: string) => void;
+  readonly runtimeHost?: BenchmarkRuntimeHost;
 }

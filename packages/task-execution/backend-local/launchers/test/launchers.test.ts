@@ -134,8 +134,32 @@ describe("v1 launchers", () => {
 
     const first = runPlanned(provisioned);
     expect(first.status, first.stderr).toBe(0);
-    const prediction = JSON.parse(readFileSync(join(provisioned.out, "prediction.json"), "utf8"));
+
+    // #39 divergence pin: the output file is named for the Task's DECLARATION, read out of the
+    // staged Task itself rather than written as a literal here. The workspace harvest binds each
+    // declared output to `out/<name>`, so a launcher writing any other name puts a filename into
+    // the sealed Delivery's `outputs` -- which the evaluator's `verifyEvaluationSubject` refuses.
+    // Asserting against a literal is exactly what let `prediction.json` survive eight live rounds.
+    const declaredOutput = JSON.parse(goldenNativeTask().toString("utf8")).outputs[0].name;
+    expect(declaredOutput).toBe("prediction");
+    const prediction = JSON.parse(readFileSync(join(provisioned.out, declaredOutput), "utf8"));
     expect(prediction).toStrictEqual({ probabilityYes: "0.750000", submittedAt: "2026-08-02T00:00:00Z" });
+
+    // The structured envelope is backend metadata: present for `readResultEnvelope`, and never a
+    // name the Task declares.
+    expect(readdirSync(provisioned.out).sort())
+      .toStrictEqual([declaredOutput, "structured-output.json"].sort());
+  });
+
+  it("accepts a native forecast with a self-declared author and namespaced derivation metadata", async () => {
+    const authored = JSON.parse(goldenNativeTask().toString("utf8"));
+    authored.author = "did:key:z6MkiFixture";
+    authored["https://product.example/extensions/derivation/v1"] = {
+      sourceTask: { digest: { sha256: "a".repeat(64) } },
+    };
+    const provisioned = await provisionAttempt(new TextEncoder().encode(JSON.stringify(authored)));
+    const result = runPlanned(provisioned);
+    expect(result.status, result.stderr).toBe(0);
   });
 
   it("prediction-v1-baseline refuses a legacy SignedTaskV1 staged as the sealed Task", async () => {
@@ -174,7 +198,7 @@ describe("v1 launchers", () => {
 
     const result = runPlanned(provisioned);
     expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(readFileSync(join(provisioned.out, "prediction.json"), "utf8")))
+    expect(JSON.parse(readFileSync(join(provisioned.out, golden.outputs[0].name), "utf8")))
       .toStrictEqual({ probabilityYes: "0.750000", submittedAt: "2026-08-02T00:00:00Z" });
   });
 

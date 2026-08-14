@@ -40,8 +40,12 @@ import {
 import type { CanonicalTaskCreatedReader } from './native-fleet-requester-write.js';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
-import { buildNativeResolveRecord } from './composition-root.js';
-import type { NativeClaimRuntimeInput } from './composition-root.js';
+import {
+  buildNativeResolveRecord,
+  buildReadTodayDeliveryFacts,
+  buildRecordPlaneCounterpartyDeliveryResolver,
+} from './composition-root.js';
+import type { NativeClaimRuntimeInput, NativeOwnDeliveryRecords } from './composition-root.js';
 import {
   buildNativeClaimPolicy,
   buildNativeEvaluationSpecResolver,
@@ -63,6 +67,7 @@ import {
 } from './native-fleet-discovery.js';
 import type { NativeDiscoveryConsumer } from './native-discovery.js';
 import type { NativePublicRecordTransport } from './native-infrastructure-bundle.js';
+import { listPublicRecordDigests } from './native-evaluator-public-record-index.js';
 import { NativeOperatorStateRepository } from './native-operator-state.js';
 import type { NativeProjectorExactPorts } from './native-projector-ports.js';
 import { openNativeTrustCatalog, type NativeTrustAuthority } from './native-trust-catalog.js';
@@ -77,9 +82,10 @@ export class NativeFleetAssemblyError extends Error {
 }
 
 /**
- * HTTP-first delivery-content resolver for the projector's today-mode delivery correspondence.
- * Native deliveries are HTTP-served and may never land on the projector's IPFS gateway, so the
- * enrich path must try the configured record-source serving planes (`byLocation`) first. Mirrors
+ * HTTP-first delivery-content resolver for the projector's today-mode delivery correspondence and
+ * (defect #45) for the announce leg's `delivery` / `evaluation-delivery` record resolution.
+ * Native deliveries are HTTP-served and may never land on the projector's IPFS gateway, so both
+ * legs must try the record-source serving planes (`byLocation`) first. Mirrors
  * `native-evaluator-opportunity-source.ts`'s `recordFetcher`, and stays untrusted: bytes are
  * returned only when they re-derive to the requested digest. Undefined on any miss so composition
  * can layer the IPFS gateway after it.
@@ -98,6 +104,49 @@ export function buildFleetDeliveryBytesResolver(
       } catch { /* serving-plane miss/failure — try the next configured origin, then IPFS */ }
     }
     return undefined;
+  };
+}
+
+/**
+ * The projector's `resolveRecord("delivery")` leg for the TODAY generation (defect #45).
+ *
+ * `BASE_SEPOLIA_TODAY` is the generation this fleet pins, and today-generation
+ * `SolutionDeliveryClaimed` carries no `deliveryDigest` (`events.ts`'s `todayEvent`) — so
+ * {@link buildFleetDeliveryBytesResolver}, which is digest-keyed, has nothing to key off. The
+ * ENGAGEMENT `(chainId, coordinator, taskId, attemptIndex)` is the key instead, and the bytes come
+ * out of this operator's own durable solution-artifact graph (`recordSolutionReady` writes exactly
+ * one `delivery` artifact per engagement and refuses any graph that does not).
+ *
+ * The anchor check is NOT skipped, it is downstream: the announce leg only asks for this role when
+ * the `delivery-recorded.v1` observation exists, `announce.ts`'s `expectedMaterialDigest` reads
+ * that observation's digest (`observe.ts` emits it only after the today-mode sha256<->keccak mech
+ * correspondence passes), and `anchorCheckedMaterial` refuses on mismatch. So bytes that are not
+ * the delivered bytes are refused there — this resolver only has to be honest about a miss.
+ *
+ * `undefined` (never a throw) on a miss and on an ambiguous match, matching the digest-keyed
+ * resolver's contract.
+ */
+export function buildFleetOwnSolutionDeliveryResolver(
+  state: Pick<NativeOperatorStateRepository, 'listEngagements' | 'listSolutionArtifacts'>,
+): (lookup: {
+  readonly chainId: number;
+  readonly coordinator: string;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+}) => Promise<Uint8Array | undefined> {
+  return async (lookup) => {
+    const coordinator = lookup.coordinator.toLowerCase();
+    const matches = state.listEngagements().filter((engagement) =>
+      engagement.chainId === lookup.chainId
+      && engagement.coordinator.toLowerCase() === coordinator
+      && engagement.taskId === lookup.taskId
+      && engagement.attemptIndex === lookup.attemptIndex);
+    if (matches.length !== 1) return undefined;
+    const deliveries = state
+      .listSolutionArtifacts(matches[0]!.engagementId)
+      .filter(({ role }) => role === 'delivery');
+    if (deliveries.length !== 1) return undefined;
+    return deliveries[0]!.bytes;
   };
 }
 
@@ -201,6 +250,35 @@ export function createLateBoundVerdictObservation(): LateBoundVerdictObservation
 }
 
 /**
+ * The same late-binding, for the today-generation `resolveRecord("evaluation-delivery")` reader
+ * (defect #45). It reads the SAME durable evaluator state the M4b gate reads, which does not exist
+ * until `buildFleetNativeEvaluator` has run, so it is installed from the SAME call site in
+ * `main.ts` and for the same reason. Until then it returns `undefined` — a miss, which the
+ * resolver turns into a named refusal, not an exception and never fabricated bytes. A
+ * solver-only operator that runs no evaluator stays on that default forever, correctly: it holds
+ * no evaluation-delivery records to announce.
+ */
+export interface LateBoundEvaluationDeliveryRecords {
+  readonly resolve: NonNullable<NativeOwnDeliveryRecords['evaluationDelivery']>;
+  install(resolver: NativeOwnDeliveryRecords['evaluationDelivery']): void;
+}
+
+export function createLateBoundEvaluationDeliveryRecords(): LateBoundEvaluationDeliveryRecords {
+  let installed: NativeOwnDeliveryRecords['evaluationDelivery'] | undefined;
+  return {
+    resolve: async (lookup) => installed === undefined ? undefined : installed(lookup),
+    install(resolver) {
+      if (installed !== undefined) {
+        throw new NativeFleetAssemblyError(
+          'native evaluation-delivery record resolver is already installed; the late-bound reader is set exactly once',
+        );
+      }
+      installed = resolver;
+    },
+  };
+}
+
+/**
  * Everything the fleet requester WRITE path (`buildFleetRequesterWrite`, one-swap M5e) needs that
  * this runtime can build BEFORE the composition venue exists — the role authority, the shared
  * authority-time and canonical reads, and the identity/location metadata. `main.ts` completes it
@@ -255,6 +333,13 @@ export interface FleetNativeRuntime {
    * {@link createLateBoundVerdictObservation}.
    */
   readonly installVerdictObservation: LateBoundVerdictObservation['install'];
+  /**
+   * Installs the today-generation `resolveRecord("evaluation-delivery")` reader over the same
+   * durable evaluator `state`, from the same one call site in `main.ts` (defect #45). Until then
+   * the leg misses and the resolver refuses by name. See
+   * {@link createLateBoundEvaluationDeliveryRecords}.
+   */
+  readonly installEvaluationDeliveryRecords: LateBoundEvaluationDeliveryRecords['install'];
 }
 
 export interface FleetNativeRuntimeInput {
@@ -269,6 +354,13 @@ export interface FleetNativeRuntimeInput {
   readonly password: string;
   readonly workerOwnerId: string;
   readonly fetchImpl?: (request: string | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * Optional, and only the counterparty delivery resolver reads it today. Its "candidate hashes to
+   * the on-chain anchor but names a DIFFERENT attempt" branch is the one genuinely suspicious thing
+   * this module can observe, and without a logger it is silent — the refusal itself still reaches
+   * the operator through `NativeAnnouncementRecordError`, but not what was rejected or why.
+   */
+  readonly logger?: { warn(message: string): void };
 }
 
 function required<T>(value: T | undefined, key: string): T {
@@ -418,6 +510,41 @@ export async function buildFleetNativeRuntime(
   // adapter through `installVerdictObservation` once that state exists; until then the stable port
   // refuses fail-closed. See `createLateBoundVerdictObservation`.
   const lateBoundVerdict = createLateBoundVerdictObservation();
+  // ONE digest-keyed reader over the native serving plane, shared by the two consumers that need
+  // it (defect #45): the projector's ANNOUNCE leg (`resolveRecord` for the `delivery` /
+  // `evaluation-delivery` roles) and its ENRICH leg (`resolveDeliveryBytes`, the today-mode
+  // delivery correspondence). Both want the same bytes under the same content address, so they
+  // read the same origins.
+  //
+  // `publicBaseUrl` LEADS the list. `native-fleet-serving-plane.ts` serves every source this
+  // operator owns — requester, solver AND evaluator records — under that one origin, and the
+  // announce leg's most common request is for a record this operator itself just published (its
+  // own solution delivery, its own verdict). Reading only `config.recordSources` made that
+  // self-resolution depend on the operator having listed itself as a peer.
+  const nativeRecordBytes = buildFleetDeliveryBytesResolver(
+    (url) => records.byLocation(url),
+    [publicBaseUrl, ...(config.recordSources ?? []).map(({ baseUrl }) => baseUrl)],
+  );
+  // ENGAGEMENT-keyed readers for the TODAY generation this fleet actually pins (`chain` above is
+  // `BASE_SEPOLIA_TODAY`), whose delivery events carry no digest for `nativeRecordBytes` to key
+  // off. The solution leg reads the solver state opened above; the evaluation leg is late-bound
+  // for the same reason the M4b gate is — its durable state does not exist yet.
+  const lateBoundEvaluationRecords = createLateBoundEvaluationDeliveryRecords();
+  const ownDeliveryRecords: NativeOwnDeliveryRecords = {
+    solutionDelivery: buildFleetOwnSolutionDeliveryResolver(state),
+    evaluationDelivery: lateBoundEvaluationRecords.resolve,
+  };
+  // #2644 parity for the ANNOUNCE leg. `ownDeliveryRecords` above answers for a delivery this
+  // operator produced; a REQUESTER announcing a counterparty's settled delivery holds no such
+  // record and never will, so it anchors the published one against
+  // `getAttempt(...).solutionCidDigest` and fetches it off the same record plane the enrich leg
+  // already reads (`listRecordPlaneDigests` below). Same origins, same digest re-derivation.
+  const counterpartySolutionDelivery = buildRecordPlaneCounterpartyDeliveryResolver({
+    readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, chain.taskCoordinator),
+    fetchDeliveryBytes: nativeRecordBytes,
+    listRecordPlaneDigests: (limit) => listPublicRecordDigests(input.store, limit),
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
   const projectorPorts: NativeProjectorExactPorts = {
     resolveRecord: buildNativeResolveRecord(
       chain,
@@ -425,12 +552,18 @@ export async function buildFleetNativeRuntime(
         stateDir: nativeRequesterStateDir,
         requesterSubmission: identities.get('requester-submission'),
       }),
+      nativeRecordBytes,
+      ownDeliveryRecords,
+      counterpartySolutionDelivery,
     ),
     verifyVerdictObservation: lateBoundVerdict.port,
-    resolveDeliveryBytes: buildFleetDeliveryBytesResolver(
-      (url) => records.byLocation(url),
-      (config.recordSources ?? []).map(({ baseUrl }) => baseUrl),
-    ),
+    resolveDeliveryBytes: nativeRecordBytes,
+    // Defect #48. The requester's candidate content addresses for a counterparty's solution
+    // Delivery: today generation puts the sha256 anchor only on the Mech `Deliver` this operator
+    // does not subscribe to, so the projector keys its fetch off the signed record-plane location
+    // statements instead — hints, re-checked against the coordinator's own keccak anchor by
+    // `buildRecordPlaneSolutionDeliveryPort` before anything is believed about them.
+    listRecordPlaneDigests: (limit) => listPublicRecordDigests(input.store, limit),
   };
 
   const discovery = await buildFleetNativeDiscovery({
@@ -473,6 +606,7 @@ export async function buildFleetNativeRuntime(
     records,
     agentIri,
     installVerdictObservation: lateBoundVerdict.install,
+    installEvaluationDeliveryRecords: lateBoundEvaluationRecords.install,
   };
 }
 

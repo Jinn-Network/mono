@@ -18,8 +18,9 @@
  *
  * WHAT EACH CHECK PROVES, AND WHAT IT DOES NOT (read before wiring):
  *
- *  1. `executorBinding` -- DSSE-structural verification (`@jinn-network/trust-core`'s
- *     `parseDsseEnvelope`/`dssePreAuthEncoding`) plus a genuine asymmetric-signature check (Node's
+ *  1. `executorBinding` -- exact-encoding DSSE verification (`@jinn-network/trust-core`'s
+ *     strict `parseExactDsseEnvelope`/`dssePreAuthEncoding`, the same authority-bearing parser
+ *     the remote evaluator applies -- defect #34 follow-up) plus a genuine asymmetric-signature check (Node's
  *     built-in `crypto.verify`, Ed25519). The signed payload is `verificationInput.deliveryBytes`
  *     itself -- the settling Delivery's own exact sealed bytes, unmodified (this field's own type
  *     comment already calls this out: "verifier implementations use these as the DSSE payload
@@ -95,7 +96,7 @@
  */
 import { verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import type { Hex } from 'viem';
-import { dssePreAuthEncoding, parseDsseEnvelope } from '@jinn-network/trust-core';
+import { dssePreAuthEncoding, parseExactDsseEnvelope } from '@jinn-network/trust-core';
 import type {
   DispatchBindingCheck,
   EvaluationSpecificationCheck,
@@ -186,9 +187,16 @@ function checkExecutorBinding(
     };
   }
 
-  let envelope: ReturnType<typeof parseDsseEnvelope>;
+  // Defect #34 follow-up: parse with the same authority-bearing STRICT parser the remote
+  // evaluator uses (`parseExactDsseEnvelope`, reached there via `verifyNativeDsse`), not the
+  // loose structural `parseDsseEnvelope`. The envelope under check is this operator's OWN
+  // producer output (`backend.ts`'s `sealExecutorBindingEnvelope`), which emits exactly the
+  // canonical encoding the strict parser reconstructs -- so a pass here stays a pass remotely,
+  // and any producer encoding drift is caught by the operator's own settlement grade instead of
+  // surfacing only as a remote `envelope-signature-invalid` refusal a live round later.
+  let envelope: ReturnType<typeof parseExactDsseEnvelope>;
   try {
-    envelope = parseDsseEnvelope(envelopeBytes);
+    envelope = parseExactDsseEnvelope(envelopeBytes);
   } catch (cause) {
     return { status: 'invalid', detail: `executor-binding envelope failed DSSE parsing: ${String(cause)}` };
   }

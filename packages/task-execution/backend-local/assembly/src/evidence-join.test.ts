@@ -185,6 +185,48 @@ describe("evidence recorder join (C3)", () => {
     expect(awaitCalls).toBe(1);
   });
 
+  /**
+   * #36. `producer` defaults to `source`, so `source` and `executor` become two SEPARATE
+   * `agent`-kind graph identities on every recording this join starts — with different
+   * descriptor names ("Jinn backend-local" vs "Jinn executor launcher"). The recorder's
+   * contextual-identity check therefore refuses one identity used for both roles. That refusal
+   * is CORRECT and stays; what the composition must do is pass two distinct identities.
+   */
+  test("one identity used as both source and executor is refused; two distinct identities record cleanly (#36)", async () => {
+    const bytes = new TextEncoder().encode("exact");
+    // `createEvidenceJoin` types both identities as `${string}:${string}` (evidence-join.ts:54-55);
+    // plain `string` is not assignable to it, so the helper must carry the same shape.
+    const start = async (
+      source: `${string}:${string}`,
+      executor: `${string}:${string}`,
+      attempt: `urn:uuid:${string}`,
+    ) =>
+      createEvidenceJoin({
+        ports: ports(new InMemoryEvidenceRepository()),
+        source,
+        executor,
+        now: () => "2026-07-28T00:00:00.000Z",
+      }).start({
+        paths: await workspace(),
+        attempt,
+        taskDigest: sha256(bytes),
+        taskBytes: bytes,
+        dispatchContextBytes: bytes,
+        launchPlanBytes: bytes,
+        startedAt: "2026-07-28T00:00:00.000Z",
+      });
+
+    const reused = "urn:uuid:44cfb891-0000-4000-8000-000000000001";
+    await expect(start(reused, reused, "urn:uuid:10000000-0000-4000-8000-000000000004"))
+      .rejects.toThrow(/reused for incompatible contextual roles/);
+
+    await expect(start(
+      reused,
+      "urn:jinn:operator-runtime:0.2.2",
+      "urn:uuid:10000000-0000-4000-8000-000000000005",
+    )).resolves.toBeDefined();
+  });
+
   test("the assembly source never imports the concrete evidence local runtime", async () => {
     const source = await readFile(new URL("./evidence-join.ts", import.meta.url), "utf8");
     expect(source).not.toContain("@jinn-network/evidence-local-runtime");

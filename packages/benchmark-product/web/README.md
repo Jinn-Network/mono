@@ -8,6 +8,8 @@ core import.
 Read the [product overview](../README.md),
 [app specification](./BENCHMARK-PRODUCT-WEB-SPEC.md),
 [public-bundle guide](../PUBLIC-BUNDLE.md), and [security note](../SECURITY.md).
+Real Inspect selection and native-artifact behavior are documented in the
+[Inspect runtime guide](../INSPECT-RUNTIME.md).
 
 ## Required local configuration
 
@@ -61,10 +63,19 @@ exist and is the direct Playwright command.
   experience; previews never claim a service is live and invoke no operations.
 - `/workspace/new` — workspace initialization.
 - `/workspace` — workspace, drafts, and audit summary.
-- `/workspace/[draftId]` — intake, arms, authority, preview, quote, and lock.
+- `/workspace/[draftId]` — native/SWE-bench intake, real Inspect runtime
+  selection, arms, authority, preview, quote, and lock.
 - `/workspace/[draftId]/run` — launch, durable status, resume, cancel, collect.
 - `/workspace/[draftId]/results` — Matrix, Report, claim, verification, and local
   publication.
+- `/publication/[...path]` — fixed same-workspace exact-byte public archive; the browser
+  never selects a workspace.
+
+Set `BENCHMARK_PRODUCT_PUBLICATION_PUBLIC_BASE_URL` to the externally visible origin plus
+`/publication` when a proxy means the server cannot safely derive its public URL. It is only a
+locator: configure/register consent and exact-byte probes remain core operation gates.
+The GUI displays and uses this server-owned exact archive mount; it never accepts a browser URL.
+The CLI retains `--public-base-url` for deliberate remote/archive operation outside the GUI.
 
 All displayed facts and action receipts come from public core operations.
 Known failures preserve their typed recovery category. Unexpected errors,

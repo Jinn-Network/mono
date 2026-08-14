@@ -11,34 +11,58 @@
  * pinning shape mirror `../venue/venue.integration.test.ts`.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseMatrix, parseRun } from "@jinn-network/benchmarking-records";
-import { parseDsseEnvelope } from "@jinn-network/trust-core";
+import { parseMatrix, parseReport, parseRun } from "@jinn-network/benchmarking-records";
+import type {
+  AttemptUri,
+  BackendCapabilities,
+  DeliveryRef,
+  ObservationSnapshot,
+  SubmissionAck,
+  SubmissionUri,
+} from "@jinn-network/task-execution-backend";
+import { deriveEvaluationTask } from "@jinn-network/task-execution-profiles";
+import { sealDelivery, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
+import { canonicalJsonBytes, parseDsseEnvelope } from "@jinn-network/trust-core";
 import { readAuditEntries } from "../audit/journal.js";
+import { verifyPublicBundle } from "../bundle/verify.js";
 import { armAdd } from "../operations/arms.js";
 import { authorityGrant } from "../operations/authority-ops.js";
 import type { OperationContext } from "../operations/context.js";
-import { createDraft, readDraftDocument } from "../operations/drafts.js";
+import { createDraft, readDraftDocument, updateDraft } from "../operations/drafts.js";
+import { importSweBenchRows } from "../operations/import.js";
 import { initWorkspace } from "../operations/init.js";
+import { runPublish } from "../operations/publish.js";
 import { runCollect } from "../operations/run-collect.js";
 import { runLaunch } from "../operations/run-launch.js";
 import { runLock } from "../operations/run-lock.js";
 import { runQuote } from "../operations/run-quote.js";
+import { runReport } from "../operations/report.js";
 import { runResults } from "../operations/run-results.js";
 import { runStatus } from "../operations/run-status.js";
+import { runVerify } from "../operations/verify.js";
 import { sampleInit } from "../operations/sample.js";
-import { readVerdictEnvelope } from "../venue/signing.js";
-import { SOLVE_HARNESS_PINS } from "../venue/venue.js";
+import {
+  LEGACY_VERDICT_EVALUATOR_ID,
+  createVerdictDsseSigner,
+  loadOrCreateVerdictSigningKey,
+  readVerdictEnvelope,
+  sealVerdictStatement,
+} from "../venue/signing.js";
+import { SOLVE_HARNESS_PINS, type LocalVenue } from "../venue/venue.js";
 import { resultsArtifactPath } from "../workspace/layout.js";
-import { getSealedBytes } from "../workspace/sealed-store.js";
-import { readRunJournalEntries } from "./journal.js";
+import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import type { ProxiedBackend } from "./drive.js";
+import { foldRunJournal, readRunJournalEntries, type RunJournalEntry } from "./journal.js";
+import { parseRunPinningEvidence } from "./pinning-evidence.js";
 
 const SIX_FRACTION_DIGITS = /^-?\d+\.\d{6}$/;
 
 let workspaceDir: string;
+const detachedRoots: string[] = [];
 
 beforeEach(() => {
   workspaceDir = mkdtempSync(join(tmpdir(), "bp12-run-path-"));
@@ -46,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(workspaceDir, { recursive: true, force: true });
+  for (const root of detachedRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 /**
@@ -63,6 +88,357 @@ function makeClock(): () => string {
 
 function contextFor(clock: () => string, principal = "sponsor-1"): OperationContext {
   return { workspaceDir, principal, clock };
+}
+
+const PAIRED_BASELINE_HARNESS = "paired-fixture-baseline";
+const PAIRED_CANDIDATE_HARNESS = "paired-fixture-candidate";
+
+type FixtureVerdict = "pass" | "fail" | "no-verdict";
+
+interface PairedComparison {
+  readonly pairs: number;
+  readonly delta: string | null;
+  readonly interval: { readonly alpha: string; readonly low: string; readonly high: string } | null;
+  readonly reasons: readonly string[];
+}
+
+interface PairedScenario {
+  readonly draftId: string;
+  readonly rows: readonly ReturnType<typeof pairedRow>[];
+  readonly verdictFor: (instanceId: string, armId: "baseline" | "candidate") => FixtureVerdict;
+}
+
+function utf8(value: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(value));
+}
+
+function pairedRow(index: number, repo: string) {
+  const suffix = index.toString(16).padStart(2, "0");
+  return {
+    instance_id: `paired-fixture-${suffix}`,
+    repo,
+    base_commit: `${"a".repeat(38)}${suffix}`,
+    problem_statement: `Apply deterministic fixture change ${suffix}.`,
+    language: "typescript",
+    image: {
+      uri: "https://example.org/images/paired-fixture:1",
+      digest: { sha256: "8".repeat(64) },
+    },
+    testMaterial: [{ uri: `https://example.org/tests/paired-fixture-${suffix}.json` }],
+    parser: {
+      id: "jinn.parser.fixture",
+      version: "1.0.0",
+      digest: `sha256:${"9".repeat(64)}`,
+    },
+    transitions: {
+      failToPass: [`fixture-${suffix}::target`],
+      passToPass: [`fixture-${suffix}::regression`],
+    },
+    timeout: 60,
+  };
+}
+
+async function fixtureVerdictEnvelope(
+  evaluationSpecificationSha256: string,
+  verdict: "pass" | "fail",
+): Promise<Uint8Array> {
+  const statement = {
+    _type: "https://in-toto.io/Statement/v1",
+    subject: [
+      { name: "subject-task.json", digest: { sha256: "a".repeat(64) } },
+      { name: "patch", digest: { sha256: "b".repeat(64) } },
+    ],
+    predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
+    predicate: {
+      evaluator: { id: LEGACY_VERDICT_EVALUATOR_ID },
+      verdict,
+      evaluationSpecification: { digest: { sha256: evaluationSpecificationSha256 } },
+      taskSubject: "subject-task.json",
+      resultSubjects: ["patch"],
+      measurements: [{ name: "passed", value: verdict === "pass" }],
+      evaluatedAt: "2026-08-12T00:00:00Z",
+    },
+  };
+  const key = loadOrCreateVerdictSigningKey(workspaceDir);
+  return sealVerdictStatement({
+    statementBytes: canonicalJsonBytes(statement),
+    evaluatorId: LEGACY_VERDICT_EVALUATOR_ID,
+    expectedEvaluationSpecificationSha256: evaluationSpecificationSha256,
+    signer: createVerdictDsseSigner(key),
+  });
+}
+
+const PAIRED_FIXTURE_CAPABILITIES: BackendCapabilities = {
+  taskProfiles: [],
+  inputMediaTypes: [],
+  outputMediaTypes: [],
+  cancel: false,
+  watch: false,
+  preflight: false,
+  fetchArtifact: true,
+  confidentialInputs: false,
+  signedObservations: false,
+  signedDeliveries: false,
+  evidenceCapture: "none",
+  deadlineEnforcement: false,
+  isolation: ["unrestricted"],
+  attempts: {},
+  runPinning: {
+    keys: [
+      { key: "harness", inventory: [PAIRED_BASELINE_HARNESS, PAIRED_CANDIDATE_HARNESS], posture: "enforced" },
+      { key: "isolationPolicy", inventory: ["unrestricted"], posture: "enforced" },
+    ],
+  },
+};
+
+/**
+ * Purpose-built repository-work venue for P4b Task 8b. The public operations and platform
+ * driver are real; only execution is deterministic: solve deliveries carry an arm marker, and
+ * the venue turns that marker plus the sealed Task's instance id into a real signed verdict.
+ */
+function pairedFixtureVenue(scenario: PairedScenario): LocalVenue {
+  const byUri = new Map<string, { attempt: string; submission: string; deliverySha256: string }>();
+  const accepted = new Map<string, SubmissionAck>();
+  const bytesBySha256 = new Map<string, Uint8Array>();
+  const evaluationByTask = new Map<string, {
+    readonly evaluationSpecificationSha256: string;
+    readonly verdict: FixtureVerdict;
+  }>();
+  let sequence = 0;
+
+  function store(bytes: Uint8Array): string {
+    const digest = sha256Hex(bytes);
+    bytesBySha256.set(digest, bytes);
+    return digest;
+  }
+
+  const backend: ProxiedBackend = {
+    async capabilities() {
+      return PAIRED_FIXTURE_CAPABILITIES;
+    },
+    async submit(taskBytes, submissionBytes) {
+      const submission = JSON.parse(new TextDecoder().decode(submissionBytes)) as {
+        readonly idempotencyKey: string;
+        readonly submission: string;
+        readonly task: { readonly digest: { readonly sha256: string } };
+        readonly requirements?: { readonly harness?: { readonly id?: string } };
+      };
+      const prior = accepted.get(submission.idempotencyKey);
+      if (prior !== undefined) return prior;
+
+      sequence += 1;
+      const attempt = `urn:uuid:00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
+      const harnessId = submission.requirements?.harness?.id;
+      const isEvaluation = harnessId === "evaluation-harness";
+      let outputName: string;
+      let outputBytes: Uint8Array;
+      if (isEvaluation) {
+        const evaluation = evaluationByTask.get(sha256Hex(taskBytes));
+        if (evaluation === undefined) throw new Error("paired fixture: unknown evaluation Task");
+        if (evaluation.verdict === "no-verdict") {
+          outputName = "diagnostic";
+          outputBytes = utf8({ detail: "purpose-built zero-pair fixture" });
+        } else {
+          outputName = "verdict";
+          outputBytes = await fixtureVerdictEnvelope(
+            evaluation.evaluationSpecificationSha256,
+            evaluation.verdict,
+          );
+        }
+      } else {
+        const armId = harnessId === PAIRED_CANDIDATE_HARNESS ? "candidate" : "baseline";
+        outputName = "patch";
+        outputBytes = utf8({ armId });
+      }
+
+      const outputSha256 = store(outputBytes);
+      const deliveryBytes = sealDelivery({
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+        attempt,
+        task: `sha256:${submission.task.digest.sha256}`,
+        outputs: [{ name: outputName, digest: { sha256: outputSha256 } }],
+        outcome: "fulfilled",
+        createdAt: "2026-08-12T00:00:00Z",
+      });
+      const deliverySha256 = store(deliveryBytes);
+      const state = { attempt, submission: submission.submission, deliverySha256 };
+      byUri.set(submission.submission, state);
+      byUri.set(attempt, state);
+      const ack: SubmissionAck = {
+        accepted: true,
+        submission: submission.submission as SubmissionUri,
+        digest: `sha256:${sha256Hex(submissionBytes)}`,
+      };
+      accepted.set(submission.idempotencyKey, ack);
+      return ack;
+    },
+    async observe(reference) {
+      const found = byUri.get(reference as string);
+      if (found === undefined) throw new Error(`paired fixture: unknown attempt ${String(reference)}`);
+      const snapshot: ObservationSnapshot = {
+        descriptor: {
+          attempt: found.attempt as AttemptUri,
+          task: `sha256:${"0".repeat(64)}`,
+          submission: found.submission as SubmissionUri,
+          derived: {
+            state: "delivered",
+            terminal: true,
+            contradictory: false,
+            cancelRequested: false,
+            executionIds: [],
+            deliveries: [],
+          },
+        },
+        cursor: { sequence: "0" },
+        observations: [],
+      };
+      return snapshot;
+    },
+    async recover() {
+      throw new Error("paired fixture: recover is not used");
+    },
+    async deliveries(attempt) {
+      const found = byUri.get(attempt as string);
+      return found === undefined
+        ? []
+        : [{ attempt: attempt as AttemptUri, digest: `sha256:${found.deliverySha256}` } as DeliveryRef];
+    },
+    async fetchDelivery(reference) {
+      const bytes = bytesBySha256.get(reference.digest.slice("sha256:".length));
+      if (bytes === undefined) throw new Error("paired fixture: unknown Delivery bytes");
+      return bytes;
+    },
+    async fetchArtifact(descriptor: ResourceDescriptor) {
+      const digest = descriptor.digest?.["sha256"];
+      const bytes = digest === undefined ? undefined : bytesBySha256.get(digest);
+      if (bytes === undefined) throw new Error("paired fixture: unknown artifact bytes");
+      return bytes;
+    },
+    async drain() {},
+  };
+
+  return {
+    backend: backend as unknown as LocalVenue["backend"],
+    verdictKeyId: "paired-fixture-verdict-key",
+    evaluators: [{ id: LEGACY_VERDICT_EVALUATOR_ID, keyId: "paired-fixture-verdict-key" }],
+    prepareEvaluationCell(input) {
+      const subject = JSON.parse(new TextDecoder().decode(input.subjectTaskBytes)) as {
+        readonly payload?: { readonly instance_id?: string };
+      };
+      const patch = input.resultArtifacts.find((artifact) => artifact.name === "patch");
+      const marker = patch === undefined
+        ? undefined
+        : JSON.parse(new TextDecoder().decode(patch.bytes)) as { readonly armId?: "baseline" | "candidate" };
+      const instanceId = subject.payload?.instance_id;
+      const armId = marker?.armId;
+      if (instanceId === undefined || armId === undefined) {
+        throw new Error("paired fixture: missing sealed instance or arm marker");
+      }
+      const derived = deriveEvaluationTask({
+        subjectTask: { name: "subject-task.json", digest: `sha256:${sha256Hex(input.subjectTaskBytes)}` },
+        subjectDelivery: { name: "subject-delivery.json", digest: `sha256:${sha256Hex(input.subjectDeliveryBytes)}` },
+        subjectResults: input.resultArtifacts.map((artifact) => ({
+          name: artifact.name,
+          digest: `sha256:${sha256Hex(artifact.bytes)}`,
+        })),
+        evaluationSpecDigest: `sha256:${sha256Hex(input.evaluationSpecBytes)}`,
+      });
+      const taskSha256 = derived.digest.slice("sha256:".length);
+      evaluationByTask.set(taskSha256, {
+        evaluationSpecificationSha256: sha256Hex(input.evaluationSpecBytes),
+        verdict: scenario.verdictFor(instanceId, armId),
+      });
+      return { taskBytes: derived.bytes, taskSha256 };
+    },
+    async shutdown() {},
+  };
+}
+
+async function runPairedLifecycle(scenario: PairedScenario): Promise<{
+  readonly comparison: PairedComparison;
+  readonly bundleDir: string;
+}> {
+  const clock = makeClock();
+  const context = contextFor(clock);
+  expect(initWorkspace(context).ok).toBe(true);
+  expect(createDraft(context, { draftId: scenario.draftId, name: "Paired lifecycle fixture" }).ok).toBe(true);
+  const imported = importSweBenchRows(context, {
+    draftId: scenario.draftId,
+    rows: scenario.rows,
+    name: "Paired lifecycle fixture",
+    description: "Purpose-built P4b end-to-end coverage",
+  });
+  expect(imported.ok, JSON.stringify(imported)).toBe(true);
+
+  expect(armAdd(context, {
+    draftId: scenario.draftId,
+    armId: "baseline",
+    pinning: { harness: { id: PAIRED_BASELINE_HARNESS, version: "1" } },
+  }).ok).toBe(true);
+  expect(armAdd(context, {
+    draftId: scenario.draftId,
+    armId: "candidate",
+    pinning: { harness: { id: PAIRED_CANDIDATE_HARNESS, version: "1" } },
+  }).ok).toBe(true);
+  expect(updateDraft(context, {
+    draftId: scenario.draftId,
+    patch: {
+      analysis: {
+        method: "jinn.benchmarking.method/paired-delta",
+        version: "1",
+        baseline: "baseline",
+        candidate: "candidate",
+        parameters: { seed: 123456789, resamples: 1000, alpha: "0.05" },
+      },
+    },
+  }).ok).toBe(true);
+
+  const createVenue = () => pairedFixtureVenue(scenario);
+  const quoted = await runQuote(context, { draftId: scenario.draftId }, { createVenue });
+  expect(quoted.ok && quoted.result.quote.ok, JSON.stringify(quoted)).toBe(true);
+  expect(runLock(context, { draftId: scenario.draftId }).ok).toBe(true);
+  const launched = await runLaunch(context, { draftId: scenario.draftId }, { createVenue });
+  expect(launched.ok, JSON.stringify(launched)).toBe(true);
+  const collected = await runCollect(context, { draftId: scenario.draftId });
+  expect(collected.ok, JSON.stringify(collected)).toBe(true);
+  expect(runResults(context, { draftId: scenario.draftId }).ok).toBe(true);
+  const reported = await runReport(context, { draftId: scenario.draftId });
+  expect(reported.ok, JSON.stringify(reported)).toBe(true);
+  if (!reported.ok) throw new Error("unreachable");
+  const verified = await runVerify(context, { draftId: scenario.draftId });
+  expect(verified.ok, JSON.stringify(verified)).toBe(true);
+  const published = await runPublish(context, { draftId: scenario.draftId });
+  expect(published.ok, JSON.stringify(published)).toBe(true);
+  if (!published.ok) throw new Error("unreachable");
+
+  // Read the Report while the authenticated builder store is still present, then sever every
+  // dependency on that store before bundle verification. The detached bundle must survive after
+  // the entire originating workspace (sealed records, keys, journals, and artifacts) is gone.
+  const report = parseReport(getSealedBytes(workspaceDir, reported.result.reportSha256));
+  const perSubject = (report.results as { readonly perSubject?: readonly { readonly results?: unknown }[] }).perSubject;
+  expect(perSubject).toHaveLength(1);
+
+  const detachedRoot = mkdtempSync(join(tmpdir(), `benchmark-product-${scenario.draftId}-bundle-`));
+  detachedRoots.push(detachedRoot);
+  const bundleDir = join(detachedRoot, "bundle");
+  cpSync(join(workspaceDir, published.result.bundleRelativePath), bundleDir, { recursive: true });
+  rmSync(workspaceDir, { recursive: true, force: true });
+  expect(existsSync(workspaceDir)).toBe(false);
+
+  const bundleVerification = await verifyPublicBundle(bundleDir);
+  expect(bundleVerification.checks).toEqual([
+    "manifest",
+    "evidence-closure",
+    "trust",
+    "matrix-rederivation",
+    "report-verification",
+    "claim-consistency",
+  ]);
+
+  return {
+    comparison: perSubject![0]!.results as PairedComparison,
+    bundleDir,
+  };
 }
 
 describe("official run path — public operations only, real local venue (AC2)", () => {
@@ -163,6 +539,31 @@ describe("official run path — public operations only, real local venue (AC2)",
         expect(entry).toMatchObject({
           evaluator: "urn:jinn:benchmark-product:local-venue:evaluator-1",
           evalIndex: 1,
+        });
+      }
+      const solveAcceptances = journalEntries.filter(
+        (entry): entry is Extract<RunJournalEntry, { kind: "submission-accepted" }> =>
+          entry.kind === "submission-accepted" && entry.leg === "solve",
+      );
+      expect(solveAcceptances).toHaveLength(6);
+      const pinningEntries = journalEntries.filter(
+        (entry): entry is Extract<RunJournalEntry, { kind: "submission-pinning-evidence" }> =>
+          entry.kind === "submission-pinning-evidence",
+      );
+      expect(pinningEntries).toHaveLength(6);
+      const pinningByCell = new Map(pinningEntries.map((entry) => [entry.cellKey, entry]));
+      const folded = foldRunJournal(journalEntries);
+      for (const entry of solveAcceptances) {
+        const pinning = pinningByCell.get(entry.cellKey);
+        expect(pinning?.submissionSha256, entry.cellKey).toBe(entry.submissionSha256);
+        expect(pinning?.pinningEvidenceSha256, entry.cellKey).toMatch(/^[a-f0-9]{64}$/u);
+        expect(folded.get(entry.cellKey)?.pinningEvidenceSha256, entry.cellKey).toBe(pinning?.pinningEvidenceSha256);
+        const evidence = parseRunPinningEvidence(
+          getSealedBytes(workspaceDir, pinning!.pinningEvidenceSha256),
+        );
+        expect(evidence.admission, entry.cellKey).toMatchObject({
+          ready: true,
+          checkedRequirementsDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
         });
       }
 
@@ -269,5 +670,93 @@ describe("official run path — public operations only, real local venue (AC2)",
       }
     },
     240_000,
+  );
+});
+
+describe("paired-delta public lifecycle — P4b Task 8b", () => {
+  test(
+    "interval present: create -> import -> arms -> lock -> launch -> collect -> report -> verify -> publish -> bundle verify",
+    async () => {
+      const rows = [
+        pairedRow(1, "example/cluster-a"),
+        pairedRow(2, "example/cluster-a"),
+        pairedRow(3, "example/cluster-a"),
+        pairedRow(4, "example/cluster-b"),
+        pairedRow(5, "example/cluster-b"),
+        pairedRow(6, "example/cluster-b"),
+      ];
+      const baseline = new Map(rows.map((row, index) => [row.instance_id, index < 2 ? "pass" : "fail"] as const));
+      const candidate = new Map(rows.map((row, index) => [row.instance_id, index < 4 ? "pass" : "fail"] as const));
+      const outcome = await runPairedLifecycle({
+        draftId: "paired-interval-present",
+        rows,
+        verdictFor: (instanceId, armId) => (armId === "baseline" ? baseline : candidate).get(instanceId)!,
+      });
+
+      expect(outcome.comparison.pairs).toBe(6);
+      expect(outcome.comparison.delta).toBe("0.3333");
+      expect(outcome.comparison.interval).toMatchObject({ alpha: "0.0500" });
+      expect(outcome.comparison.reasons).toEqual([]);
+      const html = readFileSync(join(outcome.bundleDir, "index.html"), "utf8");
+      expect(html).toContain("Candidate minus baseline estimate (candidate minus baseline): 0.3333.");
+      expect(html).toContain("Alpha: 0.0500. Paired task count: 6.");
+      expect(html).toContain(outcome.comparison.interval!.low);
+      expect(html).toContain(outcome.comparison.interval!.high);
+      for (const path of ["badge.svg", "social-card.svg", "share.txt"] as const) {
+        const compact = readFileSync(join(outcome.bundleDir, path), "utf8");
+        expect(compact, path).toContain("index.html");
+        for (const resultNumber of ["0.3333", outcome.comparison.interval!.low, outcome.comparison.interval!.high, "0.0500"]) {
+          expect(compact, `${path} leaked result number ${resultNumber}`).not.toContain(resultNumber);
+        }
+      }
+    },
+    60_000,
+  );
+
+  test(
+    "interval withheld: the complete lifecycle retains delta and both method reasons",
+    async () => {
+      const rows = [pairedRow(1, "example/one-cluster"), pairedRow(2, "example/one-cluster")];
+      const outcome = await runPairedLifecycle({
+        draftId: "paired-interval-withheld",
+        rows,
+        verdictFor: (_instanceId, armId) => armId === "candidate" ? "pass" : "fail",
+      });
+
+      expect(outcome.comparison.pairs).toBe(2);
+      expect(outcome.comparison.delta).toBe("1.0000");
+      expect(outcome.comparison.interval).toBeNull();
+      expect(outcome.comparison.reasons).toEqual([
+        "fewer than minN=5 paired tasks (got 2)",
+        "fewer than two source clusters (got 1)",
+      ]);
+      const html = readFileSync(join(outcome.bundleDir, "index.html"), "utf8");
+      expect(html).toContain("Candidate minus baseline estimate (candidate minus baseline): 1.0000.");
+      expect(html).toContain("Interval: withheld. Alpha: 0.0500. Paired task count: 2.");
+      for (const reason of outcome.comparison.reasons) expect(html).toContain(reason);
+    },
+    60_000,
+  );
+
+  test(
+    "zero pairs: the complete lifecycle publishes no delta or interval and does not crash",
+    async () => {
+      const rows = [pairedRow(1, "example/zero-a"), pairedRow(2, "example/zero-b")];
+      const outcome = await runPairedLifecycle({
+        draftId: "paired-zero-pairs",
+        rows,
+        verdictFor: (_instanceId, armId) => armId === "candidate" ? "no-verdict" : "pass",
+      });
+
+      expect(outcome.comparison.pairs).toBe(0);
+      expect(outcome.comparison.delta).toBeNull();
+      expect(outcome.comparison.interval).toBeNull();
+      const html = readFileSync(join(outcome.bundleDir, "index.html"), "utf8");
+      expect(html).toContain("Candidate minus baseline estimate (candidate minus baseline): unavailable.");
+      expect(html).toContain("Interval: withheld. Alpha: 0.0500. Paired task count: 0.");
+      expect(html).toContain("Interval withheld");
+      expect(html).toContain("fewer than minN=5 paired tasks (got 0)");
+    },
+    60_000,
   );
 });

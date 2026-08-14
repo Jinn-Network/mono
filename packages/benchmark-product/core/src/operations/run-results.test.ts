@@ -350,7 +350,7 @@ describe("runResults — an expected-but-never-dispatched cell", () => {
     const [droppedCellKey] = deliveredCells;
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== droppedCellKey;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== droppedCellKey;
       }
       return true;
@@ -480,7 +480,7 @@ describe("runResults — failure block, sourced from the run journal fold (BP-22
     // only the evaluation leg, then add the real could-not-grade terminal shape.
     const withoutTargets = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return !solveTerminalKeys.has(entry.event.cellKey);
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         if (solveTerminalKeys.has(entry.cellKey)) return false;
         if (entry.cellKey !== unscorableCellKey) return true;
         if (entry.kind === "evaluation") return false;
@@ -624,11 +624,15 @@ describe("runResults — failure block, sourced from the run journal fold (BP-22
       { judged: 0, unscorable: 0, expired: 0 },
     );
     expect(attritionTotals).toEqual({ judged: 1, unscorable: 1, expired: 4 });
+    // P4b Task 5: `headline` is optional on ClaimPackage (a paired-delta Report carries
+    // `comparison` instead); this operation is wilson-only until Task 3 completes, so it is
+    // always present here.
+    expect(reported.result.claimPackage.headline).toBeDefined();
     for (const arm of Object.keys(matrix.attrition.perArm)) {
       const judgedForArm = matrix.cells.filter((cell) => cell.armId === arm && cell.outcome === "judged").length;
-      expect(reported.result.claimPackage.headline[arm]?.n, arm).toBe(judgedForArm);
+      expect(reported.result.claimPackage.headline?.[arm]?.n, arm).toBe(judgedForArm);
     }
-    expect(Object.values(reported.result.claimPackage.headline).reduce((sum, arm) => sum + arm.n, 0)).toBe(1);
+    expect(Object.values(reported.result.claimPackage.headline!).reduce((sum, arm) => sum + arm.n, 0)).toBe(1);
 
     const verified = await runVerify(contextFor(clock), { draftId: "draft-1" });
     expect(verified.ok, JSON.stringify(verified)).toBe(true);

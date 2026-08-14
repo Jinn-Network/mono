@@ -6,9 +6,9 @@
  * `arm list`, `authority grant`, `authority revoke`, `authority show`,
  * `quote`, `lock`, `launch`, `resume`, `status`, `collect`, `results`,
  * `cancel`, `report`, `verify`, `publish`), plus the path-oriented standalone
- * `bundle verify` exclusion and `help`. Every verb takes `--json` for a
- * machine-readable envelope; every failure is a typed error envelope with a
- * distinct exit code (§4.3). `runCli` never throws and never touches
+ * `bundle verify` and Demo-1 preregistration-verifier exclusions, plus `help`.
+ * Every verb takes `--json` for a machine-readable envelope; every failure is a
+ * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
  * `process` — `bin.ts` is the only file in this package that does.
  *
  * `runCli` is `async` because `sample.init` (spec: the bundled sample
@@ -25,8 +25,8 @@
  * only the final rendered result.
  *
  * `CLI_VERB_NAMES` is the dispatch inventory. The generated parity artifact
- * checks the 27 workspace operations against the facade and records `bundle
- * verify` separately because it needs neither workspace nor principal.
+ * checks the 27 workspace operations against the facade and records the two
+ * read-only standalone verifiers separately.
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
@@ -49,6 +49,11 @@ import {
   runCancel,
   runLaunch,
   runLock,
+  publicationAccounting,
+  publicationConfigure,
+  publicationRegister,
+  publicationReport,
+  publicationStatus,
   runPreview,
   runPublish,
   runQuote,
@@ -58,14 +63,25 @@ import {
   runStatus,
   runVerify,
   sampleInit,
+  selectInspectEvaluation,
+  selectHarborRuntime,
+  selectTerminalBench2Runtime,
+  migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
   type RunLaunchDeps,
+  type SelectInspectEvaluationInput,
+  type SelectHarborRuntimeInput,
+  type SelectTerminalBench2RuntimeInput,
+  type MigrateTerminalBenchLegacyTaskInput,
 } from "../operations/index.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
+import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
+import { readRunJournalEntries } from "../run/journal.js";
+import { requireRunState } from "../run/state.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
@@ -84,6 +100,13 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   import swebench  --workspace <dir> --principal <id> --draft <draftId> --file <rows.json>
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
+  runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
+  runtime harbor select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
+  runtime terminal-bench-2 select --workspace <dir> --principal <id> --draft <draftId>
+                   --file <selection.json>
+  runtime terminal-bench migrate --workspace <dir> --principal <id> --file <migration.json>
   arm add          --workspace <dir> --principal <id> --draft <draftId>
                    --arm <armId> --pinning <json> [--notes <text>]
   arm update       --workspace <dir> --principal <id> --draft <draftId>
@@ -97,6 +120,11 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   preview          --workspace <dir> --principal <id> --draft <draftId> [--items <n>]
   quote            --workspace <dir> --principal <id> --draft <draftId>
   lock             --workspace <dir> --principal <id> --draft <draftId>
+  publication configure --workspace <dir> --principal <id> --draft <draftId> --public-base-url <url>
+  publication register  --workspace <dir> --principal <id> --draft <draftId> [--public-base-url <url>]
+  publication status     --workspace <dir> --principal <id> --draft <draftId>
+  publication accounting --workspace <dir> --principal <id> --draft <draftId>
+  publication report     --workspace <dir> --principal <id> --draft <draftId>
   launch           --workspace <dir> --principal <id> --draft <draftId>
   resume           --workspace <dir> --principal <id> --draft <draftId>
   cancel           --workspace <dir> --principal <id> --draft <draftId>
@@ -106,7 +134,11 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   report           --workspace <dir> --principal <id> --draft <draftId>
   verify           --workspace <dir> --principal <id> --draft <draftId>
   publish          --workspace <dir> --principal <id> --draft <draftId>
+                   [--include-native-artifacts]
   bundle verify    --bundle <dir> [--json]
+  demo1 prereg verify --workspace <dir> --draft <draftId> --witness <witness.json>
+                   --method-summary-sha256 <sha256> --grader-program-sha256 <sha256>
+                   --source-commit <full-git-oid> [--json]
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
@@ -122,6 +154,10 @@ const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
+const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
 const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
@@ -132,6 +168,11 @@ const AUTHORITY_SHOW_FLAGS = ["workspace", "principal", "json"] as const;
 const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as const;
 const QUOTE_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LOCK_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLICATION_CONFIGURE_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
+const PUBLICATION_REGISTER_FLAGS = ["workspace", "principal", "json", "draft", "public-base-url"] as const;
+const PUBLICATION_STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLICATION_ACCOUNTING_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLICATION_REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -140,8 +181,11 @@ const COLLECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const RESULTS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const VERIFY_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft", "include-native-artifacts"] as const;
 const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
+const DEMO1_PREREG_VERIFY_FLAGS = [
+  "workspace", "draft", "witness", "method-summary-sha256", "grader-program-sha256", "source-commit", "json",
+] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -173,7 +217,12 @@ function renderResult<T>(result: OperationResult<T>, jsonMode: boolean, humanSuc
 function buildOperationContext(args: ParsedArgs, context: CliContext): OperationContext {
   const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
   const principal = required(args, "principal");
-  return { workspaceDir, principal, clock: context.clock };
+  return {
+    workspaceDir,
+    principal,
+    clock: context.clock,
+    ...(context.runtimeHost === undefined ? {} : { runtimeHost: context.runtimeHost }),
+  };
 }
 
 /** Renders `warnings` (arm mutations, spec: duplicate-pinning is a surface, not a refusal) as human-mode lines. */
@@ -312,6 +361,52 @@ function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: b
     (value) =>
       `imported ${value.taskSha256s.length} task(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}\n`,
   );
+}
+
+async function handleInspectRuntimeSelect(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_INSPECT_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    SelectInspectEvaluationInput,
+    "draftId"
+  >;
+  const result = await selectInspectEvaluation(opContext, { draftId, ...configuration } as SelectInspectEvaluationInput);
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `selected Inspect evaluation ${value.selectionManifestSha256} for draft ${draftId}\n`,
+  );
+}
+
+async function handleTerminalBench2RuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectTerminalBench2RuntimeInput, "draftId">;
+  const result = await selectTerminalBench2Runtime(opContext, { draftId, ...configuration } as SelectTerminalBench2RuntimeInput);
+  return renderResult(result, jsonMode, (value) => `selected Terminal-Bench 2 profile ${value.terminalBench2ProfileSha256} for draft ${draftId}\n`);
+}
+
+async function handleHarborRuntimeSelect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_HARBOR_SELECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<SelectHarborRuntimeInput, "draftId">;
+  const result = await selectHarborRuntime(opContext, { draftId, ...configuration } as SelectHarborRuntimeInput);
+  return renderResult(result, jsonMode, (value) => `selected Harbor runtime ${value.selectionManifestSha256} for draft ${draftId}\n`);
+}
+
+async function handleTerminalBenchMigration(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const configuration = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as MigrateTerminalBenchLegacyTaskInput;
+  const result = await migrateTerminalBenchLegacyTask(opContext, configuration);
+  return renderResult(result, jsonMode, (value) => `migrated legacy Terminal-Bench task as ${value.manifestSha256}\n`);
 }
 
 function handleArmAdd(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -508,6 +603,48 @@ function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): C
   );
 }
 
+async function handlePublicationConfigure(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_CONFIGURE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = await publicationConfigure(opContext, { draftId: required(args, "draft"), publicBaseUrl: required(args, "public-base-url") });
+  return renderResult(result, jsonMode, (value) => `configured public source at ${value.publicBaseUrl}; launch is now gated on prospective registration completing before dispatch\n`);
+}
+
+async function handlePublicationRegister(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_REGISTER_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = await publicationRegister(opContext, {
+    draftId: required(args, "draft"),
+    ...(optional(args, "public-base-url") === undefined ? {} : { publicBaseUrl: optional(args, "public-base-url")! }),
+  });
+  return renderResult(result, jsonMode, (value) => value.postHoc
+    ? `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} post-hoc; this does not rerun completed work\n`
+    : `registered run ${value.recordSha256} at ${value.source.agent}/${value.source.name}#${value.sourceSequence} before dispatch\n`);
+}
+
+function handlePublicationStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, PUBLICATION_STATUS_FLAGS);
+  const result = publicationStatus(buildOperationContext(args, context), { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) => {
+    const stages = value.stages.map((stage) => `${stage.name}=${stage.state}`).join(", ");
+    return `publication mode=${value.mode}; analysis=${value.analysisPreregistration}; registration=${value.registrationTiming}; ${stages}\n${value.recovery.guidance}\n`;
+  });
+}
+
+async function handlePublicationAccounting(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_ACCOUNTING_FLAGS);
+  const result = await publicationAccounting(buildOperationContext(args, context), { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) => `published accounting ${value.accountingSha256} and Matrix v2 ${value.matrixV2Sha256}; accounting does not require a Report and does not rerun work\n`);
+}
+
+async function handlePublicationReport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLICATION_REPORT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const result = await publicationReport(opContext, { draftId: required(args, "draft") });
+  return renderResult(result, jsonMode, (value) =>
+    `published signed Report v2 ${value.reportRecordSha256} (payload ${value.reportPayloadSha256}) at ${value.source.agent}/${value.source.name}#${value.receipt.sourceSequence}\n`);
+}
+
 /** `launch`'s `RunLaunchDeps`: `onProgress` streams to `context.progress` in human mode only —
  * `--json` mode's stdout stays the single machine-parseable envelope (module header). */
 function launchDeps(context: CliContext, jsonMode: boolean): RunLaunchDeps {
@@ -611,7 +748,10 @@ async function handlePublish(args: ParsedArgs, context: CliContext, jsonMode: bo
   assertKnownFlags(args, PUBLISH_FLAGS);
   const opContext = buildOperationContext(args, context);
   const draftId = required(args, "draft");
-  const result = await runPublish(opContext, { draftId });
+  const result = await runPublish(opContext, {
+    draftId,
+    ...(present(args, "include-native-artifacts") ? { includeNativeArtifacts: true } : {}),
+  });
   return renderResult(
     result,
     jsonMode,
@@ -630,6 +770,36 @@ async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMod
   );
 }
 
+function handleDemo1PreregistrationVerify(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): CliResult {
+  assertKnownFlags(args, DEMO1_PREREG_VERIFY_FLAGS);
+  const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
+  const draftId = required(args, "draft");
+  const runState = requireRunState(workspaceDir, draftId);
+  if (runState.runSha256 === undefined) {
+    refuse("illegal-transition", `runs.${draftId}`, "Demo-1 preregistration verification requires a sealed Run");
+  }
+  const result = verifyDemo1PreregistrationPreDispatch({
+    commitment: {
+      runSha256: runState.runSha256,
+      methodSummarySha256: required(args, "method-summary-sha256"),
+      graderProgramSha256: required(args, "grader-program-sha256"),
+      sourceCommit: required(args, "source-commit"),
+    },
+    witness: readJsonFile(pathFrom(context.cwd, required(args, "witness"))),
+    runState,
+    journal: readRunJournalEntries(workspaceDir, draftId),
+  });
+  return renderResult(
+    { ok: true, result },
+    jsonMode,
+    (value) => `Demo-1 preregistration ready (${value.stage}): ${value.manifestCid} / ${value.transactionHash}\n`,
+  );
+}
+
 type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
 
 const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
@@ -641,6 +811,10 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["inspect", handleInspect],
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
+  ["runtime inspect select", handleInspectRuntimeSelect],
+  ["runtime harbor select", handleHarborRuntimeSelect],
+  ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],
+  ["runtime terminal-bench migrate", handleTerminalBenchMigration],
   ["arm add", handleArmAdd],
   ["arm update", handleArmUpdate],
   ["arm remove", handleArmRemove],
@@ -651,6 +825,11 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["preview", handlePreview],
   ["quote", handleQuote],
   ["lock", handleLock],
+  ["publication configure", handlePublicationConfigure],
+  ["publication register", handlePublicationRegister],
+  ["publication status", handlePublicationStatus],
+  ["publication accounting", handlePublicationAccounting],
+  ["publication report", handlePublicationReport],
   ["launch", handleLaunch],
   ["resume", handleResume],
   ["cancel", handleCancel],
@@ -661,6 +840,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["verify", handleVerify],
   ["publish", handlePublish],
   ["bundle verify", handleBundleVerify],
+  ["demo1 prereg verify", handleDemo1PreregistrationVerify],
 ]);
 
 /** The complete verb surface, derived from `VERBS` — the parity anchor `./parity.test.ts` checks

@@ -19,7 +19,12 @@
  * fills that in a later packet.
  */
 
-import { itemTaskDigest, parseBenchmark } from "@jinn-network/benchmarking-records";
+import {
+  BENCHMARKING_METHOD_IDS,
+  BENCHMARKING_METHOD_VERSION,
+  itemTaskDigest,
+  parseBenchmark,
+} from "@jinn-network/benchmarking-records";
 import { resolveAssurance, type DraftSpec, type ResolvedAssurance } from "../domain/draft.js";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { getSealedBytes, hasSealedBytes } from "../workspace/sealed-store.js";
@@ -27,6 +32,10 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
 import type { OperationResult } from "./result.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 
 export interface ArmInspection {
   readonly armId: string;
@@ -62,6 +71,15 @@ export interface DraftInspection {
   readonly assurance: { readonly preset: string; readonly overrides?: unknown; readonly resolved: ResolvedAssurance };
   /** Present only when `taskSet.kind === "benchmark"` — absent for a still-`pendingSample` draft. */
   readonly benchmark?: BenchmarkInspection;
+  /**
+   * The §9.2 method that will produce this draft's Report (P4b Task 7), mirroring
+   * `run/compile.ts`'s `buildAnalysisPlan` selection: an absent `spec.analysis` block means
+   * `wilson@1`, exactly today's implicit default, so this field is always present even when the
+   * draft names nothing explicit. Echoed verbatim from `spec.analysis` when set — not
+   * registry-validated here, since that refusal belongs to compile time (Task 2), not inspection.
+   */
+  readonly analysis: { readonly method: string; readonly version: string };
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 function resolveBenchmarkInspection(workspaceDir: string, benchmarkSha256: string): BenchmarkInspection {
@@ -113,6 +131,11 @@ export function inspectDraft(
         spec.taskSet.kind === "benchmark"
           ? resolveBenchmarkInspection(context.workspaceDir, spec.taskSet.benchmarkSha256)
           : undefined;
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        context.workspaceDir,
+        spec.evaluationRuntime,
+        resolveAssurance(spec.assurance),
+      );
 
       const inspection: DraftInspection = {
         draftId: document.draftId,
@@ -130,6 +153,10 @@ export function inspectDraft(
           overrides: spec.assurance.overrides,
           resolved: resolveAssurance(spec.assurance),
         },
+        analysis: spec.analysis === undefined
+          ? { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION }
+          : { method: spec.analysis.method, version: spec.analysis.version },
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
         ...(benchmark !== undefined ? { benchmark } : {}),
       };
       return { inspection };

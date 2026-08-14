@@ -341,6 +341,48 @@ describe("backend evidence capture posture (C3)", () => {
     expect("workKind" in seen[0]!).toBe(false);
     expect("requestId" in seen[0]!).toBe(false);
   });
+
+  /**
+   * #36. A recording's `producer` descriptor is derived from `source` and its `executor`
+   * descriptor from `executor`, under two different names — so one identity in both roles makes
+   * the recorder refuse EVERY attempt this backend starts. Pre-guard that stayed latent until
+   * the first live attempt, where it surfaced as an opaque `dependency-unavailable` terminal
+   * 122ms in. Refuse at construction so the composition, not the grade, is what breaks.
+   */
+  test("refuses construction when source and executor are one identity and capture is on (#36)", async () => {
+    const reused = "urn:uuid:44cfb891-0000-4000-8000-0000000000ff";
+    const config = (
+      recorderAvailability: LocalTaskExecutionBackendConfig["recorderAvailability"],
+      executor: string,
+      root: string,
+    ): LocalTaskExecutionBackendConfig => ({
+      stateRoot: root,
+      source: reused,
+      executor,
+      profileStore,
+      launchers: [],
+      provisioner: () => { throw new Error("not used"); },
+      provisionerCapabilities: {
+        taskProfiles: [profile.profile],
+        workspaceKinds: ["dir"],
+        inputMediaTypes: ["application/json"],
+        outputMediaTypes: ["text/x-diff"],
+        isolation: ["process"],
+      },
+      recorderAvailability,
+    });
+
+    const always = config("always", reused, await stateRoot());
+    const available = config("available", reused, await stateRoot());
+    const distinct = config("always", "urn:jinn:operator-runtime:0.2.2", await stateRoot());
+    const captureOff = config("none", reused, await stateRoot());
+
+    expect(() => makeLocalTaskExecutionBackend(always)).toThrow(/source and executor must be distinct/);
+    expect(() => makeLocalTaskExecutionBackend(available)).toThrow(/source and executor must be distinct/);
+    // Distinct identities construct; so does a capture-free backend, which records no graph.
+    backends.push(makeLocalTaskExecutionBackend(distinct));
+    backends.push(makeLocalTaskExecutionBackend(captureOff));
+  });
 });
 
 // ── Finding E31: real executor delivery signing ──────────────────────────────────────────────
@@ -550,6 +592,48 @@ describe("executor delivery signing (finding E31)", () => {
     // No trace of the signature leaks into the Delivery document itself.
     const parsed = JSON.parse(new TextDecoder().decode(deliveryBytes)) as Record<string, unknown>;
     expect(Object.keys(parsed).some((key) => key.includes("executor-binding"))).toBe(false);
+  });
+
+  // ── Defect #34: the envelope's own ENCODING, not just its parsed shape ──────────────────────
+  //
+  // The consumer that matters is an authority-bearing one: `@jinn-network/trust-core`'s
+  // `parseExactDsseEnvelope` (via the client's `verifyNativeDsse`) accepts ONLY the sole producer
+  // encoding -- `sealDsseEnvelope`'s RFC 8785 JCS bytes -- and rejects every alternate spelling of
+  // the same envelope (its own suite asserts a "reordered" representation throws). A `JSON.stringify`
+  // envelope in `payloadType, payload, signatures` insertion order parses fine under the LOOSE
+  // `parseDsseEnvelope` the settlement-grade checker uses, and is refused by the strict one -- which
+  // surfaces as `envelope-signature-invalid` even though the Ed25519 signature is perfectly valid.
+  // The expected string below is reconstructed independently here (sorted keys spelled out by hand),
+  // so this does not assert the production code against its own serializer.
+  test("getDeliverySignature emits the canonical (JCS sorted-key) envelope encoding the strict DSSE parser accepts", async () => {
+    const keyPair = generateKeyPairSync("ed25519");
+    const instance = signingBackend(await stateRoot(), {
+      deliverySigningKey: {
+        keyId: "test-executor-key",
+        sign: (payload) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+      },
+    });
+    const { task, submission } = documents();
+    const ack = await instance.submit(task, submission);
+    expect(ack.accepted).toBe(true);
+    if (!ack.accepted) throw new Error("unreachable");
+    const snapshot = await terminalSnapshot(instance, ack.submission);
+    const [ref] = await instance.deliveries(snapshot.descriptor.attempt);
+    const deliveryBytes = await instance.fetchDelivery(ref!);
+
+    const envelopeBytes = instance.getDeliverySignature(documentDigest(deliveryBytes));
+    expect(envelopeBytes).toBeDefined();
+    const text = new TextDecoder().decode(envelopeBytes!);
+    const envelope = JSON.parse(text) as {
+      payloadType: string;
+      payload: string;
+      signatures: readonly { keyid: string; sig: string }[];
+    };
+    const expected = `{"payload":${JSON.stringify(envelope.payload)},`
+      + `"payloadType":${JSON.stringify(envelope.payloadType)},`
+      + `"signatures":[{"keyid":${JSON.stringify(envelope.signatures[0]!.keyid)},`
+      + `"sig":${JSON.stringify(envelope.signatures[0]!.sig)}}]}`;
+    expect(text).toBe(expected);
   });
 
   test("getDeliverySignature keys by digest -- an unknown digest returns undefined", async () => {

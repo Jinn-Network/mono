@@ -20,6 +20,12 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/environment-record", ["environments", "record"]],
   ["@jinn-network/task-execution-profiles", ["task-execution", "profiles"]],
   ["@jinn-network/benchmarking-records", ["benchmarking", "records"]],
+  ["@jinn-network/record-discovery-protocol", ["discovery", "protocol"]],
+  ["@jinn-network/record-discovery-client", ["discovery", "client"]],
+  ["@jinn-network/record-discovery-serve", ["discovery", "serve"]],
+  ["@jinn-network/record-discovery-transport-http", ["discovery", "transport-http"]],
+  ["@jinn-network/record-publication", ["discovery", "publication"]],
+  ["@jinn-network/benchmarking-publication", ["benchmarking", "publication"]],
   ["@jinn-network/benchmarking-aggregate", ["benchmarking", "aggregate"]],
   ["@jinn-network/task-admission", ["task-supply", "admission"]],
   ["@jinn-network/benchmarking-interop", ["benchmarking", "interop"]],
@@ -34,6 +40,7 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/attestation-issuer", ["evidence", "attestation-issuer"]],
   ["@jinn-network/task-execution-evaluation-harness", ["task-execution", "evaluation-harness"]],
   ["@jinn-network/task-execution-evaluator-adapters", ["task-execution", "evaluator-adapters"]],
+  ["@jinn-network/task-execution-oci-grader", ["task-execution", "oci-grader"]],
   ["@jinn-network/task-execution-backend-local", ["task-execution", "backend-local", "assembly"]],
   ["@jinn-network/benchmarking-run", ["benchmarking", "run"]],
   ["@jinn-network/benchmarking-local", ["benchmarking", "local"]],
@@ -57,6 +64,16 @@ function run(command, args, options = {}) {
 }
 
 try {
+  const productManifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  const localArchiveNames = new Set(CROSS_TREE_DEPENDENCIES.map(([name]) => name));
+  const unpackedJinnDependencies = Object.keys(productManifest.dependencies ?? {})
+    .filter((name) => name.startsWith("@jinn-network/") && !localArchiveNames.has(name));
+  if (unpackedJinnDependencies.length > 0) {
+    throw new Error(
+      `pack smoke must install every Jinn runtime dependency from a local tarball: ${unpackedJinnDependencies.join(", ")}`,
+    );
+  }
+
   // Sequential, not Promise.all: a concurrent `yarn pack` on cross-tree dependencies races their
   // `dist` wipe-and-rebuild prepack steps against each other's type-resolution reads.
   const archives = new Map();
@@ -96,7 +113,7 @@ try {
     `
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark, runCancel } from "@jinn-network/benchmark-product-core";
+import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, HARBOR_ADAPTER_ID, SUPPORTED_HARBOR_VERSION_RANGE, buildSampleBenchmark, createWorkspacePublicationHttpHandler, publicationConfigure, publicationRegister, runCancel } from "@jinn-network/benchmark-product-core";
 
 const require = createRequire(import.meta.url);
 const requiredEntry = require("@jinn-network/benchmark-product-core");
@@ -110,6 +127,11 @@ if (requiredEntry.PRODUCT_BRANDING.displayName !== PRODUCT_BRANDING.displayName)
 
 if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
 if (typeof runCancel !== "function") throw new Error("runCancel missing from packed public entrypoint");
+if (HARBOR_ADAPTER_ID !== "harbor" || SUPPORTED_HARBOR_VERSION_RANGE !== "0.21.x") {
+  throw new Error("packed Harbor adapter contract is missing or drifted");
+}
+if (typeof publicationConfigure !== "function" || typeof publicationRegister !== "function") throw new Error("publication operation facade is incomplete");
+if (typeof createWorkspacePublicationHttpHandler !== "function") throw new Error("publication HTTP composition helper is missing");
 // The bundled sample must build from the PACKED graph: this proves the admission package ships
 // its golden fixture in the tarball and the whole intake path works for an external consumer.
 const sample = await buildSampleBenchmark();
@@ -127,17 +149,24 @@ if (packageJson.bin?.colophon !== "./dist/cli/bin.js" || packageJson.bin?.["benc
 }
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = [
+  "@jinn-network/attestation-issuer",
   "@jinn-network/benchmarking-aggregate",
   "@jinn-network/benchmarking-interop",
   "@jinn-network/benchmarking-local",
+  "@jinn-network/benchmarking-publication",
   "@jinn-network/benchmarking-records",
   "@jinn-network/benchmarking-run",
+  "@jinn-network/record-discovery-protocol",
+  "@jinn-network/record-discovery-serve",
+  "@jinn-network/record-discovery-transport-http",
+  "@jinn-network/record-publication",
   "@jinn-network/task-admission",
   "@jinn-network/task-execution-backend",
   "@jinn-network/task-execution-backend-local",
   "@jinn-network/task-execution-evaluation-harness",
   "@jinn-network/task-execution-evaluator-adapters",
   "@jinn-network/task-execution-launchers",
+  "@jinn-network/task-execution-oci-grader",
   "@jinn-network/task-execution-profiles",
   "@jinn-network/task-execution-protocol",
   "@jinn-network/task-execution-supervisor",

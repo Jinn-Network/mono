@@ -133,6 +133,66 @@
       }
     },
     {
+      "operation": "migrateTerminalBenchLegacyTask",
+      "cliVerb": "runtime terminal-bench migrate",
+      "authorityGated": false,
+      "description": "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured migration input paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
+      "operation": "publicationAccounting",
+      "cliVerb": "publication accounting",
+      "authorityGated": true,
+      "description": "Publishes retained complete or partial dispatch accounting and Matrix v2 without running work or requiring a Report.",
+      "gui": {
+        "status": "shipped",
+        "action": "publication.accounting"
+      }
+    },
+    {
+      "operation": "publicationConfigure",
+      "cliVerb": "publication configure",
+      "authorityGated": true,
+      "description": "Configures the mutable public source locator and explicit prospective-publication intent.",
+      "gui": {
+        "status": "shipped",
+        "action": "publication.configure"
+      }
+    },
+    {
+      "operation": "publicationRegister",
+      "cliVerb": "publication register",
+      "authorityGated": true,
+      "description": "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
+      "gui": {
+        "status": "shipped",
+        "action": "publication.register"
+      }
+    },
+    {
+      "operation": "publicationReport",
+      "cliVerb": "publication report",
+      "authorityGated": true,
+      "description": "Produces, independently verifies, and publishes the signed Report v2 envelope after its exact accounting closure.",
+      "gui": {
+        "status": "shipped",
+        "action": "publication.report"
+      }
+    },
+    {
+      "operation": "publicationStatus",
+      "cliVerb": "publication status",
+      "authorityGated": false,
+      "description": "Reads the local publication state, timing assurance, receipts, compatibility, and recovery guidance without contacting a backend.",
+      "gui": {
+        "status": "shipped",
+        "action": "publication.status"
+      }
+    },
+    {
       "operation": "runCancel",
       "cliVerb": "cancel",
       "authorityGated": true,
@@ -263,6 +323,36 @@
       }
     },
     {
+      "operation": "selectHarborRuntime",
+      "cliVerb": "runtime harbor select",
+      "authorityGated": false,
+      "description": "Selects and digest-binds a managed Harbor runtime.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured Harbor host paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
+      "operation": "selectInspectEvaluation",
+      "cliVerb": "runtime inspect select",
+      "authorityGated": false,
+      "description": "Selects, probes, and digest-binds an unmodified Inspect evaluation and its runtime configuration.",
+      "gui": {
+        "status": "shipped",
+        "action": "runtime.inspect.select"
+      }
+    },
+    {
+      "operation": "selectTerminalBench2Runtime",
+      "cliVerb": "runtime terminal-bench-2 select",
+      "authorityGated": false,
+      "description": "Resolves one immutable Terminal-Bench 2 task and binds it to the managed Harbor runtime.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
       "operation": "updateDraft",
       "cliVerb": "draft update",
       "authorityGated": false,
@@ -281,6 +371,10 @@
     {
       "name": "bundle verify",
       "reason": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal"
+    },
+    {
+      "name": "demo1 prereg verify",
+      "reason": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access"
     }
   ]
 }

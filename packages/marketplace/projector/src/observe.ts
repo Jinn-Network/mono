@@ -39,6 +39,34 @@ export interface ObservationProjectionContext {
     readonly onChainSha256CidDigest: `sha256:${string}`;
     readonly onChainKeccak: Hex;
   };
+  /**
+   * Requester-side today-mode delivery correspondence (defect #48), carried on the ROUTER's
+   * `SolutionDeliveryClaimed` rather than on a Mech `Deliver`.
+   *
+   * A requester never subscribes to the counterparty's mech -- the projector's log filter scans
+   * the router, the coordinator, and this operator's OWN mech(es) only -- so it can never hold a
+   * `pendingMechDeliveries` fact for a solution another operator delivered. Absence of that fact
+   * is therefore not evidence of an invalid reference on the requester; it is evidence of a
+   * subscription this role does not have.
+   *
+   * What the requester DOES hold is the coordinator's own anchor for the attempt
+   * (`getAttempt(taskId, attemptIndex).solutionCidDigest`, today generation's keccak evidence hash
+   * over the exact sealed Delivery bytes) plus the record plane those bytes are published to. The
+   * host resolves the published record, re-derives BOTH digests locally, and hands the pair over
+   * here. The reducer re-checks the keccak leg itself rather than trusting the host -- the same
+   * defense in depth `deliveryCorrespondence` already gets from `checkDeliveryCorrespondence`.
+   *
+   * Presence of this field is the requester-side witness. Its absence changes nothing: the
+   * mech-fact requirement on every other role stays exactly as it was.
+   */
+  readonly recordPlaneDelivery?: {
+    /** sha256 of the exact published Delivery bytes -- the digest `delivery-recorded.v1` carries. */
+    readonly sha256Digest: `sha256:${string}`;
+    /** keccak256 of those same bytes, recomputed locally by the host. */
+    readonly keccakEvidenceHash: Hex;
+    /** `TaskCoordinator.getAttempt(...).solutionCidDigest` for this attempt. */
+    readonly onChainKeccak: Hex;
+  };
 }
 
 export type ObservationMarketplaceEvent = MarketplaceEvent & {
@@ -481,6 +509,20 @@ function evaluationEngagementKey(
 
 function sameAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+/** Case-insensitive bytes32 comparison. Same shape as `sameAddress`, different width. */
+function sameHex(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+/**
+ * The all-zero anchor. `TaskCoordinator.recordSubmission` rejects a zero `solutionCidDigest`, so an
+ * attempt that reads back zero has no submission recorded at all -- never something a resolved
+ * record may be matched against (a zero-vs-zero compare would otherwise "pass").
+ */
+function isZeroHash(value: string): boolean {
+  return /^0x0{64}$/i.test(value);
 }
 
 type ContractGeneration = "today" | "revised";
@@ -1241,6 +1283,45 @@ export function reduceMarketplaceProjection(
           break;
         }
         if (mechDelivery === undefined) {
+          // Defect #48. Role-aware, and deliberately additive: the mech-fact requirement below is
+          // untouched for every producer that can actually witness a Mech `Deliver`. Only a host
+          // that resolved the published Delivery record off the record plane AND re-derived its
+          // digests locally supplies `recordPlaneDelivery`, and only a REQUESTER host does that
+          // (see `ObservationProjectionContext.recordPlaneDelivery`). Emitting the old
+          // `rejected`/`invalid-reference` terminal there was a false rejection of a delivery the
+          // coordinator itself settled, and -- landing beside the verdict's own terminal -- folded
+          // the Attempt `contradictory`, which `adoptPostedTask` refuses outright.
+          const recordPlane = event.projection.recordPlaneDelivery;
+          if (recordPlane !== undefined) {
+            // Re-check the anchor here rather than trusting the host's own comparison: this is the
+            // same posture the today-mode mech branch takes with `checkDeliveryCorrespondence`.
+            // Only the keccak leg exists requester-side -- today's sha256 anchor lives solely in
+            // the Mech `Deliver` payload -- so this is the whole on-chain binding available, and
+            // it binds the exact bytes: `solutionCidDigest` is keccak256 over the sealed Delivery.
+            if (
+              !sameHex(recordPlane.keccakEvidenceHash, recordPlane.onChainKeccak)
+              || isZeroHash(recordPlane.onChainKeccak)
+            ) {
+              emit(
+                event,
+                "network.jinn.task-execution.attempt-terminal.v1",
+                attempt,
+                {
+                  state: "rejected",
+                  category: "content-corruption",
+                  detail: "record-plane Delivery does not hash to the coordinator's solution anchor",
+                },
+              );
+              break;
+            }
+            emit(
+              event,
+              "network.jinn.task-execution.delivery-recorded.v1",
+              attempt,
+              { digest: recordPlane.sha256Digest },
+            );
+            break;
+          }
           emit(
             event,
             "network.jinn.task-execution.attempt-terminal.v1",

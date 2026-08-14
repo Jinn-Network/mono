@@ -17,6 +17,8 @@ export const JOURNAL_FILENAME = "journal.jsonl";
 export const AUTHORITY_FILENAME = "authority.json";
 export const RUNS_DIRNAME = "runs";
 export const PREVIEWS_DIRNAME = "previews";
+export const RUNTIME_HOSTS_DIRNAME = "runtime-hosts";
+export const PUBLICATION_DIRNAME = "publication";
 
 export function workspaceMetadataPath(workspaceDir: string): string {
   return join(workspaceDir, WORKSPACE_METADATA_FILENAME);
@@ -149,4 +151,43 @@ export function previewJournalPath(workspaceDir: string, draftId: string, previe
  * rehearses against; never the official venue root under the workspace directly. */
 export function previewScratchDir(workspaceDir: string, draftId: string, previewId: string): string {
   return join(previewDir(workspaceDir, draftId, previewId), "scratch");
+}
+
+/** Private connection state for optional runtime workers. Never part of sealed records/bundles. */
+export function runtimeHostsDir(workspaceDir: string): string {
+  return join(workspaceDir, RUNTIME_HOSTS_DIRNAME);
+}
+
+export function runtimeHostPath(workspaceDir: string, selectionManifestSha256: string): string {
+  return join(runtimeHostsDir(workspaceDir), `${selectionManifestSha256}.json`);
+}
+
+/** Private durable state and public static root for this workspace's Record Discovery source. */
+export function publicationDir(workspaceDir: string): string {
+  return join(workspaceDir, PUBLICATION_DIRNAME);
+}
+
+export function publicationServeRoot(workspaceDir: string): string {
+  return join(publicationDir(workspaceDir), "public");
+}
+
+export function publicationStatePath(workspaceDir: string, sourceId: string, kind: "state" | "intent"): string {
+  // Source ids contain IRIs and are deliberately never used as path components.
+  return join(publicationDir(workspaceDir), "sources", `${sourceId}.${kind}.json`);
+}
+
+export function publicationJournalPath(workspaceDir: string, draftId: string, stage?: string): string {
+  // Keep PUB-12 registration recovery on its original path. New independently resumable stages
+  // use a suffix so their plans can never collide with that completed journal fingerprint.
+  return join(publicationDir(workspaceDir), "journals", stage === undefined ? `${draftId}.json` : `${draftId}.${stage}.json`);
+}
+
+/** Immutable workspace proof that its did:key authored one exact record digest. */
+export function publicationAuthorshipPath(workspaceDir: string, recordSha256: string): string {
+  return join(publicationDir(workspaceDir), "authorship", `${recordSha256}.json`);
+}
+
+/** Durable externally verified source coordinate for a non-workspace-owned record. */
+export function publicationOriginPath(workspaceDir: string, recordSha256: string): string {
+  return join(publicationDir(workspaceDir), "origins", `${recordSha256}.json`);
 }

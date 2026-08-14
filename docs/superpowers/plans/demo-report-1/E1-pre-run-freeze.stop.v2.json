@@ -1,0 +1,1353 @@
+{
+  "schema": "jinn.demo1.pre-run-freeze.v2",
+  "inputs": {
+    "source": {
+      "authentication": "git-tree-path-blob+sha256@1",
+      "repositoryUrl": "https://github.com/anthropics/skills.git",
+      "commit": "f17010c9bb483898c1d9c9f42dde2b3a98889434",
+      "commitTree": "0fe4c0c8372b239b13062036d08d05f79d4055a1",
+      "skillsTree": "491339fffffe73a52f638f09747dddd8ae2cf154"
+    },
+    "exclusions": {
+      "documentSkills": [
+        "skills/docx",
+        "skills/pdf",
+        "skills/pptx",
+        "skills/xlsx"
+      ]
+    },
+    "outcomeBlindTaskChecks": [
+      "goldPatchPasses",
+      "emptyPatchFails",
+      "compatibleTaskLicense",
+      "instructionLeakageAbsent",
+      "conflictingInstructionFileAbsent",
+      "contentGoldPatchCollisionAbsent"
+    ],
+    "transform": {
+      "id": "demo1-literal-instruction-materialization@1",
+      "specSha256": "65a70f3df8d47ccbbfba95d419d8be0244b83522daf919421295881adc343702"
+    },
+    "poolRequirements": {
+      "suitability": {
+        "tasks": 6,
+        "repositories": 6
+      },
+      "rehearsal": {
+        "tasks": 10,
+        "repositories": 5
+      },
+      "officialFeasibilityFloor": {
+        "tasks": 5,
+        "repositories": 2,
+        "basis": "paired-delta@1 requires minN=5 paired tasks and at least two source clusters"
+      }
+    },
+    "officialDesign": {
+      "status": "pending-e2",
+      "arms": 3,
+      "cellCeiling": 600,
+      "targetPower": "0.80",
+      "targetEffectPercentagePoints": "21",
+      "exactCapacity": null,
+      "winnerLockedBeforeE2": true,
+      "insufficientWinnerCapacityDisposition": "stop-with-evidence-no-candidate-switch"
+    },
+    "candidates": [
+      {
+        "repositoryPath": "skills/algorithmic-art",
+        "source": {
+          "repositoryPath": "skills/algorithmic-art",
+          "folderTree": "4aef6bcad51d058ec32b1acb9da436851863e56e",
+          "skill": {
+            "path": "skills/algorithmic-art/SKILL.md",
+            "gitBlob": "634f6fa42e4e697fa6afd293acd7fb8246574876",
+            "sha256": "3bc4092c09804853186524c826bc0621b940bb6122c05b84496dff95388e6eef",
+            "bytes": 19769,
+            "name": "algorithmic-art",
+            "description": "Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic art, flow fields, or particle systems. Create original algorithmic art rather than copying existing artists' work to avoid copyright violations."
+          },
+          "license": {
+            "path": "skills/algorithmic-art/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling generator and viewer templates.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/algorithmic-art/SKILL.md",
+              "sha256": "3bc4092c09804853186524c826bc0621b940bb6122c05b84496dff95388e6eef"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/brand-guidelines",
+        "source": {
+          "repositoryPath": "skills/brand-guidelines",
+          "folderTree": "1dc8bd3584b80568edae7da16382363e24ecf0f0",
+          "skill": {
+            "path": "skills/brand-guidelines/SKILL.md",
+            "gitBlob": "47c72c607bdb5dd81bdea5de2b5e4f3992a5fd59",
+            "sha256": "1120b3769e2985cefb3d25be981b1f914abeba57ae079b83c20c666c164fa9fe",
+            "bytes": 2235,
+            "name": "brand-guidelines",
+            "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply."
+          },
+          "license": {
+            "path": "skills/brand-guidelines/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "match",
+          "detail": "Complete usable procedure in SKILL.md.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/brand-guidelines/SKILL.md",
+              "sha256": "1120b3769e2985cefb3d25be981b1f914abeba57ae079b83c20c666c164fa9fe"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/canvas-design",
+        "source": {
+          "repositoryPath": "skills/canvas-design",
+          "folderTree": "95095faaee2ea943e85a5d1d562fde06841e835e",
+          "skill": {
+            "path": "skills/canvas-design/SKILL.md",
+            "gitBlob": "9f63fee82de84cd4230e1d0e322247b61eb4c94c",
+            "sha256": "a1f288079624402f30682753c1d43920b6664785698d21d3e7aa197450a6448b",
+            "bytes": 11939,
+            "name": "canvas-design",
+            "description": "Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs, never copying existing artists' work to avoid copyright violations."
+          },
+          "license": {
+            "path": "skills/canvas-design/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling font assets.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/canvas-design/SKILL.md",
+              "sha256": "a1f288079624402f30682753c1d43920b6664785698d21d3e7aa197450a6448b"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/claude-api",
+        "source": {
+          "repositoryPath": "skills/claude-api",
+          "folderTree": "f5a11c25cbe8b46d0260e9c14f8257a6e1fe5dec",
+          "skill": {
+            "path": "skills/claude-api/SKILL.md",
+            "gitBlob": "7f61519cc82eb2a99d4a3dc41a1a24fa08583ce0",
+            "sha256": "57c1e405c5110a14aeff2da10d25b95c188d801fc9a779fa7d7a25ccbf46b890",
+            "bytes": 72716,
+            "name": "claude-api",
+            "description": "Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.\nTRIGGER — read BEFORE opening the target file; don't skip because it \"looks like a one-liner\" — whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) — never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).\nSKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named — don't Read the file)."
+          },
+          "license": {
+            "path": "skills/claude-api/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling language and shared references.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/claude-api/SKILL.md",
+              "sha256": "57c1e405c5110a14aeff2da10d25b95c188d801fc9a779fa7d7a25ccbf46b890"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/doc-coauthoring",
+        "source": {
+          "repositoryPath": "skills/doc-coauthoring",
+          "folderTree": "d9df960e61fe2bafe9183e37de6f9f6b73b74087",
+          "skill": {
+            "path": "skills/doc-coauthoring/SKILL.md",
+            "gitBlob": "a5a69839ef4a161131d80b6daef10037a9686f4a",
+            "sha256": "2e47d78846faeea4a56e9809c52700087a15a2155a3f293a3efbaded81398ef4",
+            "bytes": 15815,
+            "name": "doc-coauthoring",
+            "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers. Trigger when user mentions writing docs, creating proposals, drafting specs, or similar documentation tasks."
+          },
+          "license": null
+        },
+        "standalone": {
+          "status": "match",
+          "detail": "Complete usable procedure in SKILL.md.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/doc-coauthoring/SKILL.md",
+              "sha256": "2e47d78846faeea4a56e9809c52700087a15a2155a3f293a3efbaded81398ef4"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/docx",
+        "source": {
+          "repositoryPath": "skills/docx",
+          "folderTree": "6e6f5b95c1de6e803cc07b214f5059b074d64e0c",
+          "skill": {
+            "path": "skills/docx/SKILL.md",
+            "gitBlob": "fb954a460a1ea2294e9595e87fecce8df043eeba",
+            "sha256": "8017469ea95fb7d28225c62daf8e2f3492a7b516fc64c18c28977cbf8980b7fe",
+            "bytes": 6911,
+            "name": "docx",
+            "description": "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files) or Word templates (.dotx files). Triggers include: any mention of 'Word doc', 'word document', '.docx', '.dotx', or requests to produce professional documents with formatting like tables of contents, headings, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx or .dotx files, inserting or replacing images in documents, performing find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a 'report', 'memo', 'letter', 'template', or similar deliverable as a Word or .docx file, use this skill. Do NOT use for PDFs, spreadsheets, Google Docs, or general coding tasks unrelated to document generation."
+          },
+          "license": {
+            "path": "skills/docx/LICENSE.txt",
+            "gitBlob": "c55ab42224874608473643de0a85736b7fec0730",
+            "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+            "bytes": 1467,
+            "status": "incompatible",
+            "spdxId": "LicenseRef-Anthropic-Source-Available"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Fixed document exclusion; also requires sibling scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/docx/SKILL.md",
+              "sha256": "8017469ea95fb7d28225c62daf8e2f3492a7b516fc64c18c28977cbf8980b7fe"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/frontend-design",
+        "source": {
+          "repositoryPath": "skills/frontend-design",
+          "folderTree": "0d5b74a14bdf3ebcd64f352d06376a2ef05ed296",
+          "skill": {
+            "path": "skills/frontend-design/SKILL.md",
+            "gitBlob": "decdff43d05908b4c1fc2cfd2d80fc5743440934",
+            "sha256": "1608ea77fbb6fc30d13a97d12cfa8ebf31358d40f0dd97beed24829d6b3f45dd",
+            "bytes": 8260,
+            "name": "frontend-design",
+            "description": "Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults."
+          },
+          "license": {
+            "path": "skills/frontend-design/LICENSE.txt",
+            "gitBlob": "f433b1a53f5b830a205fd2df78e2b34974656c7b",
+            "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+            "bytes": 10174,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "match",
+          "detail": "Complete usable procedure in SKILL.md.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/frontend-design/SKILL.md",
+              "sha256": "1608ea77fbb6fc30d13a97d12cfa8ebf31358d40f0dd97beed24829d6b3f45dd"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/internal-comms",
+        "source": {
+          "repositoryPath": "skills/internal-comms",
+          "folderTree": "9869687dcf6deb6802ca88ac11e67b6f7278017a",
+          "skill": {
+            "path": "skills/internal-comms/SKILL.md",
+            "gitBlob": "56ea935b74f371bfeb4c7d3c19d5139df866e73b",
+            "sha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475",
+            "bytes": 1511,
+            "name": "internal-comms",
+            "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.)."
+          },
+          "license": {
+            "path": "skills/internal-comms/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling examples.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/internal-comms/SKILL.md",
+              "sha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/mcp-builder",
+        "source": {
+          "repositoryPath": "skills/mcp-builder",
+          "folderTree": "b866bcfb57b780c10b587c7b543e871a91661ce0",
+          "skill": {
+            "path": "skills/mcp-builder/SKILL.md",
+            "gitBlob": "8a1a77a47d141967b246adb4da4f91037578ff7d",
+            "sha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295",
+            "bytes": 9092,
+            "name": "mcp-builder",
+            "description": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK)."
+          },
+          "license": {
+            "path": "skills/mcp-builder/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling references and scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/mcp-builder/SKILL.md",
+              "sha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/pdf",
+        "source": {
+          "repositoryPath": "skills/pdf",
+          "folderTree": "6369f4649de69bd6857c9bc3b058a77206009238",
+          "skill": {
+            "path": "skills/pdf/SKILL.md",
+            "gitBlob": "d3e046a5ae107a6cb23cfb16c219837094ab35d3",
+            "sha256": "9f78b8359fbd4943ad260a7a1e436e5a96503406d6c34e99f69223d647d85b9c",
+            "bytes": 8072,
+            "name": "pdf",
+            "description": "Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, extracting images, and OCR on scanned PDFs to make them searchable. If the user mentions a .pdf file or asks to produce one, use this skill."
+          },
+          "license": {
+            "path": "skills/pdf/LICENSE.txt",
+            "gitBlob": "c55ab42224874608473643de0a85736b7fec0730",
+            "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+            "bytes": 1467,
+            "status": "incompatible",
+            "spdxId": "LicenseRef-Anthropic-Source-Available"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Fixed document exclusion; also requires sibling references and scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/pdf/SKILL.md",
+              "sha256": "9f78b8359fbd4943ad260a7a1e436e5a96503406d6c34e99f69223d647d85b9c"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/pptx",
+        "source": {
+          "repositoryPath": "skills/pptx",
+          "folderTree": "64529c8b3f35fe632b7256bd2f6d46e4b40160ce",
+          "skill": {
+            "path": "skills/pptx/SKILL.md",
+            "gitBlob": "41cd2306977f269bb1d8169a9643b35053aa66bd",
+            "sha256": "a7ff03e2c85b636f55232a6b1555f5dd90216b7a1a359ab289d8364e6acbc6a0",
+            "bytes": 20796,
+            "name": "pptx",
+            "description": "Use this skill any time a .pptx or .potx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx or .potx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates (.potx), layouts, speaker notes, or comments. Trigger whenever the user mentions \"deck,\" \"slides,\" \"presentation,\" or references a .pptx or .potx filename, regardless of what they plan to do with the content afterward. If a .pptx or .potx file needs to be opened, created, or touched, use this skill."
+          },
+          "license": {
+            "path": "skills/pptx/LICENSE.txt",
+            "gitBlob": "c55ab42224874608473643de0a85736b7fec0730",
+            "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+            "bytes": 1467,
+            "status": "incompatible",
+            "spdxId": "LicenseRef-Anthropic-Source-Available"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Fixed document exclusion; also requires sibling scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/pptx/SKILL.md",
+              "sha256": "a7ff03e2c85b636f55232a6b1555f5dd90216b7a1a359ab289d8364e6acbc6a0"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/skill-creator",
+        "source": {
+          "repositoryPath": "skills/skill-creator",
+          "folderTree": "3cf9a8db32597ba3e24b584a3d696f4e11c7d7b6",
+          "skill": {
+            "path": "skills/skill-creator/SKILL.md",
+            "gitBlob": "65b3a402dbd09b8e83f9d637c6b553875189085c",
+            "sha256": "dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf",
+            "bytes": 33168,
+            "name": "skill-creator",
+            "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy."
+          },
+          "license": {
+            "path": "skills/skill-creator/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling agents, references, scripts, assets, and eval viewer.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/skill-creator/SKILL.md",
+              "sha256": "dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/slack-gif-creator",
+        "source": {
+          "repositoryPath": "skills/slack-gif-creator",
+          "folderTree": "c61d2f7bb6334b68a6936ad3f41ebfc7cb76fe2a",
+          "skill": {
+            "path": "skills/slack-gif-creator/SKILL.md",
+            "gitBlob": "16660d8ceb77af47986bba1c9176c2ff3f287a91",
+            "sha256": "2efca615ce55a3edd8fc05c779068a8085816617991987e446606403cd3abb22",
+            "bytes": 7841,
+            "name": "slack-gif-creator",
+            "description": "Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like \"make me a GIF of X doing Y for Slack.\""
+          },
+          "license": {
+            "path": "skills/slack-gif-creator/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling core modules and requirements.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/slack-gif-creator/SKILL.md",
+              "sha256": "2efca615ce55a3edd8fc05c779068a8085816617991987e446606403cd3abb22"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/theme-factory",
+        "source": {
+          "repositoryPath": "skills/theme-factory",
+          "folderTree": "e05534d132fb1b21f9917840874758e30f0a9b1a",
+          "skill": {
+            "path": "skills/theme-factory/SKILL.md",
+            "gitBlob": "90dfceaf2ecdc191a4dcfb0069768a9560638998",
+            "sha256": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552",
+            "bytes": 3124,
+            "name": "theme-factory",
+            "description": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can apply to any artifact that has been creating, or can generate a new theme on-the-fly."
+          },
+          "license": {
+            "path": "skills/theme-factory/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling showcase and theme files.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/theme-factory/SKILL.md",
+              "sha256": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/web-artifacts-builder",
+        "source": {
+          "repositoryPath": "skills/web-artifacts-builder",
+          "folderTree": "821b94f16c123d5f12e4e72eda9f7a162e2698f6",
+          "skill": {
+            "path": "skills/web-artifacts-builder/SKILL.md",
+            "gitBlob": "8b39b19f259b4216ecb07574741dd8eaa9863a07",
+            "sha256": "81c5002c6643b0de7b8710b00e7a9038daa6fb9b68d59870ee6adb12da8d10f8",
+            "bytes": 3087,
+            "name": "web-artifacts-builder",
+            "description": "Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state management, routing, or shadcn/ui components - not for simple single-file HTML/JSX artifacts."
+          },
+          "license": {
+            "path": "skills/web-artifacts-builder/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling initialization and bundling scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/web-artifacts-builder/SKILL.md",
+              "sha256": "81c5002c6643b0de7b8710b00e7a9038daa6fb9b68d59870ee6adb12da8d10f8"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/webapp-testing",
+        "source": {
+          "repositoryPath": "skills/webapp-testing",
+          "folderTree": "5ffb7dc66b9fd4c25c3e400a4c00da99a349b714",
+          "skill": {
+            "path": "skills/webapp-testing/SKILL.md",
+            "gitBlob": "4726215301db64a0cc4d41fc3219c61f37a30f4a",
+            "sha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2",
+            "bytes": 3913,
+            "name": "webapp-testing",
+            "description": "Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs."
+          },
+          "license": {
+            "path": "skills/webapp-testing/LICENSE.txt",
+            "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+            "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+            "bytes": 11345,
+            "status": "compatible",
+            "spdxId": "Apache-2.0"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling scripts and examples.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/webapp-testing/SKILL.md",
+              "sha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2"
+            }
+          ]
+        },
+        "tasks": []
+      },
+      {
+        "repositoryPath": "skills/xlsx",
+        "source": {
+          "repositoryPath": "skills/xlsx",
+          "folderTree": "fe6471cc9b5b97aae0b576ccb92ffd9b0207589d",
+          "skill": {
+            "path": "skills/xlsx/SKILL.md",
+            "gitBlob": "9da54804cc8c938586f89363c8da3b3a6e2a563d",
+            "sha256": "6712b39718fe815054abca9c3ee72f989613e6f771c8a5c58f30a65a6c905622",
+            "bytes": 8598,
+            "name": "xlsx",
+            "description": "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .xltx, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \"the xlsx in my downloads\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved."
+          },
+          "license": {
+            "path": "skills/xlsx/LICENSE.txt",
+            "gitBlob": "c55ab42224874608473643de0a85736b7fec0730",
+            "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+            "bytes": 1467,
+            "status": "incompatible",
+            "spdxId": "LicenseRef-Anthropic-Source-Available"
+          }
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Fixed document exclusion; also requires sibling scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/xlsx/SKILL.md",
+              "sha256": "6712b39718fe815054abca9c3ee72f989613e6f771c8a5c58f30a65a6c905622"
+            }
+          ]
+        },
+        "tasks": []
+      }
+    ]
+  },
+  "derived": {
+    "status": "stop",
+    "selectionBasisSha256": "b586e12d583aaf459dae5999c4aa73da288dd693636788654b91f378fcbfcef4",
+    "seeds": {
+      "procedure": "sha256-first-u32be-nonzero@1",
+      "resolved": {
+        "taskSelection": 2618989006,
+        "replicateScheduling": 3361499064,
+        "interleaving": 1475670040,
+        "pairedBootstrap": 3322963037
+      }
+    },
+    "candidates": [
+      {
+        "repositoryPath": "skills/algorithmic-art",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/algorithmic-art/SKILL.md",
+          "gitBlob": "634f6fa42e4e697fa6afd293acd7fb8246574876",
+          "sha256": "3bc4092c09804853186524c826bc0621b940bb6122c05b84496dff95388e6eef",
+          "bytes": 19769
+        },
+        "upstreamName": "algorithmic-art",
+        "upstreamDescription": "Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic art, flow fields, or particle systems. Create original algorithmic art rather than copying existing artists' work to avoid copyright violations.",
+        "license": {
+          "path": "skills/algorithmic-art/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling generator and viewer templates.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/algorithmic-art/SKILL.md",
+              "sha256": "3bc4092c09804853186524c826bc0621b940bb6122c05b84496dff95388e6eef"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/brand-guidelines",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/brand-guidelines/SKILL.md",
+          "gitBlob": "47c72c607bdb5dd81bdea5de2b5e4f3992a5fd59",
+          "sha256": "1120b3769e2985cefb3d25be981b1f914abeba57ae079b83c20c666c164fa9fe",
+          "bytes": 2235
+        },
+        "upstreamName": "brand-guidelines",
+        "upstreamDescription": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
+        "license": {
+          "path": "skills/brand-guidelines/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "match",
+          "detail": "Complete usable procedure in SKILL.md.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/brand-guidelines/SKILL.md",
+              "sha256": "1120b3769e2985cefb3d25be981b1f914abeba57ae079b83c20c666c164fa9fe"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/canvas-design",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/canvas-design/SKILL.md",
+          "gitBlob": "9f63fee82de84cd4230e1d0e322247b61eb4c94c",
+          "sha256": "a1f288079624402f30682753c1d43920b6664785698d21d3e7aa197450a6448b",
+          "bytes": 11939
+        },
+        "upstreamName": "canvas-design",
+        "upstreamDescription": "Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs, never copying existing artists' work to avoid copyright violations.",
+        "license": {
+          "path": "skills/canvas-design/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling font assets.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/canvas-design/SKILL.md",
+              "sha256": "a1f288079624402f30682753c1d43920b6664785698d21d3e7aa197450a6448b"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/claude-api",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/claude-api/SKILL.md",
+          "gitBlob": "7f61519cc82eb2a99d4a3dc41a1a24fa08583ce0",
+          "sha256": "57c1e405c5110a14aeff2da10d25b95c188d801fc9a779fa7d7a25ccbf46b890",
+          "bytes": 72716
+        },
+        "upstreamName": "claude-api",
+        "upstreamDescription": "Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.\nTRIGGER — read BEFORE opening the target file; don't skip because it \"looks like a one-liner\" — whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) — never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).\nSKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named — don't Read the file).",
+        "license": {
+          "path": "skills/claude-api/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling language and shared references.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/claude-api/SKILL.md",
+              "sha256": "57c1e405c5110a14aeff2da10d25b95c188d801fc9a779fa7d7a25ccbf46b890"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/doc-coauthoring",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/doc-coauthoring/SKILL.md",
+          "gitBlob": "a5a69839ef4a161131d80b6daef10037a9686f4a",
+          "sha256": "2e47d78846faeea4a56e9809c52700087a15a2155a3f293a3efbaded81398ef4",
+          "bytes": 15815
+        },
+        "upstreamName": "doc-coauthoring",
+        "upstreamDescription": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers. Trigger when user mentions writing docs, creating proposals, drafting specs, or similar documentation tasks.",
+        "license": null,
+        "standalone": {
+          "status": "match",
+          "detail": "Complete usable procedure in SKILL.md.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/doc-coauthoring/SKILL.md",
+              "sha256": "2e47d78846faeea4a56e9809c52700087a15a2155a3f293a3efbaded81398ef4"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "missing-compatible-folder-license",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/docx",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/docx/SKILL.md",
+          "gitBlob": "fb954a460a1ea2294e9595e87fecce8df043eeba",
+          "sha256": "8017469ea95fb7d28225c62daf8e2f3492a7b516fc64c18c28977cbf8980b7fe",
+          "bytes": 6911
+        },
+        "upstreamName": "docx",
+        "upstreamDescription": "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files) or Word templates (.dotx files). Triggers include: any mention of 'Word doc', 'word document', '.docx', '.dotx', or requests to produce professional documents with formatting like tables of contents, headings, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx or .dotx files, inserting or replacing images in documents, performing find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a 'report', 'memo', 'letter', 'template', or similar deliverable as a Word or .docx file, use this skill. Do NOT use for PDFs, spreadsheets, Google Docs, or general coding tasks unrelated to document generation.",
+        "license": {
+          "path": "skills/docx/LICENSE.txt",
+          "gitBlob": "c55ab42224874608473643de0a85736b7fec0730",
+          "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+          "bytes": 1467,
+          "status": "incompatible",
+          "spdxId": "LicenseRef-Anthropic-Source-Available"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Fixed document exclusion; also requires sibling scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/docx/SKILL.md",
+              "sha256": "8017469ea95fb7d28225c62daf8e2f3492a7b516fc64c18c28977cbf8980b7fe"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "source-available-document-skill",
+          "missing-compatible-folder-license",
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/frontend-design",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/frontend-design/SKILL.md",
+          "gitBlob": "decdff43d05908b4c1fc2cfd2d80fc5743440934",
+          "sha256": "1608ea77fbb6fc30d13a97d12cfa8ebf31358d40f0dd97beed24829d6b3f45dd",
+          "bytes": 8260
+        },
+        "upstreamName": "frontend-design",
+        "upstreamDescription": "Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults.",
+        "license": {
+          "path": "skills/frontend-design/LICENSE.txt",
+          "gitBlob": "f433b1a53f5b830a205fd2df78e2b34974656c7b",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "bytes": 10174,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "match",
+          "detail": "Complete usable procedure in SKILL.md.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/frontend-design/SKILL.md",
+              "sha256": "1608ea77fbb6fc30d13a97d12cfa8ebf31358d40f0dd97beed24829d6b3f45dd"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/internal-comms",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/internal-comms/SKILL.md",
+          "gitBlob": "56ea935b74f371bfeb4c7d3c19d5139df866e73b",
+          "sha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475",
+          "bytes": 1511
+        },
+        "upstreamName": "internal-comms",
+        "upstreamDescription": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).",
+        "license": {
+          "path": "skills/internal-comms/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling examples.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/internal-comms/SKILL.md",
+              "sha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/mcp-builder",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/mcp-builder/SKILL.md",
+          "gitBlob": "8a1a77a47d141967b246adb4da4f91037578ff7d",
+          "sha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295",
+          "bytes": 9092
+        },
+        "upstreamName": "mcp-builder",
+        "upstreamDescription": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).",
+        "license": {
+          "path": "skills/mcp-builder/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling references and scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/mcp-builder/SKILL.md",
+              "sha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/pdf",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/pdf/SKILL.md",
+          "gitBlob": "d3e046a5ae107a6cb23cfb16c219837094ab35d3",
+          "sha256": "9f78b8359fbd4943ad260a7a1e436e5a96503406d6c34e99f69223d647d85b9c",
+          "bytes": 8072
+        },
+        "upstreamName": "pdf",
+        "upstreamDescription": "Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, extracting images, and OCR on scanned PDFs to make them searchable. If the user mentions a .pdf file or asks to produce one, use this skill.",
+        "license": {
+          "path": "skills/pdf/LICENSE.txt",
+          "gitBlob": "c55ab42224874608473643de0a85736b7fec0730",
+          "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+          "bytes": 1467,
+          "status": "incompatible",
+          "spdxId": "LicenseRef-Anthropic-Source-Available"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Fixed document exclusion; also requires sibling references and scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/pdf/SKILL.md",
+              "sha256": "9f78b8359fbd4943ad260a7a1e436e5a96503406d6c34e99f69223d647d85b9c"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "source-available-document-skill",
+          "missing-compatible-folder-license",
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/pptx",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/pptx/SKILL.md",
+          "gitBlob": "41cd2306977f269bb1d8169a9643b35053aa66bd",
+          "sha256": "a7ff03e2c85b636f55232a6b1555f5dd90216b7a1a359ab289d8364e6acbc6a0",
+          "bytes": 20796
+        },
+        "upstreamName": "pptx",
+        "upstreamDescription": "Use this skill any time a .pptx or .potx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx or .potx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates (.potx), layouts, speaker notes, or comments. Trigger whenever the user mentions \"deck,\" \"slides,\" \"presentation,\" or references a .pptx or .potx filename, regardless of what they plan to do with the content afterward. If a .pptx or .potx file needs to be opened, created, or touched, use this skill.",
+        "license": {
+          "path": "skills/pptx/LICENSE.txt",
+          "gitBlob": "c55ab42224874608473643de0a85736b7fec0730",
+          "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+          "bytes": 1467,
+          "status": "incompatible",
+          "spdxId": "LicenseRef-Anthropic-Source-Available"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Fixed document exclusion; also requires sibling scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/pptx/SKILL.md",
+              "sha256": "a7ff03e2c85b636f55232a6b1555f5dd90216b7a1a359ab289d8364e6acbc6a0"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "source-available-document-skill",
+          "missing-compatible-folder-license",
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/skill-creator",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/skill-creator/SKILL.md",
+          "gitBlob": "65b3a402dbd09b8e83f9d637c6b553875189085c",
+          "sha256": "dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf",
+          "bytes": 33168
+        },
+        "upstreamName": "skill-creator",
+        "upstreamDescription": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.",
+        "license": {
+          "path": "skills/skill-creator/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling agents, references, scripts, assets, and eval viewer.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/skill-creator/SKILL.md",
+              "sha256": "dcd4803e61e913e6fc27294184cd3a71f09f5e924ff20c8a9a20173e7b3c2bcf"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/slack-gif-creator",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/slack-gif-creator/SKILL.md",
+          "gitBlob": "16660d8ceb77af47986bba1c9176c2ff3f287a91",
+          "sha256": "2efca615ce55a3edd8fc05c779068a8085816617991987e446606403cd3abb22",
+          "bytes": 7841
+        },
+        "upstreamName": "slack-gif-creator",
+        "upstreamDescription": "Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like \"make me a GIF of X doing Y for Slack.\"",
+        "license": {
+          "path": "skills/slack-gif-creator/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling core modules and requirements.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/slack-gif-creator/SKILL.md",
+              "sha256": "2efca615ce55a3edd8fc05c779068a8085816617991987e446606403cd3abb22"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/theme-factory",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/theme-factory/SKILL.md",
+          "gitBlob": "90dfceaf2ecdc191a4dcfb0069768a9560638998",
+          "sha256": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552",
+          "bytes": 3124
+        },
+        "upstreamName": "theme-factory",
+        "upstreamDescription": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can apply to any artifact that has been creating, or can generate a new theme on-the-fly.",
+        "license": {
+          "path": "skills/theme-factory/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling showcase and theme files.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/theme-factory/SKILL.md",
+              "sha256": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/web-artifacts-builder",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/web-artifacts-builder/SKILL.md",
+          "gitBlob": "8b39b19f259b4216ecb07574741dd8eaa9863a07",
+          "sha256": "81c5002c6643b0de7b8710b00e7a9038daa6fb9b68d59870ee6adb12da8d10f8",
+          "bytes": 3087
+        },
+        "upstreamName": "web-artifacts-builder",
+        "upstreamDescription": "Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state management, routing, or shadcn/ui components - not for simple single-file HTML/JSX artifacts.",
+        "license": {
+          "path": "skills/web-artifacts-builder/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling initialization and bundling scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/web-artifacts-builder/SKILL.md",
+              "sha256": "81c5002c6643b0de7b8710b00e7a9038daa6fb9b68d59870ee6adb12da8d10f8"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/webapp-testing",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/webapp-testing/SKILL.md",
+          "gitBlob": "4726215301db64a0cc4d41fc3219c61f37a30f4a",
+          "sha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2",
+          "bytes": 3913
+        },
+        "upstreamName": "webapp-testing",
+        "upstreamDescription": "Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.",
+        "license": {
+          "path": "skills/webapp-testing/LICENSE.txt",
+          "gitBlob": "4f881c52d1f72f4cfb720e339e2d35c3058d01a9",
+          "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362",
+          "bytes": 11345,
+          "status": "compatible",
+          "spdxId": "Apache-2.0"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Requires sibling scripts and examples.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/webapp-testing/SKILL.md",
+              "sha256": "51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      },
+      {
+        "repositoryPath": "skills/xlsx",
+        "sourceAuthenticated": true,
+        "upstreamSkillMd": {
+          "path": "skills/xlsx/SKILL.md",
+          "gitBlob": "9da54804cc8c938586f89363c8da3b3a6e2a563d",
+          "sha256": "6712b39718fe815054abca9c3ee72f989613e6f771c8a5c58f30a65a6c905622",
+          "bytes": 8598
+        },
+        "upstreamName": "xlsx",
+        "upstreamDescription": "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .xltx, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \"the xlsx in my downloads\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved.",
+        "license": {
+          "path": "skills/xlsx/LICENSE.txt",
+          "gitBlob": "c55ab42224874608473643de0a85736b7fec0730",
+          "sha256": "79f6d8f5b427252fa3b1c11ecdbdb6bf610b944f7530b4de78f770f38741cfaa",
+          "bytes": 1467,
+          "status": "incompatible",
+          "spdxId": "LicenseRef-Anthropic-Source-Available"
+        },
+        "standalone": {
+          "status": "mismatch",
+          "detail": "Fixed document exclusion; also requires sibling scripts.",
+          "evidence": [
+            {
+              "uri": "git+https://github.com/anthropics/skills.git@f17010c9bb483898c1d9c9f42dde2b3a98889434#skills/xlsx/SKILL.md",
+              "sha256": "6712b39718fe815054abca9c3ee72f989613e6f771c8a5c58f30a65a6c905622"
+            }
+          ]
+        },
+        "tasks": [],
+        "eligibleTaskCount": 0,
+        "eligibleRepositoryCount": 0,
+        "rejectionReasons": [
+          "source-available-document-skill",
+          "missing-compatible-folder-license",
+          "instructions-not-standalone",
+          "no-grader-valid-repository-work-tasks",
+          "insufficient-suitability-pool",
+          "insufficient-rehearsal-pool",
+          "insufficient-official-feasibility-pool"
+        ],
+        "preE2Ready": false
+      }
+    ],
+    "ranking": [],
+    "winner": null,
+    "stopReasons": [
+      "no-candidate-meets-pre-e2-feasibility-floor"
+    ]
+  },
+  "execution": {
+    "modelArms": 0,
+    "dockerCells": 0,
+    "previews": 0,
+    "rehearsalCells": 0,
+    "officialCells": 0
+  }
+}

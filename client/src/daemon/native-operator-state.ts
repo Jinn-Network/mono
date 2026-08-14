@@ -571,6 +571,26 @@ function detailJson(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) => typeof item === 'bigint' ? item.toString(10) : item);
 }
 
+/**
+ * The operation detail an operation already carries, for writers that ANNOTATE rather than replace.
+ *
+ * `detail_json` on some operation kinds carries operation IDENTITY, not just the last observation:
+ * a `solution-settlement` row is opened with `{attempt, deliveryDigest}` and the settlement reader
+ * binds the on-chain settlement to the exact public Delivery through `detail.deliveryDigest`.
+ * A writer that clobbers that detail destroys the identity, and the reopened operation can never be
+ * read canonically again (#2623). Returns `{}` for anything that is not a JSON object, so a
+ * malformed row degrades to the old replace-everything behaviour instead of throwing inside a
+ * transaction.
+ */
+function priorDetail(operation: RawOperation): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(operation.detail_json);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch { return {}; }
+}
+
 export class NativeOperatorStateRepository {
   private readonly now: () => Date;
 
@@ -1020,10 +1040,13 @@ export class NativeOperatorStateRepository {
       if (operation.tx_hash !== null && operation.tx_hash !== txHash) {
         throw new NativeOperatorStateConflictError('orphan notice names a different transaction');
       }
+      // Annotate, never replace (#2623): the orphan notice adds `{txHash, reason}` on top of the
+      // detail the operation already carries. `prepareClaimRetry` is the only writer entitled to
+      // blank a claim's detail, and it does so explicitly.
       this.store.db.prepare(
         `UPDATE native_operations SET status = 'orphaned', tx_hash = ?, detail_json = ?, updated_at = ?
           WHERE operation_id = ?`,
-      ).run(txHash, detailJson(input), now, id);
+      ).run(txHash, detailJson({ ...priorDetail(operation), ...input }), now, id);
       this.store.db.prepare(
         `UPDATE native_engagements SET state = 'eligible', attempt_index = NULL, attempt_uri = NULL,
           request_id = NULL, updated_at = ? WHERE engagement_id = ?`,
@@ -1506,12 +1529,22 @@ export class NativeOperatorStateRepository {
               `cannot reopen orphaned solution settlement from ${engagement.state}`,
             );
           }
+          // Reopening restores the operation to `intent`, so it must also restore the `intent`
+          // DETAIL (#2623). The identity is re-derived here from durable state that no orphan
+          // notice can reach — `native_engagements.attempt_uri` and the `delivery` row in
+          // `native_solution_artifacts` — which is the same pair the `created` branch below writes
+          // and the same pair `solutionSettlementId` hashes. This is what lets an operation whose
+          // detail was ALREADY poisoned by an older build recover on its next reconcile instead of
+          // orphan-looping forever.
           this.store.db.prepare(
             `UPDATE native_operations
               SET status = 'intent', prior_tx_hash = tx_hash, tx_hash = NULL,
-                block_hash = NULL, block_number = NULL, updated_at = ?
+                block_hash = NULL, block_number = NULL, detail_json = ?, updated_at = ?
               WHERE operation_id = ?`,
-          ).run(now, operationId);
+          ).run(detailJson({
+            attempt: engagement.attempt_uri,
+            deliveryDigest: delivery.record_digest,
+          }), now, operationId);
           this.store.db.prepare(
             `UPDATE native_engagements SET state = 'solution-settlement-pending', updated_at = ?
               WHERE engagement_id = ?`,
@@ -1794,10 +1827,19 @@ export class NativeOperatorStateRepository {
       if (operation.tx_hash !== null && operation.tx_hash !== txHash) {
         throw new NativeOperatorStateConflictError('solution settlement orphan notice names a different transaction');
       }
+      // #2623: an orphan notice ANNOTATES the operation; it does not replace its identity.
+      // `detail_json` was opened at intent with `{attempt, deliveryDigest}`, and
+      // `solutionSettlementCanonical` reads `detail.deliveryDigest` to bind the settlement to the
+      // exact public Delivery. Overwriting it with `{txHash, reason}` left the reopened operation
+      // with no digest, so the very next canonical read orphaned it again on "solution operation
+      // has no exact Delivery digest" — an unbounded loop with no clock, because this method
+      // returns normally and never reaches the retry/pause machinery. That is what wedged operator
+      // B live in round 26 (task 1234, 48 orphan events at the ~33s poll cadence, one occupied
+      // `maxConcurrent: 1` slot). Merge, so identity survives the round trip.
       this.store.db.prepare(
         `UPDATE native_operations SET status = 'orphaned', tx_hash = ?, detail_json = ?, updated_at = ?
           WHERE operation_id = ?`,
-      ).run(txHash, detailJson(input), now, operationId);
+      ).run(txHash, detailJson({ ...priorDetail(operation), ...input }), now, operationId);
       this.store.db.prepare(
         `UPDATE native_engagements SET state = 'solution-published', updated_at = ? WHERE engagement_id = ?`,
       ).run(now, operation.engagement_id);

@@ -1,22 +1,31 @@
 /**
  * #983 — post-flip guided onboarding, end to end against a mocked daemon API.
  *
- * Validates the two PR B fixes plus the carried-over flow:
+ * Validates:
  *  1. App holds the onboarding takeover while the daemon is `running` but
- *     onboardingComplete is absent — even when joinedSolverNets already carries
- *     the first join (the MEDIUM eject-before-harness bug).
- *  2. SolverNetStep sources the LIVE registry and renders the swe-rebench-v2
- *     card keyed by the REAL manifest cid (data-manifest-cid), tolerating the
- *     brief 503 subsystem_not_ready window after the flip (the BUG fix).
- *  3. Join → POST /v1/operator/join/<realcid>; Enter dashboard → POST
- *     /v1/operator/onboarding-complete; once bootstrap reports
- *     onboardingComplete:true the takeover drops to <Operating>.
+ *     onboardingComplete is absent (the MEDIUM eject-before-harness bug).
+ *  2. Once the bootstrap is terminal, rail step 4 goes active and mounts the
+ *     harness READINESS card, sourced from the composed
+ *     `GET /v1/harnesses/readiness` snapshot and tolerating the brief 503
+ *     `subsystem_not_ready` window after the flip.
+ *  3. Enter dashboard → POST /v1/operator/onboarding-complete; once bootstrap
+ *     reports onboardingComplete:true the takeover drops to <Operating>.
+ *  4. No membership write fires anywhere in the takeover.
+ *
+ * REPOINTED for Wave-4 D1 (DR-2026-08-05). The takeover used to have a
+ * "Pick your first SolverNet" step that POSTed /v1/operator/join/<cid>, and an
+ * "Enter dashboard" button that re-joined to persist the chosen harness +
+ * model. D1 deleted both routes. The step-4 assertions therefore move from
+ * "the rail's SolverNet step is active and its card carries the real cid" to
+ * "the rail's readiness step is active and reports what this machine can run",
+ * and the join assertions invert: the test now pins that ZERO join requests
+ * fire, because a takeover that silently discarded the operator's answers is
+ * exactly the bug this repoint exists to prevent.
  *
  * Like spa-config.e2e.test.ts this mocks the daemon's API at the page level so
  * the SPA renders without a live bootstrapped fleet. The mocks are mutable
- * closures so the test can drive the registry 503→200 self-heal and the
- * bootstrap onboardingComplete transition, and can assert the join +
- * onboarding-complete POSTs fired with the right cid.
+ * closures so the test can drive the readiness 503→200 self-heal and the
+ * bootstrap onboardingComplete transition.
  */
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -81,18 +90,17 @@ test.afterAll(async () => {
   }
 });
 
-test('post-flip onboarding: join under the real cid, complete, drop the takeover', async ({
+test('post-flip onboarding: confirm harness readiness, complete, drop the takeover', async ({
   page,
 }) => {
   // ── Mutable mock state ───────────────────────────────────────────────────
-  // The takeover holds until onboardingComplete flips true; the registry 503s
-  // once, then serves the swe-rebench-v2 summary; the join populates
-  // joinedSolverNets so the harness step reveals.
+  // The takeover holds until onboardingComplete flips true; the readiness
+  // snapshot 503s once (the post-flip registry-holder window), then serves.
   let onboardingComplete = false;
   let registryServed = false; // first poll 503s, subsequent polls 200
-  let joinedSolverNets: Record<string, unknown> = {};
-  let joinPostCid: string | null = null;
-  const joinPostBodies: Array<Record<string, unknown>> = [];
+  let readinessServed = false; // first poll 503s, subsequent polls 200
+  const joinedSolverNets: Record<string, unknown> = {};
+  const joinRequests: string[] = [];
   let onboardingCompletePosts = 0;
 
   const j = (body: unknown): { contentType: string; body: string } => ({
@@ -171,30 +179,48 @@ test('post-flip onboarding: join under the real cid, complete, drop the takeover
     },
   );
 
-  // Harness readiness — codex ready so the Enter-dashboard gate can open.
+  // Per-harness readiness — the catch-all, for any single-harness probe some
+  // other surface makes. Registered FIRST so the composed-snapshot route below
+  // beats it: Playwright checks routes in reverse-registration order, and
+  // `/v1/harnesses/readiness` matches this prefix too.
   await page.route(
     (url) => url.pathname.startsWith('/v1/harnesses/'),
     (route) => route.fulfill(j({ harnessName: 'codex', manifestCids: [], ready: true })),
   );
-
-  // operator join — record the cid, populate joinedSolverNets so the next
-  // bootstrap poll reveals the harness step; restartRequired:false (PR A).
+  // Harness readiness — the composed snapshot the step-4 card reads. First
+  // poll 503 subsystem_not_ready (the registry holder is populated post-flip),
+  // then 200 with one ready harness. The card must self-heal, not latch a
+  // false "not ready".
   await page.route(
-    (url) => url.pathname.startsWith('/v1/operator/join/'),
+    (url) => url.pathname === '/v1/harnesses/readiness',
     (route) => {
-      const cid = decodeURIComponent(route.request().url().split('/v1/operator/join/')[1] ?? '');
-      joinPostCid = cid;
-      const postData = route.request().postData();
-      if (postData) joinPostBodies.push(JSON.parse(postData) as Record<string, unknown>);
-      joinedSolverNets = { [cid]: { manifestCid: cid, roles: ['solver'] } };
+      if (!readinessServed) {
+        readinessServed = true;
+        return route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'subsystem_not_ready' }),
+        });
+      }
       return route.fulfill(
         j({
-          ok: true,
-          restartRequired: false,
-          manifestCid: cid,
-          config: { manifestCid: cid, roles: ['solver'], name: 'SWE-rebench v2' },
+          lastRefreshedAt: '2026-06-01T00:00:00.000Z',
+          harnesses: [{ harnessName: 'codex', manifestCids: [], ready: true }],
         }),
       );
+    },
+  );
+
+  // The join routes are GONE (Wave-4 D1). This mock exists only so a rogue
+  // request is RECORDED rather than falling through to the real daemon and
+  // 404-ing quietly; the assertion below is that it never fires.
+  await page.route(
+    // Deliberately NOT `startsWith('/v1/operator/join')` — that would also
+    // swallow `/v1/operator/joined`, the read this SPA still makes.
+    (url) => url.pathname === '/v1/operator/join' || url.pathname.startsWith('/v1/operator/join/'),
+    (route) => {
+      joinRequests.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+      return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
     },
   );
 
@@ -252,37 +278,41 @@ test('post-flip onboarding: join under the real cid, complete, drop the takeover
 
   // 1. Takeover is held: onboarding progress shows, the operating shell does not.
   await expect(page.getByTestId('onboarding-progress')).toBeVisible();
-  // The SolverNet step (rail step 4) is active once the bootstrap is terminal.
+  // The readiness step (rail step 4) is active once the bootstrap is terminal.
   await expect(page.getByTestId('onboarding-phase-4')).toHaveAttribute('data-status', 'active');
   await expect(page.getByTestId('overview-page-grid')).toHaveCount(0);
 
-  // 2. Registry self-heals from the 503 window to the swe-rebench-v2 card,
-  //    keyed by the real manifest cid.
-  const card = page.getByTestId('onboarding-solvernet-card');
+  // 2. The readiness card mounts and self-heals from the 503 window to the
+  //    composed snapshot — one row per harness this build registers.
+  const card = page.getByTestId('onboarding-harness-card');
   await expect(card).toBeVisible({ timeout: 15_000 });
-  await expect(card).toHaveAttribute('data-manifest-cid', SWE_CID);
+  await expect(page.getByTestId('onboarding-harness-row-codex')).toHaveAttribute(
+    'data-ready',
+    'true',
+    { timeout: 15_000 },
+  );
 
-  // 3. Join fires POST /v1/operator/join/<realcid>.
-  await page.getByTestId('onboarding-solvernet-join').click();
-  await expect.poll(() => joinPostCid).toBe(SWE_CID);
+  // 3. The step asks no question: no SolverNet card, no harness radio, no model
+  //    select. Anything it collected here would be discarded — the write paths
+  //    that used to persist those answers are gone.
+  await expect(page.getByTestId('onboarding-solvernet-card')).toHaveCount(0);
+  await expect(page.getByTestId('onboarding-model-select')).toHaveCount(0);
 
-  // 4. The harness step reveals (joinedSolverNets now non-empty) and the
-  //    Enter-dashboard gate opens (codex ready + default model selected).
+  // 4. Enter dashboard is open on arrival — readiness is reported, not enforced.
   const enter = page.getByTestId('onboarding-enter-dashboard');
-  await expect(page.getByTestId('onboarding-harness-card')).toBeVisible({ timeout: 15_000 });
   await expect(enter).toBeEnabled({ timeout: 15_000 });
 
-  // 5. Enter dashboard fires the Enter-dashboard (second) join carrying the
-  //    chosen harness + model, then POST /v1/operator/onboarding-complete.
-  //    The second join is the exact surface the HIGH name-drop bug lived in,
-  //    so assert it carried codex + the default model end to end.
+  // 5. Enter dashboard fires exactly one POST /v1/operator/onboarding-complete
+  //    and nothing else.
   await enter.click();
   await expect.poll(() => onboardingCompletePosts).toBe(1);
-  await expect.poll(() => joinPostBodies.length).toBeGreaterThanOrEqual(2);
-  expect(joinPostBodies.at(-1)).toMatchObject({ harness: 'codex', model: 'gpt-5.4-mini' });
 
   // 6. With bootstrap now reporting onboardingComplete:true the takeover drops
   //    to <Operating> (the overview grid renders; the takeover is gone).
   await expect(page.getByTestId('overview-page-grid')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('onboarding-progress')).toHaveCount(0);
+
+  // 7. The whole journey wrote no membership. This is the assertion that would
+  //    have caught a takeover still POSTing at a deleted route.
+  expect(joinRequests).toEqual([]);
 });
