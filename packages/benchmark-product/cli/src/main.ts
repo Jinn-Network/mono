@@ -3,11 +3,14 @@ import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  captureQualifiedSubscriptionLogin,
   createDefaultBenchmarkRuntimeHost,
   PRODUCT_VERSION,
   runCli as runCoreCli,
   USAGE as CORE_USAGE,
+  type AgentProfile,
   type CliResult,
+  type CredentialGrant,
 } from "@colophon-claims/core";
 import { runSampleLifecycle, SAMPLE_LIFECYCLE_MODES, type SampleLifecycleEvent } from "@colophon-claims/core/sample-lifecycle";
 import { BUNDLE_FORMAT } from "@colophon-claims/verify";
@@ -301,6 +304,8 @@ export interface ColophonCliContext {
   readonly interactive?: boolean;
   /** Explicit Colophon-owned OS data directory; never a Claude/Codex home. */
   readonly agentDataDir?: string;
+  /** Injectable only for the interactive terminal boundary and its regression coverage. */
+  readonly subscriptionLogin?: (dataDir: string, profile: AgentProfile) => Promise<CredentialGrant>;
   /** Packaged build evidence; injectable only for hermetic tests. */
   readonly buildMetadata?: ColophonBuildMetadata;
   /** Found operating-system target; injectable only for hermetic tests. */
@@ -339,6 +344,12 @@ export async function runColophonCli(argv: readonly string[], context: ColophonC
       runtimeHost,
       agentDataDir: context.agentDataDir,
       progress: context.progress,
+      ...(context.interactive === true
+        ? {
+            subscriptionLogin: context.subscriptionLogin
+              ?? (async (dataDir: string, profile: AgentProfile) => captureQualifiedSubscriptionLogin(dataDir, profile)),
+          }
+        : {}),
     });
   } catch (cause) {
     return renderTopLevelFailure(cause, json);
