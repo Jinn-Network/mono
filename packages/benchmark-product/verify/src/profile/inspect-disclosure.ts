@@ -4,6 +4,7 @@ import {
   isInspectMultiScorerSelection,
   type InspectSelectionManifest,
 } from "./inspect-manifest.js";
+import { deriveInspectEvaluationStrategy, type InspectAssurance } from "./inspect-assurance.js";
 
 export interface InspectScoringProjectionDisclosure {
   readonly measurementName: string;
@@ -23,6 +24,10 @@ export interface InspectRuntimeMethodDisclosure {
     readonly epochReducers: readonly string[] | null;
   };
   readonly evaluatorRelationship: "same-execution-scorer";
+  readonly scoreSourceRelationship: "same-execution-scorer";
+  readonly officialEvaluationRelationship: "same-execution-scorer" | "separate-log-verifier";
+  readonly officialEvaluatorCount: number;
+  readonly partyIndependence: "not-established";
 }
 
 function ruleText(rule: VerdictRule): string {
@@ -42,7 +47,9 @@ function ruleText(rule: VerdictRule): string {
 export function describeInspectRuntimeMethod(
   manifest: InspectSelectionManifest,
   selectionManifestSha256: string,
+  assurance?: Readonly<InspectAssurance>,
 ): InspectRuntimeMethodDisclosure {
+  const strategy = deriveInspectEvaluationStrategy(assurance);
   const projections: readonly InspectScoringProjectionDisclosure[] = isInspectMultiScorerSelection(manifest)
     ? manifest.scoring.projections
     : [{
@@ -69,5 +76,11 @@ export function describeInspectRuntimeMethod(
       }
       : { metrics: null, epochReducers: null },
     evaluatorRelationship: "same-execution-scorer",
+    scoreSourceRelationship: "same-execution-scorer",
+    officialEvaluationRelationship: strategy === "embedded"
+      ? "same-execution-scorer"
+      : "separate-log-verifier",
+    officialEvaluatorCount: assurance?.minVerdicts ?? 1,
+    partyIndependence: "not-established",
   };
 }

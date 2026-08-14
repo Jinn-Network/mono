@@ -52,6 +52,7 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import type { TaskSpecification } from "@jinn-network/task-execution-protocol";
 import { makeEvaluationLauncher } from "@jinn-network/task-execution-evaluation-harness/launcher";
+import { defineEvaluatorRegistration } from "@jinn-network/task-execution-evaluation-harness";
 import {
   contextResolutionSnapshotSource,
   createPredictionEvaluatorRegistration,
@@ -86,15 +87,21 @@ import {
 } from "../runtime/inspect/artifacts.js";
 import {
   assertInspectSelectionUndrifted,
+  inspectWorkerPath,
   readInspectHostBinding,
   readInspectSelectionManifest,
 } from "../runtime/inspect/host.js";
 import { makeInspectLauncher } from "../runtime/inspect/launcher.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
+import { assertInspectOciBrokerReady, inspectOciRunnerPath } from "../runtime/inspect/oci.js";
+import {
+  inspectLogVerifierParser,
+  inspectLogVerifierMethod,
+  type InspectEvaluationStrategy,
+} from "../runtime/inspect/assurance.js";
 import { HARBOR_ADAPTER_ID, HarborSelectionManifestSchema, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { readHarborHostBinding } from "../runtime/harbor/host.js";
 import { makeHarborLauncher, HARBOR_LAUNCHER_ID } from "../runtime/harbor/launcher.js";
-import { assertInspectOciBrokerReady } from "../runtime/inspect/oci.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   createEvaluationCellRegistry,
@@ -136,6 +143,8 @@ export interface LocalVenueOptions {
   readonly now: () => string;
   /** Selected evaluation runtime. Absent and `jinn-native` both preserve the original venue. */
   readonly evaluationRuntime?: EvaluationRuntimeBinding;
+  /** Product-private strategy derived from the resolved assurance sealed into the Run. */
+  readonly inspectEvaluationStrategy?: InspectEvaluationStrategy;
   /** How many venue evaluator identities to mint (integer >= 1, default 1). See
    * `LocalVenue.evaluators` for the honesty posture of what N identities do and do not prove. */
   readonly evaluatorCount?: number;
@@ -308,10 +317,15 @@ function evaluatorIri(index: number): string {
 /** Evaluator registration id, `index` 1-based — used BOTH parent-side (the launcher's
  * `registrations` + `selectRegistration`) and in the generated deployment module the spawned
  * harness loads; the spawned harness selects by exact id match, so the two must agree. */
-type EvaluationAdapterKind = "prediction" | "swe-rebench";
+type EvaluationAdapterKind = "prediction" | "swe-rebench" | "inspect-log-verifier";
 
 function evaluatorRegistrationId(index: number, kind: EvaluationAdapterKind): string {
-  return `${kind === "prediction" ? "prediction-market" : "swe-rebench-v2"}:evaluator-${index}`;
+  const prefix = kind === "prediction"
+    ? "prediction-market"
+    : kind === "swe-rebench"
+      ? "swe-rebench-v2"
+      : "inspect-log-verifier";
+  return `${prefix}:evaluator-${index}`;
 }
 
 /** Portable logical handle only (`defineEvaluatorRegistration`'s `signer.handle` constraint) —
@@ -428,6 +442,10 @@ function resolveEvaluationHarnessLauncherModuleUrl(): string {
   return import.meta.resolve("@jinn-network/task-execution-evaluation-harness/launcher");
 }
 
+function resolveInspectVerifierRuntimeUrl(): string {
+  return new URL("../runtime/inspect/verifier-runtime.mjs", import.meta.url).href;
+}
+
 /** Generates `<workspaceDir>/venue/evaluation-deployment.mjs`, the ESM module the spawned
  * evaluation-harness subprocess loads via `JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE`. Embeds
  * ABSOLUTE `file://` imports of the evaluator-adapters, OCI-grader, and evaluation-harness package
@@ -441,16 +459,33 @@ function writeEvaluationDeploymentModule(
     readonly id: string;
     readonly predictionRegistrationId: string;
     readonly sweRebenchRegistrationId: string;
+    readonly inspectRegistrationId: string;
   }[],
   grader: {
     readonly runtime: "docker" | "podman";
     readonly dockerPath?: string;
     readonly allowPublicNetwork: boolean;
   },
+  inspect?: {
+    readonly manifest: ReturnType<typeof readInspectSelectionManifest>;
+    readonly selectionManifestSha256: string;
+    readonly workerPath: string;
+    readonly ociRunnerPath: string;
+    readonly host: { readonly kind: "local-python"; readonly pythonPath: string } | {
+      readonly kind: "oci";
+      readonly dockerPath: string;
+      readonly imageDigest: string;
+      readonly platform: string;
+      readonly user: string;
+    };
+    readonly evaluationMethod: ReturnType<typeof inspectLogVerifierMethod>;
+    readonly parserAllowlistKey: string;
+  },
 ): string {
   const evaluatorAdaptersEntryUrl = resolveEvaluatorAdaptersEntryUrl();
   const ociGraderEntryUrl = resolveOciGraderEntryUrl();
   const evaluationHarnessEntryUrl = resolveEvaluationHarnessEntryUrl();
+  const inspectVerifierRuntimeUrl = resolveInspectVerifierRuntimeUrl();
   const source = `// Generated by @colophon-claims/core's local venue (src/venue/venue.ts).
 // Loaded by the spawned evaluation-harness subprocess via JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE.
 // Do not edit by hand -- regenerated on every createLocalVenue() call.
@@ -462,11 +497,13 @@ import {
 } from ${JSON.stringify(evaluatorAdaptersEntryUrl)};
 import { sha256Hex, sweRebenchOciGraderReportSource } from ${JSON.stringify(ociGraderEntryUrl)};
 import { validateEvaluatorRegistrationSet } from ${JSON.stringify(evaluationHarnessEntryUrl)};
+import { createInspectLogVerifierRegistration } from ${JSON.stringify(inspectVerifierRuntimeUrl)};
 
 // One registration per supported parser and workspace-minted evaluator identity. Distinct
 // identities prove agent-distinctness only -- the same operator runs every evaluator here.
 const EVALUATORS = ${JSON.stringify(evaluators)};
 const SWE_REBENCH_GRADER = ${JSON.stringify(grader)};
+const INSPECT = ${JSON.stringify(inspect ?? null)};
 const sweRebenchGraderReportSource = sweRebenchOciGraderReportSource({
   runtime: SWE_REBENCH_GRADER.runtime,
   allowPublicNetwork: SWE_REBENCH_GRADER.allowPublicNetwork,
@@ -498,8 +535,17 @@ export const evaluationHarnessDeployment = Object.freeze({
       }),
       registrationId: evaluator.sweRebenchRegistrationId,
     },
+    ...(INSPECT === null ? [] : [createInspectLogVerifierRegistration({
+      ...INSPECT,
+      registrationId: evaluator.inspectRegistrationId,
+      evaluatorId: evaluator.id,
+      signerHandle: ${JSON.stringify(SIGNER_HANDLE)},
+    })]),
   ])),
-  parserAllowlist: evaluatorAdaptersParserAllowlist(),
+  parserAllowlist: new Set([
+    ...evaluatorAdaptersParserAllowlist(),
+    ...(INSPECT === null ? [] : [INSPECT.parserAllowlistKey]),
+  ]),
   evidenceWriter: {
     async putClaimEvidence({ name, bytes, mediaType }) {
       // A digest-bound data URI keeps bounded grader evidence deletion-portable with the verdict;
@@ -554,6 +600,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const inspectHost = runtimeId === INSPECT_ADAPTER_ID
     ? readInspectHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
     : undefined;
+  const inspectEvaluationStrategy = inspectSelection === undefined
+    ? undefined
+    : options.inspectEvaluationStrategy ?? "embedded";
   const harborSelection: HarborSelectionManifest | undefined = runtimeId === HARBOR_ADAPTER_ID
     ? HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256))))
     : undefined;
@@ -600,16 +649,16 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     && (sweRebenchGrader.dockerPath.length === 0 || !isAbsolute(sweRebenchGrader.dockerPath))) {
     refuse("validation", "sweRebenchGrader.dockerPath", "grader runtime path must be absolute");
   }
-  if (inspectSelection !== undefined && evaluatorCount !== 1) {
+  if (inspectSelection !== undefined && inspectEvaluationStrategy === "embedded" && evaluatorCount !== 1) {
     refuse(
       "validation",
       "evaluatorCount",
-      "the Inspect adapter exposes one same-execution scorer identity and cannot satisfy a distinct-evaluator quorum",
+      "embedded Inspect scoring exposes exactly one same-execution scorer identity",
     );
   }
-  const evaluatorIdentities = inspectSelection === undefined
-    ? Array.from({ length: evaluatorCount }, (_, i) => ({ id: evaluatorIri(i + 1) }))
-    : [{ id: INSPECT_EMBEDDED_EVALUATOR_ID }];
+  const evaluatorIdentities = inspectSelection !== undefined && inspectEvaluationStrategy === "embedded"
+    ? [{ id: INSPECT_EMBEDDED_EVALUATOR_ID }]
+    : Array.from({ length: evaluatorCount }, (_, i) => ({ id: evaluatorIri(i + 1) }));
   const signingKeys = loadOrCreateEvaluatorSigningKeys(
     workspaceDir,
     evaluatorIdentities,
@@ -620,6 +669,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     signer: createVerdictDsseSigner(key),
     predictionRegistrationId: evaluatorRegistrationId(index + 1, "prediction"),
     sweRebenchRegistrationId: evaluatorRegistrationId(index + 1, "swe-rebench"),
+    inspectRegistrationId: evaluatorRegistrationId(index + 1, "inspect-log-verifier"),
   }));
   const registry = createEvaluationCellRegistry();
   const provisioner = createLocalProvisioner({
@@ -639,7 +689,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
           manifest: inspectSelection,
           host: inspectHost,
-          evaluator: evaluators[0]!,
+          ...(inspectEvaluationStrategy === "embedded"
+            ? { embeddedEvaluator: evaluators[0]! }
+            : {}),
         },
       }),
     ...(harborSelection === undefined || harborHost === undefined
@@ -689,6 +741,30 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       manifest: inspectSelection,
       hostConnectionDescriptor: options.inspectHostConnectionDescriptor,
     });
+  const inspectVerifier = inspectSelection === undefined
+    || inspectHost === undefined
+    || inspectEvaluationStrategy !== "separate-log-verification"
+    ? undefined
+    : {
+      manifest: inspectSelection,
+      selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
+      workerPath: inspectWorkerPath(),
+      ociRunnerPath: inspectOciRunnerPath(),
+      host: inspectHost.kind === "oci"
+        ? {
+          kind: "oci" as const,
+          dockerPath: inspectHost.dockerPath,
+          imageDigest: inspectHost.imageDigest,
+          platform: inspectHost.platform,
+          user: inspectHost.user,
+        }
+        : { kind: "local-python" as const, pythonPath: inspectHost.pythonPath },
+      evaluationMethod: inspectLogVerifierMethod(
+        inspectSelection,
+        options.evaluationRuntime!.selectionManifestSha256,
+      ),
+      parserAllowlistKey: parserAllowlistKey(inspectLogVerifierParser(inspectSelection)),
+    };
   const harborLauncher = harborSelection === undefined || harborHost === undefined
     ? undefined
     : makeHarborLauncher({ manifest: harborSelection, host: harborHost });
@@ -732,6 +808,27 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
         registrationId: evaluator.sweRebenchRegistrationId,
       },
     },
+    ...(inspectVerifier === undefined ? [] : [{
+      evaluatorId: evaluator.id,
+      kind: "inspect-log-verifier" as const,
+      registration: defineEvaluatorRegistration({
+        registrationId: evaluator.inspectRegistrationId,
+        adapter: {
+          async evaluate() {
+            throw new TypeError("Inspect log verification runs only in the supervised evaluation deployment");
+          },
+        },
+        evaluationMethod: inspectVerifier.evaluationMethod,
+        specificationCompatibility: (specification) =>
+          specification.family === "deterministic-process"
+          && parserAllowlistKey((specification.familyBlock as DeterministicProcessBlock).parser)
+            === inspectVerifier.parserAllowlistKey,
+        evaluatorIdentity: { id: evaluator.id },
+        signer: { handle: SIGNER_HANDLE },
+        outcomeValidator: (evaluation) => evaluation,
+        interruptionBehavior: "repeatable",
+      }),
+    }]),
   ]));
   const evaluationSpecKinds = new Map<string, EvaluationAdapterKind>();
   const evaluationHarnessLauncherModuleUrl = resolveEvaluationHarnessLauncherModuleUrl();
@@ -739,12 +836,14 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const evaluationHarnessDigest = sha256Hex(readFileSync(evaluationHarnessEntrypointPath));
   const deploymentModulePath = writeEvaluationDeploymentModule(
     workspaceDir,
-    evaluators.map(({ id, predictionRegistrationId, sweRebenchRegistrationId }) => ({
+    evaluators.map(({ id, predictionRegistrationId, sweRebenchRegistrationId, inspectRegistrationId }) => ({
       id,
       predictionRegistrationId,
       sweRebenchRegistrationId,
+      inspectRegistrationId,
     })),
     sweRebenchGrader,
+    inspectVerifier,
   );
   const platformEvaluationLauncher = makeEvaluationLauncher({
     deploymentModule: pathToFileURL(deploymentModulePath).href,
@@ -1034,11 +1133,13 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       ? "prediction"
       : parserKey === parserAllowlistKey(SWE_REBENCH_PARSER)
         ? "swe-rebench"
-        : refuse(
-          "validation",
-          "evaluationSpecBytes.familyBlock.parser",
-          `local venue has no evaluator registration for parser ${familyBlock.parser.id}`,
-        );
+        : inspectVerifier !== undefined && parserKey === inspectVerifier.parserAllowlistKey
+          ? "inspect-log-verifier"
+          : refuse(
+            "validation",
+            "evaluationSpecBytes.familyBlock.parser",
+            `local venue has no evaluator registration for parser ${familyBlock.parser.id}`,
+          );
 
     let evaluationContextBytes: Uint8Array;
     if (adapterKind === "prediction") {
@@ -1054,7 +1155,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
         );
       }
       evaluationContextBytes = new TextEncoder().encode(JSON.stringify(deriveSampleResolution(forecast)));
-    } else {
+    } else if (adapterKind === "swe-rebench") {
       const declaredNetwork = familyBlock[SWE_REBENCH_PUBLIC_NETWORK_EXTENSION];
       if (declaredNetwork !== undefined && declaredNetwork !== true) {
         return refuse(
@@ -1078,6 +1179,16 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       // The OCI source consumes the exact subject and EvaluationSpec; it deliberately has no
       // fixture-controlled context port. Keep the generic provisioner's required context file
       // present but semantically empty.
+      evaluationContextBytes = new TextEncoder().encode("{}");
+    } else {
+      const resultNames = input.resultArtifacts.map((artifact) => artifact.name).sort();
+      if (resultNames.length !== 2 || resultNames[0] !== "inspect-log" || resultNames[1] !== "inspect-summary") {
+        return refuse(
+          "validation",
+          "resultArtifacts",
+          "Inspect log verification requires exactly inspect-log and inspect-summary solve outputs",
+        );
+      }
       evaluationContextBytes = new TextEncoder().encode("{}");
     }
 
@@ -1120,8 +1231,10 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     },
     verdictKeyId: evaluators[0]!.keyId,
     evaluators: evaluators.map(({ id, keyId }) => ({ id, keyId })),
-    evaluationMode: inspectSelection === undefined ? "separate" : "embedded",
-    ...(inspectSelection === undefined
+    evaluationMode: inspectSelection === undefined || inspectEvaluationStrategy === "separate-log-verification"
+      ? "separate"
+      : "embedded",
+    ...(inspectSelection === undefined || inspectEvaluationStrategy !== "embedded"
       ? {}
       : {
         interpretEmbeddedEvaluation(

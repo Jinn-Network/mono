@@ -94,6 +94,33 @@ describe.skipIf(imageDigest === undefined)("trusted broker contract", () => {
     expect(output.trim()).toBe("broker-v1-conformance-ok");
   }, 30_000);
 
+  test("runs verifier operations without a broker, credential descriptor, or network", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "jinn-inspect-verify-boundary-")));
+    const inputDir = join(root, "input");
+    const name = `jinn-inspect-verify-boundary-${process.pid}`;
+    mkdirSync(inputDir);
+    writeFileSync(join(inputDir, "inspect-verify.json"), "{}", { mode: 0o400 });
+    const runner = fileURLToPath(new URL("./oci-runner.mjs", import.meta.url));
+    try {
+      const result = spawnSync(process.execPath, [
+        runner, dockerPath, "run", "--rm", "--pull=never", "--platform=linux/amd64",
+        `--name=${name}`, "--network=none", "--read-only", "--cap-drop=ALL",
+        "--mount", `type=bind,src=${inputDir},dst=/jinn/input,readonly`,
+        "--entrypoint=python", imageDigest!, "-c", "print('verify-boundary-ok')",
+        "/jinn/input/inspect-verify.json",
+      ], { encoding: "utf8", env: { LANG: "C.UTF-8" } });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("verify-boundary-ok");
+      const containers = execFileSync(dockerPath, ["ps", "-a", "--filter", `name=${name}`, "--format", "{{.Names}}"], { encoding: "utf8" }).trim();
+      const networks = execFileSync(dockerPath, ["network", "ls", "--filter", `name=${name}`, "--format", "{{.Name}}"], { encoding: "utf8" }).trim();
+      const volumes = execFileSync(dockerPath, ["volume", "ls", "--filter", `name=${name}`, "--format", "{{.Name}}"], { encoding: "utf8" }).trim();
+      expect({ containers, networks, volumes }).toEqual({ containers: "", networks: "", volumes: "" });
+    } finally {
+      spawnSync(dockerPath, ["rm", "--force", name], { stdio: "ignore" });
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test("cancellation reaps the worker, broker, private network, and secret volumes", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "jinn-broker-cancel-")));
     const keyPath = join(root, "key");

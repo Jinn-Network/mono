@@ -55,11 +55,6 @@ export function hostCredentialForwards(credential: HarnessHostCredential | undef
   return [{ handle, target: basename, role: "harness" }];
 }
 
-/** The small exec-time helper is the only code which opens a forwarded secret file. */
-export function credentialExecArgv(argv: readonly string[]): string[] {
-  return [process.execPath, new URL("./credential-exec.mjs", import.meta.url).pathname, "--", ...argv];
-}
-
 export function probeFrom(options: LauncherOptions, id: string): () => Promise<ProbeResult> {
   return options.probe ?? (async () => ({ ready: false, detail: `${id}: binary/auth/version probe port not configured` }));
 }

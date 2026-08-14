@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFile, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,7 +19,3 @@ await new Promise((resolve, reject) => {
     else reject(new Error(`TypeScript build exited with ${code}`));
   });
 });
-
-// This bridge is deliberately plain ESM: it is the process entrypoint that must be able to run
-// before a harness, without a TypeScript loader or any dependency that could inherit credentials.
-await copyFile(join(packageRoot, "src", "credential-exec.mjs"), join(dist, "credential-exec.mjs"));

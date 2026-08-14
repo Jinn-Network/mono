@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Exec-time credential bridge shared by the real CLI launchers.
+ * Exec-time credential bridge owned by the Attempt Supervisor.
  *
  * The launch plan only contains `secrets/<basename>` references. This process resolves those
  * references immediately before spawning the harness, removes its control variables, and never
@@ -45,7 +45,6 @@ function readSecretBytes(reference, secretsRoot) {
 }
 
 function secretText(reference, secretsRoot) {
-  // Forward text secrets as a value; strip exactly one file line ending, never interior space.
   const bytes = readSecretBytes(reference, secretsRoot);
   try {
     const text = bytes.toString("utf8").replace(/\r?\n$/u, "");
@@ -97,7 +96,6 @@ function main() {
   if (codexArtifact !== undefined) {
     const tmp = requiredEnv("TMPDIR");
     codexState = join(tmp, "jinn-codex-local-login");
-    // Fresh per-attempt state; never copy the normal host CODEX_HOME.
     rmSync(codexState, { recursive: true, force: true });
     mkdirSync(codexState, { recursive: true, mode: 0o700 });
     chmodSync(codexState, 0o700);

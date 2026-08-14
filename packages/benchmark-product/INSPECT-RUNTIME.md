@@ -371,14 +371,30 @@ equals `passValue`; otherwise it is fail.
 | Inspect internal `retryOnError` | one Jinn attempt with one final native log; no extra Jinn cell |
 | a later Jinn retry or resume | a new attempt for the same expected cell; journal identity prevents double counting |
 
-All scorers from one Inspect run still produce exactly one Result Evaluation.
-They are represented by
+All scorers from one Inspect run remain one score source. Under the exact
+`direct-check` primitives, they produce one embedded Result Evaluation under
 `urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer`. It is an
-attributable evaluation claim, but it is not called independent and cannot
-satisfy a distinct-evaluator quorum. A future external evaluator can append a
-separate Result Evaluation over the retained execution/delivery evidence; it
-must not overwrite the Inspect-native score or pretend it was produced by the
-same execution.
+attributable claim, but it is not called independent.
+
+The other assurance presets use `separate-log-verification`. Each requested
+verifier leg starts a fresh supervised process, reads the genuine native log
+with pinned Inspect `read_eval_log()`, revalidates its locked identities and
+sample/scorer accounting, and returns only bounded observations. The Tier 4
+product host recomputes the locked Jinn measurements and verdict, while the
+ordinary evaluation harness emits and the product signs one Result Evaluation
+per workspace evaluator identity. The solve Delivery contains only
+`inspect-log` and `inspect-summary`; the embedded score is source evidence and
+is not counted as another Matrix vote.
+
+For local Python, verifier children receive a minimal environment with no
+ambient credentials. For OCI, each leg runs in a new networkless container
+from the selected digest-pinned image with no broker, credential, project,
+dataset, Docker-socket, or unrelated host mount. It receives only the exact
+evaluation inputs and output directory. These separate processes and keys
+prove agent-distinct execution on the self-run venue. They are not independent
+rescoring, method diversity, a separate organization, or real-world party
+independence. A genuinely external evaluator can later append another Result
+Evaluation over the retained evidence without overwriting either source.
 
 ## Execution and credential boundary
 
@@ -478,7 +494,10 @@ recomputation, portable closure verification, and explicit trust disclosures.
 A self-run campaign shows that the identified local operator produced the
 identified evidence. It does not prove that the operator is independent, that
 the host was uncompromised, or that distinct keys belong to distinct
-real-world parties. Stronger claims require a genuinely separate evaluator,
+real-world parties. The `separate-evaluator`, `evaluator-panel`, and
+`strict-agreement` presets run the requested number of distinct processes and
+keys, but their runtime disclosure remains `partyIndependence:
+"not-established"`. Stronger claims require a genuinely separate evaluator,
 attester, or future market venue.
 
 The adapter boundary is intentionally runtime-neutral: the lifecycle stores an

@@ -18,6 +18,11 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/environment-record", ["environments", "record"]],
   ["@jinn-network/task-execution-profiles", ["task-execution", "profiles"]],
   ["@jinn-network/benchmarking-records", ["benchmarking", "records"]],
+  ["@jinn-network/record-discovery-protocol", ["discovery", "protocol"]],
+  ["@jinn-network/record-discovery-serve", ["discovery", "serve"]],
+  ["@jinn-network/record-discovery-client", ["discovery", "client"]],
+  ["@jinn-network/record-discovery-transport-http", ["discovery", "transport-http"]],
+  ["@jinn-network/record-publication", ["discovery", "publication"]],
   ["@jinn-network/benchmarking-aggregate", ["benchmarking", "aggregate"]],
   ["@jinn-network/task-admission", ["task-supply", "admission"]],
   ["@jinn-network/benchmarking-interop", ["benchmarking", "interop"]],
@@ -36,6 +41,7 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/task-execution-backend-local", ["task-execution", "backend-local", "assembly"]],
   ["@jinn-network/benchmarking-run", ["benchmarking", "run"]],
   ["@jinn-network/benchmarking-local", ["benchmarking", "local"]],
+  ["@jinn-network/benchmarking-publication", ["benchmarking", "publication"]],
 ];
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-benchmark-product-core-"));
 const consumer = join(temporaryRoot, "consumer");
@@ -142,8 +148,13 @@ const expectedJinnDependencies = [
   "@jinn-network/benchmarking-aggregate",
   "@jinn-network/benchmarking-interop",
   "@jinn-network/benchmarking-local",
+  "@jinn-network/benchmarking-publication",
   "@jinn-network/benchmarking-records",
   "@jinn-network/benchmarking-run",
+  "@jinn-network/record-discovery-protocol",
+  "@jinn-network/record-discovery-serve",
+  "@jinn-network/record-discovery-transport-http",
+  "@jinn-network/record-publication",
   "@jinn-network/task-admission",
   "@jinn-network/task-execution-backend",
   "@jinn-network/task-execution-backend-local",

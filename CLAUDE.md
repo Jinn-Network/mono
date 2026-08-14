@@ -113,7 +113,8 @@ client/          TypeScript daemon — the main runnable component
         ipfs.ts          IPFS upload/download via Autonolas gateway
         safe.ts          Safe wallet creation + viem clients
     daemon/
-      daemon.ts          Orchestrates the creator loop and the native operator host's loops
+      daemon.ts          Orchestrates the long-running loops (see ARCHITECTURE.md §6)
+      loop-heartbeat.ts  LOOP_REGISTRY — loop names, intervals, admission class
       creator.ts         Posts desired states via adapter
     runner/
       runner.ts          Runner interface
@@ -218,7 +219,7 @@ JINN_PASSWORD=your-secret jinn run         # supply password via env (no on-disk
 The daemon will:
 1. Run the earning bootstrap (wallet → Safe → service → staking → mech)
 2. Pause at `awaiting_funding` if the wallet needs ETH/OLAS — fund and re-run
-3. Start the daemon with 3 loops (creator, restorer, delivery-watcher)
+3. Start the daemon's long-running loops — which ones depends on vertical mode and config; see [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) §6
 
 ### Repo contributors only
 
@@ -391,7 +392,7 @@ Per DR-2026-06-30 (tokenless, OLAS-native), Jinn has no DAO token, no treasury e
 
 ### How the daemon works
 
-See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. The current daemon shape is seven long-running loops (creator, engine-watcher, engine-tick, delivery-watcher, reward-claim, balance-topup, peer-sync) plus one-shot in-flight recovery on startup. Per DR-2026-06-30 the reward-claim loop is the sole reward path (stOLAS `RewardClaimLoop`); the former L2→L1 jinn-claim loop was removed with the JINN token. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
+See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. There is no fixed daemon shape: **every loop is conditional**, so the running set depends on the vertical mode (`legacy` or `native-v1`) and config. Today that set is `work` and `evaluator` (the native solve and evaluate paths), `posting`, `projector`, `evidence-driver`, the support/earning loops (`reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`), `peer-sync`, and — in legacy mode only — `creator`. Startup runs one-shot in-flight recovery before any loop takes work. `LOOP_REGISTRY` in `client/src/daemon/loop-heartbeat.ts` is the single source of loop names, heartbeat intervals, and admission class; the started set is computed in `Daemon.start()` (search `started.add(`). Wave-4 D1 retired `engine-watcher` and `engine-tick` with the TaskEngine and D2 retired `delivery-watcher`; all three `LOOP_REGISTRY` rows are removed by Wave-4 D6. Per DR-2026-06-30 the reward-claim loop is the sole reward path (stOLAS `RewardClaimLoop`); the former L2→L1 jinn-claim loop was removed with the JINN token. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
 
 Generators are **launched-record-driven**, not config-flag-driven (per `spec/2026-05-05-solvernet-creation-and-launch.md` §11). On startup the daemon walks `~/.jinn-client/solvernets/launched/` for records this operator owns; for each record where `status === 'launched'` and `generatorEnabled === true`, it spawns the matching SolverType-specific generator. The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone — gating is "do I have a launched record where I'm the owner." Joining a SolverNet as an operator (writing a `joinedSolverNets[<manifestCid>]` config entry, see §12) never starts a generator; that's launcher-only.
 

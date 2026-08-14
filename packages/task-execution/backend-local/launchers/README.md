@@ -9,11 +9,10 @@ Depends on `@jinn-network/task-execution-protocol`, `@jinn-network/task-executio
 `@jinn-network/task-execution-supervisor` (for the `AttemptIdentity` type the frozen `plan(...)`
 signature takes), and `@jinn-network/task-execution-workspace` (for `TaskView`/`WorkspacePaths`).
 It never imports the `backend-local` (assembly) package or any evidence package, and never
-spawns a harness directly — the supervisor spawns, through the shim, per the
-launchers-plan-supervisor-spawns split. The packaged `credential-exec.mjs` helper is the narrow
-exec-time exception: it is itself launched by the supervisor and spawns the already-planned
-harness after replacing `secrets/<portable-basename>` references with file contents in the child
-environment. It never logs or persists those contents.
+spawns a harness directly — the supervisor owns both the shim and its packaged
+`credential-exec.mjs` bridge. A credential-qualified launcher selects that supervisor command in
+its plan; the bridge replaces `secrets/<portable-basename>` references with file contents only in
+the already-planned child environment. It never logs or persists those contents.
 
 ## Platform credentials
 

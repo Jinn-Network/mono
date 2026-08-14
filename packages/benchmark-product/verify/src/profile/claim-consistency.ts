@@ -18,7 +18,7 @@ function firstDifference(actual: unknown, expected: unknown, path = "claim"): st
   return path;
 }
 
-export function assertClaimConsistency(input: { readonly claim: ClaimPackage; readonly identities: ClaimRecordIdentities; readonly benchmarkRecord: BenchmarkRecord; readonly runRecord: RunRecord; readonly matrixRecord: MatrixRecord; readonly reportRecord: ReportRecord; readonly draftId: string; readonly assurancePreset: string; readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] }; }): void {
+export function assertClaimConsistency(input: { readonly claim: ClaimPackage; readonly identities: ClaimRecordIdentities; readonly benchmarkRecord: BenchmarkRecord; readonly runRecord: RunRecord; readonly matrixRecord: MatrixRecord; readonly reportRecord: ReportRecord; readonly draftId: string; readonly assurancePreset: string; readonly additionalLimitations?: readonly string[]; readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] }; }): void {
   const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
   if (identities.reportSha256 === undefined) refuse("record-integrity", "claim-consistency", "verified Report identity is absent");
   const plan = runRecord.analysisPlan?.find((entry) => entry.method === reportRecord.method.id && entry.version === reportRecord.method.version);
@@ -29,8 +29,8 @@ export function assertClaimConsistency(input: { readonly claim: ClaimPackage; re
   const expected = buildClaimPackage({ draftId: input.draftId, benchmarkSha256: identities.benchmarkSha256, runRecord, runSha256: identities.runSha256, matrixRecord, matrixSha256: identities.matrixSha256, reportRecord, reportSha256: identities.reportSha256, reportEnvelopeSha256: identities.reportEnvelopeSha256, venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord), verificationCommandVerb: "bundle verify", assurance: { preset: input.assurancePreset, resolved: { independence: runRecord.policy.independence, minVerdicts, distinctEvaluator, verdictRule } }, ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }) });
   if (!equal(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) refuse("record-integrity", "claim-consistency", `claim package ${firstDifference(claim, expected)} is not the exact projection of verified facts`);
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
-  const expectedLimitations = [...localVenueLimitsForRun(runRecord), ...(rehearsalLine === undefined ? [] : [rehearsalLine])];
+  const expectedLimitations = [...localVenueLimitsForRun(runRecord), ...(input.additionalLimitations ?? []), ...(rehearsalLine === undefined ? [] : [rehearsalLine])];
   const posture = venueIsolationPostureForPolicy(runRecord.policy.submissionBaseline?.isolationPolicy);
-  if (posture.inventory.length > 1 && !equal(canonicalJsonBytes(reportRecord.limitations ?? []), canonicalJsonBytes(expectedLimitations))) refuse("record-integrity", "claim-consistency", "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history");
+  if ((posture.inventory.length > 1 || (input.additionalLimitations?.length ?? 0) > 0) && !equal(canonicalJsonBytes(reportRecord.limitations ?? []), canonicalJsonBytes(expectedLimitations))) refuse("record-integrity", "claim-consistency", "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history");
   if (rehearsalLine === undefined ? (reportRecord.limitations ?? []).some((line) => line.includes("disposable preview rehearsal(s)")) : !(reportRecord.limitations ?? []).includes(rehearsalLine)) refuse("record-integrity", "claim-consistency", "claim rehearsal and verified Report disclosure disagree");
 }

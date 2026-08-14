@@ -70,6 +70,7 @@ import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import { deriveInspectEvaluationStrategy, type InspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -134,13 +135,20 @@ async function acquireFreeVenue(
   now: () => string,
   evaluatorCount: number,
   agentProfileRequirements: readonly Readonly<Record<string, unknown>>[],
+  inspectEvaluationStrategy: InspectEvaluationStrategy,
 ): Promise<
   | { readonly ok: true; readonly venue: LocalVenue }
   | { readonly ok: false; readonly reason: "contention" | "unavailable"; readonly detail: string }
 > {
   let venue: LocalVenue | undefined;
   try {
-    venue = createVenue({ workspaceDir, now, evaluatorCount, agentProfileRequirements });
+    venue = createVenue({
+      workspaceDir,
+      now,
+      evaluatorCount,
+      agentProfileRequirements,
+      inspectEvaluationStrategy,
+    });
     const preflight = await venue.backend.preflight({});
     if (!preflight.ready) {
       const detail = preflight.detail ?? preflight.error?.message ?? "local venue is not ready";
@@ -277,6 +285,7 @@ export function runCancel(
         context.clock,
         minVerdicts,
         runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
+        deriveInspectEvaluationStrategy(runRecord.policy.evaluation),
       );
       if (!acquired.ok) {
         if (acquired.reason === "contention") {

@@ -290,6 +290,13 @@ cd cargo/client
 yarn jinn run
 ```
 
+> **Superseded.** Steps 2–3 below, and Step 5.2's claim cycle, describe the v0 JINN-token
+> stack as it stood on 2026-04-29. DR-2026-06-30 (tokenless, OLAS-native) dropped the JINN
+> token and deleted `JinnClaimLoop`; Wave-4 D1 deleted the TaskEngine behind the
+> creator/solver/delivery-watcher shape. On a current client the loop set is conditional on
+> vertical mode and config — see [`client/ARCHITECTURE.md`](../../client/ARCHITECTURE.md) §6 —
+> and rewards settle through the stOLAS reward-claim loop. Kept as the record of that deploy.
+
 The daemon should:
 1. Read existing earning state (`earning-v0-2026-04-29/earning_state.json`) — bootstrap is already complete.
 2. Start the three loops: creator, solver, delivery-watcher (Phase 0 mech work).

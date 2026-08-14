@@ -1,7 +1,8 @@
 import type { LauncherContract } from "./contract.js";
+import { credentialExecArgv } from "@jinn-network/task-execution-supervisor";
 import {
   baseEnv, capabilities, effort, isolation, loadoutPath, modelId, probeFrom, requireHarness,
-  credentialExecArgv, credentialForwards, credentialReference, executablePath, schema, type HarnessCredentialMode,
+  credentialForwards, credentialReference, executablePath, schema, type HarnessCredentialMode,
   hostCredentialForwards, type HarnessHostCredential, type LauncherOptions,
 } from "./planning.js";
 
