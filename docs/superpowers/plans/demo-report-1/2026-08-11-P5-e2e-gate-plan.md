@@ -186,17 +186,20 @@ yarn p5:green \
 
 ## Acceptance evidence
 
-The final `P5-evidence.md` records the exact branch head, fixture/provenance identities, disk-gate
-snapshots, per-task gold/empty outcomes, readiness inventory, Benchmark/Run/Matrix/Report/bundle
-digests, all-12 accounting, per-axis match counts, cluster/draw accounting, withheld-interval
-reason, builder-workspace deletion, cold verification checks, package/architecture gates, and the
-explicit no-publication boundary. If a terminal stop occurs, it records the stop evidence instead
-of manufacturing a passing result.
+The final `P5-evidence.md` records the exact independently reviewed implementation commit and
+integration base, fixture/provenance identities, disk-gate snapshots, per-task gold/empty outcomes,
+readiness inventory, Benchmark/Run/Matrix/Report/bundle digests, all-12 accounting, per-axis match
+counts, cluster/draw accounting, withheld-interval reason, builder-workspace deletion, cold
+verification checks, package/architecture gates, and the explicit no-publication boundary. The
+live PR body records the final PR head because a committed document cannot contain its own
+resulting commit hash. If a terminal stop occurs, the evidence file records the stop instead of
+manufacturing a passing result.
 
-The current run stopped before dispatch after two exact-image pre-stage attempts (the original and
+An earlier run stopped before dispatch after two exact-image pre-stage attempts (the original and
 the single authorized infrastructure retry). The operator attests that each configured
 1,800-second bound expired, but the original execution history did not capture the direct child
 timeout bit or final monotonic elapsed and therefore does not independently prove a timeout. The
 append-only stop records preserve both attempts, terminal `UNAVAILABLE`, exact-image absence, and
-this limitation. No third attempt, alternate image, gold/empty grade, or Claude cell is permitted
-in this packet without new operator action.
+this limitation. That closed packet received no third attempt, alternate image, gold/empty grade,
+or Claude cell. The separately authorized 2026-08-14 fresh run is recorded in the final evidence
+file and does not alter this historical stop.

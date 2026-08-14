@@ -31,10 +31,30 @@ test("committed P5 evidence records the completed cold bundle and truthful withh
     "utf8",
   );
   assert.match(evidence, /Final outcome: complete local plumbing proof/u);
+  assert.match(evidence, /Recorded:\*\* 2026-08-14/u);
+  assert.match(evidence, /77da47e41e363e6dd2a1c9eff5fddcab9ed6e6b2/u);
+  assert.match(evidence, /77271a709f713223119d4683358856e5d7191a66/u);
+  assert.match(evidence, /c4b99165d9b84af6da694b0ab9e849652c8e9da3/u);
   assert.match(evidence, /fe23ac64f568e73a6dc37c7a638ace571ded88e5cca20401dc916326d49ead32/u);
   assert.match(evidence, /all 12 reached a valid\s+grader outcome/u);
   assert.match(evidence, /draws=0.*no bootstrap ensemble was executed/su);
   assert.match(evidence, /standalone verifier then passed manifest, evidence-closure, trust, Matrix rederivation/su);
+  assert.match(evidence, /71,463,460,864 bytes \(66\.56 GiB\)/u);
+  assert.match(evidence, /gerlero__foamlib-329.*PASS.*FAIL/u);
+  assert.match(evidence, /conan-io__conan-19604.*PASS.*FAIL/u);
+  assert.match(evidence, /nesquena__hermes-webui-1818.*PASS.*FAIL/u);
+  assert.match(evidence, /Claude Code `2\.1\.222`.*ddfe2e537c459eb33fab3469ed5a88c0df8741a421c6562af5d31f068da94028/su);
+  assert.match(evidence, /claude-haiku-4-5-20251001/u);
+  assert.match(evidence, /SKILL\.md.*2e2196f931c6d53ebd942d11662c319b4b191c4b397c03c3bb1aa62bee26b7a2/su);
+  assert.match(evidence, /CLAUDE\.md.*98227d6fcbc9122249441581d6c44a9270f3cd45c0264e67aad20d51762f57c2/su);
+  assert.match(evidence, /P5 pure\/injected tests: 37\/37/u);
+  assert.match(evidence, /strict final-fixture tests: 11\/11/u);
+  assert.match(evidence, /focused P5 runtime and evidence guards: 16\/16/u);
+  assert.match(evidence, /1,035 tests passed,\s+28 skipped/su);
+  assert.doesNotMatch(evidence, /Recovery implementation commit:\*\* `76a9857db`/u);
+  assert.doesNotMatch(evidence, /P5 pure\/injected tests: 27\/27/u);
+  assert.doesNotMatch(evidence, /892 tests passed/u);
+  assert.doesNotMatch(evidence, /^P5 is not complete\./mu);
   assert.doesNotMatch(evidence, /## Current outcome:.*stopped/su);
 });
 

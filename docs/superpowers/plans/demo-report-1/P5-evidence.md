@@ -1,6 +1,6 @@
 # Demo-1 P5 Evidence
 
-**Recorded:** 2026-08-13
+**Recorded:** 2026-08-14
 
 **Branch:** `codex/demo1-p5-plumbing`
 
@@ -8,7 +8,10 @@
 
 **Current integration base:** `c4b99165d9b84af6da694b0ab9e849652c8e9da3`
 
-**Recovery implementation commit:** `76a9857db`
+**Reviewed recovery implementation commit:**
+`77da47e41e363e6dd2a1c9eff5fddcab9ed6e6b2`
+
+**Integration reconciliation merge:** `77271a709f713223119d4683358856e5d7191a66`
 
 ## Final outcome: complete local plumbing proof
 
@@ -27,6 +30,37 @@ The sealed records are:
 - Report `e7af093b2a7e7b9016d9fcef85f87fde4933ef940d56920a710fef2ff5fdeecc`;
 - Report envelope `74f9d020b352d4c2d87029b6a2c5b7a94042f0d80eb2a389797988c9cd1a294b`;
 - bundle identity `fe23ac64f568e73a6dc37c7a638ace571ded88e5cca20401dc916326d49ead32`.
+
+The final run's disk snapshots were:
+
+- before reserving run-owned recovery space: 71,463,460,864 bytes (66.56 GiB) available;
+- after establishing the 17,179,869,184-byte (16 GiB) reserve: 54,241,873,920 bytes
+  (50.52 GiB) available;
+- at the repeated green-baseline gate: 54,240,219,136 bytes (50.52 GiB) available;
+- at official launch: 54,067,200,000 bytes (50.35 GiB) available;
+- immediately before the final reserve release, after cold verification: 88,648,261,632 bytes
+  (82.56 GiB) available; after releasing only the run-owned reserve: 105,820,057,600 bytes
+  (98.55 GiB) available.
+
+The real pre-dispatch controls were:
+
+| Task | Exact image digest | Gold | Empty |
+| --- | --- | --- | --- |
+| `gerlero__foamlib-329` | `sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781` | PASS | FAIL |
+| `conan-io__conan-19604` | `sha256:a79eb716bef039cf4b3fa094ea7aca74067fcc3730412c90377a8501569a7b7b` | PASS | FAIL |
+| `nesquena__hermes-webui-1818` | `sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6` | PASS | FAIL |
+
+Attempt-equivalent readiness returned `ready=true` with `effort=high` and this exact inventory:
+
+- harness: Claude Code `2.1.222` through the OAuth wrapper digest
+  `sha256:ddfe2e537c459eb33fab3469ed5a88c0df8741a421c6562af5d31f068da94028`;
+- underlying Claude executable digest
+  `sha256:c66a6cc6fa2e8145bb1a6e77831f2caf4b83690ff04650500dfa6e2c05ca997c`;
+- model: `claude-haiku-4-5-20251001`;
+- Skill loadout: `jinn.skill.v1` / `SKILL.md`, digest
+  `sha256:2e2196f931c6d53ebd942d11662c319b4b191c4b397c03c3bb1aa62bee26b7a2`;
+- baseline loadout: `jinn.skill.v1` / `CLAUDE.md`, digest
+  `sha256:98227d6fcbc9122249441581d6c44a9270f3cd45c0264e67aad20d51762f57c2`.
 
 The Report has three paired tasks from three repository clusters and correctly withholds its
 interval because `minN=5`. Its bootstrap disclosure distinguishes the locked plan from work
@@ -142,8 +176,9 @@ and Matrix digest is
 
 ## Historical outcome: stopped at the digest-pinned image pre-stage
 
-P5 is not complete. The disk precondition later recovered, so the fixture was legally minted and
-the real OCI green-baseline control began. The operator attests that the configured 1,800-second
+At this historical checkpoint P5 was not complete. The disk precondition later recovered, so the
+fixture was legally minted and the real OCI green-baseline control began. The operator attests
+that the configured 1,800-second
 bound expired before the first exact digest-pinned image became locally available. One recorded
 infrastructure-only retry was authorized under the identical digest, platform, configured bound,
 and grader contract; the operator attests to the same configured-bound expiry in that
@@ -234,15 +269,16 @@ The fixture bytes are `sha256:365cbfa8218501cfb804dcb0555fbb63b563060e1aafadd685
 for `rows.json` and `sha256:0e09dbfa994730101c53510060838eca23380533aad5b7aeaa601288b85e4973`
 for `provenance.json`. The strict post-P3b fixture suite passes all 11 assertions.
 
-Final non-Docker reruns on Node 22 passed:
+Final exact-source reruns on Node 22 passed:
 
-- P5 pure/injected tests: 27/27;
+- P5 pure/injected tests: 37/37;
 - strict final-fixture tests: 11/11;
-- benchmark-product core full suite: 83 files passed, 3 skipped; 892 tests passed,
-  13 skipped;
+- focused P5 runtime and evidence guards: 16/16;
+- benchmark-product core full suite: 103 files passed, 6 skipped; 1,035 tests passed,
+  28 skipped;
 - benchmark-product typecheck, build, parity check, and packed-consumer smoke;
-- package inventory, source boundaries, and architecture generator: 39/39, followed by an exact
-  generated-topology check.
+- package inventory, source boundaries, architecture controls, and an exact generated-topology
+  check.
 
 ## Authorized recovery path
 
