@@ -225,6 +225,11 @@ interface ProcessResult {
   readonly stdout: string;
 }
 
+/** Host capability failure that the product can safely project as an actionable venue refusal. */
+export class InspectOciUnavailableError extends Error {
+  override readonly name = "InspectOciUnavailableError";
+}
+
 function resolveDockerCli(path: string): string {
   try {
     const canonical = realpathSync(resolve(path));
@@ -233,7 +238,7 @@ function resolveDockerCli(path: string): string {
     accessSync(canonical, constants.X_OK);
     return canonical;
   } catch {
-    throw new TypeError("Docker is required for this OCI arm, but its CLI is not available at the configured path. Install Docker, start it, and retry the local check.");
+    throw new InspectOciUnavailableError("Docker is required for this OCI arm, but its CLI is not available at the configured path. Install Docker, start it, and retry the local check.");
   }
 }
 
@@ -346,7 +351,7 @@ export async function probeInspectOciSelection(
   try {
     serverResult = await runBoundedProcess(binding.dockerPath, ["version", "--format", "{{json .Server}}"], undefined, signal);
   } catch {
-    throw new TypeError("Docker is required for this OCI arm, but Colophon could not reach a running Docker engine. Start Docker and retry the local check.");
+    throw new InspectOciUnavailableError("Docker is required for this OCI arm, but Colophon could not reach a running Docker engine. Start Docker and retry the local check.");
   }
   const [imageResult, sandboxImageResult] = await Promise.all([
     runBoundedProcess(binding.dockerPath, ["image", "inspect", "--format", "{{json .}}", binding.imageDigest], undefined, signal),

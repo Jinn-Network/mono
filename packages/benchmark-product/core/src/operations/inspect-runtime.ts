@@ -14,6 +14,7 @@ import {
   type InspectRuntimeMethodDisclosure,
 } from "../runtime/inspect/disclosure.js";
 import { writeInspectHostBinding } from "../runtime/inspect/host.js";
+import { InspectOciUnavailableError } from "../runtime/inspect/oci.js";
 import {
   createDefaultBenchmarkRuntimeHost,
   type InspectRuntimeSelectionRequest,
@@ -80,6 +81,7 @@ export function selectInspectEvaluation(
       try {
         resolution = await runtimeHost.resolveInspectSelection(input);
       } catch (cause) {
+        if (!(cause instanceof InspectOciUnavailableError)) throw cause;
         refuse(
           "venue-unavailable",
           "inspect.selection.runtime",

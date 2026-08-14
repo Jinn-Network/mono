@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
 import type { OperationContext } from "./context.js";
 import { createDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
@@ -81,5 +82,22 @@ describe("selectInspectEvaluation scoring forms", () => {
         issues: [{ path: "inspect.selection.runtime" }],
       },
     });
+  });
+
+  test("does not recategorize a semantic Inspect selection failure as a venue outage", async () => {
+    const runtimeHost = createDefaultBenchmarkRuntimeHost();
+    const selected = await selectInspectEvaluation({
+      ...setup(),
+      runtimeHost: {
+        ...runtimeHost,
+        resolveInspectSelection: async () => {
+          throw new Error("selected Inspect task has duplicate resolved scorer names");
+        },
+      },
+    }, {
+      ...base,
+      scorer: { name: "match", passValue: "C" },
+    });
+    expect(selected).toMatchObject({ ok: false, error: { code: "execution" } });
   });
 });
