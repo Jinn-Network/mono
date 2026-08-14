@@ -243,9 +243,32 @@ function materializeCredentialWrapper(
   claudeExecutable: { readonly path: string; readonly digest: string },
 ): { readonly path: string; readonly digest: string } {
   const source = credentialWrapperSource(claudeExecutable);
-  writeFileSync(path, source, { encoding: "utf8", mode: 0o700, flag: "wx" });
-  chmodSync(path, 0o700);
-  return { path, digest: sha256(readFileSync(path)) };
+  const expected = Buffer.from(source, "utf8");
+  const verifyExisting = (): { readonly path: string; readonly digest: string } => {
+    const entry = lstatSync(path);
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error("existing Claude OAuth wrapper must be a regular non-symlink file");
+    }
+    if ((entry.mode & 0o777) !== 0o700) {
+      throw new Error("existing Claude OAuth wrapper must have mode 0700");
+    }
+    if (typeof process.getuid === "function" && entry.uid !== process.getuid()) {
+      throw new Error("existing Claude OAuth wrapper must be owned by the current operator");
+    }
+    const actual = readFileSync(path);
+    if (!actual.equals(expected)) {
+      throw new Error("existing Claude OAuth wrapper bytes do not match the bound runtime");
+    }
+    return { path, digest: sha256(actual) };
+  };
+  try {
+    writeFileSync(path, expected, { mode: 0o700, flag: "wx" });
+    chmodSync(path, 0o700);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+    return verifyExisting();
+  }
+  return verifyExisting();
 }
 
 function readinessEnvironment(tokenFilePath: string, configDir: string): Record<string, string> {

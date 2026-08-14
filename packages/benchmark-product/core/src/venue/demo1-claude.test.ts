@@ -147,6 +147,13 @@ else process.exit(45);
       const wrapperSource = readFileSync(wrapperPath, "utf8");
       expect(wrapperSource).not.toContain(fakeToken);
       expect(wrapperSource).not.toContain(tokenPath);
+      const resumedBinding = createDemo1ClaudeRuntimeBinding({
+        executablePath: claudePath,
+        harnessVersion: HARNESS_VERSION,
+        artifacts,
+        oauthCredential: { tokenFilePath: tokenPath, wrapperPath },
+      });
+      expect(resumedBinding.executable).toEqual(binding.executable);
 
       const launcher = makeDemo1ClaudeLauncher(binding);
       const plan = launcher.plan(view(demo1ClaudeArmRequirements(binding, "skill")), paths, attempt);
@@ -172,6 +179,26 @@ else process.exit(45);
         grantKey: DEMO1_CLAUDE_OAUTH_GRANT_KEY,
         descriptor: { kind: "wrong" },
       })).rejects.toThrow(/does not match/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when a pre-existing credential wrapper does not match the bound runtime", () => {
+    const root = mkdtempSync(join(tmpdir(), "demo1-claude-oauth-mismatch-"));
+    const tokenPath = join(root, "oauth-token");
+    const wrapperPath = join(root, "credential-wrapper.mjs");
+    writeFileSync(tokenPath, "fixture-oauth-token\n", { mode: 0o600 });
+    chmodSync(tokenPath, 0o600);
+    writeFileSync(wrapperPath, "#!/usr/bin/env node\n", { mode: 0o700 });
+    chmodSync(wrapperPath, 0o700);
+    try {
+      expect(() => createDemo1ClaudeRuntimeBinding({
+        executablePath: process.execPath,
+        harnessVersion: HARNESS_VERSION,
+        artifacts,
+        oauthCredential: { tokenFilePath: tokenPath, wrapperPath },
+      })).toThrow(/wrapper bytes do not match/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
