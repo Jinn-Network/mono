@@ -59,10 +59,16 @@ function writeState(runRoot, state) {
   }
 }
 
-function allocateReserve(path, bytes) {
-  const result = process.platform === "darwin"
-    ? spawnSync("/usr/bin/mkfile", [`${String(Number(bytes / GIB))}g`, path], { stdio: "pipe" })
-    : spawnSync("fallocate", ["-l", bytes.toString(), path], { stdio: "pipe" });
+export function allocateP5ReserveFile(path, bytes, {
+  platform = process.platform,
+  spawn = spawnSync,
+} = {}) {
+  // `mkfile` is installed under /usr/sbin on current macOS releases. Resolve it through PATH
+  // rather than pinning the obsolete /usr/bin location; the exact resulting file size is still
+  // verified by createP5DiskReserve before any state is sealed.
+  const result = platform === "darwin"
+    ? spawn("mkfile", [`${String(Number(bytes / GIB))}g`, path], { stdio: "pipe" })
+    : spawn("fallocate", ["-l", bytes.toString(), path], { stdio: "pipe" });
   if (result.error !== undefined || result.status !== 0) {
     const detail = result.error?.message ?? result.stderr?.toString("utf8").trim() ?? `exit ${String(result.status)}`;
     throw new Error(`P5 could not create its run-owned disk reserve: ${detail}`);
@@ -89,7 +95,7 @@ function validatedState(runRoot) {
 
 export function createP5DiskReserve(runRoot, {
   diskPath = "/",
-  allocate = allocateReserve,
+  allocate = allocateP5ReserveFile,
   available = freeBytes,
 } = {}) {
   const root = realpathSync(runRoot);

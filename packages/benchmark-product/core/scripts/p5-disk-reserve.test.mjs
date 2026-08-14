@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  allocateP5ReserveFile,
   createP5DiskReserve,
   inspectP5DiskReserve,
   P5_RECOVERY_LOG,
@@ -40,6 +41,22 @@ test("P5 establishes a run-owned 16 GiB reserve only at the 60 GiB start gate", 
   assert.equal(inspectP5DiskReserve(root).currentBytes, Number(P5_RESERVE_BYTES));
   assert.equal(JSON.parse(readFileSync(join(root, P5_RESERVE_STATE), "utf8")).reserveFile, "p5-disk-reserve.bin");
 }));
+
+test("macOS reserve allocation resolves mkfile through PATH instead of an obsolete absolute path", () => {
+  let invocation;
+  allocateP5ReserveFile("/run-owned/p5-disk-reserve.bin", 16n * GIB, {
+    platform: "darwin",
+    spawn(command, args, options) {
+      invocation = { command, args, options };
+      return { status: 0, stderr: Buffer.from("") };
+    },
+  });
+  assert.deepEqual(invocation, {
+    command: "mkfile",
+    args: ["16g", "/run-owned/p5-disk-reserve.bin"],
+    options: { stdio: "pipe" },
+  });
+});
 
 test("P5 refuses to begin below 60 GiB and never invokes allocation", () => withRoot((root) => {
   let allocated = false;
