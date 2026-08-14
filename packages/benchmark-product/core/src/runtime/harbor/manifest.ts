@@ -172,6 +172,35 @@ export function normalizeHarborSavedJobConfig(saved: unknown, submitted: unknown
   return effective;
 }
 
+/**
+ * Harbor 0.21 does not persist an attempt number in TrialConfig. Prove the
+ * effective one-Trial/no-retry execution from the committed JobConfig and
+ * resolved JobResult instead. Older fixtures may carry an explicit attempt;
+ * when present, it must still be exactly one.
+ */
+export function assertSingleHarborTrial(
+  job: HarborJobConfig,
+  trial: Readonly<Record<string, unknown>>,
+  jobResult: Readonly<Record<string, unknown>>,
+): void {
+  const trialAttempt = trial.attempt_number ?? trial.attempt;
+  const stats = jobResult.stats;
+  if (
+    job.n_attempts !== 1
+    || job.n_concurrent_trials !== 1
+    || job.retry.max_retries !== 0
+    || (trialAttempt !== undefined && trialAttempt !== 1)
+    || (trial.source_trial !== undefined && trial.source_trial !== null)
+    || jobResult.n_total_trials !== 1
+    || typeof stats !== "object"
+    || stats === null
+    || Array.isArray(stats)
+    || (stats as Record<string, unknown>).n_retries !== 0
+  ) {
+    throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+  }
+}
+
 export function harborJobSource(manifest: HarborSelectionManifest): { readonly tasks: readonly [z.infer<typeof TaskInput>] } | { readonly datasets: readonly [z.infer<typeof DatasetExecutionInput>] } {
   return manifest.source.kind === "task"
     ? { tasks: [manifest.source.jobInput] }

@@ -68,8 +68,8 @@ writeFileSync(${JSON.stringify(join(root, "harbor-runs.ndjson"))}, JSON.stringif
 const job = join(config.jobs_dir, config.job_name); const trial = join(job, "trial-1");
 mkdirSync(join(trial, "verifier"), { recursive: true }); mkdirSync(join(trial, "artifacts"), { recursive: true });
 writeFileSync(join(job, "config.json"), JSON.stringify(config));
-writeFileSync(join(job, "result.json"), JSON.stringify({ id: config.job_name, status: "success" }));
-writeFileSync(join(trial, "config.json"), JSON.stringify({ attempt_number: 1, task: { name: "echo" }, agent: config.agents[0] }));
+writeFileSync(join(job, "result.json"), JSON.stringify({ id: config.job_name, status: "success", n_total_trials: 1, stats: { n_retries: 0 } }));
+writeFileSync(join(trial, "config.json"), JSON.stringify({ task: { name: "echo" }, agent: config.agents[0] }));
 writeFileSync(join(trial, "result.json"), JSON.stringify({ id: config.job_name + ":trial-1", status: "success" }));
 writeFileSync(join(trial, "verifier", "reward.txt"), "1\\n");
 writeFileSync(join(trial, "artifacts", "prediction.json"), JSON.stringify({ probabilityYes: "0.5", submittedAt: "2026-08-13T00:00:00Z" }));

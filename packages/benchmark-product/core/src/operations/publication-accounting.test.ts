@@ -171,8 +171,8 @@ function writeHarborArchive(input: { runSha256: string; cellKey: string; dispatc
   const native = [
     [HARBOR_INVOCATION_CONFIG_ROLE, "invocation.json", storeJson(submittedJob)],
     [HARBOR_JOB_CONFIG_ROLE, "config.json", storeJson(submittedJob)],
-    [HARBOR_JOB_RESULT_ROLE, "result.json", storeJson({ id: jobId })],
-    [HARBOR_TRIAL_CONFIG_ROLE, "trial/config.json", storeJson({ attempt_number: 1 })],
+    [HARBOR_JOB_RESULT_ROLE, "result.json", storeJson({ id: jobId, n_total_trials: 1, stats: { n_retries: 0 } })],
+    [HARBOR_TRIAL_CONFIG_ROLE, "trial/config.json", storeJson({ task: manifest.source.jobInput, agent: selected.jobAgent })],
     [HARBOR_TRIAL_RESULT_ROLE, "trial/result.json", storeJson({ id: trialId })],
     [HARBOR_REWARD_ROLE, "trial/reward.json", storeJson({ reward: 1 })],
   ].map(([role, path, sha256]) => ({ role, path, sha256, bytes: getSealedBytes(workspaceDir, sha256).length, availability: "public" as const }));

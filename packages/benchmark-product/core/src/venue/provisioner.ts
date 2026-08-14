@@ -56,7 +56,7 @@ import {
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import { resolveHarborMaterial, type HarborHostBinding } from "../runtime/harbor/host.js";
 import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
-import { HarborJobConfigSchema, harborJobSource, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { assertSingleHarborTrial, HarborJobConfigSchema, harborJobSource, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { harborJobName } from "../runtime/harbor/launcher.js";
 import {
   HARBOR_ARTIFACT_MANIFEST_ROLE,
@@ -772,10 +772,9 @@ function harborProvisionerContract(input: LocalProvisionerInput, options: Harbor
         const submittedJobConfig = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(paths.input, "harbor-job.json")))) as unknown;
         const jobConfig = normalizeHarborSavedJobConfig(savedJobConfig, submittedJobConfig);
         const trialConfig = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, trialDirectory, "config.json")))) as Record<string, unknown>;
-        const jobResult = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, "result.json")))) as { id?: unknown; job_id?: unknown };
+        const jobResult = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, "result.json")))) as Record<string, unknown>;
         const trialResult = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(await readFile(join(jobRoot, trialDirectory, "result.json")))) as { id?: unknown; trial_id?: unknown };
-        const trialAttempt = trialConfig.attempt_number ?? trialConfig.attempt;
-        if (jobConfig.n_attempts !== 1 || jobConfig.n_concurrent_trials !== 1 || jobConfig.retry.max_retries !== 0 || trialAttempt !== 1) throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+        assertSingleHarborTrial(jobConfig, trialConfig, jobResult);
         jobId = typeof jobResult.id === "string" ? jobResult.id : typeof jobResult.job_id === "string" ? jobResult.job_id : jobName;
         trialId = typeof trialResult.id === "string" ? trialResult.id : typeof trialResult.trial_id === "string" ? trialResult.trial_id : trialDirectory;
         await recordHarborDispatchMapping(options.workspaceDir, `${options.selectionManifestSha256}:${runSha256}:${cellKey}:${dispatch}:${submissionSha256}`, jobId, trialId);

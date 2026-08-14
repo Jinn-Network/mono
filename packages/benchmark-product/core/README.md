@@ -33,6 +33,16 @@ yarn pack:smoke
 `yarn public-quickstart` then exercises the built CLI on the real local venue
 and proves copied-bundle verification after source-workspace deletion.
 
+The opt-in `yarn publication-release-rehearsal` is the complementary external
+release gate. With `COLOPHON_PUBLICATION_RELEASE_HARBOR` set to an exact Harbor
+0.21 executable, it runs the pinned no-network fixture through real Harbor and
+Docker, then proves prospective registration, six public-before-Harbor
+Submissions, complete runtime evidence, Accounting/Matrix v2, signed Report v2,
+exact public retrieval, and no publication-triggered rerun. It uses Harbor's
+built-in Oracle agent and does not use model credentials. See the
+[product overview](../README.md#real-harbor-publication-rehearsal) for the exact
+operator command.
+
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
