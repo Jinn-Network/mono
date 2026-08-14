@@ -151,6 +151,17 @@ describe("v1 launchers", () => {
       .toStrictEqual([declaredOutput, "structured-output.json"].sort());
   });
 
+  it("accepts a native forecast with a self-declared author and namespaced derivation metadata", async () => {
+    const authored = JSON.parse(goldenNativeTask().toString("utf8"));
+    authored.author = "did:key:z6MkiFixture";
+    authored["https://product.example/extensions/derivation/v1"] = {
+      sourceTask: { digest: { sha256: "a".repeat(64) } },
+    };
+    const provisioned = await provisionAttempt(new TextEncoder().encode(JSON.stringify(authored)));
+    const result = runPlanned(provisioned);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   it("prediction-v1-baseline refuses a legacy SignedTaskV1 staged as the sealed Task", async () => {
     const provisioned = await provisionAttempt(new TextEncoder().encode(JSON.stringify({
       schemaVersion: "task.v1",

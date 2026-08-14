@@ -1,5 +1,5 @@
 import { verify as edVerify } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -79,6 +79,15 @@ describe("loadOrCreateReportSigningKey", () => {
     expect(second.keyId).toBe(first.keyId);
     const message = new TextEncoder().encode("probe");
     expect(second.sign(message)).toEqual(first.sign(message));
+  });
+
+  it("refuses a sidecar that does not match the persisted Ed25519 public key", () => {
+    loadOrCreateReportSigningKey(workspaceDir);
+    writeFileSync(
+      join(workspaceDir, "venue", "report-signing-key.json"),
+      JSON.stringify({ keyId: `did:key:z${"1".repeat(48)}` }),
+    );
+    expect(() => loadOrCreateReportSigningKey(workspaceDir)).toThrow(/sidecar does not match/);
   });
 
   it("two different workspaces mint two different report keyIds", () => {

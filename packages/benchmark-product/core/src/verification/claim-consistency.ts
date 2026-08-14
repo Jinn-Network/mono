@@ -59,6 +59,9 @@ export function assertClaimConsistency(input: {
   readonly reportRecord: ReportRecord;
   readonly draftId: string;
   readonly assurancePreset: string;
+  /** Product-private disclosures whose applicability is proven by evidence outside the frozen
+   * Run schema (for example, the bundled Inspect task/selection closure). */
+  readonly additionalLimitations?: readonly string[];
   readonly rehearsal?: { readonly previewCount: number; readonly timestamps: readonly string[] };
 }): void {
   const { claim, identities, runRecord, matrixRecord, reportRecord } = input;
@@ -115,13 +118,14 @@ export function assertClaimConsistency(input: {
   const reportLimitations = reportRecord.limitations ?? [];
   const expectedLimitations = [
     ...localVenueLimitsForRun(runRecord),
+    ...(input.additionalLimitations ?? []),
     ...(rehearsalLine === undefined ? [] : [rehearsalLine]),
   ];
   const isolationPosture = venueIsolationPostureForPolicy(
     runRecord.policy.submissionBaseline?.["isolationPolicy"],
   );
   if (
-    isolationPosture.inventory.length > 1
+    (isolationPosture.inventory.length > 1 || (input.additionalLimitations?.length ?? 0) > 0)
     && !bytesEqual(canonicalJsonBytes(reportLimitations), canonicalJsonBytes(expectedLimitations))
   ) {
     refuse(

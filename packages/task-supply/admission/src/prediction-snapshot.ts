@@ -119,10 +119,14 @@ function exactEvaluationSpec(bytes: Uint8Array): { digest: `sha256:${string}` } 
 }
 
 function forecastFromTask(task: Record<string, unknown>, evaluationSpecDigest: string): PredictionSnapshotAdmissionReceiptV1["forecast"] {
+  const requiredTaskFields = ["evaluation", "instructions", "outputs", "payload", "profile", "protocol"];
+  const taskFields = Object.keys(task);
   if (
     task.protocol !== "https://spec.jinn.network/profiles/task-execution/v1"
     || typeof task.instructions !== "string" || task.instructions.length === 0
-    || Object.keys(task).sort().join(",") !== "evaluation,instructions,outputs,payload,profile,protocol"
+    || !requiredTaskFields.every((field) => taskFields.includes(field))
+    || taskFields.some((field) => !requiredTaskFields.includes(field) && field !== "author" && !/^[a-z][a-z0-9+.-]*:/iu.test(field))
+    || (task.author !== undefined && (typeof task.author !== "string" || !/^[a-z][a-z0-9+.-]*:/iu.test(task.author)))
   ) {
     return refuse("invalid-candidate", "prediction Task does not satisfy the frozen native contract");
   }

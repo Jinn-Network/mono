@@ -80,7 +80,7 @@ describe("product documentation consistency", () => {
     };
     const coreReadme = read(coreReadmePath);
 
-    expect(parity.entries).toHaveLength(28);
+    expect(parity.entries).toHaveLength(36);
     for (const entry of parity.entries) {
       expect(coreReadme, entry.operation).toContain(`\`${entry.operation}\``);
       expect(coreReadme, entry.cliVerb).toContain(`\`${PRODUCT_BRANDING.commandName} ${entry.cliVerb}`);
@@ -90,8 +90,8 @@ describe("product documentation consistency", () => {
 
     for (const operation of GATED_OPERATIONS) expect(coreReadme).toContain(`\`${operation}\``);
     for (const code of PRODUCT_ERROR_CODES) expect(coreReadme).toContain(`\`${code}\``);
-    expect(coreReadme).toContain("28 generated operations");
-    expect(coreReadme).toContain("five gated operations");
+    expect(coreReadme).toContain("36 generated operations");
+    expect(coreReadme).toContain("nine gated operations");
     expect(coreReadme).toContain("11 typed error codes");
     expect(coreReadme).toContain("`{\"ok\":true,\"result\":...}`");
     expect(coreReadme).toContain("`{\"ok\":false,\"error\":...}`");
@@ -110,6 +110,10 @@ describe("product documentation consistency", () => {
     expect(guide).toContain("`read_eval_log`");
     expect(guide).toContain("inspect view --log-dir");
     expect(guide).toContain("same-execution-scorer");
+    expect(guide).toContain("`separate-log-verification`");
+    expect(guide).toContain('`partyIndependence:\n"not-established"`');
+    expect(guide).toMatch(/embedded score is source evidence and\s+is not counted as another Matrix vote/is);
+    expect(guide).toMatch(/not independent\s+rescoring, method diversity, a separate organization, or real-world party\s+independence/is);
     expect(guide).toMatch(/not called independent/i);
     expect(guide).toMatch(/summary.*not an EvalLog/is);
     expect(guide).toMatch(/no ambient credential variables/i);
@@ -156,7 +160,7 @@ describe("product documentation consistency", () => {
     }
     expect(webReadme).toContain("`BENCHMARK_PRODUCT_WORKSPACE_DIR`");
     expect(webReadme).toContain("`BENCHMARK_PRODUCT_PRINCIPAL`");
-    expect(webReadme).toMatch(/server-only.*public.*benchmark-product-core/is);
+    expect(webReadme).toMatch(/server-only.*public.*@colophon-claims\/core/is);
     expect(webReadme).toMatch(/private.*local.*deployment status.*none/is);
     expect(webReadme).toMatch(/typed.*redact|redact.*typed/is);
   });

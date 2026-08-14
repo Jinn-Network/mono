@@ -23,6 +23,7 @@ import {
   BUILD_SECRET_ENV,
   createRuntimeEnvironment,
   CREDENTIAL_SECRET_ENV,
+  LOCAL_APP_CAPABILITY_ENV,
   OWNERSHIP_TOKEN_ENV,
   RUN_ID_ENV,
   RUNTIME_SECRET_ENV,
@@ -48,12 +49,14 @@ describe("production browser workspace ownership", () => {
       [OWNERSHIP_TOKEN_ENV]: "owner-inherited-token-000004",
       [RUNTIME_SECRET_ENV]: "BP50_RUNTIME_SECRET_inherited",
       [CREDENTIAL_SECRET_ENV]: "BP50_CREDENTIAL_inherited_value",
+      [LOCAL_APP_CAPABILITY_ENV]: "BP50_LOCAL_APP_inherited_value",
     };
     expect(createRuntimeEnvironment(complete)).toEqual({
       [RUN_ID_ENV]: complete[RUN_ID_ENV],
       [OWNERSHIP_TOKEN_ENV]: complete[OWNERSHIP_TOKEN_ENV],
       [RUNTIME_SECRET_ENV]: complete[RUNTIME_SECRET_ENV],
       [CREDENTIAL_SECRET_ENV]: complete[CREDENTIAL_SECRET_ENV],
+      [LOCAL_APP_CAPABILITY_ENV]: complete[LOCAL_APP_CAPABILITY_ENV],
     });
     expect(() => createRuntimeEnvironment({
       [BUILD_SECRET_ENV]: complete[BUILD_SECRET_ENV],

@@ -36,7 +36,7 @@ forms, create no authority, and do not weaken this deployment boundary.
 
 The browser supplies product form fields and draft identifiers only. It never
 supplies a workspace path or arbitrary bundle path. Server-only modules load
-the public `@jinn-network/benchmark-product-core` entry and project typed,
+the public `@colophon-claims/core` entry and project typed,
 minimal receipts. All error detail is treated as attacker-controlled because
 filesystem and subprocess failures may contain paths, commands, or secrets.
 The browser receives a fixed description for each error code and safe logical

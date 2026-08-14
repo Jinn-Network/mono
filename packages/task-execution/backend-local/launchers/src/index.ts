@@ -37,3 +37,14 @@ export type {
   ResultContract,
   RunPinningEnforcementPosture,
 } from "./contract.js";
+export type {
+  ClaudeCodeLauncherOptions,
+} from "./claude-code.js";
+export type {
+  CodexLauncherOptions,
+} from "./codex.js";
+export type {
+  HarnessCredentialMode,
+  HarnessHostCredential,
+  PortableSecretBasename,
+} from "./planning.js";

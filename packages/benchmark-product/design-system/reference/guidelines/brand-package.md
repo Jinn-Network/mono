@@ -14,8 +14,9 @@ Build the product as a **publishing house for benchmark claims**, not another ev
 - **Deeper promise:** *Publish benchmark claims people can check.*
 - **Territory:** The Press — a claim is a publication, and every publication states how it was made.
 - **Flagship artifact:** the public report. Everything else in the system is an entrance to it.
-- **Jinn:** factual attribution only, one approved string ("Built on Jinn."), in the report imprint,
-  the infrastructure/about page, docs and verification pages. Nowhere else.
+- **Jinn:** factual attribution only, two approved strings ("Built on Jinn." as the imprint form;
+  "Built on Jinn, by Jinn contributors." where the relationship is described in prose), in the report
+  imprint, the infrastructure/about page, docs and verification pages. Nowhere else.
 
 Why this and not the alternatives: the eval category already owns "dashboard" and "observability."
 Nobody owns "the artifact a skeptic reads." The word *colophon* names precisely the thing the product
@@ -490,8 +491,11 @@ An agent reading only this object gets the accounting, not just the number.
 
 ## 14. Jinn attribution policy
 
-**Approved string:** "Built on Jinn." Nothing else. No logo lockup, no co-branding, no colour, type
-or motif borrowed, no "powered by" variants, no Jinn terminology in workflow language.
+**Approved strings:** two, by context. "Built on Jinn." is the imprint form, used wherever the
+attribution stands alone as a bare line. "Built on Jinn, by Jinn contributors." is the relationship
+form, used only where the relationship is described in prose — the infrastructure / about page, per
+the approved wording below. Nothing else. No logo lockup, no co-branding, no colour, type or motif
+borrowed, no "powered by" variants, no Jinn terminology in workflow language.
 
 **Appears in:**
 - the report imprint, as the last, smallest line;
@@ -506,10 +510,29 @@ headlines · social cards · badges · campaign language · the visual identity.
 **Prominence:** smallest type on the page, `--text-faint`, no mark, no link styling stronger than
 body links. It should read as a manufacturing fact, like a printer's imprint at the back of a book.
 
-**Infrastructure page wording (approved):**
-> Colophon runs benchmark executions on Jinn infrastructure. Jinn provides the execution and
-> settlement layer; Colophon defines the benchmark method, the evaluation policy, the accounting and
-> the published report. Colophon is an independent product and is not the canonical interface to Jinn.
+**Infrastructure page wording (approved; revised 2026-08-11 by operator ruling —
+see below):**
+> Colophon runs benchmark executions on Jinn infrastructure. Jinn provides the execution, evidence
+> and verification layers; Colophon defines the benchmark method, the evaluation policy, the
+> accounting and the published report. Built on Jinn, by Jinn contributors.
+
+**Why this wording changed.** The original read "Jinn provides the execution and *settlement* layer"
+and closed "Colophon is an *independent product* and is not the canonical interface to Jinn." Both
+clauses were struck:
+
+- *Settlement* names a capability the product does not ship. Nothing settles on the self-run venue,
+  and the word invites a reader to infer an economic guarantee that does not exist.
+- *Independent product* asserts organizational independence Colophon does not have — it is built by
+  the same contributors, in the same repository. That is precisely the class of claim the product
+  design's must-not-imply rules forbid, and this document's own word policy already restricts
+  "independent" to solver-separation and bars it from implying unrelated real-world parties. A
+  skeptical reader who traces the attribution line to the Jinn repository — one click — would find a
+  product about verifiable claims making an unverifiable one about itself.
+
+"Built on Jinn, by Jinn contributors." states the relationship without characterizing it, and needs
+no separate disclaimer about canonical interfaces: the design's tier rules already establish that
+Colophon is not Jinn's frontend, and the sentence claims nothing that a reader could catch us
+overstating.
 
 **When to omit:** any surface where the reader's question is "what is this product and what does it
 do" — hero, pricing, onboarding, the app shell, social assets.

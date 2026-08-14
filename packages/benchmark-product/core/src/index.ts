@@ -10,6 +10,7 @@
 
 export type { ProductBranding } from "./branding.js";
 export { PRODUCT_BRANDING } from "./branding.js";
+export * from "./agent/index.js";
 export { BENCHMARKING_PROTOCOL } from "./platform.js";
 export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js";
 export type { GuiCapability } from "./cli/parity-map.js";
@@ -62,13 +63,20 @@ export type {
 // Runtime-neutral adapter catalog. Lifecycle state stores only an opaque digest-bound binding.
 export {
   NATIVE_RUNTIME_ADAPTER_ID,
+  NATIVE_RUNTIME_EVIDENCE_PROFILE,
+  INSPECT_RUNTIME_EVIDENCE_PROFILE,
+  INSPECT_EVAL_LOG_ARTIFACT_ROLE,
+  INSPECT_SELECTION_CORRELATION_ROLE,
+  INSPECT_RUNTIME_PROVENANCE_ROLE,
+  createRuntimeEvidenceAdapter,
   createRuntimeVenue,
   listRuntimeAdapters,
   runtimeSubmissionBaseline,
   runtimeNativeArtifactPublicationPolicy,
 } from "./runtime/adapter.js";
-export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary } from "./runtime/adapter.js";
+export type { EvaluationRuntimeAdapter, RuntimeAdapterSummary, RuntimeEvidenceAdapterOptions, RuntimeEvidenceDispatchInput, RuntimePublicationAdapter } from "./runtime/adapter.js";
 export { createDefaultBenchmarkRuntimeHost } from "./runtime/host-port.js";
+export { assessAgentRuntimeReadiness } from "./runtime/agent-readiness.js";
 export type {
   BenchmarkRuntimeHost,
   BenchmarkRuntimeHostOptions,
@@ -76,6 +84,74 @@ export type {
   InspectRuntimeSelectionRequest,
   InspectRuntimeSelectionResolution,
 } from "./runtime/host-port.js";
+export {
+  HARBOR_SELECTION_SCHEMA,
+  SUPPORTED_HARBOR_VERSION_RANGE,
+  HarborSelectionManifestSchema,
+  harborSelectionManifestBytes,
+  harborSelectionManifestSha256,
+  assertSupportedHarborVersion,
+} from "./runtime/harbor/manifest.js";
+export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
+export {
+  HARBOR_SELECTION_ROLE,
+  HARBOR_CORRELATION_ROLE,
+  HARBOR_JOB_CONFIG_ROLE,
+  HARBOR_JOB_RESULT_ROLE,
+  HARBOR_TRIAL_CONFIG_ROLE,
+  HARBOR_TRIAL_RESULT_ROLE,
+  HARBOR_REWARD_ROLE,
+  HARBOR_ATIF_ROLE,
+  HARBOR_CTRF_ROLE,
+  HARBOR_LOGS_ROLE,
+  HARBOR_ARTIFACT_MANIFEST_ROLE,
+  HARBOR_COLLECTED_ARTIFACTS_ROLE,
+  readHarborDispatchArchive,
+  readHarborDispatchArchiveFor,
+  harborEvidenceContributionFromArchive,
+} from "./runtime/harbor/venue.js";
+export { resolveHarborSelection } from "./runtime/harbor/host.js";
+export type {
+  HarborSelectionManifest,
+} from "./runtime/harbor/manifest.js";
+export type {
+  HarborDispatchArchive,
+} from "./runtime/harbor/venue.js";
+export type { HarborRuntimeSelectionRequest, HarborRuntimeSelectionResolution } from "./runtime/harbor/host.js";
+export {
+  TERMINAL_BENCH_2_DATASET_ID,
+  TERMINAL_BENCH_2_PROFILE,
+  TERMINAL_BENCH_2_SELECTION_ROLE,
+  TERMINAL_BENCH_MIGRATION_ROLE,
+  HARBOR_021_PACKAGER_ALGORITHM,
+  TerminalBench2SelectionManifestSchema,
+  TerminalBenchMigrationManifestSchema,
+  terminalBench2SelectionBytes,
+  terminalBenchMigrationBytes,
+} from "./runtime/terminal-bench-2/manifest.js";
+export type {
+  TerminalBench2SelectionManifest,
+  TerminalBenchMaterial,
+  TerminalBenchMigrationManifest,
+} from "./runtime/terminal-bench-2/manifest.js";
+export {
+  migrateTerminalBenchLegacyMaterial,
+  computeHarbor021TaskContentHash,
+  resolveTerminalBench2Selection,
+} from "./runtime/terminal-bench-2/host.js";
+export { terminalBench2ExternalReadiness } from "./runtime/terminal-bench-2/external-readiness.js";
+export type { TerminalBench2ExternalReadiness, TerminalBench2ExternalReadinessInput } from "./runtime/terminal-bench-2/external-readiness.js";
+export type {
+  TerminalBench2SelectionRequest,
+  TerminalBench2SelectionResolution,
+  TerminalBenchMigrationRequest,
+  TerminalBenchMigrationResolution,
+} from "./runtime/terminal-bench-2/host.js";
+export type {
+  AgentRuntimeReadiness,
+  AgentRuntimeReadinessCode,
+  AgentRuntimeReadinessRequest,
+} from "./runtime/agent-readiness.js";
 export type {
   InspectRuntimeMethodDisclosure,
   InspectScoringProjectionDisclosure,
@@ -216,6 +292,32 @@ export { WORKSPACE_STORAGE_VERSION, WorkspaceMetadataSchema } from "./workspace/
 export type { WorkspaceMetadata } from "./workspace/workspace.js";
 export { getSealedBytes, hasSealedBytes, putSealedBytes, sha256Hex } from "./workspace/sealed-store.js";
 
+// Publication readiness is an explicit projection over durable state/journal capture. It does
+// not alter legacy workspaces or synthesize execution history.
+export {
+  DEFAULT_PUBLICATION_AGENT_KEY_REF,
+  DEFAULT_PUBLICATION_SOURCE_NAME,
+  PublicationSourceSchema,
+  PublicationStageSchema,
+  PublicationStateSchema,
+  RunStateSchema,
+  createPublicationState,
+} from "./run/state.js";
+export type { PublicationSource, PublicationStage, PublicationState, RunState } from "./run/state.js";
+export { assessPublicationCompatibility } from "./run/publication-compatibility.js";
+export type { PublicationCompatibilityAssessment } from "./run/publication-compatibility.js";
+export { projectPublicationStatus } from "./run/publication-status.js";
+export type { PublicationStatusProjection, PublicationStageStatus, PublicationStageName } from "./run/publication-status.js";
+export {
+  createWorkspacePublicationHttpHandler,
+  createWorkspacePublicationSource,
+  normalizePublicArchiveBaseUrl,
+  publicArchiveUrl,
+} from "./run/publication-source.js";
+export { recordPublicationOrigin } from "./run/publication-authority.js";
+export { foldRunJournalLineage } from "./run/journal.js";
+export type { DispatchLineageFold } from "./run/journal.js";
+
 // Audit journal read surface (spec §4.4): appends happen only as a side effect of operations.
 export { readAuditEntries } from "./audit/journal.js";
 export type { AuditEntry } from "./audit/journal.js";
@@ -239,6 +341,11 @@ export {
   initWorkspace,
   inspectDraft,
   listDrafts,
+  publicationAccounting,
+  publicationConfigure,
+  publicationRegister,
+  publicationReport,
+  publicationStatus,
   runCancel,
   runCollect,
   runLaunch,
@@ -253,6 +360,9 @@ export {
   runVerify,
   sampleInit,
   selectInspectEvaluation,
+  selectHarborRuntime,
+  selectTerminalBench2Runtime,
+  migrateTerminalBenchLegacyTask,
   updateDraft,
 } from "./operations/index.js";
 export type {
@@ -272,7 +382,18 @@ export type {
   ImportSweBenchRowsResult,
   OperationContext,
   OperationResult,
+  MigrateTerminalBenchLegacyTaskInput,
+  MigrateTerminalBenchLegacyTaskResult,
   PreviewArtifact,
+  PublicationAccountingInput,
+  PublicationAccountingResult,
+  PublicationConfigureInput,
+  PublicationRegisterInput,
+  PublicationRegisterDeps,
+  PublicationRegistrationResult,
+  PublicationReportDeps,
+  PublicationReportInput,
+  PublicationReportResult,
   QuoteArmSize,
   QuoteCoverageRefusal,
   QuoteEstimatedWallTime,
@@ -305,6 +426,8 @@ export type {
   RunResumeInput,
   RunResumeResult,
   RunStatusCell,
+  SelectTerminalBench2RuntimeInput,
+  SelectTerminalBench2RuntimeResult,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,
@@ -325,6 +448,25 @@ export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
 export { verifyPublicBundle } from "./bundle/verify.js";
 export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./bundle/verify.js";
 
+// PUB-13b: an additive publication-profile projection. This is intentionally not wired into the
+// v2 `publish` operation or CLI: callers opt into its accounting-first, report-optional contract.
+export { BUNDLE_V3_FORMAT } from "./bundle/manifest.js";
+export { materializeBundleV3 } from "./bundle/v3-materialize.js";
+export type {
+  BundleV3NativeArtifactInput,
+  MaterializeBundleV3Deps,
+  MaterializeBundleV3Input,
+  MaterializedBundleV3,
+} from "./bundle/v3-materialize.js";
+export { verifyBundleV3 } from "./bundle/v3-verify.js";
+export type { BundleV3VerificationResult, VerifyBundleV3Deps } from "./bundle/v3-verify.js";
+export {
+  BUNDLE_V3_INDEX_FORMAT,
+  BundleV3IndexSchema,
+  BundleV3NativeDisclosureSchema,
+} from "./bundle/v3-schema.js";
+export type { BundleV3Index, BundleV3NativeDisclosure } from "./bundle/v3-schema.js";
+
 // The bundled sample benchmark (BP-11) and SWE-bench row intake, re-exported so a GUI
 // client can call them directly without a source dependency on ./intake/*.
 export { buildSampleBenchmark, SAMPLE_ISSUER } from "./intake/sample.js";
@@ -338,4 +480,4 @@ export { USAGE, runCli } from "./cli/main.js";
 export type { CliContext, CliResult } from "./cli/result.js";
 
 /** The product core's own version, mirrored from package.json. */
-export const PRODUCT_VERSION = "0.1.0";
+export const PRODUCT_VERSION = "1.0.0";

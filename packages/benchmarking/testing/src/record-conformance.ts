@@ -11,11 +11,15 @@ import {
   loadRevealedMap,
   loadRevealExpectedCoverage,
   parseBenchmark,
+  parseBenchmarkAccounting,
   parseMatrix,
+  parseObservationArchive,
   parseReport,
   parseRun,
   sealBenchmark,
+  sealBenchmarkAccounting,
   sealMatrix,
+  sealObservationArchive,
   sealReport,
   sealRun,
   type BenchmarkRecord,
@@ -23,21 +27,19 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
 
-const KINDS: readonly RecordKind[] = ["benchmark", "run", "matrix", "report"];
-
-const PARSERS: Record<RecordKind, (bytes: Uint8Array) => unknown> = {
-  benchmark: parseBenchmark,
-  run: parseRun,
-  matrix: parseMatrix,
-  report: parseReport,
-};
-
-const SEALERS: Record<RecordKind, (document: unknown) => { bytes: Uint8Array; digest: `sha256:${string}` }> = {
-  benchmark: sealBenchmark,
-  run: sealRun,
-  matrix: sealMatrix,
-  report: sealReport,
-};
+const KINDS = [
+  { kind: "benchmark", parse: parseBenchmark, seal: sealBenchmark, minimal: true },
+  { kind: "run", parse: parseRun, seal: sealRun, minimal: true },
+  { kind: "matrix", parse: parseMatrix, seal: sealMatrix, minimal: true },
+  { kind: "report", parse: parseReport, seal: sealReport, minimal: true },
+  { kind: "benchmark-accounting", parse: parseBenchmarkAccounting, seal: sealBenchmarkAccounting, minimal: false },
+  { kind: "observation-archive", parse: parseObservationArchive, seal: sealObservationArchive, minimal: false },
+] as const satisfies readonly {
+  readonly kind: RecordKind;
+  readonly parse: (bytes: Uint8Array) => unknown;
+  readonly seal: (document: unknown) => { bytes: Uint8Array; digest: `sha256:${string}` };
+  readonly minimal: boolean;
+}[];
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((byte, index) => byte === b[index]);
@@ -51,18 +53,18 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
  */
 export function describeRecordConformance(): void {
   describe("benchmarking record conformance (design §16 Layer 1)", () => {
-    for (const kind of KINDS) {
+    for (const { kind, parse, seal, minimal } of KINDS) {
       describe(`${kind} record`, () => {
         test("valid golden fixture parses under its schema", async () => {
           const bytes = await loadGoldenBytes(kind, "valid");
-          expect(() => PARSERS[kind](bytes)).not.toThrow();
+          expect(() => parse(bytes)).not.toThrow();
         });
 
         test("producer-side re-seal reproduces the pinned bytes and digest", async () => {
           const json = await loadGoldenJson(kind, "valid");
           const pinnedBytes = await loadGoldenBytes(kind, "valid");
           const pinnedDigest = await loadGoldenDigest(kind, "valid");
-          const resealed = SEALERS[kind](json);
+          const resealed = seal(json);
           expect(bytesEqual(resealed.bytes, pinnedBytes)).toBe(true);
           expect(resealed.digest).toBe(pinnedDigest);
         });
@@ -73,9 +75,9 @@ export function describeRecordConformance(): void {
           expect(documentDigest(pinnedBytes)).toBe(pinnedDigest);
         });
 
-        test("minimal golden fixture parses under its schema", async () => {
+        test.skipIf(!minimal)("minimal golden fixture parses under its schema", async () => {
           const bytes = await loadGoldenBytes(kind, "minimal");
-          expect(() => PARSERS[kind](bytes)).not.toThrow();
+          expect(() => parse(bytes)).not.toThrow();
         });
       });
     }

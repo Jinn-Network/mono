@@ -340,8 +340,16 @@ describe("buildClaimPackage", () => {
       reportSha256,
       reportEnvelopeSha256,
     });
-    expect(claim.verification.command).toBe("colophon bundle verify --bundle <bundle-dir> --json");
-    expect(claim.verification.checks.length).toBeGreaterThan(0);
+    expect(claim.verification.command).toBe("npx @colophon-claims/verify@1.0.0 <bundle-dir>");
+    expect(claim.verification.compatibleCommand).toBe("npx @colophon-claims/verify@1 <bundle-dir>");
+    expect(claim.verification.checks).toEqual([
+      "manifest",
+      "evidence-closure",
+      "trust",
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+    ]);
     expect(claim.verification.trustRoot.length).toBeGreaterThan(0);
   });
 

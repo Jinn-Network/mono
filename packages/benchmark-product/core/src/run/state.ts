@@ -9,14 +9,9 @@
  * (reused here, not reimplemented) — so `runLock` can refuse a stale quote (A2: any edit of a
  * quoted draft invalidates the quote) by comparing digests rather than re-diffing documents.
  *
- * `owner` is a deterministic `urn:uuid:` IRI derived from the workspace's own `createdAt` plus
- * the draftId — the same construction `benchmarking-run`'s `launch.ts` uses internally for
- * deterministic Submission URIs (`deterministicSubmissionUri`, not exported publicly, so
- * mirrored here rather than imported). Deterministic so a RunState rebuilt from the same
- * workspace and draftId always names the same owner, and so the value satisfies both the
- * platform Run record's `owner: AgentIriSchema` (any absolute IRI) and the Submission record's
- * `requester: string` — `launchAndWatch` uses `run.owner` as the Submission `requester`
- * (verified in `@jinn-network/benchmarking-run`'s `launch.ts`).
+ * `owner` on newly quoted runs is the stable workspace-held Ed25519 `did:key`, shared with the
+ * Record Discovery source. Historical deterministic `urn:uuid:` owners remain schema-readable;
+ * `deriveRunOwner` below is retained for that compatibility surface.
  */
 
 import { createHash } from "node:crypto";
@@ -34,6 +29,68 @@ const Rfc3339Schema = z.string().regex(
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
+/** Product policy, rather than a discovery identity. The stable key reference can be resolved
+ * by a product host without making a rotating public key part of every RunState. */
+export const PublicationSourceSchema = z.object({
+  agentKeyRef: z.string().min(1),
+  name: z.string().min(1),
+  publicBaseUrl: z.string().url().optional(),
+});
+
+export const PublicationStageSchema = z.object({
+  state: z.enum(["not-started", "in-progress", "complete"]),
+  /** Frozen before the first executor attempt, so a crash retry has the identical plan. */
+  announcedAt: Rfc3339Schema.optional(),
+  /** A completed run registered later is explicitly distinguished from prospective registration. */
+  postHoc: z.boolean().optional(),
+  /** A durable source append position. Its presence freezes source identity, never its URL. */
+  receipt: z.object({
+    sourceSequence: z.string().min(1),
+    entrySha256: Sha256HexSchema,
+  }).optional(),
+  /** Frozen source position which bounds the complete accounting input enumeration. */
+  sourceCutoff: z.object({
+    sourceSequence: z.string().regex(/^\d{16}$/),
+    entrySha256: Sha256HexSchema,
+  }).optional(),
+  /** Exact record/artifact bytes made durable by this stage, keyed by their product role. */
+  digests: z.record(z.string(), Sha256HexSchema).optional(),
+});
+
+export const PublicationStateSchema = z.object({
+  /** Local is the safe default. Prospective mode is an explicit public-before-run intent. */
+  mode: z.enum(["local", "prospective"]).optional(),
+  source: PublicationSourceSchema,
+  registration: PublicationStageSchema,
+  accounting: PublicationStageSchema,
+  /** Matrix v2 is a later, separately announced record; legacy `matrixSha256` remains untouched. */
+  matrixV2: PublicationStageSchema.optional(),
+  report: PublicationStageSchema,
+}).transform((publication) => ({ ...publication, matrixV2: publication.matrixV2 ?? { state: "not-started" as const } }));
+
+export type PublicationSource = z.infer<typeof PublicationSourceSchema>;
+export type PublicationStage = z.infer<typeof PublicationStageSchema>;
+export type PublicationState = z.infer<typeof PublicationStateSchema>;
+
+export const DEFAULT_PUBLICATION_SOURCE_NAME = "colophon-benchmarks";
+export const DEFAULT_PUBLICATION_AGENT_KEY_REF = "workspace-owner";
+
+/** New managed runs always receive this state at quote time. No stage is implied complete. */
+export function createPublicationState(source: Partial<PublicationSource> = {}): PublicationState {
+  return {
+    mode: "local",
+    source: {
+      agentKeyRef: source.agentKeyRef ?? DEFAULT_PUBLICATION_AGENT_KEY_REF,
+      name: source.name ?? DEFAULT_PUBLICATION_SOURCE_NAME,
+      ...(source.publicBaseUrl === undefined ? {} : { publicBaseUrl: source.publicBaseUrl }),
+    },
+    registration: { state: "not-started" },
+    accounting: { state: "not-started" },
+    matrixV2: { state: "not-started" },
+    report: { state: "not-started" },
+  };
+}
+
 /** Mirrors `@jinn-network/benchmarking-run`'s `QuoteReport` (quote.ts) — not re-exported by that package as a schema. */
 const QuoteReportSchema = z.object({
   ok: z.boolean(),
@@ -49,7 +106,7 @@ export const RunStateSchema = z.object({
   draftId: z.string().min(1),
   /** sha256 hex of the draft spec's canonical JSON as of the most recent quote (A2). */
   specSha256: Sha256HexSchema,
-  /** Deterministic `urn:uuid:` run owner (see module header). */
+  /** Stable workspace did:key for new runs; historical absolute owner IRIs remain readable. */
   owner: z.string().min(1),
   quote: QuoteReportSchema.optional(),
   quotedAt: Rfc3339Schema.optional(),
@@ -62,11 +119,20 @@ export const RunStateSchema = z.object({
   closedAt: Rfc3339Schema.optional(),
   /** sha256 hex of the sealed Matrix record's exact bytes, set at `run.collect`. */
   matrixSha256: Sha256HexSchema.optional(),
+  /** sha256 hex of the accounting-bound Matrix v2; never replaces the legacy Matrix v1 field. */
+  matrixV2Sha256: Sha256HexSchema.optional(),
+  /** sha256 hex of the exact BenchmarkAccounting record. */
+  accountingSha256: Sha256HexSchema.optional(),
   /** sha256 hex of the sealed Report record's exact PAYLOAD bytes, set at `report` (BP-13). */
   reportSha256: Sha256HexSchema.optional(),
   /** sha256 hex of the sealed Report's DSSE ENVELOPE bytes, set at `report` (BP-13). */
   reportEnvelopeSha256: Sha256HexSchema.optional(),
+  /** Signed Report v2 identities. These are independent from the legacy Report v1 fields. */
+  reportPayloadSha256: Sha256HexSchema.optional(),
+  reportRecordSha256: Sha256HexSchema.optional(),
   reportedAt: Rfc3339Schema.optional(),
+  /** Absent only on historical workspaces created before prospective publication capture. */
+  publication: PublicationStateSchema.optional(),
   /** SHA-256 of the exact canonical public bundle manifest bytes (BP-40). */
   bundleIdentity: Sha256HexSchema.optional(),
   /** Workspace-relative digest-addressed immutable target, never an absolute path. */
@@ -80,6 +146,34 @@ export const RunStateSchema = z.object({
     "claim-consistency",
   ])).optional(),
   publishedAt: Rfc3339Schema.optional(),
+}).superRefine((state, context) => {
+  if ((state.reportPayloadSha256 === undefined) !== (state.reportRecordSha256 === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [state.reportPayloadSha256 === undefined ? "reportPayloadSha256" : "reportRecordSha256"],
+      message: "signed Report v2 payload and record identities must be established together",
+    });
+  }
+  // A crash can durably append the Report and advance the stage marker before the two local
+  // identities are checkpointed. Keep that state readable so publication.report can reproduce
+  // and reconcile the exact bytes; user-facing completion still requires receipt + identities.
+}).transform((state) => {
+  // PUB-09 temporarily serialized the legacy v1 identities under both name pairs. Such a state
+  // predates a completed Report-v2 stage, so normalize those duplicate aliases away in memory.
+  // The file is not rewritten merely by reading it. A later v2 publication may then establish
+  // its genuinely independent payload/envelope identities without losing the v1 bytes.
+  const historicalAliases = state.publication?.report.state !== "complete"
+    && state.reportPayloadSha256 !== undefined
+    && state.reportPayloadSha256 === state.reportSha256
+    && state.reportRecordSha256 !== undefined
+    && state.reportRecordSha256 === state.reportEnvelopeSha256;
+  if (!historicalAliases) return state;
+  const {
+    reportPayloadSha256: _historicalPayloadAlias,
+    reportRecordSha256: _historicalRecordAlias,
+    ...normalized
+  } = state;
+  return normalized as typeof state;
 });
 
 export type RunState = z.infer<typeof RunStateSchema>;
@@ -127,6 +221,60 @@ export function writeRunState(workspaceDir: string, draftId: string, state: RunS
   const result = RunStateSchema.safeParse(state);
   if (!result.success) {
     refuseWithIssues("validation", issuesFromZodError(result.error));
+  }
+  // Source name/key identify an announcement chain. Once any append receipt is durable, changing
+  // either — or weakening any already-durable stage fact — would falsely move old positions to a
+  // new source/history. A public URL is a locator only and deliberately remains mutable.
+  const currentBytes = readFileIfExistsSync(runStatePath(workspaceDir, draftId));
+  if (currentBytes !== undefined) {
+    const current = readRunState(workspaceDir, draftId);
+    if (current?.reportPayloadSha256 !== undefined && (
+      result.data.reportPayloadSha256 !== current.reportPayloadSha256
+      || result.data.reportRecordSha256 !== current.reportRecordSha256
+    )) {
+      refuse("conflict", `runs.${draftId}.reportRecordSha256`, "signed Report v2 identities cannot be removed or changed once established");
+    }
+    if (current?.publication !== undefined) {
+      const stages = [current.publication.registration, current.publication.accounting, current.publication.matrixV2, current.publication.report];
+      const hasReceipt = stages.some((stage) => stage.receipt !== undefined);
+      if (hasReceipt) {
+        const proposed = result.data.publication;
+        if (proposed === undefined) {
+          refuse("conflict", `runs.${draftId}.publication`, "publication state cannot be removed after a durable source append receipt");
+        }
+        if (
+          current.publication.source.name !== proposed.source.name
+          || current.publication.source.agentKeyRef !== proposed.source.agentKeyRef
+        ) {
+          refuse("conflict", `runs.${draftId}.publication.source`, "source name and agent key reference are immutable after a durable source append receipt");
+        }
+        if ((current.publication.mode ?? "local") !== (proposed.mode ?? "local")) {
+          refuse("conflict", `runs.${draftId}.publication.mode`, "publication mode is immutable after a durable source append receipt");
+        }
+        const stageNames = ["registration", "accounting", "matrixV2", "report"] as const;
+        const rank = { "not-started": 0, "in-progress": 1, complete: 2 } as const;
+        for (const stageName of stageNames) {
+          const before = current.publication[stageName];
+          const after = proposed[stageName];
+          if (rank[after.state] < rank[before.state]) {
+            refuse("conflict", `runs.${draftId}.publication.${stageName}.state`, "publication stage state cannot move backward after a durable source append receipt");
+          }
+          if (before.receipt !== undefined && (
+            after.receipt?.sourceSequence !== before.receipt.sourceSequence
+            || after.receipt.entrySha256 !== before.receipt.entrySha256
+          )) {
+            refuse("conflict", `runs.${draftId}.publication.${stageName}.receipt`, "a durable source append receipt cannot be removed or changed");
+          }
+          if (before.receipt !== undefined || before.state === "complete") {
+            for (const [role, digest] of Object.entries(before.digests ?? {})) {
+              if (after.digests?.[role] !== digest) {
+                refuse("conflict", `runs.${draftId}.publication.${stageName}.digests.${role}`, "an established publication-stage digest cannot be removed or changed");
+              }
+            }
+          }
+        }
+      }
+    }
   }
   atomicWriteFileSync(runStatePath(workspaceDir, draftId), JSON.stringify(result.data, null, 2));
 }

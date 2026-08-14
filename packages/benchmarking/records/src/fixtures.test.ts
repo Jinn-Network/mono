@@ -16,6 +16,12 @@ import { documentDigest } from "./hashing.js";
 import { parseRun, sealRun } from "./run/schema.js";
 import { parseMatrix, sealMatrix } from "./matrix/schema.js";
 import { parseReport, sealReport } from "./report/schema.js";
+import {
+  parseBenchmarkAccounting,
+  parseObservationArchive,
+  sealBenchmarkAccounting,
+  sealObservationArchive,
+} from "./accounting/schema.js";
 import { sealRecord } from "./sealing.js";
 
 const FAMILIES: Array<{
@@ -27,6 +33,8 @@ const FAMILIES: Array<{
   { kind: "run", parse: parseRun, seal: sealRun },
   { kind: "matrix", parse: parseMatrix, seal: sealMatrix },
   { kind: "report", parse: parseReport, seal: sealReport },
+  { kind: "benchmark-accounting", parse: parseBenchmarkAccounting, seal: sealBenchmarkAccounting },
+  { kind: "observation-archive", parse: parseObservationArchive, seal: sealObservationArchive },
 ];
 
 describe("golden fixture loaders", () => {

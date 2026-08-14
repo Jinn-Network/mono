@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseMatrix } from "@jinn-network/benchmarking-records";
+import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../../audit/journal.js";
 import type { OperationContext } from "../../operations/context.js";
 import { createDraft, updateDraft } from "../../operations/drafts.js";
@@ -22,7 +23,11 @@ import { runPreview } from "../../operations/preview.js";
 import { runVerify } from "../../operations/verify.js";
 import { verifyPublicBundle } from "../../bundle/verify.js";
 import { readRunJournalEntries } from "../../run/journal.js";
-import { getSealedBytes } from "../../workspace/sealed-store.js";
+import { getSealedBytes, sha256Hex } from "../../workspace/sealed-store.js";
+import { readInspectSelectionManifest, inspectWorkerPath } from "./host.js";
+import { inspectOciRunnerPath } from "./oci.js";
+// @ts-expect-error This product-private runtime is copied into dist without a public type surface.
+import { createInspectLogVerifierRegistration } from "./verifier-runtime.mjs";
 
 const pythonPath = process.env.JINN_INSPECT_PYTHON;
 const fixtureDir = dirname(fileURLToPath(new URL("../../../test/fixtures/inspect-project/hermetic_eval.py", import.meta.url)));
@@ -39,6 +44,105 @@ function context(workspaceDir: string): OperationContext {
 }
 
 describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => {
+  test.each([
+    ["separate-evaluator", 1],
+    ["evaluator-panel", 2],
+    ["strict-agreement", 2],
+  ] as const)("runs %s through separately signed native-log verifier legs", async (
+    preset,
+    expectedVerifiers,
+  ) => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), `benchmark-product-inspect-${preset}-`));
+    workspaces.push(workspaceDir);
+    const ctx = context(workspaceDir);
+    expect(initWorkspace(ctx).ok).toBe(true);
+    expect(createDraft(ctx, { draftId: preset, name: `Inspect ${preset}` }).ok).toBe(true);
+    expect(updateDraft(ctx, { draftId: preset, patch: { assurance: { preset } } }).ok).toBe(true);
+    const selected = await selectInspectEvaluation(ctx, {
+      draftId: preset,
+      pythonPath: pythonPath!,
+      projectDir: fixtureDir,
+      taskReference: "hermetic_eval.py@multiple_scorer_eval",
+      arms: [
+        { armId: "control", model: "mockllm/model" },
+        { armId: "candidate", model: "mockllm/model" },
+      ],
+      scoring: {
+        projections: [
+          { measurementName: "correct", scorerName: "correctness_scorer", passValue: "C" },
+          { measurementName: "safe", scorerName: "policy_scorer", subScoreKey: "safe", passValue: true },
+        ],
+        verdictRule: {
+          all: [
+            { threshold: { measurement: "correct", op: "eq", value: true } },
+            { threshold: { measurement: "safe", op: "eq", value: true } },
+          ],
+        },
+      },
+    });
+    expect(selected.ok, JSON.stringify(selected)).toBe(true);
+    if (!selected.ok) throw new Error("unreachable");
+    expect(selected.result.runtimeMethod).toMatchObject({
+      evaluatorRelationship: "same-execution-scorer",
+      scoreSourceRelationship: "same-execution-scorer",
+      officialEvaluationRelationship: "separate-log-verifier",
+      officialEvaluatorCount: expectedVerifiers,
+      partyIndependence: "not-established",
+    });
+    const previewed = await runPreview(ctx, { draftId: preset, items: 1 });
+    expect(previewed.ok, JSON.stringify(previewed)).toBe(true);
+    if (!previewed.ok) throw new Error("unreachable");
+    expect(previewed.result.preview.scope).toBe("solve-cells-only");
+    expect(previewed.result.runtimeMethod).toEqual(selected.result.runtimeMethod);
+    expect((await runQuote(ctx, { draftId: preset })).ok).toBe(true);
+    const locked = runLock(ctx, { draftId: preset });
+    expect(locked.ok).toBe(true);
+    expect((await runLaunch(ctx, { draftId: preset })).ok).toBe(true);
+    const collected = await runCollect(ctx, { draftId: preset });
+    expect(collected.ok, JSON.stringify(collected)).toBe(true);
+    if (!collected.ok) throw new Error("unreachable");
+
+    const matrix = parseMatrix(getSealedBytes(workspaceDir, collected.result.matrixSha256));
+    expect(matrix.cells).toHaveLength(2);
+    expect(
+      matrix.cells.every((cell) => cell.outcome === "judged"),
+      JSON.stringify({ matrix, journal: readRunJournalEntries(workspaceDir, preset) }),
+    ).toBe(true);
+    expect(matrix.cells.every((cell) => cell.verdicts.length === expectedVerifiers)).toBe(true);
+    const deliveryEntries = readRunJournalEntries(workspaceDir, preset)
+      .filter((entry) => entry.kind === "delivery");
+    expect(deliveryEntries).toHaveLength(2);
+    expect(deliveryEntries.every((entry) =>
+      entry.outputs.map((output) => output.name).sort().join(",") === "inspect-log,inspect-summary"
+    )).toBe(true);
+    const evaluationEntries = readRunJournalEntries(workspaceDir, preset)
+      .filter((entry) => entry.kind === "evaluation");
+    expect(evaluationEntries).toHaveLength(2 * expectedVerifiers);
+    expect(evaluationEntries.every((entry) =>
+      entry.evalTaskSha256 !== undefined
+      && entry.evalDeliverySha256 !== undefined
+      && entry.evalAttempt !== undefined
+      && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer"
+    )).toBe(true);
+    expect(new Set(evaluationEntries.map((entry) => entry.evaluator)).size).toBe(expectedVerifiers);
+
+    expect((await runReport(ctx, { draftId: preset })).ok).toBe(true);
+    expect((await runVerify(ctx, { draftId: preset })).ok).toBe(true);
+    const published = await runPublish(ctx, { draftId: preset, includeNativeArtifacts: true });
+    expect(published.ok, JSON.stringify(published)).toBe(true);
+    if (!published.ok) throw new Error("unreachable");
+    const detachedRoot = mkdtempSync(join(tmpdir(), `benchmark-product-inspect-${preset}-bundle-`));
+    workspaces.push(detachedRoot);
+    const detachedBundle = join(detachedRoot, "bundle");
+    cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
+    rmSync(workspaceDir, { recursive: true, force: true });
+    const detached = await verifyPublicBundle(detachedBundle);
+    expect(detached.runtimeMethod).toMatchObject({
+      officialEvaluationRelationship: "separate-log-verifier",
+      officialEvaluatorCount: expectedVerifiers,
+    });
+  }, 180_000);
+
   test("rejects source drift after lock before accepting any cell submission", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-drift-"));
     const projectDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-project-"));
@@ -137,12 +241,16 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     if (!selected.ok) expect(selected.error.code).toBe("execution");
   }, 120_000);
 
-  test("accounts for a real Inspect scorer failure without inventing a verdict", async () => {
+  test("accounts for a real Inspect scorer failure in separate verifier legs without inventing a verdict", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "benchmark-product-inspect-scorer-failure-"));
     workspaces.push(workspaceDir);
     const ctx = context(workspaceDir);
     expect(initWorkspace(ctx).ok).toBe(true);
     expect(createDraft(ctx, { draftId: "inspect-scorer-failure", name: "Inspect scorer failure" }).ok).toBe(true);
+    expect(updateDraft(ctx, {
+      draftId: "inspect-scorer-failure",
+      patch: { assurance: { preset: "separate-evaluator" } },
+    }).ok).toBe(true);
     expect((await selectInspectEvaluation(ctx, {
       draftId: "inspect-scorer-failure",
       pythonPath: pythonPath!,
@@ -176,6 +284,14 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     expect(matrix.cells).toHaveLength(2);
     expect(matrix.cells.every((cell) => cell.outcome === "unscorable")).toBe(true);
     expect(matrix.cells.every((cell) => cell.verdicts.length === 0)).toBe(true);
+    const failedVerifiers = readRunJournalEntries(workspaceDir, "inspect-scorer-failure")
+      .filter((entry) => entry.kind === "evaluation");
+    expect(failedVerifiers).toHaveLength(2);
+    expect(failedVerifiers.every((entry) =>
+      entry.evaluationTerminal === "could-not-grade"
+      && entry.evalTaskSha256 !== undefined
+      && entry.evaluator !== "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer"
+    )).toBe(true);
   }, 120_000);
 
   test("honors Inspect maxSamples without multiplying or omitting benchmark cells", async () => {
@@ -354,6 +470,99 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
         verdict: "pass",
       });
     }
+
+    const verifiedDelivery = deliveries[0]!;
+    const nativeLogOutput = verifiedDelivery.outputs.find((output) => output.name === "inspect-log")!;
+    const summaryOutput = verifiedDelivery.outputs.find((output) => output.name === "inspect-summary")!;
+    const manifest = readInspectSelectionManifest(workspaceDir, selected.result.selectionManifestSha256);
+    const registration = createInspectLogVerifierRegistration({
+      registrationId: "inspect-log-verifier-proof",
+      evaluatorId: "did:key:inspect-log-verifier-proof",
+      signerHandle: "inspect-log-verifier-proof.pem",
+      evaluationMethod: {
+        name: "benchmark-product-inspect-log-verifier",
+        digest: { sha256: manifest.runtime.workerSha256 },
+      },
+      manifest,
+      selectionManifestSha256: selected.result.selectionManifestSha256,
+      workerPath: inspectWorkerPath(),
+      ociRunnerPath: inspectOciRunnerPath(),
+      host: { kind: "local-python", pythonPath: pythonPath! },
+    });
+    const separatelyVerified = await registration.adapter.evaluate(
+      {
+        descriptor: { name: "evaluation-task", digest: { sha256: "0".repeat(64) } },
+        bytes: new Uint8Array(),
+      },
+      [
+        {
+          descriptor: {
+            name: "inspect-log",
+            digest: { sha256: nativeLogOutput.sha256 },
+            mediaType: "application/vnd.inspect-ai.eval",
+          },
+          bytes: getSealedBytes(workspaceDir, nativeLogOutput.sha256),
+        },
+        {
+          descriptor: {
+            name: "inspect-summary",
+            digest: { sha256: summaryOutput.sha256 },
+            mediaType: "application/vnd.jinn.inspect-summary+json",
+          },
+          bytes: getSealedBytes(workspaceDir, summaryOutput.sha256),
+        },
+      ],
+      parseEvaluationSpec(getSealedBytes(workspaceDir, selected.result.evaluationSpecSha256)),
+      {},
+      { attemptUri: "urn:jinn:attempt:inspect-log-verifier-proof" } as never,
+      new AbortController().signal,
+    );
+    expect(separatelyVerified).toMatchObject({
+      verdict: "pass",
+      measurements: [
+        { name: "correct", value: true },
+        { name: "safe", value: true },
+      ],
+      detailedOutcome: {
+        relationship: "separate-log-verifier",
+        scoreSource: "same-execution-scorer",
+      },
+    });
+    expect(separatelyVerified.limitations).toContain("not-independent-rescoring");
+
+    const alteredSummary = JSON.parse(
+      new TextDecoder().decode(getSealedBytes(workspaceDir, summaryOutput.sha256)),
+    ) as { measurements: Array<{ value: boolean }> };
+    alteredSummary.measurements[0]!.value = false;
+    const alteredSummaryBytes = new TextEncoder().encode(JSON.stringify(alteredSummary));
+    await expect(registration.adapter.evaluate(
+      {
+        descriptor: { name: "evaluation-task", digest: { sha256: "0".repeat(64) } },
+        bytes: new Uint8Array(),
+      },
+      [
+        {
+          descriptor: {
+            name: "inspect-log",
+            digest: { sha256: nativeLogOutput.sha256 },
+            mediaType: "application/vnd.inspect-ai.eval",
+          },
+          bytes: getSealedBytes(workspaceDir, nativeLogOutput.sha256),
+        },
+        {
+          descriptor: {
+            name: "inspect-summary",
+            digest: { sha256: sha256Hex(alteredSummaryBytes) },
+            mediaType: "application/vnd.jinn.inspect-summary+json",
+          },
+          bytes: alteredSummaryBytes,
+        },
+      ],
+      parseEvaluationSpec(getSealedBytes(workspaceDir, selected.result.evaluationSpecSha256)),
+      {},
+      { attemptUri: "urn:jinn:attempt:inspect-log-verifier-tamper-proof" } as never,
+      new AbortController().signal,
+    )).rejects.toThrow(/projection/u);
 
     const reported = await runReport(ctx, { draftId: "inspect-real" });
     expect(reported.ok).toBe(true);

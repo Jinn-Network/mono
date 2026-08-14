@@ -363,6 +363,7 @@ export function runResults(
       const runtimeMethod = inspectRuntimeMethodForBinding(
         context.workspaceDir,
         document.spec.evaluationRuntime,
+        runRecord.policy.evaluation,
       );
 
       const results: RunResultsDocument = {

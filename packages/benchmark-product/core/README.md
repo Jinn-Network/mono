@@ -1,12 +1,13 @@
-# Colophon core — `@jinn-network/benchmark-product-core`
+# Colophon core — `@colophon-claims/core`
 
-The private Tier 4 core package is the single trusted product boundary. It owns
+The public Tier 4 core package is the single trusted product boundary. It owns
 workspace and draft state, lifecycle transitions, authority checks, the audit
-journal, real local-venue composition, Report and claim production, local
-public-bundle emission, and portable verification. The CLI and private web app
+journal, real local-venue composition, Report and claim production, and local
+public-bundle emission. Portable verification is owned by the smaller
+`@colophon-claims/verify` package and re-exported here. The CLI and private web app
 are clients of these public operations; neither is a second implementation.
-The preferred CLI command is `colophon`; `benchmark-product` remains an
-internal compatibility alias while packages keep their established names.
+The user-facing `colophon` executable is owned by `@colophon-claims/cli`; core
+retains the advanced command library used by that endpoint.
 
 Authority: [product design](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md).
 Start at the [product overview](../README.md); see the
@@ -14,7 +15,7 @@ Start at the [product overview](../README.md); see the
 [threat model](../SECURITY.md), and
 [Demo-1 E4 adapter runbook](../../../docs/superpowers/plans/demo-report-1/E4-preregistration-adapter.md).
 
-This package is `private: true`, unpublished, and requires Node 22. The complete
+This package is public-shaped, not yet published, and requires Node 22. The complete
 portal dependency graph must be built from source before core. The exact
 dependency order is maintained in
 [Benchmark Product CI](../../../.github/workflows/benchmark-product-ci.yml);
@@ -32,11 +33,21 @@ yarn pack:smoke
 `yarn public-quickstart` then exercises the built CLI on the real local venue
 and proves copied-bundle verification after source-workspace deletion.
 
+The opt-in `yarn publication-release-rehearsal` is the complementary external
+release gate. With `COLOPHON_PUBLICATION_RELEASE_HARBOR` set to an exact Harbor
+0.21 executable, it runs the pinned no-network fixture through real Harbor and
+Docker, then proves prospective registration, six public-before-Harbor
+Submissions, complete runtime evidence, Accounting/Matrix v2, signed Report v2,
+exact public retrieval, and no publication-triggered rerun. It uses Harbor's
+built-in Oracle agent and does not use model credentials. See the
+[product overview](../README.md#real-harbor-publication-rehearsal) for the exact
+operator command.
+
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **28 generated operations**, all shipped through the library, CLI, and
-GUI:
+contains **36 generated operations**, all shipped through the library and CLI
+with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
 |---|---|---|
@@ -53,6 +64,12 @@ GUI:
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
 | `listDrafts` | `colophon draft list` | List drafts. |
+| `migrateTerminalBenchLegacyTask` | `colophon runtime terminal-bench migrate` | Transform legacy Terminal-Bench material with pinned Harbor and preserve both byte histories. |
+| `publicationConfigure` | `colophon publication configure` | Configure the public locator and opt into prospective disclosure. |
+| `publicationRegister` | `colophon publication register` | Store, announce, and exact-probe the registration closure. |
+| `publicationStatus` | `colophon publication status` | Read timing assurance, stage receipts, compatibility, and recovery guidance without backend calls. |
+| `publicationAccounting` | `colophon publication accounting` | Publish retained complete or partial accounting and Matrix v2 without a Report or rerun. |
+| `publicationReport` | `colophon publication report` | Produce, verify, and publish the signed Report v2 envelope from the accounting closure. |
 | `runCancel` | `colophon cancel` | Durably request or finalize cancellation. |
 | `runCollect` | `colophon collect` | Seal the terminal Matrix. |
 | `runLaunch` | `colophon launch` | Drive the real local venue. |
@@ -67,6 +84,8 @@ GUI:
 | `runVerify` | `colophon verify` | Re-derive Matrix, Report, and claim consistency. |
 | `sampleInit` | `colophon sample init` | Attach the bundled three-task benchmark. |
 | `selectInspectEvaluation` | `colophon runtime inspect select` | Select and bind a real Inspect evaluation. |
+| `selectHarborRuntime` | `colophon runtime harbor select` | Select and bind the managed Harbor runtime. |
+| `selectTerminalBench2Runtime` | `colophon runtime terminal-bench-2 select` | Resolve and bind one immutable Terminal-Bench 2 task through Harbor. |
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI
@@ -101,9 +120,10 @@ Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 
 ## Authority and lifecycle behavior
 
-The **five gated operations** are `lock`, `launch`, `cancel`, `report`, and
-`publish`. The founding sponsor receives all five grants. A delegated agent may
-perform any of them only after a sponsor grants it. `authority grant` and
+The **nine gated operations** are `lock`, `launch`, `cancel`, `report`,
+`publish`, `publication.configure`, `publication.register`,
+`publication.accounting`, and `publication.report`. The founding sponsor receives all nine grants. A delegated agent may perform any of them
+only after a sponsor grants it. `authority grant` and
 `authority revoke` are separately sponsor-only, so a delegated agent cannot
 self-escalate. This is local-process policy and attribution, not operating-system
 or hosted authentication.
@@ -156,3 +176,7 @@ Mutable drafts, grants, journals, scratch state, and private signing keys remain
 inside the workspace. Sealed records are stored as exact digest-addressed bytes.
 `publish` is **local immutable emission only: no upload, no hosting, no deployment**, package publication, or remote write. The emitted closure is
 public and not a general PII or confidentiality scrubber.
+
+For staged publication, `publicBaseUrl` is the exact archive mount, not merely an origin. For
+example, `https://example.test/publication` resolves records beneath
+`https://example.test/publication/records/...`; an origin-root mount remains supported.

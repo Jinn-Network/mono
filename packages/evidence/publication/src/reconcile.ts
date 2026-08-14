@@ -7,6 +7,7 @@ import type {
 } from "@jinn-network/evidence-repository";
 
 import { EvidencePublicationError } from "./errors.js";
+import { executeEvidenceFramePlacement } from "./record-publication-adapter.js";
 import {
   derivePlacementIdempotencyKey,
   snapshotPreparedAnnouncement,
@@ -506,14 +507,24 @@ async function placeAfterIntent(
     dependencies.sink.medium,
     dependencies.sink.profile,
   );
-  const { value: result } = await operation.waitFor(
-    () =>
-      dependencies.sink.place(
-        suppliedPrepared,
-        idempotencyKey,
-        operation.dependencyOptions,
-      ),
-  );
+  let result: PlaceResult | undefined;
+  await executeEvidenceFramePlacement({
+    planId: `evidence-publication:${entry.bundleKey}:frame:${partition.ordinal}:${expectedPrepared.frameDigest}`,
+    frameDigest: expectedPrepared.frameDigest,
+    frameBytes: expectedPrepared.frameBytes,
+    place: async () => {
+      const placed = await operation.waitFor(() =>
+        dependencies.sink.place(
+          suppliedPrepared,
+          idempotencyKey,
+          operation.dependencyOptions,
+        ));
+      result = placed.value;
+    },
+  });
+  if (result === undefined) {
+    throw new EvidencePublicationError("JOURNAL_CORRUPT", "The neutral frame adapter did not return a placement result.");
+  }
   const checked = snapshotPlaceResult(
     result,
     idempotencyKey,

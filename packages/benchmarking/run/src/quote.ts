@@ -3,7 +3,7 @@ import {
   type BenchmarkRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
-import type { BackendCapabilities } from "@jinn-network/task-execution-backend";
+import type { BenchmarkBackendCapabilities } from "./backend-port.js";
 
 export type QuoteErrorCode = "hard-cap-breach" | "unsupported-requirement";
 
@@ -28,7 +28,7 @@ function mergeRequirements(
 
 function unsupportedPinningErrors(
   run: RunRecord,
-  caps: BackendCapabilities,
+  caps: BenchmarkBackendCapabilities,
 ): QuoteError[] {
   const supported = new Map<string, Set<string>>(
     caps.runPinning.keys.map((entry: { key: string; inventory: readonly string[] }) => [
@@ -81,7 +81,7 @@ function parseDecimal(value: string): number {
 export function quoteRun(
   bench: BenchmarkRecord,
   run: RunRecord,
-  caps: BackendCapabilities,
+  caps: BenchmarkBackendCapabilities,
 ): QuoteReport {
   const cells = expectedCellCount(bench, run);
   const errors: QuoteError[] = [...unsupportedPinningErrors(run, caps)];

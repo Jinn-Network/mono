@@ -187,13 +187,14 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await auditState(page, "invalid action result");
 
   await submitAction(page, "Attach sample", /sample/u);
-  const addArm = actionForm(page, "Add arm");
+  await activateByKeyboard(page, page.getByText("Advanced: raw Arm pinning", { exact: true }));
+  const addArm = actionForm(page, "Add raw-pinned arm");
   await typeByKeyboard(page, addArm.getByLabel("Arm ID"), "baseline");
   await typeByKeyboard(page, addArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "prediction-v1-baseline", version: "1.0.0" } }));
-  await submitAction(page, "Add arm", /baseline/u);
+  await submitAction(page, "Add raw-pinned arm", /baseline/u);
   await typeByKeyboard(page, addArm.getByLabel("Arm ID"), "sample");
   await typeByKeyboard(page, addArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }));
-  await submitAction(page, "Add arm", /sample/u);
+  await submitAction(page, "Add raw-pinned arm", /sample/u);
 
   const lock = page.getByRole("button", { name: "Lock run", exact: true });
   await expect(lock).toBeDisabled();
@@ -247,13 +248,14 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await submitAction(page, "Create draft", /bp52-browser-cancelled/u);
   await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}`);
   await submitAction(page, "Attach sample", /sample/u);
-  const cancelledArm = actionForm(page, "Add arm");
+  await activateByKeyboard(page, page.getByText("Advanced: raw Arm pinning", { exact: true }));
+  const cancelledArm = actionForm(page, "Add raw-pinned arm");
   await typeByKeyboard(page, cancelledArm.getByLabel("Arm ID"), "baseline");
   await typeByKeyboard(page, cancelledArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "prediction-v1-baseline", version: "1.0.0" } }));
-  await submitAction(page, "Add arm", /baseline/u);
+  await submitAction(page, "Add raw-pinned arm", /baseline/u);
   await typeByKeyboard(page, cancelledArm.getByLabel("Arm ID"), "sample");
   await typeByKeyboard(page, cancelledArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }));
-  await submitAction(page, "Add arm", /sample/u);
+  await submitAction(page, "Add raw-pinned arm", /sample/u);
   await submitAction(page, "Quote", /solveCells/u);
   await submitAction(page, "Lock run", /locked/u);
   await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}/run`);

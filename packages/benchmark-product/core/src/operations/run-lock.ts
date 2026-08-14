@@ -16,8 +16,8 @@
  * enforcement, it just drives the draft into a state those checks already treat as immutable.
  */
 
-import { sealRun } from "@jinn-network/benchmarking-records";
-import type { DraftDocument } from "../domain/draft.js";
+import { RUN_RECORD_KIND, sealRun, withRunPublicationExtension } from "@jinn-network/benchmarking-records";
+import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
@@ -29,6 +29,8 @@ import {
 import { requireRunState, specDigest, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
+import { runtimeRegistrationArtifacts } from "../runtime/adapter.js";
+import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
@@ -70,6 +72,7 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
       const runtimeMethod = inspectRuntimeMethodForBinding(
         clockedContext.workspaceDir,
         document.spec.evaluationRuntime,
+        resolveAssurance(document.spec.assurance),
       );
 
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
@@ -82,6 +85,17 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         );
       }
 
+      const unreadyAgent = context.runtimeHost?.assessAgentReadiness(
+        document.spec.arms.map((arm) => ({ armId: arm.armId, pinning: arm.pinning })),
+      ).find((finding) => !finding.ready);
+      if (unreadyAgent !== undefined) {
+        refuse(
+          "venue-unavailable",
+          `arms.${unreadyAgent.armId}.pinning`,
+          `${unreadyAgent.detail}${unreadyAgent.remediation === undefined ? "" : ` ${unreadyAgent.remediation}`}`,
+        );
+      }
+
       const closeAt = computeCloseAt(at, document.spec.policy.closeAfterMs);
       const compiled = compileDraft({
         workspaceDir: clockedContext.workspaceDir,
@@ -90,8 +104,20 @@ export function runLock(context: OperationContext, input: RunLockInput): Operati
         closeAt,
       });
 
-      const sealed = sealRun(compiled.plannedRun.record);
+      const runWithPublicationAuthorization = withRunPublicationExtension(
+        compiled.plannedRun.record as unknown as Record<string, unknown>,
+        {
+          registrationArtifacts: [...runtimeRegistrationArtifacts(clockedContext.workspaceDir, document.spec.evaluationRuntime)],
+        },
+      );
+      const sealed = sealRun(runWithPublicationAuthorization);
       const runSha256 = putSealedBytes(clockedContext.workspaceDir, sealed.bytes);
+      recordWorkspaceAuthorship({
+        workspaceDir: clockedContext.workspaceDir,
+        recordSha256: runSha256,
+        recordKind: RUN_RECORD_KIND,
+        authoredAt: at,
+      });
 
       const transitioned = transition("quoted", "lock");
       if (!transitioned.ok) {

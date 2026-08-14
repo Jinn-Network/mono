@@ -45,6 +45,9 @@ import {
   driveEvaluationCatchUp,
   type DriveDeps,
 } from "../run/drive.js";
+import { createProductLaunchCapture } from "../run/publication-capture.js";
+import { createWorkspacePublicationSource, publicArchiveUrl, recordPath, withWorkspacePublicationSourceLock } from "../run/publication-source.js";
+import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
   appendRunJournalEntry,
   evaluationGaps,
@@ -52,11 +55,12 @@ import {
   outstandingCells,
   readRunJournalEntries,
 } from "../run/journal.js";
-import { requireRunState, writeRunState } from "../run/state.js";
+import { requireRunState, writeRunState, type PublicationState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -83,6 +87,22 @@ export interface RunLaunchInput {
 
 export interface RunLaunchResult {
   readonly draft: DraftDocument;
+}
+
+function prospectiveRegistrationVerified(publication: PublicationState): boolean {
+  return publication.registration.state === "complete"
+    && publication.registration.receipt !== undefined
+    && publication.source.publicBaseUrl !== undefined;
+}
+
+function requireProspectiveRegistrationVerified(publication: PublicationState, draftId: string): void {
+  if (!prospectiveRegistrationVerified(publication)) {
+    refuse(
+      "conflict",
+      `runs.${draftId}.publication.registration`,
+      "prospective public registration is pending/unverified until it has a durable receipt and public locator; retry registration before dispatch",
+    );
+  }
 }
 
 export interface RunResumeInput {
@@ -185,6 +205,51 @@ async function runDriverGeneration<T>(
   }
 }
 
+async function createRunLaunchCapture(
+  workspaceDir: string,
+  draftId: string,
+  liveClock: () => string,
+): Promise<ReturnType<typeof createProductLaunchCapture>> {
+  const state = requireRunState(workspaceDir, draftId);
+  const publication = state.publication;
+  if (publication?.mode !== "prospective") {
+    return createProductLaunchCapture({ workspaceDir, draftId, liveClock });
+  }
+  requireProspectiveRegistrationVerified(publication, draftId);
+  const frozenCaptures = readRunJournalEntries(workspaceDir, draftId).filter(
+    (entry) => entry.kind === "submission-captured" && entry.publicationSourceSequence !== undefined,
+  );
+  return createProductLaunchCapture({
+    workspaceDir,
+    draftId,
+    liveClock,
+    announceSubmission: async ({ bytes, digest, at }) => withWorkspacePublicationSourceLock(workspaceDir, async () => {
+      const source = createWorkspacePublicationSource(workspaceDir, publication.source.name);
+      if (source.source.agent !== publication.source.agentKeyRef || state.owner !== source.source.agent) {
+        refuse("conflict", `runs.${draftId}.publication.source`, "Run owner and source agent must be the same stable workspace did:key");
+      }
+      await source.writer.recover();
+      const prior = frozenCaptures.find((entry) => entry.kind === "submission-captured" && entry.submissionSha256 === digest.slice(7));
+      const receipt = await source.writer.append({
+        timestamp: prior?.at ?? at,
+        announcement: {
+          announcementId: `submission:${digest}`,
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/submission/v1", digest, mediaType: SUBMISSION_MEDIA_TYPE },
+        },
+        record: { bytes, contentType: SUBMISSION_MEDIA_TYPE },
+      });
+      const base = publication.source.publicBaseUrl!;
+      const response = await fetch(publicArchiveUrl(base, recordPath(digest)));
+      const observed = response.ok ? new Uint8Array(await response.arrayBuffer()) : undefined;
+      if (observed === undefined || observed.length !== bytes.length || !observed.every((byte, index) => byte === bytes[index])) {
+        throw new Error("prospective Submission was announced but is not exactly retrievable");
+      }
+      return { sequence: receipt.sequence, entrySha256: receipt.entryDigest.slice("sha256:".length) };
+    }),
+  });
+}
+
 export function runLaunch(
   context: OperationContext,
   input: RunLaunchInput,
@@ -199,6 +264,8 @@ export function runLaunch(
     inputs: input,
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "locked");
+      const publicationIntent = requireRunState(clockedContext.workspaceDir, input.draftId).publication;
+      if (publicationIntent?.mode === "prospective") requireProspectiveRegistrationVerified(publicationIntent, input.draftId);
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(loaded.document.spec.evaluationRuntime, options, context.runtimeHost));
 
@@ -225,6 +292,8 @@ export function runLaunch(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          agentProfileRequirements: loaded.runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
+          inspectEvaluationStrategy: deriveInspectEvaluationStrategy(loaded.runRecord.policy.evaluation),
           ...(deps.solveStartDelayMsForTesting !== undefined
             ? { solveStartDelayMsForTesting: deps.solveStartDelayMsForTesting }
             : {}),
@@ -254,7 +323,9 @@ export function runLaunch(
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
                 liveClock: context.clock,
+                recordSolveSubmissions: false,
               });
+              const capture = await createRunLaunchCapture(clockedContext.workspaceDir, input.draftId, context.clock);
               const driveDeps: DriveDeps = {
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
@@ -281,6 +352,7 @@ export function runLaunch(
                 get earlyClose() {
                   return cancellation!.earlyClose;
                 },
+                capture,
               });
               await driveCellEvents(driveDeps, events);
               return { draft };
@@ -339,7 +411,12 @@ export function runResume(
 
       const journaledSubmissions = new Map<string, string>();
       for (const entry of entries) {
-        if (entry.kind === "submission-accepted") {
+        // Pre-submit capture is the crash boundary. An interruption after backend acceptance but
+        // before the accepted observation archive still resumes with these exact bytes rather
+        // than sealing a new deadline under the same idempotency key.
+        if (entry.kind === "submission-captured") {
+          journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
+        } else if (entry.kind === "submission-accepted" && entry.leg !== "evaluation") {
           journaledSubmissions.set(`${entry.cellKey}::${entry.dispatch}`, entry.submissionSha256);
         }
       }
@@ -353,6 +430,8 @@ export function runResume(
           workspaceDir: clockedContext.workspaceDir,
           now: context.clock,
           evaluatorCount: minVerdicts,
+          agentProfileRequirements: loaded.runRecord.arms.map((arm) => arm.pinning as Readonly<Record<string, unknown>>),
+          inspectEvaluationStrategy: deriveInspectEvaluationStrategy(loaded.runRecord.policy.evaluation),
           ...(deps.solveStartDelayMsForTesting !== undefined
             ? { solveStartDelayMsForTesting: deps.solveStartDelayMsForTesting }
             : {}),
@@ -382,7 +461,9 @@ export function runResume(
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
                 liveClock: context.clock,
+                recordSolveSubmissions: false,
               });
+              const capture = await createRunLaunchCapture(clockedContext.workspaceDir, input.draftId, context.clock);
               const driveDeps: DriveDeps = {
                 workspaceDir: clockedContext.workspaceDir,
                 draftId: input.draftId,
@@ -417,6 +498,7 @@ export function runResume(
                       return sha256 === undefined ? undefined : getSealedBytes(clockedContext.workspaceDir, sha256);
                     },
                   },
+                  capture,
                 });
                 await driveCellEvents(driveDeps, events);
               }

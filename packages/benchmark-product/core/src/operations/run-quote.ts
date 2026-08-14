@@ -32,15 +32,16 @@ import type { RunRecord } from "@jinn-network/benchmarking-records";
 import type { BackendCapabilities } from "@jinn-network/task-execution-backend";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { transition, type LifecycleState } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { draftPath } from "../workspace/layout.js";
-import { assertWorkspace } from "../workspace/workspace.js";
 import { compileDraft, type CompiledRun } from "../run/compile.js";
 import { readPreviewLog, type PreviewLog } from "../run/preview-log.js";
-import { deriveRunOwner, specDigest, writeRunState } from "../run/state.js";
+import { createPublicationState, readRunState, specDigest, writeRunState } from "../run/state.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -253,9 +254,21 @@ export function runQuote(
         ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
       const nextState = ensureQuotable(document.state, input.draftId);
 
+      const unreadyAgent = context.runtimeHost?.assessAgentReadiness(
+        document.spec.arms.map((arm) => ({ armId: arm.armId, pinning: arm.pinning })),
+      ).find((finding) => !finding.ready);
+      if (unreadyAgent !== undefined) {
+        refuse(
+          "venue-unavailable",
+          `arms.${unreadyAgent.armId}.pinning`,
+          `${unreadyAgent.detail}${unreadyAgent.remediation === undefined ? "" : ` ${unreadyAgent.remediation}`}`,
+        );
+      }
+
       const closeAt = computeCloseAt(at, document.spec.policy.closeAfterMs);
-      const workspaceMetadata = assertWorkspace(clockedContext.workspaceDir);
-      const owner = deriveRunOwner(workspaceMetadata.createdAt, input.draftId);
+      // One real workspace-held did:key is both Run owner and public source agent. This avoids
+      // inventing an unverifiable delegation from a deterministic URN with no private key.
+      const owner = loadOrCreateReportSigningKey(clockedContext.workspaceDir).keyId;
 
       const compiled = compileDraft({
         workspaceDir: clockedContext.workspaceDir,
@@ -270,7 +283,14 @@ export function runQuote(
       // audit timestamps are pinned to one instant.
       let venue: LocalVenue;
       try {
-        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock });
+        const resolvedAssurance = resolveAssurance(document.spec.assurance);
+        venue = createVenue({
+          workspaceDir: clockedContext.workspaceDir,
+          now: context.clock,
+          evaluatorCount: resolvedAssurance.minVerdicts,
+          inspectEvaluationStrategy: deriveInspectEvaluationStrategy(resolvedAssurance),
+          agentProfileRequirements: document.spec.arms.map((arm) => arm.pinning),
+        });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }
@@ -285,12 +305,19 @@ export function runQuote(
         await venue.shutdown();
       }
 
+      const previousPublication = readRunState(clockedContext.workspaceDir, input.draftId)?.publication;
       writeRunState(clockedContext.workspaceDir, input.draftId, {
         draftId: input.draftId,
         specSha256: specDigest(document.spec),
         owner,
         quote,
         quotedAt: at,
+        // The source agent is the durable workspace report-signing did:key, never the mutable
+        // workspace principal or a URL.  This is created at quote time so it is stable before
+        // any later registration receipt makes the identity immutable.
+        publication: previousPublication === undefined
+          ? createPublicationState({ agentKeyRef: owner })
+          : { ...previousPublication, source: { ...previousPublication.source, agentKeyRef: owner } },
       });
 
       let draft = document;

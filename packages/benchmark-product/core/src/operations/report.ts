@@ -54,6 +54,11 @@ import {
   inspectRuntimeMethodForBinding,
   type InspectRuntimeMethodDisclosure,
 } from "../runtime/inspect/disclosure.js";
+import {
+  deriveInspectEvaluationStrategy,
+  INSPECT_SEPARATE_ASSURANCE_LIMITATIONS,
+} from "../runtime/inspect/assurance.js";
+import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
 import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { requireRunState, writeRunState } from "../run/state.js";
@@ -71,6 +76,7 @@ export interface RunReportInput {
 
 export interface RunReportResult {
   readonly draft: DraftDocument;
+  /** Exact legacy Report v1 payload and envelope identities. */
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
   readonly preregistered: boolean;
@@ -108,11 +114,6 @@ export function runReport(
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
       }
-      const runtimeMethod = inspectRuntimeMethodForBinding(
-        clockedContext.workspaceDir,
-        document.spec.evaluationRuntime,
-      );
-
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
       if (runState.runSha256 === undefined || runState.matrixSha256 === undefined) {
         refuse(
@@ -125,6 +126,11 @@ export function runReport(
       const matrixBytes = getSealedBytes(clockedContext.workspaceDir, runState.matrixSha256);
       const matrixRecord = parseMatrix(matrixBytes);
       const runRecord = parseRun(getSealedBytes(clockedContext.workspaceDir, runState.runSha256));
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        clockedContext.workspaceDir,
+        document.spec.evaluationRuntime,
+        runRecord.policy.evaluation,
+      );
 
       const resolvedAssurance = resolveAssurance(document.spec.assurance);
       const verdictRule = resolvedAssurance.verdictRule;
@@ -150,15 +156,20 @@ export function runReport(
         ? previewDisclosureLine(previewLog)
         : undefined;
       const venueLimits = localVenueLimitsForRun(runRecord);
+      const inspectLimits = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+        && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
+        ? INSPECT_SEPARATE_ASSURANCE_LIMITATIONS
+        : [];
       const limitations = selected.method === BENCHMARKING_METHOD_IDS.pairedDelta
         ? [
             ...venueLimits,
+            ...inspectLimits,
             PAIRED_ESTIMATE_LIMITATION,
             ...(previewLimitation === undefined ? [] : [previewLimitation]),
           ]
         : previewLimitation === undefined
-          ? venueLimits
-          : [...venueLimits, previewLimitation];
+          ? [...venueLimits, ...inspectLimits]
+          : [...venueLimits, ...inspectLimits, previewLimitation];
 
       let produced: ProducedReport;
       try {

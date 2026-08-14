@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BenchmarkProductError } from "../errors.js";
 import { SAMPLE_REPOSITORY_WORK_LAUNCHER_ID } from "./sample-repository-work.js";
 import { createLocalVenue, EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "./venue.js";
+import type { AgentRuntimeBinding } from "../agent/index.js";
 import {
   DEMO1_CLAUDE_MODEL_ID,
   createDemo1ClaudeRuntimeBinding,
@@ -120,6 +122,39 @@ describe("createLocalVenue task-profile admission", () => {
     } finally {
       await venue.shutdown();
     }
+  });
+});
+
+describe("createLocalVenue real agent bindings", () => {
+  it("registers a protected host-owned Codex API-key binding without adding product-private run pinning", async () => {
+    const key = join(workspaceDir, "host-codex-api-key");
+    writeFileSync(key, "credential-value-not-in-plan\n", { mode: 0o600 });
+    chmodSync(key, 0o600);
+    const runtime: AgentRuntimeBinding = {
+      profile: {
+        format: "colophon-agent/1", agentId: "codex-main", adapter: "codex",
+        executable: { path: process.execPath, sha256: createHash("sha256").update(readFileSync(process.execPath)).digest("hex"), version: "1.2.3" },
+        model: "gpt-test", effort: "high", network: "provider-required",
+      },
+      credential: { format: "colophon-agent-credential/1", agentId: "codex-main", kind: "api-key", secretBasename: "codex-main.api-key" },
+      credentialFile: key,
+    };
+    venue = createLocalVenue({
+      workspaceDir,
+      now: NOW,
+      agentRuntimes: [runtime],
+      agentVersionCommand: () => "codex-cli 1.2.3",
+    });
+    const capabilities = await venue.backend.capabilities();
+    expect(capabilities.runPinning.keys.find((entry) => entry.key === "model")?.inventory).toContain("gpt-test");
+    expect(capabilities.runPinning.keys.map((entry) => entry.key)).not.toContain("colophon-agent-profile");
+    await expect(venue.backend.preflight({
+      taskProfile: "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      requirements: {
+        harness: { id: "codex", version: "1.2.3", digest: runtime.profile.executable.sha256 },
+        model: { id: "gpt-test" }, effort: "high", isolationPolicy: "unrestricted",
+      },
+    })).resolves.toMatchObject({ ready: true });
   });
 });
 

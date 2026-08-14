@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { copyFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,10 @@ await new Promise((resolve, reject) => {
     else reject(new Error(`TypeScript build exited with ${code}`));
   });
 });
+
+// The credential bridge is a plain ESM process entrypoint and must run before a harness without
+// a TypeScript loader or dependencies that could inherit credentials.
+await copyFile(join(packageRoot, "src", "credential-exec.mjs"), join(dist, "credential-exec.mjs"));
 
 await new Promise((resolve, reject) => {
   const child = spawn(process.execPath, ["scripts/build-native.mjs"], {

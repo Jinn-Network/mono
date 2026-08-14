@@ -133,7 +133,7 @@
   },
   "releaseGroups": {
     "platform-v1": {
-      "expectedPackageCount": 52,
+      "expectedPackageCount": 54,
       "publishPolicies": [
         "canary-only"
       ],
@@ -246,7 +246,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 14,
       "publishPolicies": [
         "private",
         "never"
@@ -789,7 +789,7 @@
       }
     },
     {
-      "name": "@jinn-network/benchmark-product-core",
+      "name": "@colophon-claims/core",
       "path": "packages/benchmark-product/core",
       "domain": "benchmark-product",
       "role": "benchmark product core",
@@ -804,6 +804,10 @@
           },
           {
             "path": "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md",
+            "status": "approved"
+          },
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
             "status": "approved"
           }
         ],
@@ -829,7 +833,79 @@
       "replacedBy": []
     },
     {
-      "name": "@jinn-network/benchmark-product-web",
+      "name": "@colophon-claims/cli",
+      "path": "packages/benchmark-product/cli",
+      "domain": "benchmark-product",
+      "role": "Colophon self-serve command and packaged local application",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@colophon-claims/verify",
+      "path": "packages/benchmark-product/verify",
+      "domain": "benchmark-product",
+      "role": "standalone Colophon public-bundle reader verifier",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@colophon-claims/web",
       "path": "packages/benchmark-product/web",
       "domain": "benchmark-product",
       "role": "benchmark product web application",
@@ -849,6 +925,10 @@
           {
             "path": "packages/benchmark-product/web/BENCHMARK-PRODUCT-WEB-SPEC.md",
             "status": "draft"
+          },
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
+            "status": "approved"
           }
         ],
         "decisionRecord": null
@@ -1090,6 +1170,49 @@
         "fixtures": [
           "fixtures"
         ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-publication",
+      "path": "packages/benchmarking/publication",
+      "domain": "benchmarking",
+      "role": "benchmark publication planning and accounting verification",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
         "conformance": []
       },
       "supersedes": [],
@@ -1557,6 +1680,49 @@
           {
             "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
             "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-publication",
+      "path": "packages/discovery/publication",
+      "domain": "discovery",
+      "role": "kind-neutral recoverable record publication coordinator",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md",
+            "status": "draft"
           }
         ],
         "decisionRecord": {

@@ -56,6 +56,7 @@ import {
 import { EVALUATOR_REQUIREMENT_KEY } from "../venue/venue.js";
 import { INSPECT_EMBEDDED_EVALUATOR_ID } from "../runtime/inspect/artifacts.js";
 import { INSPECT_ADAPTER_ID, InspectSelectionManifestSchema } from "../runtime/inspect/manifest.js";
+import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 
 export const PUBLIC_BUNDLE_FILES = [
   "static-bundle.json",
@@ -172,11 +173,13 @@ function recordClosure(input: MaterializeBundleInput): {
   const matrix = parseMatrix(matrixBytes);
   const report = parseReport(reportBytes);
   const draft = parseDraftDocument(JSON.parse(readFileSync(draftPath(workspaceDir, draftId), "utf8")));
-  const embeddedInspect = draft.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID;
-  const inspectSelectionSha256 = embeddedInspect
+  const inspectRuntime = draft.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID;
+  const separateInspectVerifier = inspectRuntime
+    && deriveInspectEvaluationStrategy(run.policy.evaluation) === "separate-log-verification";
+  const inspectSelectionSha256 = inspectRuntime
     ? draft.spec.evaluationRuntime?.selectionManifestSha256
     : undefined;
-  if (embeddedInspect) {
+  if (inspectRuntime) {
     if (inspectSelectionSha256 === undefined) {
       refuse("record-integrity", "evidence-closure", "Inspect draft has no sealed runtime selection identity");
     }
@@ -206,7 +209,7 @@ function recordClosure(input: MaterializeBundleInput): {
       evaluation?: { digest?: { sha256?: string } };
       payload?: { selectionManifestSha256?: unknown };
     };
-    if (embeddedInspect) {
+    if (inspectRuntime) {
       if (task.payload?.selectionManifestSha256 !== inspectSelectionSha256) {
         refuse("record-integrity", "evidence-closure", `Inspect Task ${taskSha256} does not bind the draft's sealed runtime selection`);
       }
@@ -232,28 +235,43 @@ function recordClosure(input: MaterializeBundleInput): {
     evaluations: [],
   };
   const evaluationEvidenceByVerdict = new Map<string, {
-    relationship?: "same-execution-scorer";
+    relationship?: "same-execution-scorer" | "separate-log-verifier";
     evalTaskSha256?: string;
     evalSubmissionSha256?: string;
     evalDeliverySha256?: string;
     evalAttempt?: string;
     evalIndex: number;
   }>();
+  const pinningBySubmission = new Map<string, string>();
+  for (const entry of journal) {
+    if (entry.kind !== "submission-pinning-evidence") continue;
+    const key = `${entry.cellKey}:${entry.dispatch}:${entry.submissionSha256}`;
+    const prior = pinningBySubmission.get(key);
+    if (prior !== undefined && prior !== entry.pinningEvidenceSha256) {
+      refuse("record-integrity", "evidence-closure", `solve Submission ${entry.submissionSha256} has conflicting run-pinning evidence`);
+    }
+    pinningBySubmission.set(key, entry.pinningEvidenceSha256);
+  }
   for (const entry of journal) {
     if (entry.kind === "submission-accepted") {
       const isEvaluation = entry.leg === "evaluation";
       addRole(evidenceRecords, entry.submissionSha256, isEvaluation ? "evaluation-submission" : "solve-submission");
       if (!isEvaluation) {
-        if (entry.pinningEvidenceSha256 !== undefined) {
-          addRole(evidenceRecords, entry.pinningEvidenceSha256, "run-pinning-evidence");
+        const enrichedPinning = pinningBySubmission.get(`${entry.cellKey}:${entry.dispatch}:${entry.submissionSha256}`);
+        if (entry.pinningEvidenceSha256 !== undefined && enrichedPinning !== undefined && entry.pinningEvidenceSha256 !== enrichedPinning) {
+          refuse("record-integrity", "evidence-closure", `solve Submission ${entry.submissionSha256} has conflicting run-pinning evidence`);
+        }
+        const pinningEvidenceSha256 = entry.pinningEvidenceSha256 ?? enrichedPinning;
+        if (pinningEvidenceSha256 !== undefined) {
+          addRole(evidenceRecords, pinningEvidenceSha256, "run-pinning-evidence");
         }
         graph.solveSubmissions.push({
           cellKey: entry.cellKey,
           dispatch: entry.dispatch,
           sha256: entry.submissionSha256,
-          ...(entry.pinningEvidenceSha256 === undefined
+          ...(pinningEvidenceSha256 === undefined
             ? {}
-            : { pinningEvidenceSha256: entry.pinningEvidenceSha256 }),
+            : { pinningEvidenceSha256 }),
         });
       } else {
         const bytes = getSealedBytes(workspaceDir, entry.submissionSha256);
@@ -287,7 +305,7 @@ function recordClosure(input: MaterializeBundleInput): {
       addRole(evidenceRecords, entry.deliverySha256, "solve-delivery");
       for (const output of entry.outputs) {
         addRole(evidenceRecords, output.sha256, "solve-output");
-        if (embeddedInspect && output.name === "inspect-log") {
+        if (inspectRuntime && output.name === "inspect-log") {
           // Duplicate the authenticated record bytes under Inspect's native extension so the
           // copied bundle opens directly in the pinned Inspect reader and Inspect View.
           files.set(`native/inspect/${output.sha256}.eval`, getSealedBytes(workspaceDir, output.sha256));
@@ -309,7 +327,7 @@ function recordClosure(input: MaterializeBundleInput): {
         && entry.evalDeliverySha256 !== undefined
         && entry.evalAttempt !== undefined
         && submission !== undefined;
-      const hasEmbeddedLineage = embeddedInspect
+      const hasEmbeddedLineage = inspectRuntime
         && entry.evaluator === INSPECT_EMBEDDED_EVALUATOR_ID
         && entry.evalTaskSha256 === undefined
         && entry.evalDeliverySha256 === undefined
@@ -331,7 +349,11 @@ function recordClosure(input: MaterializeBundleInput): {
       graph.evaluations.push({
         cellKey: entry.cellKey,
         evalIndex,
-        ...(hasEmbeddedLineage ? { relationship: "same-execution-scorer" as const } : {}),
+        ...(hasEmbeddedLineage
+          ? { relationship: "same-execution-scorer" as const }
+          : hasSeparateLineage && separateInspectVerifier
+            ? { relationship: "separate-log-verifier" as const }
+            : {}),
         ...(entry.evaluator !== undefined ? { evaluator: entry.evaluator } : {}),
         ...(entry.evalTaskSha256 !== undefined ? { evalTaskSha256: entry.evalTaskSha256 } : {}),
         ...(submission !== undefined ? { evalSubmissionSha256: submission.sha256 } : {}),
@@ -346,6 +368,7 @@ function recordClosure(input: MaterializeBundleInput): {
           hasEmbeddedLineage
             ? { relationship: "same-execution-scorer", evalIndex }
             : {
+              ...(separateInspectVerifier ? { relationship: "separate-log-verifier" as const } : {}),
               evalTaskSha256: entry.evalTaskSha256!,
               evalSubmissionSha256: submission!.sha256,
               evalDeliverySha256: entry.evalDeliverySha256!,

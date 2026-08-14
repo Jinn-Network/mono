@@ -23,6 +23,7 @@
   "resolutions": {
     "@hono/node-server": "^2.0.11",
     "@jinn-network/task-execution-protocol": "portal:../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../trust/core",
     "drizzle-orm": "^0.45.2",
     "kysely": "^0.28.17"
   },

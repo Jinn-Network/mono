@@ -365,7 +365,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "pattern": "^@jinn-network/[a-z0-9][a-z0-9-]*$"
+          "pattern": "^@(jinn-network|colophon-claims)/[a-z0-9][a-z0-9-]*$"
         },
         "path": {
           "$ref": "#/$defs/repositoryPath"

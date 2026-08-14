@@ -45,6 +45,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import {
   axisObservationsFromRuntimeObservations,
+  requirementsDigest,
   runPinningPropertyId,
 } from "@jinn-network/benchmarking-local";
 import type { AttemptWaitPort } from "@jinn-network/benchmarking-run";
@@ -895,6 +896,7 @@ export async function runE2ECampaign(
       evidenceFor(cellKey: string): WaveCellEvidence {
         const [taskDigest, armId] = cellKey.split("/");
         const participant = byArm.get(armId!)!;
+        const plannedArm = devPlan.arms.find((arm) => arm.armId === armId)!;
         const taskIndex = devTaskDigests.indexOf(taskDigest!);
         const swapped = cellKey === swappedCellKey;
         return {
@@ -904,7 +906,10 @@ export async function runE2ECampaign(
           verdicts: [verdictFor(cellKey, taskIndex < participant.devPasses ? "pass" : "fail")],
           pinning: {
             dispatches: 1,
-            admission: { ready: true },
+            admission: {
+              ready: true,
+              checkedRequirementsDigest: requirementsDigest(plannedArm.pinning),
+            },
             // The swapped cell reports the SEED's loadout, whatever arm it belonged to.
             observations: fidelityObservations(
               (swapped ? seed.candidate.tuple : participant.candidate.tuple) as unknown as Record<string, unknown>,
@@ -1045,6 +1050,7 @@ export async function runE2ECampaign(
       evidenceFor(cellKey: string): WaveCellEvidence {
         const [taskDigest, armId] = cellKey.split("/");
         const participant = byArm.get(armId!)!;
+        const plannedArm = promotionPlan.arms.find((arm) => arm.armId === armId)!;
         const taskIndex = gateTaskDigests.indexOf(taskDigest!);
         return {
           deliveryDigest: documentDigest(new TextEncoder().encode(`delivery/${cellKey}`)),
@@ -1053,7 +1059,10 @@ export async function runE2ECampaign(
           verdicts: [verdictFor(cellKey, taskIndex < participant.gatePasses ? "pass" : "fail")],
           pinning: {
             dispatches: 1,
-            admission: { ready: true },
+            admission: {
+              ready: true,
+              checkedRequirementsDigest: requirementsDigest(plannedArm.pinning),
+            },
             observations: fidelityObservations(
               participant.candidate.tuple as unknown as Record<string, unknown>,
             ),

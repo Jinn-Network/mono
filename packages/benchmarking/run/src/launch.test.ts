@@ -281,6 +281,68 @@ describe("launchAndWatch (§10.1 op 4 / §7.4)", () => {
     expect(events.map((event) => event.kind)).toEqual(["dispatch", "claimed", "delivered"]);
   });
 
+  test("captures each sealed Submission before submit and the accepted observation snapshot", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    const order: string[] = [];
+    const capturedSubmissions: Uint8Array[] = [];
+    const originalSubmit = backend.submit.bind(backend);
+    backend.submit = async (taskBytes, submissionBytes) => {
+      order.push("submit");
+      return originalSubmit(taskBytes, submissionBytes);
+    };
+
+    for await (const event of launchAndWatch(bench, run, backend, {
+      ...baseOpts(runDigest, sealedTasks, backend),
+      capture: {
+        async captureSubmission({ bytes }) {
+          order.push("submission");
+          capturedSubmissions.push(bytes);
+        },
+        async captureObservation({ snapshot }) {
+          order.push("snapshot");
+          expect(snapshot.descriptor.attempt).toBeTruthy();
+        },
+      },
+    })) {
+      if (event.kind === "delivered") break;
+    }
+
+    expect(order.slice(0, 3)).toEqual(["submission", "submit", "snapshot"]);
+    const submission = JSON.parse(new TextDecoder().decode(capturedSubmissions[0]!)) as {
+      attempts?: { maxTotal?: number; maxConcurrent?: number };
+    };
+    expect(submission.attempts).toEqual({ maxTotal: 1, maxConcurrent: 1 });
+  });
+
+  test("capture failure prevents backend submit", async () => {
+    const { bench, run, runDigest, tasks } = await miniatureContext();
+    const sealedTasks = sealingTasks(tasks);
+    const backend = pinningBackend();
+    let submitted = false;
+    const originalSubmit = backend.submit.bind(backend);
+    backend.submit = async (taskBytes, submissionBytes) => {
+      submitted = true;
+      return originalSubmit(taskBytes, submissionBytes);
+    };
+
+    await expect(async () => {
+      for await (const _event of launchAndWatch(bench, run, backend, {
+        ...baseOpts(runDigest, sealedTasks, backend),
+        capture: {
+          async captureSubmission() {
+            throw new Error("capture unavailable");
+          },
+          async captureObservation() {},
+        },
+      })) {
+        void _event;
+      }
+    }).rejects.toThrow("capture unavailable");
+    expect(submitted).toBe(false);
+  });
+
   test("IMPORTANT F: backend.watch path advances cursor to terminal and aborts without hang", async () => {
     const { bench, run, runDigest, tasks } = await miniatureContext();
     const sealedTasks = sealingTasks(tasks);

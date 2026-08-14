@@ -31,9 +31,11 @@ import {
   verify as edVerify,
   type KeyObject,
 } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dssePreAuthEncoding, parseDsseEnvelope, type DsseSigner } from "@jinn-network/trust-core";
+import { atomicWriteFileSync } from "../fs/atomic.js";
+import { acquireRunPublicationGuard } from "../run/finalization-lock.js";
 
 const PEM_FILE_NAME = "report-signing-key.pem";
 const SIDECAR_FILE_NAME = "report-signing-key.json";
@@ -119,20 +121,48 @@ export function loadOrCreateReportSigningKey(workspaceDir: string): ReportSignin
   const pemPath = join(venueDir, PEM_FILE_NAME);
   const sidecarPath = join(venueDir, SIDECAR_FILE_NAME);
 
-  if (existsSync(pemPath) && existsSync(sidecarPath)) {
+  const loadPersisted = (): ReportSigningKey | undefined => {
+    const hasPem = existsSync(pemPath);
+    const hasSidecar = existsSync(sidecarPath);
+    if (!hasPem && !hasSidecar) return undefined;
+    if (hasPem !== hasSidecar) throw new Error("report signing key PEM/sidecar pair is incomplete");
     const pem = readFileSync(pemPath, "utf8");
     const privateKey = createPrivateKey({ key: pem, format: "pem", type: "pkcs8" });
     const publicKey = createPublicKey(privateKey);
     const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as ReportSigningKeySidecar;
+    const derived = didKeyFromEd25519PublicKey(publicKey);
+    if (sidecar.keyId !== derived) throw new Error("report signing key sidecar does not match the persisted Ed25519 public key");
     return toReportSigningKey(privateKey, publicKey, sidecar.keyId);
-  }
+  };
 
-  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const keyId = didKeyFromEd25519PublicKey(publicKey);
-  const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
-  writeFileSync(pemPath, pem, { mode: 0o600 });
-  writeFileSync(sidecarPath, `${JSON.stringify({ keyId } satisfies ReportSigningKeySidecar, null, 2)}\n`, { mode: 0o600 });
-  return toReportSigningKey(privateKey, publicKey, keyId);
+  const present = loadPersisted();
+  if (present !== undefined) return present;
+
+  // The fenced workspace-global lock prevents two fresh processes from independently creating
+  // a PEM/sidecar pair. Recheck after acquisition because another process may have won.
+  const started = Date.now();
+  let lock: ReturnType<typeof acquireRunPublicationGuard>;
+  do {
+    lock = acquireRunPublicationGuard(workspaceDir, "__workspace-report-signing-key__");
+    if (lock.acquired) break;
+    if (lock.reason !== "contended") throw new Error(`report signing key lock is ${lock.reason}: ${lock.detail}`);
+    if (Date.now() - started >= 30_000) throw new Error("timed out waiting for report signing key lock");
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  } while (!lock.acquired);
+
+  try {
+    const raced = loadPersisted();
+    if (raced !== undefined) return raced;
+
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const keyId = didKeyFromEd25519PublicKey(publicKey);
+    const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+    atomicWriteFileSync(pemPath, pem, 0o600);
+    atomicWriteFileSync(sidecarPath, `${JSON.stringify({ keyId } satisfies ReportSigningKeySidecar, null, 2)}\n`, 0o600);
+    return loadPersisted()!;
+  } finally {
+    if (lock.acquired) lock.release();
+  }
 }
 
 /** Adapts a `ReportSigningKey` to `@jinn-network/trust-core`'s injected `DsseSigner` port. */

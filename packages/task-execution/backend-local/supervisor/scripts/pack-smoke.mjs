@@ -44,7 +44,7 @@ function output(command, args, options = {}) {
 }
 
 function assertArchiveShape(entries) {
-  for (const required of ["package/README.md", "package/dist/index.d.ts", "package/dist/index.js"]) {
+  for (const required of ["package/README.md", "package/dist/index.d.ts", "package/dist/index.js", "package/dist/credential-exec.mjs"]) {
     if (!entries.includes(required)) throw new Error(`supervisor archive is missing ${required}`);
   }
   const leaked = entries.filter(

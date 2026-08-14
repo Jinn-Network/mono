@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { CellStatusEvent } from "@jinn-network/benchmarking-run";
+import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import {
   TaskExecutionError,
   type AttemptUri,
@@ -12,8 +13,8 @@ import {
   type SubmissionUri,
 } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
-import { sealTask } from "@jinn-network/task-execution-protocol";
-import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { sealDelivery, sealTask } from "@jinn-network/task-execution-protocol";
+import { getSealedBytes, putSealedBytes, sealedRecordPath, sha256Hex } from "../workspace/sealed-store.js";
 import {
   createRecordingProxy,
   driveCellEvents,
@@ -21,7 +22,9 @@ import {
   type ProxiedBackend,
 } from "./drive.js";
 import { readRunJournalEntries } from "./journal.js";
+import { requireWorkspaceAuthorship } from "./publication-authority.js";
 import { EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import {
   parseRunPinningEvidence,
   type VerifiedRunPinningCheck,
@@ -164,6 +167,10 @@ function fakeVenue(prepared: { taskBytes: Uint8Array; taskSha256: string }, eval
   };
 }
 
+function ownedFakeVenue(prepared: { taskBytes: Uint8Array; taskSha256: string }): LocalVenue {
+  return { ...fakeVenue(prepared), assertRunOwnership() {} };
+}
+
 describe("createRecordingProxy", () => {
   test("journals submission-accepted from a solve-shaped nonce (<cellKey>:<dispatch>) then delegates", async () => {
     const clock = makeClock();
@@ -217,6 +224,33 @@ describe("createRecordingProxy", () => {
       accepted: false,
     });
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual([]);
+  });
+
+  test("prospective solve capture keeps pinning evidence as a separate append-only enrichment", async () => {
+    const pinningEvidence = {
+      ready: true,
+      checkedRequirementsDigest: `sha256:${"7".repeat(64)}` as const,
+    };
+    const backend = makeFakeBackend({ pinningEvidence });
+    const proxy = createRecordingProxy(backend, {
+      workspaceDir,
+      draftId: "draft-1",
+      liveClock: makeClock(),
+      recordSolveSubmissions: false,
+    });
+    const submissionBytes = utf8({ nonce: `${CELL_A}:1`, submission: "urn:uuid:00000000-0000-4000-8000-000000000001" });
+    await proxy.submit(new Uint8Array([1]), submissionBytes);
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "submission-pinning-evidence",
+      cellKey: CELL_A,
+      dispatch: 1,
+      submissionSha256: sha256Hex(submissionBytes),
+      pinningEvidenceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(entries.some((entry) => entry.kind === "submission-accepted")).toBe(false);
   });
 
   test("journals submission-accepted with leg 'evaluation' from an eval-shaped nonce (eval:<runSha256>:e<i>:<cellKey>:<dispatch>)", async () => {
@@ -436,6 +470,94 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
     const submittedDoc = JSON.parse(new TextDecoder().decode(submits[0]!.submissionBytes)) as { requirements?: { harness?: unknown }; requester?: string };
     expect(submittedDoc.requirements?.harness).toEqual({ id: "evaluation-harness", version: "0.1.0" });
     expect(submittedDoc.requester).toBe("urn:uuid:owner-1");
+  });
+
+  test("owned local capture authors solve Delivery, execution evidence, eval Delivery, and verdict", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const evidenceBytes = utf8({ locallyRecordedExecution: true });
+    const evidenceSha256 = putSealedBytes(workspaceDir, evidenceBytes);
+    const predictionBytes = utf8({ probabilityYes: "0.5" });
+    const predictionSha256 = sha256Hex(predictionBytes);
+    const verdictBytes = utf8({ locallyProducedVerdict: true });
+    const verdictSha256 = sha256Hex(verdictBytes);
+    const solveDeliveryBytes = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt: "urn:uuid:00000000-0000-4000-8000-000000000101",
+      task: `sha256:${taskSha256}`,
+      outputs: [{ name: "prediction", mediaType: "application/json", digest: { sha256: predictionSha256 } }],
+      outcome: "fulfilled",
+      evidenceRecords: [{ family: "execution-evidence", digest: `sha256:${evidenceSha256}` }],
+      createdAt: "2026-08-05T00:00:00Z",
+    });
+    const evalDeliveryBytes = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt: "urn:uuid:00000000-0000-4000-8000-000000000102",
+      task: `sha256:${taskSha256}`,
+      outputs: [{ name: "verdict", mediaType: "application/vnd.dsse.envelope.v1+json", digest: { sha256: verdictSha256 } }],
+      outcome: "fulfilled",
+      evidenceRecords: [{ family: "result-evaluation", digest: `sha256:${verdictSha256}` }],
+      createdAt: "2026-08-05T00:00:01Z",
+    });
+    const solveDeliverySha256 = sha256Hex(solveDeliveryBytes);
+    const evalDeliverySha256 = sha256Hex(evalDeliveryBytes);
+    const preparedTaskBytes = new Uint8Array([1, 2, 3]);
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: {
+        "urn:uuid:00000000-0000-4000-8000-000000000101": [fakeDeliveryRef("urn:uuid:00000000-0000-4000-8000-000000000101", solveDeliverySha256)],
+        "urn:uuid:00000000-0000-4000-8000-000000000102": [fakeDeliveryRef("urn:uuid:00000000-0000-4000-8000-000000000102", evalDeliverySha256)],
+      },
+      deliveryBytesByDigest: {
+        [`sha256:${solveDeliverySha256}`]: solveDeliveryBytes,
+        [`sha256:${evalDeliverySha256}`]: evalDeliveryBytes,
+      },
+      artifactBytesByDigest: { [predictionSha256]: predictionBytes, [verdictSha256]: verdictBytes },
+      submitResult: { accepted: true, submission: "urn:uuid:00000000-0000-4000-8000-000000000199" as SubmissionUri, digest: `sha256:${"f".repeat(64)}` },
+      observeResult: fakeSnapshot("urn:uuid:00000000-0000-4000-8000-000000000102", "delivered"),
+    });
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue: ownedFakeVenue({ taskBytes: preparedTaskBytes, taskSha256: sha256Hex(preparedTaskBytes) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+      (async function* () { yield { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "urn:uuid:00000000-0000-4000-8000-000000000101" } as CellStatusEvent; })(),
+    );
+    const author = loadOrCreateReportSigningKey(workspaceDir).keyId;
+    for (const [recordSha256, recordKind] of [
+      [solveDeliverySha256, RECORD_KINDS.delivery],
+      [evidenceSha256, RECORD_KINDS.executionEvidence],
+      [evalDeliverySha256, RECORD_KINDS.delivery],
+      [verdictSha256, RECORD_KINDS.resultEvaluation],
+    ] as const) {
+      expect(requireWorkspaceAuthorship({ workspaceDir, recordSha256, recordKind, author }).digestHex).toMatch(/^[a-f0-9]{64}$/u);
+    }
+  });
+
+  test.each(["missing", "tampered"] as const)("%s owned execution evidence refuses before Delivery journal", async (mode) => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const evidenceSha256 = "a".repeat(64);
+    if (mode === "tampered") writeFileSync(sealedRecordPath(workspaceDir, evidenceSha256), "wrong bytes");
+    const solveDeliveryBytes = sealDelivery({
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      attempt: "urn:uuid:00000000-0000-4000-8000-000000000201",
+      task: `sha256:${taskSha256}`,
+      outputs: [], outcome: "fulfilled",
+      evidenceRecords: [{ family: "execution-evidence", digest: `sha256:${evidenceSha256}` }],
+      createdAt: "2026-08-05T00:00:00Z",
+    });
+    const solveDeliverySha256 = sha256Hex(solveDeliveryBytes);
+    const preparedTaskBytes = new Uint8Array([1, 2, 3]);
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: { "urn:uuid:00000000-0000-4000-8000-000000000201": [fakeDeliveryRef("urn:uuid:00000000-0000-4000-8000-000000000201", solveDeliverySha256)] },
+      deliveryBytesByDigest: { [`sha256:${solveDeliverySha256}`]: solveDeliveryBytes },
+    });
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue: ownedFakeVenue({ taskBytes: preparedTaskBytes, taskSha256: sha256Hex(preparedTaskBytes) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+      (async function* () { yield { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "urn:uuid:00000000-0000-4000-8000-000000000201" } as CellStatusEvent; })(),
+    );
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries.some((entry) => entry.kind === "delivery")).toBe(false);
+    expect(entries.find((entry) => entry.kind === "evaluation")).toMatchObject({ evaluationTerminal: "could-not-grade" });
   });
 
   test("no attempt on the delivered event -> could-not-grade, no crash", async () => {

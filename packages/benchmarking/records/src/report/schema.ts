@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { parseExactDsseEnvelope, recordDigest, type DsseEnvelopeSignature } from "@jinn-network/trust-core";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema, LowercaseSha256HexSchema } from "../descriptors.js";
 import { topLevelRecordSchema } from "../extensions.js";
-import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
+import { BENCHMARKING_PROTOCOL, REPORT_MEDIA_TYPE } from "../identifiers.js";
 import { sumAttritionExcluded, validateCompletenessOutcome } from "../completeness.js";
 import { AttritionSchema, CompletenessSchema } from "../matrix/schema.js";
 import { isJsonValue } from "../json.js";
-import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
+import { InvalidDocumentError, parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 
 const JsonValueSchema = z.unknown().refine(isJsonValue, {
   message: "must be a losslessly representable JSON value",
@@ -116,4 +117,32 @@ export function parseReport(bytes: Uint8Array): ReportRecord {
  */
 export function sealReport(document: unknown): SealedRecord {
   return sealWithSchema(ReportRecordSchema, document);
+}
+
+/**
+ * The exact signed Report v2 record. The payload stays Report v1 and retains its raw-JCS
+ * identity; the published record identity is the exact DSSE envelope digest.
+ * Structural parsing does not claim envelope binding, signature validity, or signer trust.
+ */
+export interface SignedReportRecord {
+  readonly payload: ReportRecord;
+  readonly payloadBytes: Uint8Array;
+  readonly signatures: readonly DsseEnvelopeSignature[];
+  readonly recordDigest: `sha256:${string}`;
+}
+
+export function parseSignedReportRecord(envelopeBytes: Uint8Array): SignedReportRecord {
+  const envelope = parseExactDsseEnvelope(envelopeBytes);
+  if (envelope.payloadType !== REPORT_MEDIA_TYPE) {
+    throw new InvalidDocumentError([{
+      path: "payloadType",
+      message: `signed Report payloadType must be ${REPORT_MEDIA_TYPE}`,
+    }]);
+  }
+  return {
+    payload: parseReport(envelope.payloadBytes),
+    payloadBytes: envelope.payloadBytes,
+    signatures: envelope.signatures,
+    recordDigest: recordDigest(envelopeBytes),
+  };
 }
