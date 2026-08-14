@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import type {
   LauncherCapabilities,
@@ -31,6 +40,9 @@ export const DEMO1_SKILL_PLUGIN_DIRECTORY = ".jinn-demo1-skill-plugin";
 export const DEMO1_SKILL_PATH = `${DEMO1_SKILL_PLUGIN_DIRECTORY}/skills/demo1/SKILL.md`;
 export const DEMO1_SKILL_PLUGIN_MANIFEST_PATH = `${DEMO1_SKILL_PLUGIN_DIRECTORY}/.claude-plugin/plugin.json`;
 export const DEMO1_CLAUDE_MD_PATH = "CLAUDE.md";
+export const DEMO1_CLAUDE_OAUTH_GRANT_KEY = "demo1-claude-oauth-token";
+export const DEMO1_CLAUDE_OAUTH_SECRET_TARGET = "demo1-claude-oauth-token";
+export const DEMO1_CLAUDE_OAUTH_FILE_ENV = "JINN_CLAUDE_OAUTH_TOKEN_FILE";
 export const DEMO1_EXPERIMENT_PATHS = [
   DEMO1_SKILL_PLUGIN_DIRECTORY,
   DEMO1_CLAUDE_MD_PATH,
@@ -114,6 +126,7 @@ export interface Demo1ClaudeReadiness {
   readonly ready: boolean;
   readonly detail?: string;
   readonly executable: { readonly path: string; readonly digest: string };
+  readonly claudeExecutable: { readonly path: string; readonly digest: string };
   readonly harnessVersions: readonly string[];
   readonly models: readonly string[];
   readonly loadouts: readonly {
@@ -126,22 +139,37 @@ export interface Demo1ClaudeReadiness {
 export type Demo1ClaudeCommand = (
   executablePath: string,
   args: readonly string[],
+  options?: { readonly env?: Readonly<Record<string, string>> },
 ) => Promise<{ readonly stdout: string; readonly stderr?: string }>;
+
+export interface Demo1ClaudeOAuthCredentialOptions {
+  /** Existing operator-owned `claude setup-token` file. Its bytes are never sealed or logged. */
+  readonly tokenFilePath: string;
+  /** New run-owned path for the deterministic, digest-pinned credential wrapper. */
+  readonly wrapperPath: string;
+}
 
 export interface Demo1ClaudeRuntimeOptions {
   readonly executablePath: string;
   readonly harnessVersion: string;
   readonly artifacts: Demo1InstructionArtifacts;
+  readonly oauthCredential?: Demo1ClaudeOAuthCredentialOptions;
   /** Test seam only. Production uses execFile without a shell. */
   readonly command?: Demo1ClaudeCommand;
 }
 
 export interface Demo1ClaudeRuntimeBinding {
   readonly executable: { readonly path: string; readonly digest: string };
+  readonly claudeExecutable: { readonly path: string; readonly digest: string };
   readonly harnessVersion: string;
   readonly modelId: string;
   readonly effort: "low" | "medium" | "high" | "xhigh" | "max";
   readonly artifacts: Demo1InstructionArtifacts;
+  readonly credential?: {
+    readonly capabilityGrants: Readonly<Record<string, unknown>>;
+    readonly secretForward: { readonly grantKey: string; readonly target: string };
+    resolve(input: { readonly grantKey: string; readonly descriptor: unknown }): Promise<Uint8Array>;
+  };
   probe(): Promise<Demo1ClaudeReadiness>;
 }
 
@@ -154,8 +182,121 @@ export interface Demo1ClaudeSelectedRuntimeOptions extends Demo1ClaudeRuntimeOpt
   readonly decision: Demo1RuntimePolicyDecision;
 }
 
-function defaultCommand(executablePath: string, args: readonly string[]) {
-  return execFileAsync(executablePath, [...args], { encoding: "utf8", maxBuffer: 1024 * 1024 });
+function defaultCommand(
+  executablePath: string,
+  args: readonly string[],
+  options?: { readonly env?: Readonly<Record<string, string>> },
+) {
+  return execFileAsync(executablePath, [...args], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+    ...(options?.env === undefined ? {} : { env: { ...options.env } }),
+  });
+}
+
+function assertSecureTokenFile(path: string): void {
+  const entry = lstatSync(path);
+  if (!entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error("Claude OAuth token source must be a regular non-symlink file");
+  }
+  if ((entry.mode & 0o777) !== 0o600) {
+    throw new Error("Claude OAuth token source must have mode 0600");
+  }
+  if (typeof process.getuid === "function" && entry.uid !== process.getuid()) {
+    throw new Error("Claude OAuth token source must be owned by the current operator");
+  }
+  const bytes = readFileSync(path);
+  const usable = bytes.length > 0 && bytes.some((byte) => byte > 0x20);
+  bytes.fill(0);
+  if (!usable) {
+    throw new Error("Claude OAuth token source is empty");
+  }
+}
+
+function credentialWrapperSource(claudeExecutable: { readonly path: string; readonly digest: string }): string {
+  return `#!${process.execPath}
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { lstatSync, readFileSync } from "node:fs";
+
+const CLAUDE = ${JSON.stringify(claudeExecutable.path)};
+const EXPECTED = ${JSON.stringify(claudeExecutable.digest)};
+const TOKEN_FILE_ENV = ${JSON.stringify(DEMO1_CLAUDE_OAUTH_FILE_ENV)};
+const actual = createHash("sha256").update(readFileSync(CLAUDE)).digest("hex");
+if (actual !== EXPECTED) throw new Error("bound Claude executable digest changed");
+const tokenPath = process.env[TOKEN_FILE_ENV];
+if (tokenPath === undefined || tokenPath.length === 0) throw new Error("Claude OAuth token file is absent");
+const entry = lstatSync(tokenPath);
+if (!entry.isFile() || entry.isSymbolicLink() || (entry.mode & 0o777) !== 0o600) {
+  throw new Error("Claude OAuth token file is not a non-symlink 0600 file");
+}
+const tokenBytes = readFileSync(tokenPath);
+let token;
+try {
+  token = new TextDecoder("utf-8", { fatal: true }).decode(tokenBytes).trim();
+} finally {
+  tokenBytes.fill(0);
+}
+if (token.length === 0 || /\\s/u.test(token)) throw new Error("Claude OAuth token is malformed");
+const env = { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: token, CLAUDE_FORCE_OAUTH: "1" };
+delete env[TOKEN_FILE_ENV];
+delete env.ANTHROPIC_API_KEY;
+delete env.ANTHROPIC_AUTH_TOKEN;
+delete env.ANTHROPIC_BASE_URL;
+delete env.ANTHROPIC_MODEL;
+const result = spawnSync(CLAUDE, process.argv.slice(2), { env, stdio: "inherit" });
+env.CLAUDE_CODE_OAUTH_TOKEN = "";
+token = "";
+if (result.error !== undefined) throw result.error;
+if (result.signal !== null) process.kill(process.pid, result.signal);
+process.exit(result.status ?? 1);
+`;
+}
+
+function materializeCredentialWrapper(
+  path: string,
+  claudeExecutable: { readonly path: string; readonly digest: string },
+): { readonly path: string; readonly digest: string } {
+  const source = credentialWrapperSource(claudeExecutable);
+  const expected = Buffer.from(source, "utf8");
+  const verifyExisting = (): { readonly path: string; readonly digest: string } => {
+    const entry = lstatSync(path);
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error("existing Claude OAuth wrapper must be a regular non-symlink file");
+    }
+    if ((entry.mode & 0o777) !== 0o700) {
+      throw new Error("existing Claude OAuth wrapper must have mode 0700");
+    }
+    if (typeof process.getuid === "function" && entry.uid !== process.getuid()) {
+      throw new Error("existing Claude OAuth wrapper must be owned by the current operator");
+    }
+    const actual = readFileSync(path);
+    if (!actual.equals(expected)) {
+      throw new Error("existing Claude OAuth wrapper bytes do not match the bound runtime");
+    }
+    return { path, digest: sha256(actual) };
+  };
+  try {
+    writeFileSync(path, expected, { mode: 0o700, flag: "wx" });
+    chmodSync(path, 0o700);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+    return verifyExisting();
+  }
+  return verifyExisting();
+}
+
+function readinessEnvironment(tokenFilePath: string, configDir: string): Record<string, string> {
+  const environment: Record<string, string> = {
+    [DEMO1_CLAUDE_OAUTH_FILE_ENV]: tokenFilePath,
+    CLAUDE_CONFIG_DIR: configDir,
+    CLAUDE_FORCE_OAUTH: "1",
+  };
+  for (const key of ["HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "SHELL"] as const) {
+    const value = process.env[key];
+    if (value !== undefined) environment[key] = value;
+  }
+  return environment;
 }
 
 /** Product-owned, binary/auth/version readiness binding. No ambient executable-path discovery. */
@@ -163,10 +304,36 @@ function createRuntimeBinding(
   options: Demo1ClaudeRuntimeOptions,
   selected: { readonly model: string; readonly effort: Demo1ClaudeRuntimeBinding["effort"] },
 ): Demo1ClaudeRuntimeBinding {
-  const executable = {
+  const claudeExecutable = {
     path: options.executablePath,
     digest: sha256(readFileSync(options.executablePath)),
   };
+  const executable = options.oauthCredential === undefined
+    ? claudeExecutable
+    : materializeCredentialWrapper(options.oauthCredential.wrapperPath, claudeExecutable);
+  if (options.oauthCredential !== undefined) assertSecureTokenFile(options.oauthCredential.tokenFilePath);
+  const credentialDescriptor = Object.freeze({
+    kind: "jinn.benchmark-product.demo1-claude-oauth/1",
+  });
+  const credential = options.oauthCredential === undefined
+    ? undefined
+    : {
+      capabilityGrants: Object.freeze({
+        [DEMO1_CLAUDE_OAUTH_GRANT_KEY]: credentialDescriptor,
+      }) as Readonly<Record<string, unknown>>,
+      secretForward: Object.freeze({
+        grantKey: DEMO1_CLAUDE_OAUTH_GRANT_KEY,
+        target: DEMO1_CLAUDE_OAUTH_SECRET_TARGET,
+      }),
+      async resolve(input: { readonly grantKey: string; readonly descriptor: unknown }) {
+        if (input.grantKey !== DEMO1_CLAUDE_OAUTH_GRANT_KEY
+          || JSON.stringify(input.descriptor) !== JSON.stringify(credentialDescriptor)) {
+          throw new Error("Claude OAuth capability grant does not match the bound descriptor");
+        }
+        assertSecureTokenFile(options.oauthCredential!.tokenFilePath);
+        return new Uint8Array(readFileSync(options.oauthCredential!.tokenFilePath));
+      },
+    };
   const inventory = [options.artifacts.skill, options.artifacts.baseline].map((pin) => {
     const canonical = canonicalLoadoutPin(pin);
     return { kind: canonical.kind as "jinn.skill.v1", name: canonical.name, digest: canonical.digest };
@@ -174,29 +341,41 @@ function createRuntimeBinding(
   const command = options.command ?? defaultCommand;
   return {
     executable,
+    claudeExecutable,
     harnessVersion: options.harnessVersion,
     modelId: selected.model,
     effort: selected.effort,
     artifacts: options.artifacts,
+    ...(credential === undefined ? {} : { credential }),
     async probe() {
       let observedVersion: string | undefined;
       const unavailable = (detail: string): Demo1ClaudeReadiness => ({
         ready: false,
         detail,
         executable,
+        claudeExecutable,
         harnessVersions: observedVersion === undefined ? [] : [observedVersion],
         models: [selected.model],
         loadouts: inventory,
       });
+      const configDir = options.oauthCredential === undefined
+        ? undefined
+        : mkdtempSync(join(tmpdir(), "demo1-claude-readiness-"));
+      const commandOptions = options.oauthCredential === undefined
+        ? undefined
+        : { env: readinessEnvironment(options.oauthCredential.tokenFilePath, configDir!) };
       try {
         if (sha256(readFileSync(executable.path)) !== executable.digest) {
           return unavailable("claude-code executable digest changed after runtime binding");
+        }
+        if (sha256(readFileSync(claudeExecutable.path)) !== claudeExecutable.digest) {
+          return unavailable("underlying claude-code executable digest changed after runtime binding");
         }
         const versionOutput = (await command(executable.path, [
           "--model", selected.model,
           "--effort", selected.effort,
           "--version",
-        ])).stdout.trim();
+        ], commandOptions)).stdout.trim();
         const parsed = CLAUDE_VERSION_OUTPUT.exec(versionOutput);
         if (parsed === null) {
           return unavailable(`claude-code emitted malformed version output: ${versionOutput || "<empty>"}`);
@@ -207,19 +386,22 @@ function createRuntimeBinding(
             `claude-code version mismatch: expected ${options.harnessVersion || "<empty>"}, observed ${observedVersion}`,
           );
         }
-        const auth = JSON.parse((await command(executable.path, ["auth", "status"])).stdout) as {
+        const auth = JSON.parse((await command(executable.path, ["auth", "status"], commandOptions)).stdout) as {
           readonly loggedIn?: unknown;
         };
         if (auth.loggedIn !== true) return unavailable("claude-code authentication is not ready");
         return {
           ready: true,
           executable,
+          claudeExecutable,
           harnessVersions: [observedVersion],
           models: [selected.model],
           loadouts: inventory,
         };
       } catch (cause) {
         return unavailable(cause instanceof Error ? cause.message : "claude-code readiness probe failed");
+      } finally {
+        if (configDir !== undefined) rmSync(configDir, { recursive: true, force: true });
       }
     },
   };
@@ -260,9 +442,13 @@ export function createDemo1ClaudeSelectedRuntimeBinding(
   return createRuntimeBinding(options, options.selection.selected);
 }
 
-function exactCapabilities(base: LauncherCapabilities, runtime: Demo1ClaudeRuntimeBinding): LauncherCapabilities {
+function exactCapabilities(
+  base: LauncherCapabilities,
+  runtime: Demo1ClaudeRuntimeBinding,
+): LauncherCapabilities {
   return {
     ...base,
+    secretForwards: runtime.credential === undefined ? [] : [runtime.credential.secretForward],
     runPinning: {
       keys: base.runPinning.keys.map((support) => {
         if (support.key === "effort") return { ...support, inventory: [runtime.effort] };
@@ -311,7 +497,16 @@ export function makeDemo1ClaudeLauncher(runtime: Demo1ClaudeRuntimeBinding): Lau
         }
       }
       argv = [runtime.executable.path, ...argv.slice(1)];
-      return { ...planned, argv };
+      if (runtime.credential === undefined) return { ...planned, argv };
+      return {
+        ...planned,
+        argv,
+        env: {
+          ...planned.env,
+          [DEMO1_CLAUDE_OAUTH_FILE_ENV]: `secrets/${runtime.credential.secretForward.target}`,
+        },
+        secretForwards: [runtime.credential.secretForward],
+      };
     },
   };
 }

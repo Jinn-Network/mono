@@ -111,10 +111,9 @@ A `jinn run` process is layered top-to-bottom roughly like this:
   │   src/earning/bootstrap.ts  src/earning/store.ts           │
   ├────────────────────────────────────────────────────────────┤
   │ Daemon orchestrator                                        │
-  │   creator · work · evaluator · posting · projector ·       │
+  │   work · evaluator · posting · projector ·                 │
   │   evidence-driver · reward-claim · balance-topup ·         │
-  │   eviction-check · checkpoint · harvest · peer-sync ·      │
-  │   watchdog                                                 │
+  │   eviction-check · checkpoint · harvest · watchdog         │
   │   src/daemon/daemon.ts + src/daemon/*-loop.ts              │
   ├────────────────────────────────────────────────────────────┤
   │ Work pipeline + native coordinators                        │
@@ -157,7 +156,6 @@ The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises the long-
 
 | Loop | File | Starts when | Job |
 |---|---|---|---|
-| Creator | `daemon/creator.ts` | legacy mode | Pulls Tasks from configured `TaskSource`s and posts each via `JinnRouter.createTask`. Idempotent per `(creatorMultisig, desiredStateId)`. |
 | Work | `daemon/work-loop.ts` | `composition` + `work` configured | The native solver loop. Per card announced by the projector's archive: gate on projector catch-up, map to `SubmissionFacts`, gate on the rolling-window AI-units / spend-cap accounting, admit a claim intent in the engagement ledger, then drive the pipeline claim → submit → deliver → settle. Also reconciles in-flight settlements every tick. |
 | Evaluator | `daemon/evaluator-loop.ts` | `evaluator` configured | The evaluator counterpart of `work`: recover in-flight work → poll the signed opportunity source → acquire subject material → evaluate → deliver + settle a verdict. |
 | Posting | `daemon/posting-loop.ts` | native mode + non-empty `posting[]` | The native counterpart of `creator` — drives the requester's `posting[]` config through the marketplace binding. |
@@ -168,13 +166,12 @@ The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises the long-
 | Eviction-check | `daemon/eviction-loop.ts` | `evictionCheck.intervalMs > 0` | Polls each complete service's staking state; on `Evicted`, restakes it without needing a daemon restart. |
 | Checkpoint | `daemon/checkpoint-loop.ts` | `checkpoint.intervalMs > 0` | Calls bare `checkpoint()` on each staking proxy hosting a fleet service, so `tsCheckpoint` advances on the operator's pace rather than waiting for someone else to invoke it. |
 | Harvest | `daemon/harvest-loop.ts` | `harvest` enabled with repos or `sessions` | Commit-echo mining from configured local repos (task-creator v0). |
-| Peer-sync | `daemon/peer-sync.ts` (`PeerSync`) | `peers` configured | Queries each peer's `/artifacts/search` endpoint and stores the results as remote artifacts. |
 
 Startup also runs **one-shot in-flight recovery** before any loop takes new work: `NativeOperatorHost.start()` in `native-v1`, `WorkLoop.initialize()` otherwise, which re-drives admitted claims and unsettled solutions (`reconcileStartup`) and syncs discovery. The work loop repeats the same reconcile on a cadence thereafter.
 
 Each loop runs as a background Promise; failures emit a structured error event but do not crash the process. The watchdog (`daemon/watchdog-loop.ts`) registers every started loop against its `LOOP_REGISTRY` heartbeat and exits non-zero when one goes stale, letting the supervisor restart through the idempotent boot path. `daemon.stop()` signals each loop, drains in-flight work with a configurable timeout, and closes resources.
 
-> `LOOP_REGISTRY` still declares `engine-tick`, `engine-watcher`, and `delivery-watcher` rows. All three are dead — Wave-4 D1 deleted the TaskEngine behind the first two, D2 deleted the delivery-watcher — and all three are removed by Wave-4 D6, which narrows the registry to match D1–D4's deletions ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md), addendum decision 3). `creator` retires with the legacy path in the same wave.
+> Wave-4 D6 removed `creator`, `engine-tick`, `engine-watcher`, `delivery-watcher`, and `peer-sync` from `LOOP_REGISTRY` after D1–D4 deleted those loops ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md), addendum 2026-08-13). Remaining ten: `posting`, `reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`, `projector`, `evidence-driver`, `work`, `evaluator`. Intervals and admission of the survivors are unchanged.
 
 ### 6.1 Generator ownership and the launched-record subsystem
 
@@ -186,16 +183,15 @@ Operator-side participation is the dual surface: a `joinedSolverNets[<manifestCi
 
 The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone. Internal harness dispatch may still alias `solverType = `${contractId}.${contractVersion}`` for one migration cycle (per spec §15); new code does not introduce dependencies on it.
 
-### 6.2 SolverNet registry — IdentityRegistry-anchored manifests over IPFS
+### 6.2 SolverNet launch publish — IdentityRegistry-anchored manifests over IPFS
 
-Launched SolverNet manifests are discovered and resolved through a `SolverNetRegistryClient` (canonical interface in [`spec/2026-05-05-solvernet-creation-and-launch.md`](../spec/2026-05-05-solvernet-creation-and-launch.md) §13). The day-1 implementation is `IdentityRegistryBackedSolverNetRegistryClient`:
+Wave-4 D4 retired the ERC-8004 registry *reader* (`registry-client.ts`, `GET /v1/solvernets/registry*`). Catalog reads go through `discovery-client.listLaunchedSolverNets`. The launch path still pins a canonical manifest to IPFS and broadcasts `IdentityRegistry.setMetadata` via `client/src/solvernets/launch-publisher.ts` (helpers carved out of the retired client so launch recovery keeps working):
 
-- **Publish** — `publishManifest` canonicalizes the manifest (RFC 8785 JCS), pins the JSON to IPFS via `client/src/adapters/mech/ipfs.ts`, then calls `IdentityRegistry.setMetadata(launcherAgentId, "solvernet-manifest:<cid>", { schemaVersion: 'solvernet.lifecycle.v1', status, at, hash })`. This piggybacks the existing `IdentityPublisher` pattern (`client/src/erc8004/identity.ts`) and the network-trust v0 attestation pattern (`client/src/network-trust/attestation.ts`) — no new contract.
-- **Lifecycle transitions** (`publishLifecycleTransition`) are additional `setMetadata` writes against the same `solvernet-manifest:<cid>` key with updated `status` (`launched | paused | retired`). The manifest itself is signed once at launch and never re-signed; lifecycle authenticity flows from `msg.sender == launcher's agent wallet` (enforced on-chain by IdentityRegistry's access control on `setMetadata`).
-- **Discover** (`listLaunched`) — subgraph query for `Registered` events `WHERE key LIKE 'solvernet-manifest:%'` (no agentId filter — the registry is global per spec principle 6). The most-recent-wins resolver (`client/src/network-trust/most-recent-wins.ts`) picks the latest event per `(agentId, cid)` tuple to compute current status.
-- **Resolve** (`getManifest`) — IPFS fetch via the Autonolas gateway (or any configured gateway). Trust chain: signature recovers the agent EOA → `IdentityRegistry.getAgentByWallet(signer, atBlock: anchorBlock)` → `IdentityRegistry.getSafeForAgent(agentId, atBlock: anchorBlock)` MUST equal `manifest.launcher.safeAddress`. A stolen agent EOA can publish fake manifests but cannot redirect funding away from the legitimate launcher's Safe.
+- **Pin + broadcast** — canonicalize the manifest (RFC 8785 JCS), pin the JSON to IPFS via `client/src/adapters/mech/ipfs.ts`, then `IdentityRegistry.setMetadata(launcherAgentId, "solvernet-manifest:<cid>", { schemaVersion: 'solvernet.lifecycle.v1', status, at, hash })`. This piggybacks the existing `IdentityPublisher` pattern (`client/src/erc8004/identity.ts`) — no new contract.
+- **Lifecycle vocabulary** — `encodeLifecyclePayload` / `SOLVERNET_MANIFEST_KEY_PREFIX` stay; Wave-4 D3 retired the lifecycle *producer*, not the on-wire shape. Authenticity still flows from `msg.sender == launcher's agent wallet`.
+- **Most-recent-wins** — `client/src/solvernets/most-recent-wins.ts` remains for launch recovery (mempool-drop detection), not as a catalog reader.
 
-There is no hosted index, no dedicated SolverNet registry contract, and no launcher follow-list. The subgraph is the discovery substrate. The interface in spec §13 lets us swap backings (gas optimisation, alternative gateway, on-chain registry) without touching the manifest schema or operator flow.
+There is no hosted SolverNet registry contract and no launcher follow-list. Spec §13's client interface is gone from this process; the indexer GraphQL catalog (`discovery-client`) is the remaining list/resolve path.
 
 ## 7. Task lifecycle, end-to-end
 
@@ -245,7 +241,7 @@ A few non-obvious points:
 - **Artifact bytes live in the operator's SQLite + HTTP server**, not on IPFS; only the manifest envelope goes to IPFS. Evaluators fetch artifacts from the operator's `publicEndpoint` under x402 payment gating per [`spec/2026-04-30-phase-a-umbrella.md`](../spec/2026-04-30-phase-a-umbrella.md) §1.
 - **ERC-8004 anchoring is gated** on the bootstrap having minted an agent NFT for the active service. When `agent_id` is null on the active service, `IdentityPublisher` and `ReputationFeedback` are disabled with a clear log line.
 - **Tasks carry `solverNetManifestCid` as a BINDING field** (per [`spec/2026-05-05-solvernet-creation-and-launch.md`](../spec/2026-05-05-solvernet-creation-and-launch.md) §14). The on-chain `TaskCoordinator` task digest is `manifestDigest = keccak256(manifestCid)` — manifest-bound, not solverType-bound. This makes operator eligibility per-launch, not per-protocol: an operator participating in launcher A's Prediction is not automatically eligible to claim launcher B's Prediction tasks even though both share the same SolverNet contract. The Task document also carries `contractId` + `contractVersion` (e.g. `prediction` + `v1`) for harness dispatch; daemon-internal code may still use a derived `solverType = `${contractId}.${contractVersion}`` alias for one migration cycle but new code resolves the contract by `{ id, version }`.
-- **Manifest resolution is registry-mediated.** `operator.validateTask(taskDoc)` calls `registry.getManifest({ manifestCid: taskDoc.solverNetManifestCid })`, validates the task against `manifest.contract.schemas.task`, then dispatches via `manifest.contract.id + manifest.contract.version`. The day-1 registry is `IdentityRegistryBackedSolverNetRegistryClient` (see §6.2 below); the abstraction lets the backing be swapped without touching the manifest schema or operator flow.
+- **Manifest resolution is local + indexer-mediated.** Task validation reads the launched-record / IPFS manifest for `taskDoc.solverNetManifestCid`, then dispatches via `manifest.contract.id + manifest.contract.version`. Wave-4 D4 deleted the in-process ERC-8004 registry client; catalog list/resolve goes through `discovery-client` (see §6.2).
 
 ## 8. Extension points
 
@@ -283,7 +279,7 @@ Plugin authoring is documented at [`client/docs/solver-plugins.md`](docs/solver-
 
 ### Peers and corpus
 
-When `subgraphUrl` is configured, the daemon backfills artifact metadata and node endpoints from the Jinn ERC-8004 subgraph at startup, and the runtime corpus (`src/corpus/`) is wired so MCP tools (`search_artifacts`, `acquire_artifact`) can serve cross-operator queries. When `peers` is configured, `PeerSync` (`src/daemon/peer-sync.ts`) periodically pulls artifact lists from each peer's HTTP endpoint.
+When `subgraphUrl` is configured, the daemon backfills artifact metadata and node endpoints from the Jinn ERC-8004 subgraph at startup, and the runtime corpus (`src/corpus/`) is wired so MCP tools (`search_artifacts`, `acquire_artifact`) can serve cross-operator queries. Wave-4 D4 retired the peer-sync loop; `peers` / `JINN_PEERS` remain parseable but unused.
 
 ### Local API extensions
 

@@ -2,10 +2,8 @@ import { randomBytes } from 'node:crypto';
 import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
-import { CreatorLoop } from './creator.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
-import { PeerSync } from './peer-sync.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import type { Corpus as CoreCorpus } from '@jinn-network/core/corpus-read';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
@@ -28,8 +26,6 @@ import {
   isNonRecoverableInnerRevert,
   formatDecodedRevert,
 } from '../adapters/mech/safe-revert.js';
-import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
-import type { Task } from '../types/index.js';
 import type { SignedEnvelope } from '../types/envelope.js';
 import type { OperatorComposition } from './composition-root.js';
 import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
@@ -124,6 +120,11 @@ export interface DaemonConfig {
    * has something to compare against.
    */
   apiToken?: string;
+  /**
+   * Parseable-but-ignored after Wave-4 D4 (peer-sync retired). Left on the
+   * config shape so existing `new Daemon({ peers })` call sites and the
+   * `peers` / `JINN_PEERS` config key do not become a schema break.
+   */
   peers?: string[];
   signer?: EthHttpSigner;
   /** This node's public HTTP endpoint (for 8004 registration) */
@@ -201,19 +202,13 @@ export interface DaemonConfig {
    */
   store?: Store;
 
-  /** Restoration task sources polled by CreatorLoop. */
-  taskSources?: TaskSource[];
-  /** Backwards-compatible static tasks; used when taskSources is omitted. */
-  tasks?: Task[];
-
   /**
-   * Creator Safe address — used to scope CreatorLoop's SQLite idempotency
-   * cache keys per-Safe. Without this, two co-located daemons on the same
-   * DB would collide. Optional for backwards compatibility.
+   * Resolved swe-rebench-v2 state dir from loadConfig. The creator and
+   * delivery-watcher hooks that consumed it retired with Wave-4 D2/D3; the
+   * field stays on the config surface because `main.ts` and the harness e2e
+   * rigs still pass it and the solver-type generator state store reads the
+   * same directory.
    */
-  creatorSafeAddress?: string;
-
-  /** Resolved swe-rebench-v2 state dir from loadConfig; threaded to creator/delivery hooks. */
   sweRebenchV2StateDir?: string;
 
   /**
@@ -300,7 +295,6 @@ export interface DaemonConfig {
 
 export class Daemon {
   private store: Store;
-  private creatorLoop?: CreatorLoop;
   private nativeHost?: NativeOperatorHost;
   private adapter: ExecutionAdapter;
   private loopPromises: Promise<void>[] = [];
@@ -308,7 +302,6 @@ export class Daemon {
   private apiServer?: ApiServer;
   private ownsApiServer = false;
   private ownsStore = false;
-  private peerSync?: PeerSync;
   private readonly apiPort: number;
   private readonly apiToken: string;
   private rewardClaimLoop?: RewardClaimLoop;
@@ -369,18 +362,6 @@ export class Daemon {
     // so the API server still has something to compare bearer headers
     // against. Production callers (main.ts) always pass an explicit token.
     this.apiToken = config.apiToken ?? randomBytes(32).toString('hex');
-    if (verticalMode === 'legacy') {
-      const taskSources = config.taskSources
-        ?? (config.tasks ? [new StaticConfiguredTaskSource(config.tasks)] : []);
-      this.creatorLoop = new CreatorLoop(
-        this.adapter,
-        taskSources,
-        this.store,
-        config.creatorSafeAddress,
-        config.sweRebenchV2StateDir,
-      );
-    }
-
     if (config.rewardClaim && config.rewardClaim.intervalMs > 0) {
       this.rewardClaimLoop = new RewardClaimLoop({
         ...config.rewardClaim,
@@ -513,40 +494,6 @@ export class Daemon {
     this.cachedShutdownState = 'running';
     emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 
-    // Start peer sync if peers configured
-    const peers = this.config.peers ?? (process.env['JINN_PEERS'] ?? '').split(',').filter(Boolean);
-    if (peers.length > 0) {
-      this.peerSync = new PeerSync({
-        peers,
-        store: this.store,
-        signer: this.config.signer,
-      });
-      this.loopPromises.push(
-        this.peerSync.run().catch(err => {
-          console.error('[daemon] peer-sync crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'peer-sync loop crashed',
-            errorCode: 'peer_sync_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
-      );
-    }
-
-    if (this.creatorLoop) {
-      this.loopPromises.push(
-        this.creatorLoop.run().catch(err => {
-          console.error('[daemon] creator crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'creator loop crashed',
-            errorCode: 'creator_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
-      );
-    }
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
         this.rewardClaimLoop.run().catch(err => {
@@ -697,7 +644,6 @@ export class Daemon {
       // of loop names + defaults) — filter to the loops actually started, then
       // override the intervals that are operator/config-driven.
       const started = new Set<LoopName>();
-      if (this.creatorLoop) started.add('creator');
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
       if (this.evictionLoop) started.add('eviction-check');
@@ -708,7 +654,6 @@ export class Daemon {
       if (this.postingLoop) started.add('posting');
       if (this.projectorLoop) started.add('projector');
       if (this.evidenceDriverLoop) started.add('evidence-driver');
-      if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
@@ -756,7 +701,6 @@ export class Daemon {
 
   async stop(): Promise<void> {
     emitStructured({ kind: 'system', message: 'daemon loops stopping' });
-    this.creatorLoop?.stop();
     await this.nativeHost?.close();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
@@ -768,7 +712,6 @@ export class Daemon {
     this.postingLoop?.stop();
     this.projectorLoop?.stop();
     this.evidenceDriverLoop?.stop();
-    this.peerSync?.stop();
     this.watchdogLoop?.stop();
 
     // Stop the adapter to unblock any pending async iterators

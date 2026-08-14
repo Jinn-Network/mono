@@ -24,7 +24,7 @@ describe('LOOP_REGISTRY admission field (#2407)', () => {
   // `posting` (one-swap M5, #2461) is the native counterpart of `creator` — the claim/work-path
   // requester leg — so it is `ready-only` too. `evaluator` (one-swap M4a, #2461) is the native
   // counterpart of `work` — the evaluator claim/verdict-settlement path — so it is `ready-only`.
-  const READY_ONLY = new Set(['creator', 'posting', 'engine-tick', 'work', 'evaluator']);
+  const READY_ONLY = new Set(['posting', 'work', 'evaluator']);
 
   it('every entry declares admission: always | ready-only', () => {
     for (const entry of LOOP_REGISTRY) {
@@ -32,7 +32,7 @@ describe('LOOP_REGISTRY admission field (#2407)', () => {
     }
   });
 
-  it('assigns ready-only exactly to the claim/work path: creator, posting, engine-tick, work, evaluator', () => {
+  it('assigns ready-only exactly to the claim/work path: posting, work, evaluator', () => {
     const readyOnly = LOOP_REGISTRY.filter((r) => r.admission === 'ready-only').map((r) => r.name);
     expect(new Set(readyOnly)).toEqual(READY_ONLY);
   });
@@ -46,9 +46,9 @@ describe('LOOP_REGISTRY admission field (#2407)', () => {
   });
 
   it('getLoopAdmission looks up the registered admission for a loop name', () => {
-    expect(getLoopAdmission('creator')).toBe('ready-only');
+    expect(getLoopAdmission('posting')).toBe('ready-only');
     expect(getLoopAdmission('work')).toBe('ready-only');
-    expect(getLoopAdmission('engine-tick')).toBe('ready-only');
+    expect(getLoopAdmission('evaluator')).toBe('ready-only');
     expect(getLoopAdmission('eviction-check')).toBe('always');
     expect(getLoopAdmission('reward-claim')).toBe('always');
   });
@@ -88,12 +88,12 @@ describe('runLoop admission gating (#2407)', () => {
     const tick = vi.fn().mockResolvedValue(undefined);
     let stopped = false;
     const running = runLoop({
-      name: 'creator',
+      name: 'work',
       store,
       tick,
       intervalMs: 1000,
       stopSignal: () => stopped,
-      emitSource: 'creator',
+      emitSource: 'work',
       getReadiness: () => 'degraded',
     });
 
@@ -101,7 +101,7 @@ describe('runLoop admission gating (#2407)', () => {
     expect(tick).not.toHaveBeenCalled();
     // Heartbeat still stamps — an intentionally-paused loop must not look
     // stale to the watchdog.
-    expect(getLoopTick(store, 'creator')).not.toBeNull();
+    expect(getLoopTick(store, 'work')).not.toBeNull();
 
     stopped = true;
     await vi.advanceTimersByTimeAsync(1000);
@@ -160,12 +160,12 @@ describe('runLoop admission gating (#2407)', () => {
     const tick = vi.fn().mockResolvedValue(undefined);
     let stopped = false;
     const running = runLoop({
-      name: 'creator',
+      name: 'work',
       store,
       tick,
       intervalMs: 1000,
       stopSignal: () => stopped,
-      emitSource: 'creator',
+      emitSource: 'work',
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -180,12 +180,12 @@ describe('runLoop admission gating (#2407)', () => {
     const tick = vi.fn().mockResolvedValue(undefined);
     let stopped = false;
     const running = runLoop({
-      name: 'creator',
+      name: 'work',
       store,
       tick,
       intervalMs: 1000,
       stopSignal: () => stopped,
-      emitSource: 'creator',
+      emitSource: 'work',
     });
 
     await vi.advanceTimersByTimeAsync(0);

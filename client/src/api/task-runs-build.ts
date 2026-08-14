@@ -1,6 +1,6 @@
 import type { PersistedTaskRun } from '../types/task-run.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
-import type { VerdictTallyResult } from '../discovery/types.js';
+import type { VerdictTallyResult } from '../archive/types.js';
 import { deriveSolveOutcome, deriveEvaluateOutcome, type RunOutcome } from './run-outcome.js';
 
 /**

@@ -34,7 +34,6 @@ import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.j
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
-import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
@@ -111,7 +110,6 @@ import {
 } from './harnesses/impls/jinn-repo-evaluator/docker-immutable-verifier.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
-import { resolveContractFromSolverNetId } from './solvernets/launched-record-dispatcher.js';
 import type { Harness } from './harnesses/types.js';
 import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
@@ -123,6 +121,8 @@ import {
 } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
 import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from './corpus/onchain-query.js';
+import { createHttpCorpusDiscovery } from '@jinn-network/core/corpus-read';
+import { createArchiveReadsFromStore, type ArchiveReads } from './archive/reads.js';
 import { CapturesStore } from './store/captures.js';
 import { createLiveCapturePublisher } from './captures/live-publisher.js';
 import { EnsurePendingCaptureProcessor, ensurePendingCapture, ingestStopHookCapture } from './captures/ingest.js';
@@ -144,8 +144,6 @@ import {
 } from './trajectory/transcript-watcher.js';
 import { defaultTranscriptWatchDirectories } from './trajectory/transcript-session-dirs.js';
 import { buildInfo } from './build-info.js';
-import { BASE_FEEDS } from './venues/chainlink/feeds.js';
-import { GeneratedTaskSource, StaticConfiguredTaskSource, filterBindableTasks } from './tasks/sources.js';
 import {
   checkRpcNetwork,
   logRpcLocalDevToStderr,
@@ -618,13 +616,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // Safe address and the prediction.v1 generator are not yet known at start-up.
   // We capture both into closures here and let `addLauncherRoutes` read them
   // lazily — by the time `/v1/launcher/status` is hit, both are populated.
-  let predictionGeneratorRef:
-    | { getState(): import('./solver-types/prediction-v1-auto.js').PredictionV1GeneratorStateSnapshot }
-    | undefined;
-  const launchedGeneratorStateBySolverType = new Map<
-    string,
-    () => LauncherGeneratorStateSnapshot | undefined
-  >();
   let safeAddressForLauncher: `0x${string}` | undefined;
   let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
 
@@ -647,21 +638,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./harnesses/readiness-registry.js').HarnessReadinessRegistry | undefined;
   } = { current: undefined };
 
-  // jinn-mono-u34i: same eager-register / late-populate pattern for the
-  // DiscoveryAPI. Pre-fix, /v1/discovery/* routes only mounted when
-  // `config.discovery` was set at startApiServer time — but main.ts builds
-  // `sharedDiscoveryApi` post-bootstrap, so the routes were never registered
-  // and the panel's /build page got a permanent 404 on plugin-publications +
-  // builder-artifacts. Holder ref lets the routes register eagerly and
-  // start returning real data the moment main.ts assigns holder.current.
-  const discoveryApiHolder: {
-    current: import('./discovery/types.js').DiscoveryAPI | undefined;
-  } = { current: undefined };
+  // Wave-4 D4: archive/projector reads for task-post-counts and launcher
+  // getTaskStatuses. Store already exists here, so the holder is populated
+  // immediately; the holder shape matches pluginReader's eager-register pattern.
+  const archiveReadsHolder: { current: ArchiveReads | undefined } = {
+    current: createArchiveReadsFromStore(sharedStore),
+  };
 
   // One-swap R3 (#2461): the plugin-publication reader backing the /build page's
   // plug-in routes, carved off `discovery/` onto the IdentityRegistry log source
-  // so those routes survive the D-wave deletion. Populated post-bootstrap
-  // alongside `discoveryApiHolder`; same eager-register / late-populate pattern.
+  // so those routes survive the D-wave deletion. Populated post-bootstrap.
   const pluginReaderHolder: { current: PluginPublicationReader | undefined } = {
     current: undefined,
   };
@@ -877,11 +863,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // harness readiness routes. Until main.ts sets the holder, requests
       // return 503 subsystem_not_ready (the panel handles that gracefully).
       harnessReadinessRegistry: { holder: harnessReadinessRegistryHolder },
-      // jinn-mono-u34i: see discoveryApiHolder comment above.
-      discovery: { holder: discoveryApiHolder },
-      // One-swap R3 (#2461): plugin-publication routes read through the carved
-      // host reader (IdentityRegistry log source), not `discovery/`.
+      // Wave-4 D4: plugin-publication routes require pluginReader (no
+      // DiscoveryAPI fallback). Archive reads back task-post-counts.
       pluginReader: { holder: pluginReaderHolder },
+      archiveReads: { holder: archiveReadsHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -1036,15 +1021,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         onSolverNetsUpdated: () => {
           invalidatePredictionOperatorStatusCache(config);
         },
-        getGeneratorState: (netName) => {
-          if (netName === 'prediction') {
-            return predictionGeneratorRef?.getState();
-          }
-          const joined = findJoinedByName(config.joinedSolverNets, netName);
-          const solverType = joined ? solverTypeFromJoinedContract(joined) : undefined;
-          if (!solverType) return undefined;
-          return launchedGeneratorStateBySolverType.get(solverType)?.();
-        },
+        // Wave-4 D3 retired the launched-record generators (and with them the
+        // creator loop they fed), so no generator state exists to report. The
+        // hook stays on the launcher-status surface — its consumers already
+        // treat an absent snapshot as "no generator running", which is now
+        // always the truth.
+        getGeneratorState: () => undefined,
         getOpenTaskCount: (netName) => {
           if (!safeAddressForLauncher) return 0;
           const joined = findJoinedByName(config.joinedSolverNets, netName);
@@ -1109,13 +1091,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             }));
           },
           // #579: on-chain finalized/open/expired status for the Recent posted
-          // Tasks chip. discoveryApiHolder is populated post-bootstrap; before
-          // that (or with no discovery API) we return an empty Map → all chips
-          // render 'unknown', the safe degraded default.
+          // Tasks chip. Wave-4 D4 reads ArchiveReads.getTaskStatuses, which
+          // degrades to an empty Map → chips render 'unknown'.
           fetchTaskStatuses: async (manifestCid: string) => {
-            const api = discoveryApiHolder.current;
-            if (!api) return new Map();
-            return api.getTaskStatuses({ manifestCid });
+            const reads = archiveReadsHolder.current;
+            if (!reads) return new Map();
+            return reads.getTaskStatuses({ manifestCid });
           },
         },
       },
@@ -1618,54 +1599,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     .filter((entry) => entry.roles.includes('solver'))
     .map((entry) => entry.manifestCid);
 
-  // ── DiscoveryAPI construction ─────────────────────────────────────────────
-  // Build the shared DiscoveryAPI used by MechAdapter (task discovery),
-  // the SolverNet registry client (lifecycle status), and the corpus library
-  // (envelope discovery). See spec/2026-05-11-discovery-api-and-shared-indexer.md §9.
-  let sharedDiscoveryApi: import('./discovery/types.js').DiscoveryAPI | undefined;
-  {
-    const onchainFloorOpts = {
-      rpcUrl: config.rpcUrl,
-      chainId: config.network === 'testnet' ? 84532 : 8453,
-      routerAddress: ROUTER_ADDRESS,
-      identityRegistryAddress: identityRegistryAddress ?? undefined,
-      safeAddress,
-      mechAddress: mechAddress ?? undefined,
-      taskDiscoveryFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
-    } as const;
-    async function buildOnchainFloor(): Promise<import('./discovery/types.js').DiscoveryAPI> {
-      const { createOnchainDiscoveryAPI } = await import('./discovery/onchain.js');
-      return createOnchainDiscoveryAPI(onchainFloorOpts);
-    }
-
-    const discoveryConfig = config.discovery;
-    if (discoveryConfig) {
-      // A discovery block was explicitly set.
-      try {
-        const { createDiscoveryAPI } = await import('./discovery/factory.js');
-        sharedDiscoveryApi = createDiscoveryAPI(discoveryConfig, { ...onchainFloorOpts });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[main] DiscoveryAPI construction failed: ${msg} — falling back to onchain discovery`);
-        sharedDiscoveryApi = await buildOnchainFloor();
-      }
-    } else {
-      // No discovery config (mainnet without an explicit discovery block) —
-      // default to the always-live onchain floor.
-      sharedDiscoveryApi = await buildOnchainFloor();
-    }
-  }
-
-  // jinn-mono-u34i: populate the holder so the /v1/discovery/* routes
-  // registered eagerly at server-start time start returning real data on
-  // the panel's next refetch. Before this, the routes 404'd forever and
-  // the /build page rendered "Discovery unavailable" permanently.
-  discoveryApiHolder.current = sharedDiscoveryApi;
-
   // One-swap R3 (#2461): populate the carved plugin-publication reader over the
   // IdentityRegistry log source. Reuses the already-built `publicClient` and the
-  // fallback-chain RPC. When no IdentityRegistry address is known the routes
-  // fall back to `discovery` inside addDiscoveryRoutes.
+  // fallback-chain RPC. Plugin routes 503 until this is set.
   if (identityRegistryAddress) {
     pluginReaderHolder.current = createPluginPublicationReader({
       logSource: createRpcPluginLogSource({
@@ -1681,16 +1617,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // `.map` result, safe to push onto). The join applier holds this same object
   // reference and pushes a newly-joined cid onto it live.
   const taskDiscovery = {
-    discoveryApi: sharedDiscoveryApi,
     solverNetManifestCids: taskDiscoveryManifestCids,
     // No explicit `onchainFromBlock` by default — let `MechAdapter`'s
     // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow through.
-    // Hardcoding here shadowed the adapter's default and re-introduced the
-    // ghost-task floor every release; removing the shadow makes `adapter.ts`
-    // the single source of truth. See gh #300. An operator MAY opt in to a
-    // recent floor via `taskDiscoveryOnchainFromBlock` to bound the canonical
-    // getLogs scan (which otherwise parses a large history on the main thread
-    // and can stall the loop) and lean on the indexer DiscoveryAPI.
     ...(config.taskDiscoveryOnchainFromBlock !== undefined
       ? { onchainFromBlock: config.taskDiscoveryOnchainFromBlock }
       : {}),
@@ -2061,27 +1990,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   // ── SolverNet subsystem (Task 11 of solvernet-creation-and-launch.md) ─────
   //
-  // Loads owned launched records from `~/.jinn-client/solvernets/launched/`,
-  // resumes any in-flight launch / lifecycle transitions, and starts the
-  // operator catalog refresher. Generator construction per launched record
-  // lands in Task 12; until then we expose `pendingGenerators` so the
-  // upcoming wiring has a clean handoff point.
-  //
-  // The launch state machine resumes correctly through the receipt-confirmation
-  // path; discovery is now exclusively via DiscoveryAPI (280n.6).
+  // Loads owned launched records from `~/.jinn-client/solvernets/launched/`
+  // and resumes any in-flight launches. Wave-4 D4 retired the ERC-8004
+  // registry client and catalog refresher.
   let solverNetSubsystem: import('./solvernets/daemon-init.js').SolverNetSubsystem | undefined;
-  // Hoisted so the engine wiring below can pick the registry client up as
-  // its `manifestResolver` (Task 27 of the SolverNet creation-and-launch
-  // spec — task validation goes manifest → contract → schemas).
-  let solverNetRegistryClientForEngine:
-    | import('./solvernets/registry-client.js').SolverNetRegistryClient
-    | undefined;
   if (agentId && identityRegistryAddress && config.network === 'testnet') {
     const {
       initSolverNetSubsystem,
       createIpfsClientAdapter,
       createMetadataPublisherFromViem,
-      createDefaultRegistryClient,
     } = await import('./solvernets/daemon-init.js');
     const { createSolverNetStore } = await import('./solvernets/store.js');
 
@@ -2095,15 +2012,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       walletClient: agentClients.walletClient,
       publicClient: agentClients.publicClient,
     });
-    const solverNetRegistryClient = createDefaultRegistryClient({
-      ipfs: solverNetIpfs,
-      publisher: solverNetPublisher,
-      discoveryApi: sharedDiscoveryApi,
-      network: 'base-sepolia',
-    });
-    solverNetRegistryClientForEngine = solverNetRegistryClient;
 
-    const launcherSigner: import('./solvernets/registry-client.js').SignerWithAgentEoa = {
+    const launcherSigner: import('./solvernets/launch-publisher.js').SignerWithAgentEoa = {
       agentEoaAddress: privateKeyToAccount(agentPrivateKey).address as `0x${string}`,
       agentEoaPrivateKey: agentPrivateKey,
       agentId,
@@ -2114,18 +2024,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         store: solverNetStore,
         ipfs: solverNetIpfs,
         publisher: solverNetPublisher,
-        registryClient: solverNetRegistryClient,
-        network: 'base-sepolia',
         resolveSigner: async () => launcherSigner,
-        lifecycleSigner: launcherSigner,
         awaitTxConfirmation: async (txHash) => {
           const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
           return { blockNumber: Number(receipt.blockNumber) };
         },
       });
       console.log(
-        `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s), ` +
-          `${solverNetSubsystem.pendingGenerators.length} ready for spawn (Task 12)`,
+        `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s)`,
       );
 
       // jinn-mono-hqz0: populate the launcher endpoints' deps holder. The
@@ -2135,14 +2041,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // /launcher list page 404s on /v1/solvernets/launched.
       if (solverNetEndpointsDepsHolder) {
         const { LaunchAction } = await import('./solvernets/launch-state-machine.js');
-        const { LifecycleTransition } = await import('./solvernets/lifecycle-transitions.js');
         const awaitLauncherTxConfirmation = async (txHash: `0x${string}`) => {
           const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
           return { blockNumber: Number(receipt.blockNumber) };
         };
         const pendingGeneratorsRef = { current: solverNetSubsystem.pendingGenerators };
-        // Noop subgraph for launch/lifecycle state-machine mempool-drop recovery.
-        // Real subgraph extension lands in Task 25 (jinn-mono-280n).
+        // Noop subgraph for launch state-machine mempool-drop recovery.
         const noopSubgraph = {
           async fetchSetMetadataEvents() { return []; },
           async fetchSetMetadataEventsForCid() { return []; },
@@ -2152,40 +2056,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           ipfs: solverNetIpfs,
           publisher: solverNetPublisher,
           subgraph: noopSubgraph,
-          spawnGenerator: async () => {
-            /* Generators are spawned by main.ts post-launch loop;
-             * the launcher endpoint just persists the record here. */
-          },
-          awaitTxConfirmation: awaitLauncherTxConfirmation,
-        });
-        const lifecycleTransition = new LifecycleTransition({
-          store: solverNetStore,
-          registry: solverNetRegistryClient,
-          signer: launcherSigner,
-          subgraph: noopSubgraph,
           awaitTxConfirmation: awaitLauncherTxConfirmation,
         });
         if (!safeAddressForLauncher) {
           throw new Error('[main] safeAddressForLauncher missing at SolverNet endpoints registration');
         }
-        const getGeneratorState = (
-          solverNetId: string,
-        ): LauncherGeneratorStateSnapshot | undefined => {
-          const entry = pendingGeneratorsRef.current.find(
-            (g) => g.recordRef.current.solverNetId === solverNetId,
-          );
-          const resolved = resolveContractFromSolverNetId(
-            entry?.recordRef.current.solverNetId ?? solverNetId,
-          );
-          if (!resolved) return undefined;
-          return launchedGeneratorStateBySolverType.get(resolved.solverType)?.();
-        };
         solverNetEndpointsDepsHolder.current = {
           store: solverNetStore,
           launch: {
             launchAction,
-            lifecycleTransition,
-            getGeneratorState,
             pendingGenerators: pendingGeneratorsRef,
             signer: launcherSigner,
             network: 'base-sepolia',
@@ -2195,8 +2074,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               agentId: launcherSigner.agentId,
             },
           },
-          catalog: solverNetSubsystem.catalog,
-          registry: solverNetRegistryClient,
         };
         console.log('[main] SolverNet endpoints deps populated (jinn-mono-hqz0)');
       }
@@ -2211,117 +2088,36 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         '(requires testnet + agent_id + identity_registry_address — Task 11 scaffolding)',
     );
   }
-  // The catalog cache will be consumed by the API server in Tasks 14/15.
-  // The `pendingGenerators` set is iterated below to wire generators per
-  // launched record (Task 12).
-
-  // ── Auto Task generators (launched-record-driven) ────────────────────────
+  // The catalog cache is consumed by the API server (Tasks 14/15).
   //
-  // Per spec/2026-05-05-solvernet-creation-and-launch.md §11 + Task 22 of the
-  // implementation plan, generator construction is wholly driven by the
-  // SolverNet launched-record subsystem. The legacy
-  // `collectTestnetAutoTaskGenerators` path (config-block-keyed Polymarket
-  // generator + role-based hot-spawn gate) is retired — SolverNet ownership
-  // is determined by which launched records the daemon owns, not by the
-  // operator-config role enum.
-  const autoTasksDisabled = process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
-  // ── SolverNet launched-record generators (Task 12 of
-  //     spec/2026-05-05-solvernet-creation-and-launch.md §11) ────────────────
-  //
-  // For each owned launched record where `status === 'launched'` and
-  // `generatorEnabled === true`, construct a prediction.v1 Polymarket
-  // generator wired to the live `recordRef` and `configRef` exposed by
-  // `initSolverNetSubsystem`. Lifecycle transitions (pause/resume/retire)
-  // and the SolverNet config API endpoint (Task 14) mutate these refs at
-  // runtime; the per-tick gate inside the generator picks the change up
-  // within one cadence — no daemon restart, no recreation.
-  const launchedRecordGenerators: Array<{
-    solverType: string;
-    generator: import('./tasks/sources.js').TaskGenerator;
-  }> = [];
-  if (solverNetSubsystem && !autoTasksDisabled) {
-    const { wireLaunchedRecordGenerators } = await import(
-      './solvernets/launched-record-dispatcher.js'
-    );
-    const wired = await wireLaunchedRecordGenerators({
-      pendingGenerators: solverNetSubsystem.pendingGenerators,
-      launchedDir: join(config.earningDir, 'solvernets', 'launched'),
-      staticConfig: {
-        agentEoa: agentEoaAddress,
-        safeAddress,
-        agentPrivateKey,
-        ipfsGatewayUrl: config.ipfsGatewayUrl,
-        stateDir: config.sweRebenchV2StateDir,
-        ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
-      },
-      logger: {
-        info: (message) => console.log(message),
-        warn: (message) => console.warn(message),
-      },
-    });
-    launchedRecordGenerators.push(...wired.generators);
-    for (const [solverType, getState] of wired.generatorStatesBySolverType) {
-      launchedGeneratorStateBySolverType.set(solverType, getState);
-    }
-    if (!predictionGeneratorRef && wired.predictionGeneratorRef) {
-      predictionGeneratorRef =
-        wired.predictionGeneratorRef as unknown as typeof predictionGeneratorRef;
-    }
-  }
-  if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
-    // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
-  }
-
-  // filterBindableTasks (issue #415): drop config-level tasks[] entries without
-  // solverNetManifestCid before they enter the creator loop. Such entries would
-  // throw a PermanentError on every attempt and retry every 30 min indefinitely.
-  const bindableConfigTasks = filterBindableTasks(config.tasks);
-  const taskSources = [
-    new StaticConfiguredTaskSource(bindableConfigTasks),
-    ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
-      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator, {
-        bucketKeyForTask: (task) => {
-          if (task.solverType === 'swe-rebench-v2.v1') {
-            const instanceId = task.spec?.['instance_id'];
-            const postedCount = task.eligibility?.['posted_count_after_record'];
-            if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
-            return `swe-rebench-v2:${instanceId}:${postedCount}`;
-          }
-          // Issue #1893: jinn-repo.v1 live-issue tasks bucket on
-          // <issueNumber>:<snapshotHash> (carried on `eligibility` by
-          // `jinn-repo-live-auto.ts`) rather than the default window-based
-          // key — the window's startTs/endTs changes every tick, which would
-          // defeat once-per-bucket dedup for a generator whose own re-post
-          // signal is a material issue edit, not the passage of time.
-          if (task.solverType === 'jinn-repo.v1' && task.spec?.['source'] === 'live-issue') {
-            const issueNumber = task.eligibility?.['issue_number'];
-            const snapshotHash = task.eligibility?.['snapshot_hash'];
-            if (typeof issueNumber !== 'number' || typeof snapshotHash !== 'string') return undefined;
-            return `jinn-repo-live:${issueNumber}:${snapshotHash}`;
-          }
-          return undefined;
-        },
-      }),
-    ),
-  ];
+  // Wave-4 D3 (Task 17 of the cutover stage-3 plan, DR-2026-08-05 decision 1)
+  // retired the launched-record generator dispatcher and the creator loop it
+  // fed. Nothing constructs task sources here any more: the native posting
+  // path is `posting[]` driven through the requester work client
+  // (`PostingLoop`), and one-off posts go through `jinn tasks submit`.
+  // `initSolverNetSubsystem`'s `pendingGenerators` set is now read only by the
+  // SolverNet endpoints, which use it for the record/config refs.
 
   // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
   //
   // Built once per daemon lifetime; the agent EOA private key stays in this
   // process's memory and never crosses into the MCP subprocess. The MCP
   // tool `acquire_artifact` proxies to `POST /v1/artifacts/acquire` instead.
-  // Always enabled when a DiscoveryAPI is available (which is always true after
-  // 280n.3 — the onchain floor is always constructed). Falls back to disabled
-  // when no discovery is available and no identity registry is set.
-  const corpusFactory = (sharedDiscoveryApi || identityRegistryAddress)
+  // Wave-4 D4: envelope discovery goes through core's HTTP corpus port from
+  // `config.discovery.url` (kept for R3b survivors). Falls back to the
+  // on-chain identity-registry scan when no URL is set.
+  const corpusHttpDiscovery = config.discovery?.url
+    ? createHttpCorpusDiscovery({ url: config.discovery.url })
+    : undefined;
+  const corpusFactory = (corpusHttpDiscovery || identityRegistryAddress)
     ? (store: Store) =>
         (corpusForApi = createCorpus({
-          ...(sharedDiscoveryApi ? { discovery: sharedDiscoveryApi } : {}),
+          ...(corpusHttpDiscovery ? { discovery: corpusHttpDiscovery } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           store,
           signer: { privateKey: agentPrivateKey },
           selfSafeAddress: safeAddress,
-          ...(!sharedDiscoveryApi && identityRegistryAddress
+          ...(!corpusHttpDiscovery && identityRegistryAddress
             ? {
                 onchain: {
                   rpcUrl: config.rpcUrl,
@@ -2335,7 +2131,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     : undefined;
   if (!corpusFactory) {
     console.warn(
-      '[main] Corpus disabled (no DiscoveryAPI or on-chain identity registry); ' +
+      '[main] Corpus disabled (no discovery.url or on-chain identity registry); ' +
         'MCP record lookup and artifact acquisition network branches will be unavailable.',
     );
   }
@@ -2763,7 +2559,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const daemon = new Daemon({
     adapter,
     runner,
-    taskSources,
     dbPath: config.dbPath,
     store: sharedStore,
     composition,
@@ -2777,7 +2572,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     apiToken,
     peers: config.peers.length > 0 ? config.peers : undefined,
     nodeEndpoint: config.nodeEndpoint,
-    creatorSafeAddress: safeAddress,
     sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     corpusFactory,
     status: {

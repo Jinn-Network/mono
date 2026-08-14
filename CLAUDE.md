@@ -129,14 +129,10 @@ client/          TypeScript daemon — the main runnable component
     store/store.ts       SQLite persistence (activity, artifacts, recovery)
     api/
       server.ts          Hono HTTP API for artifact search/publish
-      peers.ts           Background peer sync
     auth/erc8128.ts      ERC-8128 HTTP message signatures
-    discovery/           Read-side data access (spec/2026-05-11-discovery-api-and-shared-indexer.md)
-      types.ts           DiscoveryAPI interface + result shapes
-      http.ts            HttpDiscoveryAPI — GraphQL against the Ponder indexer (default)
-      onchain.ts         OnchainDiscoveryAPI — RPC getLogs/multicall floor (always live)
-      with-fallback.ts   Health-tracking wrapper: primary → floor on failure
-      factory.ts         Builds the configured DiscoveryAPI from config
+    discovery-client/    Neutral HTTP-indexer slice (R3b, four methods)
+    plugin-registry/     Plugin publication reads (R3a)
+    archive/             Projector-backed task-post counts / status chips
     mcp/server.ts        MCP tools exposed to Claude subprocess
     x402/                Payment-gated artifact access
     types/               DesiredState, errors, core types
@@ -295,11 +291,11 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | apiPort          | JINN_API_PORT            | 7331                              |
 | dbPath           | JINN_DB_PATH             | ~/.jinn-client/jinn.db            |
 | earningDir       | JINN_EARNING_DIR         | ~/.jinn-client/earning            |
-| peers            | JINN_PEERS               | []                                |
+| peers            | JINN_PEERS               | [] — parseable but unused after Wave-4 D4 (peer-sync retired) |
 | tasks            | JINN_TASKS               | []                                |
-| discovery.mode   | JINN_DISCOVERY_MODE      | mainnet: unset → `onchain` RPC floor; testnet: `http` |
-| discovery.url    | JINN_DISCOVERY_URL       | testnet only: `DEFAULT_TESTNET_DISCOVERY_URL` (Ponder indexer); mainnet: unset |
-| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | false — opt-in (only relevant when mode is `http`/`embedded`) |
+| discovery.mode   | JINN_DISCOVERY_MODE      | kept parseable (R3b survivors, corpus HTTP, MCP); Wave-4 D4 deleted the `discovery/` factory |
+| discovery.url    | JINN_DISCOVERY_URL       | testnet only: `DEFAULT_TESTNET_DISCOVERY_URL` (Ponder indexer); mainnet: unset — `createHttpCorpusDiscovery` and `discovery-client` |
+| discovery.fallbackToOnchain | JINN_DISCOVERY_FALLBACK | parseable but unused after Wave-4 D4 (`with-fallback` retired) |
 | ipfsRegistryUrl  | JINN_IPFS_REGISTRY_URL   | https://registry.autonolas.tech   |
 | ipfsGatewayUrl   | JINN_IPFS_GATEWAY_URL    | https://gateway.autonolas.tech    |
 | engine.workingDirRoot | JINN_ENGINE_WORKING_DIR_ROOT | ~/.jinn-client/engine/work   |
@@ -363,14 +359,18 @@ On boot the daemon emits one line per slot
 probe is log-only — secondary-slot 429s never gate startup; only
 `checkRpcNetwork`'s chain-id mismatch against the head URL is fail-loud.
 
-This is the JSON-RPC transport layer. It is **distinct from**
-`discovery.fallbackToOnchain` (next section), which sits one layer up at
-the read-API and decides whether to fall through from the Ponder indexer
-to direct `eth_getLogs`. The RPC fallback chain operates beneath both.
+This is the JSON-RPC transport layer. It is **distinct from** the indexer
+HTTP read path (`discovery.url` / `JINN_DISCOVERY_URL`), which
+`createHttpCorpusDiscovery` and `client/src/discovery-client/http.ts`
+still consult. The RPC fallback chain operates beneath both.
 
-Discovery defaults differ by network: mainnet ships with no `discovery` block and runs against the always-live on-chain RPC floor (`mode: 'onchain'`); testnet defaults to `mode: 'http'` against the privately-operated Ponder indexer at `DEFAULT_TESTNET_DISCOVERY_URL` (see `client/src/config.ts`). Set `discovery.mode: 'onchain'` (or `JINN_DISCOVERY_MODE=onchain`) to pin the RPC-only floor anywhere.
-
-`discovery.fallbackToOnchain` is **opt-in** (default off, since the 2026-05-23 substrate incident). When the indexer is unreachable, the daemon raises `DiscoveryUnavailableError` and the operator-app surfaces the outage; it does NOT silently fall through to direct `eth_getLogs`. Silent fall-through was hiding indexer outages and turning every daemon into its own indexer, which storms shared RPC quota and took the indexer down. Set `fallbackToOnchain: true` (or `JINN_DISCOVERY_FALLBACK=1`) only when you self-host an RPC with generous `getLogs` quotas — the factory emits a one-time boot warning so the choice is visible in logs.
+`discovery.url` / `discovery.mode` / `JINN_DISCOVERY_URL` stay (R3b
+survivors, evidence CLI, `jinn tasks watch`, MCP env, corpus HTTP).
+Wave-4 D4 deleted `client/src/discovery/` (factory, on-chain floor, HTTP
+fat client, `with-fallback`); `fallbackToOnchain` remains parseable but
+is not consulted. When the indexer is unreachable those HTTP readers
+raise `DiscoveryUnavailableError` — there is no silent `eth_getLogs`
+fall-through.
 
 ## On-Chain Addresses (Base)
 
@@ -392,7 +392,7 @@ Per DR-2026-06-30 (tokenless, OLAS-native), Jinn has no DAO token, no treasury e
 
 ### How the daemon works
 
-See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. There is no fixed daemon shape: **every loop is conditional**, so the running set depends on the vertical mode (`legacy` or `native-v1`) and config. Today that set is `work` and `evaluator` (the native solve and evaluate paths), `posting`, `projector`, `evidence-driver`, the support/earning loops (`reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`), `peer-sync`, and — in legacy mode only — `creator`. Startup runs one-shot in-flight recovery before any loop takes work. `LOOP_REGISTRY` in `client/src/daemon/loop-heartbeat.ts` is the single source of loop names, heartbeat intervals, and admission class; the started set is computed in `Daemon.start()` (search `started.add(`). Wave-4 D1 retired `engine-watcher` and `engine-tick` with the TaskEngine and D2 retired `delivery-watcher`; all three `LOOP_REGISTRY` rows are removed by Wave-4 D6. Per DR-2026-06-30 the reward-claim loop is the sole reward path (stOLAS `RewardClaimLoop`); the former L2→L1 jinn-claim loop was removed with the JINN token. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
+See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. There is no fixed daemon shape: **every loop is conditional**, so the running set depends on the vertical mode (`legacy` or `native-v1`) and config. Today that set is `work` and `evaluator` (the native solve and evaluate paths), `posting`, `projector`, `evidence-driver`, and the support/earning loops (`reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`). Startup runs one-shot in-flight recovery before any loop takes work. `LOOP_REGISTRY` in `client/src/daemon/loop-heartbeat.ts` is the single source of loop names, heartbeat intervals, and admission class; the started set is computed in `Daemon.start()` (search `started.add(`). Wave-4 D1 retired `engine-watcher` and `engine-tick` with the TaskEngine, D2 retired `delivery-watcher`, D3 retired `creator`, and D4 retired `peer-sync`; Wave-4 D6 removed all five leftover `LOOP_REGISTRY` rows. Remaining ten: `posting`, `reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`, `projector`, `evidence-driver`, `work`, `evaluator`. Per DR-2026-06-30 the reward-claim loop is the sole reward path (stOLAS `RewardClaimLoop`); the former L2→L1 jinn-claim loop was removed with the JINN token. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
 
 Generators are **launched-record-driven**, not config-flag-driven (per `spec/2026-05-05-solvernet-creation-and-launch.md` §11). On startup the daemon walks `~/.jinn-client/solvernets/launched/` for records this operator owns; for each record where `status === 'launched'` and `generatorEnabled === true`, it spawns the matching SolverType-specific generator. The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone — gating is "do I have a launched record where I'm the owner." Joining a SolverNet as an operator (writing a `joinedSolverNets[<manifestCid>]` config entry, see §12) never starts a generator; that's launcher-only.
 

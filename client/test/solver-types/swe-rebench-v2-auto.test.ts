@@ -21,8 +21,11 @@ import {
   hashVettedPoolArtifact,
 } from '../../src/solver-types/_swe-rebench-v2-validated-pool.js';
 import type { LaunchedSolverNetRecord } from '../../src/solvernets/store.js';
-import type { DiscoveryAPI } from '../../src/discovery/types.js';
 import type { Task } from '../../src/types/task.js';
+
+vi.mock('../../src/solver-types/_swe-rebench-v2-pool-recovery.js', async (importOriginal) => {
+  return await importOriginal();
+});
 
 const config: GeneratorConfig = {
   N_target_successes: 5,
@@ -193,229 +196,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord', () => {
   });
 });
 
-describe('makeSweRebenchV2GeneratorForLaunchedRecord — network-truth success reconciliation (#669)', () => {
-  it('classifies an instance as saturated when network successes ≥ N_target_successes, even if local successful=0', async () => {
-    // Arrange — local state file says successful=0 for org__repo-669;
-    // network truth (the stub DiscoveryAPI) reports passCount=21 for the same
-    // instance, which is ≥ N_target_successes=5. The expected behaviour is
-    // that the launcher does NOT post org__repo-669 — it is saturated
-    // from network truth, even though the local counter is zero.
-    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-669-'));
-    await mkdir(stateDir, { recursive: true });
-    await writeFile(
-      join(stateDir, 'generator-state.json'),
-      JSON.stringify({
-        schemaVersion: 'swe-rebench-v2-generator-state.v1',
-        tasks: {
-          'org__repo-669': { posted: 8, successful: 0, last_posted_at: 0 },
-        },
-      }),
-    );
-
-    // Inject a single-instance pool so the only candidate is the network-saturated one.
-    // Pool cache file shape per `_swe-rebench-v2-pool-cache.ts`: { schemaVersion,
-    // savedAt, tasks }. With a non-empty cache and HF unreachable in the test
-    // sandbox, `loadPoolWithCacheFallback` serves from disk.
-    // NB: the instance id MUST be synthetic (not a real dataset instance) — the
-    // generator excludes active held-out-slate instances from the train stream
-    // (`excludeHeldOutSlate`), so a real slate member would vanish from the
-    // eligible pool and this test would never reach the saturation path.
-    await writeFile(
-      join(stateDir, 'pool-cache.json'),
-      JSON.stringify({
-        schemaVersion: 'swe-rebench-v2-pool-cache.v1',
-        savedAt: new Date().toISOString(),
-        tasks: [{
-          instance_id: 'org__repo-669',
-          language: 'python',
-          hf_dataset: 'nebius/SWE-rebench-leaderboard',
-          hf_split: '2024_12',
-          base_commit: '0000000000000000000000000000000000000000',
-        }],
-      }),
-    );
-
-    // Force the HF datasets-server load to fail so loadPoolWithCacheFallback
-    // serves the single-instance pool we wrote to disk above. Without this the
-    // generator pulls the live HF dataset and the test environment becomes
-    // dependent on network state.
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockImplementation(async () => {
-        throw new Error('HF unreachable in test sandbox');
-      });
-
-    // Stub DiscoveryAPI: only getInstanceSuccessCounts is exercised on this
-    // code path; the rest throw so any accidental call surfaces.
-    const successCounts = new Map<string, number>([
-      ['org__repo-669', 21],
-    ]);
-    const notUsed = vi.fn(async () => { throw new Error('not used'); });
-    const discoveryApi = {
-      getInstanceSuccessCounts: vi.fn(async () => successCounts),
-      getInstanceClaimCounts: vi.fn(async () => new Map()),
-      findClaimableTasks: notUsed,
-      listLaunchedSolverNets: notUsed,
-      getLifecycleStatus: notUsed,
-      getSolverNetOperatorCount: notUsed,
-      queryEnvelopes: notUsed,
-      listPluginPublications: notUsed,
-      getPluginScores: notUsed,
-      listBuilderArtifacts: notUsed,
-    } satisfies DiscoveryAPI;
-
-    const recordRef = {
-      current: launchedRecord({
-        status: 'launched',
-        manifestCid: 'bafymanifest669test',
-      }),
-    };
-    const configRef = {
-      current: {
-        N_target_successes: 5,
-        posting_window_ms: 300_000,
-        // Use 'python-floor' so the test doesn't have to publish a vetted pool.
-        admissionMode: 'python-floor' as const,
-      },
-    };
-
-    const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
-      recordRef,
-      configRef,
-      staticConfig: { stateDir, discoveryApi },
-    });
-
-    // Act — call the generator tick.
-    const result = await gen();
-
-    // Assert — no task posted, saturated == 1.
-    expect(result).toBeNull();
-    expect(discoveryApi.getInstanceSuccessCounts).toHaveBeenCalledWith({
-      manifestCid: 'bafymanifest669test',
-    });
-    expect(gen.getState().lastPollSummary).toMatchObject({
-      saturated: 1,
-      posted: 0,
-    });
-
-    fetchSpy.mockRestore();
-  });
-});
-
-describe('makeSweRebenchV2GeneratorForLaunchedRecord — claim-exhaustion repost (#802)', () => {
-  async function seed(stateDir: string, counters: Record<string, unknown>) {
-    await mkdir(stateDir, { recursive: true });
-    await writeFile(
-      join(stateDir, 'generator-state.json'),
-      JSON.stringify({ schemaVersion: 'swe-rebench-v2-generator-state.v1', tasks: counters }),
-    );
-    await writeFile(
-      join(stateDir, 'pool-cache.json'),
-      JSON.stringify({
-        schemaVersion: 'swe-rebench-v2-pool-cache.v1',
-        savedAt: new Date().toISOString(),
-        tasks: [{
-          instance_id: 'org__repo-1', language: 'python',
-          hf_dataset: 'nebius/SWE-rebench-leaderboard', hf_split: '2024_12',
-          base_commit: '0000000000000000000000000000000000000000',
-        }],
-      }),
-    );
-  }
-
-  function stubDiscovery(over: Partial<DiscoveryAPI>): DiscoveryAPI {
-    const notUsed = vi.fn(async () => { throw new Error('not used'); });
-    return {
-      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
-      getInstanceClaimCounts: vi.fn(async () => new Map()),
-      findClaimableTasks: notUsed, listLaunchedSolverNets: notUsed,
-      getLifecycleStatus: notUsed, getSolverNetOperatorCount: notUsed,
-      queryEnvelopes: notUsed, listPluginPublications: notUsed,
-      getPluginScores: notUsed, listBuilderArtifacts: notUsed,
-      ...over,
-    } as DiscoveryAPI;
-  }
-
-  function gen(stateDir: string, discoveryApi: DiscoveryAPI) {
-    return makeSweRebenchV2GeneratorForLaunchedRecord({
-      recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy802' }) },
-      configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'python-floor' as const } },
-      staticConfig: { stateDir, discoveryApi },
-    });
-  }
-
-  it('reposts an exhausted instance whose successes < N', async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-'));
-    await seed(stateDir, { 'org__repo-1': { posted: 1, successful: 1, last_posted_at: 0, last_task_id: '10' } });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('HF unreachable in test sandbox'));
-    const discovery = stubDiscovery({
-      getInstanceClaimCounts: vi.fn(async () => new Map([['10', { taskId: '10', consumed: 5, maxClaims: 5 }]])),
-    });
-    const g = gen(stateDir, discovery);
-
-    const result = await g();
-
-    expect(result).not.toBeNull();
-    expect((result as Task[])[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
-    expect(g.getState().lastPollSummary).toMatchObject({ posted: 1 });
-    fetchSpy.mockRestore();
-  });
-
-  it('does NOT repost an instance with claim slots remaining (live)', async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-'));
-    // last_posted_at must be inside the 300s posting window: a posting only stays
-    // `live` when slots remain AND the on-chain claim window is still open (#850).
-    await seed(stateDir, { 'org__repo-1': { posted: 1, successful: 0, last_posted_at: Date.now(), last_task_id: '11' } });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('HF unreachable in test sandbox'));
-    const discovery = stubDiscovery({
-      getInstanceClaimCounts: vi.fn(async () => new Map([['11', { taskId: '11', consumed: 2, maxClaims: 5 }]])),
-    });
-    const g = gen(stateDir, discovery);
-
-    const result = await g();
-
-    expect(result).toBeNull();
-    expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0 });
-    fetchSpy.mockRestore();
-  });
-
-  it('aborts the tick when getInstanceClaimCounts throws (never under-counts)', async () => {
-    const { DiscoveryUnavailableError } = await import('../../src/discovery/types.js');
-    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-'));
-    await seed(stateDir, { 'org__repo-1': { posted: 1, successful: 1, last_posted_at: 0, last_task_id: '10' } });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('HF unreachable in test sandbox'));
-    const discovery = stubDiscovery({
-      getInstanceClaimCounts: vi.fn(async () => { throw new DiscoveryUnavailableError('indexer down'); }),
-    });
-    const g = gen(stateDir, discovery);
-
-    const result = await g();
-
-    expect(result).toBeNull(); // aborted, nothing posted
-    expect(g.getState().lastError?.message).toContain('claim-budget reconciliation failed');
-    expect(g.getState().lastPollSummary).toMatchObject({ posted: 0 });
-    fetchSpy.mockRestore();
-  });
-});
-
-// Generator-level guard for the held-out slate exclusion (#817 AC#2). The unit
-// test for excludeHeldOutSlate proves the helper; this proves it is WIRED into
-// the generator tick — seed a pool with a real slate instance_id plus a
-// non-slate id, run the tick, and assert only the non-slate id is ever posted.
-// Deleting the exclusion call in swe-rebench-v2.ts fails this test.
 describe('makeSweRebenchV2GeneratorForLaunchedRecord — held-out slate exclusion (#817 AC#2)', () => {
-  function stubDiscovery(): DiscoveryAPI {
-    const notUsed = vi.fn(async () => { throw new Error('not used'); });
-    return {
-      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
-      getInstanceClaimCounts: vi.fn(async () => new Map()),
-      findClaimableTasks: notUsed, listLaunchedSolverNets: notUsed,
-      getLifecycleStatus: notUsed, getSolverNetOperatorCount: notUsed,
-      queryEnvelopes: notUsed, listPluginPublications: notUsed,
-      getPluginScores: notUsed, listBuilderArtifacts: notUsed,
-    } as DiscoveryAPI;
-  }
-
   it('never posts a slate instance_id while a non-slate id is eligible', async () => {
     // A genuine reserved id from the shipped v1 slate — production SOLVER_TYPE /
     // SLATE_VERSION resolve to this same slate inside the generator.
@@ -452,7 +233,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — held-out slate exclusio
     const gen = makeSweRebenchV2GeneratorForLaunchedRecord({
       recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy817' }) },
       configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'python-floor' as const } },
-      staticConfig: { stateDir, discoveryApi: stubDiscovery() },
+      staticConfig: { stateDir },
     });
 
     const result = await gen();
@@ -501,29 +282,11 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
     });
   }
 
-  // A single generator instance whose indexer claim map is a mutable closure —
-  // lets us change what the indexer reports BETWEEN ticks on the SAME generator,
-  // which is what exercises Blocker 1 (the long-lived in-memory cache must pick
-  // up the creator's out-of-band disk write at tick start).
-  function liveGeneratorWithMutableClaims(
-    stateDir: string,
-    claimsRef: {
-      current: Map<string, { taskId: string; consumed: number; maxClaims: number }>;
-    },
-  ) {
-    const notUsed = vi.fn(async () => { throw new Error('not used'); });
-    const discoveryApi = {
-      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
-      getInstanceClaimCounts: vi.fn(async () => claimsRef.current),
-      findClaimableTasks: notUsed, listLaunchedSolverNets: notUsed,
-      getLifecycleStatus: notUsed, getSolverNetOperatorCount: notUsed,
-      queryEnvelopes: notUsed, listPluginPublications: notUsed,
-      getPluginScores: notUsed, listBuilderArtifacts: notUsed,
-    } as DiscoveryAPI;
+  function liveGenerator(stateDir: string) {
     return makeSweRebenchV2GeneratorForLaunchedRecord({
       recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy802live' }) },
       configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'python-floor' as const } },
-      staticConfig: { stateDir, discoveryApi },
+      staticConfig: { stateDir },
     });
   }
 
@@ -531,8 +294,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-live-'));
     const fetchSpy = mockHfFetchSingleInstance();
     try {
-      const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
-      const g = liveGeneratorWithMutableClaims(stateDir, claimsRef);
+      const g = liveGenerator(stateDir);
 
       // Tick 1: instance is unposted (no last_task_id) → posted. Indexer still
       // empty (brand-new task not yet seen).
@@ -542,9 +304,6 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
       // Simulate the CreatorLoop hook via the SAME accessor daemon code uses —
       // a SEPARATE store instance writing last_task_id to the shared file.
       await getSweRebenchV2StateStore(stateDir).recordLastTaskId('org__repo-1', '777');
-      // Indexer now reflects the task with slots remaining (live).
-      claimsRef.current = new Map([['777', { taskId: '777', consumed: 2, maxClaims: 5 }]]);
-
       // Tick 2 on the SAME generator. Blocker 1's bug: the generator's first-load
       // cache still has last_task_id=undefined → unposted → re-post storm. With
       // the tick-start reload it observes '777' → live → no re-post.
@@ -561,14 +320,10 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-802-lag-'));
     const fetchSpy = mockHfFetchSingleInstance();
     try {
-      const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
-      const g = liveGeneratorWithMutableClaims(stateDir, claimsRef);
+      const g = liveGenerator(stateDir);
 
       await g(); // posts org__repo-1
       await getSweRebenchV2StateStore(stateDir).recordLastTaskId('org__repo-1', '888');
-      // Indexer STILL missing '888' (lag): a known last_task_id absent from the
-      // snapshot must classify `live` (not-yet-indexed), NOT repostable.
-
       const second = await g();
       expect(second).toBeNull();
       expect(g.getState().lastPollSummary).toMatchObject({ live: 1, posted: 0, repostable: 0 });
@@ -583,8 +338,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — live post→record→re
     const fetchSpy = mockHfFetchSingleInstance();
     try {
       // onchain floor returns an empty success map on EVERY tick.
-      const claimsRef = { current: new Map<string, { taskId: string; consumed: number; maxClaims: number }>() };
-      const g = liveGeneratorWithMutableClaims(stateDir, claimsRef);
+      const g = liveGenerator(stateDir);
 
       const first = await g();
       expect((first as Task[])[0].spec).toMatchObject({ instance_id: 'org__repo-1' });
@@ -692,25 +446,12 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — fresh-volume pool recov
     });
   }
 
-  function recoveryDiscovery(getMostRecent: DiscoveryAPI['getMostRecentTaskCidDigest']): DiscoveryAPI {
-    const notUsed = vi.fn(async () => { throw new Error('not used'); });
-    return {
-      getInstanceSuccessCounts: vi.fn(async () => new Map<string, number>()),
-      getInstanceClaimCounts: vi.fn(async () => new Map()),
-      getMostRecentTaskCidDigest: getMostRecent,
-      findClaimableTasks: notUsed, listLaunchedSolverNets: notUsed,
-      getLifecycleStatus: notUsed, getSolverNetOperatorCount: notUsed,
-      queryEnvelopes: notUsed, listPluginPublications: notUsed,
-      getPluginScores: notUsed, listBuilderArtifacts: notUsed,
-    } as DiscoveryAPI;
-  }
-
-  function recoveryGen(stateDir: string, discoveryApi: DiscoveryAPI) {
+  function recoveryGen(stateDir: string) {
     return makeSweRebenchV2GeneratorForLaunchedRecord({
       recordRef: { current: launchedRecord({ status: 'launched', manifestCid: 'bafy957recovery' }) },
       // admissionMode 'required' is the only mode that triggers the recovery hook.
       configRef: { current: { N_target_successes: 5, posting_window_ms: 300_000, admissionMode: 'required' as const } },
-      staticConfig: { stateDir, discoveryApi },
+      staticConfig: { stateDir },
     });
   }
 
@@ -725,8 +466,9 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — fresh-volume pool recov
     const fetchSpy = mockHfSuccess();
     // Recovery returns no-task (transient) — a fresh SolverNet whose first task
     // hasn't been posted yet. fetchFromIpfs is never reached on this path.
-    const getMostRecent = vi.fn(async () => undefined);
-    const gen = recoveryGen(stateDir, recoveryDiscovery(getMostRecent));
+    const recoveryMod = await import('../../src/solver-types/_swe-rebench-v2-pool-recovery.js');
+    const recoverSpy = vi.spyOn(recoveryMod, 'recoverVettedPoolFromNetwork');
+    const gen = recoveryGen(stateDir);
 
     const base = Date.now();
     let clock = base;
@@ -734,18 +476,19 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — fresh-volume pool recov
     try {
       clock = base;
       await gen();
-      expect(getMostRecent).toHaveBeenCalledTimes(1); // first attempt
+      expect(recoverSpy).toHaveBeenCalledTimes(1); // first attempt
 
-      // A second tick within the 5-min throttle window must NOT re-hit the indexer.
+      // A second tick within the 5-min throttle window must NOT re-hit recovery.
       clock = base + 60_000; // +1 min
       await gen();
-      expect(getMostRecent).toHaveBeenCalledTimes(1); // still 1 — throttled, NOT latched
+      expect(recoverSpy).toHaveBeenCalledTimes(1); // still 1 — throttled, NOT latched
 
       // After the throttle interval elapses, recovery is RETRIED (not latched).
       clock = base + 6 * 60_000 + 30_000; // +6.5 min from first
       await gen();
-      expect(getMostRecent).toHaveBeenCalledTimes(2); // retried — proves no permanent latch
+      expect(recoverSpy).toHaveBeenCalledTimes(2); // retried — proves no permanent latch
     } finally {
+      recoverSpy.mockRestore();
       nowSpy.mockRestore();
       fetchSpy.mockRestore();
     }
@@ -773,13 +516,15 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — fresh-volume pool recov
       }),
     );
     const fetchSpy = mockHfSuccess();
-    const getMostRecent = vi.fn(async () => undefined);
-    const gen = recoveryGen(stateDir, recoveryDiscovery(getMostRecent));
+    const recoveryMod = await import('../../src/solver-types/_swe-rebench-v2-pool-recovery.js');
+    const recoverSpy = vi.spyOn(recoveryMod, 'recoverVettedPoolFromNetwork');
+    const gen = recoveryGen(stateDir);
 
     try {
       await gen();
-      expect(getMostRecent).not.toHaveBeenCalled(); // local pool present → never queried the indexer
+      expect(recoverSpy).not.toHaveBeenCalled(); // local pool present → never queried recovery
     } finally {
+      recoverSpy.mockRestore();
       fetchSpy.mockRestore();
     }
   }, 120_000);
@@ -787,22 +532,6 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — fresh-volume pool recov
 
 describe('makeSweRebenchV2GeneratorForLaunchedRecord — vetted-pool staleness (#796)', () => {
   const MANIFEST_CID = 'bafymanifest796test';
-
-  function inertDiscovery(): DiscoveryAPI {
-    const notUsed = vi.fn(async () => { throw new Error('not used'); });
-    return {
-      getInstanceSuccessCounts: vi.fn(async () => new Map()),
-      getInstanceClaimCounts: vi.fn(async () => new Map()),
-      findClaimableTasks: notUsed,
-      listLaunchedSolverNets: notUsed,
-      getLifecycleStatus: notUsed,
-      getSolverNetOperatorCount: notUsed,
-      queryEnvelopes: notUsed,
-      listPluginPublications: notUsed,
-      getPluginScores: notUsed,
-      listBuilderArtifacts: notUsed,
-    } satisfies DiscoveryAPI;
-  }
 
   async function seedPublication(stateDir: string, version: string): Promise<void> {
     const artifact = parseVettedPoolArtifact({
@@ -837,7 +566,7 @@ describe('makeSweRebenchV2GeneratorForLaunchedRecord — vetted-pool staleness (
             admissionMode: 'python-floor' as const,
           },
         },
-        staticConfig: { stateDir, discoveryApi: inertDiscovery() },
+        staticConfig: { stateDir },
       });
       await gen();
       return gen.getState();

@@ -44,7 +44,7 @@ import type {
   MetadataPublisher,
   SetMetadataPublishResult,
   SubgraphClient,
-} from '../../src/solvernets/registry-client-erc8004.js';
+} from '../../src/solvernets/launch-publisher.js';
 import type { SetMetadataEvent } from '../../src/solvernets/most-recent-wins.js';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
 

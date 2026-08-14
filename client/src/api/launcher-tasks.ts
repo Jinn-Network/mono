@@ -28,7 +28,7 @@
  */
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { JinnConfig } from '../config.js';
-import type { TaskOnchainStatus, TaskStatusSnapshot } from '../discovery/types.js';
+import type { TaskOnchainStatus, TaskStatusSnapshot } from '../archive/types.js';
 import { joinedDisplayName, solverTypeFromJoinedContract } from '../solver-nets/registry.js';
 
 export type LauncherTaskState =

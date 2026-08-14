@@ -178,7 +178,7 @@ describe('gatherStatusForApi', () => {
     });
   });
 
-  it('enriches COMPLETE solve run outcomes from discovery.getVerdictTallies (#502)', async () => {
+  it('enriches COMPLETE solve run outcomes from the native verdict tally store (#502)', async () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
@@ -204,10 +204,44 @@ describe('gatherStatusForApi', () => {
         `UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`,
       ).run(2_500, 'swe-complete');
 
-      const getVerdictTallies = vi.fn(async () =>
-        new Map([['42', { pass: 0, fail: 2 }]]),
-      );
-      const discovery = { getVerdictTallies } as unknown as import('../../src/discovery/types.js').DiscoveryAPI;
+      const digest = `sha256:${'a'.repeat(64)}`;
+      store.db.exec(`
+        CREATE TABLE IF NOT EXISTS native_canonical_observations (
+          observation_id TEXT PRIMARY KEY, observation_json TEXT NOT NULL, accepted_at TEXT NOT NULL
+        );
+      `);
+      store.db
+        .prepare(
+          `INSERT INTO native_engagements
+            (engagement_id, chain_id, coordinator, task_id, role, operator_agent, task_digest,
+             submission_uri, submission_digest, state, attempt_index, attempt_uri, request_id,
+             policy_json, capability_json, created_at, updated_at)
+           VALUES ('eng-42', '84532', '0xcoord', '42', 'solver', '0xop', ?,
+                   'urn:uuid:00000000-0000-0000-0000-000000000042', 'sha256:${'b'.repeat(64)}',
+                   'solution-settled', 0, NULL, '0xreq42', '{}', '{}',
+                   '2026-08-01T00:00:02.000Z', '2026-08-01T00:00:05.000Z')`,
+        )
+        .run(digest);
+      store.db
+        .prepare(
+          `INSERT INTO native_canonical_observations (observation_id, observation_json, accepted_at)
+           VALUES ('obs-42a', ?, '2026-08-01T00:00:06.000Z'),
+                  ('obs-42b', ?, '2026-08-01T00:00:07.000Z')`,
+        )
+        .run(
+          JSON.stringify({
+            id: 'obs-42a',
+            type: 'network.jinn.task-execution.attempt-terminal.v1',
+            taskdigest: digest,
+            data: { state: 'rejected', detail: 'verdict-fail' },
+          }),
+          JSON.stringify({
+            id: 'obs-42b',
+            type: 'network.jinn.task-execution.attempt-terminal.v1',
+            taskdigest: digest,
+            data: { state: 'rejected', detail: 'verdict-fail' },
+          }),
+        );
 
       const status = await gatherStatusForApi(store, {
         earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
@@ -215,16 +249,14 @@ describe('gatherStatusForApi', () => {
         network: 'testnet' as const,
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
-        discovery,
       });
 
-      expect(getVerdictTallies).toHaveBeenCalledWith({ taskIds: ['42'] });
       const row = status.taskRuns?.recentTasks.find((r) => r.requestId === 'swe-complete');
       expect(row?.outcome).toBe('fail');
     });
   });
 
-  it('leaves outcome null when no discovery is supplied (#502)', async () => {
+  it('COMPLETE solve with no native tally degrades to awaiting, never fail (#502)', async () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
@@ -252,7 +284,7 @@ describe('gatherStatusForApi', () => {
 
       const status = await gatherStatusForApi(store, undefined);
       const row = status.taskRuns?.recentTasks.find((r) => r.requestId === 'swe-complete-nodisc');
-      expect(row?.outcome).toBeNull();
+      expect(row?.outcome).toBe('awaiting');
     });
   });
 
@@ -294,21 +326,15 @@ describe('gatherStatusForApi', () => {
           }),
         );
 
-      // Discovery is supplied but must NOT be consulted in native mode.
-      const getVerdictTallies = vi.fn(async () => new Map([['701', { pass: 0, fail: 9 }]]));
-      const discovery = { getVerdictTallies } as unknown as import('../../src/discovery/types.js').DiscoveryAPI;
-
       const status = await gatherStatusForApi(store, {
         earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-native-')),
         rpcUrl: 'http://127.0.0.1:0',
         network: 'testnet' as const,
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
-        discovery,
         config: { compositionMode: 'native' } as unknown as JinnConfig,
       });
 
-      expect(getVerdictTallies).not.toHaveBeenCalled();
       const row = status.taskRuns?.recentTasks.find((r) => r.taskId === '701');
       expect(row?.state).toBe('COMPLETE');
       expect(row?.outcome).toBe('pass');

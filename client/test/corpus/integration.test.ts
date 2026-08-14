@@ -3,9 +3,8 @@ import { createHash } from 'node:crypto';
 import { Store } from '../../src/store/store.js';
 import { createCorpus } from '../../src/corpus/index.js';
 import type { SignedEnvelope } from '../../src/types/envelope.js';
-import type { DiscoveryAPI } from '../../src/discovery/types.js';
-import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
-import { withFallback } from '../../src/discovery/with-fallback.js';
+import type { CorpusDiscoveryPort } from '@jinn-network/core/corpus-read';
+import { DiscoveryUnavailableError } from '../../src/discovery-client/types.js';
 import type { EnvelopeRef } from '../../src/corpus/types.js';
 
 const TEST_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
@@ -45,11 +44,8 @@ function fakeEnvelopeRef(opts: { manifestCid: string; opSafe: string }): Envelop
   };
 }
 
-function stubDiscovery(envelopeRefs: EnvelopeRef[] = []): DiscoveryAPI {
+function stubDiscovery(envelopeRefs: EnvelopeRef[] = []): CorpusDiscoveryPort {
   return {
-    findClaimableTasks: vi.fn().mockResolvedValue([]),
-    listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
-    getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
     queryEnvelopes: vi.fn().mockResolvedValue(envelopeRefs),
   };
 }
@@ -116,22 +112,10 @@ describe('createCorpus.read (integration)', () => {
     expect(acquireFn).toHaveBeenCalledTimes(1); // second read served from cache
   });
 
-  it('falls back to an empty successful on-chain result when the discovery indexer is unavailable', async () => {
-    // Primary throws DiscoveryUnavailableError; floor returns empty.
-    // withFallback routes to the floor after 1 failure (unhealthyThreshold=1).
-    const failingPrimary: DiscoveryAPI = {
-      findClaimableTasks: vi.fn().mockResolvedValue([]),
-      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
-      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+  it('surfaces DiscoveryUnavailableError from the corpus discovery port', async () => {
+    const discovery: CorpusDiscoveryPort = {
       queryEnvelopes: vi.fn().mockRejectedValue(new DiscoveryUnavailableError('indexer HTTP 429')),
     };
-    const emptyFloor: DiscoveryAPI = {
-      findClaimableTasks: vi.fn().mockResolvedValue([]),
-      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
-      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
-      queryEnvelopes: vi.fn().mockResolvedValue([]),
-    };
-    const discovery = withFallback(failingPrimary, emptyFloor, { unhealthyThreshold: 1 });
 
     const corpus = createCorpus({
       discovery,
@@ -141,17 +125,13 @@ describe('createCorpus.read (integration)', () => {
       selfSafeAddress: '0x' + 'b'.repeat(40),
     });
 
-    await expect(corpus.query({ limit: 5 })).resolves.toEqual([]);
-    expect(failingPrimary.queryEnvelopes).toHaveBeenCalled();
-    expect(emptyFloor.queryEnvelopes).toHaveBeenCalled();
+    await expect(corpus.query({ limit: 5 })).rejects.toThrow(/indexer HTTP 429/);
+    expect(discovery.queryEnvelopes).toHaveBeenCalled();
   });
 
   it('surfaces an actionable error when all configured corpus indexes fail', async () => {
     // discovery throws a non-transient error — corpus re-throws it.
-    const discovery: DiscoveryAPI = {
-      findClaimableTasks: vi.fn().mockResolvedValue([]),
-      listLaunchedSolverNets: vi.fn().mockResolvedValue([]),
-      getLifecycleStatus: vi.fn().mockResolvedValue(undefined),
+    const discovery: CorpusDiscoveryPort = {
       queryEnvelopes: vi.fn().mockRejectedValue(new Error('rpc unavailable')),
     };
 

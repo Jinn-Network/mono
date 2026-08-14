@@ -66,6 +66,7 @@ import {
   sealTask,
   serializeCanonicalJson,
   sha256Hex,
+  TASK_EXECUTION_ERROR_CATEGORIES,
   validateDelivery,
   validateDispatchContext,
   validateSubmission,
@@ -452,6 +453,7 @@ function parseLaunchPlan(value: unknown): LaunchPlan {
       if (!isRecord(candidate) || !hasOnlyKeys(
         candidate,
         ["match", "blame", "reasonCode"],
+        ["category"],
       ) || !isRecord(candidate.match) || !hasOnlyKeys(
         candidate.match,
         [],
@@ -464,7 +466,9 @@ function parseLaunchPlan(value: unknown): LaunchPlan {
           || (Number.isSafeInteger(exitCode) && Number(exitCode) >= 0 && Number(exitCode) <= 255))
         && (signal === undefined || nonEmptyString(signal))
         && (candidate.blame === "task" || candidate.blame === "infrastructure")
-        && nonEmptyString(candidate.reasonCode);
+        && nonEmptyString(candidate.reasonCode)
+        && (candidate.category === undefined
+          || TASK_EXECUTION_ERROR_CATEGORIES.includes(candidate.category as never));
     })
   )) {
     throw new TaskExecutionError("invalid-document", {
@@ -1932,7 +1936,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       this.appendTerminal(attempt, {
         state: "failed",
         blame: interpreted.blame ?? "task",
-        category: "protocol-violation",
+        category: interpreted.category ?? "protocol-violation",
         detail: stderrTail === undefined ? reason : `${reason}: ${stderrTail}`,
       });
       return;

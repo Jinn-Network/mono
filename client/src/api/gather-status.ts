@@ -49,7 +49,6 @@ import {
   type PredictionV1Status,
 } from './prediction-v1-build.js';
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
-import type { DiscoveryAPI } from '../discovery/types.js';
 import type { VerdictTally } from '../types/verdict-tally-read-model.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
 import type { EvidenceIndexingSource } from '../types/evidence-indexing.js';
@@ -215,14 +214,6 @@ export interface StatusGatherConfig {
    * `latestVersion` null — the SPA simply doesn't show the update banner.
    */
   latestVersion?: () => string | null;
-  /**
-   * Resolved DiscoveryAPI, threaded by `server.ts`. When present, the async
-   * status path enriches each COMPLETE solve run's task-relative `outcome`
-   * from `getVerdictTallies` (spec/2026-05-22-run-outcome.md). Absent ⇒
-   * outcomes stay `null` (the SPA renders `—`). This is a DISPLAY signal:
-   * any discovery failure degrades silently to `null`, never a wrong `'fail'`.
-   */
-  discovery?: DiscoveryAPI;
   /**
    * Optional getter for the live `EvidenceDriverLoop` instance (Task 12's
    * composition root threads this through server.ts). When present,
@@ -655,43 +646,27 @@ export async function gatherGatheredStatusRaw(
     taskRuns = undefined;
   }
 
-  // Enrich task-relative outcomes from the verdict tallies
-  // (spec/2026-05-22-run-outcome.md). DISPLAY signal — degrade silently to
-  // null on any failure; never surface a wrong 'fail'.
-  //
-  // Dual-read (one-swap R2, umbrella #2461, DR-2026-08-05): legacy mode reads
-  // the network indexer through `DiscoveryAPI.getVerdictTallies` (byte-unchanged
-  // — gated on a threaded `status.discovery` exactly as before); native mode
-  // reads the native projector's canonical observation store through the neutral
-  // `Store.verdictTallyReadModel()` port, because the legacy `discovery/` tree
-  // never runs under `compositionMode: "native"`. Dark on every legacy boot.
+  // Enrich task-relative outcomes from the native projector's verdict
+  // tally read model (spec/2026-05-22-run-outcome.md). DISPLAY signal —
+  // degrade silently to null on any failure; never surface a wrong 'fail'.
+  // Wave-4 D4 dropped the legacy `DiscoveryAPI.getVerdictTallies` path.
   if (taskRuns) {
-    const verdictMode = readPlaneMode(status);
-    const discovery = status?.discovery;
-    if (verdictMode === 'native' || discovery) {
-      try {
-        const solveTaskIds = [
-          ...new Set(
-            [...taskRuns.recentTasks, ...taskRuns.inFlight]
-              .filter((r) => r.taskRole !== 'evaluation' && r.state === 'COMPLETE' && r.taskId)
-              .map((r) => r.taskId as string),
-          ),
-        ];
-        let tallies: Map<string, VerdictTally>;
-        if (solveTaskIds.length === 0) {
-          tallies = new Map();
-        } else if (verdictMode === 'native') {
-          tallies = store.verdictTallyReadModel().getVerdictTallies({ taskIds: solveTaskIds });
-        } else {
-          // Legacy: `discovery` is defined here (the branch requires it when not
-          // native), so the byte-unchanged network read fires as before.
-          tallies = await discovery!.getVerdictTallies({ taskIds: solveTaskIds });
-        }
-        applyOutcomes(taskRuns.recentTasks, tallies);
-        applyOutcomes(taskRuns.inFlight, tallies);
-      } catch {
-        // Outcomes stay null → SPA renders '—'/'awaiting'.
-      }
+    try {
+      const solveTaskIds = [
+        ...new Set(
+          [...taskRuns.recentTasks, ...taskRuns.inFlight]
+            .filter((r) => r.taskRole !== 'evaluation' && r.state === 'COMPLETE' && r.taskId)
+            .map((r) => r.taskId as string),
+        ),
+      ];
+      const tallies: Map<string, VerdictTally> =
+        solveTaskIds.length === 0
+          ? new Map()
+          : store.verdictTallyReadModel().getVerdictTallies({ taskIds: solveTaskIds });
+      applyOutcomes(taskRuns.recentTasks, tallies);
+      applyOutcomes(taskRuns.inFlight, tallies);
+    } catch {
+      // Outcomes stay null → SPA renders '—'/'awaiting'.
     }
   }
 

@@ -17,7 +17,7 @@ import {
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse, type ProductErrorEnvelope } from "../errors.js";
 import { cancelRequested } from "../run/cancel-marker.js";
-import { foldRunJournal, readRunJournalEntries, type CellStatus } from "../run/journal.js";
+import { evaluationGaps, foldRunJournal, readRunJournalEntries, type CellStatus } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
@@ -40,6 +40,12 @@ export interface RunStatusCell {
    * folded from the run journal's own `blame` field (`../run/journal.ts`). Absent whenever no
    * error terminal on the current dispatch carried an observable blame. */
   readonly blame?: "task" | "infrastructure";
+  readonly evaluationRecovery?: {
+    readonly retryableFailures: number;
+    readonly pending: boolean;
+    readonly recovered: boolean;
+    readonly exhausted: boolean;
+  };
 }
 
 export interface RunStatusCounts {
@@ -75,6 +81,13 @@ export interface RunStatusResult {
   readonly driver?: RunDriverStatus;
   readonly cells: readonly RunStatusCell[];
   readonly counts: RunStatusCounts;
+  readonly evaluationRecovery?: {
+    readonly maxInfrastructureRetries: 1;
+    readonly retryableFailures: number;
+    readonly pendingCells: number;
+    readonly recoveredCells: number;
+    readonly exhaustedCells: number;
+  };
 }
 
 export function runStatus(
@@ -105,6 +118,16 @@ export function runStatus(
       const expected = expectedCellSet(benchRecord, runRecord);
       const entries = readRunJournalEntries(context.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);
+      const maxInfrastructureRetries = runRecord.policy.evaluation?.maxInfrastructureRetries ?? 0;
+      const pendingEvaluationCells = new Set(
+        evaluationGaps(
+          fold,
+          runRecord.policy.evaluation?.minVerdicts ?? 1,
+          maxInfrastructureRetries,
+        ).filter((gap) => document.state === "running"
+          && gap.cell.evaluationLegs.some((leg) => leg.retryableFailures > 0))
+          .map((gap) => gap.cell.cellKey),
+      );
 
       const driverGenerations = new Map<string, RunDriverStatus & { readonly eventIndex: number }>();
       entries.forEach((entry, eventIndex) => {
@@ -160,6 +183,15 @@ export function runStatus(
 
       const cells: RunStatusCell[] = expected.map((coord) => {
         const cell = fold.get(coord.cellKey);
+        const retryableFailures = cell?.evaluationLegs.reduce(
+          (total, leg) => total + leg.retryableFailures,
+          0,
+        ) ?? 0;
+        const recovered = cell?.evaluationLegs.some((leg) => leg.retryableFailures > 0
+          && cell.verdicts.some((verdict) => (verdict.evalIndex ?? 1) === leg.evalIndex)) ?? false;
+        const exhausted = cell?.evaluationLegs.some((leg) => leg.retryableFailures > 0
+          && (cell.completedEvalIndexes.includes(leg.evalIndex) || document.state === "closed")
+          && !cell.verdicts.some((verdict) => (verdict.evalIndex ?? 1) === leg.evalIndex)) ?? false;
         return {
           cellKey: coord.cellKey,
           armId: coord.armId,
@@ -172,6 +204,14 @@ export function runStatus(
           ...(cell?.verdictSha256 !== undefined ? { verdictSha256: cell.verdictSha256 } : {}),
           ...(cell?.detail !== undefined ? { detail: cell.detail } : {}),
           ...(cell?.blame !== undefined ? { blame: cell.blame } : {}),
+          ...(maxInfrastructureRetries === 0 ? {} : {
+            evaluationRecovery: {
+              retryableFailures,
+              pending: pendingEvaluationCells.has(coord.cellKey),
+              recovered,
+              exhausted,
+            },
+          }),
         };
       });
 
@@ -190,6 +230,18 @@ export function runStatus(
         ...(driver !== undefined ? { driver } : {}),
         cells,
         counts,
+        ...(maxInfrastructureRetries === 0 ? {} : {
+          evaluationRecovery: {
+            maxInfrastructureRetries: 1 as const,
+            retryableFailures: cells.reduce(
+              (total, cell) => total + (cell.evaluationRecovery?.retryableFailures ?? 0),
+              0,
+            ),
+            pendingCells: cells.filter((cell) => cell.evaluationRecovery?.pending).length,
+            recoveredCells: cells.filter((cell) => cell.evaluationRecovery?.recovered).length,
+            exhaustedCells: cells.filter((cell) => cell.evaluationRecovery?.exhausted).length,
+          },
+        }),
       };
     },
   });

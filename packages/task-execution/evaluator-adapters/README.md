@@ -101,17 +101,21 @@ proposed and are not patched in this package or the harness runtime.
 - **No new record or interchange format.** SARIF, JUnit XML, TAP, and benchmark-local
   JSON are ingestion formats parsed at the adapter edge. The only outward shape is
   `CompletedEvaluation`, which the harness composes into the signed Result Evaluation.
-- **No changes to the harness runtime, the registration contract, the launcher, or
-  `profiles`.** Findings there are surfaced with proposed dispositions, never patched.
+- **No ownership of the harness runtime, registration contract, launcher, or
+  `profiles`.** This package consumes their public contracts and keeps conformance
+  coverage aligned when those contracts evolve; it does not implement those layers.
 
 ## Unscorable is never a silent zero
 
 An evaluation that could not grade the solution raises `EvaluationOperationalError`.
-The harness runtime returns exit `EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE` (70),
-the launcher maps that to `blame: "infrastructure"`, and **no verdict is written**. A
+The harness runtime returns the typed retryable exit
+`EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE` (71) for the exact
+`UNAVAILABLE`/`provider-unavailable`/`new-attempt-required` contract, and the generic
+`EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE` (70) for other operational failures.
+The launcher maps both to `blame: "infrastructure"`, and **no verdict is written**. A
 `fail` verdict is reserved for a solution that *was* graded and did not satisfy the
 spec's `verdictRule`. `src/conformance.integration.test.ts` case 3 is the gate that
-holds this property against the real `runEvaluationHarness`.
+holds the provider-unavailable property against the real `runEvaluationHarness`.
 
 One consequence worth stating plainly: a malformed solver Result — unparseable JSON,
 empty bytes, a probability outside `[0,1]` — is a graded `fail`, not an operational
