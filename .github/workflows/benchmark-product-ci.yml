@@ -13,6 +13,8 @@ on:
       - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
       - "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md"
       - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
+      - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
+      - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
   push:
     branches: [next]
     paths:
@@ -26,6 +28,8 @@ on:
       - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
       - "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md"
       - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
+      - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
+      - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
 
 permissions:
   contents: read
@@ -68,6 +72,7 @@ jobs:
       # Cross-tree portal dependencies, built from source in dependency order: each one's `dist/`
       # is what the next one's type resolution reads. The full graph: BP-11's runtime closure
       # (protocol, trust-core, environment-record, profiles, records, task-admission, interop),
+      # the public Record Discovery source/transport/publication stack,
       # then BP-12's real local-venue stack (backend, supervisor, workspace, launchers -- all now
       # real runtime dependencies, not the prior test-only `task-execution-launchers`
       # devDependency) plus its evidence-* / attestation-issuer transitives and the evaluation
@@ -78,10 +83,16 @@ jobs:
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/client && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/transport-http && yarn install --immutable && yarn build)
+          (cd packages/discovery/publication && yarn install --immutable && yarn build)
           (cd packages/environments/record && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
           (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/publication && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
@@ -109,6 +120,10 @@ jobs:
           yarn install --immutable
           yarn typecheck
           yarn test
+          # The profile kit is intentionally product-local application acceptance coverage, not
+          # a shipped protocol claim. Run its manifest and the actual combined Harbor/source
+          # post-hoc case explicitly so future broad test filtering cannot silently omit it.
+          yarn vitest run src/conformance/publication-profile.test.ts src/runtime/harbor/harbor.test.ts
           yarn build
           yarn check:parity
           yarn pack:smoke

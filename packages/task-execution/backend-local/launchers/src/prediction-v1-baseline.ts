@@ -67,7 +67,12 @@ function isPredictionOutput(output) {
     && isObject(properties.submittedAt) && keys(properties.submittedAt) === 'format,type' && properties.submittedAt.type === 'string' && properties.submittedAt.format === 'date-time';
 }
 function isNativeTask(doc) {
-  if (!isObject(doc) || keys(doc) !== 'evaluation,instructions,outputs,payload,profile,protocol' || doc.protocol !== 'https://spec.jinn.network/profiles/task-execution/v1' || typeof doc.instructions !== 'string' || doc.instructions.length === 0) return false;
+  if (!isObject(doc) || doc.protocol !== 'https://spec.jinn.network/profiles/task-execution/v1' || typeof doc.instructions !== 'string' || doc.instructions.length === 0) return false;
+  const required = ['evaluation','instructions','outputs','payload','profile','protocol'];
+  const documentKeys = Object.keys(doc);
+  if (!required.every((key) => documentKeys.includes(key))) return false;
+  if (documentKeys.some((key) => !required.includes(key) && key !== 'author' && !/^[a-z][a-z0-9+.-]*:/i.test(key))) return false;
+  if (doc.author !== undefined && (typeof doc.author !== 'string' || !/^[a-z][a-z0-9+.-]*:/i.test(doc.author))) return false;
   if (!isObject(doc.profile) || keys(doc.profile) !== 'digest,uri' || doc.profile.uri !== PROFILE_URI || !isObject(doc.profile.digest) || keys(doc.profile.digest) !== 'sha256' || doc.profile.digest.sha256 !== PROFILE_DIGEST) return false;
   if (!isObject(doc.evaluation) || keys(doc.evaluation) !== 'digest,name' || doc.evaluation.name !== 'evaluation-spec.json' || !isObject(doc.evaluation.digest) || keys(doc.evaluation.digest) !== 'sha256' || !/^[0-9a-f]{64}$/.test(doc.evaluation.digest.sha256)) return false;
   if (!Array.isArray(doc.outputs) || doc.outputs.length !== 1 || !isPredictionOutput(doc.outputs[0])) return false;

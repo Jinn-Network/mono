@@ -1,0 +1,53 @@
+{
+  "name": "@jinn-network/record-publication",
+  "version": "0.1.0",
+  "description": "Kind-neutral, recoverable publication plans for exact records and artifacts.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/discovery/publication"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/record-discovery-serve": "0.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/trust-core": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/record-discovery-protocol": "portal:../protocol",
+    "@jinn-network/record-discovery-serve": "portal:../serve",
+    "@jinn-network/trust-core": "portal:../../trust/core"
+  }
+}

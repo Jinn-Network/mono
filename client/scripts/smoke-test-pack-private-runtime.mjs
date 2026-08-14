@@ -64,15 +64,14 @@ try {
   writeFileSync(join(smokeDir, 'consumer.mts'), `
 import type { DaemonConfig } from '@jinn-network/client';
 
-type EngineConfig = DaemonConfig['restorationEngine'];
 type HarvestConfig = NonNullable<DaemonConfig['harvest']>;
-type EngineStoreRetired = 'mineableStore' extends keyof EngineConfig ? false : true;
+type RestorationEngineRetired = 'restorationEngine' extends keyof DaemonConfig ? false : true;
 type HarvestStoreRetired = 'mineableStore' extends keyof HarvestConfig ? false : true;
 
-const engineStoreRetired: EngineStoreRetired = true;
+const restorationEngineRetired: RestorationEngineRetired = true;
 const harvestStoreRetired: HarvestStoreRetired = true;
 
-void engineStoreRetired;
+void restorationEngineRetired;
 void harvestStoreRetired;
 `);
   // @safe-global/types-kit@4.0.1 has declarations that reference a package

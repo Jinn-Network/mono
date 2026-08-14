@@ -5,6 +5,15 @@ import { z } from "zod";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const schemaRoot = join(packageRoot, "schemas");
+const protocolObservationSchemaPath = join(
+  packageRoot,
+  "..",
+  "..",
+  "task-execution",
+  "protocol",
+  "schemas",
+  "observation.schema.json",
+);
 const mode = process.argv[2];
 
 if (mode !== "--write" && mode !== "--check") {
@@ -17,6 +26,40 @@ function jsonBytes(value) {
 
 const NAMESPACED = "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$";
 const UNIT_DECIMAL = "^(?:0*1(?:\\.0+)?|0*0\\.(?:0*[1-9]\\d*))$";
+
+/**
+ * Compose the TEP-generated CloudEvents base and its payload union into one faithful Draft
+ * 2020-12 union. Zod emits the runtime intersection as `allOf`; its closed payload member then
+ * falsely rejects every CloudEvents base property under JSON Schema. This merge consumes the
+ * protocol package's generated authority instead of copying the 11 observation semantics here.
+ */
+function composeProtocolObservationSchema(generated) {
+  const [envelope, payloads] = generated.allOf ?? [];
+  if (
+    envelope?.type !== "object"
+    || typeof envelope.properties !== "object"
+    || !Array.isArray(payloads?.oneOf)
+  ) {
+    throw new Error("Unexpected task-execution observation schema shape");
+  }
+  return {
+    $comment: "Composed from @jinn-network/task-execution-protocol/schemas/observation.schema.json.",
+    oneOf: payloads.oneOf.map((payload) => ({
+      type: "object",
+      properties: {
+        ...structuredClone(envelope.properties),
+        ...structuredClone(payload.properties),
+      },
+      required: [...new Set([...(envelope.required ?? []), ...(payload.required ?? [])])],
+      additionalProperties: structuredClone(envelope.additionalProperties ?? {}),
+    })),
+  };
+}
+
+const generatedProtocolObservationSchema = JSON.parse(
+  await readFile(protocolObservationSchemaPath, "utf8"),
+);
+const protocolObservationSchema = composeProtocolObservationSchema(generatedProtocolObservationSchema);
 
 /** Zod's ResourceDescriptor.and({ digest }) emits a closed second allOf member. Runtime keeps
  * descriptor hints (notably optional `name`), so keep the digest member open and let the first
@@ -45,6 +88,19 @@ function postProcess(filename, schema) {
     schema.$comment = "Runtime checks: cross-record references, canonical byte equality, and Report cross-field invariants.";
   } else {
     schema.$comment = "Runtime checks: cross-record references, canonical byte equality, and Matrix/Run cross-field invariants.";
+  }
+  if (filename === "benchmark-accounting.schema.json") {
+    schema.$comment = "Runtime checks: canonical byte equality, deterministic accounting order, comparable registration boundaries, and delegate authorization effective no later than close.";
+  }
+  if (filename === "observation-archive.schema.json") {
+    schema.$comment = "Runtime checks: canonical byte equality, deterministic stream/observation/conflict ordering, conflict equivalence, and authority designation.";
+    schema.$defs = {
+      ...(schema.$defs ?? {}),
+      protocolObservation: structuredClone(protocolObservationSchema),
+    };
+    const stream = schema.properties.streams.items.properties;
+    stream.observations.items = { $ref: "#/$defs/protocolObservation" };
+    stream.conflicts.items.properties.observations.items = { $ref: "#/$defs/protocolObservation" };
   }
   if (filename === "run.schema.json") {
     schema.properties.policy.properties.completenessFloor.pattern = UNIT_DECIMAL;
@@ -94,17 +150,20 @@ const { BenchmarkRecordSchema } = await import("../dist/benchmark/schema.js");
 const { RunRecordSchema } = await import("../dist/run/schema.js");
 const { MatrixRecordSchema } = await import("../dist/matrix/schema.js");
 const { ReportRecordSchema } = await import("../dist/report/schema.js");
+const { BenchmarkAccountingRecordSchema, ObservationArchiveSchema } = await import("../dist/accounting/schema.js");
 
 const FAMILIES = [
   ["benchmark.schema.json", BenchmarkRecordSchema],
   ["run.schema.json", RunRecordSchema],
   ["matrix.schema.json", MatrixRecordSchema],
   ["report.schema.json", ReportRecordSchema],
+  ["benchmark-accounting.schema.json", BenchmarkAccountingRecordSchema],
+  ["observation-archive.schema.json", ObservationArchiveSchema],
 ];
 
 const assets = new Map();
 for (const [filename, schema] of FAMILIES) {
-  const options = filename === "matrix.schema.json" || filename === "report.schema.json"
+  const options = filename === "matrix.schema.json" || filename === "report.schema.json" || filename === "observation-archive.schema.json"
     ? { target: "draft-2020-12", unrepresentable: "any" }
     : { target: "draft-2020-12" };
   assets.set(filename, jsonBytes(postProcess(filename, z.toJSONSchema(schema, options))));

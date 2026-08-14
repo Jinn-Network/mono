@@ -13,7 +13,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { z } from "zod";
 import { refuse, refuseWithIssues } from "../errors.js";
 import { atomicWriteFileSync, readFileIfExistsSync } from "../fs/atomic.js";
-import { artifactsDir, draftsDir, recordsDir, workspaceMetadataPath } from "./layout.js";
+import { artifactsDir, draftsDir, publicationDir, recordsDir, workspaceMetadataPath } from "./layout.js";
 
 export const WORKSPACE_STORAGE_VERSION = 1;
 
@@ -59,6 +59,7 @@ export function createWorkspaceLayout(workspaceDir: string, createdAt: string): 
   mkdirSync(draftsDir(workspaceDir), { recursive: true });
   mkdirSync(recordsDir(workspaceDir), { recursive: true });
   mkdirSync(artifactsDir(workspaceDir), { recursive: true });
+  mkdirSync(publicationDir(workspaceDir), { recursive: true });
   atomicWriteFileSync(metadataPath, JSON.stringify(parsed.data, null, 2));
   return parsed.data;
 }

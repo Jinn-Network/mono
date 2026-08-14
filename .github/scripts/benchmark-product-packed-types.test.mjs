@@ -99,10 +99,16 @@ assertFamilyCoverage();
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
+  ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/record-discovery-transport-http', join(root, 'packages', 'discovery', 'transport-http')],
+  ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
+  ['@jinn-network/benchmarking-publication', join(root, 'packages', 'benchmarking', 'publication')],
   ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
@@ -237,11 +243,11 @@ export const productName: string = PRODUCT_BRANDING.displayName;
 const guiInitCapability = GUI_CAPABILITY_CATALOG.initWorkspace;
 export const guiInitOperation: string = guiInitCapability.status === 'shipped'
   ? guiInitCapability.action
-  : guiInitCapability.deferredTo;
+  : guiInitCapability.reason;
 const guiResultsCapability = GUI_CAPABILITY_CATALOG.runResults;
 export const guiResultsOperation: string = guiResultsCapability.status === 'shipped'
   ? guiResultsCapability.action
-  : guiResultsCapability.deferredTo;
+  : guiResultsCapability.reason;
 `,
   );
   await writeFile(join(consumerRoot, 'tsconfig.json'), JSON.stringify({

@@ -123,8 +123,13 @@ const CORE_ALLOWED_JINN_PACKAGES = [
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-publication',
   '@jinn-network/benchmarking-records',
   '@jinn-network/benchmarking-run',
+  '@jinn-network/record-discovery-protocol',
+  '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-transport-http',
+  '@jinn-network/record-publication',
   '@jinn-network/task-admission',
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-backend-local',
@@ -352,7 +357,7 @@ test('benchmark-product actually imports the dependencies it declares (positive 
   }
 });
 
-test('web keeps the core edge server-only, has no API routes, and does not duplicate product semantics', () => {
+test('web keeps the core edge server-only, exposes only its fixed public archive route, and does not duplicate product semantics', () => {
   const webRoot = join(packageRoot, 'web', 'src');
   const webFiles = files(webRoot);
   const clientCoreImports = webFiles.flatMap((file) => {
@@ -383,7 +388,9 @@ test('web keeps the core edge server-only, has no API routes, and does not dupli
   const apiRoutes = webFiles
     .filter((file) => /(?:^|\/)app(?:\/.*)?\/route\.[cm]?[jt]sx?$/.test(file))
     .map((file) => relative(root, file));
-  assert.deepEqual(apiRoutes, [], 'v1 forbids HTTP API route handlers');
+  assert.deepEqual(apiRoutes, [
+    'packages/benchmark-product/web/src/app/publication/[...path]/route.ts',
+  ], 'only the fixed same-workspace public archive route is allowed');
 
   const duplicated = webFiles.flatMap((file) => {
     const source = readFileSync(file, 'utf8');

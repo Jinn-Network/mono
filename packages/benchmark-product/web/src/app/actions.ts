@@ -15,6 +15,12 @@ import {
   inspectDraft,
   listDrafts,
   runLock,
+  publicationAccounting,
+  publicationConfigure,
+  publicationRegister,
+  publicationReport,
+  publicationStatus,
+  normalizePublicArchiveBaseUrl,
   runLaunch,
   runResume,
   runCancel,
@@ -40,7 +46,7 @@ import {
   positiveIntegerField,
 } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
-import { ProductContextConfigurationError, readRunDriverTestingDeps } from "@/lib/server/product-context";
+import { ProductContextConfigurationError, readProductServerConfiguration, readRunDriverTestingDeps } from "@/lib/server/product-context";
 import { projectRunStatusForGui } from "@/lib/server/view-models";
 import { projectPublishErrorForGui } from "@/lib/server/gui-error";
 
@@ -186,6 +192,58 @@ export async function runQuoteAction(_previous: GuiActionState, formData: FormDa
 export async function runLockAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
   return executeOperation((context) => runLock(context, { draftId }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
+}
+
+/** The browser supplies a locator and draft id only. The workspace is fixed by server config. */
+export async function publicationConfigureAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation((context) => {
+    const configured = readProductServerConfiguration().publicationPublicBaseUrl;
+    if (configured === undefined) throw new ProductContextConfigurationError("The server must configure a publication public base URL before the GUI can publish");
+    return publicationConfigure(context, { draftId, publicBaseUrl: configured });
+  }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
+}
+
+export async function publicationRegisterAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation((context) => {
+    const configured = readProductServerConfiguration().publicationPublicBaseUrl;
+    if (configured === undefined) throw new ProductContextConfigurationError("The server must configure a publication public base URL before the GUI can publish");
+    return publicationRegister(context, { draftId, publicBaseUrl: configured });
+  }, { revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`] });
+}
+
+export async function publicationStatusAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  return executeOperation((context) => publicationStatus(context, { draftId: field(formData, "draftId") }));
+}
+
+export async function publicationAccountingAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation(async (context) => publicationAccounting(context, { draftId }), {
+    revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`, `/workspace/${draftId}/results`],
+  });
+}
+
+/** Publishing a signed interpretation is an explicit, server-owned consent action. The browser
+ * supplies only the draft and acknowledgement; source locator and workspace authority stay server-side. */
+export async function publicationReportAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  if (field(formData, "consent") !== "publish-signed-report-v2") {
+    throw new ProductContextConfigurationError("Confirm signed Report v2 publication before continuing");
+  }
+  return executeOperation(async (context) => {
+    const configured = readProductServerConfiguration().publicationPublicBaseUrl;
+    if (configured === undefined) throw new ProductContextConfigurationError("The server must configure a publication public base URL before the GUI can publish");
+    const status = publicationStatus(context, { draftId });
+    if (!status.ok) return status;
+    if (status.result.publicBaseUrl === undefined
+      || normalizePublicArchiveBaseUrl(status.result.publicBaseUrl) !== configured) {
+      throw new ProductContextConfigurationError("The server-configured public archive mount must match the run's configured publication locator before a signed Report v2 can publish");
+    }
+    return publicationReport(context, { draftId });
+  }, {
+    revalidate: [`/workspace/${draftId}`, `/workspace/${draftId}/run`, `/workspace/${draftId}/results`],
+  });
 }
 
 export async function runLaunchAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {

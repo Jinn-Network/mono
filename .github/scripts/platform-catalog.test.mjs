@@ -759,15 +759,21 @@ test('records authority status per governing document', () => {
   const benchmarking = catalog.packages.filter((pkg) => pkg.domain === 'benchmarking');
   assert.ok(benchmarking.length > 0);
   for (const pkg of benchmarking) {
+    const governingDesign = pkg.name === '@jinn-network/benchmarking-publication'
+      ? {
+          path: 'docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md',
+          status: 'draft',
+        }
+      : {
+          path: 'docs/superpowers/specs/2026-07-28-benchmarking-application-design.md',
+          status: 'proposed',
+        };
     assert.deepEqual(pkg.authority.documents, [
       {
         path: 'docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md',
         status: 'ratified',
       },
-      {
-        path: 'docs/superpowers/specs/2026-07-28-benchmarking-application-design.md',
-        status: 'proposed',
-      },
+      governingDesign,
     ]);
     assert.deepEqual(pkg.authority.decisionRecord, {
       path: 'log/decisions/2026-07-30-platform-boundary-and-topology.md',

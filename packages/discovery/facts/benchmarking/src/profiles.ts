@@ -19,3 +19,6 @@ export const benchmarkProfile: FactsProfileDocument = loadProfile("benchmark.v1.
 export const runProfile: FactsProfileDocument = loadProfile("run.v1.json");
 export const matrixProfile: FactsProfileDocument = loadProfile("matrix.v1.json");
 export const reportProfile: FactsProfileDocument = loadProfile("report.v1.json");
+/** Legacy raw Report v1 facts remain immutable; signed envelopes use this separate profile. */
+export const signedReportProfile: FactsProfileDocument = loadProfile("report.v2.json");
+export const benchmarkAccountingProfile: FactsProfileDocument = loadProfile("benchmark-accounting.v1.json");
