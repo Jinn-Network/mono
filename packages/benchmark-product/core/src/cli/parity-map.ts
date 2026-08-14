@@ -51,6 +51,9 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   sampleInit: "sample init",
   importSweBenchRows: "import swebench",
   selectInspectEvaluation: "runtime inspect select",
+  selectHarborRuntime: "runtime harbor select",
+  selectTerminalBench2Runtime: "runtime terminal-bench-2 select",
+  migrateTerminalBenchLegacyTask: "runtime terminal-bench migrate",
   armAdd: "arm add",
   armUpdate: "arm update",
   armRemove: "arm remove",
@@ -61,6 +64,11 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runPreview: "preview",
   runQuote: "quote",
   runLock: "lock",
+  publicationConfigure: "publication configure",
+  publicationRegister: "publication register",
+  publicationAccounting: "publication accounting",
+  publicationReport: "publication report",
+  publicationStatus: "publication status",
   runLaunch: "launch",
   runResume: "resume",
   runCancel: "cancel",
@@ -85,6 +93,9 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   sampleInit: "sample.init",
   importSweBenchRows: "import.swebench",
   selectInspectEvaluation: "runtime.inspect.select",
+  selectHarborRuntime: "runtime.harbor.select",
+  selectTerminalBench2Runtime: "runtime.terminal-bench-2.select",
+  migrateTerminalBenchLegacyTask: "runtime.terminal-bench.migrate",
   armAdd: "arm.add",
   armUpdate: "arm.update",
   armRemove: "arm.remove",
@@ -95,6 +106,11 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runPreview: "preview",
   runQuote: "quote",
   runLock: "lock",
+  publicationConfigure: "publication.configure",
+  publicationRegister: "publication.register",
+  publicationAccounting: "publication.accounting",
+  publicationReport: "publication.report",
+  publicationStatus: "publication.status",
   runLaunch: "launch",
   runResume: "run.resume",
   runCancel: "cancel",
@@ -118,6 +134,9 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
   sampleInit: "Attaches the bundled sample benchmark to a draft.",
   importSweBenchRows: "Imports SWE-bench rows as a sealed benchmark attached to a draft.",
   selectInspectEvaluation: "Selects, probes, and digest-binds an unmodified Inspect evaluation and its runtime configuration.",
+  selectHarborRuntime: "Selects and digest-binds a managed Harbor runtime.",
+  selectTerminalBench2Runtime: "Resolves one immutable Terminal-Bench 2 task and binds it to the managed Harbor runtime.",
+  migrateTerminalBenchLegacyTask: "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
   armAdd: "Adds a solver arm (pinning) to a draft.",
   armUpdate: "Updates an existing arm's pinning and/or notes.",
   armRemove: "Removes an arm from a draft.",
@@ -129,6 +148,11 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
     "Runs a disposable rehearsal of the draft's arms on the local venue in a throwaway area; never official evidence, never advances the lifecycle.",
   runQuote: "Prices a compiled run against the local venue's capabilities, without spending.",
   runLock: "Seals the Run record and transitions the draft to locked (authority-gated).",
+  publicationConfigure: "Configures the mutable public source locator and explicit prospective-publication intent.",
+  publicationRegister: "Stores, announces, and exact-probes the registration closure before dispatch or truthfully post-hoc.",
+  publicationAccounting: "Publishes retained complete or partial dispatch accounting and Matrix v2 without running work or requiring a Report.",
+  publicationReport: "Produces, independently verifies, and publishes the signed Report v2 envelope after its exact accounting closure.",
+  publicationStatus: "Reads the local publication state, timing assurance, receipts, compatibility, and recovery guidance without contacting a backend.",
   runLaunch: "Launches the locked run on the real local venue (authority-gated).",
   runResume: "Resumes an interrupted run, dispatching only outstanding work.",
   runCancel:
@@ -144,12 +168,12 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
 
 /**
  * GUI disposition for every shipped library operation. This is the M3 parity
- * authority: an operation is either backed by one stable GUI action id now or
- * explicitly assigned to the packet that will ship it. Silence is forbidden.
+ * authority: an operation is either backed by one stable GUI action id now or has a tested
+ * security reason it is unavailable. Silence is forbidden.
  */
 export type GuiCapability =
   | { readonly status: "shipped"; readonly action: string }
-  | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" };
+  | { readonly status: "unavailable"; readonly reason: string };
 
 export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   initWorkspace: { status: "shipped", action: "workspace.init" },
@@ -161,6 +185,11 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   sampleInit: { status: "shipped", action: "intake.sample" },
   importSweBenchRows: { status: "shipped", action: "intake.swebench" },
   selectInspectEvaluation: { status: "shipped", action: "runtime.inspect.select" },
+  // These inputs contain host paths/executable locations. A browser must not supply those
+  // paths; a future server-configured runtime catalogue can safely expose them.
+  selectHarborRuntime: { status: "unavailable", reason: "requires server-configured Harbor host paths; browser-supplied paths are forbidden" },
+  selectTerminalBench2Runtime: { status: "unavailable", reason: "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden" },
+  migrateTerminalBenchLegacyTask: { status: "unavailable", reason: "requires server-configured migration input paths; browser-supplied paths are forbidden" },
   armAdd: { status: "shipped", action: "arm.add" },
   armUpdate: { status: "shipped", action: "arm.update" },
   armRemove: { status: "shipped", action: "arm.remove" },
@@ -171,6 +200,11 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runPreview: { status: "shipped", action: "run.preview" },
   runQuote: { status: "shipped", action: "run.quote" },
   runLock: { status: "shipped", action: "run.lock" },
+  publicationConfigure: { status: "shipped", action: "publication.configure" },
+  publicationRegister: { status: "shipped", action: "publication.register" },
+  publicationAccounting: { status: "shipped", action: "publication.accounting" },
+  publicationStatus: { status: "shipped", action: "publication.status" },
+  publicationReport: { status: "shipped", action: "publication.report" },
   runLaunch: { status: "shipped", action: "run.launch" },
   runResume: { status: "shipped", action: "run.resume" },
   runCancel: { status: "shipped", action: "run.cancel" },

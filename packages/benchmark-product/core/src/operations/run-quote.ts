@@ -37,10 +37,10 @@ import { transition, type LifecycleState } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { draftPath } from "../workspace/layout.js";
-import { assertWorkspace } from "../workspace/workspace.js";
 import { compileDraft, type CompiledRun } from "../run/compile.js";
 import { readPreviewLog, type PreviewLog } from "../run/preview-log.js";
-import { deriveRunOwner, specDigest, writeRunState } from "../run/state.js";
+import { createPublicationState, readRunState, specDigest, writeRunState } from "../run/state.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -254,8 +254,9 @@ export function runQuote(
       const nextState = ensureQuotable(document.state, input.draftId);
 
       const closeAt = computeCloseAt(at, document.spec.policy.closeAfterMs);
-      const workspaceMetadata = assertWorkspace(clockedContext.workspaceDir);
-      const owner = deriveRunOwner(workspaceMetadata.createdAt, input.draftId);
+      // One real workspace-held did:key is both Run owner and public source agent. This avoids
+      // inventing an unverifiable delegation from a deterministic URN with no private key.
+      const owner = loadOrCreateReportSigningKey(clockedContext.workspaceDir).keyId;
 
       const compiled = compileDraft({
         workspaceDir: clockedContext.workspaceDir,
@@ -285,12 +286,19 @@ export function runQuote(
         await venue.shutdown();
       }
 
+      const previousPublication = readRunState(clockedContext.workspaceDir, input.draftId)?.publication;
       writeRunState(clockedContext.workspaceDir, input.draftId, {
         draftId: input.draftId,
         specSha256: specDigest(document.spec),
         owner,
         quote,
         quotedAt: at,
+        // The source agent is the durable workspace report-signing did:key, never the mutable
+        // workspace principal or a URL.  This is created at quote time so it is stable before
+        // any later registration receipt makes the identity immutable.
+        publication: previousPublication === undefined
+          ? createPublicationState({ agentKeyRef: owner })
+          : { ...previousPublication, source: { ...previousPublication.source, agentKeyRef: owner } },
       });
 
       let draft = document;

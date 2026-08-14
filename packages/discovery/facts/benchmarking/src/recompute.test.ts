@@ -11,16 +11,20 @@ import type { ReferencedBytes } from "@jinn-network/record-discovery-protocol";
 import { describe, expect, it } from "vitest";
 
 import {
+  BENCHMARK_ACCOUNTING_RECORD_KIND,
   BENCHMARK_RECORD_KIND,
   MATRIX_RECORD_KIND,
   REPORT_RECORD_KIND,
+  REPORT_V2_RECORD_KIND,
   RUN_RECORD_KIND,
 } from "./identifiers.js";
 import {
   BENCHMARKING_FACTS_RECOMPUTE,
+  benchmarkAccountingRecompute,
   benchmarkRecompute,
   matrixRecompute,
   reportRecompute,
+  signedReportRecompute,
   runRecompute,
 } from "./recompute.js";
 
@@ -331,11 +335,13 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     expect(await reportRecompute(junk, noReferencedBytes)).toEqual({});
   });
 
-  it("registry resolves the four kinds and returns undefined for unknown kinds", () => {
+  it("registry resolves legacy, signed Report, and Accounting kinds and returns undefined for unknown kinds", () => {
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(BENCHMARK_RECORD_KIND)).toBe(benchmarkRecompute);
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(RUN_RECORD_KIND)).toBe(runRecompute);
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(MATRIX_RECORD_KIND)).toBe(matrixRecompute);
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(REPORT_RECORD_KIND)).toBe(reportRecompute);
+    expect(BENCHMARKING_FACTS_RECOMPUTE.get(REPORT_V2_RECORD_KIND)).toBe(signedReportRecompute);
+    expect(BENCHMARKING_FACTS_RECOMPUTE.get(BENCHMARK_ACCOUNTING_RECORD_KIND)).toBe(benchmarkAccountingRecompute);
     expect(BENCHMARKING_FACTS_RECOMPUTE.get("https://spec.jinn.network/records/unknown/v1")).toBeUndefined();
   });
 });

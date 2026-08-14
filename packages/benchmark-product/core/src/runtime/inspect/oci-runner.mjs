@@ -119,7 +119,13 @@ function populateVolume(dockerPath, imageDigest, volume, filename, input, mode, 
 
 function setupBroker(dockerPath, dockerArgs, containerName, imageDigest, connection, probeOnly = false) {
   if (!probeOnly) {
-    if (dockerArgs.at(-1) === "/jinn/input/inspect-probe.json") return undefined;
+    // Probe and verifier workers never call a model. In particular, the verifier input is an
+    // EvalLog rather than inspect-run.json, and must not acquire a broker, credential volume, or
+    // network merely because it shares this cancellation-safe OCI supervisor.
+    if ([
+      "/jinn/input/inspect-probe.json",
+      "/jinn/input/inspect-verify.json",
+    ].includes(dockerArgs.at(-1))) return undefined;
     const inputDir = mountSource(dockerArgs, "/jinn/input");
     if (inputDir === undefined) throw new Error("credentialed worker input mount is missing");
     const runInput = JSON.parse(readFileSync(join(inputDir, "inspect-run.json"), "utf8"));

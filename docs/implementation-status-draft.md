@@ -120,7 +120,6 @@ loop names, heartbeat intervals, and admission class.
 | Loop | File | Conditional? |
 |---|---|---|
 | `CreatorLoop` | [`daemon/creator.ts`](client/src/daemon/creator.ts) | legacy mode |
-| `DeliveryWatcherLoop` | [`daemon/delivery-watcher.ts`](client/src/daemon/delivery-watcher.ts) | legacy mode |
 | `WorkLoop` | [`daemon/work-loop.ts`](client/src/daemon/work-loop.ts) | `composition` + `work` configured |
 | `EvaluatorLoop` | [`daemon/evaluator-loop.ts`](client/src/daemon/evaluator-loop.ts) | `evaluator` configured |
 | `PostingLoop` | [`daemon/posting-loop.ts`](client/src/daemon/posting-loop.ts) | native mode + non-empty `posting[]` |

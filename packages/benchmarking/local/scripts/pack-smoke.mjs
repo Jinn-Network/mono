@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const crossTree = [
+  ["@jinn-network/trust-core", join(packageRoot, "..", "..", "trust", "core")],
   ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol")],
   ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend")],
   ["@jinn-network/task-execution-profiles", join(packageRoot, "..", "..", "task-execution", "profiles")],

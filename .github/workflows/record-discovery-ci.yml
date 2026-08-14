@@ -167,6 +167,55 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  publication:
+    needs: [foundation, serve]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependency from source
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Restore Record Discovery Protocol distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-protocol-dist
+          path: packages/discovery/protocol/dist
+      - name: Restore Record Discovery Serve distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: record-discovery-serve-dist
+          path: packages/discovery/serve/dist
+      - name: Install Record Discovery Protocol toolchain
+        working-directory: packages/discovery/protocol
+        run: yarn install --immutable
+      - name: Install Record Discovery Serve toolchain
+        working-directory: packages/discovery/serve
+        run: yarn install --immutable
+      - name: Verify Record Publication
+        working-directory: packages/discovery/publication
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Record Publication distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: record-discovery-publication-dist
+          path: packages/discovery/publication/dist
+          if-no-files-found: error
+          retention-days: 1
+
   client:
     needs: [foundation, testing]
     runs-on: ubuntu-latest
@@ -622,7 +671,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, testing, serve, client, transport-http, facts-evidence, facts-trust, facts-task-execution, facts-benchmarking, facts-environments, facts-chain-environments, sources-evidence-journal]
+    needs: [architecture, foundation, testing, serve, publication, client, transport-http, facts-evidence, facts-trust, facts-task-execution, facts-benchmarking, facts-environments, facts-chain-environments, sources-evidence-journal]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -632,6 +681,7 @@ jobs:
           FOUNDATION_RESULT: ${{ needs.foundation.result }}
           TESTING_RESULT: ${{ needs.testing.result }}
           SERVE_RESULT: ${{ needs.serve.result }}
+          PUBLICATION_RESULT: ${{ needs.publication.result }}
           CLIENT_RESULT: ${{ needs.client.result }}
           TRANSPORT_HTTP_RESULT: ${{ needs.transport-http.result }}
           FACTS_EVIDENCE_RESULT: ${{ needs.facts-evidence.result }}
@@ -647,6 +697,7 @@ jobs:
             "$FOUNDATION_RESULT" \
             "$TESTING_RESULT" \
             "$SERVE_RESULT" \
+            "$PUBLICATION_RESULT" \
             "$CLIENT_RESULT" \
             "$TRANSPORT_HTTP_RESULT" \
             "$FACTS_EVIDENCE_RESULT" \
@@ -677,6 +728,7 @@ jobs:
         run: |
           declare -A target=(
             [protocol]=protocol [testing]=testing [serve]=serve [client]=client
+            [publication]=publication
             [transport-http]=transport-http
             [facts-evidence]=facts/evidence [facts-trust]=facts/trust
             [facts-task-execution]=facts/task-execution

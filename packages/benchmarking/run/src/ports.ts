@@ -4,7 +4,11 @@
  * hosts inject implementations that satisfy these contracts.
  */
 
-import type { MatrixRecord, RunRecord } from "@jinn-network/benchmarking-records";
+import type {
+  BenchmarkAccountingRecord,
+  MatrixRecord,
+  RunRecord,
+} from "@jinn-network/benchmarking-records";
 import type {
   EvaluationSpec,
   MeasurementMap,
@@ -138,6 +142,27 @@ export interface MatrixSignaturePort {
   ): Promise<{ ok: true } | { ok: false; detail: string }>;
 }
 
+/** Result returned by an injected accounting verification or completeness authority. */
+export type AccountingCheckResult = { ok: true } | { ok: false; detail: string };
+
+/** Verifies the sealed accounting record's publisher/procedure semantics from its exact bytes. */
+export interface AccountingVerificationPort {
+  verifyAccounting(
+    accountingBytes: Uint8Array,
+    accounting: BenchmarkAccountingRecord,
+    run: RunRecord,
+  ): Promise<AccountingCheckResult>;
+}
+
+/** Establishes completeness within the accounting record's declared authoritative scope. */
+export interface AccountingCompletenessPort {
+  verifyCompleteness(
+    accountingBytes: Uint8Array,
+    accounting: BenchmarkAccountingRecord,
+    run: RunRecord,
+  ): Promise<AccountingCheckResult>;
+}
+
 /** The full injected port bag `assembleMatrix` / `verifyMatrix` consume. */
 export interface AssemblyPorts {
   inputScope: InputScope;
@@ -147,6 +172,12 @@ export interface AssemblyPorts {
   admission: AdmissionEvidencePort;
   cost: CostSource;
   verifySignatures?: MatrixSignaturePort;
+}
+
+/** V2 assembly adds no state: callers supply independent accounting verification authorities. */
+export interface MatrixV2AssemblyPorts extends AssemblyPorts {
+  accountingVerification: AccountingVerificationPort;
+  accountingCompleteness: AccountingCompletenessPort;
 }
 
 export type AssemblyProcedure = {

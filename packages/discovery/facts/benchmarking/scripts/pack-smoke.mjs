@@ -81,7 +81,7 @@ import * as recordDiscoveryFactsBenchmarking from "@jinn-network/record-discover
 if (typeof recordDiscoveryFactsBenchmarking !== "object") throw new Error("root import failed");
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
-const expectedJinnDependencies = ["@jinn-network/benchmarking-records", "@jinn-network/record-discovery-protocol"];
+const expectedJinnDependencies = ["@jinn-network/benchmarking-records", "@jinn-network/record-discovery-protocol", "@jinn-network/trust-core"];
 if (jinnDependencies.length !== expectedJinnDependencies.length
     || jinnDependencies.some((name) => !expectedJinnDependencies.includes(name))) {
   throw new Error("unexpected Jinn coupling: " + jinnDependencies.join(", "));

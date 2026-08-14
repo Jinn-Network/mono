@@ -4,7 +4,8 @@
 # because the indexer depends on @jinn-network/benchmarking-records via
 # `portal:../benchmarking/records`, which resolves to a sibling directory
 # outside packages/indexer/ (records itself depends on
-# @jinn-network/task-execution-protocol via `portal:../../task-execution/protocol`).
+# @jinn-network/task-execution-protocol via `portal:../../task-execution/protocol`
+# and @jinn-network/trust-core via `portal:../../trust/core`).
 # Both packages' exports maps point at compiled dist/*.js, and dist/ is
 # gitignored, so both are built inside this image, in dependency order,
 # before the indexer install resolves the portal symlink.
@@ -38,6 +39,17 @@ RUN corepack enable && yarn install --immutable
 COPY task-execution/protocol/tsconfig.json task-execution/protocol/tsconfig.build.json ./
 COPY task-execution/protocol/scripts ./scripts
 COPY task-execution/protocol/src ./src
+RUN yarn build
+
+# Build @jinn-network/trust-core before benchmarking-records. Signed Report v2
+# parsing is part of the records public surface, so the records portal resolves
+# this sibling during its own build and at runtime.
+WORKDIR /app/trust/core
+COPY trust/core/package.json trust/core/yarn.lock trust/core/.yarnrc.yml ./
+RUN corepack enable && yarn install --immutable
+COPY trust/core/tsconfig.json trust/core/tsconfig.build.json ./
+COPY trust/core/scripts ./scripts
+COPY trust/core/src ./src
 RUN yarn build
 
 # Build @jinn-network/benchmarking-records next. The indexer's
@@ -92,6 +104,7 @@ WORKDIR /app/indexer
 # (node_modules/@jinn-network/benchmarking-records → ../benchmarking/records
 # → /app/benchmarking/records/dist).
 COPY --from=build /app/task-execution/protocol /app/task-execution/protocol
+COPY --from=build /app/trust/core /app/trust/core
 COPY --from=build /app/benchmarking/records /app/benchmarking/records
 
 # Copy built tree from build stage.

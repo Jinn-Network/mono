@@ -109,6 +109,20 @@ const sampleSigner: SampleDsseSigner = async ({ preAuthEncoding }) => {
   return [{ keyid: SAMPLE_SIGNING_KEY_ID, signature: new Uint8Array(signature) }];
 };
 
+/** Issues the bundled sample's deterministic admission receipt for one exact Task spelling. */
+export async function sealSamplePredictionAdmissionReceipt(
+  taskBytes: Uint8Array,
+  evaluationSpecBytes: Uint8Array,
+): Promise<{ readonly envelopeBytes: Uint8Array; readonly sha256: string }> {
+  const receipt = admitPredictionSnapshot({
+    taskBytes,
+    evaluationSpecBytes,
+    issuer: SAMPLE_ISSUER,
+  });
+  const sealed = await sealPredictionSnapshotAdmissionReceipt(receipt, sampleSigner);
+  return { envelopeBytes: sealed.envelopeBytes, sha256: sha256Hex(sealed.envelopeBytes) };
+}
+
 export interface SampleBenchmarkTask {
   readonly marketId: string;
   readonly bytes: Uint8Array;
@@ -158,12 +172,7 @@ export async function buildSampleBenchmark(): Promise<SampleBenchmark> {
     // checks prove the re-sealed bytes satisfy the frozen native prediction
     // contract and still bind this exact EvaluationSpec — admitPredictionSnapshot
     // throws (refusing the whole build) if either is not the case.
-    const receipt = admitPredictionSnapshot({
-      taskBytes,
-      evaluationSpecBytes: fixture.evaluationSpec,
-      issuer: SAMPLE_ISSUER,
-    });
-    const sealedReceipt = await sealPredictionSnapshotAdmissionReceipt(receipt, sampleSigner);
+    const sealedReceipt = await sealSamplePredictionAdmissionReceipt(taskBytes, fixture.evaluationSpec);
 
     tasks.push({
       marketId: variation.marketId,
@@ -171,7 +180,7 @@ export async function buildSampleBenchmark(): Promise<SampleBenchmark> {
       sha256: sha256Hex(taskBytes),
       receipt: {
         envelopeBytes: sealedReceipt.envelopeBytes,
-        sha256: sha256Hex(sealedReceipt.envelopeBytes),
+        sha256: sealedReceipt.sha256,
       },
     });
   }

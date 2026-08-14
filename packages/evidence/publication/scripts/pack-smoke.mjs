@@ -20,6 +20,10 @@ const consumer = join(temporaryRoot, "consumer");
 const archives = {
   protocol: join(temporaryRoot, "protocol.tgz"),
   repository: join(temporaryRoot, "repository.tgz"),
+  trust: join(temporaryRoot, "trust.tgz"),
+  recordDiscoveryProtocol: join(temporaryRoot, "record-discovery-protocol.tgz"),
+  recordDiscoveryServe: join(temporaryRoot, "record-discovery-serve.tgz"),
+  recordPublication: join(temporaryRoot, "record-publication.tgz"),
   publication: join(temporaryRoot, "publication.tgz"),
 };
 
@@ -60,6 +64,18 @@ try {
   await run("yarn", ["pack", "--out", archives.repository], {
     cwd: join(packagesRoot, "repository"),
   });
+  await run("yarn", ["pack", "--out", archives.trust], {
+    cwd: join(packagesRoot, "..", "trust", "core"),
+  });
+  await run("yarn", ["pack", "--out", archives.recordDiscoveryProtocol], {
+    cwd: join(packagesRoot, "..", "discovery", "protocol"),
+  });
+  await run("yarn", ["pack", "--out", archives.recordDiscoveryServe], {
+    cwd: join(packagesRoot, "..", "discovery", "serve"),
+  });
+  await run("yarn", ["pack", "--out", archives.recordPublication], {
+    cwd: join(packagesRoot, "..", "discovery", "publication"),
+  });
   await run("yarn", ["pack", "--out", archives.publication], {
     cwd: packageRoot,
   });
@@ -98,6 +114,10 @@ try {
       dependencies: {
         "@jinn-network/evidence-protocol": `file:${archives.protocol}`,
         "@jinn-network/evidence-repository": `file:${archives.repository}`,
+        "@jinn-network/trust-core": `file:${archives.trust}`,
+        "@jinn-network/record-discovery-protocol": `file:${archives.recordDiscoveryProtocol}`,
+        "@jinn-network/record-discovery-serve": `file:${archives.recordDiscoveryServe}`,
+        "@jinn-network/record-publication": `file:${archives.recordPublication}`,
         "@jinn-network/evidence-publication": `file:${archives.publication}`,
         typescript: "5.9.3",
         vite: "6.4.3",
@@ -107,7 +127,7 @@ try {
   );
   await run(
     "npm",
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+    ["install", "--legacy-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund"],
     { cwd: consumer },
   );
 
@@ -257,7 +277,7 @@ try {
     .filter((name) => name.startsWith("@jinn-network/"));
   if (
     jinnRuntimeDependencies.join(",") !==
-      "@jinn-network/evidence-repository"
+      "@jinn-network/evidence-repository,@jinn-network/record-publication"
   ) {
     throw new Error(
       `unexpected Publication dependency boundary: ${

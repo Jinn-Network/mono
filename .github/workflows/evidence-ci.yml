@@ -159,6 +159,13 @@ jobs:
         run: |
           (cd packages/evidence/protocol && yarn install --immutable)
           (cd packages/evidence/repository && yarn install --immutable)
+      - name: Build neutral publication dependencies from source
+        if: matrix.component == 'publication'
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/publication && yarn install --immutable && yarn build)
       - name: Install ORAS 1.3.2
         if: matrix.component == 'repository-oci'
         uses: oras-project/setup-oras@v2
@@ -547,6 +554,12 @@ jobs:
         with:
           name: evidence-publication-dist
           path: packages/evidence/publication/dist
+      - name: Build neutral publication dependencies from source
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/publication && yarn install --immutable && yarn build)
       - name: Install packed-smoke dependency toolchains
         run: |
           (cd packages/evidence/protocol && yarn install --immutable)

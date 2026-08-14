@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseMatrix } from "@jinn-network/benchmarking-records";
+import { parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
 import { readAuditEntries } from "../../audit/journal.js";
 import type { OperationContext } from "../../operations/context.js";
 import { createDraft, updateDraft } from "../../operations/drafts.js";
@@ -23,6 +24,10 @@ import { runVerify } from "../../operations/verify.js";
 import { verifyPublicBundle } from "../../bundle/verify.js";
 import { readRunJournalEntries } from "../../run/journal.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
+import { readInspectSelectionManifest, inspectWorkerPath } from "./host.js";
+import { inspectOciRunnerPath } from "./oci.js";
+// @ts-expect-error This product-private runtime is copied into dist without a public type surface.
+import { createInspectLogVerifierRegistration } from "./verifier-runtime.mjs";
 
 const pythonPath = process.env.JINN_INSPECT_PYTHON;
 const fixtureDir = dirname(fileURLToPath(new URL("../../../test/fixtures/inspect-project/hermetic_eval.py", import.meta.url)));
@@ -354,6 +359,65 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
         verdict: "pass",
       });
     }
+
+    const verifiedDelivery = deliveries[0]!;
+    const nativeLogOutput = verifiedDelivery.outputs.find((output) => output.name === "inspect-log")!;
+    const summaryOutput = verifiedDelivery.outputs.find((output) => output.name === "inspect-summary")!;
+    const manifest = readInspectSelectionManifest(workspaceDir, selected.result.selectionManifestSha256);
+    const registration = createInspectLogVerifierRegistration({
+      registrationId: "inspect-log-verifier-proof",
+      evaluatorId: "did:key:inspect-log-verifier-proof",
+      signerHandle: "inspect-log-verifier-proof.pem",
+      evaluationMethod: {
+        name: "benchmark-product-inspect-log-verifier",
+        digest: { sha256: manifest.runtime.workerSha256 },
+      },
+      manifest,
+      selectionManifestSha256: selected.result.selectionManifestSha256,
+      workerPath: inspectWorkerPath(),
+      ociRunnerPath: inspectOciRunnerPath(),
+      host: { kind: "local-python", pythonPath: pythonPath! },
+    });
+    const separatelyVerified = await registration.adapter.evaluate(
+      {
+        descriptor: { name: "evaluation-task", digest: { sha256: "0".repeat(64) } },
+        bytes: new Uint8Array(),
+      },
+      [
+        {
+          descriptor: {
+            name: "inspect-log",
+            digest: { sha256: nativeLogOutput.sha256 },
+            mediaType: "application/vnd.inspect-ai.eval",
+          },
+          bytes: getSealedBytes(workspaceDir, nativeLogOutput.sha256),
+        },
+        {
+          descriptor: {
+            name: "inspect-summary",
+            digest: { sha256: summaryOutput.sha256 },
+            mediaType: "application/vnd.jinn.inspect-summary+json",
+          },
+          bytes: getSealedBytes(workspaceDir, summaryOutput.sha256),
+        },
+      ],
+      parseEvaluationSpec(getSealedBytes(workspaceDir, selected.result.evaluationSpecSha256)),
+      {},
+      { attemptUri: "urn:jinn:attempt:inspect-log-verifier-proof" } as never,
+      new AbortController().signal,
+    );
+    expect(separatelyVerified).toMatchObject({
+      verdict: "pass",
+      measurements: [
+        { name: "correct", value: true },
+        { name: "safe", value: true },
+      ],
+      detailedOutcome: {
+        relationship: "separate-log-verifier",
+        scoreSource: "same-execution-scorer",
+      },
+    });
+    expect(separatelyVerified.limitations).toContain("not-independent-rescoring");
 
     const reported = await runReport(ctx, { draftId: "inspect-real" });
     expect(reported.ok).toBe(true);

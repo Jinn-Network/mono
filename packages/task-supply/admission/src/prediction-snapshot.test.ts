@@ -80,6 +80,26 @@ describe("prediction-snapshot-admission/1", () => {
     expect(second).toStrictEqual(first);
   });
 
+  it("admits the same native contract with a self-declared author and namespaced derivation metadata", () => {
+    const original = JSON.parse(new TextDecoder().decode(task));
+    const authored = seal({
+      ...original,
+      author: "did:key:z6MkiFixture",
+      "https://product.example/extensions/derivation/v1": {
+        sourceTask: { digest: { sha256: "a".repeat(64) } },
+      },
+    });
+    expect(admitPredictionSnapshot({ taskBytes: authored, evaluationSpecBytes: evaluationSpec, issuer: "did:jinn:admitter" }).task.documentDigest)
+      .toBe(recordDigest(authored));
+  });
+
+  it("rejects an unnamespaced extra root field", () => {
+    const original = JSON.parse(new TextDecoder().decode(task));
+    const altered = seal({ ...original, injected: true });
+    expect(() => admitPredictionSnapshot({ taskBytes: altered, evaluationSpecBytes: evaluationSpec, issuer: "did:jinn:admitter" }))
+      .toThrow("frozen native contract");
+  });
+
   it("rejects a forecast outside the closed probability range", () => {
     const invalidTask = seal({
       ...JSON.parse(new TextDecoder().decode(task)),

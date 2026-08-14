@@ -111,10 +111,10 @@ A `jinn run` process is layered top-to-bottom roughly like this:
   │   src/earning/bootstrap.ts  src/earning/store.ts           │
   ├────────────────────────────────────────────────────────────┤
   │ Daemon orchestrator                                        │
-  │   creator · delivery-watcher · work · evaluator ·          │
-  │   posting · projector · evidence-driver · reward-claim ·   │
-  │   balance-topup · eviction-check · checkpoint · harvest ·  │
-  │   peer-sync · watchdog                                     │
+  │   creator · work · evaluator · posting · projector ·       │
+  │   evidence-driver · reward-claim · balance-topup ·         │
+  │   eviction-check · checkpoint · harvest · peer-sync ·      │
+  │   watchdog                                                 │
   │   src/daemon/daemon.ts + src/daemon/*-loop.ts              │
   ├────────────────────────────────────────────────────────────┤
   │ Work pipeline + native coordinators                        │
@@ -158,7 +158,6 @@ The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises the long-
 | Loop | File | Starts when | Job |
 |---|---|---|---|
 | Creator | `daemon/creator.ts` | legacy mode | Pulls Tasks from configured `TaskSource`s and posts each via `JinnRouter.createTask`. Idempotent per `(creatorMultisig, desiredStateId)`. |
-| Delivery-watcher | `daemon/delivery-watcher.ts` | legacy mode | Watches for delivered Solutions, calls `JinnRouter.claimDelivery` to settle them, and (for restoration role) creates the paired evaluation job. |
 | Work | `daemon/work-loop.ts` | `composition` + `work` configured | The native solver loop. Per card announced by the projector's archive: gate on projector catch-up, map to `SubmissionFacts`, gate on the rolling-window AI-units / spend-cap accounting, admit a claim intent in the engagement ledger, then drive the pipeline claim → submit → deliver → settle. Also reconciles in-flight settlements every tick. |
 | Evaluator | `daemon/evaluator-loop.ts` | `evaluator` configured | The evaluator counterpart of `work`: recover in-flight work → poll the signed opportunity source → acquire subject material → evaluate → deliver + settle a verdict. |
 | Posting | `daemon/posting-loop.ts` | native mode + non-empty `posting[]` | The native counterpart of `creator` — drives the requester's `posting[]` config through the marketplace binding. |
@@ -175,7 +174,7 @@ Startup also runs **one-shot in-flight recovery** before any loop takes new work
 
 Each loop runs as a background Promise; failures emit a structured error event but do not crash the process. The watchdog (`daemon/watchdog-loop.ts`) registers every started loop against its `LOOP_REGISTRY` heartbeat and exits non-zero when one goes stale, letting the supervisor restart through the idempotent boot path. `daemon.stop()` signals each loop, drains in-flight work with a configurable timeout, and closes resources.
 
-> `LOOP_REGISTRY` still declares `engine-tick` and `engine-watcher` rows. Both are dead — Wave-4 D1 deleted the TaskEngine that drove them — and are removed by Wave-4 D6, which narrows the registry to match D1–D4's deletions ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md), addendum decision 3). `creator` and `delivery-watcher` retire with the legacy path in the same wave.
+> `LOOP_REGISTRY` still declares `engine-tick`, `engine-watcher`, and `delivery-watcher` rows. All three are dead — Wave-4 D1 deleted the TaskEngine behind the first two, D2 deleted the delivery-watcher — and all three are removed by Wave-4 D6, which narrows the registry to match D1–D4's deletions ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md), addendum decision 3). `creator` retires with the legacy path in the same wave.
 
 ### 6.1 Generator ownership and the launched-record subsystem
 
@@ -228,19 +227,14 @@ operator                  daemon process              chain / network
                                 └► deliver + settle ────► Mech Marketplace
                                                           JinnRouter.claimDelivery
 
-3. (legacy mode)            delivery-watcher  ◄────── delivery events
-                            ├► JinnRouter.claimDelivery (operator-side)
-                            └► (restoration role) creates evaluation Task
-                                back to step 1 with role='evaluation'
-
-4.                          evaluator loop
+3.                          evaluator loop
                             ├► poll the signed opportunity source
                             ├► acquire subject material
                             ├► evaluate, then deliver + settle a verdict
                             └► ReputationRegistry.giveFeedback ─► ERC-8004 ReputationRegistry
                                                                   (rates the harness's agent NFT)
 
-5.                          reward-claim loop  ──────► stOLAS distributor
+4.                          reward-claim loop  ──────► stOLAS distributor
 ```
 
 The boundaries between steps are persisted in SQLite, so a crash anywhere is recoverable: startup recovery (`NativeOperatorHost.start()` / `WorkLoop.initialize()`) re-drives admitted claims and unsettled solutions, and the loops are idempotent.

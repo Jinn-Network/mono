@@ -7,6 +7,10 @@ import {
 } from "@jinn-network/evidence-repository";
 
 import { EvidencePublicationError } from "./errors.js";
+import {
+  executeEvidenceArtifactStore,
+  executeEvidenceRecordStore,
+} from "./record-publication-adapter.js";
 import { normalizePublishInput } from "./identities.js";
 import {
   createPublicationOperation,
@@ -248,13 +252,23 @@ async function storeObjects(
   while (entry.storedArtifacts.length < normalized.artifacts.length) {
     const index = entry.storedArtifacts.length;
     const artifact = normalized.artifacts[index]!;
-    const { value: receipt } = await operation.waitFor(
-      () =>
-        dependencies.repository.putArtifact(
-          artifact.bytes,
-          operation.dependencyOptions,
-        ),
-    );
+    let receipt: RepositoryWriteReceipt<EvidenceArtifactReference> | undefined;
+    await executeEvidenceArtifactStore({
+      planId: `evidence-publication:${entry.bundleKey}:artifact:${artifact.reference.digest}`,
+      reference: artifact.reference,
+      bytes: artifact.bytes,
+      store: async () => {
+        const result = await operation.waitFor(() =>
+          dependencies.repository.putArtifact(
+            artifact.bytes,
+            operation.dependencyOptions,
+          ));
+        receipt = result.value;
+      },
+    });
+    if (receipt === undefined) {
+      throw new EvidencePublicationError("JOURNAL_CORRUPT", "The neutral store adapter did not return an artifact receipt.");
+    }
     assertArtifactReceipt(
       receipt,
       artifact.reference,
@@ -281,14 +295,24 @@ async function storeObjects(
   while (entry.storedRecords.length < normalized.records.length) {
     const index = entry.storedRecords.length;
     const record = normalized.records[index]!;
-    const { value: receipt } = await operation.waitFor(
-      () =>
-        dependencies.repository.putRecord(
-          record.reference.family,
-          record.bytes,
-          operation.dependencyOptions,
-        ),
-    );
+    let receipt: RepositoryWriteReceipt<EvidenceRecordReference> | undefined;
+    await executeEvidenceRecordStore({
+      planId: `evidence-publication:${entry.bundleKey}:record:${record.reference.family}:${record.reference.digest}`,
+      reference: record.reference,
+      bytes: record.bytes,
+      store: async () => {
+        const result = await operation.waitFor(() =>
+          dependencies.repository.putRecord(
+            record.reference.family,
+            record.bytes,
+            operation.dependencyOptions,
+          ));
+        receipt = result.value;
+      },
+    });
+    if (receipt === undefined) {
+      throw new EvidencePublicationError("JOURNAL_CORRUPT", "The neutral store adapter did not return a record receipt.");
+    }
     assertRecordReceipt(
       receipt,
       record.reference,
