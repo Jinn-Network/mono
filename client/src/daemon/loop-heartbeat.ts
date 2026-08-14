@@ -18,13 +18,13 @@ import { emitEvent } from '../observability/emit-event.js';
 export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
 
 /**
- * The fourteen canonical long-running loops the watchdog supervises, with their
- * default poll intervals and (for the for-await polling loops) a staleness
- * floor. The two for-await adapter loops (engine-watcher, delivery-watcher)
- * heartbeat at the poll-cycle tail inside the mech adapter so an
- * idle-but-polling loop never looks stale. Fleet state (checkpoint txs,
- * eviction checks) stays in FleetStateStore; eviction-check, checkpoint, and
- * harvest heartbeats use this observability Store.
+ * The ten canonical long-running loops the watchdog supervises, with their
+ * default poll intervals and (where a loop may block on chain I/O) a staleness
+ * floor. Wave-4 D6 dropped `creator`, `engine-tick`, `engine-watcher`,
+ * `delivery-watcher`, and `peer-sync` after D1–D4 deleted those loops.
+ * Fleet state (checkpoint txs, eviction checks) stays in FleetStateStore;
+ * eviction-check, checkpoint, and harvest heartbeats use this observability
+ * Store.
  *
  * This registry is the single source of truth: LOOP_NAMES, the LoopName union,
  * and the daemon's watchdog registrations are all derived from it. Order is
@@ -34,20 +34,15 @@ export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
  * `ready-only` loops are the claim/work path and do not tick while daemon
  * readiness is `degraded`; `always` loops are the self-healing economic
  * loops (eviction recovery, checkpoint, balance top-up, reward claim, …)
- * plus the two adapter-driven "watchdog-adjacent" loops (engine-watcher,
- * delivery-watcher) — they keep running so a degraded condition can clear on
- * its own. See `runLoop` below for where this is consulted.
+ * — they keep running so a degraded condition can clear on its own. See
+ * `runLoop` below for where this is consulted.
  */
 export const LOOP_REGISTRY = [
-  { name: 'creator', intervalMs: 5000, admission: 'ready-only' },
-  // Native posting loop (one-swap M5, #2461). The native counterpart of `creator`: it drives the
-  // requester's `posting[]` config through the marketplace binding. Opt-in — only registered with
-  // the watchdog when a `PostingLoop` is actually started (native mode + non-empty posting[]);
-  // a legacy boot never constructs it. `ready-only` like `creator`.
+  // Native posting loop (one-swap M5, #2461). Drives the requester's
+  // `posting[]` config through the marketplace binding. Opt-in — only
+  // registered with the watchdog when a `PostingLoop` is actually started
+  // (native mode + non-empty posting[]); a legacy boot never constructs it.
   { name: 'posting', intervalMs: 5000, admission: 'ready-only' },
-  { name: 'engine-tick', intervalMs: 5000, admission: 'ready-only' },
-  { name: 'engine-watcher', intervalMs: 5000, floorMs: 5 * 60_000, admission: 'always' },
-  { name: 'delivery-watcher', intervalMs: 5000, floorMs: 5 * 60_000, admission: 'always' },
   { name: 'reward-claim', intervalMs: 5000, admission: 'always' },
   { name: 'balance-topup', intervalMs: 5000, admission: 'always' },
   { name: 'eviction-check', intervalMs: 60_000, admission: 'always' },
@@ -56,7 +51,6 @@ export const LOOP_REGISTRY = [
   // default (config.ts `harvest.intervalMs`); the daemon only registers it
   // with the watchdog when config.harvest is enabled with repos.
   { name: 'harvest', intervalMs: 60 * 60 * 1000, admission: 'always' },
-  { name: 'peer-sync', intervalMs: 60_000, admission: 'always' },
   { name: 'projector', intervalMs: 5000, floorMs: 300_000, admission: 'always' },
   { name: 'evidence-driver', intervalMs: 30_000, floorMs: 300_000, admission: 'always' },
   { name: 'work', intervalMs: 5000, floorMs: 300_000, admission: 'ready-only' },
@@ -167,14 +161,10 @@ export function buildLoopMetricsSnapshot(store: Store): LoopMetricsSnapshotEntry
  * `tick_error`/`failed` event), run afterTick, stamp the heartbeat, then sleep
  * — plain or raced against a stopPromise.
  *
- * The two for-await polling loops (engine-watcher, delivery-watcher) are NOT
- * routed through here: their heartbeat is stamped inside the mech adapter so an
- * idle-but-polling loop stays fresh. They only carry a LOOP_REGISTRY entry.
- * Both are `admission: 'always'` (§5), so their not routing through this
- * function's admission check is inert today — an `always` loop has nothing
- * to gate. If either is ever reclassified `ready-only`, their for-await
- * drivers in the mech adapter need the same `getLoopAdmission`/readiness
- * check added inline (#2407 caveat i).
+ * Wave-4 D6 removed the for-await adapter loops (`engine-watcher`,
+ * `delivery-watcher`) from this registry. Their leftover generators on
+ * `MechAdapter` (stage 5 / `legacy-operator-composition`) no longer stamp
+ * a heartbeat.
  *
  * The `intervalMs <= 0` disable guard is intentionally NOT here — it stays in
  * each caller's run() (reward-claim / balance-topup). That precedent is

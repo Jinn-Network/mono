@@ -55,7 +55,6 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { Store } from '../../store/store.js';
 import { TaskRunPersistence } from '../../store/task-run-persistence.js';
-import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
@@ -603,9 +602,6 @@ export class MechAdapter implements ExecutionAdapter {
     // orphan is `legacy-operator-composition`'s door (stage 5), not this row's —
     // D2 removes the evaluation half and leaves the rest structurally intact.
     while (!this.stopped) {
-      // Retained only because the `engine-watcher` LOOP_REGISTRY row is still
-      // declared (D6 owns its removal). Nothing supervises this loop any more.
-      if (this.store) recordLoopTick(this.store, 'engine-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }
@@ -995,14 +991,9 @@ export class MechAdapter implements ExecutionAdapter {
       // Cursor persistence is per-chunk inside the loop above (#552). A poll
       // that did no chunked work has no progress to persist.
 
-      // #1043/#1038 originally put a heartbeat at the poll-cycle tail so an
-      // idle-but-polling loop never looked stale to the watchdog. That
-      // supervision no longer exists: Wave-4 D2 deleted the `DeliveryWatcherLoop`
-      // that drove this generator, and the daemon no longer starts or registers a
-      // `delivery-watcher` loop, so nothing reads this tick. The write is retained
-      // only because the LOOP_REGISTRY row is still declared — D6 owns removing
-      // the row, and this call goes with it.
-      if (this.store) recordLoopTick(this.store, 'delivery-watcher');
+      // Wave-4 D6 dropped the `delivery-watcher` LOOP_REGISTRY row. This
+      // generator is still orphaned (stage 5 / `legacy-operator-composition`);
+      // it no longer stamps a heartbeat the watchdog does not read.
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }

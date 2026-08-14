@@ -97,11 +97,11 @@ describe('renderMetrics — exposition format', () => {
 
   it('omits jinn_loop_last_tick_seconds for a loop that has never ticked, and includes it once it has', () => {
     const before = renderMetrics(store, { getDaemonReadiness, getLoopSnapshot: loopSnapshot });
-    expect(before).not.toMatch(/jinn_loop_last_tick_seconds\{loop="creator"\}/);
+    expect(before).not.toMatch(/jinn_loop_last_tick_seconds\{loop="checkpoint"\}/);
 
-    recordLoopTick(store, 'creator');
+    recordLoopTick(store, 'checkpoint');
     const after = renderMetrics(store, { getDaemonReadiness, getLoopSnapshot: loopSnapshot });
-    expect(after).toMatch(/jinn_loop_last_tick_seconds\{loop="creator"\} \d+(\.\d+)?/);
+    expect(after).toMatch(/jinn_loop_last_tick_seconds\{loop="checkpoint"\} \d+(\.\d+)?/);
   });
 
   it('derives jinn_activity_events_total from store.getActivityCountsByKind, one line per kind', () => {

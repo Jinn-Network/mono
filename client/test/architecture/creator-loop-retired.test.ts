@@ -23,8 +23,9 @@
  *     posting-service's two candidate types re-home into the posting service.
  *     Only the creator-loop-only exports die.
  *
- * `LOOP_REGISTRY` still declares `creator`: the registry narrowing is D6's
- * scope, not D3's (DR-2026-08-05 addendum 2026-08-13, decision 3).
+ * Wave-4 D6 dropped the leftover `creator` `LOOP_REGISTRY` row. This guard
+ * still asserts `posting` remains — that is the native replacement, not a
+ * registry leftover.
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
@@ -84,9 +85,9 @@ describe('creator loop retirement (Wave-4 D3)', () => {
     expect(read('../../src/cli/commands/tasks.ts')).toContain('TaskPostingService');
   });
 
-  it('the loop registry still declares creator (D6 owns the narrowing) and declares posting', () => {
+  it('the loop registry declares posting (native replacement) and not creator', () => {
     const names = LOOP_REGISTRY.map((row) => row.name);
-    expect(names).toContain('creator');
+    expect(names).not.toContain('creator');
     expect(names).toContain('posting');
   });
 });

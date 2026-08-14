@@ -4,13 +4,14 @@
  * loop retire. Native replacements (public archive listener, M6 discovery
  * serving, R3a `plugin-registry/`, R3b `discovery-client/`) already shipped.
  *
- * D6 owns `LOOP_REGISTRY` narrowing — the `peer-sync` row stays declared.
+ * Wave-4 D6 dropped the leftover `peer-sync` `LOOP_REGISTRY` row; this guard
+ * no longer asserts that name. Keep-modules (`discovery-client/`,
+ * `plugin-registry/`) still must exist.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { LOOP_REGISTRY } from '../../src/daemon/loop-heartbeat.js';
 import { codeOnly } from './_support/source-text.js';
 
 const srcRoot = fileURLToPath(new URL('../../src/', import.meta.url));
@@ -82,9 +83,8 @@ describe('client/src/discovery and peer-sync are retired (Wave-4 D4)', () => {
     expect(routes).not.toMatch(/\bgetDiscovery\s*\(/u);
   });
 
-  it('keeps discovery-client, plugin-registry, and the peer-sync registry row', () => {
+  it('keeps discovery-client and plugin-registry', () => {
     expect(existsSync(join(srcRoot, 'discovery-client'))).toBe(true);
     expect(existsSync(join(srcRoot, 'plugin-registry'))).toBe(true);
-    expect(LOOP_REGISTRY.map((row) => row.name)).toContain('peer-sync');
   });
 });
