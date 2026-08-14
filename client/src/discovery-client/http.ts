@@ -16,7 +16,6 @@ import {
   DiscoveryUnavailableError as CoreDiscoveryUnavailableError,
 } from '@jinn-network/core/corpus-read';
 
-import type { SolverNetManifestSummary } from '../solvernets/registry-client.js';
 import type { CorpusQuery, EnvelopeRef } from '../corpus/types.js';
 import {
   DiscoveryUnavailableError,
@@ -24,6 +23,7 @@ import {
   type AutopilotDeliveryRole,
   type CodeDigestRewardRow,
   type DiscoveryClient,
+  type SolverNetManifestSummary,
 } from './types.js';
 
 // ── GraphQL query strings ─────────────────────────────────────────────────────

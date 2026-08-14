@@ -4,7 +4,6 @@ import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
-import { PeerSync } from './peer-sync.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import type { Corpus as CoreCorpus } from '@jinn-network/core/corpus-read';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
@@ -121,6 +120,11 @@ export interface DaemonConfig {
    * has something to compare against.
    */
   apiToken?: string;
+  /**
+   * Parseable-but-ignored after Wave-4 D4 (peer-sync retired). Left on the
+   * config shape so existing `new Daemon({ peers })` call sites and the
+   * `peers` / `JINN_PEERS` config key do not become a schema break.
+   */
   peers?: string[];
   signer?: EthHttpSigner;
   /** This node's public HTTP endpoint (for 8004 registration) */
@@ -298,7 +302,6 @@ export class Daemon {
   private apiServer?: ApiServer;
   private ownsApiServer = false;
   private ownsStore = false;
-  private peerSync?: PeerSync;
   private readonly apiPort: number;
   private readonly apiToken: string;
   private rewardClaimLoop?: RewardClaimLoop;
@@ -491,27 +494,6 @@ export class Daemon {
     this.cachedShutdownState = 'running';
     emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
 
-    // Start peer sync if peers configured
-    const peers = this.config.peers ?? (process.env['JINN_PEERS'] ?? '').split(',').filter(Boolean);
-    if (peers.length > 0) {
-      this.peerSync = new PeerSync({
-        peers,
-        store: this.store,
-        signer: this.config.signer,
-      });
-      this.loopPromises.push(
-        this.peerSync.run().catch(err => {
-          console.error('[daemon] peer-sync crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'peer-sync loop crashed',
-            errorCode: 'peer_sync_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
-      );
-    }
-
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
         this.rewardClaimLoop.run().catch(err => {
@@ -672,7 +654,6 @@ export class Daemon {
       if (this.postingLoop) started.add('posting');
       if (this.projectorLoop) started.add('projector');
       if (this.evidenceDriverLoop) started.add('evidence-driver');
-      if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
@@ -731,7 +712,6 @@ export class Daemon {
     this.postingLoop?.stop();
     this.projectorLoop?.stop();
     this.evidenceDriverLoop?.stop();
-    this.peerSync?.stop();
     this.watchdogLoop?.stop();
 
     // Stop the adapter to unblock any pending async iterators

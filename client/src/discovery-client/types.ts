@@ -9,18 +9,51 @@
  * `getAutopilotDeliveryCandidates` read).
  *
  * The module is deliberately NARROW: it owns only the four methods those
- * consumers actually drive, not the ~20-method `DiscoveryAPI`. The legacy
- * `discovery/` tree keeps the rest until the D-wave deletes it, and
- * `discovery/types.ts` re-exports the shapes below so its remaining importers
- * compile unchanged.
+ * consumers actually drive, not the retired ~20-method `DiscoveryAPI`.
+ * Wave-4 D4 deleted `client/src/discovery/`; catalog-row types for
+ * `listLaunchedSolverNets` live here.
  *
- * Import direction is one-way and load-bearing: `discovery/` may import from
- * here, never the reverse. `test/architecture/discovery-client-neutrality.test.ts`
- * pins that, so the D-wave deletion of `discovery/` cannot re-break this module.
  */
 
-import type { SolverNetManifestSummary } from '../solvernets/registry-client.js';
 import type { CorpusQuery, EnvelopeRef } from '../corpus/types.js';
+
+/**
+ * Current lifecycle status of a SolverNet manifest. Owned here because
+ * `DiscoveryClient.listLaunchedSolverNets` returns catalog rows; Wave-4 D4
+ * deleted `solvernets/registry-client.ts`.
+ */
+export interface SolverNetLifecycleStatus {
+  status: 'launched' | 'paused' | 'retired';
+  statusUpdatedAt: string;
+  sourceBlock: number;
+  manifestHash: `0x${string}`;
+}
+
+/**
+ * Catalog-row projection of a launched SolverNet — the return shape of
+ * `DiscoveryClient.listLaunchedSolverNets`. Not a fifth method.
+ */
+export interface SolverNetManifestSummary {
+  manifestCid: string;
+  solverNetId: string;
+  name: string;
+  network: string;
+  launcherAgentId: string;
+  launcherSafeAddress: `0x${string}`;
+  status: 'launched' | 'paused' | 'retired';
+  statusUpdatedAt: string;
+  contractId: string;
+  contractVersion: string;
+  solutionPriceWei: string;
+  verdictPriceWei: string;
+  openRoles: Array<'solver' | 'evaluator'>;
+  anchorBlock: number;
+  /**
+   * Indexed chain id from the on-chain MetadataSet event (84532 = base-sepolia,
+   * 8453 = base). Used by listLaunched for chain scoping without an IPFS fetch.
+   */
+  chainId: number;
+}
 
 /**
  * Machine-readable reason a discovery read failed. `rpc_rate_limited` is the

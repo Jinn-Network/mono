@@ -261,7 +261,7 @@ export type LauncherTaskState =
   | 'failed';
 
 /**
- * Mirror of the daemon-side `TaskOnchainStatus` (client/src/discovery/types.ts).
+ * Mirror of the daemon-side `TaskOnchainStatus` (client/src/archive/types.ts).
  * On-chain finalization status for the Recent posted Tasks chip — DISTINCT from
  * the local generator-side `state`. `'unknown'` is the safe degraded default.
  */
@@ -486,7 +486,7 @@ export interface OperatorArtifactsResponse {
 //
 //   `DraftSolverNetRecord`     — `client/src/solvernets/store.ts` (§6.1)
 //   `LaunchedSolverNetRecord`  — `client/src/solvernets/store.ts` (§6.2)
-//   `SolverNetManifestSummary` — `client/src/solvernets/registry-client.ts`
+//   `SolverNetManifestSummary` — `client/src/discovery-client/types.ts`
 //   `SolverNetManifestV1`      — `@jinn-network/sdk/solvernets`
 //   `GeneratorConfig`          — `PredictionV1GeneratorRuntimeConfig` from
 //                                `client/src/solver-types/prediction-v1-auto.ts`
@@ -684,7 +684,7 @@ export interface GeneratorConfig {
 /**
  * Catalog-row projection of a launched SolverNet. Returned by the global
  * registry endpoint (`/v1/solvernets/registry`); mirrors
- * `SolverNetManifestSummary` in `client/src/solvernets/registry-client.ts`.
+ * `SolverNetManifestSummary` in `client/src/discovery-client/types.ts`.
  */
 export interface SolverNetManifestSummary {
   manifestCid: string;

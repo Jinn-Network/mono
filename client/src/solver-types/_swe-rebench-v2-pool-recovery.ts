@@ -5,10 +5,11 @@
  * the generator's admission gate hits `admission-required-no-data` and posts 0
  * tasks. The vetted pool was previously published to IPFS; we recover it via the
  * indexer (DR-2026-06-02 open-question #4, Option B — read the artifact ref via
- * the DiscoveryAPI, not on-chain directly):
+ * a recent-task digest callback, not on-chain directly):
  *
- *   1. `discoveryApi.getMostRecentTaskCidDigest(manifestCid)` → a recent task's
- *      on-chain `taskCidDigest` (pure indexer/chain read; no IPFS in discovery).
+ *   1. `getMostRecentTaskCidDigest(manifestCid)` → a recent task's
+ *      on-chain `taskCidDigest`. Wave-4 D4 retired DiscoveryAPI; production
+ *      no longer supplies this callback (recovery then returns `no-task`).
  *   2. Reconstruct the IPFS task CID (`f01551220 + digestHexWithout0x`, the same
  *      derivation as `adapters/mech/adapter.ts`) and fetch the task body.
  *   3. Read the vetted-pool ref from the task's `eligibility.vettedPoolRef`
@@ -40,7 +41,6 @@ import {
   hashVettedPoolArtifact,
   type ValidatedPoolEntry,
 } from './_swe-rebench-v2-validated-pool.js';
-import type { DiscoveryAPI } from '../discovery/types.js';
 
 export interface RecoverVettedPoolResult {
   recovered: boolean;
@@ -83,10 +83,19 @@ export function isTerminalRecoveryOutcome(result: RecoverVettedPoolResult): bool
   return result.reason === 'local-pool-present';
 }
 
+export interface RecoverVettedPoolTaskDigest {
+  taskCidDigest: string;
+  taskId: string;
+}
+
 export interface RecoverVettedPoolDeps {
   stateDir: string;
   manifestCid: string;
-  discoveryApi: DiscoveryAPI;
+  /**
+   * Optional recent-task lookup. Wave-4 D4 retired DiscoveryAPI; production
+   * omits this and recovery returns `no-task`. Tests inject a stub.
+   */
+  getMostRecentTaskCidDigest?: (manifestCid: string) => Promise<RecoverVettedPoolTaskDigest | null>;
   ipfsGatewayUrl: string;
   store: ValidatedPoolStore;
   /** Injected so tests can stub the IPFS round-trip; production passes `fetchFromIpfs`. */
@@ -96,7 +105,7 @@ export interface RecoverVettedPoolDeps {
 export async function recoverVettedPoolFromNetwork(
   deps: RecoverVettedPoolDeps,
 ): Promise<RecoverVettedPoolResult> {
-  const { stateDir: _stateDir, manifestCid, discoveryApi, ipfsGatewayUrl, store, fetchFromIpfs } = deps;
+  const { stateDir: _stateDir, manifestCid, getMostRecentTaskCidDigest, ipfsGatewayUrl, store, fetchFromIpfs } = deps;
   void _stateDir; // reserved for symmetry with resolvePublishedVettedPool; store already binds stateDir
 
   try {
@@ -107,8 +116,12 @@ export async function recoverVettedPoolFromNetwork(
       return { recovered: false, reason: 'local-pool-present' };
     }
 
-    // 1) Most-recent task digest for the SolverNet (pure indexer/chain read).
-    const recent = await discoveryApi.getMostRecentTaskCidDigest(manifestCid);
+    if (!getMostRecentTaskCidDigest) {
+      return { recovered: false, reason: 'no-task' };
+    }
+
+    // 1) Most-recent task digest for the SolverNet.
+    const recent = await getMostRecentTaskCidDigest(manifestCid);
     if (!recent) return { recovered: false, reason: 'no-task' };
 
     // 2) Reconstruct the IPFS task CID and fetch the task body. Lowercase the

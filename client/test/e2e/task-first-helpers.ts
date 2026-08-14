@@ -60,9 +60,6 @@ import { TrajectoryCollector } from '../../src/trajectory/index.js';
 import { allocateAnvilPort } from '../_support/chain/port-allocator.js';
 import { jsonRpc as anvilJsonRpc, spawnAnvilFork } from '../_support/chain/anvil.js';
 import { LaunchAction } from '../../src/solvernets/launch-state-machine.js';
-import {
-  IdentityRegistryBackedSolverNetRegistryClient,
-} from '../../src/solvernets/registry-client-erc8004.js';
 import { createSolverNetStore } from '../../src/solvernets/store.js';
 import {
   buildSignedSolverNetManifestV1,
@@ -2020,13 +2017,6 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       identityRegistryAddress: BASE_SEPOLIA_IDENTITY_REGISTRY,
       agentEoaPrivateKey: launcher.agentPrivateKey,
     });
-    const registry = new IdentityRegistryBackedSolverNetRegistryClient({
-      ipfs,
-      publisher,
-      subgraph,
-      network: 'base-sepolia',
-    });
-
     const spawnedRecords: Array<{ solverNetId: string }> = [];
     const launchAction = new LaunchAction({
       store: solverNetStore,

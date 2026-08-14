@@ -131,27 +131,20 @@ describe("legacy chunking oracles have not drifted from the fixtures", () => {
   });
 
   test("the discovery floor's per-pass chunk caps still match the bounded-scan fixtures", () => {
-    const source = readOracle("client/src/discovery/onchain.ts");
-    if (source === undefined) {
-      expect(true).toBe(true);
-      return;
-    }
-    for (const constant of ["MAX_OPERATOR_COUNT_TASK_PAGES", "MAX_TASK_POST_COUNT_SCAN_PAGES"]) {
-      const declaration = new RegExp(String.raw`\b${constant}\s*=\s*([0-9_]+)\b`).exec(source);
-      expect(declaration, `${constant} declaration not found`).not.toBeNull();
-      const value = Number(declaration![1]!.replaceAll("_", ""));
-      expect(LEGACY_BOUNDED_SCAN_RULES.some((rule) => rule.maxChunksPerPass === value)).toBe(true);
-    }
+    // Wave-4 D4 deleted `client/src/discovery/onchain.ts`. The numeric
+    // fixtures in this file are now the sole record of those caps.
+    expect(readOracle("client/src/discovery/onchain.ts")).toBeUndefined();
+    expect(
+      LEGACY_BOUNDED_SCAN_RULES.every((rule) => rule.maxChunksPerPass === 50),
+    ).toBe(true);
   });
 
   test("the discovery floor still sizes chunks as a delta, which is why the fixtures restate the rule in counts", () => {
-    const source = readOracle("client/src/discovery/onchain.ts");
-    if (source === undefined) {
-      expect(true).toBe(true);
-      return;
-    }
-    // Oldest-first mode: `end = start + chunkBlocks` inclusive, i.e. chunkBlocks + 1 blocks.
-    expect(source).toContain("start + chunkBlocks > toBlock ? toBlock : start + chunkBlocks");
-    expect(source).toContain("start += chunkBlocks + 1n");
+    expect(readOracle("client/src/discovery/onchain.ts")).toBeUndefined();
+    const discoveryFloor = LEGACY_CHUNK_CONSTANTS.find(
+      (entry) => entry.source === "client/src/discovery/onchain.ts",
+    );
+    expect(discoveryFloor?.convention).toBe("delta");
+    expect(discoveryFloor?.requestWidthBlocks).toBe(2_000n);
   });
 });

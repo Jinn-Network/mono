@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { handleGetCodeDigestReward } from '../../src/mcp/get-codedigest-reward.js';
-import { DiscoveryUnavailableError, type DiscoveryAPI } from '../../src/discovery/types.js';
+import { DiscoveryUnavailableError, type DiscoveryClient } from '../../src/discovery-client/types.js';
 
 describe('handleGetCodeDigestReward (#764)', () => {
   it('returns ok:true with aggregated rows', async () => {
@@ -8,7 +8,7 @@ describe('handleGetCodeDigestReward (#764)', () => {
       getCodeDigestRewards: vi.fn(async () => [
         { codeDigest: 'sha256:A', attempts: 10, passes: 7, passRate: 0.7, avgScore: 0.6 },
       ]),
-    } as unknown as DiscoveryAPI;
+    } as unknown as DiscoveryClient;
     const out = await handleGetCodeDigestReward(discovery, { codeDigests: ['sha256:A'] });
     expect(out.ok).toBe(true);
     expect(out.rows).toHaveLength(1);
@@ -17,7 +17,7 @@ describe('handleGetCodeDigestReward (#764)', () => {
   it('returns a structured discovery_unavailable error (no throw)', async () => {
     const discovery = {
       getCodeDigestRewards: vi.fn(async () => { throw new DiscoveryUnavailableError('down'); }),
-    } as unknown as DiscoveryAPI;
+    } as unknown as DiscoveryClient;
     const out = await handleGetCodeDigestReward(discovery, { codeDigests: ['sha256:A'] });
     expect(out.ok).toBe(false);
     expect((out.error as { kind: string }).kind).toBe('discovery_unavailable');
@@ -33,7 +33,7 @@ describe('handleGetCodeDigestReward (#764)', () => {
   it('rethrows non-DiscoveryUnavailable errors', async () => {
     const discovery = {
       getCodeDigestRewards: vi.fn(async () => { throw new Error('unexpected'); }),
-    } as unknown as DiscoveryAPI;
+    } as unknown as DiscoveryClient;
     await expect(handleGetCodeDigestReward(discovery, { codeDigests: ['sha256:A'] })).rejects.toThrow('unexpected');
   });
 });

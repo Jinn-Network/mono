@@ -26,8 +26,7 @@ import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import type {
   AutopilotDeliveryCandidateLookup,
-  DiscoveryAPI,
-} from '../../src/discovery/types.js';
+} from '../../src/discovery-client/types.js';
 
 const CHAIN_ID = 84532;
 const TASK_ID = '501';
@@ -349,7 +348,7 @@ async function harness(options: HarnessOptions = {}) {
     getAutopilotDeliveryCandidates: options.discoveryError
       ? vi.fn().mockRejectedValue(options.discoveryError)
       : vi.fn().mockResolvedValue(options.discoveryResult ?? ready),
-  } as unknown as DiscoveryAPI;
+  } as unknown as Pick<import('../../src/discovery-client/types.js').DiscoveryClient, 'getAutopilotDeliveryCandidates'>;
   const deliveryMech = options.deliveryMech ?? MECH;
   const getLogs = options.rpcError
     ? vi.fn().mockRejectedValue(options.rpcError)
