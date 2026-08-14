@@ -11,7 +11,7 @@
 **Reviewed recovery implementation commit:**
 `77da47e41e363e6dd2a1c9eff5fddcab9ed6e6b2`
 
-**Integration reconciliation merge:** `77271a709f713223119d4683358856e5d7191a66`
+**Integration reconciliation merge:** `fd611298835e8a3a542dec970827c35087a360f3`
 
 ## Final outcome: complete local plumbing proof
 
