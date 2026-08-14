@@ -16,13 +16,12 @@ import { randomUUID } from 'node:crypto';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import { SweRebenchV2LanguageSchema, SweRebenchV2TaskSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import type { Task } from '../types/task.js';
-import type { TaskGenerator } from '../tasks/sources.js';
 import type { TaskClaimPolicy, TaskV1 } from '../types/task-document.js';
 import { signTaskV1 } from '../tasks/signing.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
 import { uploadToIpfs, fetchFromIpfs } from '../adapters/mech/ipfs.js';
 import { recoverVettedPoolFromNetwork, isTerminalRecoveryOutcome } from './_swe-rebench-v2-pool-recovery.js';
-import type { SolverTypeDefinition } from './solver-type.js';
+import type { SolverTypeDefinition, TaskGenerator } from './solver-type.js';
 import {
   selectNextPostingCandidates,
   summarizePoolState,

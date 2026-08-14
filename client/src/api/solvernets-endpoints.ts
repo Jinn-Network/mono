@@ -12,11 +12,13 @@
  *     PATCH  /v1/solvernets/drafts/:id          — update fields on a draft.
  *     DELETE /v1/solvernets/drafts/:id          — delete a draft.
  *
- *   Launch + lifecycle (Task 14):
+ *   Launch (Task 14):
  *     POST   /v1/solvernets/drafts/:id/launch                   — kick off LaunchAction.
  *     GET    /v1/solvernets/launched/:id                        — read current record.
- *     PATCH  /v1/solvernets/launched/:id/lifecycle              — pause/resume/retire.
  *     PATCH  /v1/solvernets/launched/:id/generator-config       — hot-apply config.
+ *
+ *   The `PATCH .../lifecycle` route (pause/resume/retire) retired with Wave-4
+ *   D3 together with its transition state machine.
  *
  *   Catalog (Task 15):
  *     GET    /v1/solvernets/launched                            — list owned launched records.
@@ -69,7 +71,6 @@ import {
   type UnsignedSolverNetManifestV1,
 } from '../solvernets/manifest.js';
 import { LaunchAction } from '../solvernets/launch-state-machine.js';
-import { LifecycleTransition } from '../solvernets/lifecycle-transitions.js';
 import type {
   PendingGeneratorSpawn,
   SolverNetCatalogCache,
@@ -77,7 +78,7 @@ import type {
 import {
   resolveLaunchedRecordContract,
   type LaunchedRecordContractRef,
-} from '../solvernets/launched-record-dispatcher.js';
+} from '../solvernets/launched-record-contract.js';
 import type { LauncherGeneratorStateSnapshot } from './launcher-status.js';
 import type {
   SignerWithAgentEoa,
@@ -86,23 +87,28 @@ import type {
 } from '../solvernets/registry-client.js';
 
 /**
- * Optional Task-14 deps that turn on the launch + lifecycle + generator-config
- * endpoints. The drafts CRUD endpoints (Task 13) only need `store`; when this
- * block is omitted those routes still mount and the launch routes return 503.
+ * Optional Task-14 deps that turn on the launch + generator-config endpoints.
+ * The drafts CRUD endpoints (Task 13) only need `store`; when this block is
+ * omitted those routes still mount and the launch routes return 503.
+ *
+ * Wave-4 D3 (Task 18 of the cutover stage-3 plan, DR-2026-08-05 decision 1)
+ * removed `lifecycleTransition` along with the `PATCH .../lifecycle` route: the
+ * transition producer is retired, and pause/retire is now expressed as
+ * `posting[].enabled` plus the work client's close (headless design §4.2).
  */
 export interface SolverNetsLaunchDeps {
   launchAction: LaunchAction;
-  lifecycleTransition: LifecycleTransition;
   /**
-   * Live generator-state reader, keyed by `solverNetId`. Returns the running
-   * generator's current poll/error snapshot, or `undefined` when the record
-   * has no active generator. When omitted, responses fall back to the
+   * Live generator-state reader, keyed by `solverNetId`. Retained as an
+   * optional seam only: Wave-4 D3 retired the launched-record generators, so
+   * production never supplies it and responses always fall back to the
    * record's persisted `generatorState`. See #471.
    */
   getGeneratorState?: (solverNetId: string) => LauncherGeneratorStateSnapshot | undefined;
-  /** Live mirror of the daemon's per-record generator state. The endpoint
-   * mutates `configRef.current` for the matching record so the next
-   * generator tick sees hot-applied config. Lookups by `solverNetId`. */
+  /** Live mirror of the daemon's per-record refs. The generator-config
+   * endpoint mutates `configRef.current` for the matching record so a
+   * subsequent read sees the change without a disk reload. Lookups by
+   * `solverNetId`. */
   pendingGenerators: { current: PendingGeneratorSpawn[] };
   /** Signer used by `launchAction.launch` (single-launcher daemon). */
   signer: SignerWithAgentEoa;
@@ -120,7 +126,7 @@ export interface SolverNetsLaunchDeps {
 
 export interface SolverNetsEndpointsDeps {
   store: SolverNetStore;
-  /** Optional Task 14 launch + lifecycle + generator-config wiring. */
+  /** Optional Task 14 launch + generator-config wiring. */
   launch?: SolverNetsLaunchDeps;
   /**
    * Optional Task 15 catalog cache (from `daemon-init.ts`). Surfaces the
@@ -139,10 +145,9 @@ export interface SolverNetsEndpointsDeps {
 }
 
 /**
- * Overlay the live generator-state snapshot onto a launched record. The live
- * snapshot wins over the persisted `generatorState`, which is only a
- * best-effort checkpoint. Without a live reader or active generator, keep the
- * persisted value unchanged. See #471.
+ * Overlay the live generator-state snapshot onto a launched record when a
+ * reader is supplied. Wave-4 D3 retired the generators, so production supplies
+ * none and the persisted `generatorState` is returned unchanged. See #471.
  */
 function withLiveGeneratorState(
   record: LaunchedSolverNetRecord,
@@ -262,13 +267,7 @@ const RegistryStatusFilterSchema = z.enum(['launched', 'paused', 'retired']);
 // blocks obviously invalid/path-like input before an IPFS round-trip.
 const CID_SHAPE_REGEX = /^(Qm[A-Za-z0-9]{10,}|b[A-Za-z0-9]{10,})$/u;
 
-// ── Lifecycle / generator-config validation schemas ─────────────────────────
-
-const LifecycleBodySchema = z
-  .object({
-    target: z.enum(['paused', 'launched', 'retired']),
-  })
-  .strict();
+// ── Generator-config validation schemas ─────────────────────────────────────
 
 /**
  * Zod schema mirroring `PredictionV1GeneratorRuntimeConfig` from
@@ -1067,10 +1066,10 @@ export function registerSolverNetsEndpoints(
 
   // GET /v1/solvernets/launched/:id — read the current launched record.
   //
-  // Prefers the in-memory recordRef (lifecycle / launch state machines
-  // mutate it synchronously after each disk write) and falls back to disk.
-  // Either source is up-to-date because both are written before the
-  // operation returns.
+  // Prefers the in-memory recordRef (the launch state machine and the
+  // generator-config route mutate it synchronously after each disk write) and
+  // falls back to disk. Either source is up-to-date because both are written
+  // before the operation returns.
   //
   // Response shape: the persisted record fields + an optional
   // `summary?: SolverNetManifestSummary` derived from the registry
@@ -1084,8 +1083,8 @@ export function registerSolverNetsEndpoints(
       return c.json({ error: 'invalid_invocation', message: 'missing record id' }, 400);
     }
 
-    // Prefer in-memory ref when available (lifecycle / launch updates land
-    // there first via mutation).
+    // Prefer in-memory ref when available (launch / generator-config updates
+    // land there first via mutation).
     if (deps.launch) {
       const entry = deps.launch.pendingGenerators.current.find(
         (g) => g.recordRef.current.solverNetId === id,
@@ -1124,109 +1123,6 @@ export function registerSolverNetsEndpoints(
       ...liveRecord,
       ...(summary !== undefined ? { summary } : {}),
     });
-  });
-
-  // PATCH /v1/solvernets/launched/:id/lifecycle — pause / resume / retire.
-  //
-  // Blocking: the lifecycle transition is one tx + one receipt, typically
-  // 5-30 seconds. We await completion and return the updated record so the
-  // SPA can re-render in a single round-trip.
-  app.patch('/v1/solvernets/launched/:id/lifecycle', async (c) => {
-    const id = c.req.param('id');
-    if (!id) {
-      return c.json({ error: 'invalid_invocation', message: 'missing record id' }, 400);
-    }
-
-    if (!deps.launch) {
-      return c.json(
-        {
-          error: 'launch_unavailable',
-          message: 'lifecycle routes are not configured',
-        },
-        503,
-      );
-    }
-    const launchDeps = deps.launch;
-
-    let raw: unknown;
-    try {
-      raw = await c.req.json();
-    } catch {
-      return c.json({ error: 'invalid_body', message: 'expected JSON body' }, 400);
-    }
-
-    const parsed = LifecycleBodySchema.safeParse(raw);
-    if (!parsed.success) {
-      return c.json(
-        {
-          error: 'invalid_body',
-          message: parsed.error.issues
-            .map((i) => `${i.path.join('.') || '<body>'}: ${i.message}`)
-            .join('; '),
-        },
-        400,
-      );
-    }
-    const target = parsed.data.target;
-
-    let record: LaunchedSolverNetRecord | null;
-    try {
-      record = await store.loadRecord(id);
-    } catch (err) {
-      return c.json(
-        {
-          error: 'store_read_failed',
-          message: err instanceof Error ? err.message : String(err),
-        },
-        500,
-      );
-    }
-    if (!record) {
-      return c.json({ error: 'record_not_found', message: `Unknown record: ${id}` }, 404);
-    }
-
-    // Terminal-state guard at the API edge so the caller gets a typed error
-    // before we even touch the state machine. The state machine also
-    // rejects (it is the source of truth) but surfacing it here gives a
-    // stable error code.
-    if (record.status === 'retired' && target !== 'retired') {
-      return c.json(
-        {
-          error: 'lifecycle_terminal',
-          message: `SolverNet ${id} is retired; transitions are no-ops`,
-        },
-        400,
-      );
-    }
-
-    // Idempotent no-op: caller's view matches current state, no work to do.
-    if (record.status === target && record.lifecycleProgress === undefined) {
-      return c.json(record);
-    }
-
-    let updated: LaunchedSolverNetRecord;
-    try {
-      updated = await launchDeps.lifecycleTransition.transition(record, target);
-    } catch (err) {
-      return c.json(
-        {
-          error: 'lifecycle_failed',
-          message: err instanceof Error ? err.message : String(err),
-        },
-        500,
-      );
-    }
-
-    // Mutate the in-memory recordRef so subsequent reads (and the next
-    // generator tick) see the new status without waiting for a disk reload.
-    const entry = launchDeps.pendingGenerators.current.find(
-      (g) => g.recordRef.current.solverNetId === id,
-    );
-    if (entry) {
-      entry.recordRef.current = updated;
-    }
-
-    return c.json(updated);
   });
 
   // PATCH /v1/solvernets/launched/:id/generator-config — hot-apply config.
