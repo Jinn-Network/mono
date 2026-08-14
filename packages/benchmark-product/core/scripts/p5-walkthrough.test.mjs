@@ -34,7 +34,7 @@ test("committed P5 evidence records the completed cold bundle and truthful withh
   assert.match(evidence, /Recorded:\*\* 2026-08-14/u);
   assert.match(evidence, /77da47e41e363e6dd2a1c9eff5fddcab9ed6e6b2/u);
   assert.match(evidence, /77271a709f713223119d4683358856e5d7191a66/u);
-  assert.match(evidence, /c4b99165d9b84af6da694b0ab9e849652c8e9da3/u);
+  assert.match(evidence, /c65d57d66b56ffdfb20fc45d2c1a72009f64964c/u);
   assert.match(evidence, /fe23ac64f568e73a6dc37c7a638ace571ded88e5cca20401dc916326d49ead32/u);
   assert.match(evidence, /all 12 reached a valid\s+grader outcome/u);
   assert.match(evidence, /draws=0.*no bootstrap ensemble was executed/su);

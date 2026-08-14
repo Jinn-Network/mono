@@ -6,7 +6,7 @@
 
 **Original implementation base:** `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`
 
-**Current integration base:** `c4b99165d9b84af6da694b0ab9e849652c8e9da3`
+**Current integration base:** `c65d57d66b56ffdfb20fc45d2c1a72009f64964c`
 
 **Reviewed recovery implementation commit:**
 `77da47e41e363e6dd2a1c9eff5fddcab9ed6e6b2`
