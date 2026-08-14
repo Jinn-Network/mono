@@ -32,13 +32,19 @@ export function auditP5Accounting({ matrix, status, comparison }) {
   }
   if (comparison.clustering.clusters !== P5_TASK_COUNT
     || comparison.bootstrap.count !== P5_TASK_COUNT
+    || comparison.bootstrap.resamples !== P5_RESAMPLES
     || comparison.bootstrap.unit !== "source-cluster") {
     refuse(`report did not preserve three repository clusters: ${JSON.stringify(comparison.bootstrap)}`);
   }
   const clusterCount = comparison.bootstrap.clusters.length;
-  const expectedDraws = P5_RESAMPLES * clusterCount;
-  if (clusterCount !== P5_TASK_COUNT || comparison.bootstrap.draws !== expectedDraws) {
-    refuse(`bootstrap accounting moved: ${comparison.bootstrap.draws} != ${P5_RESAMPLES} x ${clusterCount}`);
+  if (clusterCount !== P5_TASK_COUNT) {
+    refuse(`bootstrap cluster accounting moved: ${clusterCount} != ${P5_TASK_COUNT}`);
+  }
+  // This micro-slate is deliberately below paired-delta's minimum sample size.
+  // With no interval to estimate, the method performs no resampling; planned
+  // resample capacity must not be misreported as draws that actually occurred.
+  if (comparison.bootstrap.draws !== 0) {
+    refuse(`withheld interval performed ${comparison.bootstrap.draws} bootstrap draws, expected 0`);
   }
   return { clusterCount, draws: comparison.bootstrap.draws };
 }

@@ -27,16 +27,17 @@ function fixture() {
       clustering: { clusters: 3 },
       bootstrap: {
         count: 3,
+        resamples: 1_000,
         unit: "source-cluster",
         clusters: [{}, {}, {}],
-        draws: 3_000,
+        draws: 0,
       },
     },
   };
 }
 
 test("accepts the exact 12-cell, three-cluster, no-interval contract", () => {
-  assert.deepEqual(auditP5Accounting(fixture()), { clusterCount: 3, draws: 3_000 });
+  assert.deepEqual(auditP5Accounting(fixture()), { clusterCount: 3, draws: 0 });
 });
 
 test("rejects a missing cell", () => {
@@ -54,11 +55,11 @@ test("rejects unverifiable evidence and a second dispatch", () => {
   assert.throws(() => auditP5Accounting(input), /non-exact dispatch/u);
 });
 
-test("rejects a published interval and raw draw-count drift", () => {
+test("rejects a published interval and draws performed for a withheld interval", () => {
   const input = fixture();
   input.comparison.interval = [0, 1];
   assert.throws(() => auditP5Accounting(input), /did not withhold its interval/u);
   input.comparison.interval = null;
-  input.comparison.bootstrap.draws = 6_000;
-  assert.throws(() => auditP5Accounting(input), /6000 != 1000 x 3/u);
+  input.comparison.bootstrap.draws = 3_000;
+  assert.throws(() => auditP5Accounting(input), /performed 3000 bootstrap draws, expected 0/u);
 });
