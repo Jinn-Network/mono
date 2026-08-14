@@ -193,6 +193,24 @@ test('the CLI packages web as private build input rather than a public runtime d
   assert.match(buildScript, /webRoot,\s*["']build/, 'CLI build must invoke the private web build before packing');
 });
 
+test('the cross-runner distribution artifact retains the private Next runtime without hidden secrets', () => {
+  const workflow = readFileSync(join(root, '.github', 'workflows', 'benchmark-product-ci.yml'), 'utf8');
+  const uploadStart = workflow.indexOf('      - name: Upload Benchmark Product runtime distributions');
+  const uploadEnd = workflow.indexOf('\n  web:', uploadStart);
+  assert.notEqual(uploadStart, -1, 'Benchmark Product CI must upload its runtime distributions');
+  assert.notEqual(uploadEnd, -1, 'runtime distribution upload must remain in the product job');
+  const upload = workflow.slice(uploadStart, uploadEnd);
+  assert.match(upload, /include-hidden-files:\s*true/u, 'the artifact must retain the embedded .next runtime');
+  for (const exclusion of [
+    '!packages/**/dist/**/.env*',
+    '!packages/**/dist/**/.git/**',
+    '!packages/**/dist/**/.npmrc',
+    '!packages/**/dist/**/.yarnrc*',
+  ]) {
+    assert.ok(upload.includes(exclusion), `hidden artifact upload must exclude ${exclusion}`);
+  }
+});
+
 test('Colophon and Jinn dependencies and portal resolutions match the approved graph', () => {
   for (const [directory] of PRODUCT_PACKAGES) {
     const manifest = readPackage(directory);
