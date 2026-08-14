@@ -9,6 +9,7 @@ import {
   p5ArmPinning,
   p5BuildEntrypoint,
   p5CheckpointAction,
+  p5LaunchElapsedMs,
   p5ResumeNeeded,
   removeRunOwnedBuilderWorkspace,
   runCanonicalP5GreenBaseline,
@@ -163,6 +164,20 @@ test("builder-workspace deletion refuses a foreign root shape", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("launch timing is rebuilt from durable launch and resume steps", () => {
+  assert.equal(p5LaunchElapsedMs([
+    { label: "init", elapsedMs: 4 },
+    { label: "launch", elapsedMs: 3_000 },
+    { label: "status", elapsedMs: 2 },
+    { label: "resume", elapsedMs: 500 },
+    { label: "launch.from-lock", elapsedMs: 250 },
+  ]), 3_750);
+  assert.throws(
+    () => p5LaunchElapsedMs([{ label: "launch", elapsedMs: -1 }]),
+    /invalid durable launch timing/u,
+  );
 });
 
 function expectResume(counts, evaluationRecovery, expected) {

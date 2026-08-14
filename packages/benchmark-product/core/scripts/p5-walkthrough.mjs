@@ -195,6 +195,18 @@ export function removeRunOwnedBuilderWorkspace(workspaceDir) {
   rmSync(workspaceDir, { recursive: true, force: true });
 }
 
+/** Rebuild run time from durable step evidence so a post-run resume cannot reset it to zero. */
+export function p5LaunchElapsedMs(steps) {
+  const launchLabels = new Set(["launch", "launch.from-lock", "resume"]);
+  return steps.reduce((total, step) => {
+    if (!launchLabels.has(step.label)) return total;
+    if (!Number.isSafeInteger(step.elapsedMs) || step.elapsedMs < 0) {
+      fail(`invalid durable launch timing for ${step.label}: ${String(step.elapsedMs)}`);
+    }
+    return total + step.elapsedMs;
+  }, 0);
+}
+
 function rfc3339(value) {
   const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?Z?$/u.exec(value);
   if (match === null) fail(`fixture provenance timestamp is not a supported UTC instant: ${value}`);
@@ -472,7 +484,6 @@ async function main() {
   let benchmarkSha256;
   let runSha256;
   let diskBeforeLaunch;
-  let launchElapsedMs = 0;
   if (!resuming) {
     await step("init", () => core.initWorkspace(context));
     await step("draft.create", () => core.createDraft(context, {
@@ -527,9 +538,7 @@ async function main() {
     checkpoint.phase = "locked";
     replaceWalkthroughState(runRoot, checkpoint);
     diskBeforeLaunch = recoverP5DiskCapacity(runRoot, "official P5 launch");
-    const launchStarted = Date.now();
     await step("launch", () => core.runLaunch(context, { draftId: DRAFT_ID }, { createVenue }));
-    launchElapsedMs = Date.now() - launchStarted;
     checkpoint.phase = "launched";
     replaceWalkthroughState(runRoot, checkpoint);
   } else {
@@ -544,18 +553,14 @@ async function main() {
   let status = await step("status", () => core.runStatus(context, { draftId: DRAFT_ID }));
   if (p5CheckpointAction(status) === "launch") {
     recoverP5DiskCapacity(runRoot, "before same-Run launch");
-    const resumeStarted = Date.now();
     await step("launch.from-lock", () => core.runLaunch(context, { draftId: DRAFT_ID }, { createVenue }));
-    launchElapsedMs += Date.now() - resumeStarted;
     checkpoint.phase = "launched";
     replaceWalkthroughState(runRoot, checkpoint);
     status = await step("status.after-launch", () => core.runStatus(context, { draftId: DRAFT_ID }));
   }
   if (p5CheckpointAction(status) === "resume") {
     recoverP5DiskCapacity(runRoot, "before same-cell resume");
-    const resumeStarted = Date.now();
     await step("resume", () => core.runResume(context, { draftId: DRAFT_ID }, { createVenue }));
-    launchElapsedMs += Date.now() - resumeStarted;
     checkpoint.phase = "resumed";
     replaceWalkthroughState(runRoot, checkpoint);
     status = await step("status.after-resume", () => core.runStatus(context, { draftId: DRAFT_ID }));
@@ -690,7 +695,7 @@ async function main() {
         resamples: RESAMPLES,
         clusterCount,
         draws,
-        identity: "draws = resamples x clusterCount",
+        identity: "interval withheld; draws performed = 0; resamples is planned capacity",
       },
     },
     report: {
@@ -702,8 +707,8 @@ async function main() {
       plumbingNotCapability: true,
     },
     timing: {
-      launchElapsedMs,
-      meanLaunchPipelineCellMs: Math.round(launchElapsedMs / 12),
+      launchElapsedMs: p5LaunchElapsedMs(steps),
+      meanLaunchPipelineCellMs: Math.round(p5LaunchElapsedMs(steps) / 12),
       steps,
     },
     verification: {
