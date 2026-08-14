@@ -96,4 +96,4 @@ The first two are created by the skill on first PLAN call if absent. The skill i
 
 ---
 
-Changes to this document require a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions) and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md). *(The 2026-07-07 rewrite was owner-authorised directly, bypassing that pipeline at Oak's instruction.)*
+Changes to this document require a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions) and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md). *(The 2026-07-07 rewrite was owner-authorised directly, bypassing that pipeline at Oak's instruction. The 2026-08-14 product-led rewrite was likewise owner-authorised, at Ritsu's instruction: the Discussion step was waived explicitly, not overlooked, and the repository's canonical-doc check stayed red on this PR to record that no Discussion was linked.)*
