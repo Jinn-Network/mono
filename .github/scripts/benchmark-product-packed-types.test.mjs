@@ -111,8 +111,8 @@ function proveViewer(command, args, options = {}) {
     let probing = false;
     const timeout = setTimeout(() => {
       child.kill('SIGTERM');
-      finish(new Error('installed viewer did not become ready within 30 seconds'));
-    }, 30_000);
+      finish(new Error('installed viewer and packaged workspace did not become ready within 60 seconds'));
+    }, 60_000);
     const finish = (error) => {
       if (settled) return;
       settled = true;
@@ -135,8 +135,45 @@ function proveViewer(command, args, options = {}) {
           fetch(new URL('/bundle/index.html', match[1]), { headers }),
         ]);
         const [homeBytes, reportBytes] = await Promise.all([home.text(), report.text()]);
-        if (!home.ok || !homeBytes.includes('Verified: 6 of 6 checks passed')) throw new Error('verified viewer page was not served');
-        if (!report.ok || !reportBytes.includes('Colophon report')) throw new Error('authenticated bundle report was not served');
+        if (
+          !home.ok
+          || !homeBytes.includes('6 of 6 bundle checks passed')
+          || !homeBytes.includes('What happened, task by task')
+          || !homeBytes.includes('Use my work')
+        ) throw new Error('verified comparison and its next actions were not served');
+        if (
+          !report.ok
+          || !reportBytes.includes('Colophon report')
+          || !reportBytes.includes('Across 3 paired cells')
+          || !reportBytes.includes('demonstrates the evidence path, not agent quality')
+          || !reportBytes.includes('No comparative winner is stated')
+        ) throw new Error('authenticated sample comparison was not served');
+        const workspaceStart = await fetch(new URL('/use-my-work', match[1]), {
+          method: 'POST', headers, redirect: 'manual',
+        });
+        const workspaceLaunchUrl = workspaceStart.headers.get('location');
+        if (workspaceStart.status !== 303 || workspaceLaunchUrl === null || !/^http:\/\/127\.0\.0\.1:\d+\/__colophon_launch\?capability=/u.test(workspaceLaunchUrl)) {
+          throw new Error(`installed viewer did not hand off to the packaged local workspace: ${workspaceStart.status} ${await workspaceStart.text()}`);
+        }
+        const repeatedWorkspaceStart = await fetch(new URL('/use-my-work', match[1]), {
+          method: 'POST', headers, redirect: 'manual',
+        });
+        if (repeatedWorkspaceStart.status !== 405) throw new Error('installed viewer reused its one-time workspace action');
+        const workspaceLaunch = await fetch(workspaceLaunchUrl, { redirect: 'manual' });
+        const workspaceCookie = workspaceLaunch.headers.get('set-cookie')?.split(';', 1)[0];
+        if (workspaceLaunch.status !== 303 || workspaceLaunch.headers.get('location') !== '/' || workspaceCookie === undefined) {
+          throw new Error('packaged local workspace launch handshake failed');
+        }
+        const repeatedWorkspaceLaunch = await fetch(workspaceLaunchUrl, { redirect: 'manual' });
+        if (repeatedWorkspaceLaunch.status !== 403) throw new Error('packaged local workspace reused its one-time launch URL');
+        const workspaceHome = await fetch(new URL('/', workspaceLaunchUrl), { headers: { cookie: workspaceCookie } });
+        const workspaceHomeBytes = await workspaceHome.text();
+        if (
+          !workspaceHome.ok
+          || !workspaceHomeBytes.includes('Run the sample')
+          || !workspaceHomeBytes.includes('Verify a bundle')
+          || !workspaceHomeBytes.includes('Use my work')
+        ) throw new Error('installed packaged workspace did not serve the three-choice home');
         child.kill('SIGTERM');
       } catch (cause) {
         child.kill('SIGTERM');
@@ -393,5 +430,9 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
       : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public @1 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
   } finally { await registry.close(); }
 } finally {
-  await rm(temporaryRoot, { recursive: true, force: true });
+  if (process.env.COLOPHON_KEEP_PACKED_TEMP === '1') {
+    console.error(`Retained cold-install diagnostic root at ${temporaryRoot}`);
+  } else {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
 }

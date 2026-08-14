@@ -124,6 +124,79 @@ function expectStringsAbsent(value: string, secrets: readonly Buffer[], label: s
   }
 }
 
+test("the local home runs the zero-key sample to a verified report and verifies its copied bundle", async ({ page }) => {
+  await auditedGoto(page, "/");
+  await activateByKeyboard(page, page.getByRole("button", { name: "Run to verified report", exact: true }));
+  await expect(page.getByRole("heading", { level: 1, name: "Results and report" })).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByRole("heading", { level: 2, name: "Published public bundle" })).toBeVisible();
+  await expect(page.getByText("claim-consistency", { exact: true }).first()).toBeVisible();
+  await auditState(page, "one-action sample result");
+
+  const guidedDraft = readdirSync(join(WORKSPACE, "artifacts"))
+    .filter((entry) => entry.startsWith("local-"))
+    .find((entry) => existsSync(join(WORKSPACE, "artifacts", entry, "public-bundles")));
+  expect(guidedDraft).toBeDefined();
+  const bundleRoot = join(WORKSPACE, "artifacts", guidedDraft!, "public-bundles");
+  const identities = readdirSync(bundleRoot);
+  expect(identities).toHaveLength(1);
+  const bundle = join(bundleRoot, identities[0]!);
+
+  await auditedGoto(page, "/");
+  await typeByKeyboard(page, page.getByLabel("Bundle directory on this machine"), bundle);
+  await submitAction(page, "Run all six checks", /6 of 6 checks passed/u);
+  await expect(page.getByText("claim-consistency", { exact: false })).toBeVisible();
+  await auditState(page, "reader-only bundle verification");
+});
+
+test("the guided own-work journey imports tasks, selects two agents, and enforces the provider boundary", async ({ page }) => {
+  await auditedGoto(page, "/");
+  await activateByKeyboard(page, page.getByRole("link", { name: "Start my comparison", exact: true }));
+  await expect(page.getByRole("heading", { level: 1, name: "Name the comparison" })).toBeVisible();
+  await typeByKeyboard(page, page.getByLabel("Name", { exact: true }), "Claude Code and Codex on my tasks");
+  await activateByKeyboard(page, page.getByRole("button", { name: "Choose tasks", exact: true }));
+  await expect(page.getByRole("heading", { level: 1, name: "Draft" })).toBeVisible();
+  await auditState(page, "guided own-work task choice");
+
+  const draftUrl = new URL(page.url());
+  const draftId = draftUrl.pathname.split("/").filter(Boolean).at(-1);
+  expect(draftId).toMatch(/^local-[a-f0-9-]+$/u);
+  const importForm = actionForm(page, "Import this SWE-bench file");
+  await importForm.getByLabel("SWE-bench rows JSON file").setInputFiles(
+    resolve(process.cwd(), "../../benchmarking/interop/fixtures/swebench/rows.multi-repo.json"),
+  );
+  await submitAction(page, "Import this SWE-bench file", /taskSha256s/u);
+  await expect(page.getByText(/Claude Code claude-low/u).first()).toBeVisible();
+  await expect(page.getByText(/Codex codex-low/u).first()).toBeVisible();
+
+  for (const selected of [
+    { agentId: "claude-low", armId: "claude" },
+    { agentId: "codex-low", armId: "codex" },
+  ] as const) {
+    const addAgent = actionForm(page, "Add selected agent as an Arm");
+    await addAgent.getByLabel("Configured agent").selectOption(selected.agentId);
+    await typeByKeyboard(page, addAgent.getByLabel("Arm ID"), selected.armId);
+    await submitAction(page, "Add selected agent as an Arm", new RegExp(selected.armId, "u"));
+  }
+  await expect(page.getByText("Ready for a local preflight", { exact: false })).toHaveCount(2);
+  await auditState(page, "guided own-work configured agents");
+
+  const refused = await submitAction(page, "Quote", /invalid-invocation/u);
+  await expect(refused).toContainText("provider network and possible-charge boundary");
+  const quoteForm = actionForm(page, "Quote");
+  await tabTo(page, quoteForm.getByRole("checkbox"));
+  await page.keyboard.press("Space");
+  await expect(quoteForm.getByRole("checkbox")).toBeChecked();
+  await submitAction(page, "Quote", /solveCells/u);
+
+  const lockForm = actionForm(page, "Lock run");
+  await tabTo(page, lockForm.getByRole("checkbox"));
+  await page.keyboard.press("Space");
+  await expect(lockForm.getByRole("checkbox")).toBeChecked();
+  await submitAction(page, "Lock run", /locked/u);
+  await expect(page.getByRole("button", { name: "Quote", exact: true })).toBeDisabled();
+  await auditState(page, "guided own-work locked method");
+});
+
 test("keyboard-only real lifecycle is accessible, private, responsive, and securely published", async ({ page }) => {
   const consoleMessages: string[] = [];
   const consoleFailures: string[] = [];
@@ -148,8 +221,11 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   });
 
   await auditedGoto(page, "/");
-  await expect(page.getByRole("heading", { level: 1, name: "Compare agents on the same work." })).toBeVisible();
-  await auditState(page, "landing route");
+  await expect(page.getByRole("heading", { level: 1, name: "What do you want to check?" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Run the sample" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Verify a bundle" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Use my work" })).toBeVisible();
+  await auditState(page, "local three-choice route");
 
   await auditedGoto(page, "/workspace/new");
   await expect(page.getByRole("heading", { level: 1, name: "New draft" })).toBeVisible();
@@ -164,7 +240,8 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await expect(page.locator("main#main-content")).toBeFocused();
   await auditState(page, "uninitialized workspace");
 
-  await activateByKeyboard(page, page.getByRole("button", { name: "Initialize workspace", exact: true }));
+  const initialize = page.getByRole("button", { name: "Initialize workspace", exact: true });
+  if (await initialize.count() > 0) await activateByKeyboard(page, initialize);
   await expect(page.getByText("Configured on this server")).toBeVisible();
   await auditState(page, "initialized workspace");
   await activateByKeyboard(page, page.getByRole("link", { name: "New draft" }));
@@ -176,7 +253,8 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await submitAction(page, "Create draft", /bp50-browser/u);
   await activateByKeyboard(page, page.getByRole("link", { name: "Workspace" }));
   await expect(page.getByText("Hostile <script>alert(1)</script> benchmark")).toBeVisible();
-  await activateByKeyboard(page, page.getByRole("link", { name: "Open" }));
+  const completeDraft = page.getByRole("listitem").filter({ hasText: "Hostile <script>alert(1)</script> benchmark" });
+  await activateByKeyboard(page, completeDraft.getByRole("link", { name: "Open", exact: true }));
   await expect(page.getByRole("heading", { level: 1, name: "Draft" })).toBeVisible();
   await auditState(page, "draft setup");
 

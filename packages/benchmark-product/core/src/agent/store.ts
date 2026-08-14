@@ -8,6 +8,7 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import { AGENT_PROFILE_FORMAT, AgentIdSchema, AgentProfileSchema, type AgentProfile } from "./profile.js";
 import { readRegularFileNoFollow, regularFileIsReady } from "./safe-file.js";
 import { observeAgentVersion, type AgentVersionCommand } from "./version.js";
+import { discoverAgentExecutable, type DiscoverAgentExecutableOptions } from "./executable.js";
 
 const CREDENTIAL_FORMAT = "colophon-agent-credential/1" as const;
 const SecretBasenameSchema = z.string().regex(/^[A-Za-z0-9._-]+$/u).refine((value) => value !== "." && value !== "..");
@@ -27,16 +28,32 @@ export interface AgentRuntimeBinding {
   readonly credentialFile: string;
 }
 
-/** Evidence that an exact harness version can keep its login artifact in the terminal-wiped boundary. */
+/** Exact prepublication candidate admitted to the terminal-wiped capture boundary. */
 export interface HarnessLoginQualification {
   readonly adapter: AgentProfile["adapter"];
   readonly executableSha256: string;
   readonly executableVersion: string;
   readonly mode: "credential-artifact";
+  readonly capture: "claude-setup-token" | "codex-device-auth";
 }
 
-/** Empty until a real isolated login flow is qualified. This is a fail-closed policy table. */
-export const QUALIFIED_HARNESS_LOGIN_ARTIFACTS: readonly HarnessLoginQualification[] = [];
+/** Exact Mac candidates allowed to attempt isolated capture; real interactive acceptance remains a release gate. */
+export const QUALIFIED_HARNESS_LOGIN_ARTIFACTS: readonly HarnessLoginQualification[] = [
+  {
+    adapter: "claude-code",
+    executableSha256: "c66a6cc6fa2e8145bb1a6e77831f2caf4b83690ff04650500dfa6e2c05ca997c",
+    executableVersion: "2.1.222",
+    mode: "credential-artifact",
+    capture: "claude-setup-token",
+  },
+  {
+    adapter: "codex",
+    executableSha256: "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+    executableVersion: "0.147.0",
+    mode: "credential-artifact",
+    capture: "codex-device-auth",
+  },
+];
 
 function profilePath(dataDir: string, agentId: string): string {
   return join(dataDir, "agents", `${agentId}.json`);
@@ -90,6 +107,42 @@ export function storeAgentProfile(
   atomicWriteFileSync(profilePath(dataDir, profile.agentId), JSON.stringify(stored, null, 2));
   chmodSync(profilePath(dataDir, profile.agentId), 0o600);
   return stored;
+}
+
+export interface ObserveAndStoreAgentProfileInput {
+  readonly agentId: string;
+  readonly adapter: AgentProfile["adapter"];
+  readonly model: string;
+  readonly effort: AgentProfile["effort"];
+  readonly executable?: string;
+}
+
+/** Primary self-serve profile path: observe the exact launch binary rather than trusting JSON. */
+export function observeAndStoreAgentProfile(
+  dataDir: string,
+  input: ObserveAndStoreAgentProfileInput,
+  options: DiscoverAgentExecutableOptions & { readonly versionCommand?: AgentVersionCommand } = {},
+): AgentProfile {
+  if (input.adapter !== "claude-code" && input.adapter !== "codex") throw new Error("agent adapter must be claude-code or codex");
+  if (!["low", "medium", "high", "xhigh", "max"].includes(input.effort)) throw new Error("agent effort is not supported");
+  if (["default", "latest", "sonnet", "opus", "haiku"].includes(input.model.toLowerCase())) {
+    throw new Error("agent model must be an exact provider model identifier, not a drifting alias");
+  }
+  const path = discoverAgentExecutable(input.adapter, {
+    ...options,
+    ...(input.executable === undefined ? {} : { explicitPath: input.executable }),
+  });
+  const version = observeAgentVersion({ adapter: input.adapter, executable: { path } }, options.versionCommand);
+  const sha256 = createHash("sha256").update(readRegularFileNoFollow(path)).digest("hex");
+  return storeAgentProfile(dataDir, {
+    format: AGENT_PROFILE_FORMAT,
+    agentId: input.agentId,
+    adapter: input.adapter,
+    executable: { path, sha256, version },
+    model: input.model,
+    effort: input.effort,
+    network: "provider-required",
+  }, options);
 }
 
 export function readAgentProfile(dataDir: string, agentId: string): AgentProfile | undefined {
@@ -148,7 +201,7 @@ function storeProtectedCredential(
 
 /**
  * Stores a captured credential-only login artifact only when the internal qualification table
- * exactly binds adapter, executable digest, and version. The empty production table fails closed.
+ * exactly binds adapter, executable digest, and version. Every unknown build fails closed.
  */
 export function storeQualifiedLoginArtifact(
   dataDir: string,
@@ -161,12 +214,16 @@ export function storeQualifiedLoginArtifact(
   return storeProtectedCredential(dataDir, profile.agentId, sourceFile, "credential-artifact");
 }
 
-function harnessLoginIsQualified(profile: AgentProfile): boolean {
-  return QUALIFIED_HARNESS_LOGIN_ARTIFACTS.some((qualification) =>
+export function qualifiedHarnessLogin(profile: AgentProfile): HarnessLoginQualification | undefined {
+  return QUALIFIED_HARNESS_LOGIN_ARTIFACTS.find((qualification) =>
     qualification.mode === "credential-artifact"
     && qualification.adapter === profile.adapter
     && qualification.executableSha256 === profile.executable.sha256
     && qualification.executableVersion === profile.executable.version);
+}
+
+function harnessLoginIsQualified(profile: AgentProfile): boolean {
+  return qualifiedHarnessLogin(profile) !== undefined;
 }
 
 export function readCredentialGrant(dataDir: string, agentId: string): CredentialGrant | undefined {
@@ -204,10 +261,9 @@ export function configuredAgentRuntimes(dataDir: string): readonly AgentRuntimeB
 }
 
 /** No provider login is run until the exact pinned harness version has been independently qualified. */
-export function requireQualifiedHarnessLogin(profile: AgentProfile): never {
-  if (harnessLoginIsQualified(profile)) {
-    throw new Error(`${profile.adapter} login capture is qualified but has not been invoked with a fresh credential-only destination`);
-  }
+export function requireQualifiedHarnessLogin(profile: AgentProfile): HarnessLoginQualification {
+  const qualification = qualifiedHarnessLogin(profile);
+  if (qualification !== undefined) return qualification;
   throw new Error(
     `${profile.adapter} login is not qualified for this pinned harness version; Colophon will not read or copy an existing harness home`,
   );

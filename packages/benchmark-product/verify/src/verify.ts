@@ -58,6 +58,7 @@ import {
 } from "./profile/inspect-assurance.js";
 import { assertClaimConsistency } from "./profile/claim-consistency.js";
 import { buildPublicAssets } from "./assets.js";
+import { derivePublicComparison, type PublicComparisonView } from "./comparison.js";
 import {
   verifyBundleSnapshot,
   type VerifiedBundleSnapshot,
@@ -104,6 +105,7 @@ export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {}
  */
 export interface VerifiedPublicBundleSnapshot {
   readonly verification: PublicBundleVerificationResult;
+  readonly comparison: PublicComparisonView;
   readonly snapshot: VerifiedBundleSnapshot;
 }
 
@@ -1056,7 +1058,13 @@ export async function verifyPublicBundleSnapshot(
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
     .sort();
-  const expectedAssets = buildPublicAssets({
+  const comparison = derivePublicComparison({
+    benchmark,
+    matrix,
+    assemblyCells: assembly.cells,
+    recordBytes: records,
+  });
+  const assetFacts = {
     claim,
     matrix,
     report: verifiedReport.record,
@@ -1067,7 +1075,15 @@ export async function verifyPublicBundleSnapshot(
       return match === null ? [] : [match[1]!];
     }),
     dissentCellKeys,
-  });
+  };
+  // Reader v1 remains able to authenticate bundles published before the
+  // human comparison projection existed. A bundle must match one complete,
+  // deterministic presentation profile; individual assets cannot be mixed.
+  const legacyAssets = buildPublicAssets(assetFacts);
+  const isLegacyPresentation = Object.entries(legacyAssets).every(([path, bytes]) => equalBytes(read(path), bytes));
+  const expectedAssets = isLegacyPresentation
+    ? legacyAssets
+    : buildPublicAssets({ ...assetFacts, comparison });
   for (const [path, bytes] of Object.entries(expectedAssets)) {
     if (!equalBytes(read(path), bytes)) refuse("record-integrity", path, `${path} is not the exact projection of verified public facts`);
   }
@@ -1089,6 +1105,7 @@ export async function verifyPublicBundleSnapshot(
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
     },
+    comparison,
     snapshot: checked,
   };
 }

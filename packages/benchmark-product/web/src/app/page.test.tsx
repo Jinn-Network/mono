@@ -1,30 +1,31 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { Button } from "@/components/ui/button";
-import { PRODUCT_BRANDING } from "@/lib/branding";
 import Page from "./page";
+
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn(),
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 describe("landing page", () => {
   const markup = renderToStaticMarkup(<Page />);
 
-  test("renders the product identity", () => {
-    expect(markup).toContain(PRODUCT_BRANDING.displayName);
-    expect(markup).toContain(PRODUCT_BRANDING.tagline);
+  test("leads with the three local jobs", () => {
+    for (const term of ["Run the sample", "Verify a bundle", "Use my work"]) expect(markup).toContain(term);
+    expect(markup.indexOf("Run the sample")).toBeLessThan(markup.indexOf("Advanced product surfaces"));
   });
 
-  test("links to the configured workspace", () => {
-    expect(markup).toContain('href="/workspace"');
-  });
-
-  test("explains what the product compares", () => {
-    expect(markup).toContain("agent configurations on the same tasks");
-  });
-
-  test("carries the run-accounting and report facts", () => {
+  test("states the zero-account and local-only boundary in plain speech", () => {
     const lower = markup.toLowerCase();
-    for (const term of ["quality", "cost", "runtime", "failures", "disagreement", "report"]) {
+    for (const term of ["no account", "no api key", "no telemetry", "stays on this machine", "may cost money"]) {
       expect(lower, `expected markup to mention "${term}"`).toContain(term);
     }
+  });
+
+  test("keeps expert work behind an advanced disclosure", () => {
+    expect(markup).toContain("Advanced product surfaces");
+    expect(markup).toContain('href="/workspace"');
   });
 });
 

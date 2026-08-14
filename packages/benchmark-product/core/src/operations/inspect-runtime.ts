@@ -14,6 +14,7 @@ import {
   type InspectRuntimeMethodDisclosure,
 } from "../runtime/inspect/disclosure.js";
 import { writeInspectHostBinding } from "../runtime/inspect/host.js";
+import { InspectOciUnavailableError } from "../runtime/inspect/oci.js";
 import {
   createDefaultBenchmarkRuntimeHost,
   type InspectRuntimeSelectionRequest,
@@ -76,7 +77,17 @@ export function selectInspectEvaluation(
         refuse("validation", "inspect.selection", cause instanceof Error ? cause.message : String(cause));
       }
       const runtimeHost = context.runtimeHost ?? createDefaultBenchmarkRuntimeHost();
-      const resolution = await runtimeHost.resolveInspectSelection(input);
+      let resolution: Awaited<ReturnType<typeof runtimeHost.resolveInspectSelection>>;
+      try {
+        resolution = await runtimeHost.resolveInspectSelection(input);
+      } catch (cause) {
+        if (!(cause instanceof InspectOciUnavailableError)) throw cause;
+        refuse(
+          "venue-unavailable",
+          "inspect.selection.runtime",
+          cause instanceof Error ? cause.message : "The Inspect runtime could not be checked locally.",
+        );
+      }
       const { manifest } = resolution;
       const artifacts = buildInspectSelectionArtifacts(manifest);
       for (const [label, bytes, expected] of [

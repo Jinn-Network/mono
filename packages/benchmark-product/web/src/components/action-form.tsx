@@ -19,6 +19,7 @@ export function ActionForm({ action, submitLabel, gated = false, disabled = fals
   const [state, formAction, pending] = useActionState(action, IDLE_ACTION_STATE);
   const router = useRouter();
   const resultRef = useRef<HTMLDivElement>(null);
+  const providerBoundary = ["Quote", "Lock run", "Launch", "Resume"].includes(submitLabel);
   useEffect(() => {
     if (state.status !== "idle") resultRef.current?.focus();
   }, [state]);
@@ -33,6 +34,7 @@ export function ActionForm({ action, submitLabel, gated = false, disabled = fals
   return (
     <form action={formAction} className="flex min-w-0 flex-col gap-3">
       {children}
+      {providerBoundary ? <label className="flex max-w-2xl items-start gap-2 text-sm"><input className="mt-1" type="checkbox" name="ack-provider-network-costs" value="acknowledged" /> <span><strong>Provider network and possible charges.</strong> Check this before continuing when this draft uses Claude Code or Codex. The bundled sample does not require it.</span></label> : null}
       <Button type="submit" variant={gated ? "destructive" : "default"} disabled={pending || disabled} className="h-auto max-w-full self-start whitespace-normal text-left">
         {pending ? "Working" : submitLabel}
       </Button>

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -225,6 +225,23 @@ interface ProcessResult {
   readonly stdout: string;
 }
 
+/** Host capability failure that the product can safely project as an actionable venue refusal. */
+export class InspectOciUnavailableError extends Error {
+  override readonly name = "InspectOciUnavailableError";
+}
+
+function resolveDockerCli(path: string): string {
+  try {
+    const canonical = realpathSync(resolve(path));
+    const stat = lstatSync(canonical);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("not a regular executable");
+    accessSync(canonical, constants.X_OK);
+    return canonical;
+  } catch {
+    throw new InspectOciUnavailableError("Docker is required for this OCI arm, but its CLI is not available at the configured path. Install Docker, start it, and retry the local check.");
+  }
+}
+
 async function runBoundedProcess(
   executable: string,
   args: readonly string[],
@@ -322,7 +339,7 @@ export async function probeInspectOciSelection(
   if ((input.scorer === undefined) === (scoring === undefined)) throw new TypeError("select exactly one of scorer or scoring");
   const binding = InspectOciHostBindingSchema.parse({
     kind: "oci",
-    dockerPath: resolve(input.dockerPath),
+    dockerPath: resolveDockerCli(input.dockerPath),
     imageDigest: input.imageDigest,
     platform: SUPPORTED_OCI_PLATFORM,
     projectDir: realpathSync(input.projectDir),
@@ -330,8 +347,13 @@ export async function probeInspectOciSelection(
     user: `${process.getuid?.() ?? 65532}:${process.getgid?.() ?? 65532}`,
     ...(input.sandboxExecution === undefined ? {} : { sandboxExecution: input.sandboxExecution }),
   });
-  const [serverResult, imageResult, sandboxImageResult] = await Promise.all([
-    runBoundedProcess(binding.dockerPath, ["version", "--format", "{{json .Server}}"], undefined, signal),
+  let serverResult: ProcessResult;
+  try {
+    serverResult = await runBoundedProcess(binding.dockerPath, ["version", "--format", "{{json .Server}}"], undefined, signal);
+  } catch {
+    throw new InspectOciUnavailableError("Docker is required for this OCI arm, but Colophon could not reach a running Docker engine. Start Docker and retry the local check.");
+  }
+  const [imageResult, sandboxImageResult] = await Promise.all([
     runBoundedProcess(binding.dockerPath, ["image", "inspect", "--format", "{{json .}}", binding.imageDigest], undefined, signal),
     binding.sandboxExecution === undefined
       ? Promise.resolve(undefined)

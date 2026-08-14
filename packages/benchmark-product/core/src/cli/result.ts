@@ -1,4 +1,5 @@
 import type { BenchmarkRuntimeHost } from "../runtime/host-port.js";
+import type { AgentProfile, CredentialGrant } from "../agent/index.js";
 
 /**
  * The CLI's return shape and its injected environment (spec §5.2).
@@ -26,4 +27,6 @@ export interface CliContext {
   readonly runtimeHost?: BenchmarkRuntimeHost;
   /** OS user-data directory supplied only by the process-owning CLI wrapper. */
   readonly agentDataDir?: string;
+  /** Process-owned interactive subscription capture; absent in tests and non-interactive embeddings. */
+  readonly subscriptionLogin?: (dataDir: string, profile: AgentProfile) => Promise<CredentialGrant>;
 }

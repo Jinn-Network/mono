@@ -30,7 +30,7 @@
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
-import { doctorAgent, listAgentProfiles, profileArmPinning, profileMatchesArmPinning, readAgentProfile, requireQualifiedHarnessLogin, storeAgentProfile, storeApiKeyCredential } from "../agent/index.js";
+import { doctorAgent, listAgentProfiles, observeAndStoreAgentProfile, profileArmPinning, profileMatchesArmPinning, readAgentProfile, requireQualifiedHarnessLogin, storeAgentProfile, storeApiKeyCredential } from "../agent/index.js";
 import { refuse, toErrorEnvelope, type ProductErrorCode, type ProductErrorEnvelope } from "../errors.js";
 import {
   armAdd,
@@ -115,7 +115,9 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --arm <armId> [--pinning <json>] [--notes <text>]
   arm remove       --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
   arm list         --workspace <dir> --principal <id> --draft <draftId>
-  agent add        --file <colophon-agent.json>
+  agent add        (--file <colophon-agent.json> | --agent <id> --adapter <claude-code|codex>
+                   --model <exact-model-id> --effort <low|medium|high|xhigh|max>
+                   [--executable <path>])
   agent credentials --agent <agentId> --api-key-file <path>
   agent login      --agent <agentId>
   doctor           --workspace <dir> --principal <id> --draft <draftId>
@@ -172,7 +174,7 @@ const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinnin
 const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
 const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
 const ARM_LIST_FLAGS = ["workspace", "principal", "json", "draft"] as const;
-const AGENT_ADD_FLAGS = ["file", "json"] as const;
+const AGENT_ADD_FLAGS = ["file", "agent", "adapter", "model", "effort", "executable", "json"] as const;
 const AGENT_CREDENTIALS_FLAGS = ["agent", "api-key-file", "json"] as const;
 const AGENT_LOGIN_FLAGS = ["agent", "json"] as const;
 const DOCTOR_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -502,7 +504,22 @@ function handleArmAdd(args: ParsedArgs, context: CliContext, jsonMode: boolean):
 
 function handleAgentAdd(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
   assertKnownFlags(args, AGENT_ADD_FLAGS);
-  const profile = storeAgentProfile(agentDataDir(context), readJsonFile(pathFrom(context.cwd, required(args, "file"))));
+  const file = optional(args, "file");
+  const guidedFlags = ["agent", "adapter", "model", "effort", "executable"].filter((name) => optional(args, name) !== undefined);
+  if (file !== undefined && guidedFlags.length > 0) {
+    refuse("invalid-invocation", "agent add", "choose --file or guided agent flags, not both");
+  }
+  const profile = file !== undefined
+    ? storeAgentProfile(agentDataDir(context), readJsonFile(pathFrom(context.cwd, file)))
+    : observeAndStoreAgentProfile(agentDataDir(context), {
+        agentId: required(args, "agent"),
+        adapter: required(args, "adapter") as "claude-code" | "codex",
+        model: required(args, "model"),
+        effort: required(args, "effort") as "low" | "medium" | "high" | "xhigh" | "max",
+        ...(optional(args, "executable") === undefined
+          ? {}
+          : { executable: pathFrom(context.cwd, optional(args, "executable")!) }),
+      });
   return renderResult({ ok: true, result: profile }, jsonMode, (value) => `stored ${value.adapter} agent profile ${value.agentId}; no credentials were stored\n`);
 }
 
@@ -515,14 +532,20 @@ function handleAgentCredentials(args: ParsedArgs, context: CliContext, jsonMode:
   return renderResult({ ok: true, result: grant }, jsonMode, (value) => `stored protected ${value.kind} grant for ${value.agentId}; its value is never recorded in a workspace or launch plan\n`);
 }
 
-function handleAgentLogin(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+async function handleAgentLogin(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, AGENT_LOGIN_FLAGS);
   const dataDir = agentDataDir(context);
   const agentId = required(args, "agent");
   const profile = readAgentProfile(dataDir, agentId);
   if (profile === undefined) refuse("not-found", "agent", `agent profile ${agentId} does not exist`);
-  // This is intentionally a fail-closed qualification seam, not a fake successful login.
+  // Refuse before invoking any terminal callback unless the exact executable is qualified.
   requireQualifiedHarnessLogin(profile);
+  if (jsonMode) refuse("invalid-invocation", "--json", "subscription login is interactive and does not support --json");
+  if (context.subscriptionLogin === undefined) {
+    refuse("invalid-invocation", "agent login", "subscription login requires an interactive Colophon terminal");
+  }
+  const grant = await context.subscriptionLogin(dataDir, profile);
+  return renderResult({ ok: true, result: grant }, false, (value) => `stored protected subscription grant for ${value.agentId}; provider acceptance is not yet tested\n`);
 }
 
 function handleDoctor(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
