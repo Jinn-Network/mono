@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import {
   p5BuildEntrypoint,
   p5CheckpointAction,
   p5ResumeNeeded,
+  removeRunOwnedBuilderWorkspace,
   runCanonicalP5GreenBaseline,
 } from "./p5-walkthrough.mjs";
 
@@ -101,7 +102,10 @@ test("bundle-staged checkpoint finishes after workspace deletion and re-entry is
     const workspaceDir = join(root, "builder-workspace");
     const bundleDir = join(root, "bundle");
     const transcriptPath = join(root, "transcript.json");
-    mkdirSync(workspaceDir);
+    const immutableInput = join(workspaceDir, "attempts", "one", "input");
+    mkdirSync(immutableInput, { recursive: true });
+    writeFileSync(join(immutableInput, "SKILL.md"), "sealed\n", { mode: 0o400 });
+    chmodSync(immutableInput, 0o500);
     mkdirSync(bundleDir);
     const pendingTranscript = {
       schema: "demo1.p5-plumbing/1",
@@ -144,6 +148,18 @@ test("bundle-staged checkpoint finishes after workspace deletion and re-entry is
       releaseReserve: () => { throw new Error("reserve must not release twice"); },
     });
     assert.deepEqual(replayed, JSON.parse(readFileSync(transcriptPath, "utf8")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("builder-workspace deletion refuses a foreign root shape", () => {
+  const root = mkdtempSync(join(tmpdir(), "p5-finalize-shape-test-"));
+  const workspacePath = join(root, "builder-workspace");
+  writeFileSync(workspacePath, "not a directory\n");
+  try {
+    assert.throws(() => removeRunOwnedBuilderWorkspace(workspacePath), /non-directory/u);
+    assert.equal(existsSync(workspacePath), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

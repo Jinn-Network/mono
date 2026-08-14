@@ -13,10 +13,12 @@ import {
   cpSync,
   existsSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -171,6 +173,28 @@ function writeDurableJsonExclusive(path, value) {
   }
 }
 
+/** Restore deletion permission only on directories owned by this run's operator, then remove it. */
+export function removeRunOwnedBuilderWorkspace(workspaceDir) {
+  const operatorUid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const prepareDirectory = (path) => {
+    const entry = lstatSync(path);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      fail(`builder workspace contains a non-directory where a directory was expected: ${path}`);
+    }
+    if (operatorUid !== undefined && entry.uid !== operatorUid) {
+      fail(`builder workspace directory is not owned by the current operator: ${path}`);
+    }
+    chmodSync(path, 0o700);
+    for (const child of readdirSync(path, { withFileTypes: true })) {
+      if (child.isDirectory() && !child.isSymbolicLink()) {
+        prepareDirectory(join(path, child.name));
+      }
+    }
+  };
+  prepareDirectory(workspaceDir);
+  rmSync(workspaceDir, { recursive: true, force: true });
+}
+
 function rfc3339(value) {
   const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?Z?$/u.exec(value);
   if (match === null) fail(`fixture provenance timestamp is not a supported UTC instant: ${value}`);
@@ -268,7 +292,7 @@ export async function finishStagedBundle({
     return existing;
   }
 
-  rmSync(workspaceDir, { recursive: true, force: true });
+  removeRunOwnedBuilderWorkspace(workspaceDir);
   if (existsSync(workspaceDir)) fail("builder workspace survived deletion-portability cut");
   const coldVerification = await verifyPublicBundle(bundleDir);
   if (coldVerification.identity !== pending.digests.bundleIdentity) {
