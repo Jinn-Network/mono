@@ -253,6 +253,16 @@ process.exit(result.status ?? 1);
 `;
 }
 
+function selectedRuntimeExecutableDigest(options: Demo1ClaudeRuntimeOptions): string {
+  const claudeExecutable = {
+    path: options.executablePath,
+    digest: sha256(readFileSync(options.executablePath)),
+  };
+  return options.oauthCredential === undefined
+    ? claudeExecutable.digest
+    : sha256(Buffer.from(credentialWrapperSource(claudeExecutable), "utf8"));
+}
+
 function materializeCredentialWrapper(
   path: string,
   claudeExecutable: { readonly path: string; readonly digest: string },
@@ -433,13 +443,17 @@ export function createDemo1ClaudeSelectedRuntimeBinding(
   options: Demo1ClaudeSelectedRuntimeOptions,
 ): Demo1ClaudeRuntimeBinding {
   verifyDemo1RuntimeSelection(options.selection, options.decision);
-  const observedDigest = sha256(readFileSync(options.executablePath));
+  const observedDigest = selectedRuntimeExecutableDigest(options);
   if (options.selection.harness.version !== options.harnessVersion
     || options.selection.harness.executableSha256 !== observedDigest
     || options.selection.skillSha256 !== options.artifacts.skill.digest.sha256) {
-    throw new TypeError("selected runtime does not match the observed Claude Code executable and skill identities");
+    throw new TypeError("selected runtime does not match the launched Claude Code runtime and skill identities");
   }
-  return createRuntimeBinding(options, options.selection.selected);
+  const binding = createRuntimeBinding(options, options.selection.selected);
+  if (binding.executable.digest !== observedDigest) {
+    throw new TypeError("selected Claude Code runtime changed while it was being bound");
+  }
+  return binding;
 }
 
 function exactCapabilities(

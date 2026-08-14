@@ -292,6 +292,54 @@ else process.exit(45);
       decision,
     })).toThrow(/does not match/u);
   });
+
+  it("binds an OAuth-selected v2 runtime to the launched wrapper rather than its underlying executable", () => {
+    const root = mkdtempSync(join(tmpdir(), "demo1-claude-selected-oauth-"));
+    const tokenPath = join(root, "oauth-token");
+    const wrapperPath = join(root, "credential-wrapper.mjs");
+    writeFileSync(tokenPath, "fixture-oauth-token\n", { mode: 0o600 });
+    chmodSync(tokenPath, 0o600);
+    try {
+      const runtimeOptions = {
+        executablePath: process.execPath,
+        harnessVersion: HARNESS_VERSION,
+        artifacts,
+        oauthCredential: { tokenFilePath: tokenPath, wrapperPath },
+        command: async () => ({ stdout: "" }),
+      } as const;
+      const candidate = createDemo1ClaudeCandidateRuntimeBinding({
+        ...runtimeOptions,
+        candidateIndex: 0,
+      });
+      const decision = decideDemo1Runtime(0, {
+        expectedCells: 12,
+        accountedCells: 12,
+        validGraderOutcomes: 12,
+        passes: 5,
+        timeoutFails: 0,
+        unresolvedInfrastructure: 0,
+        incompatibilities: 0,
+        skillLoaderCanary: "pass",
+      });
+      const selection = buildDemo1RuntimeSelection({
+        decision,
+        harnessVersion: HARNESS_VERSION,
+        executableSha256: candidate.executable.digest,
+        skillSha256: artifacts.skill.digest.sha256,
+        taskPoolSha256: "d".repeat(64),
+      });
+      const selected = createDemo1ClaudeSelectedRuntimeBinding({
+        ...runtimeOptions,
+        selection,
+        decision,
+      });
+      expect(selected.executable.digest).toBe(selection.harness.executableSha256);
+      expect(selected.executable.path).toBe(wrapperPath);
+      expect(selected.executable.digest).not.toBe(selected.claudeExecutable.digest);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Demo-1 Claude arm plans", () => {
