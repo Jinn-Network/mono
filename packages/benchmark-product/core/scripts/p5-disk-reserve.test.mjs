@@ -86,6 +86,45 @@ test("P5 releases only enough reserve to restore 44 GiB and logs exact scope", (
   assert.deepEqual(log, [event]);
 }));
 
+test("P5 resumes an announced reserve resize after interruption following truncate", () => withRoot((root) => {
+  const initial = [60n * GIB, 44n * GIB];
+  createP5DiskReserve(root, {
+    available: () => initial.shift(),
+    allocate: sparseAllocate,
+  });
+  assert.throws(() => recoverP5DiskCapacity(root, "before interrupted grader", {
+    availableBytes: () => 41n * GIB,
+    resize(path, bytes) {
+      truncateSync(path, bytes);
+      throw new Error("simulated process stop after truncate");
+    },
+  }), /simulated process stop after truncate/u);
+
+  // Inspection authenticates the announced transition instead of treating the smaller reserve
+  // as foreign mutation. The next recovery call durably closes the original event exactly once.
+  assert.equal(inspectP5DiskReserve(root).currentBytes, Number(13n * GIB));
+  recoverP5DiskCapacity(root, "resume preflight", { availableBytes: () => 44n * GIB });
+  const events = readFileSync(join(root, P5_RECOVERY_LOG), "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(events[0].label, "before interrupted grader");
+  assert.equal(events[0].releasedBytes, String(3n * GIB));
+  assert.equal(events[0].reserveRemainingBytes, String(13n * GIB));
+  assert.equal(events.filter((event) => event.operationId === events[0].operationId).length, 1);
+}));
+
+test("P5 state replacement ignores a stale temporary file from an earlier interruption", () => withRoot((root) => {
+  const initial = [60n * GIB, 44n * GIB];
+  createP5DiskReserve(root, {
+    available: () => initial.shift(),
+    allocate: sparseAllocate,
+  });
+  writeFileSync(join(root, `${P5_RESERVE_STATE}.tmp`), "stale partial state\n", { flag: "wx" });
+  const readings = [41n * GIB, 44n * GIB];
+  assert.doesNotThrow(() => recoverP5DiskCapacity(root, "after stale temp", {
+    availableBytes: () => readings.shift(),
+  }));
+  assert.equal(inspectP5DiskReserve(root).currentBytes, Number(13n * GIB));
+}));
+
 test("P5 returns the unused reserve after cold verification", () => withRoot((root) => {
   const initial = [60n * GIB, 44n * GIB];
   createP5DiskReserve(root, {
@@ -97,4 +136,28 @@ test("P5 returns the unused reserve after cold verification", () => withRoot((ro
   assert.equal(inspectP5DiskReserve(root).currentBytes, 0);
   assert.deepEqual(releaseP5DiskReserve(root), released);
   assert.equal(readFileSync(join(root, P5_RECOVERY_LOG), "utf8").trim().split("\n").length, 1);
+}));
+
+test("P5 resumes final reserve release after interruption following truncate", () => withRoot((root) => {
+  const initial = [60n * GIB, 44n * GIB];
+  createP5DiskReserve(root, {
+    available: () => initial.shift(),
+    allocate: sparseAllocate,
+  });
+  assert.throws(() => releaseP5DiskReserve(root, "cold bundle verified", {
+    availableBytes: () => 44n * GIB,
+    resize(path, bytes) {
+      truncateSync(path, bytes);
+      throw new Error("simulated stop during final release");
+    },
+  }), /simulated stop during final release/u);
+  assert.equal(inspectP5DiskReserve(root).currentBytes, 0);
+  const recovered = releaseP5DiskReserve(root, "cold bundle verified", {
+    availableBytes: () => 60n * GIB,
+  });
+  assert.equal(recovered.releasedBytes, String(P5_RESERVE_BYTES));
+  assert.equal(recovered.reserveRemainingBytes, "0");
+  const events = readFileSync(join(root, P5_RECOVERY_LOG), "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].operationId, recovered.operationId);
 }));

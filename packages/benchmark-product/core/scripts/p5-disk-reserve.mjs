@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
@@ -11,6 +12,7 @@ import {
   renameSync,
   statfsSync,
   truncateSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -23,6 +25,7 @@ export const P5_HARD_FLOOR_BYTES = 40n * GIB;
 export const P5_RESERVE_STATE = "p5-disk-reserve.json";
 export const P5_RECOVERY_LOG = "p5-disk-recovery.jsonl";
 const RESERVE_NAME = "p5-disk-reserve.bin";
+const RESIZE_INTENT_NAME = "p5-disk-reserve-resize.json";
 
 function freeBytes(path = "/") {
   const stats = statfsSync(path, { bigint: true });
@@ -48,10 +51,20 @@ function assertInsideRunRoot(runRoot, target) {
 
 function writeState(runRoot, state) {
   const destination = join(runRoot, P5_RESERVE_STATE);
-  const temporary = `${destination}.tmp`;
+  const temporary = `${destination}.tmp-${process.pid}-${randomUUID()}`;
   writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  const fileFd = openSync(temporary, "r");
+  try {
+    fsyncSync(fileFd);
+  } finally {
+    closeSync(fileFd);
+  }
   renameSync(temporary, destination);
-  const directoryFd = openSync(runRoot, "r");
+  syncDirectory(runRoot);
+}
+
+function syncDirectory(path) {
+  const directoryFd = openSync(path, "r");
   try {
     fsyncSync(directoryFd);
   } finally {
@@ -75,7 +88,65 @@ export function allocateP5ReserveFile(path, bytes, {
   }
 }
 
-function validatedState(runRoot) {
+function resizeIntentPath(runRoot) {
+  return join(runRoot, RESIZE_INTENT_NAME);
+}
+
+function parseResizeIntent(runRoot) {
+  const path = resizeIntentPath(runRoot);
+  if (!existsSync(path)) return undefined;
+  const intent = JSON.parse(readFileSync(path, "utf8"));
+  if (intent?.schema !== "demo1.p5-disk-resize/1" || intent.reserveFile !== RESERVE_NAME
+    || typeof intent.operationId !== "string" || intent.operationId.length === 0
+    || typeof intent.label !== "string" || intent.label.length === 0
+    || !Number.isSafeInteger(intent.dev) || !Number.isSafeInteger(intent.ino)
+    || !Number.isSafeInteger(intent.fromBytes) || intent.fromBytes < 0
+    || !Number.isSafeInteger(intent.toBytes) || intent.toBytes < 0
+    || intent.toBytes > intent.fromBytes
+    || typeof intent.before?.availableBytes !== "string"
+    || typeof intent.before?.availableGiB !== "string") {
+    throw new Error("P5 disk reserve resize intent is invalid");
+  }
+  return intent;
+}
+
+function syncReserveFile(path) {
+  const fd = openSync(path, "r+");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function writeResizeIntent(runRoot, intent) {
+  const path = resizeIntentPath(runRoot);
+  if (existsSync(path)) throw new Error("P5 disk reserve already has an unfinished resize intent");
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  writeFileSync(temporary, `${JSON.stringify(intent, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  const fd = openSync(temporary, "r");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(temporary, path);
+  syncDirectory(runRoot);
+}
+
+function removeResizeIntent(runRoot) {
+  const path = resizeIntentPath(runRoot);
+  if (!existsSync(path)) return;
+  unlinkSync(path);
+  syncDirectory(runRoot);
+}
+
+/**
+ * Authenticate the reserve and complete any durably announced resize. The intent is retained
+ * until its recovery event is durable, so a stop at every truncate/state/log boundary is
+ * resumable and auditable.
+ */
+function validatedState(runRoot, { resize = truncateSync } = {}) {
   const statePath = join(runRoot, P5_RESERVE_STATE);
   const state = JSON.parse(readFileSync(statePath, "utf8"));
   if (state?.schema !== "demo1.p5-disk-reserve/1" || state.reserveFile !== RESERVE_NAME
@@ -85,12 +156,35 @@ function validatedState(runRoot) {
   }
   const reservePath = join(runRoot, RESERVE_NAME);
   assertInsideRunRoot(runRoot, reservePath);
-  const stat = lstatSync(reservePath);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.dev !== state.dev || stat.ino !== state.ino
-    || stat.size !== state.currentBytes) {
+  let stat = lstatSync(reservePath);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.dev !== state.dev || stat.ino !== state.ino) {
     throw new Error("P5 disk reserve identity or size changed outside the run");
   }
-  return { state, reservePath };
+  const intent = parseResizeIntent(runRoot);
+  if (intent === undefined) {
+    if (stat.size !== state.currentBytes) {
+      throw new Error("P5 disk reserve identity or size changed outside the run");
+    }
+    return { state, reservePath, intent: undefined };
+  }
+  if (intent.dev !== state.dev || intent.ino !== state.ino
+    || !((state.currentBytes === intent.fromBytes && (stat.size === intent.fromBytes || stat.size === intent.toBytes))
+      || (state.currentBytes === intent.toBytes && stat.size === intent.toBytes))) {
+    throw new Error("P5 disk reserve resize intent does not match the authenticated reserve state");
+  }
+  if (stat.size === intent.fromBytes) {
+    resize(reservePath, intent.toBytes);
+    syncReserveFile(reservePath);
+    stat = lstatSync(reservePath);
+  }
+  if (stat.size !== intent.toBytes) {
+    throw new Error("P5 disk reserve resize did not reach its durable target");
+  }
+  if (state.currentBytes !== intent.toBytes) {
+    state.currentBytes = intent.toBytes;
+    writeState(runRoot, state);
+  }
+  return { state, reservePath, intent };
 }
 
 export function createP5DiskReserve(runRoot, {
@@ -145,46 +239,95 @@ function durableAppend(path, value) {
   }
 }
 
+function recoveryEvents(runRoot) {
+  const path = join(runRoot, P5_RECOVERY_LOG);
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+function finalizeResizeIntent(runRoot, intent, available) {
+  const prior = recoveryEvents(runRoot).find((event) => event?.operationId === intent.operationId);
+  if (prior !== undefined) {
+    removeResizeIntent(runRoot);
+    return prior;
+  }
+  const event = {
+    schema: "demo1.p5-disk-recovery/1",
+    operationId: intent.operationId,
+    at: new Date().toISOString(),
+    label: intent.label,
+    before: intent.before,
+    after: snapshot(available),
+    releasedBytes: String(BigInt(intent.fromBytes) - BigInt(intent.toBytes)),
+    reserveRemainingBytes: String(intent.toBytes),
+    safeTargetRestored: available >= P5_SAFE_TARGET_BYTES,
+    hardFloorSatisfied: available >= P5_HARD_FLOOR_BYTES,
+    cleanupScope: "run-owned-reserve-only",
+  };
+  durableAppend(join(runRoot, P5_RECOVERY_LOG), event);
+  removeResizeIntent(runRoot);
+  return event;
+}
+
+function beginResizeIntent(runRoot, label, state, before, toBytes) {
+  const intent = {
+    schema: "demo1.p5-disk-resize/1",
+    operationId: randomUUID(),
+    createdAt: new Date().toISOString(),
+    label,
+    before: snapshot(before),
+    reserveFile: RESERVE_NAME,
+    dev: state.dev,
+    ino: state.ino,
+    fromBytes: state.currentBytes,
+    toBytes,
+  };
+  writeResizeIntent(runRoot, intent);
+  return intent;
+}
+
 export function recoverP5DiskCapacity(runRoot, label, {
   diskPath = "/",
   availableBytes = freeBytes,
   resize = truncateSync,
 } = {}) {
   const root = resolve(runRoot);
+  let validated = validatedState(root, { resize });
+  if (validated.intent !== undefined) {
+    finalizeResizeIntent(root, validated.intent, availableBytes(diskPath));
+    validated = validatedState(root, { resize });
+  }
   const before = availableBytes(diskPath);
-  const { state, reservePath } = validatedState(root);
   let available = before;
-  let released = 0n;
-  while (available < P5_SAFE_TARGET_BYTES && state.currentBytes > 0) {
+  let event;
+  if (available < P5_SAFE_TARGET_BYTES && validated.state.currentBytes > 0) {
     const needed = P5_SAFE_TARGET_BYTES - available;
     const rounded = ((needed + GIB - 1n) / GIB) * GIB;
-    const release = rounded > BigInt(state.currentBytes) ? BigInt(state.currentBytes) : rounded;
-    const nextSize = BigInt(state.currentBytes) - release;
-    resize(reservePath, Number(nextSize));
-    const fd = openSync(reservePath, "r+");
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
-    state.currentBytes = Number(nextSize);
-    released += release;
-    writeState(root, state);
+    const release = rounded > BigInt(validated.state.currentBytes)
+      ? BigInt(validated.state.currentBytes)
+      : rounded;
+    const nextSize = Number(BigInt(validated.state.currentBytes) - release);
+    const intent = beginResizeIntent(root, label, validated.state, before, nextSize);
+    // validatedState owns completion of the announced resize. If resize throws (including after
+    // changing the file), the durable intent remains and the next invocation resumes it.
+    validated = validatedState(root, { resize });
     available = availableBytes(diskPath);
+    event = finalizeResizeIntent(root, intent, available);
+  } else {
+    event = {
+      schema: "demo1.p5-disk-recovery/1",
+      at: new Date().toISOString(),
+      label,
+      before: snapshot(before),
+      after: snapshot(available),
+      releasedBytes: "0",
+      reserveRemainingBytes: String(validated.state.currentBytes),
+      safeTargetRestored: available >= P5_SAFE_TARGET_BYTES,
+      hardFloorSatisfied: available >= P5_HARD_FLOOR_BYTES,
+      cleanupScope: "run-owned-reserve-only",
+    };
+    durableAppend(join(root, P5_RECOVERY_LOG), event);
   }
-  const event = {
-    schema: "demo1.p5-disk-recovery/1",
-    at: new Date().toISOString(),
-    label,
-    before: snapshot(before),
-    after: snapshot(available),
-    releasedBytes: released.toString(),
-    reserveRemainingBytes: String(state.currentBytes),
-    safeTargetRestored: available >= P5_SAFE_TARGET_BYTES,
-    hardFloorSatisfied: available >= P5_HARD_FLOOR_BYTES,
-    cleanupScope: "run-owned-reserve-only",
-  };
-  durableAppend(join(root, P5_RECOVERY_LOG), event);
   if (available < P5_HARD_FLOOR_BYTES) {
     throw new Error(
       `P5 disk recovery refused ${label}: ${snapshot(available).availableGiB} GiB free after releasing `
@@ -199,40 +342,26 @@ export function inspectP5DiskReserve(runRoot) {
   return { ...state };
 }
 
-export function releaseP5DiskReserve(runRoot, label = "run complete", { diskPath = "/" } = {}) {
+export function releaseP5DiskReserve(runRoot, label = "run complete", {
+  diskPath = "/",
+  availableBytes = freeBytes,
+  resize = truncateSync,
+} = {}) {
   const root = resolve(runRoot);
-  const before = freeBytes(diskPath);
-  const { state, reservePath } = validatedState(root);
+  let validated = validatedState(root, { resize });
+  if (validated.intent !== undefined) {
+    const recovered = finalizeResizeIntent(root, validated.intent, availableBytes(diskPath));
+    validated = validatedState(root, { resize });
+    if (recovered.label === label && recovered.reserveRemainingBytes === "0") return recovered;
+  }
+  const before = availableBytes(diskPath);
+  const { state } = validated;
   if (state.currentBytes === 0 && existsSync(join(root, P5_RECOVERY_LOG))) {
-    const events = readFileSync(join(root, P5_RECOVERY_LOG), "utf8")
-      .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
-    const prior = events.findLast((event) => event?.label === label
+    const prior = recoveryEvents(root).findLast((event) => event?.label === label
       && event?.reserveRemainingBytes === "0");
     if (prior !== undefined) return prior;
   }
-  const released = state.currentBytes;
-  truncateSync(reservePath, 0);
-  const fd = openSync(reservePath, "r+");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  state.currentBytes = 0;
-  writeState(root, state);
-  const after = freeBytes(diskPath);
-  const event = {
-    schema: "demo1.p5-disk-recovery/1",
-    at: new Date().toISOString(),
-    label,
-    before: snapshot(before),
-    after: snapshot(after),
-    releasedBytes: String(released),
-    reserveRemainingBytes: "0",
-    safeTargetRestored: after >= P5_SAFE_TARGET_BYTES,
-    hardFloorSatisfied: after >= P5_HARD_FLOOR_BYTES,
-    cleanupScope: "run-owned-reserve-only",
-  };
-  durableAppend(join(root, P5_RECOVERY_LOG), event);
-  return event;
+  const intent = beginResizeIntent(root, label, state, before, 0);
+  validatedState(root, { resize });
+  return finalizeResizeIntent(root, intent, availableBytes(diskPath));
 }

@@ -45,6 +45,7 @@ const DRAFT_ID = "demo1-p5-plumbing";
 const BASELINE_ARM = "claude-md-baseline";
 const CANDIDATE_ARM = "skill-candidate";
 const WALKTHROUGH_STATE = "p5-walkthrough-state.json";
+const LAUNCH_STEP_LABELS = new Set(["launch", "launch.from-lock", "resume"]);
 
 function fail(message) {
   throw new Error(`P5 walkthrough: ${message}`);
@@ -197,14 +198,37 @@ export function removeRunOwnedBuilderWorkspace(workspaceDir) {
 
 /** Rebuild run time from durable step evidence so a post-run resume cannot reset it to zero. */
 export function p5LaunchElapsedMs(steps) {
-  const launchLabels = new Set(["launch", "launch.from-lock", "resume"]);
   return steps.reduce((total, step) => {
-    if (!launchLabels.has(step.label)) return total;
+    if (!LAUNCH_STEP_LABELS.has(step.label)) return total;
     if (!Number.isSafeInteger(step.elapsedMs) || step.elapsedMs < 0) {
       fail(`invalid durable launch timing for ${step.label}: ${String(step.elapsedMs)}`);
     }
     return total + step.elapsedMs;
   }, 0);
+}
+
+/**
+ * Close a durable launch-timing boundary left open by a terminated process. The recovered
+ * duration deliberately includes the interruption window: omitting it would understate the
+ * end-to-end time consumed by the same locked Run.
+ */
+export function recoverInterruptedP5LaunchStep(checkpoint, nowMs = Date.now()) {
+  const inFlight = checkpoint?.inFlightLaunchStep;
+  if (inFlight === undefined) return undefined;
+  if (!LAUNCH_STEP_LABELS.has(inFlight.label)
+    || !Number.isSafeInteger(inFlight.startedAtUnixMs) || inFlight.startedAtUnixMs < 0
+    || !Number.isSafeInteger(nowMs) || nowMs < inFlight.startedAtUnixMs
+    || !Array.isArray(checkpoint.steps)) {
+    fail("durable in-flight launch timing is invalid");
+  }
+  const recovered = {
+    label: inFlight.label,
+    elapsedMs: nowMs - inFlight.startedAtUnixMs,
+    interrupted: true,
+  };
+  checkpoint.steps.push(recovered);
+  delete checkpoint.inFlightLaunchStep;
+  return recovered;
 }
 
 function rfc3339(value) {
@@ -304,7 +328,9 @@ export async function finishStagedBundle({
     return existing;
   }
 
-  removeRunOwnedBuilderWorkspace(workspaceDir);
+  // A process may stop after the deletion-portability cut but before cold verification or the
+  // transcript write. Absence is therefore the expected resumable state, not an ENOENT failure.
+  if (existsSync(workspaceDir)) removeRunOwnedBuilderWorkspace(workspaceDir);
   if (existsSync(workspaceDir)) fail("builder workspace survived deletion-portability cut");
   const coldVerification = await verifyPublicBundle(bundleDir);
   if (coldVerification.identity !== pending.digests.bundleIdentity) {
@@ -369,6 +395,7 @@ async function main() {
       fail("resume checkpoint is completed, invalid, or bound to different runtime paths");
     }
     inspectP5DiskReserve(runRoot);
+    recoverInterruptedP5LaunchStep(checkpoint);
     checkpoint.resumeInvocations += 1;
     replaceWalkthroughState(runRoot, checkpoint);
   } else {
@@ -469,8 +496,27 @@ async function main() {
   const steps = checkpoint.steps;
   const step = async (label, operation) => {
     const before = Date.now();
-    const result = await operation();
-    steps.push({ label, elapsedMs: Date.now() - before });
+    const durableLaunchTiming = LAUNCH_STEP_LABELS.has(label);
+    if (durableLaunchTiming) {
+      if (checkpoint.inFlightLaunchStep !== undefined) {
+        fail(`cannot begin ${label} while another launch timing boundary is open`);
+      }
+      checkpoint.inFlightLaunchStep = { label, startedAtUnixMs: before };
+      replaceWalkthroughState(runRoot, checkpoint);
+    }
+    let result;
+    try {
+      result = await operation();
+    } catch (error) {
+      // Thrown failures still receive exact timing. A hard process termination leaves
+      // the in-flight boundary for recoverInterruptedP5LaunchStep on the next invocation.
+      steps.push({ label, elapsedMs: Date.now() - before, failed: true });
+      if (durableLaunchTiming) delete checkpoint.inFlightLaunchStep;
+      replaceWalkthroughState(runRoot, checkpoint);
+      throw error;
+    }
+    steps.push({ label, elapsedMs: Date.now() - before, ...(result?.ok === true ? {} : { failed: true }) });
+    if (durableLaunchTiming) delete checkpoint.inFlightLaunchStep;
     replaceWalkthroughState(runRoot, checkpoint);
     return expectOk(label, result);
   };

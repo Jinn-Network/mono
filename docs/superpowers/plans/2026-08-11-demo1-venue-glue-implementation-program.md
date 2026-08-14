@@ -34,7 +34,8 @@ Additional locked constraints:
 - P5 remains a 3-task × 2-arm × 2-replicate **plumbing** gate. A fresh recovery-capable run starts
   with at least 60 GiB free, establishes a 16-GiB run-owned reserve, targets 44 GiB during Docker
   work, and retains the 40-GiB hard floor. It proves all twelve cells accounted, gold PASS / empty
-  FAIL, three repository clusters, and `draws === resamples × clusterCount`; it does not estimate
+  FAIL, three repository clusters, and zero executed bootstrap draws because the interval is
+  withheld below `minN`; it seals planned `resamples` and the cluster manifest separately and does not estimate
   capability. P5 seals at most one same-cell evaluation-only retry for typed provider/transport
   unavailability. It never repeats a completed Claude solve, replaces a task, adds a replicate, or
   deletes shared caches automatically.
@@ -316,7 +317,8 @@ draft→import→arms→quote→lock→launch→collect→report→verify on the
 venue with container grading and immutable local bundle emission, zero
 manual intervention; all 12 cells accounted in the Matrix; real per-axis
 evidence; `verifyMatrix` + `verifyReport` + bundle verification green;
-`draws === resamples × clusterCount`; and every task's gold patch passes
+zero executed draws for the below-`minN` withheld interval while locked `resamples` and the exact
+cluster manifest remain separately authenticated; and every task's gold patch passes
 while its empty patch fails in the real grader. The undersized micro-slate
 emits no interval and explicitly proves plumbing, not capability. A runbook
 and recorded evidence artifact are committed. R5 (slate recon) additionally delivers: 2–3

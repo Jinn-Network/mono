@@ -6,11 +6,44 @@
 
 **Original implementation base:** `a0bc1abe0c788a4dafdc8f6e9dcdf67e5f9c44ba`
 
-**Current integration base:** `002a7e17b`
+**Current integration base:** `e9bf54f2c43d8b0854725e18b63fbdd72854ca4b`
 
 **Recovery implementation commit:** `76a9857db`
 
-## Current outcome: authenticated fresh run stopped at the disk gate
+## Final outcome: complete local plumbing proof
+
+On 2026-08-14 the operator-authorized fresh recovery run completed the fixed three-task,
+two-arm, two-replicate slate. All 12 cells were dispatched exactly once, all 12 reached a valid
+grader outcome, there were zero infrastructure retries, and every cell earned `match` separately
+for harness, model, loadout, and isolation. Before dispatch, all three exact digest-pinned images
+passed the real gold-patch control and failed the empty-patch control with grader networking
+disabled.
+
+The sealed records are:
+
+- Benchmark `842c3edf193992f54647c9c77e4d000ae3860b4e35ac11f336ac01463a6b9850`;
+- Run `a7b8d70306673b24d6f5b063d514aecd7c6f2a56c2dd409c56e1990ea4cc9069`;
+- Matrix `924fdfb7c43c70a363b1d542f3aede05bbf2e76f90e89bc033c5734224c4d15d`;
+- Report `e7af093b2a7e7b9016d9fcef85f87fde4933ef940d56920a710fef2ff5fdeecc`;
+- Report envelope `74f9d020b352d4c2d87029b6a2c5b7a94042f0d80eb2a389797988c9cd1a294b`;
+- bundle identity `fe23ac64f568e73a6dc37c7a638ace571ded88e5cca20401dc916326d49ead32`.
+
+The Report has three paired tasks from three repository clusters and correctly withholds its
+interval because `minN=5`. Its bootstrap disclosure distinguishes the locked plan from work
+actually performed: `resamples=1000` and `clusterCount=3` describe planned capacity, while
+`draws=0` records that no bootstrap ensemble was executed for a withheld interval. It therefore
+proves plumbing, not capability.
+
+The immutable bundle was copied outside the builder workspace; that full workspace was deleted;
+and the standalone verifier then passed manifest, evidence-closure, trust, Matrix rederivation,
+Report verification, and claim-consistency checks without builder state. The retained local
+handoff root is `/Users/adrianobradley/life's-work/demo1-p5-runs/2026-08-14-fresh-recovery`.
+This is a local sealed handoff only: it creates no public URL, discovery source, archive mirror,
+Explorer view, or publication claim.
+
+All earlier stops below remain historical evidence. None was resumed, topped up, or rewritten.
+
+## Superseded 2026-08-13 outcome: authenticated fresh run stopped at the disk gate
 
 The operator-authorized recovery run used the product-owned secret-forwarding boundary described
 below. It passed isolated readiness and the repeated real gold-PASS/empty-FAIL baseline, locked at
@@ -160,10 +193,13 @@ event, while declaring that private history is not a retention dependency.
   Node 22; benchmark-product core builds and typechecks.
 - P4's shared-ensemble correction is merged. The old paired-delta fixture remains byte-immutable,
   its manifest erratum routes current conformance to the append-only v2 successor, and P5 asserts
-  the corrected public identity `draws = resamples × clusterCount` without product-side statistics.
+  the corrected public identity `draws = resamples × clusterCount` when an interval is actually
+  estimated. A below-`minN` withheld interval performs zero draws and reports the locked resample
+  capacity and cluster manifest separately.
 - The CI-safe P5 assertions cover the exact 40-GiB boundary and fail-closed lower boundary; exact
   12-cell accounting; one dispatch per cell; all four verification axes; three source clusters;
-  no interval with the `minN=5` reason; and raw `draws = resamples × clusterCount` accounting.
+  no interval with the `minN=5` reason; zero executed draws; and separately authenticated planned
+  `resamples` and `clusterCount` values.
 - The post-P3b fixture test now requires the named canonical evaluation-row descriptor and exact
   material keys, matching digest-pinned `docker://` URI, shipped parser identity, frozen grader
   program, timeout, and three repository provenance clusters.
@@ -232,16 +268,14 @@ Claude Code `2.1.222`, exact model inventory `claude-haiku-4-5-20251001`, and di
 wrapper and Claude-binary digests. This proves the former ambient-vs-isolated authentication gap is
 closed without weakening per-attempt state isolation.
 
-The authenticated recovery run repeated the disk gate and real three-task gold-PASS/empty-FAIL
-baseline, but the host did not retain enough space for all twelve later grading operations. A
-future wholly new run therefore needs materially more than the bare 40-GiB start threshold, must
-again account all twelve newly locked cells, emit the local immutable bundle, delete the builder
-workspace, and pass cold verification. Both earlier locked Runs remain terminal and are never
-resumed, retried, or topped up.
+The first authenticated recovery run repeated the disk gate and real three-task
+gold-PASS/empty-FAIL baseline, but the host did not retain enough space for all twelve later
+grading operations. The successful 2026-08-14 fresh Run recorded above supersedes that operational
+blocker. Both earlier locked Runs remain terminal and were never resumed, retried, or topped up.
 
 ## Publication boundary
 
-This packet may emit only a local immutable bundle. It did not create a public report URL, signed
-Record Discovery source, archive mirror, Explorer view, local report bundle, or publication claim.
-This evidence is a blocked implementation checkpoint, not a published benchmark and not a
-capability result. Neither partial run can support an arm-effect claim.
+This packet emits only the local immutable bundle identified above. It did not create a public
+report URL, signed Record Discovery source, archive mirror, Explorer view, or publication claim.
+The completed micro-slate is a plumbing proof, not a published benchmark and not a capability
+result. Neither historical partial run supports an arm-effect claim.

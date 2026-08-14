@@ -32,8 +32,10 @@ URL or discovery source, mint an archive mirror, or claim that Demo-1 is publish
   unless both sealed material and host policy declare it.
 - P4b supplies paired-delta presentation. The report must have three pairs and three source-repo
   clusters, withhold the interval because `minN=5`, and preserve number-free compact artifacts.
-- P4's shared-ensemble draw-accounting correction is integrated. P5 asserts the public report
-  field exactly: `draws = resamples × clusterCount`. The pre-correction fixture remains immutable;
+- P4's shared-ensemble draw-accounting correction is integrated. When an interval is estimated,
+  P5 asserts `draws = resamples × clusterCount`. A below-`minN` withheld interval executes and
+  reports zero draws while sealing planned `resamples` and the exact cluster manifest separately.
+  The pre-correction fixture remains immutable;
   current conformance is routed through its append-only `paired-delta-shared-ensemble.v2.json`
   successor and manifest erratum.
 
@@ -125,7 +127,8 @@ The output directory must not already exist. The command:
 3. imports the three frozen tasks, registers only arms A/B, quotes exactly 12 cells, and locks;
 4. launches with the gated Docker path, then collects, reports, and verifies;
 5. rejects any missing cell, repeat dispatch, failed verification check, or non-`match` axis;
-6. requires three pairs, three source clusters, `draws = resamples × clusterCount`, and no interval;
+6. requires three pairs, three source clusters, no interval, zero executed draws, and separate
+   locked `resamples` plus exact cluster-manifest accounting;
 7. emits the local immutable bundle, copies it outside the builder workspace, deletes only that
    newly created builder workspace, and cold-verifies the copied bundle;
 8. writes a transcript that says explicitly that the result proves plumbing, not capability, and

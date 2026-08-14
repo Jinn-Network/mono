@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   assertP5ReadyToCollect,
   finishStagedBundle,
@@ -11,14 +12,30 @@ import {
   p5CheckpointAction,
   p5LaunchElapsedMs,
   p5ResumeNeeded,
+  recoverInterruptedP5LaunchStep,
   removeRunOwnedBuilderWorkspace,
   runCanonicalP5GreenBaseline,
 } from "./p5-walkthrough.mjs";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 test("walkthrough rebuilds through the package entrypoint that copies runtime assets", () => {
   const buildEntrypoint = p5BuildEntrypoint();
   assert.equal(buildEntrypoint.endsWith("/scripts/build.mjs"), true);
   assert.equal(existsSync(buildEntrypoint), true);
+});
+
+test("committed P5 evidence records the completed cold bundle and truthful withheld draws", () => {
+  const evidence = readFileSync(
+    join(repoRoot, "docs", "superpowers", "plans", "demo-report-1", "P5-evidence.md"),
+    "utf8",
+  );
+  assert.match(evidence, /Final outcome: complete local plumbing proof/u);
+  assert.match(evidence, /fe23ac64f568e73a6dc37c7a638ace571ded88e5cca20401dc916326d49ead32/u);
+  assert.match(evidence, /all 12 reached a valid\s+grader outcome/u);
+  assert.match(evidence, /draws=0.*no bootstrap ensemble was executed/su);
+  assert.match(evidence, /standalone verifier then passed manifest, evidence-closure, trust, Matrix rederivation/su);
+  assert.doesNotMatch(evidence, /## Current outcome:.*stopped/su);
 });
 
 test("canonical walkthrough always wires v2 pre-stage stop capture with attempt identity", async () => {
@@ -154,6 +171,45 @@ test("bundle-staged checkpoint finishes after workspace deletion and re-entry is
   }
 });
 
+test("bundle-staged checkpoint resumes when interruption already deleted the workspace", async () => {
+  const root = mkdtempSync(join(tmpdir(), "p5-finalize-after-delete-test-"));
+  try {
+    const workspaceDir = join(root, "builder-workspace");
+    const bundleDir = join(root, "bundle");
+    const transcriptPath = join(root, "transcript.json");
+    mkdirSync(bundleDir);
+    const pendingTranscript = {
+      schema: "demo1.p5-plumbing/1",
+      digests: { bundleIdentity: "b".repeat(64) },
+      disk: { recoveryLog: "p5-disk-recovery.jsonl" },
+      verification: { workspaceChecks: ["matrix-rederivation"] },
+    };
+    const checkpoint = {
+      schema: "demo1.p5-walkthrough-state/1",
+      phase: "bundle-staged",
+      completed: false,
+      pendingTranscript,
+    };
+    const transcript = await finishStagedBundle({
+      runRoot: root,
+      workspaceDir,
+      bundleDir,
+      transcriptPath,
+      checkpoint,
+      verifyPublicBundle: async () => ({
+        identity: "b".repeat(64),
+        checks: ["manifest", "evidence-closure", "claim-consistency"],
+      }),
+      releaseReserve: () => ({ label: "cold bundle verified", reserveRemainingBytes: "0" }),
+    });
+    assert.equal(transcript.verification.builderWorkspaceDeleted, true);
+    assert.equal(existsSync(transcriptPath), true);
+    assert.equal(checkpoint.completed, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("builder-workspace deletion refuses a foreign root shape", () => {
   const root = mkdtempSync(join(tmpdir(), "p5-finalize-shape-test-"));
   const workspacePath = join(root, "builder-workspace");
@@ -177,6 +233,28 @@ test("launch timing is rebuilt from durable launch and resume steps", () => {
   assert.throws(
     () => p5LaunchElapsedMs([{ label: "launch", elapsedMs: -1 }]),
     /invalid durable launch timing/u,
+  );
+});
+
+test("interrupted launch timing is recovered durably instead of disappearing", () => {
+  const checkpoint = {
+    steps: [{ label: "init", elapsedMs: 4 }],
+    inFlightLaunchStep: { label: "launch", startedAtUnixMs: 1_000 },
+  };
+  assert.deepEqual(recoverInterruptedP5LaunchStep(checkpoint, 4_250), {
+    label: "launch",
+    elapsedMs: 3_250,
+    interrupted: true,
+  });
+  assert.equal(checkpoint.inFlightLaunchStep, undefined);
+  assert.equal(p5LaunchElapsedMs(checkpoint.steps), 3_250);
+  assert.equal(recoverInterruptedP5LaunchStep(checkpoint, 5_000), undefined);
+  assert.throws(
+    () => recoverInterruptedP5LaunchStep({
+      steps: [],
+      inFlightLaunchStep: { label: "launch", startedAtUnixMs: 6_000 },
+    }, 5_000),
+    /in-flight launch timing is invalid/u,
   );
 });
 
