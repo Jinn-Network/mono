@@ -60,7 +60,6 @@ import { TrajectoryCollector } from '../../src/trajectory/index.js';
 import { allocateAnvilPort } from '../_support/chain/port-allocator.js';
 import { jsonRpc as anvilJsonRpc, spawnAnvilFork } from '../_support/chain/anvil.js';
 import { LaunchAction } from '../../src/solvernets/launch-state-machine.js';
-import { LifecycleTransition } from '../../src/solvernets/lifecycle-transitions.js';
 import {
   IdentityRegistryBackedSolverNetRegistryClient,
 } from '../../src/solvernets/registry-client-erc8004.js';
@@ -1903,8 +1902,6 @@ export interface ForkSolverNetCreationResult {
   verdict: string;
   score: string;
   submittedCount: number;
-  /** Status sequence visible on the launched record across the lifecycle. */
-  lifecycleSequence: Array<'launched' | 'paused' | 'retired'>;
   /** Number of `setMetadata` writes the publisher observed across the run. */
   setMetadataCalls: number;
 }
@@ -1930,8 +1927,8 @@ export interface ForkSolverNetCreationResult {
  *      b) reject-cid — non-joined manifestCid,
  *      c) reject-role — joined CID but evaluation role the operator did
  *         not opt into.
- *   9. `LifecycleTransition.transition` → paused → launched (resume) →
- *      retired. Each transition fires a real `setMetadata` write.
+ *   (The former step 9 drove `LifecycleTransition` through paused → launched
+ *   → retired; that producer retired with Wave-4 D3.)
  */
 export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSolverNetCreationResult> {
   const anvilCheck = spawnSync('anvil', ['--version'], { stdio: 'ignore' });
@@ -2273,57 +2270,13 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     const submittedCount = Number(tupleField<bigint>(taskRecordPostFinalize, 'submittedCount', 6));
     assert(submittedCount === 1, `submittedCount=${submittedCount}, expected 1`);
 
-    // Step 9 — exercise lifecycle transitions: paused → launched → retired.
-    let stopGeneratorCalls = 0;
-    let startGeneratorCalls = 0;
-    const lifecycle = new LifecycleTransition({
-      store: solverNetStore,
-      registry,
-      signer: {
-        agentEoaAddress: launcherAccount.address,
-        agentEoaPrivateKey: launcher.agentPrivateKey,
-        agentId: launcher.agentId,
-      },
-      subgraph,
-      awaitTxConfirmation: async (txHash) => {
-        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-        return { blockNumber: Number(receipt.blockNumber) };
-      },
-      stopGenerator: async () => {
-        stopGeneratorCalls += 1;
-      },
-      startGenerator: async () => {
-        startGeneratorCalls += 1;
-      },
-    });
-
-    const lifecycleSequence: Array<'launched' | 'paused' | 'retired'> = [];
-
-    const paused = await lifecycle.transition(launched, 'paused');
-    assert(paused.status === 'paused', `pause did not land at status=paused (got ${paused.status})`);
-    assert(paused.lifecycleProgress === undefined, 'lifecycleProgress should be cleared after pause');
-    assert(stopGeneratorCalls === 1, `expected 1 stopGenerator call after pause, got ${stopGeneratorCalls}`);
-    lifecycleSequence.push('paused');
-
-    const resumed = await lifecycle.transition(paused, 'launched');
-    assert(resumed.status === 'launched', `resume did not land at status=launched (got ${resumed.status})`);
-    assert(resumed.lifecycleProgress === undefined, 'lifecycleProgress should be cleared after resume');
-    assert(startGeneratorCalls === 1, `expected 1 startGenerator call after resume, got ${startGeneratorCalls}`);
-    lifecycleSequence.push('launched');
-
-    const retired = await lifecycle.transition(resumed, 'retired');
-    assert(retired.status === 'retired', `retire did not land at status=retired (got ${retired.status})`);
-    assert(retired.lifecycleProgress === undefined, 'lifecycleProgress should be cleared after retire');
-    assert(stopGeneratorCalls === 2, `expected 2 stopGenerator calls (pause+retire), got ${stopGeneratorCalls}`);
-    lifecycleSequence.push('retired');
-
-    // Three lifecycle transitions × 1 setMetadata call each + 1 launch
-    // setMetadata = 4 total publisher calls.
+    // Wave-4 D3 retired the lifecycle-transition producer, so the former
+    // Step 9 (paused → launched → retired, one setMetadata each) is gone.
+    // The launch write is the only setMetadata this loop now performs.
     assert(
-      publisher.calls.length === 4,
-      `expected 4 setMetadata calls after launch + 3 transitions, got ${publisher.calls.length}`,
+      publisher.calls.length === 1,
+      `expected 1 setMetadata call for the launch, got ${publisher.calls.length}`,
     );
-
     return {
       manifestCid: launched.manifestCid,
       taskId,
@@ -2331,7 +2284,6 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
       verdict: String(verdictPayload['verdict']),
       score: verdictScoreSummary(verdictPayload),
       submittedCount,
-      lifecycleSequence,
       setMetadataCalls: publisher.calls.length,
     };
   } finally {
