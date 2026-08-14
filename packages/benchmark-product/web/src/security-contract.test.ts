@@ -52,6 +52,10 @@ describe("private production web security contract", () => {
     ]) expect(PINNED_PERMISSIONS_POLICY_FEATURES, capability).toContain(capability);
     expect(PINNED_PERMISSIONS_POLICY_FEATURES.includes("bluetooth")).toBe(process.platform === "darwin");
     expect(config).not.toMatch(/https?:\/\//u);
+    expect(config).toContain('source: "/publication/:path*"');
+    expect(config).toContain('source: "/:path((?!publication).*)"');
+    expect(config).not.toContain('source: "/:path*"');
+    expect(config).toContain('header.key !== "Cache-Control"');
   });
 
   test("the product-local threat model names every BP-50 trust boundary and no deployment", () => {

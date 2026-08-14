@@ -2,9 +2,11 @@ import { assertRecordKindUri } from "@jinn-network/record-discovery-protocol";
 import { describe, expect, it } from "vitest";
 
 import {
+  BENCHMARK_ACCOUNTING_RECORD_KIND,
   BENCHMARK_RECORD_KIND,
   MATRIX_RECORD_KIND,
   REPORT_RECORD_KIND,
+  REPORT_V2_RECORD_KIND,
   RUN_RECORD_KIND,
 } from "./identifiers.js";
 
@@ -15,23 +17,27 @@ import {
 const RECORD_KIND_GRAMMAR = /^https:\/\/spec\.jinn\.network\/records\/[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\/v[1-9]\d*$/;
 
 describe("facts/benchmarking identifiers", () => {
-  it("exports four grammar-conformant record-kind URIs", () => {
+  it("exports six grammar-conformant record-kind URIs", () => {
     for (const kind of [
       BENCHMARK_RECORD_KIND,
       RUN_RECORD_KIND,
       MATRIX_RECORD_KIND,
       REPORT_RECORD_KIND,
+      REPORT_V2_RECORD_KIND,
+      BENCHMARK_ACCOUNTING_RECORD_KIND,
     ]) {
       expect(() => assertRecordKindUri(kind)).not.toThrow();
       expect(kind).toMatch(RECORD_KIND_GRAMMAR);
     }
   });
 
-  it("pins the four benchmarking record-kind segments", () => {
+  it("pins the benchmarking record-kind segments", () => {
     expect(BENCHMARK_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark/v1");
     expect(RUN_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-run/v1");
     expect(MATRIX_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-matrix/v1");
     expect(REPORT_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-report/v1");
+    expect(REPORT_V2_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-report/v2");
+    expect(BENCHMARK_ACCOUNTING_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-accounting/v1");
   });
 
   // The regression test for the C2 narrowing. While the mirror dual-accepted, a pre-re-seal

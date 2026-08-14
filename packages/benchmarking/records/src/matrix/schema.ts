@@ -2,7 +2,13 @@ import { z } from "zod";
 import { Sha256Digest } from "@jinn-network/task-execution-protocol";
 import { AgentIriSchema, DigestBearingResourceDescriptorSchema } from "../descriptors.js";
 import { topLevelRecordSchema } from "../extensions.js";
-import { BENCHMARKING_PROTOCOL } from "../identifiers.js";
+import {
+  BENCHMARKING_PROTOCOL,
+  BENCHMARK_PUBLICATION_EXTENSION,
+  MATRIX_ASSEMBLY_PROCEDURE,
+  MATRIX_ASSEMBLY_PROCEDURE_VERSION,
+} from "../identifiers.js";
+import { MatrixPublicationExtensionSchema } from "../publication-extension.js";
 import { compareCodeUnitStrings } from "../order.js";
 import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../sealing.js";
 import { isCalendarStrictRfc3339 } from "../rfc3339.js";
@@ -193,6 +199,32 @@ export const MatrixRecordSchema = topLevelRecordSchema({
     assembly: AssemblySchema,
   })
   .superRefine((matrix, ctx) => {
+    const publicationExtension = matrix[BENCHMARK_PUBLICATION_EXTENSION];
+    const isAssemblyV2 = matrix.assembly.procedure === MATRIX_ASSEMBLY_PROCEDURE
+      && matrix.assembly.version === MATRIX_ASSEMBLY_PROCEDURE_VERSION;
+    if (isAssemblyV2 && publicationExtension === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: [BENCHMARK_PUBLICATION_EXTENSION],
+        message: "Matrix assembly jinn.benchmarking.assembly@2.0 requires the benchmark-publication accounting extension",
+      });
+    }
+    if (publicationExtension !== undefined) {
+      const parsed = MatrixPublicationExtensionSchema.safeParse(publicationExtension);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({ ...issue, path: [BENCHMARK_PUBLICATION_EXTENSION, ...issue.path] });
+        }
+      }
+      if (!isAssemblyV2) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["assembly"],
+          message: "the benchmark-publication accounting extension requires jinn.benchmarking.assembly@2.0",
+        });
+      }
+    }
+
     // "cells[] has exactly one entry per expected cell" (§8.1) — the self-contained structural
     // proxy this record alone can check is that the declared `completeness.expected` count
     // matches how many cell entries are actually present; the true expected-cell-set match

@@ -8,7 +8,7 @@
  * would diverge (a different `owner`, a different embedded field, anything). They do not.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -151,6 +151,11 @@ describe("preview purity — compilation exclusion (AC3)", () => {
       // ── init ─────────────────────────────────────────────────────────────────────────────
       expect(initWorkspace(contextFor(workspaceA)).ok).toBe(true);
       expect(initWorkspace(contextFor(workspaceB)).ok).toBe(true);
+      // Publication gives each workspace a durable did:key identity at initialization. This
+      // fixture compares compilation purity rather than identity uniqueness, so make B an exact
+      // identity clone of A before either workspace authors benchmark material.
+      copyFileSync(join(workspaceA, "venue", "report-signing-key.pem"), join(workspaceB, "venue", "report-signing-key.pem"));
+      copyFileSync(join(workspaceA, "venue", "report-signing-key.json"), join(workspaceB, "venue", "report-signing-key.json"));
       advance(10);
 
       // ── create ───────────────────────────────────────────────────────────────────────────

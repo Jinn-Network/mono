@@ -55,8 +55,13 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-interop',
       '@jinn-network/benchmarking-local',
+      '@jinn-network/benchmarking-publication',
       '@jinn-network/benchmarking-records',
       '@jinn-network/benchmarking-run',
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/record-discovery-transport-http',
+      '@jinn-network/record-publication',
       '@jinn-network/task-admission',
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-backend-local',
@@ -82,6 +87,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
+      '@jinn-network/record-discovery-client',
     ],
   }],
   // BP-31: the private GUI is a server-side public-entry client of core. These transitive portal
@@ -96,6 +102,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-interop',
       '@jinn-network/benchmarking-local',
+      '@jinn-network/benchmarking-publication',
       '@jinn-network/benchmarking-records',
       '@jinn-network/benchmarking-run',
       '@jinn-network/environment-record',
@@ -103,6 +110,11 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
+      '@jinn-network/record-discovery-client',
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/record-discovery-transport-http',
+      '@jinn-network/record-publication',
       '@jinn-network/task-admission',
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-backend-local',
@@ -125,6 +137,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
   ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
+  ['@jinn-network/benchmarking-publication', join(root, 'packages', 'benchmarking', 'publication')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
@@ -132,6 +145,11 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
+  ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/record-discovery-transport-http', join(root, 'packages', 'discovery', 'transport-http')],
+  ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
   ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
@@ -236,6 +254,19 @@ test('the product never publishes', () => {
     assert.equal(manifest.engines?.node, '>=22');
     assert.equal(manifest.private, true, `${expectedName} must be marked private`);
   }
+});
+
+test('the benchmark-publication profile kit is product-local acceptance coverage, not a shipped protocol surface', () => {
+  const fixture = join(packageRoot, 'core', 'test', 'fixtures', 'benchmark-publication-conformance', 'manifest.json');
+  assert.ok(existsSync(fixture), 'missing benchmark-publication conformance manifest');
+  const manifest = JSON.parse(readFileSync(fixture, 'utf8'));
+  assert.equal(manifest.profile, 'https://spec.jinn.network/profiles/benchmark-publication/v1');
+  assert.equal(manifest.owner, '@jinn-network/benchmark-product-core');
+  assert.match(manifest.scope, /application acceptance/i);
+  assert.equal(manifest.cases.length, 18);
+  const catalog = JSON.parse(readFileSync(join(root, 'architecture', 'platform-packages.v1.json'), 'utf8'));
+  const core = catalog.packages.find((entry) => entry.name === '@jinn-network/benchmark-product-core');
+  assert.deepEqual(core.publicSurface.conformance, [], 'private product acceptance coverage must not masquerade as a public conformance export');
 });
 
 test('no other package in the repository depends on the product', () => {

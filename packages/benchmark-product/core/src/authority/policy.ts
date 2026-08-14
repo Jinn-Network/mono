@@ -22,9 +22,21 @@ import { authorityPath } from "../workspace/layout.js";
  * The approval-gated operations (spec §4.1's lifecycle table). A3 names
  * `lock`, `launch`, `cancel`, and `publish` and leaves further refinement to
  * BP-10; `report` is also gated by the §4.1 table (`closed --report--> reported`
- * is listed "approval-gated") and is kept gated here to match it.
+ * is listed "approval-gated"). Publication intent and registration are irreversible public
+ * disclosure boundaries, so they receive their own granular grants rather than inheriting a
+ * broader lifecycle permission.
  */
-export const GATED_OPERATIONS = ["lock", "launch", "cancel", "report", "publish"] as const;
+export const GATED_OPERATIONS = [
+  "lock",
+  "launch",
+  "cancel",
+  "report",
+  "publish",
+  "publication.configure",
+  "publication.register",
+  "publication.accounting",
+  "publication.report",
+] as const;
 
 export type GatedOperation = (typeof GATED_OPERATIONS)[number];
 

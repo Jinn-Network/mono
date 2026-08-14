@@ -14,6 +14,7 @@ const BENCHMARKING_PACKAGES = [
   ['testing', '@jinn-network/benchmarking-testing'],
   ['aggregate', '@jinn-network/benchmarking-aggregate'],
   ['run', '@jinn-network/benchmarking-run'],
+  ['publication', '@jinn-network/benchmarking-publication'],
   ['interop', '@jinn-network/benchmarking-interop'],
   ['marketplace', '@jinn-network/benchmarking-marketplace'],
   ['local', '@jinn-network/benchmarking-local'],
@@ -38,6 +39,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
   ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
   ['@jinn-network/marketplace-projector', join(root, 'packages', 'marketplace', 'projector')],
   ['@jinn-network/marketplace-testing', join(root, 'packages', 'marketplace', 'testing')],
@@ -45,7 +47,7 @@ const SIBLING_TREE_DIRS = new Map([
 
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['records', {
-    dependencies: ['@jinn-network/task-execution-protocol'],
+    dependencies: ['@jinn-network/task-execution-protocol', '@jinn-network/trust-core'],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
   ['testing', {
@@ -83,6 +85,21 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-testing',
       '@jinn-network/task-execution-workspace',
     ],
+    portalResolutions: ['@jinn-network/trust-core'],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['publication', {
+    dependencies: [
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/record-publication',
+      '@jinn-network/task-execution-protocol',
+    ],
+    devDependencies: [],
+    portalResolutions: [
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/trust-core',
+    ],
     optionalDependencies: [], peerDependencies: [],
   }],
   ['interop', {
@@ -93,6 +110,8 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     // testing kit is used only for describeExportConformance in the package test suite.
     devDependencies: ['@jinn-network/benchmarking-testing'],
+    // benchmarking-records now parses signed Report v2 envelopes through trust-core.
+    portalResolutions: ['@jinn-network/trust-core'],
     optionalDependencies: [], peerDependencies: [],
   }],
   ['marketplace', {
@@ -132,6 +151,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     portalResolutions: [
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-protocol',
+      '@jinn-network/trust-core',
     ],
     optionalDependencies: [], peerDependencies: [],
   }],

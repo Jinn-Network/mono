@@ -55,7 +55,8 @@
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
     "@jinn-network/task-execution-testing": "portal:../../task-execution/testing",
-    "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace"
+    "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
+    "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {
     "@jinn-network/benchmarking-testing": "0.1.0",

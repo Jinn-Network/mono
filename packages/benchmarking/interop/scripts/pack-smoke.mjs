@@ -8,6 +8,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const benchmarkingRecordsRoot = join(packageRoot, "..", "records");
 const taskExecutionProtocolRoot = join(packageRoot, "..", "..", "task-execution", "protocol");
 const taskExecutionProfilesRoot = join(packageRoot, "..", "..", "task-execution", "profiles");
+const trustCoreRoot = join(packageRoot, "..", "..", "trust", "core");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-benchmarking-interop-"));
 const consumer = join(temporaryRoot, "consumer");
 
@@ -31,6 +32,7 @@ async function packOne(directory, outName) {
 try {
   const protocolArchive = await packOne(taskExecutionProtocolRoot, "task-execution-protocol.tgz");
   const profilesArchive = await packOne(taskExecutionProfilesRoot, "task-execution-profiles.tgz");
+  const trustCoreArchive = await packOne(trustCoreRoot, "trust-core.tgz");
   const recordsArchive = await packOne(benchmarkingRecordsRoot, "benchmarking-records.tgz");
   const interopArchive = await packOne(packageRoot, "benchmarking-interop.tgz");
 
@@ -43,6 +45,7 @@ try {
       dependencies: {
         "@jinn-network/task-execution-protocol": `file:${protocolArchive}`,
         "@jinn-network/task-execution-profiles": `file:${profilesArchive}`,
+        "@jinn-network/trust-core": `file:${trustCoreArchive}`,
         "@jinn-network/benchmarking-records": `file:${recordsArchive}`,
         "@jinn-network/benchmarking-interop": `file:${interopArchive}`,
       },

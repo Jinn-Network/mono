@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const benchmarkingRecordsRoot = join(packageRoot, "..", "records");
+const trustCoreRoot = join(packageRoot, "..", "..", "trust", "core");
 const taskExecutionProtocolRoot = join(packageRoot, "..", "..", "task-execution", "protocol");
 const taskExecutionBackendRoot = join(packageRoot, "..", "..", "task-execution", "backend");
 const taskExecutionProfilesRoot = join(packageRoot, "..", "..", "task-execution", "profiles");
@@ -33,6 +34,7 @@ try {
   const protocolArchive = await packOne(taskExecutionProtocolRoot, "task-execution-protocol.tgz");
   const backendArchive = await packOne(taskExecutionBackendRoot, "task-execution-backend.tgz");
   const profilesArchive = await packOne(taskExecutionProfilesRoot, "task-execution-profiles.tgz");
+  const trustCoreArchive = await packOne(trustCoreRoot, "trust-core.tgz");
   const recordsArchive = await packOne(benchmarkingRecordsRoot, "benchmarking-records.tgz");
   const runArchive = await packOne(packageRoot, "benchmarking-run.tgz");
 
@@ -46,6 +48,7 @@ try {
         "@jinn-network/task-execution-protocol": `file:${protocolArchive}`,
         "@jinn-network/task-execution-backend": `file:${backendArchive}`,
         "@jinn-network/task-execution-profiles": `file:${profilesArchive}`,
+        "@jinn-network/trust-core": `file:${trustCoreArchive}`,
         "@jinn-network/benchmarking-records": `file:${recordsArchive}`,
         "@jinn-network/benchmarking-run": `file:${runArchive}`,
       },

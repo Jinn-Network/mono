@@ -14,7 +14,13 @@
  */
 
 import type { DraftDocument } from "../domain/draft.js";
+import { buildRepositoryWorkProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
 import { convertSweBenchRows } from "../intake/swebench.js";
+import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../intake/workspace-authored.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
+import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
+import { BENCHMARK_RECORD_KIND } from "@jinn-network/benchmarking-records";
+import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import { attachBenchmarkToDraft } from "./attach.js";
 import type { OperationContext } from "./context.js";
@@ -71,19 +77,42 @@ export function importSweBenchRows(
         ...(input.provenanceTimestamps !== undefined ? { provenanceTimestamps: input.provenanceTimestamps } : {}),
       });
       const imported = converted.imported;
+      const author = loadOrCreateReportSigningKey(clockedContext.workspaceDir).keyId;
 
-      const taskSha256s = imported.tasks.map((task) => {
-        const stored = putSealedBytes(clockedContext.workspaceDir, task.bytes);
+      // SWE-bench Tasks bind the repository-work profile by digest. Keep its exact sealed bytes
+      // in the workspace so the publication closure remains content-addressed and offline.
+      putSealedBytes(
+        clockedContext.workspaceDir,
+        sealTaskProfile(buildRepositoryWorkProfile()).bytes,
+      );
+
+      const authoredTasks = imported.tasks.map((task) => {
+        // Retain the exact imported source Task, then create an explicit provenance-bearing,
+        // digest-changing Colophon record. The source bytes are never silently reattributed.
+        const sourceStored = putSealedBytes(clockedContext.workspaceDir, task.bytes);
+        const authored = deriveWorkspaceAuthoredTask({
+          sourceBytes: task.bytes,
+          author,
+          sourceKind: "swe-bench-import",
+        });
+        const stored = putSealedBytes(clockedContext.workspaceDir, authored.bytes);
         const expected = bareHex(task.digest);
         // putSealedBytes derives its returned digest from sha256(bytes) itself, so this
         // can only diverge if the platform's reported digest disagrees with the exact
         // bytes it also handed us — a platform invariant violation, not a caller error,
         // but still worth a loud failure over a silently mis-addressed store entry.
-        if (stored !== expected) {
-          throw new Error(`sealed task digest mismatch: platform reported ${expected}, store computed ${stored}`);
+        if (sourceStored !== expected) {
+          throw new Error(`sealed source task digest mismatch: platform reported ${expected}`);
         }
-        return stored;
+        recordWorkspaceAuthorship({
+          workspaceDir: clockedContext.workspaceDir,
+          recordSha256: stored,
+          recordKind: RECORD_KINDS.task,
+          authoredAt: at,
+        });
+        return { sha256: stored, bytes: authored.bytes };
       });
+      const taskSha256s = authoredTasks.map((task) => task.sha256);
 
       const evaluationSpecSha256s = converted.evaluationSpecs.map((spec) => {
         const stored = putSealedBytes(clockedContext.workspaceDir, spec.bytes);
@@ -98,13 +127,25 @@ export function importSweBenchRows(
         return stored;
       });
 
-      const benchmarkSha256 = putSealedBytes(clockedContext.workspaceDir, imported.benchmark.bytes);
+      const sourceBenchmarkStored = putSealedBytes(clockedContext.workspaceDir, imported.benchmark.bytes);
       const expectedBenchmarkSha256 = bareHex(imported.benchmark.digest);
-      if (benchmarkSha256 !== expectedBenchmarkSha256) {
+      if (sourceBenchmarkStored !== expectedBenchmarkSha256) {
         throw new Error(
-          `sealed benchmark digest mismatch: platform reported ${expectedBenchmarkSha256}, store computed ${benchmarkSha256}`,
+          `sealed source benchmark digest mismatch: platform reported ${expectedBenchmarkSha256}`,
         );
       }
+      const authoredBenchmark = deriveWorkspaceAuthoredBenchmark({
+        sourceBytes: imported.benchmark.bytes,
+        taskSha256s,
+        author,
+      });
+      const benchmarkSha256 = putSealedBytes(clockedContext.workspaceDir, authoredBenchmark.bytes);
+      recordWorkspaceAuthorship({
+        workspaceDir: clockedContext.workspaceDir,
+        recordSha256: benchmarkSha256,
+        recordKind: BENCHMARK_RECORD_KIND,
+        authoredAt: at,
+      });
 
       const draft = attachBenchmarkToDraft(clockedContext.workspaceDir, input.draftId, benchmarkSha256, at);
 

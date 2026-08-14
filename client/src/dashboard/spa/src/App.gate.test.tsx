@@ -90,7 +90,6 @@ vi.mock('./pages/Overview.js', () => ({ OverviewPage: () => null }));
 vi.mock('./pages/Launcher.js', () => ({ LauncherPage: () => null }));
 vi.mock('./pages/LauncherCreate.js', () => ({ LauncherCreatePage: () => null }));
 vi.mock('./pages/LauncherLaunched.js', () => ({ LauncherLaunchedPage: () => null }));
-vi.mock('./pages/operator-catalog/JoinFlow.js', () => ({ JoinFlow: () => null }));
 vi.mock('./captures/CapturesTab.js', () => ({ CapturesTab: () => null }));
 vi.mock('./pages/operator/OperatorShell.js', () => ({
   OperatorShell: () => null,
