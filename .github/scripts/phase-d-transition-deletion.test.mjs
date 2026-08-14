@@ -151,10 +151,14 @@ test('legacy task_runs store coupling stays confined to its declared inventory a
     .filter(importsTaskRunPersistence)
     .map((path) => relative(root, path))
     .sort();
+  // `client/src/daemon/delivery-watcher.ts` left this inventory with Wave-4 D2
+  // (`legacy-evaluator-delivery-watcher` → deleted): the module is gone, so it can
+  // no longer import TaskRunPersistence. `adapters/mech/adapter.ts` stays — D2
+  // removed only its evaluation half, and its surviving Autopilot settlement check
+  // (`engineOwnsAutopilotSettlement`) still reads the legacy task_runs rows.
   assert.deepEqual(importers, [
     'client/src/adapters/mech/adapter.ts',
     'client/src/cli/commands/backfill-failed-deliveries.ts',
-    'client/src/daemon/delivery-watcher.ts',
     'client/src/daemon/work-loop-corpus.ts',
     'client/src/harnesses/engine/backfill-failed-deliveries.ts',
     'client/src/store/store.ts',

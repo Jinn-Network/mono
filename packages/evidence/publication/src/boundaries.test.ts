@@ -41,7 +41,7 @@ describe("publication entrypoint boundaries", () => {
     ).toBeTypeOf("function");
   });
 
-  test("declares Repository as its only Jinn runtime dependency", async () => {
+  test("declares Repository and neutral record publication as its Jinn runtime dependencies", async () => {
     const manifest = JSON.parse(
       await readFile(new URL("../package.json", import.meta.url), "utf8"),
     ) as {
@@ -53,7 +53,10 @@ describe("publication entrypoint boundaries", () => {
     expect(
       Object.keys(manifest.dependencies ?? {})
         .filter((name) => name.startsWith("@jinn-network/")),
-    ).toEqual(["@jinn-network/evidence-repository"]);
+    ).toEqual([
+      "@jinn-network/evidence-repository",
+      "@jinn-network/record-publication",
+    ]);
 
     const declared = new Set([
       ...Object.keys(manifest.dependencies ?? {}),

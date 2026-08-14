@@ -91,8 +91,11 @@ import {
 } from "../runtime/inspect/host.js";
 import { makeInspectLauncher } from "../runtime/inspect/launcher.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
+import { HARBOR_ADAPTER_ID, HarborSelectionManifestSchema, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
+import { readHarborHostBinding } from "../runtime/harbor/host.js";
+import { makeHarborLauncher, HARBOR_LAUNCHER_ID } from "../runtime/harbor/launcher.js";
 import { assertInspectOciBrokerReady } from "../runtime/inspect/oci.js";
-import { sha256Hex } from "../workspace/sealed-store.js";
+import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   createEvaluationCellRegistry,
   createLocalProvisioner,
@@ -542,7 +545,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const { workspaceDir } = options;
   const runtimeBindingWorkspaceDir = options.runtimeBindingWorkspaceDir ?? workspaceDir;
   const runtimeId = options.evaluationRuntime?.adapterId ?? "jinn-native";
-  if (runtimeId !== "jinn-native" && runtimeId !== INSPECT_ADAPTER_ID) {
+  if (runtimeId !== "jinn-native" && runtimeId !== INSPECT_ADAPTER_ID && runtimeId !== HARBOR_ADAPTER_ID) {
     refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
   }
   const inspectSelection = runtimeId === INSPECT_ADAPTER_ID
@@ -550,6 +553,12 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     : undefined;
   const inspectHost = runtimeId === INSPECT_ADAPTER_ID
     ? readInspectHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    : undefined;
+  const harborSelection: HarborSelectionManifest | undefined = runtimeId === HARBOR_ADAPTER_ID
+    ? HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256))))
+    : undefined;
+  const harborHost = runtimeId === HARBOR_ADAPTER_ID
+    ? readHarborHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
     : undefined;
 
   if (
@@ -633,6 +642,16 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           evaluator: evaluators[0]!,
         },
       }),
+    ...(harborSelection === undefined || harborHost === undefined
+      ? {}
+      : {
+        harbor: {
+          workspaceDir,
+          selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
+          manifest: harborSelection,
+          host: harborHost,
+        },
+      }),
   });
 
   const predictionProfile = buildPredictionForecastProfile();
@@ -670,6 +689,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       manifest: inspectSelection,
       hostConnectionDescriptor: options.inspectHostConnectionDescriptor,
     });
+  const harborLauncher = harborSelection === undefined || harborHost === undefined
+    ? undefined
+    : makeHarborLauncher({ manifest: harborSelection, host: harborHost });
 
   // One registration per supported parser and evaluator identity, id-matched with the generated
   // child deployment. Factory registration IDs are intentionally overridden per evaluator using
@@ -897,6 +919,21 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       },
     };
   }
+  if (harborLauncher !== undefined && harborSelection !== undefined && harborHost !== undefined) {
+    launcherDeployments[HARBOR_LAUNCHER_ID] = {
+      executable: { path: harborHost.executable, digest: harborSelection.harbor.executableSha256 },
+      async probe() {
+        const ready = await harborLauncher.probe?.();
+        return {
+          ready: ready?.ready ?? false,
+          ...(ready?.detail === undefined ? {} : { detail: ready.detail }),
+          executable: { path: harborHost.executable, digest: harborSelection.harbor.executableSha256 },
+          harnessVersions: [harborSelection.harbor.version],
+          models: harborSelection.arms.map((arm) => arm.model.id),
+        };
+      },
+    };
+  }
 
   const isolationPosture = deriveVenueIsolationPosture([
     VENUE_ISOLATION_POLICY,
@@ -908,6 +945,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       EVALUATION_TASK_PROFILE_URI,
       REPOSITORY_WORK_PROFILE_URI,
       ...(inspectProfile === undefined ? [] : [INSPECT_TASK_PROFILE_URI]),
+      ...(harborSelection === undefined ? [] : [PREDICTION_FORECAST_PROFILE_URI, REPOSITORY_WORK_PROFILE_URI]),
     ],
     workspaceKinds: ["dir", "worktree"],
     inputMediaTypes: ["application/json", "text/plain"],
@@ -940,6 +978,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       ...profiledAgentLaunchers,
       evaluationLauncher,
       ...(inspectLauncher === undefined ? [] : [inspectLauncher]),
+      ...(harborLauncher === undefined ? [] : [harborLauncher]),
     ],
     launcherDeployments,
     ...(agentRuntimes.length === 0 ? {} : {

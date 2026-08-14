@@ -18,8 +18,14 @@
  */
 
 import type { DraftDocument } from "../domain/draft.js";
+import { buildPredictionForecastProfile, sealTaskProfile } from "@jinn-network/task-execution-profiles";
 import { putSealedBytes } from "../workspace/sealed-store.js";
-import { buildSampleBenchmark } from "../intake/sample.js";
+import { buildSampleBenchmark, sealSamplePredictionAdmissionReceipt } from "../intake/sample.js";
+import { deriveWorkspaceAuthoredBenchmark, deriveWorkspaceAuthoredTask } from "../intake/workspace-authored.js";
+import { loadOrCreateReportSigningKey } from "../report/signing.js";
+import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
+import { BENCHMARK_RECORD_KIND } from "@jinn-network/benchmarking-records";
+import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import { attachBenchmarkToDraft } from "./attach.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
@@ -61,14 +67,51 @@ export function sampleInit(
       readDraftDocument(clockedContext.workspaceDir, input.draftId);
 
       const sample = await buildSampleBenchmark();
+      const author = loadOrCreateReportSigningKey(clockedContext.workspaceDir).keyId;
 
+      // Registration closes every digest-bearing Task descriptor. Retain the exact built-in
+      // profile bytes alongside the Task/EvaluationSpec so a later prospective or post-hoc
+      // publication never has to substitute a URI for the digest-pinned document.
+      putSealedBytes(
+        clockedContext.workspaceDir,
+        sealTaskProfile(buildPredictionForecastProfile()).bytes,
+      );
       const evaluationSpecSha256 = putSealedBytes(clockedContext.workspaceDir, sample.evaluationSpec.bytes);
-      const tasks: SampleInitTaskSummary[] = sample.tasks.map((task) => {
-        const taskSha256 = putSealedBytes(clockedContext.workspaceDir, task.bytes);
-        const receiptSha256 = putSealedBytes(clockedContext.workspaceDir, task.receipt.envelopeBytes);
-        return { marketId: task.marketId, taskSha256, receiptSha256 };
+      const authoredTasks: Array<{ marketId: string; taskSha256: string; receiptSha256: string; bytes: Uint8Array }> = [];
+      for (const task of sample.tasks) {
+        const sourceReceiptSha256 = putSealedBytes(clockedContext.workspaceDir, task.receipt.envelopeBytes);
+        putSealedBytes(clockedContext.workspaceDir, task.bytes);
+        const authored = deriveWorkspaceAuthoredTask({
+          sourceBytes: task.bytes,
+          author,
+          sourceKind: "bundled-sample",
+          sourceReceiptSha256,
+        });
+        const taskSha256 = putSealedBytes(clockedContext.workspaceDir, authored.bytes);
+        const receipt = await sealSamplePredictionAdmissionReceipt(authored.bytes, sample.evaluationSpec.bytes);
+        const receiptSha256 = putSealedBytes(clockedContext.workspaceDir, receipt.envelopeBytes);
+        recordWorkspaceAuthorship({
+          workspaceDir: clockedContext.workspaceDir,
+          recordSha256: taskSha256,
+          recordKind: RECORD_KINDS.task,
+          authoredAt: at,
+        });
+        authoredTasks.push({ marketId: task.marketId, taskSha256, receiptSha256, bytes: authored.bytes });
+      }
+      putSealedBytes(clockedContext.workspaceDir, sample.benchmark.bytes);
+      const authoredBenchmark = deriveWorkspaceAuthoredBenchmark({
+        sourceBytes: sample.benchmark.bytes,
+        taskSha256s: authoredTasks.map((task) => task.taskSha256),
+        author,
       });
-      const benchmarkSha256 = putSealedBytes(clockedContext.workspaceDir, sample.benchmark.bytes);
+      const benchmarkSha256 = putSealedBytes(clockedContext.workspaceDir, authoredBenchmark.bytes);
+      recordWorkspaceAuthorship({
+        workspaceDir: clockedContext.workspaceDir,
+        recordSha256: benchmarkSha256,
+        recordKind: BENCHMARK_RECORD_KIND,
+        authoredAt: at,
+      });
+      const tasks: SampleInitTaskSummary[] = authoredTasks.map(({ marketId, taskSha256, receiptSha256 }) => ({ marketId, taskSha256, receiptSha256 }));
 
       const draft = attachBenchmarkToDraft(clockedContext.workspaceDir, input.draftId, benchmarkSha256, at);
 

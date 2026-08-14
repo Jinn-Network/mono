@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/benchmarking-records",
   "version": "0.1.0",
-  "description": "Sealed benchmarking record kinds (Benchmark, Run, Matrix, Report) and their record-level checks.",
+  "description": "Sealed benchmarking record kinds, publication accounting/archive contracts, and record-level checks.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -48,11 +48,13 @@
   },
   "dependencies": {
     "@jinn-network/task-execution-protocol": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
     "@noble/hashes": "^2.2.0",
     "zod": "4.4.3"
   },
   "resolutions": {
-    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol"
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

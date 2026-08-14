@@ -9,6 +9,8 @@ import { parseExactWithSchema, sealWithSchema, type SealedRecord } from "../seal
 import { isCalendarStrictRfc3339 } from "../rfc3339.js";
 import { ArmIdSchema, ReplicateSchema } from "./cells.js";
 import { exactDecimalInUnitInterval } from "../decimal.js";
+import { BENCHMARK_PUBLICATION_EXTENSION } from "../identifiers.js";
+import { RunPublicationExtensionSchema } from "../publication-extension.js";
 
 const Rfc3339 = z.string().refine(isCalendarStrictRfc3339, "must be a calendar-valid RFC 3339 timestamp");
 
@@ -79,6 +81,16 @@ export const RunRecordSchema = topLevelRecordSchema({
     closeAt: Rfc3339,
   })
   .superRefine((run, ctx) => {
+    const publicationExtension = run[BENCHMARK_PUBLICATION_EXTENSION];
+    if (publicationExtension !== undefined) {
+      const parsed = RunPublicationExtensionSchema.safeParse(publicationExtension);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({ ...issue, path: [BENCHMARK_PUBLICATION_EXTENSION, ...issue.path] });
+        }
+      }
+    }
+
     if (!exactDecimalInUnitInterval(run.policy.completenessFloor)) {
       ctx.addIssue({
         code: "custom",

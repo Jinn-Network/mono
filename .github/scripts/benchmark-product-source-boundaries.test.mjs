@@ -19,7 +19,7 @@ const PRIVATE_RUNTIME_IDENTIFIERS = [
   'jinn.network/profiles/inspect-evaluation/1',
 ];
 const CORE_JINN = [
-  '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/task-admission', '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-evaluation-harness', '@jinn-network/task-execution-evaluator-adapters', '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace', '@jinn-network/trust-core',
+  '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-publication', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication', '@jinn-network/task-admission', '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-evaluation-harness', '@jinn-network/task-execution-evaluator-adapters', '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-oci-grader', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace', '@jinn-network/trust-core',
 ];
 const VERIFY_JINN = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run', '@jinn-network/task-admission', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core',
@@ -133,7 +133,7 @@ test('the declared source boundaries have live imports', () => {
   }
 });
 
-test('web consumes core through a server-only public entry and has no API routes', () => {
+test('web keeps core server-only and exposes only its fixed public archive route', () => {
   const webFiles = files(join(packageRoot, 'web', 'src'));
   const clientImports = webFiles.filter((file) => /^\s*["']use client["'];/m.test(readFileSync(file, 'utf8')))
     .flatMap((file) => specifiers(readFileSync(file, 'utf8')).filter((specifier) => matches(specifier, WEB_CORE)).map((specifier) => `${relative(root, file)} -> ${specifier}`));
@@ -143,7 +143,31 @@ test('web consumes core through a server-only public entry and has no API routes
     .filter((file) => !/^\s*import\s+["']server-only["'];/m.test(readFileSync(file, 'utf8')) && !/^\s*["']use server["'];/m.test(readFileSync(file, 'utf8')))
     .map((file) => relative(root, file));
   assert.deepEqual(unguarded, []);
-  assert.deepEqual(webFiles.filter((file) => /(?:^|\/)app(?:\/.*)?\/route\.[cm]?[jt]sx?$/.test(file)).map((file) => relative(root, file)), []);
+  assert.deepEqual(
+    webFiles.filter((file) => /(?:^|\/)app(?:\/.*)?\/route\.[cm]?[jt]sx?$/.test(file)).map((file) => relative(root, file)),
+    ['packages/benchmark-product/web/src/app/publication/[...path]/route.ts'],
+    'only the fixed same-workspace public archive route is allowed',
+  );
+  const duplicated = webFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return [
+      /\b(?:const|let|var)\s+PRODUCT_BRANDING\b/,
+      /\b(?:const|let|var)\s+GATED_OPERATIONS\b/,
+      /\b(?:const|let|var)\s+ASSURANCE_PRESETS\b/,
+      /\bfunction\s+(?:runPreview|runQuote|runLock|runLaunch|runResume|runCancel|runStatus|runCollect|runResults|runReport|runVerify|createDraft|updateDraft)\b/,
+    ].some((pattern) => pattern.test(source)) ? [relative(root, file)] : [];
+  });
+  assert.deepEqual(duplicated, [], 'web duplicates core-owned product semantics');
+  const clientTestControls = webFiles
+    .filter((file) => /^\s*["']use client["'];/m.test(readFileSync(file, 'utf8')))
+    .filter((file) => /BENCHMARK_PRODUCT_(?:ENABLE_TEST_CONTROLS|TEST_SOLVE_DELAY_MS)/.test(readFileSync(file, 'utf8')))
+    .map((file) => relative(root, file));
+  assert.deepEqual(clientTestControls, [], 'server-only real-venue test controls leak into a client module');
+  const productContext = readFileSync(join(packageRoot, 'web', 'src', 'lib', 'server', 'product-context.ts'), 'utf8');
+  assert.match(productContext, /ENABLE_TEST_CONTROLS_ENV\]\?\.trim\(\) !== "1"/,
+    'the solve-delay control must fail closed unless its independent enable flag is exact');
+  assert.match(productContext, /delay > 60_000/,
+    'the web solve-delay control must not admit values beyond core local-venue authority');
 });
 
 test('Tier 1-3 source does not import the Tier 4 Colophon namespace', () => {

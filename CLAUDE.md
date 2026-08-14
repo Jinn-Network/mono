@@ -113,9 +113,8 @@ client/          TypeScript daemon — the main runnable component
         ipfs.ts          IPFS upload/download via Autonolas gateway
         safe.ts          Safe wallet creation + viem clients
     daemon/
-      daemon.ts          Orchestrates creator, engine-watcher, delivery-watcher loops
+      daemon.ts          Orchestrates the creator loop and the native operator host's loops
       creator.ts         Posts desired states via adapter
-      delivery-watcher.ts  Claims deliveries, creates evaluation jobs
     runner/
       runner.ts          Runner interface
       claude.ts          Spawns Claude CLI via MCP for restoration/evaluation

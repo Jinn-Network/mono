@@ -1,4 +1,4 @@
-import { getAddress, type Address, type Hex, type Log, type PublicClient, type WalletClient } from 'viem';
+import { getAddress, type Hex, type PublicClient, type WalletClient } from 'viem';
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
@@ -12,7 +12,7 @@ import type {
   TaskResult,
   DeliveredResult,
 } from '../../types/index.js';
-import { TransientError, PermanentError, parseTask } from '../../types/index.js';
+import { PermanentError, parseTask } from '../../types/index.js';
 import { createClients, type VenueBroadcaster } from './safe.js';
 
 /**
@@ -30,46 +30,28 @@ import {
   cidToDigestHex,
   fetchFromIpfs,
   fetchSignedTaskFromIpfs,
-  fetchSignedEnvelopeFromIpfs,
   fetchRawBytesFromIpfs,
-  digestHexToGatewayUrl,
 } from './ipfs.js';
-import { canonicalJson } from '../../util/canonical-json.js';
 import { normalizeEnvelopeRole, SignedEnvelopeSchema } from '../../types/envelope.js';
 import {
   deliveryClaimEvidenceHash,
-  legacyRestorationResultFromDelivery,
   signedEnvelopeJsonFromDeliveryOrRaw,
 } from '../../daemon/bridge-legacy-delivery.js';
 import {
   submitTask,
   claimTask as claimTaskOnchain,
-  claimEvaluation as claimEvaluationOnchain,
   claimDelivery,
   getMechDeliveryRate,
   getTimeoutBounds,
-  decodeTaskCreatedLogs,
-  decodeSolutionDeliveryClaimedLogs,
   decodeDeliverLogs,
-  ROUTER_DISCOVERY_EVENTS,
   MECH_DELIVER_EVENT,
-  findLatestDeliveryDataHexForRequest,
-  getMarketplaceRequestDeliveryMech,
-  getTaskCidDigest,
   callDeliverToMarketplace,
   canClaimTask,
-  canClaimEvaluation,
   type RouterTaskPolicy,
-  type DecodedTaskCreated,
   scanTasks,
   PendingTaskSubmissionError,
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
-import {
-  SafeInnerRevertError,
-  formatDecodedRevert,
-  isNonRecoverableInnerRevert,
-} from './safe-revert.js';
 import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
@@ -79,108 +61,11 @@ import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
-import {
-  SOLUTION_ENVELOPE_CID_CONTEXT_KEY,
-  SOLUTION_TASK_CID_CONTEXT_KEY,
-  RESTORATION_TASK_CID_CONTEXT_KEY,
-  AUTOPILOT_EVALUATION_CONTEXT_KEY,
-} from '../../harnesses/impls/evaluation-context.js';
-import {
-  JinnRepoAutopilotSessionTaskSchema,
-  JinnRepoAutopilotSolutionPayloadSchema,
-} from '@jinn-network/sdk/solvernets/jinn-repo';
-import {
-  admitAutopilotEvaluationOpportunity,
-} from '../../harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
 import { signTaskV1 } from '../../tasks/signing.js';
 import type { SignedTaskV1, TaskClaimPolicy, TaskV1 } from '../../types/task-document.js';
 
-interface PendingEvaluationSolution {
-  taskId: string;
-  attemptIndex: number;
-  requestId: string;
-  operator: string;
-  transactionHash?: Hex;
-  blockNumber?: number;
-  /**
-   * Defense-in-depth backstop for #645: count of consecutive failures (catch-arm
-   * throws or transient `canClaimEvaluation` reverts) for this requestId.
-   * Persisted across restarts so a wedge can't re-spam the log after every
-   * daemon bounce. Pruned once it exceeds MAX_EVALUATION_RETRY_ATTEMPTS.
-   */
-  failedAttempts?: number;
-}
-
-interface CanonicalTaskCreationProvenance {
-  onchainCreationTx: `0x${string}`;
-  onchainCreationBlock: number;
-}
-
-function taskCreationProvenanceFromSolutionEnvelope(
-  value: unknown,
-): CanonicalTaskCreationProvenance | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const task = (value as Record<string, unknown>)['task'];
-  if (typeof task !== 'object' || task === null) return undefined;
-  const record = task as Record<string, unknown>;
-  const tx = record['onchainCreationTx'];
-  const block = record['onchainCreationBlock'];
-  if (
-    typeof tx !== 'string'
-    || !/^0x[0-9a-fA-F]{64}$/.test(tx)
-    || typeof block !== 'number'
-    || !Number.isSafeInteger(block)
-    || block < 0
-  ) {
-    return undefined;
-  }
-  return {
-    onchainCreationTx: tx as `0x${string}`,
-    onchainCreationBlock: block,
-  };
-}
-
 const ROUTER_REQUEST_CURSOR_CONFIG_KEY = 'mech_router_request_block_cursor_v1';
-const PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY = 'mech_pending_evaluation_solutions_v1';
 const DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS = 100_000n;
-
-/** Yield to the event loop every N evaluation opportunities so a large retry
- *  backlog can't starve the HTTP API mid-cycle. */
-const EVALUATION_RETRY_YIELD_EVERY = 10;
-
-/**
- * Bound the number of consecutive transient/uncaught failures for a single
- * pending evaluation solution. Once exceeded, the solution is pruned from
- * `pendingEvaluationSolutions` to stop unbounded log spam (#645). At default
- * pollIntervalMs=5000, twenty cycles ≈ 100 s — comfortably above a normal
- * transient RPC outage window, well below "spamming the log forever".
- *
- * The signal-driven prunes (terminal claimability, `null` delivery-envelope
- * CID per #553, !isDiscoveryTaskAllowed) still fire on their own conditions;
- * this counter is the backstop for failure modes that don't surface a clean
- * terminal signal.
- */
-const MAX_EVALUATION_RETRY_ATTEMPTS = 20;
-
-/**
- * Decide whether a `canClaimEvaluation` failure means the opportunity can NEVER
- * become claimable (terminal, prune it) versus one that could still clear later
- * (transient, keep retrying).
- *
- * Classification is done on the *structured* `revertName` decoded straight from
- * the inner revert data — not by regex-unformatting the operator-facing `reason`
- * string. The format→regex round-trip was fragile: an arg value containing a
- * `(` corrupted the strip, and the `flattenErrorMessage` fallback produced
- * arbitrary text the regex mangled, silently mis-classifying opportunities.
- *
- * A false-keep (re-checking a dead opportunity) only costs one more RPC; a
- * false-prune (dropping a still-claimable opportunity) loses real work — so
- * when in doubt we keep. Anything without a known non-recoverable revert name
- * is treated as transient.
- */
-function isTerminalEvaluationReason(revertName: string | null | undefined): boolean {
-  return isNonRecoverableInnerRevert(revertName);
-}
 const DEFAULT_ROUTER_LOG_CHUNK_BLOCKS = 9_999n;
 /**
  * Default rolling-window size for the on-chain TaskCreated backlog scan (#801).
@@ -267,33 +152,7 @@ export class MechAdapter implements ExecutionAdapter {
   private deliveryBlockCursor = 0n;
   private pendingEvaluations = new Map<string, import('../../types/index.js').Task>();
   private observedTasks = new Map<string, TaskAnnouncement>();
-  /**
-   * Read-through cache for `restorationAnnouncementForTaskId` — the restoration
-   * task body looked up *while building an evaluation opportunity*. Kept
-   * SEPARATE from `observedTasks` (the `watchForTasks` discovery dedup set) on
-   * purpose: writing the restoration body into `observedTasks` made the
-   * TaskCreated scan skip that taskId as a *restoration* opportunity just
-   * because the daemon had built an *evaluation* opportunity for someone
-   * else's attempt on it. That blocked the creator's own daemon from claiming
-   * its own attempt on a multi-attempt (`maxClaims > 1`) task it posted.
-   */
-  private restorationBodyCache = new Map<string, TaskAnnouncement>();
-  /**
-   * TaskCreated anchors observed directly from router logs (or our own
-   * confirmed createTask receipt). Evaluator envelopes are solver-controlled,
-   * so their embedded anchors are only claims until they match this chain
-   * source.
-   */
-  private canonicalTaskCreationProvenance = new Map<string, CanonicalTaskCreationProvenance>();
   private requestKinds = new Map<string, 'solution' | 'verdict'>();
-  private evaluationOpportunities = new Map<string, {
-    taskId: string;
-    attemptIndex: number;
-    task: Task;
-    onchainCreationTx?: `0x${string}`;
-    onchainCreationBlock?: number;
-  }>();
-  private pendingEvaluationSolutions = new Map<string, PendingEvaluationSolution>();
   // Original Tasks keyed by request ID (restoration and evaluation)
   // so we can yield accurate Task in DeliveredResult
   private originalStates = new Map<string, Task>();
@@ -305,28 +164,11 @@ export class MechAdapter implements ExecutionAdapter {
     this.store = store;
   }
 
-  /**
-   * Whether this operator participates as an evaluator. Undefined ⇒ enabled
-   * (opt-out default). Gates evaluation-opportunity ingest, boot rehydrate, and
-   * per-cycle scan (#547).
-   */
-  private get evaluatorEnabled(): boolean {
-    return this.config.evaluatorEnabled !== false;
-  }
-
   /** Maps config pin → core `FetchFromIpfsOptions` (omit when unset = production ipfs.io). */
   private ipfsFetchOpts(): { fallbackGatewayBase?: string | false } | undefined {
     const fallback = this.config.ipfsFallbackGatewayUrl;
     if (fallback === undefined) return undefined;
     return { fallbackGatewayBase: fallback };
-  }
-
-  /**
-   * Enable the evaluator role at runtime after a live SolverNet join (a join
-   * never removes a role, so turning it back off is never needed). #547.
-   */
-  public setEvaluatorEnabled(enabled: boolean): void {
-    this.config.evaluatorEnabled = enabled;
   }
 
   /**
@@ -366,15 +208,11 @@ export class MechAdapter implements ExecutionAdapter {
     this.requestBlockCursor = blockNumber;
     this.deliveryBlockCursor = blockNumber;
 
-    // Recover pending state from on-chain events
+    // Recover pending state from on-chain events. The evaluation-opportunity
+    // rehydrate retired with Wave-4 D2; recoverPendingState recovers this
+    // operator's own in-flight restoration claims (router cursor + TaskCreated
+    // scan) only.
     if (this.store) {
-      // #547: only rehydrate the evaluation-opportunity set for evaluators.
-      // recoverPendingState recovers this operator's own in-flight restoration
-      // claims (router cursor + TaskCreated scan), not the evaluation set, so it
-      // stays unguarded.
-      if (this.evaluatorEnabled) {
-        this.loadPendingEvaluationSolutions();
-      }
       await this.recoverPendingState(blockNumber);
     } else {
       const fromBlock = this.onchainScanFromBlock(blockNumber);
@@ -474,172 +312,6 @@ export class MechAdapter implements ExecutionAdapter {
     return allowed === null || allowed.has(taskId);
   }
 
-  private async getRouterLogsInChunks(fromBlock: bigint, toBlock: bigint): Promise<Log[]> {
-    const logs: Log[] = [];
-    for (let start = fromBlock; start <= toBlock; start += DEFAULT_ROUTER_LOG_CHUNK_BLOCKS + 1n) {
-      const end = start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS > toBlock
-        ? toBlock
-        : start + DEFAULT_ROUTER_LOG_CHUNK_BLOCKS;
-      // #116: filter server-side to the two router events the poll loop decodes
-      // (TaskCreated + SolutionDeliveryClaimed) via an OR-of-topic0, instead of an
-      // address-only scan that decode-discards the rest. Chunking is unchanged —
-      // a topic filter shrinks the result set, not the permitted block range.
-      logs.push(...await this.publicClient.getLogs({
-        address: this.config.routerAddress,
-        events: ROUTER_DISCOVERY_EVENTS,
-        fromBlock: start,
-        toBlock: end,
-      }) as Log[]);
-    }
-    return logs;
-  }
-
-  private loadPendingEvaluationSolutions(): void {
-    const raw = this.store?.getConfigValue(PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) return;
-      for (const value of parsed) {
-        if (value == null || typeof value !== 'object') continue;
-        const item = value as Partial<PendingEvaluationSolution>;
-        if (
-          typeof item.taskId !== 'string' ||
-          typeof item.requestId !== 'string' ||
-          typeof item.operator !== 'string' ||
-          typeof item.attemptIndex !== 'number'
-        ) {
-          continue;
-        }
-        const solution: PendingEvaluationSolution = {
-          taskId: item.taskId,
-          attemptIndex: item.attemptIndex,
-          requestId: item.requestId,
-          operator: item.operator,
-          transactionHash: typeof item.transactionHash === 'string'
-            ? item.transactionHash as Hex
-            : undefined,
-          blockNumber: typeof item.blockNumber === 'number' ? item.blockNumber : undefined,
-          // #645: clamp to a non-negative integer. A tampered or corrupted
-          // store row carrying a negative or fractional failedAttempts could
-          // otherwise underflow the prune budget (e.g. -1_000_000_000 would
-          // defeat the bound for ~10^9 cycles).
-          failedAttempts:
-            typeof item.failedAttempts === 'number' && Number.isFinite(item.failedAttempts)
-              ? Math.max(0, Math.floor(item.failedAttempts))
-              : 0,
-        };
-        this.pendingEvaluationSolutions.set(solution.requestId, solution);
-      }
-    } catch (err) {
-      console.error('[mech] Failed to load pending evaluation solutions:', err);
-    }
-  }
-
-  private persistPendingEvaluationSolutions(): void {
-    if (!this.store) return;
-    this.store.setConfigValue(
-      PENDING_EVALUATION_SOLUTIONS_CONFIG_KEY,
-      JSON.stringify(Array.from(this.pendingEvaluationSolutions.values())),
-    );
-  }
-
-  private rememberPendingEvaluationSolution(solution: PendingEvaluationSolution): void {
-    this.pendingEvaluationSolutions.set(solution.requestId, solution);
-    this.persistPendingEvaluationSolutions();
-  }
-
-  private forgetPendingEvaluationSolution(requestId: string): void {
-    if (!this.pendingEvaluationSolutions.delete(requestId)) return;
-    this.persistPendingEvaluationSolutions();
-  }
-
-  /**
-   * Increment the per-solution failure counter and prune when it exceeds the
-   * MAX_EVALUATION_RETRY_ATTEMPTS budget. Persistence runs on every increment
-   * so a crash mid-cycle does not lose the count (and let a wedge resume
-   * log-spamming after a restart).
-   *
-   * Call sites: ONLY the two paths that fail to make progress on this specific
-   * solution — the transient `canClaimEvaluation` branch in
-   * evaluationAnnouncementForSolution, and the `catch (err)` arm of
-   * retryPendingEvaluationSolutions. Do NOT call from the signal-driven prune
-   * paths (terminal claimability, null delivery-envelope CID,
-   * !isDiscoveryTaskAllowed) — those already prune cleanly.
-   *
-   * Returns true when the solution was pruned (caller should stop work on it).
-   */
-  private recordEvaluationFailureAndMaybePrune(
-    solution: PendingEvaluationSolution,
-  ): boolean {
-    const next = (solution.failedAttempts ?? 0) + 1;
-    solution.failedAttempts = next;
-    if (next > MAX_EVALUATION_RETRY_ATTEMPTS) {
-      console.log(
-        `[mech] pruning evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ` +
-          `exceeded retry budget (${MAX_EVALUATION_RETRY_ATTEMPTS}) — pruned`,
-      );
-      this.forgetPendingEvaluationSolution(solution.requestId);
-      return true;
-    }
-    this.persistPendingEvaluationSolutions();
-    return false;
-  }
-
-  /** Prune terminal evaluation state so the poll loop stops retrying (#512). */
-  private pruneTerminalEvaluationOpportunity(params: {
-    opportunityId?: string;
-    solutionRequestId?: string;
-    reason: string;
-  }): void {
-    const { opportunityId, solutionRequestId, reason } = params;
-    const target = opportunityId ?? solutionRequestId ?? 'unknown';
-    console.log(
-      `[mech] pruning evaluation opportunity ${target}: ${reason} (terminal — pruned)`,
-    );
-    if (opportunityId) {
-      this.evaluationOpportunities.delete(opportunityId);
-      this.observedTasks.delete(opportunityId);
-    }
-    if (solutionRequestId) {
-      this.forgetPendingEvaluationSolution(solutionRequestId);
-    }
-  }
-
-  private async claimEvaluationWithTerminalPrune(
-    opportunityId: string,
-    evaluationOpportunity: {
-      taskId: string;
-      attemptIndex: number;
-      task: Task;
-    },
-    evaluationTaskCidDigest: Hex,
-  ): Promise<{
-    taskId: string;
-    attemptIndex: number;
-    verdictIndex: number;
-    requestId: string;
-    txHash: Hex;
-    blockNumber?: number;
-  }> {
-    try {
-      return await this.claimEvaluation(
-        evaluationOpportunity.taskId,
-        evaluationOpportunity.attemptIndex,
-        evaluationTaskCidDigest,
-      );
-    } catch (err) {
-      if (err instanceof SafeInnerRevertError && isNonRecoverableInnerRevert(err.decodedName)) {
-        this.pruneTerminalEvaluationOpportunity({
-          opportunityId,
-          solutionRequestId: evaluationOpportunity.task.restorationRequestId,
-          reason: formatDecodedRevert(err.decodedName!, err.decodedArgs),
-        });
-      }
-      throw err;
-    }
-  }
-
   private clearPendingDeliveryRecoveryState(requestId: string): void {
     this.originalStates.delete(requestId);
     this.pendingEvaluations.delete(requestId);
@@ -730,16 +402,6 @@ export class MechAdapter implements ExecutionAdapter {
       options?.onTransactionHash,
       options?.beforeBroadcast,
     );
-    if (
-      taskSubmission.txHash
-      && taskSubmission.blockNumber !== undefined
-    ) {
-      this.canonicalTaskCreationProvenance.set(taskSubmission.taskId, {
-        onchainCreationTx: taskSubmission.txHash,
-        onchainCreationBlock: taskSubmission.blockNumber,
-      });
-    }
-
     // Deliberately do NOT seed `observedTasks` with the task we just posted.
     // `observedTasks` is the dedup set for `watchForTasks`: the on-chain
     // TaskCreated scan skips any taskId already in it (so a task is announced
@@ -752,7 +414,7 @@ export class MechAdapter implements ExecutionAdapter {
     // basis), and on testnet it is the intended single-operator dogfood path
     // — post → claim → solve → grade → settle from one daemon. The dedup is
     // still correct: it now keys only on tasks `watchForTasks` actually
-    // yielded. `restorationAnnouncementForTaskId` re-hydrates from chain/IPFS
+    // yielded. `restorationAnnouncementFromDigest` re-hydrates from chain/IPFS
     // on a cache miss, so dropping the pre-seed costs at most one redundant
     // fetch if the creator later claims its own task.
     return {
@@ -868,128 +530,6 @@ export class MechAdapter implements ExecutionAdapter {
       maxClaims: claimPolicy.maxClaims,
       allowSolverSelfEvaluation: claimPolicy.allowSolverSelfEvaluation ?? isTestnet,
     };
-  }
-
-  private buildEvaluationTask(params: {
-    task: Task;
-    solutionRequestId: string;
-    attemptIndex: number;
-    resultData: string;
-    solutionEnvelopeCid: string;
-    taskCid?: string;
-    autopilotEvaluationContext?: Record<string, unknown>;
-  }): Task {
-    // Strip the restoration execution-profile pin. It asserts against the
-    // solver harness/model/version; evaluation resolves a different Harness
-    // (issue #2165 / PR #2081). Leaving it would false-reject the evaluator.
-    // Also strip nested signedTask.executionRequest so parseTask cannot
-    // rehydrate the solver pin (issue #2169).
-    const {
-      executionRequest: _solverProfile,
-      signedTask: restorationSignedTask,
-      ...restorationTask
-    } = params.task;
-    let signedTask = restorationSignedTask;
-    if (signedTask?.executionRequest !== undefined) {
-      const { executionRequest: _nestedProfile, ...signedWithoutProfile } = signedTask;
-      signedTask = signedWithoutProfile;
-    }
-    return {
-      ...restorationTask,
-      ...(signedTask !== undefined ? { signedTask } : {}),
-      id: `${params.task.id}:evaluation:${params.attemptIndex}`,
-      role: 'evaluation',
-      restorationRequestId: params.solutionRequestId,
-      attemptId: params.solutionRequestId,
-      attemptNumber: params.attemptIndex,
-      context: {
-        ...(params.task.context ?? {}),
-        restorationResult: params.resultData,
-        [SOLUTION_TASK_CID_CONTEXT_KEY]:
-          params.task.context?.[SOLUTION_TASK_CID_CONTEXT_KEY] ?? params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
-        [SOLUTION_ENVELOPE_CID_CONTEXT_KEY]: params.solutionEnvelopeCid,
-        ...(params.autopilotEvaluationContext
-          ? {
-              [AUTOPILOT_EVALUATION_CONTEXT_KEY]:
-                params.autopilotEvaluationContext,
-            }
-          : {}),
-      },
-    };
-  }
-
-  private async restorationAnnouncementForTaskId(taskId: string): Promise<TaskAnnouncement> {
-    // Read-through `restorationBodyCache` — NOT `observedTasks`. This helper is
-    // an evaluation-path lookup of a task's restoration body; caching it into
-    // the `watchForTasks` discovery dedup set would suppress the creator's own
-    // restoration-claim discovery for the same taskId (see field comment).
-    const cached =
-      this.restorationBodyCache.get(taskId) ?? this.observedTasks.get(taskId);
-    if (cached) return cached;
-
-    const taskCidDigest = await getTaskCidDigest(
-      this.publicClient,
-      this.config.routerAddress,
-      taskId,
-    );
-    const digest = taskCidDigest.startsWith('0x') ? taskCidDigest.slice(2) : taskCidDigest;
-    const taskCid = `f01551220${digest}`;
-    const signed = await fetchSignedTaskFromIpfs(
-      this.config.ipfsGatewayUrl,
-      taskCid,
-      this.ipfsFetchOpts(),
-    );
-    const task = parseTask({ signedTask: signed });
-    const announcement: TaskAnnouncement = {
-      taskId,
-      task,
-      taskCid,
-    };
-    this.restorationBodyCache.set(taskId, announcement);
-    return announcement;
-  }
-
-  private rememberCanonicalTaskCreated(event: DecodedTaskCreated): void {
-    if (
-      event.transactionHash === undefined
-      || !/^0x[0-9a-fA-F]{64}$/.test(event.transactionHash)
-      || event.blockNumber === undefined
-      || !Number.isSafeInteger(event.blockNumber)
-      || event.blockNumber < 0
-    ) {
-      return;
-    }
-    this.canonicalTaskCreationProvenance.set(event.taskId, {
-      onchainCreationTx: event.transactionHash,
-      onchainCreationBlock: event.blockNumber,
-    });
-  }
-
-  private async canonicalTaskCreationForEvaluation(
-    taskId: string,
-    opportunityBlock?: number,
-  ): Promise<CanonicalTaskCreationProvenance> {
-    const cached = this.canonicalTaskCreationProvenance.get(taskId);
-    if (cached) return cached;
-
-    const toBlock = opportunityBlock !== undefined
-      ? BigInt(opportunityBlock)
-      : await this.publicClient.getBlockNumber();
-    const fromBlock = this.taskAdmissionFloorBlock() ?? 0n;
-    if (fromBlock <= toBlock) {
-      const logs = await this.getRouterLogsInChunks(fromBlock, toBlock);
-      for (const event of decodeTaskCreatedLogs(logs)) {
-        this.rememberCanonicalTaskCreated(event);
-      }
-    }
-
-    const resolved = this.canonicalTaskCreationProvenance.get(taskId);
-    if (!resolved) {
-      throw new Error(
-        `evaluation task ${taskId} has no canonical TaskCreated provenance in router logs`,
-      );
-    }
-    return resolved;
   }
 
   private async restorationAnnouncementFromDigest(params: {
@@ -1143,395 +683,31 @@ export class MechAdapter implements ExecutionAdapter {
     }
   }
 
-  /**
-   * Look up the Deliver-event envelope CID for a pending evaluation solution.
-   *
-   * Returns `null` when the Deliver event is not present in the configured
-   * lookback window. This is a terminal signal for the caller — re-running the
-   * same lookup later is deterministically futile when `solution.blockNumber`
-   * is set (toBlock is fixed at the SolutionDeliveryClaimed block), and is
-   * monotonically less likely to find the event when toBlock follows chain head
-   * (the window slides forward, away from any older Deliver event). Callers
-   * should prune the pending solution on `null` rather than retry — see #553.
-   */
-  private async deliveryEnvelopeCidForSolution(solution: {
-    requestId: string;
-    blockNumber?: number;
-  }): Promise<string | null> {
-    const deliveryMech = await getMarketplaceRequestDeliveryMech(
-      this.publicClient,
-      this.config.mechMarketplaceAddress,
-      solution.requestId,
-    );
-    const toBlock = solution.blockNumber != null
-      ? BigInt(solution.blockNumber)
-      : await this.publicClient.getBlockNumber();
-    const lookback =
-      this.config.mechDeliverBackfillLookbackBlocks ??
-      DEFAULT_MECH_DELIVER_BACKFILL_LOOKBACK_BLOCKS;
-    const fromBlock = toBlock > lookback ? toBlock - lookback : 0n;
-    const deliveryDataHex = await findLatestDeliveryDataHexForRequest(
-      this.publicClient,
-      deliveryMech,
-      solution.requestId,
-      fromBlock,
-      toBlock,
-    );
-    if (!deliveryDataHex) {
-      return null;
-    }
-    const digest = deliveryDataHex.startsWith('0x') ? deliveryDataHex.slice(2) : deliveryDataHex;
-    return `f01551220${digest}`;
-  }
-
-  private async evaluationAnnouncementForSolution(
-    solution: PendingEvaluationSolution,
-  ): Promise<TaskAnnouncement | undefined> {
-    if (!this.isDiscoveryTaskAllowed(solution.taskId)) {
-      console.log(
-        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: outside configured task discovery scope`,
-      );
-      this.forgetPendingEvaluationSolution(solution.requestId);
-      return undefined;
-    }
-
-    // Cheap claimability gate FIRST — before the restoration lookup + IPFS
-    // fetch. A backlog of terminal opportunities (finalized / evaluation
-    // deadline passed / max verdicts reached) must not pay the expensive
-    // restoration-announcement cost on every poll cycle. Terminal reasons are
-    // pruned from the working set so the loop never re-scans on-chain history;
-    // transient reasons are left in place to be retried next cycle.
-    const claimable = await canClaimEvaluation(
-      this.publicClient,
-      this.config.safeAddress,
-      this.config.routerAddress,
-      solution.taskId,
-      solution.attemptIndex,
-      this.config.mechContractAddress,
-    );
-    if (!claimable.ok) {
-      const terminal = isTerminalEvaluationReason(claimable.revertName);
-      console.log(
-        `[mech] skipping evaluation opportunity ${solution.requestId} for task ${solution.taskId}/${solution.attemptIndex}: ${claimable.reason}` +
-          (terminal ? ' (terminal — pruned)' : ' (transient — will retry)'),
-      );
-      if (terminal) {
-        this.pruneTerminalEvaluationOpportunity({
-          solutionRequestId: solution.requestId,
-          reason: claimable.reason,
-        });
-      } else {
-        // #645 backstop: bound retries on transient/unclassified claimability
-        // failures so a wedged opportunity can't log-spam forever.
-        this.recordEvaluationFailureAndMaybePrune(solution);
-      }
-      return undefined;
-    }
-
-    const restoration = await this.restorationAnnouncementForTaskId(solution.taskId);
-    const solutionEnvelopeCid = await this.deliveryEnvelopeCidForSolution(solution);
-    if (solutionEnvelopeCid == null) {
-      // #553: Deliver event is not within the configured lookback window. A
-      // retry with the same toBlock cannot reach an older event, so this is
-      // terminal — prune so the loop never re-pays the canClaimEvaluation +
-      // restoration lookup cost on a deterministically-failing opportunity.
-      this.pruneTerminalEvaluationOpportunity({
-        solutionRequestId: solution.requestId,
-        reason:
-          `no Deliver event found within configured lookback for task ${solution.taskId}/${solution.attemptIndex}`,
-      });
-      return undefined;
-    }
-    const resultPayload = await fetchFromIpfs(
-      this.config.ipfsGatewayUrl,
-      solutionEnvelopeCid,
-      this.ipfsFetchOpts(),
-    ) as Record<string, unknown>;
-    // E43/E44: IPFS may hold a sealed TEP Delivery with the bridge envelope nested. Unwrap
-    // before reading provenance / result data (same preference as deliveryClaimForDelivery).
-    const envelopeDocument = signedEnvelopeJsonFromDeliveryOrRaw(resultPayload) as Record<string, unknown>;
-    let creationProvenance = taskCreationProvenanceFromSolutionEnvelope(envelopeDocument);
-    if (!creationProvenance && typeof envelopeDocument.data === 'string') {
-      try {
-        creationProvenance = taskCreationProvenanceFromSolutionEnvelope(
-          JSON.parse(envelopeDocument.data),
-        );
-      } catch {
-        // Legacy non-envelope result payload. The fail-closed check below
-        // keeps it out of the new provenance-bearing writer path.
-      }
-    }
-    const canonicalCreationProvenance =
-      await this.canonicalTaskCreationForEvaluation(
-        solution.taskId,
-        solution.blockNumber,
-      );
-    // Bridge-era envelopes (buildLegacyExecutionEnvelope) carry placeholder creation tx/block;
-    // when the nested envelope lacks valid provenance, trust the on-chain TaskCreated SoT.
-    if (!creationProvenance) {
-      creationProvenance = canonicalCreationProvenance;
-    } else if (
-      creationProvenance.onchainCreationTx.toLowerCase()
-        !== canonicalCreationProvenance.onchainCreationTx.toLowerCase()
-      || creationProvenance.onchainCreationBlock
-        !== canonicalCreationProvenance.onchainCreationBlock
-    ) {
-      throw new Error(
-        `evaluation opportunity ${solution.requestId} solution-envelope provenance `
-        + `does not match canonical TaskCreated provenance for task ${solution.taskId}`,
-      );
-    }
-    // Bridge read path (cutover stage 1, Task 15, coordinator amendment 4 / D3): prefer the
-    // `deliveryExtensions` bridge annotation when the converged Delivery carries one. Read-path
-    // preference only — no state-machine change, no schema change, no new transaction.
-    const bridgedResultData = legacyRestorationResultFromDelivery(
-      new TextEncoder().encode(JSON.stringify(resultPayload)),
-    );
-    const resultData =
-      bridgedResultData
-      ?? (typeof envelopeDocument.data === 'string' ? envelopeDocument.data : undefined)
-      ?? JSON.stringify(envelopeDocument);
-    let autopilotEvaluationContext: Record<string, unknown> | undefined;
-    if (
-      restoration.task.spec?.['source'] === 'autopilot-session'
-    ) {
-      const parsedTask = JinnRepoAutopilotSessionTaskSchema.safeParse(
-        restoration.task.spec,
-      );
-      if (!parsedTask.success) {
-        console.log(
-          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: malformed source Task`,
-        );
-        return undefined;
-      }
-
-      let parsedEnvelope: ReturnType<typeof SignedEnvelopeSchema.safeParse>;
-      try {
-        parsedEnvelope = SignedEnvelopeSchema.safeParse(JSON.parse(resultData));
-      } catch {
-        console.log(
-          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: malformed Solution envelope`,
-        );
-        return undefined;
-      }
-      if (
-        !parsedEnvelope.success
-        || parsedEnvelope.data.solverType !== 'jinn-repo.v1'
-        || normalizeEnvelopeRole(parsedEnvelope.data.role) !== 'solution'
-      ) {
-        console.log(
-          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: invalid Solution envelope`,
-        );
-        return undefined;
-      }
-      const parsedSolution = JinnRepoAutopilotSolutionPayloadSchema.safeParse(
-        parsedEnvelope.data.payload,
-      );
-      if (!parsedSolution.success) {
-        console.log(
-          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: invalid mutation result`,
-        );
-        return undefined;
-      }
-
-      const observation =
-        await this.config.autopilotEvaluationContextResolver?.resolve({
-          task: parsedTask.data,
-          solution: parsedSolution.data,
-          taskId: solution.taskId,
-          attemptIndex: solution.attemptIndex,
-          requestId: solution.requestId,
-          solutionEnvelopeCid,
-          solutionOperatorSafe: solution.operator,
-          evaluatorOperatorSafe: this.config.safeAddress,
-        });
-      const admission = admitAutopilotEvaluationOpportunity({
-        task: parsedTask.data,
-        solution: parsedSolution.data,
-        taskId: solution.taskId,
-        attemptIndex: solution.attemptIndex,
-        requestId: solution.requestId,
-        solutionEnvelopeCid,
-        solutionOperatorSafe: solution.operator,
-        evaluatorOperatorSafe: this.config.safeAddress,
-        observation,
-      });
-      if (admission.kind !== 'accepted') {
-        console.log(
-          `[mech] keeping Autopilot evaluation opportunity ${solution.requestId} pending: ${admission.reason}`,
-        );
-        return undefined;
-      }
-      autopilotEvaluationContext =
-        admission.context as unknown as Record<string, unknown>;
-    }
-    const evaluationTask = this.buildEvaluationTask({
-      task: restoration.task,
-      solutionRequestId: solution.requestId,
-      attemptIndex: solution.attemptIndex,
-      resultData,
-      solutionEnvelopeCid,
-      taskCid: restoration.taskCid,
-      autopilotEvaluationContext,
-    });
-    const opportunityId = `evaluation:${solution.taskId}:${solution.attemptIndex}:${solution.requestId}`;
-    const announcement: TaskAnnouncement = {
-      taskId: opportunityId,
-      task: evaluationTask,
-      taskCid: restoration.taskCid,
-      onchainCreationTx: canonicalCreationProvenance.onchainCreationTx,
-      onchainCreationBlock: canonicalCreationProvenance.onchainCreationBlock,
-      onchainOpportunityTx: solution.transactionHash,
-      onchainOpportunityBlock: solution.blockNumber,
-    };
-    this.evaluationOpportunities.set(opportunityId, {
-      taskId: solution.taskId,
-      attemptIndex: solution.attemptIndex,
-      task: evaluationTask,
-      onchainCreationTx: canonicalCreationProvenance.onchainCreationTx,
-      onchainCreationBlock: canonicalCreationProvenance.onchainCreationBlock,
-    });
-    this.observedTasks.set(opportunityId, announcement);
-    // #645: a successful announcement means the candidate has made progress;
-    // reset the transient-failure counter so that subsequent transient errors
-    // (e.g. IPFS hiccups in the announce → claim window) don't accumulate
-    // across the candidate's lifetime and silently false-prune legitimate work.
-    if (solution.failedAttempts) {
-      solution.failedAttempts = 0;
-      this.persistPendingEvaluationSolutions();
-    }
-    return announcement;
-  }
-
-  private async *retryPendingEvaluationSolutions(): AsyncIterable<TaskAnnouncement> {
-    if (!this.evaluatorEnabled) return; // #547: non-evaluators never scan.
-    let processed = 0;
-    for (const [requestId, solution] of Array.from(this.pendingEvaluationSolutions)) {
-      // Yield to the event loop periodically so a large backlog of pending
-      // evaluation solutions can't starve the HTTP API mid-cycle.
-      if (processed > 0 && processed % EVALUATION_RETRY_YIELD_EVERY === 0) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
-      processed++;
-      try {
-        const announcement = await this.evaluationAnnouncementForSolution(solution);
-        if (announcement) {
-          yield announcement;
-        }
-        // No announcement does NOT mean "forget" — pruning is owned by
-        // evaluationAnnouncementForSolution, which only removes terminal cases.
-      } catch (err) {
-        console.error(
-          `[mech] evaluation opportunity retry failed for ${requestId}:`,
-          err,
-        );
-        // #645 backstop: bound retries on any uncaught failure so a wedged
-        // requestId (e.g. an RPC failure path that re-throws every cycle)
-        // can't log-spam forever.
-        this.recordEvaluationFailureAndMaybePrune(solution);
-      }
-    }
-  }
 
   async *watchForTasks(): AsyncIterable<TaskAnnouncement> {
+    // The solution path retired with cutover stage 1 (watchForTasks stopped calling
+    // discoverSubgraphRestorationTasks) and the evaluation-opportunity path retired
+    // with Wave-4 D2 (`legacy-evaluator-delivery-watcher`, DR-2026-08-05). Nothing
+    // remains for this generator to announce: native discovery is the work loop's,
+    // and native evaluation is the evaluator loop's. The method survives only to
+    // satisfy `ExecutionAdapter` until `legacy-operator-composition` retires the
+    // legacy composition; it deliberately performs NO chain reads, because a poll
+    // that can never yield must not spend RPC quota.
+    //
+    // Scope note (Wave-4 D2): this generator has no caller. Wave-4 D1 removed
+    // `_runEngineWatcherLoop`, the only production driver, so the whole
+    // watchForTasks/claimTask/watchForDeliveries surface is orphaned. Retiring the
+    // orphan is `legacy-operator-composition`'s door (stage 5), not this row's —
+    // D2 removes the evaluation half and leaves the rest structurally intact.
     while (!this.stopped) {
-      try {
-        for await (const announcement of this.retryPendingEvaluationSolutions()) {
-          yield announcement;
-        }
-
-        // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
-        // Task 16): the solution path retires — watchForTasks yields only evaluation
-        // announcements now. discoverSubgraphRestorationTasks() and the joined-manifest-digest
-        // filter below (the joinedSolverNets claim gate the retirement table names) are no
-        // longer called from here.
-
-        const currentBlock = await this.publicClient.getBlockNumber();
-        if (currentBlock > this.requestBlockCursor) {
-          const fromBlock = this.requestBlockCursor + 1n;
-          const logs = await this.getRouterLogsInChunks(fromBlock, currentBlock);
-
-          // #547: only evaluators ingest delivery-claimed logs into the
-          // pending-evaluation set.
-          if (this.evaluatorEnabled) {
-            const submittedSolutions = decodeSolutionDeliveryClaimedLogs(logs);
-            for (const solution of submittedSolutions) {
-              this.rememberPendingEvaluationSolution(solution);
-            }
-          }
-
-          // Retained: the evaluation provenance cross-check
-          // (canonicalTaskCreationForEvaluation) reads canonicalTaskCreationProvenance.
-          const createdTasks = decodeTaskCreatedLogs(logs);
-          for (const event of createdTasks) {
-            this.rememberCanonicalTaskCreated(event);
-          }
-          for await (const announcement of this.retryPendingEvaluationSolutions()) {
-            yield announcement;
-          }
-          this.requestBlockCursor = currentBlock;
-          if (this.store) {
-            this.store.setConfigValue(ROUTER_REQUEST_CURSOR_CONFIG_KEY, currentBlock.toString());
-          }
-        }
-      } catch (err) {
-        console.error('[mech] Error polling for tasks:', formatRpcError(err, {
-          operation: 'pollTaskCreated',
-          chain: this.config.chainId === 84532 ? 'base-sepolia' : 'base',
-          rpcUrl: rpcUrlForDisplay(this.config.rpcUrl),
-          contract: this.config.routerAddress,
-          fromBlock: this.requestBlockCursor + 1n,
-        }));
-      }
-
-      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
-      // nothing was yielded) so an idle-but-polling loop never looks stale.
-      // #2407 caveat (i): this for-await driver never routes through
-      // `daemon/loop-heartbeat.ts`'s `runLoop`, so it doesn't consult
-      // per-loop admission — but `engine-watcher` is registered
-      // `admission: 'always'` (spec §5), so the omission is inert today. If
-      // this loop is ever reclassified `ready-only`, gate the poll body on
-      // `getDaemonReadiness() === 'ready'` here, the same way `engine-tick`
-      // does in `harnesses/engine/engine.ts`'s `runTickLoop`.
+      // Retained only because the `engine-watcher` LOOP_REGISTRY row is still
+      // declared (D6 owns its removal). Nothing supervises this loop any more.
       if (this.store) recordLoopTick(this.store, 'engine-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }
 
   async claimTask(taskId: string): Promise<TaskRequest> {
-    const evaluationOpportunity = this.evaluationOpportunities.get(taskId);
-    if (evaluationOpportunity) {
-      const signedEvaluationTask = await this.signTaskDocument(evaluationOpportunity.task);
-      const evaluationCid = await uploadToIpfs(this.config.ipfsRegistryUrl, signedEvaluationTask);
-      const evaluationTaskCidDigest = cidToDigestHex(evaluationCid);
-      const claimed = await this.claimEvaluationWithTerminalPrune(
-        taskId,
-        evaluationOpportunity,
-        evaluationTaskCidDigest,
-      );
-
-      this.pendingEvaluations.set(claimed.requestId, evaluationOpportunity.task);
-      this.originalStates.set(claimed.requestId, evaluationOpportunity.task);
-      this.requestKinds.set(claimed.requestId, 'verdict');
-      this.evaluationOpportunities.delete(taskId);
-      const solutionRequestId = evaluationOpportunity.task.restorationRequestId;
-      if (solutionRequestId) {
-        this.forgetPendingEvaluationSolution(solutionRequestId);
-      }
-
-      return {
-        requestId: claimed.requestId,
-        taskId: claimed.taskId,
-        attemptIndex: claimed.attemptIndex,
-        task: evaluationOpportunity.task,
-        taskCid: evaluationCid,
-        onchainCreationTx: evaluationOpportunity.onchainCreationTx,
-        onchainCreationBlock: evaluationOpportunity.onchainCreationBlock,
-        onchainClaimTx: claimed.txHash,
-        onchainClaimBlock: claimed.blockNumber,
-      };
-    }
-
     const announcement = this.observedTasks.get(taskId);
     if (!announcement) {
       throw new PermanentError(`Cannot claim unknown task ${taskId}`);
@@ -1583,30 +759,6 @@ export class MechAdapter implements ExecutionAdapter {
     );
   }
 
-  async claimEvaluation(taskId: string, attemptIndex: number, evaluationTaskCidDigest: Hex): Promise<{
-    taskId: string;
-    attemptIndex: number;
-    verdictIndex: number;
-    requestId: string;
-    txHash: Hex;
-    blockNumber?: number;
-  }> {
-    const claimed = await claimEvaluationOnchain(
-      this.publicClient,
-      this.walletClient,
-      this.config.broadcaster,
-      this.config.safeAddress,
-      this.config.routerAddress,
-      taskId,
-      attemptIndex,
-      this.config.mechContractAddress,
-      evaluationTaskCidDigest,
-      this.config.evictionRecovery,
-    );
-    this.requestKinds.set(claimed.requestId, 'verdict');
-    return claimed;
-  }
-
   async submitSolutionDelivery(requestId: RequestId, solutionDigest: Hex): Promise<void> {
     await claimDelivery(
       this.publicClient,
@@ -1616,19 +768,6 @@ export class MechAdapter implements ExecutionAdapter {
       this.config.routerAddress,
       requestId as Hex,
       { variant: 'v3', kind: 'solution', evidenceHash: solutionDigest },
-      this.config.evictionRecovery,
-    );
-  }
-
-  async submitVerdictDelivery(requestId: RequestId, verdictDigest: Hex, verdictCode: VerdictCode): Promise<void> {
-    await claimDelivery(
-      this.publicClient,
-      this.walletClient,
-      this.config.broadcaster,
-      this.config.safeAddress,
-      this.config.routerAddress,
-      requestId as Hex,
-      { variant: 'v3', kind: 'verdict', evidenceHash: verdictDigest, verdictCode },
       this.config.evictionRecovery,
     );
   }
@@ -1953,11 +1092,13 @@ export class MechAdapter implements ExecutionAdapter {
       // Cursor persistence is per-chunk inside the loop above (#552). A poll
       // that did no chunked work has no progress to persist.
 
-      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
-      // nothing was yielded) so an idle-but-polling loop never looks stale.
-      // #2407 caveat (i): see the matching comment at engine-watcher's
-      // heartbeat above — `delivery-watcher` is also `admission: 'always'`,
-      // so not consulting admission here is inert today.
+      // #1043/#1038 originally put a heartbeat at the poll-cycle tail so an
+      // idle-but-polling loop never looked stale to the watchdog. That
+      // supervision no longer exists: Wave-4 D2 deleted the `DeliveryWatcherLoop`
+      // that drove this generator, and the daemon no longer starts or registers a
+      // `delivery-watcher` loop, so nothing reads this tick. The write is retained
+      // only because the LOOP_REGISTRY row is still declared — D6 owns removing
+      // the row, and this call goes with it.
       if (this.store) recordLoopTick(this.store, 'delivery-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }

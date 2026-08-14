@@ -3,7 +3,6 @@ import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
 import { CreatorLoop } from './creator.js';
-import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from './peer-sync.js';
@@ -302,7 +301,6 @@ export interface DaemonConfig {
 export class Daemon {
   private store: Store;
   private creatorLoop?: CreatorLoop;
-  private deliveryWatcherLoop?: DeliveryWatcherLoop;
   private nativeHost?: NativeOperatorHost;
   private adapter: ExecutionAdapter;
   private loopPromises: Promise<void>[] = [];
@@ -343,7 +341,14 @@ export class Daemon {
     }
     if (verticalMode === 'legacy') {
       recordPhaseDTransitionUse('legacy-operator-composition');
-      recordPhaseDTransitionUse('legacy-evaluator-delivery-watcher-loaded');
+      // The `legacy-evaluator-delivery-watcher-loaded` counter is no longer
+      // recorded: its subject (DeliveryWatcherLoop) retired with Wave-4 D2, so a
+      // legacy boot no longer loads it and recording it would report a load that
+      // cannot happen. The signal NAME stays in the vocabulary
+      // (`compatibility/phase-d-transition-usage.ts`) and on `/v1/status` —
+      // dropping it from the Zod enum would make an already-written durable
+      // observation file carrying the counter fail strict validation on the next
+      // persist, which is an upgrade break outside this transition's scope.
     }
     if (config.store) {
       this.store = config.store;
@@ -372,11 +377,6 @@ export class Daemon {
         taskSources,
         this.store,
         config.creatorSafeAddress,
-        config.sweRebenchV2StateDir,
-      );
-      this.deliveryWatcherLoop = new DeliveryWatcherLoop(
-        this.adapter,
-        this.store,
         config.sweRebenchV2StateDir,
       );
     }
@@ -547,20 +547,6 @@ export class Daemon {
         }),
       );
     }
-    if (this.deliveryWatcherLoop) {
-      this.loopPromises.push(
-        this.deliveryWatcherLoop.run().catch(err => {
-          console.error('[daemon] delivery-watcher crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'delivery-watcher loop crashed',
-            errorCode: 'delivery_watcher_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
-      );
-    }
-
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
         this.rewardClaimLoop.run().catch(err => {
@@ -712,7 +698,6 @@ export class Daemon {
       // override the intervals that are operator/config-driven.
       const started = new Set<LoopName>();
       if (this.creatorLoop) started.add('creator');
-      if (this.deliveryWatcherLoop) started.add('delivery-watcher');
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
       if (this.evictionLoop) started.add('eviction-check');
@@ -772,7 +757,6 @@ export class Daemon {
   async stop(): Promise<void> {
     emitStructured({ kind: 'system', message: 'daemon loops stopping' });
     this.creatorLoop?.stop();
-    this.deliveryWatcherLoop?.stop();
     await this.nativeHost?.close();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();

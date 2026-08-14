@@ -1,16 +1,18 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { AgentIriSchema } from "@jinn-network/benchmarking-records";
 import { runStatePath } from "../workspace/layout.js";
 import {
+  createPublicationState,
   deriveRunOwner,
   deterministicUuidUri,
   readRunState,
   requireRunState,
   specDigest,
   writeRunState,
+  type PublicationState,
   type RunState,
 } from "./state.js";
 
@@ -74,6 +76,149 @@ describe("readRunState / writeRunState round trip", () => {
     writeRunState(workspaceDir, "draft-1", minimalState());
     writeFileSync(runStatePath(workspaceDir, "draft-1"), "not json");
     expect(() => readRunState(workspaceDir, "draft-1")).toThrowError();
+  });
+});
+
+describe("publication state migration", () => {
+  test("adds independent Matrix v2 state without changing legacy Matrix state", () => {
+    const publication = createPublicationState();
+    expect(publication.accounting).toEqual({ state: "not-started" });
+    expect(publication.matrixV2).toEqual({ state: "not-started" });
+    const state = minimalState({ matrixSha256: "b".repeat(64), publication });
+    writeRunState(workspaceDir, "draft-v2", state);
+    expect(readRunState(workspaceDir, "draft-v2")?.matrixSha256).toBe("b".repeat(64));
+    expect(readRunState(workspaceDir, "draft-v2")?.matrixV2Sha256).toBeUndefined();
+  });
+
+  test("reads a legacy report state without rewriting or inventing signed-v2 identities", () => {
+    const path = runStatePath(workspaceDir, "draft-legacy");
+    const legacy = {
+      ...minimalState({ reportSha256: "b".repeat(64), reportEnvelopeSha256: "c".repeat(64) }),
+    };
+    const exact = JSON.stringify(legacy, null, 2);
+    writeRunState(workspaceDir, "draft-legacy", minimalState());
+    writeFileSync(path, exact);
+
+    const read = readRunState(workspaceDir, "draft-legacy");
+    expect(read?.reportSha256).toBe("b".repeat(64));
+    expect(read?.reportEnvelopeSha256).toBe("c".repeat(64));
+    expect(read?.reportPayloadSha256).toBeUndefined();
+    expect(read?.reportRecordSha256).toBeUndefined();
+    expect(read?.publication).toBeUndefined();
+    expect(new TextDecoder().decode(readFileSync(path))).toBe(exact);
+  });
+
+  test("normalizes historical duplicate aliases while allowing independent signed-v2 identities", () => {
+    const path = runStatePath(workspaceDir, "draft-aliases");
+    writeRunState(workspaceDir, "draft-aliases", minimalState());
+    writeFileSync(path, JSON.stringify({
+      ...minimalState(),
+      reportSha256: "b".repeat(64), reportEnvelopeSha256: "c".repeat(64),
+      reportPayloadSha256: "b".repeat(64), reportRecordSha256: "c".repeat(64),
+    }));
+    const aliases = readRunState(workspaceDir, "draft-aliases");
+    expect(aliases?.reportPayloadSha256).toBeUndefined();
+    expect(aliases?.reportRecordSha256).toBeUndefined();
+    expect(aliases).not.toHaveProperty("reportPayloadSha256");
+    expect(aliases).not.toHaveProperty("reportRecordSha256");
+
+    const publication = createPublicationState();
+    publication.report = { state: "complete", receipt: { sourceSequence: "0001", entrySha256: "d".repeat(64) } };
+    writeRunState(workspaceDir, "draft-v2", minimalState({ publication,
+      reportSha256: "b".repeat(64), reportEnvelopeSha256: "c".repeat(64),
+      reportPayloadSha256: "e".repeat(64), reportRecordSha256: "f".repeat(64),
+    }));
+    const v2 = readRunState(workspaceDir, "draft-v2");
+    expect(v2?.reportSha256).toBe("b".repeat(64));
+    expect(v2?.reportPayloadSha256).toBe("e".repeat(64));
+  });
+
+  test("makes source identity immutable after a receipt while leaving public URL mutable", () => {
+    const publication = createPublicationState({ publicBaseUrl: "https://old.example/reports" });
+    publication.registration = {
+      state: "complete",
+      receipt: { sourceSequence: "0001", entrySha256: "d".repeat(64) },
+      digests: { run: "e".repeat(64) },
+    };
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication }));
+    const movedUrl = createPublicationState({ publicBaseUrl: "https://new.example/reports" });
+    movedUrl.registration = publication.registration;
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication: movedUrl }));
+    expect(readRunState(workspaceDir, "draft-1")?.publication?.source.publicBaseUrl).toBe("https://new.example/reports");
+
+    const renamed = createPublicationState({ name: "another-source", publicBaseUrl: "https://new.example/reports" });
+    renamed.registration = publication.registration;
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: renamed }))).toThrow(/immutable/);
+  });
+
+  test("forbids dropping and recreating publication state after a receipt", () => {
+    const publication = createPublicationState();
+    publication.registration = {
+      state: "complete",
+      receipt: { sourceSequence: "0001", entrySha256: "d".repeat(64) },
+      digests: { run: "e".repeat(64) },
+    };
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication }));
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState())).toThrow(/cannot be removed/);
+
+    const recreated = createPublicationState({ name: "replacement-source" });
+    recreated.registration = publication.registration;
+    expect(() => writeRunState(workspaceDir, "draft-1", minimalState({ publication: recreated }))).toThrow(/immutable/);
+    expect(readRunState(workspaceDir, "draft-1")?.publication?.source.name).toBe("colophon-benchmarks");
+  });
+
+  test("forbids receipt and established digest removal or mutation for every publication stage", () => {
+    const publication = createPublicationState();
+    const stageNames = ["registration", "accounting", "report"] as const;
+    stageNames.forEach((stageName, index) => {
+      publication[stageName] = {
+        state: "complete",
+        receipt: { sourceSequence: `000${index + 1}`, entrySha256: String(index + 1).repeat(64) },
+        digests: { record: String(index + 4).repeat(64) },
+      };
+    });
+    const stateWithReportV2 = (nextPublication: PublicationState) => minimalState({
+      publication: nextPublication,
+      reportPayloadSha256: "a".repeat(64),
+      reportRecordSha256: "b".repeat(64),
+    });
+    writeRunState(workspaceDir, "draft-1", stateWithReportV2(publication));
+
+    for (const stageName of stageNames) {
+      const noReceipt = structuredClone(publication);
+      delete noReceipt[stageName].receipt;
+      expect(() => writeRunState(workspaceDir, "draft-1", stateWithReportV2(noReceipt)), stageName).toThrow(/receipt cannot be removed or changed/);
+
+      const changedReceipt = structuredClone(publication);
+      changedReceipt[stageName].receipt!.entrySha256 = "f".repeat(64);
+      expect(() => writeRunState(workspaceDir, "draft-1", stateWithReportV2(changedReceipt)), stageName).toThrow(/receipt cannot be removed or changed/);
+
+      const noDigest = structuredClone(publication);
+      noDigest[stageName].digests = {};
+      expect(() => writeRunState(workspaceDir, "draft-1", stateWithReportV2(noDigest)), stageName).toThrow(/digest cannot be removed or changed/);
+
+      const changedDigest = structuredClone(publication);
+      changedDigest[stageName].digests!.record = "f".repeat(64);
+      expect(() => writeRunState(workspaceDir, "draft-1", stateWithReportV2(changedDigest)), stageName).toThrow(/digest cannot be removed or changed/);
+    }
+  });
+
+  test("allows a public URL move and forward-only stage progress", () => {
+    const publication = createPublicationState({ publicBaseUrl: "https://old.example" });
+    publication.registration = {
+      state: "complete",
+      receipt: { sourceSequence: "0001", entrySha256: "d".repeat(64) },
+      digests: { run: "e".repeat(64) },
+    };
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication }));
+    const advanced = structuredClone(publication);
+    advanced.source.publicBaseUrl = "https://new.example";
+    advanced.accounting = { state: "in-progress", digests: { observation: "a".repeat(64) } };
+    writeRunState(workspaceDir, "draft-1", minimalState({ publication: advanced }));
+    expect(readRunState(workspaceDir, "draft-1")?.publication).toMatchObject({
+      source: { publicBaseUrl: "https://new.example" },
+      accounting: { state: "in-progress" },
+    });
   });
 });
 

@@ -13,14 +13,18 @@ describe("generated library / CLI / GUI parity", () => {
     for (const [operation, capability] of Object.entries(GUI_CAPABILITY_CATALOG)) {
       if (capability.status === "shipped") {
         expect(GUI_SERVER_ACTIONS, `${operation} maps to a missing rendered server action`).toHaveProperty(capability.action);
-      } else expect.fail(`${operation} is still deferred to ${capability.deferredTo}`);
+      } else {
+        expect(capability.status).toBe("unavailable");
+        expect(capability.reason).toMatch(/browser-supplied paths are forbidden/);
+        expect(GUI_SERVER_ACTIONS).not.toHaveProperty(operation);
+      }
     }
   });
 
-  test("no shipped operation remains deferred after BP-33", () => {
-    const deferred = Object.entries(GUI_CAPABILITY_CATALOG)
+  test("no operation remains deferred; unsafe runtime path inputs are explicitly unavailable", () => {
+    const deferred = Object.entries(GUI_CAPABILITY_CATALOG as Readonly<Record<string, { readonly status: string; readonly deferredTo?: string }>>)
       .filter(([, capability]) => capability.status === "deferred")
-      .map(([operation, capability]) => [operation, capability.status === "deferred" ? capability.deferredTo : ""]);
+      .map(([operation, capability]) => [operation, capability.deferredTo ?? ""]);
     expect(deferred).toEqual([]);
   });
 });

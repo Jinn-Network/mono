@@ -210,8 +210,13 @@ __metadata:
     "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
     "@jinn-network/benchmarking-interop": "npm:0.1.0"
     "@jinn-network/benchmarking-local": "npm:0.1.0"
+    "@jinn-network/benchmarking-publication": "npm:0.1.0"
     "@jinn-network/benchmarking-records": "npm:0.1.0"
     "@jinn-network/benchmarking-run": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
+    "@jinn-network/record-discovery-transport-http": "npm:0.1.0"
+    "@jinn-network/record-publication": "npm:0.1.0"
     "@jinn-network/task-admission": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-backend-local": "npm:0.1.0"
@@ -835,11 +840,22 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/benchmarking-publication@portal:../../benchmarking/publication::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-publication@portal:../../benchmarking/publication::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/benchmarking-records": "npm:0.1.0"
+    "@jinn-network/record-publication": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
 "@jinn-network/benchmarking-records@portal:../../benchmarking/records::locator=%40colophon-claims%2Fweb%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/benchmarking-records@portal:../../benchmarking/records::locator=%40colophon-claims%2Fweb%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
   languageName: node
@@ -916,6 +932,54 @@ __metadata:
   peerDependenciesMeta:
     vitest:
       optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-client@portal:../../discovery/client::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-client@portal:../../discovery/client::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-protocol@portal:../../discovery/protocol::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-protocol@portal:../../discovery/protocol::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/trust-core": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-serve@portal:../../discovery/serve::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-serve@portal:../../discovery/serve::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-transport-http@portal:../../discovery/transport-http::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-transport-http@portal:../../discovery/transport-http::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-client": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-publication@portal:../../discovery/publication::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-publication@portal:../../discovery/publication::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
   languageName: node
   linkType: soft
 

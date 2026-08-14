@@ -40,6 +40,10 @@ const recordDiscoveryPackages = [
     '@jinn-network/record-discovery-serve',
     join(root, 'packages', 'discovery', 'serve'),
   ],
+  [
+    '@jinn-network/record-publication',
+    join(root, 'packages', 'discovery', 'publication'),
+  ],
 ];
 
 const codeEntrypoints = [

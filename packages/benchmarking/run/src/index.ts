@@ -13,6 +13,9 @@ export type {
 
 export type {
   AdmissionEvidencePort,
+  AccountingCheckResult,
+  AccountingCompletenessPort,
+  AccountingVerificationPort,
   AssemblyPorts,
   AssemblyProcedure,
   CellCost,
@@ -24,6 +27,7 @@ export type {
   InputScope,
   IntegrityTier,
   MatrixSignaturePort,
+  MatrixV2AssemblyPorts,
   PinningAxisStatus,
   PinningObservation,
   PinningObservationPort,
@@ -51,6 +55,7 @@ export type {
   CellStatusKind,
   Clock,
   HostTerminalFacts,
+  LaunchCapturePort,
   LaunchOptions,
   ReplaceableReason,
   TerminalClassifier,
@@ -71,8 +76,14 @@ export {
 export { summarizeCellStatus } from "./status.js";
 export type { CellStatusSummary } from "./status.js";
 
-export { assembleMatrix, deriveOutcome, deriveParticipantExclusion } from "./assemble.js";
-export type { AssembledMatrix } from "./assemble.js";
+export {
+  assembleMatrix,
+  assembleMatrixV2,
+  deriveOutcome,
+  deriveParticipantExclusion,
+  MatrixV2AssemblyError,
+} from "./assemble.js";
+export type { AssembledMatrix, BenchmarkAccountingInput } from "./assemble.js";
 
-export { verifyMatrix } from "./verify.js";
+export { verifyMatrix, verifyMatrixV2 } from "./verify.js";
 export type { VerifyMatrixResult } from "./verify.js";

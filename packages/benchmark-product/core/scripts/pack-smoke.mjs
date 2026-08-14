@@ -109,7 +109,7 @@ try {
     `
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark, runCancel } from "@colophon-claims/core";
+import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, HARBOR_ADAPTER_ID, SUPPORTED_HARBOR_VERSION_RANGE, buildSampleBenchmark, createWorkspacePublicationHttpHandler, publicationConfigure, publicationRegister, runCancel } from "@colophon-claims/core";
 
 const require = createRequire(import.meta.url);
 const requiredEntry = require("@colophon-claims/core");

@@ -357,7 +357,7 @@ describe("runCancel — full finalize on a fake venue", () => {
     const targetKeys = new Set([droppedA, droppedB]);
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return !targetKeys.has(entry.event.cellKey);
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return !targetKeys.has(entry.cellKey);
       }
       return true;
@@ -451,7 +451,7 @@ describe("runCancel — cell-level outcomes are decided independently of the run
     if (submissionEntry === undefined || submissionEntry.kind !== "submission-accepted") throw new Error("unreachable");
     const withoutTarget = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== expiredCellKey;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== expiredCellKey;
       }
       return true;

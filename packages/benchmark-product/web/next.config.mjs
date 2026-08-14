@@ -45,7 +45,12 @@ const config = {
   output: "standalone",
   reactStrictMode: true,
   async headers() {
-    return [{ source: "/:path*", headers: privateResponseHeaders }];
+    return [
+      // Negative lookahead is the separation boundary: the private no-store rule never matches
+      // the public archive, whose handler owns immutable cache semantics.
+      { source: "/:path((?!publication).*)", headers: privateResponseHeaders },
+      { source: "/publication/:path*", headers: privateResponseHeaders.filter((header) => header.key !== "Cache-Control") },
+    ];
   },
   serverExternalPackages: ["@colophon-claims/core"],
   outputFileTracingRoot: resolve(import.meta.dirname, "../../.."),

@@ -20,6 +20,7 @@ import {
   type AgentRuntimeReadiness,
   type AgentRuntimeReadinessRequest,
 } from "./agent-readiness.js";
+import { resolveHarborSelection, type HarborRuntimeSelectionRequest, type HarborRuntimeSelectionResolution } from "./harbor/host.js";
 
 interface InspectRuntimeSelectionBase {
   readonly projectDir: string;
@@ -49,6 +50,7 @@ export interface InspectRuntimeSelectionResolution {
 /** Process-owning boundary. Product operations carry state; the injected host owns execution. */
 export interface BenchmarkRuntimeHost {
   resolveInspectSelection(input: InspectRuntimeSelectionRequest, signal?: AbortSignal): Promise<InspectRuntimeSelectionResolution>;
+  resolveHarborSelection(input: HarborRuntimeSelectionRequest, signal?: AbortSignal): Promise<HarborRuntimeSelectionResolution>;
   createVenue(
     binding: EvaluationRuntimeBinding | undefined,
     options: Omit<LocalVenueOptions, "evaluationRuntime">,
@@ -140,6 +142,7 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
     assessAgentReadiness(requests) {
       return assessAgentRuntimeReadiness(hostOptions.agentDataDir, requests);
     },
+    resolveHarborSelection,
     async resolveInspectSelection(input, signal) {
       if (input.execution === "oci") {
         return probeInspectOciSelection({

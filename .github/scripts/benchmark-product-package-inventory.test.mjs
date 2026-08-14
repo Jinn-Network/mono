@@ -25,7 +25,9 @@ const PRODUCT_PACKAGES = [
 const CORE_JINN = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local',
-  '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run',
+  '@jinn-network/benchmarking-publication', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run',
+  '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication',
   '@jinn-network/task-admission', '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-evaluation-harness',
   '@jinn-network/task-execution-evaluator-adapters', '@jinn-network/task-execution-launchers',
@@ -54,6 +56,11 @@ const TRANSITIVE_PORTALS = [
   '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
   '@jinn-network/trust-core',
 ];
+const PUBLICATION_PORTALS = [
+  '@jinn-network/benchmarking-publication', '@jinn-network/record-discovery-client',
+  '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication',
+];
 const VERIFY_PORTALS = [
   '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records',
@@ -67,15 +74,16 @@ const APPROVED = new Map([
   ['core', { colophon: ['@colophon-claims/verify'], jinn: CORE_JINN, portals: [
     '@colophon-claims/verify', ...CORE_JINN, '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
     '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
+    '@jinn-network/record-discovery-client',
   ] }],
   ['cli', { colophon: ['@colophon-claims/core', '@colophon-claims/verify'], jinn: [], portals: [
-    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS,
+    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
   ] }],
   ['verify', { colophon: [], jinn: VERIFY_JINN, portals: VERIFY_PORTALS }],
   ['web', { colophon: ['@colophon-claims/core'], jinn: [], portals: [
     // Verify is core's public runtime dependency. Web resolves it only as portal plumbing;
     // source-boundaries still permits web to import core alone.
-    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS,
+    '@colophon-claims/core', '@colophon-claims/verify', ...TRANSITIVE_PORTALS, ...PUBLICATION_PORTALS,
   ] }],
 ]);
 
@@ -85,6 +93,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/benchmarking-aggregate', join(root, 'packages/benchmarking/aggregate')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages/benchmarking/interop')],
   ['@jinn-network/benchmarking-local', join(root, 'packages/benchmarking/local')],
+  ['@jinn-network/benchmarking-publication', join(root, 'packages/benchmarking/publication')],
   ['@jinn-network/benchmarking-records', join(root, 'packages/benchmarking/records')],
   ['@jinn-network/benchmarking-run', join(root, 'packages/benchmarking/run')],
   ['@jinn-network/environment-record', join(root, 'packages/environments/record')],
@@ -92,6 +101,11 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages/evidence/protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages/evidence/repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages/evidence/execution-recorder')],
+  ['@jinn-network/record-discovery-client', join(root, 'packages/discovery/client')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages/discovery/protocol')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages/discovery/serve')],
+  ['@jinn-network/record-discovery-transport-http', join(root, 'packages/discovery/transport-http')],
+  ['@jinn-network/record-publication', join(root, 'packages/discovery/publication')],
   ['@jinn-network/task-admission', join(root, 'packages/task-supply/admission')],
   ['@jinn-network/task-execution-backend', join(root, 'packages/task-execution/backend')],
   ['@jinn-network/task-execution-backend-local', join(root, 'packages/task-execution/backend-local/assembly')],

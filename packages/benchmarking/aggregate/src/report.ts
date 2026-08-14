@@ -1,12 +1,22 @@
 import {
+  BENCHMARK_PUBLICATION_EXTENSION,
   BENCHMARKING_PROTOCOL,
   BENCHMARKING_REPORTS_SCOPE,
   isCalendarStrictRfc3339,
   REPORT_MEDIA_TYPE,
+  REPORT_V2_RECORD_KIND,
+  SIGNED_REPORT_MEDIA_TYPE,
+  checkPublicRegistrationOrder,
+  parseBenchmarkAccounting,
   parseMatrix,
   parseReport,
+  parseSignedReportRecord,
+  readMatrixPublicationExtension,
+  sealBenchmarkAccounting,
   sealMatrix,
   sealReport,
+  type BenchmarkAccountingRecord,
+  type DigestBearingResourceDescriptor,
   type MatrixRecord,
   type ReportRecord,
   type RunRecord,
@@ -132,6 +142,47 @@ export interface ProducedReport {
   readonly record: ReportRecord;
   readonly bytes: Uint8Array;
   readonly envelope: Uint8Array;
+}
+
+export type PublicRegistrationStatus = "pre-dispatch" | "post-hoc" | "unverifiable";
+
+export type PublicRegistrationCheck =
+  | { readonly status: "pass" }
+  | { readonly status: "fail"; readonly detail: string }
+  | { readonly status: "indeterminate"; readonly detail: string };
+
+/** The report extension deliberately keeps analysis preregistration and publication timing apart. */
+export interface PublicRegistrationDisclosure {
+  readonly subjectSha256: string;
+  readonly status: PublicRegistrationStatus;
+  /** Exact accounting descriptor is the evidence for this independent disclosure. */
+  readonly accounting: DigestBearingResourceDescriptor;
+  readonly check: PublicRegistrationCheck;
+}
+
+export interface ReportPublicationExtension {
+  readonly publicRegistration: {
+    readonly perSubject: readonly PublicRegistrationDisclosure[];
+  };
+}
+
+/** Exact accounting bytes are supplied in sealed Report subject order. */
+export interface PublicRegistrationInput {
+  readonly accountingBytes: readonly Uint8Array[];
+  /** Optional caller display data; production refuses any value not derived from accounting. */
+  readonly disclosure?: ReportPublicationExtension;
+}
+
+export interface ProduceReportV2Input extends ProduceReportInput {
+  readonly publicRegistration: PublicRegistrationInput;
+}
+
+/** Signed Report v2 keeps the legacy fields while making the two identities explicit. */
+export interface ProducedReportV2 extends ProducedReport {
+  readonly reportPayloadSha256: string;
+  readonly reportRecordSha256: string;
+  readonly recordKind: typeof REPORT_V2_RECORD_KIND;
+  readonly recordMediaType: typeof SIGNED_REPORT_MEDIA_TYPE;
 }
 
 function computeInputFor(
@@ -281,13 +332,77 @@ function resolveAvailableMethod(
   return method;
 }
 
-/**
- * Computes results from exact subject/reference bytes, derives disclosures and universal
- * preregistration, seals the raw canonical Report payload, and signs those exact payload bytes.
- */
-export async function produceReport(
+interface ExactAccountingSubject {
+  readonly bytes: Uint8Array;
+  readonly record: BenchmarkAccountingRecord;
+  readonly digest: `sha256:${string}`;
+}
+
+function parseExactAccounting(bytes: Uint8Array): ExactAccountingSubject {
+  const digest = recordDigest(bytes);
+  let record: BenchmarkAccountingRecord;
+  try {
+    record = parseBenchmarkAccounting(bytes);
+  } catch (cause) {
+    throw new Error(`accounting ${digest} is not a valid BenchmarkAccounting record: ${String(cause)}`);
+  }
+  if (!bytesEqual(bytes, sealBenchmarkAccounting(record).bytes)) {
+    throw new Error(`accounting ${digest} is not the exact canonical BenchmarkAccounting encoding`);
+  }
+  return { bytes, record, digest };
+}
+
+function derivePublicationExtension(
+  exactSubjects: readonly ExactMatrixSubject[],
+  publicRegistration: PublicRegistrationInput,
+): ReportPublicationExtension {
+  if (publicRegistration.accountingBytes.length !== exactSubjects.length) {
+    throw new Error("Report v2 publicRegistration.accountingBytes must match the Report subject count and order");
+  }
+  const perSubject = exactSubjects.map((subject, index) => {
+    if (subject.record.assembly.procedure !== "jinn.benchmarking.assembly" || subject.record.assembly.version !== "2.0") {
+      throw new Error(`Report v2 subject ${subject.digest} must be a Matrix assembled by jinn.benchmarking.assembly@2.0`);
+    }
+    let matrixPublication: ReturnType<typeof readMatrixPublicationExtension>;
+    try {
+      matrixPublication = readMatrixPublicationExtension(subject.record as Record<string, unknown>);
+    } catch (cause) {
+      throw new Error(`Report v2 subject ${subject.digest} has an invalid benchmark-publication extension: ${String(cause)}`);
+    }
+    if (matrixPublication === undefined) {
+      throw new Error(`Report v2 subject ${subject.digest} is missing its Matrix accounting publication extension`);
+    }
+    const accounting = parseExactAccounting(publicRegistration.accountingBytes[index]!);
+    if (`sha256:${matrixPublication.accounting.digest.sha256}` !== accounting.digest) {
+      throw new Error(`Report v2 subject ${subject.digest} Matrix accounting descriptor does not bind the provided exact accounting bytes`);
+    }
+    if (accounting.record.run.digest.sha256 !== subject.record.run.digest.sha256) {
+      throw new Error(`Report v2 subject ${subject.digest} accounting Run does not match the Matrix Run`);
+    }
+    if (!exactJsonEqual(accounting.record.closeBoundary, subject.record.closeBoundary)) {
+      throw new Error(`Report v2 subject ${subject.digest} accounting closeBoundary must exactly match the Matrix closeBoundary`);
+    }
+    return {
+      subjectSha256: stripSha256Prefix(subject.digest),
+      status: accounting.record.publicRegistration.status,
+      accounting: matrixPublication.accounting,
+      check: checkPublicRegistrationOrder(accounting.record),
+    };
+  });
+  const extension = { publicRegistration: { perSubject } } as const;
+  if (
+    publicRegistration.disclosure !== undefined
+    && !exactJsonEqual(publicRegistration.disclosure, extension)
+  ) {
+    throw new Error("Report v2 publicRegistration disclosure must be derived faithfully from exact accounting bytes");
+  }
+  return extension;
+}
+
+async function produceReportWithExtension(
   input: ProduceReportInput,
   signer: DsseSigner,
+  publicationExtension?: ReportPublicationExtension,
 ): Promise<ProducedReport> {
   const method = resolveAvailableMethod(input.registry, input.method);
   if (
@@ -327,6 +442,7 @@ export async function produceReport(
     disclosures: derivedDisclosures,
     author: input.author,
     ...(input.limitations === undefined ? {} : { limitations: input.limitations }),
+    ...(publicationExtension === undefined ? {} : { [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension }),
   };
 
   const sealed = sealReport(document);
@@ -342,6 +458,34 @@ export async function produceReport(
     payloadType: REPORT_MEDIA_TYPE,
   });
   return { record: parseReport(sealed.bytes), bytes: sealed.bytes, envelope };
+}
+
+/**
+ * Computes results from exact subject/reference bytes, derives disclosures and universal
+ * preregistration, seals the raw canonical Report payload, and signs those exact payload bytes.
+ */
+export async function produceReport(
+  input: ProduceReportInput,
+  signer: DsseSigner,
+): Promise<ProducedReport> {
+  // Retain v1's raw-payload meaning: it does not inject publication timing or v2 record metadata.
+  return produceReportWithExtension(input, signer, undefined);
+}
+
+/** Produces the signed Report v2 whose public identity is the exact DSSE envelope digest. */
+export async function produceReportV2(
+  input: ProduceReportV2Input,
+  signer: DsseSigner,
+): Promise<ProducedReportV2> {
+  const extension = derivePublicationExtension(input.subjects.map(parseExactMatrix), input.publicRegistration);
+  const produced = await produceReportWithExtension(input, signer, extension);
+  return {
+    ...produced,
+    reportPayloadSha256: stripSha256Prefix(recordDigest(produced.bytes)),
+    reportRecordSha256: stripSha256Prefix(recordDigest(produced.envelope)),
+    recordKind: REPORT_V2_RECORD_KIND,
+    recordMediaType: SIGNED_REPORT_MEDIA_TYPE,
+  };
 }
 
 export type VerifyReportCheck =
@@ -364,6 +508,23 @@ export interface VerifyReportInput {
 
 export interface VerifyReportPorts extends MethodPorts {
   readonly trust: VerifyEnvelopeBindingDeps;
+}
+
+export type VerifyReportV2Check = VerifyReportCheck | "report-record" | "publication-disclosure";
+export type VerifyReportV2Result =
+  | {
+      readonly ok: true;
+      readonly record: ReportRecord;
+      readonly reportPayloadSha256: string;
+      readonly reportRecordSha256: string;
+    }
+  | { readonly ok: false; readonly check: VerifyReportV2Check; readonly detail: string };
+
+export interface VerifyReportV2Input extends VerifyReportInput {
+  /** External record metadata is validated independently from the DSSE payload type. */
+  readonly recordKind: string;
+  readonly recordMediaType: string;
+  readonly publicRegistration: PublicRegistrationInput;
 }
 
 /**
@@ -534,6 +695,64 @@ export async function verifyReport(
     };
   }
   return { ok: true, record };
+}
+
+/**
+ * Verifies signed Report v2 without reinterpreting Report v1: the external record is a DSSE
+ * envelope, its payload remains exact immutable Report v1 bytes, and publication timing is
+ * independently bound through every Matrix v2 accounting extension.
+ */
+export async function verifyReportV2(
+  input: VerifyReportV2Input,
+  ports: VerifyReportPorts,
+): Promise<VerifyReportV2Result> {
+  if (input.recordKind !== REPORT_V2_RECORD_KIND) {
+    return {
+      ok: false,
+      check: "report-record",
+      detail: `recordKind must be ${REPORT_V2_RECORD_KIND}`,
+    };
+  }
+  if (input.recordMediaType !== SIGNED_REPORT_MEDIA_TYPE) {
+    return {
+      ok: false,
+      check: "report-record",
+      detail: `recordMediaType must be ${SIGNED_REPORT_MEDIA_TYPE}`,
+    };
+  }
+  let signed;
+  try {
+    signed = parseSignedReportRecord(input.envelopeBytes);
+  } catch (cause) {
+    return {
+      ok: false,
+      check: "report-envelope",
+      detail: `invalid signed Report v2 envelope: ${String(cause)}`,
+    };
+  }
+  const legacyResult = await verifyReport(input, ports);
+  if (!legacyResult.ok) return legacyResult;
+
+  let extension: ReportPublicationExtension;
+  try {
+    extension = derivePublicationExtension(input.subjects.map(parseExactMatrix), input.publicRegistration);
+  } catch (cause) {
+    return { ok: false, check: "publication-disclosure", detail: String(cause) };
+  }
+  const declaredExtension = (signed.payload as Record<string, unknown>)[BENCHMARK_PUBLICATION_EXTENSION];
+  if (!exactJsonEqual(declaredExtension, extension)) {
+    return {
+      ok: false,
+      check: "publication-disclosure",
+      detail: "sealed Report publicRegistration disclosure does not match exact Matrix/accounting publication evidence",
+    };
+  }
+  return {
+    ok: true,
+    record: legacyResult.record,
+    reportPayloadSha256: stripSha256Prefix(recordDigest(signed.payloadBytes)),
+    reportRecordSha256: stripSha256Prefix(signed.recordDigest),
+  };
 }
 
 export type { DsseProducedSignature };

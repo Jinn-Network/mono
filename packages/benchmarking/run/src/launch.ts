@@ -70,6 +70,35 @@ export type AcceptedSubmissionPort = {
   ): Uint8Array | undefined | Promise<Uint8Array | undefined>;
 };
 
+/**
+ * Host-owned publication capture for one Jinn-managed dispatch. The runner never retains these
+ * values: callers persist the exact sealed Submission and accepted observation snapshot in their
+ * own durable accounting workspace.
+ */
+export type LaunchCapturePort = {
+  /** Awaited before every backend submit, including replacements and resumed dispatches. */
+  captureSubmission(input: {
+    runDigest: `sha256:${string}`;
+    cellKey: string;
+    armId: string;
+    replicate: number;
+    dispatch: number;
+    /** A defensive byte copy whose content is the exact sealed Submission. */
+    bytes: Uint8Array;
+  }): void | Promise<void>;
+  /** Awaited after the backend has accepted and exposed its ObservationSnapshot. */
+  captureObservation(input: {
+    runDigest: `sha256:${string}`;
+    cellKey: string;
+    armId: string;
+    replicate: number;
+    dispatch: number;
+    submission: `urn:uuid:${string}`;
+    submissionDigest: `sha256:${string}`;
+    snapshot: BenchmarkObservationSnapshot;
+  }): void | Promise<void>;
+};
+
 /** Host-visible typed terminal facts beyond Attempt derived state (§7.4). */
 export type HostTerminalFacts = {
   exclusionHit?: boolean;
@@ -113,6 +142,8 @@ export interface LaunchOptions {
   waitForTerminal?: AttemptWaitPort;
   /** Exact accepted Submission bytes for resume (no package journal). */
   acceptedSubmissions?: AcceptedSubmissionPort;
+  /** Optional host-owned exact-byte / observation capture for publication accounting. */
+  capture?: LaunchCapturePort;
   /** Optional §7.4 classifier (defaults to `defaultClassifyTerminal`). */
   classifyTerminal?: TerminalClassifier;
   /** Optional host-visible exclusion/unscorable facts per Attempt. */
@@ -267,6 +298,9 @@ async function sealNewSubmission(input: {
     nonce: `${coord.cellKey}:${dispatch}`,
     idempotencyKey,
     deadline,
+    // Publication profile v1: one sealed Submission authorizes one actual Attempt. Planned
+    // replicates and replacements are distinct visible cell dispatches.
+    attempts: { maxTotal: 1, maxConcurrent: 1 },
     requirements,
     annotations: submissionExtensionBlock(runDigest, coord.cellKey, coord.armId),
   };
@@ -322,6 +356,14 @@ async function dispatchAndWatchCell(input: {
       requirements: actualRequirements,
     });
 
+  await opts.capture?.captureSubmission({
+    runDigest,
+    cellKey: coord.cellKey,
+    armId: coord.armId,
+    replicate: coord.replicate,
+    dispatch,
+    bytes: new Uint8Array(sealed.bytes),
+  });
   const ack = await backend.submit(taskBytes, sealed.bytes);
   if (!ack.accepted) {
     // Submit rejection is NOT a §7.4 replacement trigger.
@@ -341,6 +383,16 @@ async function dispatchAndWatchCell(input: {
   if (typeof attempt !== "string" || attempt.length === 0) {
     throw new Error("observe(ack.submission) did not materialize descriptor.attempt");
   }
+  await opts.capture?.captureObservation({
+    runDigest,
+    cellKey: coord.cellKey,
+    armId: coord.armId,
+    replicate: coord.replicate,
+    dispatch,
+    submission: ack.submission,
+    submissionDigest: ack.digest,
+    snapshot,
+  });
   inFlight.add(attempt);
 
   const events: CellStatusEvent[] = [{

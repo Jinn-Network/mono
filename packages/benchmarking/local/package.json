@@ -45,7 +45,8 @@
     "@jinn-network/benchmarking-testing": "portal:../testing",
     "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
     "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
-    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol"
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {
     "@jinn-network/benchmarking-testing": "0.1.0",
