@@ -1,5 +1,8 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { redirect } from "next/navigation";
 import {
   armAdd,
   armList,
@@ -37,6 +40,7 @@ import {
   profileArmPinning,
   readAgentProfile,
   updateDraft,
+  verifyPublicBundle,
   type SelectInspectEvaluationInput,
 } from "@colophon-claims/core";
 import type { GuiActionState } from "@/lib/action-state";
@@ -50,11 +54,127 @@ import {
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
 import {
   ProductContextConfigurationError,
+  createProductOperationContext,
   readProductServerConfiguration,
   readRunDriverTestingDeps,
 } from "@/lib/server/product-context";
 import { projectRunStatusForGui } from "@/lib/server/view-models";
-import { projectPublishErrorForGui } from "@/lib/server/gui-error";
+import { projectProductErrorForGui, projectPublishErrorForGui } from "@/lib/server/gui-error";
+
+function failed(outcome: { readonly ok: false; readonly error: Parameters<typeof projectProductErrorForGui>[0] }): GuiActionState {
+  return { status: "error", error: projectProductErrorForGui(outcome.error) };
+}
+
+async function ensureWorkspaceAndCreateDraft(name: string): Promise<GuiActionState | { readonly draftId: string }> {
+  try {
+    const context = createProductOperationContext();
+    const initialized = initWorkspace(context);
+    if (!initialized.ok && initialized.error.code !== "conflict") return failed(initialized);
+    const draftId = `local-${randomUUID().slice(0, 12)}`;
+    const created = createDraft(context, { draftId, name });
+    return created.ok ? { draftId } : failed(created);
+  } catch {
+    return { status: "error", error: { code: "invalid-invocation", detail: "The local workspace could not be prepared. Check its configured directory and try again." } };
+  }
+}
+
+function retainedSampleFailure(
+  draftId: string,
+  stage: string,
+  outcome: { readonly ok: false; readonly error: Parameters<typeof projectProductErrorForGui>[0] },
+): GuiActionState {
+  const projected = projectProductErrorForGui(outcome.error);
+  return {
+    status: "error",
+    error: {
+      ...projected,
+      detail: `${projected.detail} The sample stopped at ${stage}; retained draft ${draftId} can be opened from Existing work.`,
+    },
+  };
+}
+
+/**
+ * Advances the zero-credential sample only through the product's existing durable operations.
+ * Every failure names the retained draft; no shadow lifecycle or cleanup path is introduced here.
+ */
+async function completeGuidedSample(draftId: string): Promise<GuiActionState | { readonly bundleIdentity: string }> {
+  const context = createProductOperationContext();
+  const quote = await runQuote(context, { draftId });
+  if (!quote.ok) return retainedSampleFailure(draftId, "quote", quote);
+  const lock = runLock(context, { draftId });
+  if (!lock.ok) return retainedSampleFailure(draftId, "lock", lock);
+  const launch = await runLaunch(context, { draftId }, readRunDriverTestingDeps());
+  if (!launch.ok) return retainedSampleFailure(draftId, "launch", launch);
+  const collect = await runCollect(context, { draftId });
+  if (!collect.ok) return retainedSampleFailure(draftId, "collect", collect);
+  const results = runResults(context, { draftId });
+  if (!results.ok) return retainedSampleFailure(draftId, "results", results);
+  const report = await runReport(context, { draftId });
+  if (!report.ok) return retainedSampleFailure(draftId, "report", report);
+  const verified = await runVerify(context, { draftId });
+  if (!verified.ok) return retainedSampleFailure(draftId, "verification", verified);
+  const published = await runPublish(context, { draftId });
+  if (!published.ok) return retainedSampleFailure(draftId, "publication", published);
+  return { bundleIdentity: published.result.bundleIdentity };
+}
+
+/** Zero-key, one-action sample journey from the three-choice home to a verified report. */
+export async function guidedSampleRunAction(_previous: GuiActionState, _formData: FormData): Promise<GuiActionState> {
+  void _previous; void _formData;
+  const prepared = await ensureWorkspaceAndCreateDraft("Bundled Colophon sample");
+  if ("status" in prepared) return prepared;
+  const context = createProductOperationContext();
+  const sample = await sampleInit(context, prepared);
+  if (!sample.ok) return failed(sample);
+  for (const arm of [
+    { armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } },
+    { armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } },
+  ] as const) {
+    const added = armAdd(context, { draftId: prepared.draftId, ...arm });
+    if (!added.ok) return retainedSampleFailure(prepared.draftId, `arm setup (${arm.armId})`, added);
+  }
+  const completed = await completeGuidedSample(prepared.draftId);
+  if ("status" in completed) return completed;
+  redirect(`/workspace/${prepared.draftId}/results`);
+}
+
+/** Starts an own-work draft without exposing the full draft record form. */
+export async function guidedOwnWorkCreateAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  void _previous;
+  const name = field(formData, "name");
+  if (name.length === 0) return { status: "error", error: { code: "validation", detail: "Name this comparison before continuing." } };
+  const prepared = await ensureWorkspaceAndCreateDraft(name);
+  if ("status" in prepared) return prepared;
+  redirect(`/workspace/${prepared.draftId}`);
+}
+
+/** Reader-only choice: authenticate a caller-selected local bundle without opening or mutating it. */
+export async function guidedVerifyBundleAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  void _previous;
+  const bundle = field(formData, "bundle");
+  if (bundle.length === 0 || bundle.includes("\0")) {
+    return { status: "error", error: { code: "validation", detail: "Choose the local bundle directory to check." } };
+  }
+  try {
+    const verification = await verifyPublicBundle(resolve(bundle));
+    return {
+      status: "success",
+      result: {
+        identity: `sha256:${verification.identity}`,
+        checks: verification.checks,
+        statement: `${verification.checks.length} of 6 checks passed. The bundle was not uploaded or changed.`,
+      },
+    };
+  } catch {
+    return {
+      status: "error",
+      error: {
+        code: "record-integrity",
+        detail: "This directory did not pass all six bundle checks. Colophon did not change it or print a verified result.",
+      },
+    };
+  }
+}
 
 export async function workspaceInitAction(_previous: GuiActionState, _formData: FormData): Promise<GuiActionState> {
   void _previous; void _formData;
@@ -99,9 +219,21 @@ export async function intakeSampleAction(_previous: GuiActionState, formData: Fo
 
 export async function intakeSweBenchAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
+  const file = formData.get("file");
+  let rows: unknown;
+  if (file instanceof File && file.size > 0) {
+    if (file.size > 2_000_000) {
+      return { status: "error", error: { code: "validation", detail: "The SWE-bench file is larger than the 2 MB local import limit." } };
+    }
+    try { rows = JSON.parse(await file.text()); } catch {
+      return { status: "error", error: { code: "validation", detail: "The selected SWE-bench file is not valid JSON." } };
+    }
+  } else {
+    rows = jsonField(formData, "rows", []);
+  }
   return executeOperation((context) => importSweBenchRows(context, {
     draftId,
-    rows: jsonField(formData, "rows", []),
+    rows,
   }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
 }
 
@@ -212,13 +344,47 @@ export async function runPreviewAction(_previous: GuiActionState, formData: Form
   }, { revalidate: [`/workspace/${draftId}`] });
 }
 
+function draftUsesProviderAgent(draftId: string): boolean {
+  try {
+    const draft = getDraft(createProductOperationContext(), { draftId });
+    if (!draft.ok) return false;
+    return draft.result.draft.spec.arms.some((arm) => {
+      const harness = arm.pinning.harness;
+      const id = typeof harness === "string"
+        ? harness
+        : typeof harness === "object" && harness !== null && !Array.isArray(harness)
+          ? (harness as Readonly<Record<string, unknown>>).id
+          : undefined;
+      return id === "claude-code" || id === "codex";
+    });
+  } catch {
+    return false;
+  }
+}
+
+function requireProviderAcknowledgement(draftId: string, formData: FormData): GuiActionState | undefined {
+  if (!draftUsesProviderAgent(draftId)) return undefined;
+  if (field(formData, "ack-provider-network-costs") === "acknowledged") return undefined;
+  return {
+    status: "error",
+    error: {
+      code: "invalid-invocation",
+      detail: "Review the provider network and possible-charge boundary, then check the acknowledgement before continuing.",
+    },
+  };
+}
+
 export async function runQuoteAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
+  const acknowledgement = requireProviderAcknowledgement(draftId, formData);
+  if (acknowledgement !== undefined) return acknowledgement;
   return executeOperation((context) => runQuote(context, { draftId }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
 }
 
 export async function runLockAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
+  const acknowledgement = requireProviderAcknowledgement(draftId, formData);
+  if (acknowledgement !== undefined) return acknowledgement;
   return executeOperation((context) => runLock(context, { draftId }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
 }
 
@@ -276,6 +442,8 @@ export async function publicationReportAction(_previous: GuiActionState, formDat
 
 export async function runLaunchAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
+  const acknowledgement = requireProviderAcknowledgement(draftId, formData);
+  if (acknowledgement !== undefined) return acknowledgement;
   return executeBackgroundOperation(
     "launch",
     (context) => runLaunch(context, { draftId }, readRunDriverTestingDeps()),
@@ -285,6 +453,8 @@ export async function runLaunchAction(_previous: GuiActionState, formData: FormD
 
 export async function runResumeAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
+  const acknowledgement = requireProviderAcknowledgement(draftId, formData);
+  if (acknowledgement !== undefined) return acknowledgement;
   return executeBackgroundOperation(
     "resume",
     (context) => runResume(context, { draftId }, readRunDriverTestingDeps()),

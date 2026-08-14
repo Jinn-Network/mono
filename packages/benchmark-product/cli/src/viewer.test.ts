@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +31,42 @@ function authenticated(files: Readonly<Record<string, string>>): VerifiedPublicB
       matrixSha256: "e".repeat(64),
       reportSha256: "f".repeat(64),
       reportEnvelopeSha256: "1".repeat(64),
+    },
+    comparison: {
+      profile: "colophon-public-comparison/1",
+      sampleKind: "bundled-prediction",
+      tasks: [{
+        digest: "2".repeat(64),
+        profileUri: "https://jinn.network/task-execution/profiles/prediction-forecast/v1",
+        label: "Will the sample event happen?",
+        summary: "Synthetic sample resolution: Yes.",
+        evidencePath: `records/${"2".repeat(64)}.bin`,
+      }],
+      arms: ["baseline", "candidate"],
+      cells: ["baseline", "candidate"].map((armId, index) => ({
+        cellKey: `${armId}-cell`,
+        taskDigest: "2".repeat(64),
+        armId,
+        replicate: 0,
+        outcome: "judged" as const,
+        outputSummary: `Forecast ${index === 0 ? "60" : "80"}% Yes`,
+        primaryScore: { name: "solverBrier" as const, value: index === 0 ? "0.16" : "0.04", direction: "lower-is-better" as const },
+        outputs: [],
+        verdicts: [],
+        evidencePaths: [],
+      })),
+      descriptiveComparison: {
+        kind: "paired-measurement",
+        measurement: "solverBrier",
+        direction: "lower-is-better",
+        firstArm: "baseline",
+        secondArm: "candidate",
+        pairedCells: 1,
+        lowerByFirst: 0,
+        lowerBySecond: 1,
+        ties: 0,
+        formalWinner: false,
+      },
     },
     snapshot: {
       manifest,
@@ -102,5 +139,73 @@ describe("verified bundle viewer", () => {
     unlinkSync(path);
     response = await fetch(`${session.base}/bundle/index.html`, { headers: { cookie: session.cookie } });
     expect(await response.text()).toBe("verified report");
+  });
+
+  test("puts the comparison and explicit next actions before the embedded report", async () => {
+    const root = mkdtempSync(join(tmpdir(), "colophon-viewer-aha-"));
+    roots.push(root);
+    writeFileSync(join(root, "index.html"), "verified report");
+    const snapshot = authenticated({ "index.html": "verified report", "evidence.json": "{}" });
+    let workspaceStarts = 0;
+    let workspaceCloses = 0;
+    const viewer = await createVerifiedBundleViewer(root, 0, {
+      verify: async () => snapshot,
+      startWorkspace: async () => {
+        workspaceStarts += 1;
+        return { url: "http://127.0.0.1:44000/launch", close: async () => { workspaceCloses += 1; } };
+      },
+    });
+    viewers.push(viewer);
+    const session = await claim(viewer);
+    const home = await fetch(session.base, { headers: { cookie: session.cookie } });
+    const html = await home.text();
+    expect(html).toContain("Complete comparison on 1 sample tasks");
+    expect(html).toContain("candidate had lower solverBrier in 1");
+    expect(html.indexOf("What happened, task by task")).toBeLessThan(html.indexOf("Published report"));
+    expect(html).toContain("Use my work");
+    expect(html).toContain("Copy verification command");
+
+    const action = await fetch(`${session.base}/use-my-work`, {
+      method: "POST",
+      headers: { cookie: session.cookie },
+      redirect: "manual",
+    });
+    expect(action.status).toBe(303);
+    expect(action.headers.get("location")).toBe("http://127.0.0.1:44000/launch");
+    expect(workspaceStarts).toBe(1);
+    expect((await fetch(`${session.base}/use-my-work`, { method: "POST", headers: { cookie: session.cookie } })).status).toBe(405);
+    await viewer.close();
+    viewers.pop();
+    expect(workspaceCloses).toBe(1);
+  });
+
+  test("keeps a packaged-workspace start failure out of the browser response and permits a retry", async () => {
+    const root = mkdtempSync(join(tmpdir(), "colophon-viewer-start-failure-"));
+    roots.push(root);
+    writeFileSync(join(root, "index.html"), "verified report");
+    const snapshot = authenticated({ "index.html": "verified report" });
+    let attempts = 0;
+    const privateDiagnostic = `/private/operator/auth-${randomUUID()}.json`;
+    const viewer = await createVerifiedBundleViewer(root, 0, {
+      verify: async () => snapshot,
+      startWorkspace: async () => {
+        attempts += 1;
+        throw new Error(privateDiagnostic);
+      },
+    });
+    viewers.push(viewer);
+    const session = await claim(viewer);
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const response = await fetch(`${session.base}/use-my-work`, {
+        method: "POST",
+        headers: { cookie: session.cookie },
+      });
+      const body = await response.text();
+      expect(response.status).toBe(500);
+      expect(body).toContain("Return to the terminal for the local diagnostic");
+      expect(body).not.toContain(privateDiagnostic);
+      expect(attempts).toBe(attempt);
+    }
   });
 });

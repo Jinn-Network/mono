@@ -25,8 +25,7 @@ real-world custody.
 - A checkout with the portal dependency distributions built in the order used
   by [Benchmark Product CI](../../.github/workflows/benchmark-product-ci.yml) is
   still required for mono development until the Jinn packages are public.
-- No account, network venue, API credential, or funds for the bundled sample
-  and default real local venue.
+- No account, API credential, funds, Docker, or provider call for the bundled sample.
 
 The self-serve source is now split into Colophon-owned Tier 4 packages:
 
