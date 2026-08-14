@@ -14,8 +14,9 @@ Build the product as a **publishing house for benchmark claims**, not another ev
 - **Deeper promise:** *Publish benchmark claims people can check.*
 - **Territory:** The Press — a claim is a publication, and every publication states how it was made.
 - **Flagship artifact:** the public report. Everything else in the system is an entrance to it.
-- **Jinn:** factual attribution only, one approved string ("Built on Jinn."), in the report imprint,
-  the infrastructure/about page, docs and verification pages. Nowhere else.
+- **Jinn:** factual attribution only, two approved strings ("Built on Jinn." as the imprint form;
+  "Built on Jinn, by Jinn contributors." where the relationship is described in prose), in the report
+  imprint, the infrastructure/about page, docs and verification pages. Nowhere else.
 
 Why this and not the alternatives: the eval category already owns "dashboard" and "observability."
 Nobody owns "the artifact a skeptic reads." The word *colophon* names precisely the thing the product
@@ -490,8 +491,11 @@ An agent reading only this object gets the accounting, not just the number.
 
 ## 14. Jinn attribution policy
 
-**Approved string:** "Built on Jinn." Nothing else. No logo lockup, no co-branding, no colour, type
-or motif borrowed, no "powered by" variants, no Jinn terminology in workflow language.
+**Approved strings:** two, by context. "Built on Jinn." is the imprint form, used wherever the
+attribution stands alone as a bare line. "Built on Jinn, by Jinn contributors." is the relationship
+form, used only where the relationship is described in prose — the infrastructure / about page, per
+the approved wording below. Nothing else. No logo lockup, no co-branding, no colour, type or motif
+borrowed, no "powered by" variants, no Jinn terminology in workflow language.
 
 **Appears in:**
 - the report imprint, as the last, smallest line;
