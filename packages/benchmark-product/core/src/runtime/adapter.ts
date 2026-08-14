@@ -47,7 +47,7 @@ import {
   HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE,
 } from "./harbor/venue.js";
-import { HarborSelectionManifestSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
+import { assertSingleHarborTrial, HarborSelectionManifestSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
 import {
   TERMINAL_BENCH_2_REGISTRY_ROLE,
   TERMINAL_BENCH_2_PROFILE,
@@ -548,8 +548,7 @@ async function harborStructureCheck(
     const trial = await exact(find(HARBOR_TRIAL_CONFIG_ROLE)!);
     const jobResult = await exact(find(HARBOR_JOB_RESULT_ROLE)!);
     const trialResult = await exact(find(HARBOR_TRIAL_RESULT_ROLE)!);
-    const trialAttempt = trial.attempt_number ?? trial.attempt;
-    if (job.n_attempts !== 1 || job.n_concurrent_trials !== 1 || job.retry.max_retries !== 0 || trialAttempt !== 1) throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+    assertSingleHarborTrial(job, trial, jobResult);
     const expectedJobName = `jinn-${lineage.submissionSha256.slice(0, 24)}-d${lineage.dispatchIndex}`;
     const effectiveJobId = jobResult.id ?? jobResult.job_id;
     const effectiveTrialId = trialResult.id ?? trialResult.trial_id;

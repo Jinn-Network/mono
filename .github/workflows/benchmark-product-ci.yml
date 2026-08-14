@@ -224,13 +224,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-product-runtime-dists
-          # The packed private Next runtime lives below dist/local-web/.next.
-          # upload-artifact excludes hidden paths unless this is explicit, which
-          # made the clean macOS qualification consume an incomplete CLI build.
+          # The CLI embeds Next's standalone runtime under `.next`. upload-artifact excludes
+          # hidden paths unless this is explicit, which would make the restored CLI tarball
+          # incomplete on every downstream qualification runner. Keep common secret-bearing
+          # hidden files excluded even though generated dist trees must not contain them.
           include-hidden-files: true
           path: |
             packages/**/dist
             !packages/**/node_modules/**
+            !packages/**/dist/**/.env*
+            !packages/**/dist/**/.git/**
+            !packages/**/dist/**/.npmrc
+            !packages/**/dist/**/.yarnrc*
           if-no-files-found: error
           retention-days: 1
 
