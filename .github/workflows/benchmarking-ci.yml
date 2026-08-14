@@ -54,9 +54,10 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8)
+      - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
       - name: Verify Benchmarking Records
         working-directory: packages/benchmarking/records
         run: |
@@ -319,8 +320,46 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  publication:
+    needs: [records]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build publication dependencies from source
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/publication && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+      - name: Verify Benchmarking Publication
+        working-directory: packages/benchmarking/publication
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Benchmarking Publication distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-publication-dist
+          path: packages/benchmarking/publication/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, records, testing, aggregate, run, interop, marketplace, local]
+    needs: [architecture, records, testing, aggregate, run, publication, interop, marketplace, local]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -331,6 +370,7 @@ jobs:
           TESTING_RESULT: ${{ needs.testing.result }}
           AGGREGATE_RESULT: ${{ needs.aggregate.result }}
           RUN_RESULT: ${{ needs.run.result }}
+          PUBLICATION_RESULT: ${{ needs.publication.result }}
           INTEROP_RESULT: ${{ needs.interop.result }}
           MARKETPLACE_RESULT: ${{ needs.marketplace.result }}
           LOCAL_RESULT: ${{ needs.local.result }}
@@ -341,6 +381,7 @@ jobs:
             "$TESTING_RESULT" \
             "$AGGREGATE_RESULT" \
             "$RUN_RESULT" \
+            "$PUBLICATION_RESULT" \
             "$INTEROP_RESULT" \
             "$MARKETPLACE_RESULT" \
             "$LOCAL_RESULT"; do
@@ -371,6 +412,8 @@ jobs:
           cp -R .benchmarking-dist/benchmarking-aggregate-dist/. packages/benchmarking/aggregate/dist/
           mkdir -p packages/benchmarking/run/dist
           cp -R .benchmarking-dist/benchmarking-run-dist/. packages/benchmarking/run/dist/
+          mkdir -p packages/benchmarking/publication/dist
+          cp -R .benchmarking-dist/benchmarking-publication-dist/. packages/benchmarking/publication/dist/
           mkdir -p packages/benchmarking/interop/dist
           cp -R .benchmarking-dist/benchmarking-interop-dist/. packages/benchmarking/interop/dist/
           mkdir -p packages/benchmarking/marketplace/dist
@@ -386,6 +429,7 @@ jobs:
           (cd packages/trust/resolve && yarn install --immutable && yarn build)
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/publication && yarn install --immutable && yarn build)
           (cd packages/marketplace/binding && yarn install --immutable && yarn build)
           (cd packages/marketplace/projector && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers

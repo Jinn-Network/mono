@@ -38,7 +38,20 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['execution-recorder', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['attestation-issuer', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['derivation', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
-  ['publication', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['publication', {
+    dependencies: [
+      '@jinn-network/evidence-repository',
+      '@jinn-network/record-publication',
+    ],
+    devDependencies: [
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/trust-core',
+    ],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
   ['local-runtime', {
     dependencies: [
       '@jinn-network/evidence-catalog-sqlite',
@@ -77,6 +90,14 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     devDependencies: [],
     optionalDependencies: [],
     peerDependencies: [],
+    // Yarn 4 does not inherit the neutral publication portals from the
+    // portaled evidence-publication dependency.
+    transitivePortalResolutions: [
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/record-publication',
+      '@jinn-network/trust-core',
+    ],
   }],
   ['trace', {
     dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/trust-core'],
@@ -127,6 +148,7 @@ function expectedPortal(directory, dependencyName) {
     return 'portal:../../trust/core';
   }
   const recordDiscoveryDirectory = new Map([
+    ['@jinn-network/record-publication', '../../discovery/publication'],
     ['@jinn-network/record-discovery-protocol', '../../discovery/protocol'],
     ['@jinn-network/record-discovery-serve', '../../discovery/serve'],
     ['@jinn-network/record-discovery-source-evidence-journal', '../../discovery/sources/evidence-journal'],

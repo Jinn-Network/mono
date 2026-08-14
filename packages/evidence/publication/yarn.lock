@@ -211,6 +211,10 @@ __metadata:
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
+    "@jinn-network/record-publication": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
@@ -235,10 +239,64 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/record-discovery-protocol@portal:../../discovery/protocol::locator=%40jinn-network%2Fevidence-publication%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-protocol@portal:../../discovery/protocol::locator=%40jinn-network%2Fevidence-publication%40workspace%3A."
+  dependencies:
+    "@jinn-network/trust-core": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-serve@portal:../../discovery/serve::locator=%40jinn-network%2Fevidence-publication%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-serve@portal:../../discovery/serve::locator=%40jinn-network%2Fevidence-publication%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-publication@portal:../../discovery/publication::locator=%40jinn-network%2Fevidence-publication%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-publication@portal:../../discovery/publication::locator=%40jinn-network%2Fevidence-publication%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/trust-core@portal:../../trust/core::locator=%40jinn-network%2Fevidence-publication%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/trust-core@portal:../../trust/core::locator=%40jinn-network%2Fevidence-publication%40workspace%3A."
+  dependencies:
+    "@noble/curves": "npm:^2.0.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
 "@jridgewell/sourcemap-codec@npm:^1.5.5":
   version: 1.5.5
   resolution: "@jridgewell/sourcemap-codec@npm:1.5.5"
   checksum: 10c0/f9e538f302b63c0ebc06eecb1dd9918dd4289ed36147a0ddce35d6ea4d7ebbda243cda7b2213b6a5e1d8087a298d5cf630fb2bd39329cdecb82017023f6081a0
+  languageName: node
+  linkType: hard
+
+"@noble/curves@npm:^2.0.0":
+  version: 2.3.0
+  resolution: "@noble/curves@npm:2.3.0"
+  dependencies:
+    "@noble/hashes": "npm:2.3.0"
+  checksum: 10c0/c0a4bc7623c3eb291e16e721a5b7db593aa216b99d634218619ffab25bef057729e761a848883bbda6d114fd3445924241500d3c0f04851f810cebb8e8121882
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:2.3.0":
+  version: 2.3.0
+  resolution: "@noble/hashes@npm:2.3.0"
+  checksum: 10c0/85651da4c1ea1db15fcacac7f38e4c4e6d60154cd116200b1002c198893bfad2733b31108352fde307126bab789f82f47b5bee8a12462b12f25fd0703aed7dce
   languageName: node
   linkType: hard
 

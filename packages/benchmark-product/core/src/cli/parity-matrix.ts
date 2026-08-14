@@ -23,7 +23,7 @@ export interface ParityMatrixEntry {
   readonly description: string;
   readonly gui:
     | { readonly status: "shipped"; readonly action: string }
-    | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" };
+    | { readonly status: "unavailable"; readonly reason: string };
 }
 
 export interface ParityMatrixExclusion {

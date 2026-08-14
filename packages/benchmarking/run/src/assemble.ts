@@ -3,15 +3,23 @@ import {
   ASSEMBLY_PROCEDURE_VERSION,
   BENCHMARKING_PROTOCOL,
   compareCodeUnitStrings,
+  documentDigest,
   expectedCellSet,
+  MATRIX_ASSEMBLY_PROCEDURE,
+  MATRIX_ASSEMBLY_PROCEDURE_VERSION,
   meetsExactDecimalFloor,
+  parseBenchmarkAccounting,
   parseMatrix,
+  sealBenchmarkAccounting,
   sealMatrix,
   sealRun,
   type BenchmarkRecord,
+  type BenchmarkAccountingRecord,
+  type DigestBearingResourceDescriptor,
   type MatrixCell,
   type Outcome,
   type RunRecord,
+  withMatrixPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import {
   checkEvaluatorIndependence,
@@ -19,13 +27,88 @@ import {
   checkVerdictRuleConsistency,
   checkVerdictSpecMatch,
 } from "./checks.js";
-import type { AssemblyPorts, AssemblyProcedure, InScopeCell, InScopeVerdict } from "./ports.js";
+import type {
+  AssemblyPorts,
+  AssemblyProcedure,
+  CloseBoundary,
+  InScopeCell,
+  InScopeVerdict,
+  MatrixV2AssemblyPorts,
+} from "./ports.js";
 
 export type AssembledMatrix = {
   record: ReturnType<typeof parseMatrix>;
   bytes: Uint8Array;
   digest: `sha256:${string}`;
 };
+
+/** Exact sealed accounting material used by Matrix assembly procedure 2.0. */
+export type BenchmarkAccountingInput = {
+  bytes: Uint8Array;
+  record: BenchmarkAccountingRecord;
+};
+
+/** Typed v2 assembly boundary failures, used by the verifier to retain named-check results. */
+export class MatrixV2AssemblyError extends Error {
+  constructor(readonly check: string, detail: string) {
+    super(detail);
+    this.name = "MatrixV2AssemblyError";
+  }
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameCloseBoundary(
+  left: { at: string; anchor?: { chain: string; blockNumber: number; blockHash: string } },
+  right: { at: string; anchor?: { chain: string; blockNumber: number; blockHash: string } },
+): boolean {
+  return left.at === right.at
+    && left.anchor?.chain === right.anchor?.chain
+    && left.anchor?.blockNumber === right.anchor?.blockNumber
+    && left.anchor?.blockHash === right.anchor?.blockHash;
+}
+
+function validateAccountingInput(
+  run: RunRecord,
+  accountingInput: BenchmarkAccountingInput,
+): BenchmarkAccountingRecord {
+  let parsed: BenchmarkAccountingRecord;
+  try {
+    parsed = parseBenchmarkAccounting(accountingInput.bytes);
+  } catch (error) {
+    throw new MatrixV2AssemblyError(
+      "accounting-bytes",
+      `exact BenchmarkAccounting bytes are invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  let resealed: Uint8Array;
+  try {
+    resealed = sealBenchmarkAccounting(accountingInput.record).bytes;
+  } catch (error) {
+    throw new MatrixV2AssemblyError(
+      "accounting-record",
+      `BenchmarkAccounting record is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!equalBytes(resealed, accountingInput.bytes)) {
+    throw new MatrixV2AssemblyError(
+      "accounting-record",
+      "BenchmarkAccounting record does not match its exact sealed bytes",
+    );
+  }
+
+  const runDigest = sealRun(run).digest.slice("sha256:".length);
+  if (parsed.run.digest.sha256 !== runDigest) {
+    throw new MatrixV2AssemblyError(
+      "accounting-run-binding",
+      "BenchmarkAccounting record does not match the sealed Run",
+    );
+  }
+  return parsed;
+}
 
 function sortDigests(values: readonly string[]): string[] {
   return [...values].sort(compareCodeUnitStrings);
@@ -135,7 +218,7 @@ function emptyArmAttrition(expected: number) {
  * Deterministic Matrix assembly (§8.3). Attempt URIs are read from in-scope cells — never
  * re-derived. Aggregation is out of scope (tenet 3).
  */
-export async function assembleMatrix(
+async function assembleMatrixForProcedure(
   bench: BenchmarkRecord,
   run: RunRecord,
   ports: AssemblyPorts,
@@ -143,8 +226,10 @@ export async function assembleMatrix(
     procedure: ASSEMBLY_PROCEDURE,
     version: ASSEMBLY_PROCEDURE_VERSION,
   },
+  accountingDescriptor?: DigestBearingResourceDescriptor,
+  closeBoundaryOverride?: CloseBoundary,
 ): Promise<AssembledMatrix> {
-  const closeBoundary = await ports.closeBoundary.resolve(run);
+  const closeBoundary = closeBoundaryOverride ?? await ports.closeBoundary.resolve(run);
   const effectiveTime = new Date(closeBoundary.at);
   const sealedRun = sealRun(run);
   const runDigest = sealedRun.digest;
@@ -296,7 +381,7 @@ export async function assembleMatrix(
   );
   const runCancelled = ports.inputScope.runCancelled === true;
 
-  const sealed = sealMatrix({
+  const matrix = {
     protocol: BENCHMARKING_PROTOCOL,
     run: { digest: { sha256: runDigest.slice("sha256:".length) } },
     closeBoundary,
@@ -313,11 +398,76 @@ export async function assembleMatrix(
       runOutcome: runCancelled ? "cancelled" : floorMet ? "complete" : "partial",
     },
     assembly: procedure,
-  });
+  };
+  const sealed = sealMatrix(accountingDescriptor === undefined
+    ? matrix
+    : withMatrixPublicationExtension(matrix, { accounting: accountingDescriptor }));
 
   return {
     record: parseMatrix(sealed.bytes),
     bytes: sealed.bytes,
     digest: sealed.digest,
   };
+}
+
+/** Legacy Matrix procedure 1.0; retained byte-for-byte for existing callers and fixtures. */
+export async function assembleMatrix(
+  bench: BenchmarkRecord,
+  run: RunRecord,
+  ports: AssemblyPorts,
+  procedure: AssemblyProcedure = {
+    procedure: ASSEMBLY_PROCEDURE,
+    version: ASSEMBLY_PROCEDURE_VERSION,
+  },
+): Promise<AssembledMatrix> {
+  return assembleMatrixForProcedure(bench, run, ports, procedure);
+}
+
+/**
+ * Accounted Matrix procedure 2.0. It binds exact BenchmarkAccounting bytes to the Matrix and
+ * delegates accounting validity and declared-scope completeness to host-injected authorities.
+ */
+export async function assembleMatrixV2(
+  bench: BenchmarkRecord,
+  run: RunRecord,
+  ports: MatrixV2AssemblyPorts,
+  accountingInput: BenchmarkAccountingInput,
+): Promise<AssembledMatrix> {
+  const accounting = validateAccountingInput(run, accountingInput);
+  const verification = await ports.accountingVerification.verifyAccounting(
+    accountingInput.bytes,
+    accounting,
+    run,
+  );
+  if (!verification.ok) {
+    throw new MatrixV2AssemblyError("accounting-verification", verification.detail);
+  }
+  const completeness = await ports.accountingCompleteness.verifyCompleteness(
+    accountingInput.bytes,
+    accounting,
+    run,
+  );
+  if (!completeness.ok) {
+    throw new MatrixV2AssemblyError("accounting-completeness", completeness.detail);
+  }
+
+  const closeBoundary = await ports.closeBoundary.resolve(run);
+  if (!sameCloseBoundary(closeBoundary, accounting.closeBoundary)) {
+    throw new MatrixV2AssemblyError(
+      "accounting-close-binding",
+      "BenchmarkAccounting close boundary does not match Matrix assembly close boundary",
+    );
+  }
+
+  return assembleMatrixForProcedure(
+    bench,
+    run,
+    ports,
+    { procedure: MATRIX_ASSEMBLY_PROCEDURE, version: MATRIX_ASSEMBLY_PROCEDURE_VERSION },
+    {
+      name: "benchmark-accounting",
+      digest: { sha256: documentDigest(accountingInput.bytes).slice("sha256:".length) },
+    },
+    closeBoundary,
+  );
 }

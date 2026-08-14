@@ -17,7 +17,7 @@ async function readFixtureJson(relativePath: string): Promise<unknown> {
   return JSON.parse(await readFile(fixtureUrl(relativePath), "utf8"));
 }
 
-export type RecordKind = "benchmark" | "run" | "matrix" | "report";
+export type RecordKind = "benchmark" | "run" | "matrix" | "report" | "benchmark-accounting" | "observation-archive";
 
 /** Golden sealed-record fixtures, one directory per record kind (§16). */
 export async function loadGoldenBytes(kind: RecordKind, name: string): Promise<Uint8Array> {

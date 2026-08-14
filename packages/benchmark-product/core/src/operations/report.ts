@@ -76,6 +76,7 @@ export interface RunReportInput {
 
 export interface RunReportResult {
   readonly draft: DraftDocument;
+  /** Exact legacy Report v1 payload and envelope identities. */
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
   readonly preregistered: boolean;

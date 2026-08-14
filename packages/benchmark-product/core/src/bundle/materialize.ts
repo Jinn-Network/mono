@@ -242,21 +242,36 @@ function recordClosure(input: MaterializeBundleInput): {
     evalAttempt?: string;
     evalIndex: number;
   }>();
+  const pinningBySubmission = new Map<string, string>();
+  for (const entry of journal) {
+    if (entry.kind !== "submission-pinning-evidence") continue;
+    const key = `${entry.cellKey}:${entry.dispatch}:${entry.submissionSha256}`;
+    const prior = pinningBySubmission.get(key);
+    if (prior !== undefined && prior !== entry.pinningEvidenceSha256) {
+      refuse("record-integrity", "evidence-closure", `solve Submission ${entry.submissionSha256} has conflicting run-pinning evidence`);
+    }
+    pinningBySubmission.set(key, entry.pinningEvidenceSha256);
+  }
   for (const entry of journal) {
     if (entry.kind === "submission-accepted") {
       const isEvaluation = entry.leg === "evaluation";
       addRole(evidenceRecords, entry.submissionSha256, isEvaluation ? "evaluation-submission" : "solve-submission");
       if (!isEvaluation) {
-        if (entry.pinningEvidenceSha256 !== undefined) {
-          addRole(evidenceRecords, entry.pinningEvidenceSha256, "run-pinning-evidence");
+        const enrichedPinning = pinningBySubmission.get(`${entry.cellKey}:${entry.dispatch}:${entry.submissionSha256}`);
+        if (entry.pinningEvidenceSha256 !== undefined && enrichedPinning !== undefined && entry.pinningEvidenceSha256 !== enrichedPinning) {
+          refuse("record-integrity", "evidence-closure", `solve Submission ${entry.submissionSha256} has conflicting run-pinning evidence`);
+        }
+        const pinningEvidenceSha256 = entry.pinningEvidenceSha256 ?? enrichedPinning;
+        if (pinningEvidenceSha256 !== undefined) {
+          addRole(evidenceRecords, pinningEvidenceSha256, "run-pinning-evidence");
         }
         graph.solveSubmissions.push({
           cellKey: entry.cellKey,
           dispatch: entry.dispatch,
           sha256: entry.submissionSha256,
-          ...(entry.pinningEvidenceSha256 === undefined
+          ...(pinningEvidenceSha256 === undefined
             ? {}
-            : { pinningEvidenceSha256: entry.pinningEvidenceSha256 }),
+            : { pinningEvidenceSha256 }),
         });
       } else {
         const bytes = getSealedBytes(workspaceDir, entry.submissionSha256);

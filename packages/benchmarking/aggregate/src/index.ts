@@ -68,15 +68,25 @@ export { fitBradleyTerry } from "./stats/bradley-terry.js";
 export type { BradleyTerryResult, PairwiseWin } from "./stats/bradley-terry.js";
 
 // --- Report production + verification (design §9.1, §12.1) ---
-export { deriveDisclosures, produceReport, verifyReport } from "./report.js";
+export { deriveDisclosures, produceReport, produceReportV2, verifyReport, verifyReportV2 } from "./report.js";
 export type {
   Disclosures,
   DsseSigner,
   MethodPorts,
+  ProduceReportV2Input,
   ProduceReportInput,
   ProducedReport,
+  ProducedReportV2,
+  PublicRegistrationCheck,
+  PublicRegistrationDisclosure,
+  PublicRegistrationInput,
+  PublicRegistrationStatus,
+  ReportPublicationExtension,
   VerifyReportCheck,
   VerifyReportInput,
   VerifyReportPorts,
   VerifyReportResult,
+  VerifyReportV2Check,
+  VerifyReportV2Input,
+  VerifyReportV2Result,
 } from "./report.js";

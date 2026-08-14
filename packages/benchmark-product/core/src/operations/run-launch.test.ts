@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
@@ -15,7 +16,8 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
-import { readRunState } from "../run/state.js";
+import { readRunState, writeRunState } from "../run/state.js";
+import { createWorkspacePublicationHttpHandler } from "../run/publication-source.js";
 import { runJournalPath } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -25,6 +27,8 @@ import type { OperationContext } from "./context.js";
 import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { runLaunch, runResume } from "./run-launch.js";
+import { publicationConfigure, publicationRegister } from "./publication-register.js";
+import { publicationStatus } from "./publication-status.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
 import { runStatus } from "./run-status.js";
@@ -261,6 +265,84 @@ describe("runLaunch — gating (authority-denied / grant)", () => {
 
     const outcome = await runLaunch(contextFor(clock, "agent-1"), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
     expect(outcome.ok).toBe(true);
+  }, 30_000);
+});
+
+describe("runLaunch — prospective mounted publication", () => {
+  test("refuses dispatch when complete registration has no durable receipt and reports resumable verification", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    expect((await publicationConfigure(contextFor(clock), {
+      draftId: "draft-1",
+      publicBaseUrl: "https://public.example/publication",
+    })).ok).toBe(true);
+    const current = readRunState(workspaceDir, "draft-1");
+    if (current?.publication === undefined) throw new Error("configured publication state missing");
+    writeRunState(workspaceDir, "draft-1", {
+      ...current,
+      publication: {
+        ...current.publication,
+        registration: {
+          state: "complete",
+          announcedAt: "2026-08-05T00:00:00.000Z",
+          postHoc: false,
+          digests: { run: current.runSha256! },
+        },
+      },
+    });
+
+    let venueCalls = 0;
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => { venueCalls += 1; throw new Error("backend must not be constructed"); },
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { code: "conflict", detail: expect.stringMatching(/pending\/unverified.*durable receipt.*retry registration/i) },
+    });
+    expect(venueCalls).toBe(0);
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("locked");
+    expect(readRunState(workspaceDir, "draft-1")?.launchedAt).toBeUndefined();
+
+    const status = publicationStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(status).toMatchObject({
+      ok: true,
+      result: {
+        registrationTiming: "pending-verification",
+        recovery: { resumable: true, guidance: expect.stringMatching(/durable receipt.*retry/i) },
+      },
+    });
+  }, 30_000);
+
+  test("registers and probes every prospective Submission beneath the exact nested archive mount", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const handler = createWorkspacePublicationHttpHandler(workspaceDir);
+    const requested: string[] = [];
+    const server = createServer(async (request, response) => {
+      const externalPath = request.url ?? "/";
+      requested.push(externalPath);
+      if (!externalPath.startsWith("/publication/")) { response.writeHead(404).end(); return; }
+      const result = await handler(new Request(`http://127.0.0.1${externalPath.slice("/publication".length)}`, { method: request.method }));
+      response.writeHead(result.status, Object.fromEntries(result.headers));
+      response.end(Buffer.from(await result.arrayBuffer()));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("test server address unavailable");
+      const base = `http://127.0.0.1:${address.port}/publication`;
+      expect((await publicationConfigure(contextFor(clock), { draftId: "draft-1", publicBaseUrl: base })).ok).toBe(true);
+      expect((await publicationRegister(contextFor(clock), { draftId: "draft-1" })).ok).toBe(true);
+      const { backend, submits } = makeStatefulFakeBackend();
+      const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+      expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+      expect(submits.length).toBeGreaterThan(0);
+      expect(requested.length).toBeGreaterThan(submits.length);
+      expect(requested.every((path) => path.startsWith("/publication/"))).toBe(true);
+      expect(requested.some((path) => path.startsWith("/publication/records/"))).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   }, 30_000);
 });
 
@@ -619,7 +701,7 @@ describe("runResume — lifecycle guard", () => {
     expect(droppedB).toBeDefined();
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== droppedA && entry.event.cellKey !== droppedB;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== droppedA && entry.cellKey !== droppedB;
       }
       return true;
@@ -748,7 +830,7 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     // naming it, keeping the other 5 cells' entries (and the launched marker) intact.
     const truncated = fullEntries.filter((entry) => {
       if (entry.kind === "cell-event") return entry.event.cellKey !== droppedCellKey;
-      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+      if (entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
         return entry.cellKey !== droppedCellKey;
       }
       return true;
@@ -776,10 +858,10 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     for (const cellKey of untouchedCellKeys) {
       const original = fullEntries.filter((entry) =>
         (entry.kind === "cell-event" && entry.event.cellKey === cellKey)
-        || ((entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
+        || ((entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
       const after = afterEntries.filter((entry) =>
         (entry.kind === "cell-event" && entry.event.cellKey === cellKey)
-        || ((entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
+        || ((entry.kind === "submission-captured" || entry.kind === "submission-pinning-evidence" || entry.kind === "submission-accepted" || entry.kind === "observation-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
       expect(after).toEqual(original);
     }
   }, 30_000);

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packagesRoot = join(packageRoot, "..");
+const workspacePackagesRoot = join(packagesRoot, "..");
 const temporaryRoot = await mkdtemp(
   join(tmpdir(), "jinn-evidence-contribution-"),
 );
@@ -15,6 +16,10 @@ const archives = {
   repository: join(temporaryRoot, "evidence-repository.tgz"),
   derivation: join(temporaryRoot, "evidence-derivation.tgz"),
   publication: join(temporaryRoot, "evidence-publication.tgz"),
+  trust: join(temporaryRoot, "trust-core.tgz"),
+  recordDiscoveryProtocol: join(temporaryRoot, "record-discovery-protocol.tgz"),
+  recordDiscoveryServe: join(temporaryRoot, "record-discovery-serve.tgz"),
+  recordPublication: join(temporaryRoot, "record-publication.tgz"),
   contribution: join(temporaryRoot, "evidence-contribution.tgz"),
 };
 
@@ -101,6 +106,18 @@ try {
   await run("yarn", ["pack", "--out", archives.derivation], {
     cwd: join(packagesRoot, "derivation"),
   });
+  await run("yarn", ["pack", "--out", archives.trust], {
+    cwd: join(workspacePackagesRoot, "trust", "core"),
+  });
+  await run("yarn", ["pack", "--out", archives.recordDiscoveryProtocol], {
+    cwd: join(workspacePackagesRoot, "discovery", "protocol"),
+  });
+  await run("yarn", ["pack", "--out", archives.recordDiscoveryServe], {
+    cwd: join(workspacePackagesRoot, "discovery", "serve"),
+  });
+  await run("yarn", ["pack", "--out", archives.recordPublication], {
+    cwd: join(workspacePackagesRoot, "discovery", "publication"),
+  });
   await run("yarn", ["pack", "--out", archives.publication], {
     cwd: join(packagesRoot, "publication"),
   });
@@ -118,6 +135,10 @@ try {
     "@jinn-network/evidence-repository": `file:${archives.repository}`,
     "@jinn-network/evidence-derivation": `file:${archives.derivation}`,
     "@jinn-network/evidence-publication": `file:${archives.publication}`,
+    "@jinn-network/trust-core": `file:${archives.trust}`,
+    "@jinn-network/record-discovery-protocol": `file:${archives.recordDiscoveryProtocol}`,
+    "@jinn-network/record-discovery-serve": `file:${archives.recordDiscoveryServe}`,
+    "@jinn-network/record-publication": `file:${archives.recordPublication}`,
     "@jinn-network/evidence-contribution": `file:${archives.contribution}`,
   };
 
@@ -142,7 +163,7 @@ try {
   );
   await run(
     "npm",
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+    ["install", "--legacy-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund"],
     { cwd: rootConsumer },
   );
 
@@ -270,7 +291,7 @@ void receipt;
   );
   await run(
     "npm",
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+    ["install", "--legacy-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund"],
     { cwd: testingConsumer },
   );
   await writeFile(

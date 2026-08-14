@@ -14,6 +14,7 @@ import type {
 } from "./inspect/manifest.js";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import type { Demo1ClaudeRuntimeBinding } from "../venue/demo1-claude.js";
+import { resolveHarborSelection, type HarborRuntimeSelectionRequest, type HarborRuntimeSelectionResolution } from "./harbor/host.js";
 
 interface InspectRuntimeSelectionBase {
   readonly projectDir: string;
@@ -43,6 +44,7 @@ export interface InspectRuntimeSelectionResolution {
 /** Process-owning boundary. Product operations carry state; the injected host owns execution. */
 export interface BenchmarkRuntimeHost {
   resolveInspectSelection(input: InspectRuntimeSelectionRequest, signal?: AbortSignal): Promise<InspectRuntimeSelectionResolution>;
+  resolveHarborSelection(input: HarborRuntimeSelectionRequest, signal?: AbortSignal): Promise<HarborRuntimeSelectionResolution>;
   createVenue(
     binding: EvaluationRuntimeBinding | undefined,
     options: Omit<LocalVenueOptions, "evaluationRuntime">,
@@ -127,6 +129,7 @@ function createOpenAIConnectionDescriptor(
 export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeHostOptions = {}): BenchmarkRuntimeHost {
   const repositoryRoot = realpathSync(hostOptions.repositoryRoot ?? fileURLToPath(new URL("../../../../..", import.meta.url)));
   return {
+    resolveHarborSelection,
     async resolveInspectSelection(input, signal) {
       if (input.execution === "oci") {
         return probeInspectOciSelection({

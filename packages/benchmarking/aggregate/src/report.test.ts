@@ -1,10 +1,16 @@
 import {
+  BENCHMARK_PUBLICATION_EXTENSION,
   BENCHMARKING_REPORTS_SCOPE,
   REPORT_MEDIA_TYPE,
+  REPORT_V2_RECORD_KIND,
+  SIGNED_REPORT_MEDIA_TYPE,
+  parseBenchmarkAccounting,
   parseMatrix,
+  sealBenchmarkAccounting,
   sealMatrix,
   sealReport,
   sealRun,
+  withMatrixPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { sealTask } from "@jinn-network/task-execution-protocol";
 import {
@@ -23,7 +29,9 @@ import { createMethodRegistry } from "./registry.js";
 import {
   deriveDisclosures,
   produceReport,
+  produceReportV2,
   verifyReport,
+  verifyReportV2,
   type MethodPorts,
   type VerifyReportPorts,
 } from "./report.js";
@@ -174,6 +182,86 @@ function makeFixture(options: { preregistered?: boolean; subjectCount?: number }
       resolveTaskBytes: () => undefined,
     },
   };
+}
+
+interface PublicationFixture extends Fixture {
+  readonly accountingBytes: Uint8Array[];
+}
+
+function makePublicationFixture(
+  options: { preregistered?: boolean; publicRegistration?: "pre-dispatch" | "post-hoc" | "unverifiable" } = {},
+): PublicationFixture {
+  const fixture = makeFixture({ preregistered: options.preregistered });
+  const accountingBytes: Uint8Array[] = [];
+  const subjectBytes = fixture.subjectBytes.map((subjectBytes, index) => {
+    const matrix = parseMatrix(subjectBytes);
+    const accounting = sealBenchmarkAccounting({
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
+      run: { name: "run", digest: { sha256: matrix.run.digest.sha256 } },
+      publisher: "urn:uuid:22222222-2222-5222-8222-222222222222",
+      publisherAuthority: { kind: "run-owner" },
+      procedure: { id: "jinn.benchmarking.accounting", version: "1.0" },
+      scope: { streams: [{
+        role: "https://spec.jinn.network/roles/benchmark-publisher-dispatches/v1",
+        kind: "record-discovery",
+        source: { agent: "urn:uuid:22222222-2222-5222-8222-222222222222", name: "benchmarks" },
+        through: { sequence: "0000000000000002", entry: `sha256:${"a".repeat(64)}` },
+      }] },
+      publicRegistration: options.publicRegistration === "pre-dispatch"
+        ? {
+            status: "pre-dispatch",
+            runBoundary: {
+              kind: "record-discovery",
+              source: { agent: "urn:uuid:22222222-2222-5222-8222-222222222222", name: "benchmarks" },
+              position: { sequence: "0000000000000001", entry: `sha256:${"b".repeat(64)}` },
+            },
+            firstDispatchBoundary: {
+              kind: "record-discovery",
+              source: { agent: "urn:uuid:22222222-2222-5222-8222-222222222222", name: "benchmarks" },
+              position: { sequence: "0000000000000002", entry: `sha256:${"c".repeat(64)}` },
+            },
+          }
+        : options.publicRegistration === "unverifiable"
+          ? { status: "unverifiable" }
+          : { status: "post-hoc" },
+      closeBoundary: matrix.closeBoundary,
+      cells: [],
+    });
+    accountingBytes.push(accounting.bytes);
+    return sealMatrix(withMatrixPublicationExtension({
+      ...matrix,
+      assembly: { procedure: "jinn.benchmarking.assembly", version: "2.0" },
+    }, {
+      accounting: {
+        name: `accounting-${index}`,
+        digest: { sha256: accounting.digest.slice("sha256:".length) },
+      },
+    })).bytes;
+  });
+  return { ...fixture, subjectBytes, accountingBytes };
+}
+
+function rebindAccountingCloseBoundary(
+  fixture: PublicationFixture,
+  closeBoundary: {
+    readonly at: string;
+    readonly anchor?: { readonly chain: string; readonly blockNumber: number; readonly blockHash: string };
+  },
+): PublicationFixture {
+  const accountingBytes: Uint8Array[] = [];
+  const subjectBytes = fixture.subjectBytes.map((subjectBytes, index) => {
+    const matrix = parseMatrix(subjectBytes);
+    const accounting = parseBenchmarkAccounting(fixture.accountingBytes[index]!);
+    const reboundAccounting = sealBenchmarkAccounting({ ...accounting, closeBoundary });
+    accountingBytes.push(reboundAccounting.bytes);
+    return sealMatrix(withMatrixPublicationExtension(matrix, {
+      accounting: {
+        name: `accounting-${index}`,
+        digest: { sha256: reboundAccounting.digest.slice("sha256:".length) },
+      },
+    })).bytes;
+  });
+  return { ...fixture, subjectBytes, accountingBytes };
 }
 
 function crossVersionPairedFixture(sharedTask: boolean): Fixture {
@@ -915,6 +1003,261 @@ describe("byte-first produceReport / verifyReport", () => {
     );
     expect(parseDsseEnvelope(produced.envelope).payloadBytes).toEqual(produced.bytes);
     expect(signedPae).toEqual(dssePreAuthEncoding(REPORT_MEDIA_TYPE, produced.bytes));
+  });
+
+  test("v1 production stays a raw Report payload contract while v2 names payload and record identities", async () => {
+    const fixture = makeFixture();
+    const legacy = await produce(fixture);
+    expect(legacy.record[BENCHMARK_PUBLICATION_EXTENSION]).toBeUndefined();
+    expect("reportPayloadSha256" in legacy).toBe(false);
+
+    const publicationFixture = makePublicationFixture({ publicRegistration: "pre-dispatch" });
+    const produced = await produceReportV2({
+      ...publicationFixture.ports,
+      subjects: publicationFixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: publicationFixture.accountingBytes },
+    }, signer);
+
+    expect(produced.reportPayloadSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(produced.reportRecordSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(produced.reportPayloadSha256).toBe(recordDigest(produced.bytes).slice("sha256:".length));
+    expect(produced.reportRecordSha256).toBe(recordDigest(produced.envelope).slice("sha256:".length));
+    expect(produced.recordKind).toBe(REPORT_V2_RECORD_KIND);
+    expect(produced.recordMediaType).toBe(SIGNED_REPORT_MEDIA_TYPE);
+  });
+
+  test("v2 verifies the exact envelope, Matrix/accounting publication binding, signature, and method replay", async () => {
+    const fixture = makePublicationFixture({ publicRegistration: "pre-dispatch" });
+    const produced = await produceReportV2({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, signer);
+
+    const result = await verifyReportV2({
+      envelopeBytes: produced.envelope,
+      subjects: fixture.subjectBytes,
+      effectiveTime: EFFECTIVE_TIME,
+      recordKind: produced.recordKind,
+      recordMediaType: produced.recordMediaType,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, verificationPorts(fixture.ports));
+    expect(result).toMatchObject({
+      ok: true,
+      reportPayloadSha256: produced.reportPayloadSha256,
+      reportRecordSha256: produced.reportRecordSha256,
+    });
+  });
+
+  test("v2 production rejects descriptor-bound accounting whose closeBoundary anchor differs from the Matrix", async () => {
+    const fixture = rebindAccountingCloseBoundary(makePublicationFixture(), {
+      at: "2026-08-04T00:00:00Z",
+      anchor: { chain: "eip155:1", blockNumber: 42, blockHash: `0x${"a".repeat(64)}` },
+    });
+    let signerCalls = 0;
+    await expect(produceReportV2({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, async (request) => {
+      signerCalls += 1;
+      return signer(request);
+    })).rejects.toThrow(/accounting closeBoundary must exactly match the Matrix closeBoundary/);
+    expect(signerCalls).toBe(0);
+  });
+
+  test("v2 verification rejects a signed Report over descriptor-rebound accounting with a different closeBoundary", async () => {
+    const fixture = rebindAccountingCloseBoundary(makePublicationFixture(), {
+      at: "2026-08-04T00:00:00Z",
+      anchor: { chain: "eip155:1", blockNumber: 42, blockHash: `0x${"b".repeat(64)}` },
+    });
+    const legacy = await produce(fixture);
+    const publicationExtension = {
+      publicRegistration: {
+        perSubject: fixture.subjectBytes.map((subjectBytes, index) => ({
+          subjectSha256: recordDigest(subjectBytes).slice("sha256:".length),
+          status: "post-hoc",
+          accounting: {
+            name: `accounting-${index}`,
+            digest: { sha256: recordDigest(fixture.accountingBytes[index]!).slice("sha256:".length) },
+          },
+          check: { status: "pass" },
+        })),
+      },
+    };
+    const forgedPayload = sealReport({
+      ...legacy.record,
+      [BENCHMARK_PUBLICATION_EXTENSION]: publicationExtension,
+    }).bytes;
+    const forgedEnvelope = sealDsseEnvelope({
+      payloadType: REPORT_MEDIA_TYPE,
+      payloadBytes: forgedPayload,
+      signatures: [{
+        keyid: REPORT_KEY,
+        signature: fixtureSignature(dssePreAuthEncoding(REPORT_MEDIA_TYPE, forgedPayload)),
+      }],
+    });
+
+    const result = await verifyReportV2({
+      envelopeBytes: forgedEnvelope,
+      subjects: fixture.subjectBytes,
+      effectiveTime: EFFECTIVE_TIME,
+      recordKind: REPORT_V2_RECORD_KIND,
+      recordMediaType: SIGNED_REPORT_MEDIA_TYPE,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, verificationPorts(fixture.ports));
+    expect(result).toEqual({
+      ok: false,
+      check: "publication-disclosure",
+      detail: expect.stringContaining("accounting closeBoundary must exactly match the Matrix closeBoundary"),
+    });
+  });
+
+  test("v2 rejects a tampered publication disclosure even when the tampered payload is correctly signed", async () => {
+    const fixture = makePublicationFixture({ publicRegistration: "pre-dispatch" });
+    const produced = await produceReportV2({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, signer);
+    const extension = produced.record[BENCHMARK_PUBLICATION_EXTENSION] as {
+      publicRegistration: { perSubject: Array<Record<string, unknown>> };
+    };
+    const tamperedPayload = sealReport({
+      ...produced.record,
+      [BENCHMARK_PUBLICATION_EXTENSION]: {
+        publicRegistration: {
+          perSubject: [{ ...extension.publicRegistration.perSubject[0], status: "post-hoc" }],
+        },
+      },
+    }).bytes;
+    const tamperedEnvelope = sealDsseEnvelope({
+      payloadType: REPORT_MEDIA_TYPE,
+      payloadBytes: tamperedPayload,
+      signatures: [{
+        keyid: REPORT_KEY,
+        signature: fixtureSignature(dssePreAuthEncoding(REPORT_MEDIA_TYPE, tamperedPayload)),
+      }],
+    });
+
+    const result = await verifyReportV2({
+      envelopeBytes: tamperedEnvelope,
+      subjects: fixture.subjectBytes,
+      effectiveTime: EFFECTIVE_TIME,
+      recordKind: REPORT_V2_RECORD_KIND,
+      recordMediaType: SIGNED_REPORT_MEDIA_TYPE,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, verificationPorts(fixture.ports));
+    expect(result).toMatchObject({ ok: false, check: "publication-disclosure" });
+  });
+
+  test.each([
+    ["wrong record kind", { recordKind: "https://spec.jinn.network/records/benchmark-report/v1", recordMediaType: SIGNED_REPORT_MEDIA_TYPE }, "recordKind"],
+    ["wrong record media type", { recordKind: REPORT_V2_RECORD_KIND, recordMediaType: REPORT_MEDIA_TYPE }, "recordMediaType"],
+  ] as const)("v2 rejects %s before report verification", async (_name, metadata, expected) => {
+    const fixture = makePublicationFixture();
+    const produced = await produceReportV2({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, signer);
+    const result = await verifyReportV2({
+      envelopeBytes: produced.envelope,
+      subjects: fixture.subjectBytes,
+      effectiveTime: EFFECTIVE_TIME,
+      ...metadata,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, verificationPorts(fixture.ports));
+    expect(result).toMatchObject({ ok: false, check: "report-record", detail: expect.stringContaining(expected) });
+  });
+
+  test("v2 rejects an exact DSSE envelope with a non-Report payload media type", async () => {
+    const fixture = makePublicationFixture();
+    const produced = await produceReportV2({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, signer);
+    const wrongMediaEnvelope = sealDsseEnvelope({
+      payloadType: "application/json",
+      payloadBytes: produced.bytes,
+      signatures: [{
+        keyid: REPORT_KEY,
+        signature: fixtureSignature(dssePreAuthEncoding("application/json", produced.bytes)),
+      }],
+    });
+    const result = await verifyReportV2({
+      envelopeBytes: wrongMediaEnvelope,
+      subjects: fixture.subjectBytes,
+      effectiveTime: EFFECTIVE_TIME,
+      recordKind: REPORT_V2_RECORD_KIND,
+      recordMediaType: SIGNED_REPORT_MEDIA_TYPE,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, verificationPorts(fixture.ports));
+    expect(result).toMatchObject({ ok: false, check: "report-envelope" });
+  });
+
+  test("v2 keeps post-hoc public registration independent from analysis preregistration", async () => {
+    const fixture = makePublicationFixture({ preregistered: true, publicRegistration: "post-hoc" });
+    const produced = await produceReportV2({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, signer);
+    const extension = produced.record[BENCHMARK_PUBLICATION_EXTENSION] as {
+      publicRegistration: { perSubject: Array<{ status: string }> };
+    };
+    expect(produced.record.preregistered).toBe(true);
+    expect(extension.publicRegistration.perSubject[0]!.status).toBe("post-hoc");
+    await expect(verifyReportV2({
+      envelopeBytes: produced.envelope,
+      subjects: fixture.subjectBytes,
+      effectiveTime: EFFECTIVE_TIME,
+      recordKind: REPORT_V2_RECORD_KIND,
+      recordMediaType: SIGNED_REPORT_MEDIA_TYPE,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, verificationPorts(fixture.ports))).resolves.toMatchObject({ ok: true });
+    expect(parseBenchmarkAccounting(fixture.accountingBytes[0]!).publicRegistration.status).toBe("post-hoc");
+  });
+
+  test("v2 carries an unverifiable public-registration status with its independent check result", async () => {
+    const fixture = makePublicationFixture({ publicRegistration: "unverifiable" });
+    const produced = await produceReportV2({
+      ...fixture.ports,
+      subjects: fixture.subjectBytes,
+      method: { id: "jinn.benchmarking.method/wilson", version: "1", parameters: {} },
+      verdictRule: "unanimous",
+      author: AUTHOR,
+      publicRegistration: { accountingBytes: fixture.accountingBytes },
+    }, signer);
+    const extension = produced.record[BENCHMARK_PUBLICATION_EXTENSION] as {
+      publicRegistration: { perSubject: Array<{ status: string; check: { status: string } }> };
+    };
+    expect(extension.publicRegistration.perSubject[0]).toMatchObject({
+      status: "unverifiable",
+      check: { status: "indeterminate" },
+    });
   });
 
   test("new exact-byte boundaries reject lone surrogates and accept supplementary scalar pairs", async () => {

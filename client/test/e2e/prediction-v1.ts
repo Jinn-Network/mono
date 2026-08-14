@@ -7,7 +7,6 @@
 import {
   runBaseSepoliaForkTaskFirstFullLoop,
   runAnvilTaskFirstFullLoop,
-  runLocalTaskFirstLifecycle,
   runPhase,
   runPredictionV1Smoke,
   summarize,
@@ -18,15 +17,6 @@ async function main(): Promise<void> {
 
   results.push(await runPhase('Prediction v1 Task/Solution/Verdict payloads', async () => {
     await runPredictionV1Smoke();
-  }));
-
-  results.push(await runPhase('Prediction v1 Task-first local lifecycle', async () => {
-    const result = await runLocalTaskFirstLifecycle();
-    process.stdout.write(
-      `taskId=${result.postedTaskId} taskCid=${result.postedTaskCid} ` +
-      `attempts=${result.attempts.map((a) => `${a.request.attemptIndex}:${a.request.requestId}`).join(',')} ` +
-      `verdicts=${result.attempts.map((a) => `${a.verdictRequest.requestId}:${a.verdict}`).join(',')}\n`,
-    );
   }));
 
   if (process.env['JINN_E2E_SKIP_FORK'] === '1') {
