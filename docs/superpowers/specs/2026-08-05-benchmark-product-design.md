@@ -1259,9 +1259,12 @@ release, or deployment semantics reopened):**
 - **Production identity.** The standalone product is named **Colophon**, described as
   “benchmark publishing for agent configurations,” with the five-second read “Compare
   agents on the same work.” and the deeper promise “Publish benchmark claims people can
-  check.” The only approved Jinn attribution is “Built on Jinn.” and it remains confined
-  to report imprint, about, documentation, and verification contexts. It never enters the
-  product name, primary navigation, result headline, or category explanation.
+  check.” Jinn attribution has two approved strings — “Built on Jinn.” as the imprint
+  form, and “Built on Jinn, by Jinn contributors.” where the relationship is described in
+  prose (operator ruling, 2026-08-11; see the design system's brand package §14). Both
+  remain confined to report imprint, about, documentation, and verification contexts.
+  Neither ever enters the product name, primary navigation, result headline, or category
+  explanation.
 - **One brand authority, compatibility-preserving command.** The public product-branding
   value owns the display name, category descriptor, five-second read, deeper promise,
   attribution, and preferred command name. The built CLI adds `colophon` as the preferred
