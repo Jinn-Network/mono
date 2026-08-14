@@ -11,6 +11,8 @@
 import { join } from "node:path";
 import { runCli } from "./main.js";
 import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
+import { captureQualifiedSubscriptionLogin } from "../agent/index.js";
+import type { AgentProfile } from "../agent/index.js";
 
 function agentDataDir(): string | undefined {
   const root = process.env.XDG_DATA_HOME ?? (process.env.HOME === undefined ? undefined : join(process.env.HOME, "Library", "Application Support"));
@@ -20,6 +22,9 @@ function agentDataDir(): string | undefined {
 const runtimeHost = createDefaultBenchmarkRuntimeHost({
   openAI: { keyFilePath: () => process.env.BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE },
   agentDataDir: agentDataDir(),
+  ...(process.stdin.isTTY && process.stdout.isTTY
+    ? { subscriptionLogin: async (dataDir: string, profile: AgentProfile) => captureQualifiedSubscriptionLogin(dataDir, profile) }
+    : {}),
 });
 
 const result = await runCli(process.argv.slice(2), {

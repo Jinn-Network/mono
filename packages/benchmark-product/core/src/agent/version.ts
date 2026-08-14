@@ -33,7 +33,7 @@ export function parseAgentVersion(adapter: AgentAdapter, output: string): string
 
 /** Executes only the adapter's local --version surface; it makes no provider request. */
 export function observeAgentVersion(
-  profile: Pick<AgentProfile, "adapter" | "executable">,
+  profile: Pick<AgentProfile, "adapter"> & { readonly executable: Pick<AgentProfile["executable"], "path"> },
   command: AgentVersionCommand = defaultVersionCommand,
 ): string {
   return parseAgentVersion(profile.adapter, command(profile.executable.path, ["--version"]));

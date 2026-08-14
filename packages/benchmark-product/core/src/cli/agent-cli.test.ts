@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -11,19 +11,20 @@ let root: string;
 let context: CliContext;
 let profilePath: string;
 let keyPath: string;
+let executablePath: string;
 const secret = "cli-secret-must-not-be-rendered";
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "colophon-agent-cli-"));
-  const executable = join(root, "claude");
-  writeFileSync(executable, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '1.0.0 (Claude Code)'; else echo claude; fi\n");
-  chmodSync(executable, 0o700);
+  executablePath = join(root, "claude");
+  writeFileSync(executablePath, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '1.0.0 (Claude Code)'; else echo claude; fi\n");
+  chmodSync(executablePath, 0o700);
   profilePath = join(root, "profile.json");
   writeFileSync(profilePath, JSON.stringify({
     format: "colophon-agent/1",
     agentId: "claude-main",
     adapter: "claude-code",
-    executable: { path: executable, sha256: createHash("sha256").update(readFileSync(executable)).digest("hex"), version: "1.0.0" },
+    executable: { path: executablePath, sha256: createHash("sha256").update(readFileSync(executablePath)).digest("hex"), version: "1.0.0" },
     model: "claude-sonnet",
     effort: "high",
     network: "provider-required",
@@ -41,6 +42,45 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("agent CLI", () => {
+  it("observes and stores an exact executable profile without requiring hand-authored JSON", async () => {
+    const result = await runCli([
+      "agent", "add",
+      "--agent", "claude-low",
+      "--adapter", "claude-code",
+      "--model", "claude-haiku-4-5-20251001",
+      "--effort", "low",
+      "--executable", executablePath,
+      "--json",
+    ], context);
+    expect(result.exitCode, result.stdout).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      result: {
+        agentId: "claude-low",
+        adapter: "claude-code",
+        model: "claude-haiku-4-5-20251001",
+        effort: "low",
+        executable: {
+          path: realpathSync(executablePath),
+          version: "1.0.0",
+          sha256: createHash("sha256").update(readFileSync(executablePath)).digest("hex"),
+        },
+      },
+    });
+
+    const alias = await runCli([
+      "agent", "add",
+      "--agent", "claude-alias",
+      "--adapter", "claude-code",
+      "--model", "sonnet",
+      "--effort", "low",
+      "--executable", executablePath,
+      "--json",
+    ], context);
+    expect(alias.exitCode).toBe(1);
+    expect(alias.stdout).toContain("exact provider model identifier");
+  });
+
   it("stores an explicit profile and protected API key without writing the value to output", async () => {
     const add = await runCli(["agent", "add", "--file", profilePath, "--json"], context);
     expect(add.exitCode).toBe(0);

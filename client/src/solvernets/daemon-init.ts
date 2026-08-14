@@ -3,11 +3,11 @@
  *
  * Spec: `spec/2026-05-05-solvernet-creation-and-launch.md` Task 11 (daemon
  * startup integration). Wires the persistence, recovery, and operator
- * catalog surfaces so the daemon can resume in-flight launches/lifecycle
- * transitions and serve the operator catalog UI.
+ * catalog surfaces so the daemon can resume in-flight launches and serve the
+ * operator catalog UI.
  *
  * This module is intentionally THIN: it composes existing pieces (`SolverNetStore`,
- * `recoverInFlightLaunches`, `recoverInFlightLifecycleTransitions`, and the
+ * `recoverInFlightLaunches`, and the
  * `IdentityRegistryBackedSolverNetRegistryClient`) into a single
  * `initSolverNetSubsystem(deps)` call that `main.ts` invokes once after the
  * `FleetBootstrapper` finishes. Task 11 sets up the SCAFFOLDING; Task 12
@@ -16,18 +16,22 @@
  * generator construction.
  *
  * Order of operations (mirrors the per-section ordering in
- * `launch-state-machine.ts` and `lifecycle-transitions.ts`):
+ * `launch-state-machine.ts`):
  *
  *   1. Resume any record stuck in `status: 'launching'` →
  *      `recoverInFlightLaunches`. Safe to call when no records are in flight.
- *   2. Resume any record with `lifecycleProgress` set →
- *      `recoverInFlightLifecycleTransitions`. Same safety property.
- *   3. Load owned records → identify which ones have
- *      `status in {'launched','paused'} && generatorEnabled`; those are the
- *      "ready-to-spawn" set the next-task generator wiring will iterate.
- *   4. Start the operator catalog refresher loop (interval-driven) so the
+ *   2. Load owned records → identify which ones have
+ *      `status in {'launched','paused'} && generatorEnabled`; those carry the
+ *      live record/config refs the SolverNet endpoints read and mutate.
+ *   3. Start the operator catalog refresher loop (interval-driven) so the
  *      daemon API can hand SPA reads without a synchronous subgraph round
  *      trip on every poll.
+ *
+ * The lifecycle-transition resume scan retired with Wave-4 D3 (Task 18 of the
+ * cutover stage-3 plan, DR-2026-08-05 decision 1): the transition PRODUCER is
+ * gone, so no record can be left mid-transition by this daemon generation. A
+ * record persisted with `lifecycleProgress` by an older generation still
+ * parses — the wire vocabulary stays — it is simply never resumed.
  *
  * Out of scope for Task 11 (do NOT add here):
  *
@@ -38,7 +42,7 @@
  *   - Removing the legacy `collectTestnetAutoTaskGenerators` path
  *     (Task 12).
  *
- * Note: the launch/lifecycle state machines use a noop subgraph client
+ * Note: the launch state machine uses a noop subgraph client
  * internally for the mempool-drop recovery path. A real subgraph extension
  * (Task 25) will replace the noop; until then recovery falls back to
  * re-broadcasting dropped transactions, which is safe and idempotent.
@@ -67,10 +71,6 @@ import {
   type LaunchActionDeps,
   type ResolveSigner,
 } from './launch-state-machine.js';
-import {
-  recoverInFlightLifecycleTransitions,
-  type LifecycleTransitionDeps,
-} from './lifecycle-transitions.js';
 import type { SolverNetRegistryClient, SolverNetManifestSummary } from './registry-client.js';
 import type { DiscoveryAPI, DiscoveryUnavailableCode } from '../discovery/types.js';
 import { DiscoveryUnavailableError } from '../discovery/types.js';
@@ -84,7 +84,7 @@ import {
   type TxRetryWalletClient,
 } from '../tx-retry.js';
 
-// Noop SubgraphClient used by launch/lifecycle state-machine recovery paths
+// Noop SubgraphClient used by the launch state-machine recovery path
 // (mempool-drop detection) until a real subgraph extension is wired (Task 25).
 // Not exported — callers should not depend on this implementation.
 const NOOP_SUBGRAPH_CLIENT: SubgraphClient = {
@@ -135,8 +135,7 @@ export interface SolverNetCatalogCache {
  * (Task 12 of spec/2026-05-05-solvernet-creation-and-launch.md §11) and
  * passes the same `recordRef` and `configRef` so:
  *
- *   - Lifecycle transitions (pause/resume/retire) update `recordRef.current`
- *     and the per-tick gate sees the new status within one cadence.
+ *   - The record ref carries the record's live status for the read surfaces.
  *   - The SolverNet config API endpoint (Task 14) mutates `configRef.current`
  *     and the per-tick reads the new cadence / allowlist / caps within one
  *     cadence — no daemon restart, no generator recreation.
@@ -149,11 +148,10 @@ export interface SolverNetCatalogCache {
 export interface PendingGeneratorSpawn {
   /** Snapshot of the launched record at subsystem-init time. */
   record: LaunchedSolverNetRecord;
-  /**
-   * Live mirror of the launched record. The lifecycle-transition path
-   * mutates `recordRef.current` immediately after persisting status changes
-   * to disk (and Task 12 also wires lifecycle resume to mutate it on
-   * recovery).
+ /**
+   * Live mirror of the launched record. The SolverNet generator-config
+   * endpoint mutates `recordRef.current` immediately after persisting to
+   * disk, so subsequent reads do not wait for a reload.
    */
   recordRef: { current: LaunchedSolverNetRecord };
   /**
@@ -178,17 +176,16 @@ export interface SolverNetSubsystem {
    * Subset of `records` where `status` is `launched` or `paused` and
    * `generatorEnabled === true`, paired with the live refs the generator
    * factory and the API endpoints share. Paused records are intentionally
-   * wired so a lifecycle resume only has to mutate `recordRef.current`.
+   * wired so a read of `recordRef.current` reflects the persisted status.
    */
   pendingGenerators: PendingGeneratorSpawn[];
   /** Operator catalog cache, populated on first refresh. */
   catalog: SolverNetCatalogCache;
   /** The registry client (for reuse by the daemon API). */
   registryClient: SolverNetRegistryClient;
-  /** Outcomes of the recovery scans. Useful for test assertions and logging. */
+  /** Outcome of the launch recovery scan. Useful for test assertions and logging. */
   recovery: {
     inFlightLaunches: { resumed: number; failed: Array<{ solverNetId: string; error: Error }> };
-    inFlightLifecycle: { resumed: number; failed: Array<{ solverNetId: string; error: Error }> };
   };
   /** Stop the catalog refresher and any future timers. Idempotent. */
   stop(): void;
@@ -203,9 +200,7 @@ export interface SolverNetSubsystem {
  * `IdentityRegistryBackedSolverNetRegistryClient.listLaunched`).
  *
  * `resolveSigner` is required for the launch-recovery branch (the launch
- * state machine signs re-broadcasts on resume). Lifecycle resume takes
- * a single `signer` directly — production passes the same signer for
- * both, since one daemon owns one launcher.
+ * state machine signs re-broadcasts on resume).
  */
 export interface InitSolverNetSubsystemDeps {
   store: SolverNetStore;
@@ -214,11 +209,6 @@ export interface InitSolverNetSubsystemDeps {
   registryClient: SolverNetRegistryClient;
   network: 'base-sepolia' | 'base';
   resolveSigner: ResolveSigner;
-  /**
-   * Single signer used by the lifecycle-resume scan. Production owns one
-   * launcher per daemon; multi-launcher recovery is out of scope.
-   */
-  lifecycleSigner: LifecycleTransitionDeps['signer'];
   /** Resolves a tx hash to a confirmed receipt. Same as the state machines. */
   awaitTxConfirmation: LaunchActionDeps['awaitTxConfirmation'];
   /** Optional override for `setInterval` / `clearInterval` (tests). */
@@ -253,8 +243,8 @@ export interface InitSolverNetSubsystemDeps {
  * generators are constructed.
  *
  * Errors during the recovery scans are captured per-record into
- * `recovery.inFlightLaunches.failed` / `recovery.inFlightLifecycle.failed`
- * so a single broken record cannot block daemon startup. Errors during
+ * `recovery.inFlightLaunches.failed` so a single broken record cannot block
+ * daemon startup. Errors during
  * the initial catalog refresh are logged and stored on the cache; the
  * refresher continues ticking.
  */
@@ -276,13 +266,6 @@ export async function initSolverNetSubsystem(
     subgraph: NOOP_SUBGRAPH_CLIENT,
     awaitTxConfirmation: deps.awaitTxConfirmation,
     resolveSigner: deps.resolveSigner,
-    // The launch-recovery path needs a generator spawner. Task 11 leaves
-    // it as a no-op — Task 12 wires the real spawner. Recovery only fires
-    // it on a record that crashed mid-spawn-phase; in that case advancing
-    // to `status: 'launched'` without an active generator is the
-    // recoverable state, and Task 12's startup code will spawn it from
-    // the `pendingGenerators` list below.
-    spawnGenerator: async () => undefined,
     ...(deps.now !== undefined ? { now: deps.now } : {}),
   });
   if (inFlightLaunches.failed.length > 0) {
@@ -294,36 +277,11 @@ export async function initSolverNetSubsystem(
     logger.info(`[solvernet] launch recovery: ${inFlightLaunches.resumed} resumed`);
   }
 
-  // Step 2 — resume in-flight lifecycle transitions.
-  const inFlightLifecycle = await recoverInFlightLifecycleTransitions({
-    store: deps.store,
-    registry: deps.registryClient,
-    signer: deps.lifecycleSigner,
-    subgraph: NOOP_SUBGRAPH_CLIENT,
-    awaitTxConfirmation: deps.awaitTxConfirmation,
-    // Task 12 will wire real start/stop generator callbacks (the
-    // counterparts to the launch spawner above). Until then, lifecycle
-    // resume only flips on-disk status — Task 12's per-record generator
-    // construction runs after this return.
-    startGenerator: async () => undefined,
-    stopGenerator: async () => undefined,
-    ...(deps.now !== undefined ? { now: deps.now } : {}),
-  });
-  if (inFlightLifecycle.failed.length > 0) {
-    logger.warn(
-      `[solvernet] lifecycle recovery: ${inFlightLifecycle.resumed} resumed, ` +
-        `${inFlightLifecycle.failed.length} failed`,
-    );
-  } else if (inFlightLifecycle.resumed > 0) {
-    logger.info(`[solvernet] lifecycle recovery: ${inFlightLifecycle.resumed} resumed`);
-  }
-
-  // Step 3 — load post-recovery records and split into the spawn-ready set.
+  // Step 2 — load post-recovery records and split into the spawn-ready set.
   // Each spawn-ready entry carries a `recordRef` and a `configRef` that the
   // generator factories close
-  // over. Lifecycle transitions and the SolverNet config API endpoint mutate
-  // these refs at runtime so the per-tick gate and runtime config update
-  // within one cadence — no daemon restart. Defaults for the runtime config
+  // over. The SolverNet config API endpoint mutates these refs at runtime so
+  // the read surfaces reflect the change without a disk reload. Defaults for the runtime config
   // are an empty object: the generator falls back to its built-in defaults
   // until the operator edits config via Task 14.
   const records = await deps.store.loadOwnedRecords();
@@ -345,7 +303,7 @@ export async function initSolverNetSubsystem(
       `${pendingGenerators.length} ready for generator spawn`,
   );
 
-  // Step 4 — start the catalog refresher.
+  // Step 3 — start the catalog refresher.
   const catalog = createCatalogCache({
     registryClient: deps.registryClient,
     network: deps.network,
@@ -369,7 +327,6 @@ export async function initSolverNetSubsystem(
     registryClient: deps.registryClient,
     recovery: {
       inFlightLaunches,
-      inFlightLifecycle,
     },
     stop() {
       catalog.stop();

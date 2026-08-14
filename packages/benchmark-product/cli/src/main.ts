@@ -204,6 +204,7 @@ async function runDemo(
   now: Date,
   progress: (line: string) => void,
   interactive: boolean,
+  agentDataDir?: string,
   suppliedBuildMetadata?: ColophonBuildMetadata,
   runtimeTarget?: RuntimeTarget,
 ): Promise<CliResult> {
@@ -235,7 +236,14 @@ async function runDemo(
     if (json) return result(0, `${JSON.stringify({ ok: true, result: evidence })}\n`);
     const answer = `Published locally; nothing was uploaded.\nBundle: ${evidence.output.bundle}\nReceipt: ${join(evidence.output.root, "quickstart-receipt.json")}\nIdentity: sha256:${evidence.digests.bundleIdentity}\nVerified: ${evidence.portableChecks.length} of 6 checks passed\nComplete comparison; no comparative winner stated.\n`;
     if (noOpen) return result(0, answer);
-    const viewer = await createVerifiedBundleViewer(evidence.output.bundle);
+    const viewer = await createVerifiedBundleViewer(evidence.output.bundle, 0, {
+      ...(agentDataDir === undefined ? {} : {
+        startWorkspace: () => startLocalWorkspaceApp({
+          workspaceDir: resolve(cwd, "colophon-workspace"),
+          agentDataDir,
+        }),
+      }),
+    });
     progress(`${answer}Viewer: ${viewer.url}`);
     return keepViewerOpen(viewer, true, { warning: progress });
   } catch (cause) {
@@ -268,7 +276,14 @@ async function runOpen(
         warning: progress,
       });
     }
-    const viewer = await createVerifiedBundleViewer(resolve(cwd, bundle), port);
+    const viewer = await createVerifiedBundleViewer(resolve(cwd, bundle), port, {
+      ...(agentDataDir === undefined ? {} : {
+        startWorkspace: () => startLocalWorkspaceApp({
+          workspaceDir: resolve(cwd, value(argv, "workspace") ?? "colophon-workspace"),
+          agentDataDir,
+        }),
+      }),
+    });
     return keepViewerOpen(viewer, !has(argv, "no-browser"), {
       ready: (url) => progress(`Viewer: ${url}`),
       warning: progress,
@@ -297,11 +312,11 @@ export async function runColophonCli(argv: readonly string[], context: ColophonC
   try {
     // Help is side-effect free even when it follows a command that normally runs work.
     if (argv.includes("--help")) return result(0, USAGE);
-    if (argv.length === 0) return runDemo([], context.cwd, context.now(), context.progress, context.interactive ?? false, context.buildMetadata, context.runtimeTarget);
+    if (argv.length === 0) return runDemo([], context.cwd, context.now(), context.progress, context.interactive ?? false, context.agentDataDir, context.buildMetadata, context.runtimeTarget);
     if (argv[0] === "demo") {
       const options = argv.slice(1);
       validateTopLevelOptions(options, { boolean: ["no-open", "json"], value: ["output"] });
-      return runDemo(options, context.cwd, context.now(), context.progress, context.interactive ?? false, context.buildMetadata, context.runtimeTarget);
+      return runDemo(options, context.cwd, context.now(), context.progress, context.interactive ?? false, context.agentDataDir, context.buildMetadata, context.runtimeTarget);
     }
     if (argv[0] === "open") {
       const options = argv.slice(1);

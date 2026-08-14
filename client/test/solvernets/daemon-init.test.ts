@@ -285,7 +285,6 @@ describe('initSolverNetSubsystem — record loading + filtering', () => {
       expect(subsystem.records).toHaveLength(0);
       expect(subsystem.pendingGenerators).toHaveLength(0);
       expect(subsystem.recovery.inFlightLaunches.resumed).toBe(0);
-      expect(subsystem.recovery.inFlightLifecycle.resumed).toBe(0);
     } finally {
       subsystem.stop();
     }
@@ -313,33 +312,6 @@ describe('initSolverNetSubsystem — in-flight recovery', () => {
       // And it shows up in pendingGenerators (Task 12 will spawn it).
       expect(subsystem.pendingGenerators).toHaveLength(1);
       expect(subsystem.pendingGenerators[0]?.record.solverNetId).toBe('net-resuming');
-    } finally {
-      subsystem.stop();
-    }
-  });
-
-  it('resumes a record with in-flight lifecycle transition', async () => {
-    // Record in the middle of a pause: status=launched, lifecycleProgress
-    // targeting paused. Recovery should advance it.
-    //
-    // NOTE: with the no-op subgraph and an awaitTxConfirmation that
-    // succeeds, the broadcasting phase will fire publishLifecycleTransition
-    // (mock returns success), then the confirming phase will succeed —
-    // the record finalizes at the target.
-    await store.writeRecord(buildLaunchedRecord({
-      solverNetId: 'net-pausing',
-      status: 'launched',
-      inFlightLifecycleTarget: 'paused',
-    }));
-
-    const subsystem = await initSolverNetSubsystem(buildDeps());
-    try {
-      expect(subsystem.recovery.inFlightLifecycle.resumed).toBe(1);
-      expect(subsystem.recovery.inFlightLifecycle.failed).toHaveLength(0);
-
-      const finalRec = await store.loadRecord('net-pausing');
-      expect(finalRec?.status).toBe('paused');
-      expect(finalRec?.lifecycleProgress).toBeUndefined();
     } finally {
       subsystem.stop();
     }

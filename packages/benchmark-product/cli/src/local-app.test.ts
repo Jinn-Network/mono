@@ -18,6 +18,21 @@ function packageWithLocalApp(): string {
   return root;
 }
 
+function hoistedPackageWithLocalApp(): string {
+  const installRoot = mkdtempSync(join(tmpdir(), "colophon-local-app-hoisted-"));
+  const root = join(installRoot, "node_modules", "@colophon-claims", "cli");
+  const app = join(root, "dist", "local-web", "packages", "benchmark-product", "web");
+  mkdirSync(join(app, ".next", "static"), { recursive: true });
+  mkdirSync(join(installRoot, "node_modules", "next"), { recursive: true });
+  mkdirSync(join(app, "public", "brand"), { recursive: true });
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@colophon-claims/cli" }));
+  writeFileSync(join(app, "local-server.mjs"), "// packaged test server\n");
+  writeFileSync(join(app, ".next", "BUILD_ID"), "test-build\n");
+  writeFileSync(join(installRoot, "node_modules", "next", "package.json"), "{}\n");
+  writeFileSync(join(app, "public", "brand", "favicon.svg"), "<svg />\n");
+  return root;
+}
+
 describe("packaged local workspace app", () => {
   test("constructs a loopback-only, ephemeral launch with a one-time capability", () => {
     const packageRoot = packageWithLocalApp();
@@ -50,5 +65,9 @@ describe("packaged local workspace app", () => {
     const packageRoot = mkdtempSync(join(tmpdir(), "colophon-local-app-missing-"));
     mkdirSync(join(packageRoot, "dist", "local-web", "packages", "benchmark-product", "web"), { recursive: true });
     expect(() => assertPackagedLocalApp(packageRoot)).toThrow("local-server.mjs");
+  });
+
+  test("accepts npm's ordinary hoisted runtime dependency layout", () => {
+    expect(assertPackagedLocalApp(hoistedPackageWithLocalApp()).root).toContain("dist/local-web");
   });
 });

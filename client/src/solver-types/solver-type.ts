@@ -3,8 +3,18 @@
  * See jinn-mono-6q1.1.
  */
 
-import type { TaskGenerator } from '../tasks/sources.js';
+import type { Task } from '../types/task.js';
 import type { LoadedHeldOutSlate } from './_swe-rebench-v2-held-out-slate.js';
+
+/**
+ * Returns freshly-built Tasks for this tick, or null to skip.
+ *
+ * Re-homed here from the deleted `tasks/sources.ts` by Wave-4 D3: it is the
+ * return type of `SolverTypeDefinition.buildGenerator`, so the SolverType
+ * contract is its natural owner now that the creator loop's task-source stack
+ * is gone.
+ */
+export type TaskGenerator = () => Promise<Task | Task[] | null>;
 
 /** Overlay fields merged into Task when posting from --spec-file. */
 export type ParsedSpecOverlay = {

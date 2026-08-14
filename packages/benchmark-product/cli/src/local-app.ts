@@ -1,13 +1,16 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LOCAL_APP_DIRECTORY = "local-web";
 const LOCAL_APP_SERVER = "local-server.mjs";
 const STANDALONE_WEB_PATH = ["packages", "benchmark-product", "web"] as const;
-const READY_TIMEOUT_MS = 15_000;
+// First start from an npm cache may pay Next's one-time production boot cost.
+// Keep this bounded, but do not misclassify a cold Mac as a broken package.
+const READY_TIMEOUT_MS = 30_000;
 const SAFE_INHERITED_ENVIRONMENT = ["PATH", "SystemRoot", "SystemDrive", "ComSpec", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "TZ"] as const;
 
 export interface PackagedLocalApp {
@@ -46,16 +49,25 @@ function requiredDirectory(root: string, relativePath: string): void {
   }
 }
 
+function requireInstalledRuntimeDependency(packageRoot: string, dependency: string): void {
+  try {
+    const manifest = createRequire(join(packageRoot, "package.json")).resolve(`${dependency}/package.json`);
+    if (!statSync(manifest).isFile()) throw new Error("not a file");
+  } catch {
+    throw new Error(`Broken Colophon installation: required runtime dependency ${dependency} is missing. Reinstall this package or report the distribution version.`);
+  }
+}
+
 /** Fails before a browser is opened when the private Next build was not packed. */
 export function assertPackagedLocalApp(packageRoot = cliPackageRoot()): PackagedLocalApp {
   const root = join(packageRoot, "dist", LOCAL_APP_DIRECTORY, ...STANDALONE_WEB_PATH);
   requiredFile(root, LOCAL_APP_SERVER);
   requiredFile(root, ".next/BUILD_ID");
   requiredDirectory(root, ".next/static");
-  // npm deliberately excludes nested node_modules from a packed tarball. The
-  // pinned runtime is therefore an ordinary CLI dependency and resolves from
-  // the package root when this standalone app starts.
-  requiredFile(packageRoot, "node_modules/next/package.json");
+  // npm may hoist the pinned runtime above the CLI package. Resolve it with the
+  // same Node package search used by local-server.mjs instead of assuming a
+  // nested node_modules layout.
+  requireInstalledRuntimeDependency(packageRoot, "next");
   requiredFile(root, "public/brand/favicon.svg");
   return { root, server: join(root, LOCAL_APP_SERVER) };
 }
@@ -132,7 +144,7 @@ function waitForLocalApp(child: ChildProcess): Promise<number> {
       if (ready.kind !== "colophon-local-app-ready" || typeof port !== "number" || !Number.isSafeInteger(port) || port < 1 || port > 65_535) return;
       finish(() => resolvePromise(port));
     };
-    const timeout = setTimeout(() => finish(() => reject(new Error("The local workspace did not become ready within 15 seconds."))), READY_TIMEOUT_MS);
+    const timeout = setTimeout(() => finish(() => reject(new Error("The local workspace did not become ready within 30 seconds."))), READY_TIMEOUT_MS);
     child.once("error", onError);
     child.once("exit", onExit);
     child.on("message", onMessage);

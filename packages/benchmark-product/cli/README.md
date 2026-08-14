@@ -12,17 +12,23 @@ To move from the sample to your own tasks, run `colophon open`. The local app us
 `./colophon-workspace` unless you select another workspace on the command line. It binds only to
 loopback and does not send telemetry. SWE-bench is the first supported importer.
 
-Claude Code and Codex arms use strict machine-local profiles. Add a profile with
-`colophon agent add`, grant an API-key file explicitly with `colophon agent credentials`, add it
-to a draft with `colophon arm add --agent`, then run `colophon doctor` before locking. Real arms
+Claude Code and Codex arms use strict machine-local profiles. Add a profile by naming the adapter,
+exact model, effort, and optional executable; Colophon observes and hashes the executable itself.
+Use `colophon agent login --agent <id>` for an exactly qualified subscription build, or explicitly
+grant an API-key file with `colophon agent credentials`. Add the profile to a draft with
+`colophon arm add --agent`, then run `colophon doctor` before locking. Real arms
 contact their provider and may create provider charges. Colophon does not create the provider
 account, hold funds, or put credential values or host paths into the published bundle.
 The sample's operating-system qualification does not qualify these real-agent paths;
 `colophon doctor` still checks each selected adapter, credential grant, and runtime before lock or launch.
 
-`colophon agent login` refuses unless the exact harness version has passed Colophon's isolated
-login-artifact qualification. No version is qualified in this pre-publication build, and Colophon
-never copies an ordinary Claude or Codex home as a shortcut.
+`colophon agent login` refuses unless the exact harness version and executable digest are in
+Colophon's isolated login-artifact allowlist. The prepublication Mac candidates are Claude Code
+2.1.222 through fresh `setup-token` capture and Codex 0.147.0 through device auth in a fresh
+`CODEX_HOME`; every other build fails closed. The isolation, validation, and cleanup contract is
+covered by automated tests, but a real interactive capture and provider acceptance are still
+publication gates. Colophon never copies an ordinary Claude or Codex home as a shortcut. A local
+doctor proves configuration, not provider acceptance.
 
 For a received bundle, prefer the smaller reader package:
 

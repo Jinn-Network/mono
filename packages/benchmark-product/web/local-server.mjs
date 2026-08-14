@@ -44,7 +44,7 @@ const server = createServer((request, response) => {
     launchAvailable = false;
     response.statusCode = 303;
     response.setHeader("Set-Cookie", `colophon_local_app=${capability}; HttpOnly; SameSite=Strict; Path=/`);
-    response.setHeader("Location", "/workspace");
+    response.setHeader("Location", "/");
     response.end();
     return;
   }

@@ -1,13 +1,13 @@
 # Colophon self-serve experience
 
-- **Version:** 0.2
+- **Version:** 0.4
 - **Date:** 2026-08-13
 - **Updated:** 2026-08-14
 - **Status:** Accepted; implementation authorized 2026-08-13
 - **Decision owner:** Operator
 - **Design scope:** From a cold product-site visitor to a locally published, independently verified benchmark bundle
 - **Source of record:** This repository
-- **Review:** Architecture-boundary and standards/adversarial passes completed 2026-08-13; zero-Docker macOS arm64 qualification added 2026-08-14
+- **Review:** Architecture-boundary and standards/adversarial passes completed 2026-08-13; zero-Docker macOS arm64 qualification and local Mac Docker/Inspect acceptance added 2026-08-14
 
 ## 1. Decision summary
 
@@ -169,7 +169,7 @@ A report or bundle carries a copyable command shaped like:
 npx @colophon-claims/verify@1 ./bundle
 ```
 
-The exact published package name remains subject to the reservation gate in section 6. The package has one executable, so `npx` can infer it. In this package, a bundle path defaults to verification; the longer `colophon bundle verify ./bundle` grammar remains available after a global install and in the full runner. Its only other surfaces are version/help and a machine-readable capability query.
+The exact published package name remains subject to the reservation gate in section 6. The package has one executable, so `npx` can infer it. In this package, a bundle path defaults to verification; the longer `colophon bundle verify --bundle ./bundle` grammar remains available after a global install and in the full runner. Its only other surfaces are version/help and a machine-readable capability query.
 
 Do not add `--yes` to the human quickstart. npm's first-download confirmation is meaningful supply-chain consent. CI and other non-interactive callers can select their own npm confirmation policy.
 
@@ -302,7 +302,7 @@ At the packaged-sample increment, the viewer supplies the comparison matrix, cel
 
 The later own-work target is `colophon open`, a local home with three choices:
 
-- **Run the sample** — the same zero-key demonstration;
+- **Run the sample** — one action drives the same zero-key demonstration through local publication and opens its verified result;
 - **Verify a bundle** — choose a local path and run the reader checks;
 - **Use my work** — select tasks, choose two supported arms, review requirements, run, inspect, and publish locally.
 
@@ -331,12 +331,14 @@ A representative supported path is:
 
 ```sh
 colophon import swebench --draft <draft-id> --file ./tasks.json
-colophon arm add --draft <draft-id> --from ./codex.arm.json
-colophon arm add --draft <draft-id> --from ./claude-code.arm.json
+colophon agent add --agent codex-low --adapter codex \
+  --model <exact-model-id> --effort low
+colophon agent login --agent codex-low
+colophon arm add --draft <draft-id> --arm codex --agent codex-low
 colophon doctor --draft <draft-id>
-colophon quote --draft <draft-id>
-colophon lock --draft <draft-id>
-colophon launch --draft <draft-id>
+colophon quote --draft <draft-id> --ack-provider-network-costs
+colophon lock --draft <draft-id> --ack-provider-network-costs
+colophon launch --draft <draft-id> --ack-provider-network-costs
 colophon collect --draft <draft-id>
 colophon report --draft <draft-id>
 colophon publish --draft <draft-id>
@@ -364,7 +366,7 @@ Failure happens before expensive or destructive work whenever possible. Every re
 | Wrong Node | `engines` rejects unsupported installs and the executable performs an immediate version check: “Colophon needs Node 22 or newer. Found Node X at PATH. No benchmark was started.” |
 | Unsupported OS/architecture | Refuse before unpacking/running native helpers. Print the qualified release matrix and link the contributor flow; do not silently fall back to an unverified process-control path. |
 | Missing packaged asset/native helper | Treat this as a broken distribution, print package version and expected asset, and ask for a bug report. Never fetch an unpinned helper at runtime. |
-| No Docker | The sample and reader verifier continue because neither needs Docker. `doctor` refuses before lock/launch only when the chosen task/evaluator needs an OCI runtime, names the relevant arm/task, and explains that Docker may execute untrusted task material. |
+| No Docker | The sample and reader verifier continue because neither needs Docker. OCI Inspect selection refuses before method lock when the Docker CLI is missing or its engine is stopped, tells the user to install/start Docker, and explains that Docker may execute untrusted task material. |
 | Missing agent executable | `doctor` names the selected adapter and searched path, then shows the exact configuration command. No benchmark is locked or launched. |
 | Agent not authenticated | `doctor` says which local agent login is missing and that real harness runs may make paid provider calls. It never prints credential contents. |
 | Unwritable, occupied, or linked output | Resolve and validate the target without following an attacker-controlled link, refuse without overwriting, and print how to choose another path. |
@@ -687,16 +689,76 @@ publication, and release-policy gates are satisfied. Zero-Docker sample, reader,
 viewer, and CLI qualification is implemented for `linux/x64` and `darwin/arm64`.
 
 The implemented pre-publication seam supports protected API-key grants for both built-in
-adapters and a real protected credential-artifact storage/runtime path. Its harness-login
-qualification table is intentionally empty: `colophon agent login` therefore refuses every
-current version rather than copying a normal Claude or Codex home or claiming an unproved
-isolation property. Qualifying an exact harness login remains release work, not a hidden gap.
+adapters and a protected credential-artifact storage/runtime path. The prepublication allowlist
+admits the operator's exact Mac build candidates: Claude Code 2.1.222 uses a fresh `setup-token`
+boundary and Codex 0.147.0 uses a fresh `CODEX_HOME` device-auth boundary. Admission binds adapter,
+observed version, and executable digest; every other build fails closed. Colophon never reads or
+copies the normal Claude or Codex home. Automated tests qualify isolation, validation, cleanup,
+and storage with injected login runners only: real interactive capture and provider acceptance
+remain explicit operator acceptance and publication gates.
 
 The local-registry proof also installs the reader alone and refuses any resolved Colophon
 runner/core or task-execution backend, launcher, supervisor, or workspace package. To make that
 installed boundary true, `benchmarking-run` now exposes the narrow structural quote/dispatch port
 it consumes instead of imposing its full execution-backend package on verification-only users.
 Concrete TEP backends remain structurally compatible.
+
+### 10.4 Aha-gap repair implemented 2026-08-14
+
+The reader package now owns a bounded human comparison projection derived only after the six
+verification checks have authenticated the Benchmark, Matrix, assembly, and content-addressed
+record closure. It projects task labels, arm outputs, ordered verdict evidence, score direction,
+and a descriptive paired count; it never registers a winner. For the bundled sample it also says
+that the outcome is synthetic and the result demonstrates the evidence path rather than agent
+quality. Core re-exports the reader's deterministic asset builder instead of carrying a second
+copy.
+
+New bundles render that projection ahead of raw accounting. The reader remains compatible with
+pre-projection bundles by requiring one complete deterministic asset profile: it accepts the
+complete legacy projection when every legacy asset matches, otherwise it requires the complete
+comparison projection. It never accepts a mixture. The verified viewer renders the same
+authenticated comparison from its immutable byte snapshot, offers cell evidence, and exposes
+**Use my work**, **Open the evidence**, and **Copy verification command**. Starting the guided
+workspace is an explicit one-time browser action and shares the viewer's shutdown boundary.
+
+`colophon open` now lands on the three-choice local home: **Run the sample**, **Verify a bundle**,
+or **Use my work**. The own-work path starts with a named comparison, then presents sample or
+file-based SWE-bench intake and configured Claude Code/Codex profiles before the existing doctor,
+cost/network disclosure, quote, and lock gates. Raw draft, Arm, Inspect, authority, and publication
+controls remain available as advanced surfaces. No live provider or paid execution was performed
+as part of this repair.
+
+The Mac release proof cold-installed the three public tarballs through real `@1` selectors, ran
+and retained the sample, served its task-by-task viewer, independently returned the canonical six
+checks, and rejected tampering. The production Chromium suite exercised the packaged one-time
+loopback server and complete local lifecycle. CI artifact transport now includes hidden files so
+the packaged `.next/BUILD_ID` reaches clean macOS qualification.
+
+The repaired production-browser journey additionally proves both user-facing aha paths. One
+action on the local home reaches a published verified report and then rechecks that bundle through
+the reader form. The own-work path names a comparison, imports a real three-row SWE-bench file,
+selects two ready low-effort Claude Code/Codex profiles, refuses quote without the provider
+network/possible-charge acknowledgement, and reaches a locked method after acknowledgement. The
+test profiles use inert executables and a sentinel grant; no provider is contacted.
+
+On the operator's Apple-silicon Mac, the installed Claude Code 2.1.222 and Codex 0.147.0 binaries
+were also passed through the real `agent add` surface. Colophon resolved the Codex npm shim to its
+native executable, observed both versions, stored their exact digests and low-effort exact model
+IDs, and created no credential files. The actual provider login and quota-consuming call were not
+run.
+
+Docker Desktop acceptance on the same Mac built the pinned `linux/amd64` Inspect worker and ran
+the real multi-scorer OCI lifecycle: two arms, hosted sandbox, native Inspect logs, separate
+evaluation records, sealed Report, six-check verification, detached copied-bundle verification,
+official native-log reading, generated Inspect viewer, and no retained Colophon containers. This
+is local acceptance evidence for the advanced path, not an expansion of the zero-Docker npm
+release matrix.
+
+The only distribution proof deliberately left for last is the real public-registry install. The
+local-registry proof uses real tarballs, an empty npm cache, actual `@1` selectors, a recursively
+audited reader closure, the installed viewer-to-workspace handoff, tamper refusal, and no portal or
+source-tree paths. Public npm still depends on scope custody and one coherent stable published
+Jinn dependency set.
 
 ## 11. Risks and controls
 
@@ -726,7 +788,9 @@ The operator must decide before public package publication:
 
 The v1 zero-Docker target decision is resolved: `linux/x64` and `darwin/arm64` are
 qualified by target-specific cold-registry jobs. That decision does not widen the
-qualification table for real agent logins, provider calls, Docker, or Inspect.
+qualification table for provider calls. The two named Mac executable identities above are the only
+prepublication login-capture candidates; real interactive acceptance is still required before they
+become a public support claim. Docker/Inspect retains its own local/runtime gates.
 
 Later decisions are deliberately deferred:
 

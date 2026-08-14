@@ -57,6 +57,7 @@ import { EVALUATOR_REQUIREMENT_KEY } from "../venue/venue.js";
 import { INSPECT_EMBEDDED_EVALUATOR_ID } from "../runtime/inspect/artifacts.js";
 import { INSPECT_ADAPTER_ID, InspectSelectionManifestSchema } from "../runtime/inspect/manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
+import { derivePublicComparison } from "@colophon-claims/verify";
 
 export const PUBLIC_BUNDLE_FILES = [
   "static-bundle.json",
@@ -547,6 +548,15 @@ function recordClosure(input: MaterializeBundleInput): {
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
     .sort();
+  const comparison = derivePublicComparison({
+    benchmark,
+    matrix,
+    assemblyCells,
+    recordBytes: new Map(evidenceCatalog.records.map((record) => [
+      record.sha256,
+      getSealedBytes(workspaceDir, record.sha256),
+    ])),
+  });
   for (const [path, bytes] of Object.entries(buildPublicAssets({
     claim,
     matrix,
@@ -555,6 +565,7 @@ function recordClosure(input: MaterializeBundleInput): {
     matrixSha256: runState.matrixSha256,
     recordSha256s: evidenceCatalog.records.map((record) => record.sha256),
     dissentCellKeys,
+    comparison,
   }))) {
     files.set(path, bytes);
   }

@@ -89,18 +89,21 @@ with an explicit shipped/deferred GUI disposition:
 | `updateDraft` | `colophon draft update` | Apply a validated JSON draft patch. |
 
 The path-oriented portable verifier is intentionally outside workspace/GUI
-parity:
-
-The exact machine command is
-`colophon bundle verify --bundle <dir> --json`.
+parity. A reader installs only the smaller verifier package. Use the exact
+version sealed into a report to reproduce publication, or its compatible major
+line to receive fixes without changing the bundle-format contract:
 
 ```text
-colophon bundle verify --bundle <dir> --json
+npx @colophon-claims/verify@1.0.0 <dir>
+npx @colophon-claims/verify@1 <dir>
 ```
 
 It reads only the caller-selected immutable bundle, needs no workspace or
 principal, and returns the six checks documented in the
 [public-bundle guide](../PUBLIC-BUNDLE.md).
+
+The full installed product delegates to the same verifier implementation with
+`colophon bundle verify --bundle <dir> --json`.
 
 Demo-1's second read-only standalone verifier is the explicit post-lock/pre-dispatch E4 gate:
 

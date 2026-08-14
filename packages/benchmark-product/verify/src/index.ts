@@ -5,6 +5,18 @@ export type {
   VerifiedPublicBundleSnapshot,
   VerifyPublicBundleDeps,
 } from "./verify.js";
+export { derivePublicComparison } from "./comparison.js";
+export type {
+  DerivePublicComparisonInput,
+  PublicComparisonCell,
+  PublicComparisonOutput,
+  PublicComparisonTask,
+  PublicComparisonVerdict,
+  PublicComparisonView,
+  PublicDescriptiveComparison,
+} from "./comparison.js";
+export { buildPublicAssets } from "./assets.js";
+export type { PublicAssetInput } from "./assets.js";
 export type {
   InspectRuntimeMethodDisclosure,
   InspectScoringProjectionDisclosure,
