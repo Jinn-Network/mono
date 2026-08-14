@@ -156,7 +156,6 @@ The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises the long-
 
 | Loop | File | Starts when | Job |
 |---|---|---|---|
-| Creator | `daemon/creator.ts` | legacy mode | Pulls Tasks from configured `TaskSource`s and posts each via `JinnRouter.createTask`. Idempotent per `(creatorMultisig, desiredStateId)`. |
 | Work | `daemon/work-loop.ts` | `composition` + `work` configured | The native solver loop. Per card announced by the projector's archive: gate on projector catch-up, map to `SubmissionFacts`, gate on the rolling-window AI-units / spend-cap accounting, admit a claim intent in the engagement ledger, then drive the pipeline claim → submit → deliver → settle. Also reconciles in-flight settlements every tick. |
 | Evaluator | `daemon/evaluator-loop.ts` | `evaluator` configured | The evaluator counterpart of `work`: recover in-flight work → poll the signed opportunity source → acquire subject material → evaluate → deliver + settle a verdict. |
 | Posting | `daemon/posting-loop.ts` | native mode + non-empty `posting[]` | The native counterpart of `creator` — drives the requester's `posting[]` config through the marketplace binding. |
@@ -172,7 +171,7 @@ Startup also runs **one-shot in-flight recovery** before any loop takes new work
 
 Each loop runs as a background Promise; failures emit a structured error event but do not crash the process. The watchdog (`daemon/watchdog-loop.ts`) registers every started loop against its `LOOP_REGISTRY` heartbeat and exits non-zero when one goes stale, letting the supervisor restart through the idempotent boot path. `daemon.stop()` signals each loop, drains in-flight work with a configurable timeout, and closes resources.
 
-> `LOOP_REGISTRY` still declares `creator`, `engine-tick`, `engine-watcher`, `delivery-watcher`, and `peer-sync` rows. All five are dead — D1 deleted the TaskEngine, D2 deleted the delivery-watcher, D3 deleted the creator loop, D4 deleted peer-sync — and Wave-4 D6 removes the five names from the registry ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md), addendum 2026-08-13).
+> Wave-4 D6 removed `creator`, `engine-tick`, `engine-watcher`, `delivery-watcher`, and `peer-sync` from `LOOP_REGISTRY` after D1–D4 deleted those loops ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md), addendum 2026-08-13). Remaining ten: `posting`, `reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`, `projector`, `evidence-driver`, `work`, `evaluator`. Intervals and admission of the survivors are unchanged.
 
 ### 6.1 Generator ownership and the launched-record subsystem
 

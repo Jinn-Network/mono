@@ -74,14 +74,14 @@ describe('#1578 runLoop helper', () => {
   it('emits a default tick_error/failed row on a throwing tick and still stamps the heartbeat', async () => {
     let stopped = false;
     const running = runLoop({
-      name: 'creator',
+      name: 'work',
       store,
       tick: async () => {
         throw new Error('boom');
       },
       intervalMs: 10_000,
       stopSignal: () => stopped,
-      emitSource: 'creator',
+      emitSource: 'work',
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -93,7 +93,7 @@ describe('#1578 runLoop helper', () => {
     expect(tickError!.detail).toBe('boom');
 
     // Heartbeat still stamped despite the throw.
-    expect(getLoopTick(store, 'creator')).not.toBeNull();
+    expect(getLoopTick(store, 'work')).not.toBeNull();
 
     stopped = true;
     await vi.advanceTimersByTimeAsync(10_000);
@@ -104,14 +104,14 @@ describe('#1578 runLoop helper', () => {
     let stopped = false;
     const onError = vi.fn();
     const running = runLoop({
-      name: 'creator',
+      name: 'work',
       store,
       tick: async () => {
         throw new Error('boom');
       },
       intervalMs: 10_000,
       stopSignal: () => stopped,
-      emitSource: 'creator',
+      emitSource: 'work',
       onError,
     });
 
@@ -135,12 +135,12 @@ describe('#1578 runLoop helper', () => {
     const intervalMs = vi.fn(() => delays[Math.min(call++, delays.length - 1)]!);
 
     void runLoop({
-      name: 'creator',
+      name: 'work',
       store,
       tick: async () => {},
       intervalMs,
       stopSignal: () => stopped,
-      emitSource: 'creator',
+      emitSource: 'work',
     });
 
     // Iteration 1: heartbeat stamped, then sleep(1000).
@@ -167,7 +167,7 @@ describe('#1578 runLoop helper', () => {
     });
     let ticks = 0;
     const running = runLoop({
-      name: 'creator',
+      name: 'work',
       store,
       tick: async () => {
         ticks++;
@@ -175,7 +175,7 @@ describe('#1578 runLoop helper', () => {
       intervalMs: 100_000, // long sleep; only stopPromise can cut it short
       stopSignal: () => stopped,
       stopPromise,
-      emitSource: 'creator',
+      emitSource: 'work',
     });
 
     // One tick, then the loop is parked in a 100s sleep raced against stopPromise.
@@ -195,14 +195,14 @@ describe('#1578 runLoop helper', () => {
     let stopped = false;
     let ticks = 0;
     const running = runLoop({
-      name: 'creator',
+      name: 'work',
       store,
       tick: async () => {
         ticks++;
       },
       intervalMs: 10_000,
       stopSignal: () => stopped,
-      emitSource: 'creator',
+      emitSource: 'work',
     });
 
     await vi.advanceTimersByTimeAsync(0);
@@ -255,17 +255,17 @@ describe('#1578 runLoop helper', () => {
   it('does not tick at all when stopSignal is already true on entry', async () => {
     let ticks = 0;
     await runLoop({
-      name: 'peer-sync',
+      name: 'harvest',
       store,
       tick: async () => {
         ticks++;
       },
       intervalMs: 10_000,
       stopSignal: () => true,
-      emitSource: 'peer-sync',
+      emitSource: 'harvest',
     });
 
     expect(ticks).toBe(0);
-    expect(getLoopTick(store, 'peer-sync')).toBeNull();
+    expect(getLoopTick(store, 'harvest')).toBeNull();
   });
 });
