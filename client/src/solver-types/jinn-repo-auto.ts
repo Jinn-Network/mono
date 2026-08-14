@@ -30,7 +30,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
-import type { TaskGenerator } from '../tasks/sources.js';
+import type { TaskGenerator } from './solver-type.js';
 import type { Task } from '../types/task.js';
 import type { TaskClaimPolicy } from '../types/task-document.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
