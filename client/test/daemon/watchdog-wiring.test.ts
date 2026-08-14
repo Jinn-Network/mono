@@ -48,6 +48,33 @@ function makeDaemon(store: Store, tmp: string, watchdog?: DaemonConfig['watchdog
     pollIntervalMs: 60_000,
     taskSources: [],
     restorationEngine: minimalEngineConfig(tmp),
+    shutdownTimeoutMs: 100,
+    // Wave-4 D3 retired `creator`, which had been this test's anchor as the
+    // last loop a bare legacy boot always started. With it gone a minimal boot
+    // starts NO loop at all, so the seeding assertions would pass vacuously.
+    // `checkpoint` anchors the test instead: it is an `always`-admission loop
+    // that needs no composition and does no network I/O -- `runOnce` failures
+    // are caught non-fatally, after which it records its tick and sleeps for
+    // `intervalMs`, so a stub store is enough to get it started and seeded.
+    // (`peer-sync` was tried first and rejected: it does real HTTP with
+    // retries, which took the suite from seconds to four minutes.)
+    //
+    // The 300s interval is deliberate on both counts: the loop ticks once at
+    // start -- seeding the heartbeat -- then sleeps well past the end of the
+    // test, so it can never re-freshen a heartbeat the staleness case forces
+    // stale. `shutdownTimeoutMs` is then required, because `stop()` races
+    // `loopPromises` against it and would otherwise block the full default 30s
+    // waiting for that sleep to finish.
+    checkpoint: {
+      intervalMs: 300_000,
+      store: {
+        async load() { throw new Error('checkpoint store stub: not used in watchdog wiring tests'); },
+      } as unknown as DaemonConfig['checkpoint'] extends { store: infer S } ? S : never,
+      chain: 'base-sepolia',
+      writeCheckpoint: async () => {
+        throw new Error('checkpoint writer stub: not used in watchdog wiring tests');
+      },
+    } as NonNullable<DaemonConfig['checkpoint']>,
     watchdog,
   });
 }
@@ -77,7 +104,9 @@ describe('#1043 Daemon watchdog wiring', () => {
     // started loop so the watchdog never trips on boot. `engine-tick` /
     // `engine-watcher` / `delivery-watcher` stay declared in LOOP_REGISTRY (D6
     // narrows it) but are never started, so never seeded.
-    expect(getLoopTick(store, 'creator')).not.toBeNull();
+    expect(getLoopTick(store, 'checkpoint')).not.toBeNull();
+    // `creator` retired with Wave-4 D3 and is never started or seeded.
+    expect(getLoopTick(store, 'creator')).toBeNull();
     expect(getLoopTick(store, 'delivery-watcher')).toBeNull();
     expect(getLoopTick(store, 'engine-tick')).toBeNull();
     expect(getLoopTick(store, 'engine-watcher')).toBeNull();
@@ -95,7 +124,9 @@ describe('#1043 Daemon watchdog wiring', () => {
 
     // Omitted watchdog config now defaults to armed — same boot-seed
     // behavior as passing `{ autoRestart: false }` explicitly.
-    expect(getLoopTick(store, 'creator')).not.toBeNull();
+    expect(getLoopTick(store, 'checkpoint')).not.toBeNull();
+    // `creator` retired with Wave-4 D3 and is never started or seeded.
+    expect(getLoopTick(store, 'creator')).toBeNull();
     expect(getLoopTick(store, 'delivery-watcher')).toBeNull();
     expect(getLoopTick(store, 'engine-tick')).toBeNull();
     expect(getLoopTick(store, 'engine-watcher')).toBeNull();
@@ -112,13 +143,13 @@ describe('#1043 Daemon watchdog wiring', () => {
     daemon = makeDaemon(store, tmp, undefined);
     await daemon.start();
 
-    // Force 'creator' far enough back that it exceeds the default staleness
-    // threshold (stalenessFactor 6 * its LOOP_REGISTRY intervalMs 5000ms).
-    store.setConfigValue('loop_heartbeat:creator', String(Date.now() - 6 * 5000 - 1));
+    // Force 'checkpoint' far enough back that it exceeds the default staleness
+    // threshold (stalenessFactor 6 * its LOOP_REGISTRY intervalMs 300000ms).
+    store.setConfigValue('loop_heartbeat:checkpoint', String(Date.now() - 6 * 300_000 - 1));
     // Drive the watchdog's own check directly instead of waiting out its real
-    // 30s check interval: with LocalAdapter's creator loop genuinely running
-    // in this Daemon, waiting would let creator's own next tick re-freshen
-    // the heartbeat we just forced stale before the watchdog ever saw it.
+    // 30s check interval: with the checkpoint loop genuinely running in this
+    // Daemon, waiting would let its own next tick re-freshen the heartbeat we
+    // just forced stale before the watchdog ever saw it.
     // This still proves the thing under test — that omitting `config.watchdog`
     // constructs a live, checkable WatchdogLoop at all (before this change,
     // `daemon.watchdogLoop` stayed undefined and `check()` never existed to call).
@@ -127,7 +158,7 @@ describe('#1043 Daemon watchdog wiring', () => {
     const events = getEventBuffer().snapshot({ limit: 20 });
     const stale = events.find((e) => e.errorCode === 'loop_watchdog_stale');
     expect(stale).toBeDefined();
-    expect(stale?.details?.['loopName']).toBe('creator');
+    expect(stale?.details?.['loopName']).toBe('checkpoint');
 
     await daemon.stop();
     daemon = undefined;

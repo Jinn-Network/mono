@@ -34,7 +34,6 @@ import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.j
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
-import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
 import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
@@ -111,7 +110,6 @@ import {
 } from './harnesses/impls/jinn-repo-evaluator/docker-immutable-verifier.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
-import { resolveContractFromSolverNetId } from './solvernets/launched-record-dispatcher.js';
 import type { Harness } from './harnesses/types.js';
 import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
@@ -144,8 +142,6 @@ import {
 } from './trajectory/transcript-watcher.js';
 import { defaultTranscriptWatchDirectories } from './trajectory/transcript-session-dirs.js';
 import { buildInfo } from './build-info.js';
-import { BASE_FEEDS } from './venues/chainlink/feeds.js';
-import { GeneratedTaskSource, StaticConfiguredTaskSource, filterBindableTasks } from './tasks/sources.js';
 import {
   checkRpcNetwork,
   logRpcLocalDevToStderr,
@@ -618,13 +614,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // Safe address and the prediction.v1 generator are not yet known at start-up.
   // We capture both into closures here and let `addLauncherRoutes` read them
   // lazily — by the time `/v1/launcher/status` is hit, both are populated.
-  let predictionGeneratorRef:
-    | { getState(): import('./solver-types/prediction-v1-auto.js').PredictionV1GeneratorStateSnapshot }
-    | undefined;
-  const launchedGeneratorStateBySolverType = new Map<
-    string,
-    () => LauncherGeneratorStateSnapshot | undefined
-  >();
   let safeAddressForLauncher: `0x${string}` | undefined;
   let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
 
@@ -1036,15 +1025,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         onSolverNetsUpdated: () => {
           invalidatePredictionOperatorStatusCache(config);
         },
-        getGeneratorState: (netName) => {
-          if (netName === 'prediction') {
-            return predictionGeneratorRef?.getState();
-          }
-          const joined = findJoinedByName(config.joinedSolverNets, netName);
-          const solverType = joined ? solverTypeFromJoinedContract(joined) : undefined;
-          if (!solverType) return undefined;
-          return launchedGeneratorStateBySolverType.get(solverType)?.();
-        },
+        // Wave-4 D3 retired the launched-record generators (and with them the
+        // creator loop they fed), so no generator state exists to report. The
+        // hook stays on the launcher-status surface — its consumers already
+        // treat an absent snapshot as "no generator running", which is now
+        // always the truth.
+        getGeneratorState: () => undefined,
         getOpenTaskCount: (netName) => {
           if (!safeAddressForLauncher) return 0;
           const joined = findJoinedByName(config.joinedSolverNets, netName);
@@ -2117,15 +2103,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         registryClient: solverNetRegistryClient,
         network: 'base-sepolia',
         resolveSigner: async () => launcherSigner,
-        lifecycleSigner: launcherSigner,
         awaitTxConfirmation: async (txHash) => {
           const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
           return { blockNumber: Number(receipt.blockNumber) };
         },
       });
       console.log(
-        `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s), ` +
-          `${solverNetSubsystem.pendingGenerators.length} ready for spawn (Task 12)`,
+        `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s)`,
       );
 
       // jinn-mono-hqz0: populate the launcher endpoints' deps holder. The
@@ -2135,13 +2119,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // /launcher list page 404s on /v1/solvernets/launched.
       if (solverNetEndpointsDepsHolder) {
         const { LaunchAction } = await import('./solvernets/launch-state-machine.js');
-        const { LifecycleTransition } = await import('./solvernets/lifecycle-transitions.js');
         const awaitLauncherTxConfirmation = async (txHash: `0x${string}`) => {
           const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
           return { blockNumber: Number(receipt.blockNumber) };
         };
         const pendingGeneratorsRef = { current: solverNetSubsystem.pendingGenerators };
-        // Noop subgraph for launch/lifecycle state-machine mempool-drop recovery.
+        // Noop subgraph for launch state-machine mempool-drop recovery.
         // Real subgraph extension lands in Task 25 (jinn-mono-280n).
         const noopSubgraph = {
           async fetchSetMetadataEvents() { return []; },
@@ -2152,40 +2135,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           ipfs: solverNetIpfs,
           publisher: solverNetPublisher,
           subgraph: noopSubgraph,
-          spawnGenerator: async () => {
-            /* Generators are spawned by main.ts post-launch loop;
-             * the launcher endpoint just persists the record here. */
-          },
-          awaitTxConfirmation: awaitLauncherTxConfirmation,
-        });
-        const lifecycleTransition = new LifecycleTransition({
-          store: solverNetStore,
-          registry: solverNetRegistryClient,
-          signer: launcherSigner,
-          subgraph: noopSubgraph,
           awaitTxConfirmation: awaitLauncherTxConfirmation,
         });
         if (!safeAddressForLauncher) {
           throw new Error('[main] safeAddressForLauncher missing at SolverNet endpoints registration');
         }
-        const getGeneratorState = (
-          solverNetId: string,
-        ): LauncherGeneratorStateSnapshot | undefined => {
-          const entry = pendingGeneratorsRef.current.find(
-            (g) => g.recordRef.current.solverNetId === solverNetId,
-          );
-          const resolved = resolveContractFromSolverNetId(
-            entry?.recordRef.current.solverNetId ?? solverNetId,
-          );
-          if (!resolved) return undefined;
-          return launchedGeneratorStateBySolverType.get(resolved.solverType)?.();
-        };
         solverNetEndpointsDepsHolder.current = {
           store: solverNetStore,
           launch: {
             launchAction,
-            lifecycleTransition,
-            getGeneratorState,
             pendingGenerators: pendingGeneratorsRef,
             signer: launcherSigner,
             network: 'base-sepolia',
@@ -2211,99 +2169,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         '(requires testnet + agent_id + identity_registry_address — Task 11 scaffolding)',
     );
   }
-  // The catalog cache will be consumed by the API server in Tasks 14/15.
-  // The `pendingGenerators` set is iterated below to wire generators per
-  // launched record (Task 12).
-
-  // ── Auto Task generators (launched-record-driven) ────────────────────────
+  // The catalog cache is consumed by the API server (Tasks 14/15).
   //
-  // Per spec/2026-05-05-solvernet-creation-and-launch.md §11 + Task 22 of the
-  // implementation plan, generator construction is wholly driven by the
-  // SolverNet launched-record subsystem. The legacy
-  // `collectTestnetAutoTaskGenerators` path (config-block-keyed Polymarket
-  // generator + role-based hot-spawn gate) is retired — SolverNet ownership
-  // is determined by which launched records the daemon owns, not by the
-  // operator-config role enum.
-  const autoTasksDisabled = process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
-  // ── SolverNet launched-record generators (Task 12 of
-  //     spec/2026-05-05-solvernet-creation-and-launch.md §11) ────────────────
-  //
-  // For each owned launched record where `status === 'launched'` and
-  // `generatorEnabled === true`, construct a prediction.v1 Polymarket
-  // generator wired to the live `recordRef` and `configRef` exposed by
-  // `initSolverNetSubsystem`. Lifecycle transitions (pause/resume/retire)
-  // and the SolverNet config API endpoint (Task 14) mutate these refs at
-  // runtime; the per-tick gate inside the generator picks the change up
-  // within one cadence — no daemon restart, no recreation.
-  const launchedRecordGenerators: Array<{
-    solverType: string;
-    generator: import('./tasks/sources.js').TaskGenerator;
-  }> = [];
-  if (solverNetSubsystem && !autoTasksDisabled) {
-    const { wireLaunchedRecordGenerators } = await import(
-      './solvernets/launched-record-dispatcher.js'
-    );
-    const wired = await wireLaunchedRecordGenerators({
-      pendingGenerators: solverNetSubsystem.pendingGenerators,
-      launchedDir: join(config.earningDir, 'solvernets', 'launched'),
-      staticConfig: {
-        agentEoa: agentEoaAddress,
-        safeAddress,
-        agentPrivateKey,
-        ipfsGatewayUrl: config.ipfsGatewayUrl,
-        stateDir: config.sweRebenchV2StateDir,
-        ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
-      },
-      logger: {
-        info: (message) => console.log(message),
-        warn: (message) => console.warn(message),
-      },
-    });
-    launchedRecordGenerators.push(...wired.generators);
-    for (const [solverType, getState] of wired.generatorStatesBySolverType) {
-      launchedGeneratorStateBySolverType.set(solverType, getState);
-    }
-    if (!predictionGeneratorRef && wired.predictionGeneratorRef) {
-      predictionGeneratorRef =
-        wired.predictionGeneratorRef as unknown as typeof predictionGeneratorRef;
-    }
-  }
-  if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
-    // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
-  }
-
-  // filterBindableTasks (issue #415): drop config-level tasks[] entries without
-  // solverNetManifestCid before they enter the creator loop. Such entries would
-  // throw a PermanentError on every attempt and retry every 30 min indefinitely.
-  const bindableConfigTasks = filterBindableTasks(config.tasks);
-  const taskSources = [
-    new StaticConfiguredTaskSource(bindableConfigTasks),
-    ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
-      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator, {
-        bucketKeyForTask: (task) => {
-          if (task.solverType === 'swe-rebench-v2.v1') {
-            const instanceId = task.spec?.['instance_id'];
-            const postedCount = task.eligibility?.['posted_count_after_record'];
-            if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
-            return `swe-rebench-v2:${instanceId}:${postedCount}`;
-          }
-          // Issue #1893: jinn-repo.v1 live-issue tasks bucket on
-          // <issueNumber>:<snapshotHash> (carried on `eligibility` by
-          // `jinn-repo-live-auto.ts`) rather than the default window-based
-          // key — the window's startTs/endTs changes every tick, which would
-          // defeat once-per-bucket dedup for a generator whose own re-post
-          // signal is a material issue edit, not the passage of time.
-          if (task.solverType === 'jinn-repo.v1' && task.spec?.['source'] === 'live-issue') {
-            const issueNumber = task.eligibility?.['issue_number'];
-            const snapshotHash = task.eligibility?.['snapshot_hash'];
-            if (typeof issueNumber !== 'number' || typeof snapshotHash !== 'string') return undefined;
-            return `jinn-repo-live:${issueNumber}:${snapshotHash}`;
-          }
-          return undefined;
-        },
-      }),
-    ),
-  ];
+  // Wave-4 D3 (Task 17 of the cutover stage-3 plan, DR-2026-08-05 decision 1)
+  // retired the launched-record generator dispatcher and the creator loop it
+  // fed. Nothing constructs task sources here any more: the native posting
+  // path is `posting[]` driven through the requester work client
+  // (`PostingLoop`), and one-off posts go through `jinn tasks submit`.
+  // `initSolverNetSubsystem`'s `pendingGenerators` set is now read only by the
+  // SolverNet endpoints, which use it for the record/config refs.
 
   // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
   //
@@ -2763,7 +2637,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const daemon = new Daemon({
     adapter,
     runner,
-    taskSources,
     dbPath: config.dbPath,
     store: sharedStore,
     composition,
@@ -2777,7 +2650,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     apiToken,
     peers: config.peers.length > 0 ? config.peers : undefined,
     nodeEndpoint: config.nodeEndpoint,
-    creatorSafeAddress: safeAddress,
     sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     corpusFactory,
     status: {

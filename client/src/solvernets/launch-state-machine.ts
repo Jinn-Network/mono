@@ -11,7 +11,10 @@
  *   recording    → atomic-write the launched record to disk with the cid
  *   broadcasting → submit IdentityRegistry.setMetadata tx
  *   confirming   → wait for tx receipt (or detect anchored event in subgraph)
- *   spawning     → start the launcher-owned generator
+ *   spawning     → finalize (Wave-4 D3 retired the generator spawn this phase
+ *                  used to drive; the phase name stays because it is part of
+ *                  the persisted `launchProgress` vocabulary that older
+ *                  records may still carry)
  *   → status: 'launched', launchProgress: undefined
  *
  * Idempotency invariants (per spec §10):
@@ -23,9 +26,6 @@
  *     scanning the subgraph for an existing event under the cid before
  *     re-firing.
  *   - Disk write: atomic-rename via the SolverNetStore.
- *   - spawnGenerator: caller-owned. The state machine assumes the spawner
- *     guards against double-spawn for a given record (Task 12 wires the
- *     real launcher).
  *
  * Architectural choice: the state machine takes ipfs / publisher / subgraph
  * directly (not the wrapped `SolverNetRegistryClient`). The registry client's
@@ -75,7 +75,6 @@ export interface LaunchActionDeps {
   ipfs: IpfsClient;
   publisher: MetadataPublisher;
   subgraph: SubgraphClient;
-  spawnGenerator: (record: LaunchedSolverNetRecord) => Promise<void>;
   /**
    * Resolve a tx hash to a confirmed receipt. Implementations may poll an
    * RPC, watch logs, or wrap viem's `waitForTransactionReceipt`. Throwing is
@@ -430,32 +429,20 @@ export class LaunchAction {
   }
 
   /**
-   * Phase 5 — spawning. Hand the launched record to the generator-spawner.
-   * On success, finalize the record: clear `launchProgress`, flip `status`
-   * to 'launched', stamp `statusUpdatedAt`.
+   * Phase 5 — spawning. Finalize the record: clear `launchProgress`, flip
+   * `status` to 'launched', stamp `statusUpdatedAt`.
+   *
+   * Wave-4 D3 removed the generator spawn this phase used to perform: the
+   * launched-record generators and the creator loop they fed are retired, so
+   * there is nothing left to hand the record to and nothing left to fail. The
+   * phase itself stays because `launchProgress.phase` is a persisted enum
+   * (`client/src/solvernets/store.ts`) and a record written by an older daemon
+   * generation can still be sitting at `spawning` on disk — that record must
+   * resume to `launched`, not error.
    */
   private async runSpawningPhase(
     record: LaunchedSolverNetRecord,
   ): Promise<LaunchedSolverNetRecord> {
-    try {
-      await this.deps.spawnGenerator(record);
-    } catch (err) {
-      const attemptCount = (record.launchProgress?.attemptCount ?? 0) + 1;
-      const message = err instanceof Error ? err.message : String(err);
-      const failed: LaunchedSolverNetRecord = {
-        ...record,
-        status: attemptCount >= this.maxAttempts ? 'failed' : 'launching',
-        statusUpdatedAt: this.now().toISOString(),
-        launchProgress: {
-          phase: 'spawning',
-          attemptCount,
-          txError: { message, at: this.now().toISOString() },
-        },
-      };
-      await this.deps.store.writeRecord(failed);
-      throw err;
-    }
-
     const finalRecord: LaunchedSolverNetRecord = {
       ...record,
       status: 'launched',

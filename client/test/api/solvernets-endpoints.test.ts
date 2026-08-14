@@ -32,10 +32,6 @@ import {
   type LaunchActionDeps,
 } from '../../src/solvernets/launch-state-machine.js';
 import { manifestHash } from '../../src/solvernets/manifest.js';
-import {
-  LifecycleTransition,
-  type LifecycleTransitionDeps,
-} from '../../src/solvernets/lifecycle-transitions.js';
 import type {
   PendingGeneratorSpawn,
   SolverNetCatalogCache,
@@ -599,8 +595,9 @@ function makeConfirmHelper(): ConfirmHelper {
 }
 
 /**
- * Build a complete launch dep bundle around real `LaunchAction` and
- * `LifecycleTransition` instances backed by the test mocks. Mirrors the
+ * Build a complete launch dep bundle around a real `LaunchAction` instance
+ * backed by the test mocks. The lifecycle-transition producer retired with
+ * Wave-4 D3, so no `LifecycleTransition` is wired here. Mirrors the
  * production wiring in `daemon-init.ts` minus the in-memory pendingGenerators
  * — we manage those directly so tests can assert on configRef mutation.
  */
@@ -645,22 +642,9 @@ function makeLaunchDeps(args: {
   };
   const launchAction = new LaunchAction(launchDeps);
 
-  const lifecycleDeps: LifecycleTransitionDeps = {
-    store: args.store,
-    registry,
-    signer,
-    subgraph,
-    awaitTxConfirmation: confirm.awaitTxConfirmation,
-    startGenerator: args.startGenerator ?? (async () => undefined),
-    stopGenerator: args.stopGenerator ?? (async () => undefined),
-    now: () => new Date('2026-05-06T01:00:00.000Z'),
-  };
-  const lifecycleTransition = new LifecycleTransition(lifecycleDeps);
-
   return {
     launch: {
       launchAction,
-      lifecycleTransition,
       pendingGenerators: args.pendingGenerators,
       signer,
       network: 'base-sepolia',
@@ -821,219 +805,6 @@ describe('POST /v1/solvernets/drafts/:id/launch (Task 14)', () => {
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('launch_unavailable');
-  });
-});
-
-describe('PATCH /v1/solvernets/launched/:id/lifecycle (Task 14)', () => {
-  async function seedLaunchedRecord(
-    app: Hono,
-  ): Promise<LaunchedSolverNetRecord> {
-    const draftId = await seedLaunchableDraft(app);
-    const launchRes = await app.request(`/v1/solvernets/drafts/${draftId}/launch`, {
-      method: 'POST',
-      headers: authHeaders(),
-    });
-    const launchBody = (await launchRes.json()) as { solverNetId: string };
-    const launched = await waitFor(async () => {
-      const r = await store.loadRecord(launchBody.solverNetId);
-      return r?.status === 'launched' ? r : null;
-    });
-    return launched;
-  }
-
-  it('pause: launched → paused, stopGenerator called, status persisted', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const stops: LaunchedSolverNetRecord[] = [];
-    const launchBundle = makeLaunchDeps({
-      store,
-      pendingGenerators,
-      stopGenerator: async (r) => {
-        stops.push(r);
-      },
-    });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'paused' }),
-      },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as LaunchedSolverNetRecord;
-    expect(body.status).toBe('paused');
-    expect(stops).toHaveLength(1);
-
-    const onDisk = await store.loadRecord(launched.solverNetId);
-    expect(onDisk?.status).toBe('paused');
-  });
-
-  it('resume: paused → launched, startGenerator called', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const starts: LaunchedSolverNetRecord[] = [];
-    const launchBundle = makeLaunchDeps({
-      store,
-      pendingGenerators,
-      startGenerator: async (r) => {
-        starts.push(r);
-      },
-    });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    // First pause.
-    await app.request(`/v1/solvernets/launched/${launched.solverNetId}/lifecycle`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ target: 'paused' }),
-    });
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'launched' }),
-      },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as LaunchedSolverNetRecord;
-    expect(body.status).toBe('launched');
-    expect(starts).toHaveLength(1);
-  });
-
-  it('retire: launched → retired, stopGenerator called, terminal', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const stops: LaunchedSolverNetRecord[] = [];
-    const launchBundle = makeLaunchDeps({
-      store,
-      pendingGenerators,
-      stopGenerator: async (r) => {
-        stops.push(r);
-      },
-    });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'retired' }),
-      },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as LaunchedSolverNetRecord;
-    expect(body.status).toBe('retired');
-    expect(stops).toHaveLength(1);
-  });
-
-  it('refuses to transition a retired record (terminal)', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    // Retire first.
-    await app.request(`/v1/solvernets/launched/${launched.solverNetId}/lifecycle`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ target: 'retired' }),
-    });
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'paused' }),
-      },
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('lifecycle_terminal');
-  });
-
-  it('idempotent no-op when target equals current status', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const stops: LaunchedSolverNetRecord[] = [];
-    const launchBundle = makeLaunchDeps({
-      store,
-      pendingGenerators,
-      stopGenerator: async (r) => {
-        stops.push(r);
-      },
-    });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    // Pause.
-    await app.request(`/v1/solvernets/launched/${launched.solverNetId}/lifecycle`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ target: 'paused' }),
-    });
-    expect(stops).toHaveLength(1);
-
-    // Pause again — should be a no-op.
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'paused' }),
-      },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as LaunchedSolverNetRecord;
-    expect(body.status).toBe('paused');
-    // No additional stopGenerator call.
-    expect(stops).toHaveLength(1);
-  });
-
-  it('rejects unknown record id with 404', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const res = await app.request(
-      '/v1/solvernets/launched/missing-id/lifecycle',
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'paused' }),
-      },
-    );
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('record_not_found');
-  });
-
-  it('rejects body with invalid target value', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'banana' }),
-      },
-    );
-    expect(res.status).toBe(400);
   });
 });
 
