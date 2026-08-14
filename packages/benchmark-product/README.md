@@ -19,6 +19,9 @@ real-world custody.
 ## Status and prerequisites
 
 - Node.js 22 (the verified runtime is 22.23.1) and Yarn 4.13.0.
+- The packaged zero-Docker sample, reader verifier, and loopback viewer are
+  qualified on Ubuntu x64 and Apple-silicon macOS arm64. Windows and Intel
+  macOS remain unsupported; real agent, Docker, and Inspect paths have separate gates.
 - A checkout with the portal dependency distributions built in the order used
   by [Benchmark Product CI](../../.github/workflows/benchmark-product-ci.yml) is
   still required for mono development until the Jinn packages are public.

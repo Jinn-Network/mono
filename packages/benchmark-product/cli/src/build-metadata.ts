@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 
 export const BUILD_METADATA_KIND = "colophon-package-build/1" as const;
-/** The one v1 npm target that has a cold-machine CI proof. This is never inferred from a build host. */
-export const DEFAULT_QUALIFIED_TARGETS = ["linux/x64"] as const;
+/** v1 npm targets with cold-machine proofs. This is never inferred from a build host. */
+export const DEFAULT_QUALIFIED_TARGETS = ["darwin/arm64", "linux/x64"] as const;
 
 export interface ColophonBuildMetadata {
   readonly kind: typeof BUILD_METADATA_KIND;

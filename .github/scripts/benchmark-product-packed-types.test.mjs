@@ -97,6 +97,52 @@ function runExpectingExit(command, args, expectedExitCode, options = {}) {
       : reject(new Error(`${command} exited with ${code}, expected ${expectedExitCode}:\n${Buffer.concat(stdout)}${Buffer.concat(stderr)}`)));
   });
 }
+function proveViewer(command, args, options = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options });
+    const stdout = []; const stderr = [];
+    let settled = false;
+    let probing = false;
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+      finish(new Error('installed viewer did not become ready within 30 seconds'));
+    }, 30_000);
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error === undefined) resolvePromise(); else reject(error);
+    };
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.stderr.on('data', async (chunk) => {
+      stderr.push(chunk);
+      const match = /Viewer: (http:\/\/127\.0\.0\.1:\d+\/launch\?token=\S+)/u.exec(Buffer.concat(stderr).toString('utf8'));
+      if (match === null || settled || probing) return;
+      probing = true;
+      try {
+        const launch = await fetch(match[1], { redirect: 'manual' });
+        const cookie = launch.headers.get('set-cookie')?.split(';', 1)[0];
+        if (launch.status !== 303 || launch.headers.get('location') !== '/' || cookie === undefined) throw new Error('viewer launch handshake failed');
+        const headers = { cookie };
+        const [home, report] = await Promise.all([
+          fetch(new URL('/', match[1]), { headers }),
+          fetch(new URL('/bundle/index.html', match[1]), { headers }),
+        ]);
+        const [homeBytes, reportBytes] = await Promise.all([home.text(), report.text()]);
+        if (!home.ok || !homeBytes.includes('Verified: 6 of 6 checks passed')) throw new Error('verified viewer page was not served');
+        if (!report.ok || !reportBytes.includes('Colophon report')) throw new Error('authenticated bundle report was not served');
+        child.kill('SIGTERM');
+      } catch (cause) {
+        child.kill('SIGTERM');
+        finish(cause);
+      }
+    });
+    child.once('error', finish);
+    child.once('exit', (code) => code === 0
+      ? finish()
+      : finish(new Error(`${command} viewer exited with ${code}:\n${Buffer.concat(stdout)}${Buffer.concat(stderr)}`)));
+  });
+}
 async function packOne(directory, name) {
   const packed = JSON.parse(await run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', archivesRoot], { cwd: directory }));
   if (packed.length !== 1 || typeof packed[0]?.filename !== 'string') throw new Error(`npm pack returned an unexpected result for ${name}`);
@@ -136,6 +182,12 @@ function installedFirstPartyClosure(lockBytes) {
     const name = lockPackageName(location, record);
     return typeof name === 'string' && isFirstParty(name) ? [name] : [];
   }))].sort();
+}
+function npxInstalledBinary(cacheRoot, binary) {
+  const npxRoot = join(cacheRoot, '_npx');
+  const candidates = readdirSync(npxRoot).map((entry) => join(npxRoot, entry, 'node_modules', '.bin', binary)).filter(existsSync);
+  if (candidates.length !== 1) throw new Error(`expected one cached npx ${binary} binary, found ${JSON.stringify(candidates)}`);
+  return candidates[0];
 }
 async function startRegistry(records) {
   const requests = new Set();
@@ -221,6 +273,8 @@ try {
         throw new Error(`reader-only install unexpectedly contains ${forbidden} at some dependency depth`);
       }
     }
+    await rm(join(readerRoot, 'node_modules'), { recursive: true, force: true });
+    await rm(join(temporaryRoot, 'reader-npm-cache'), { recursive: true, force: true });
 
     await mkdir(consumerRoot);
     await writeFile(join(consumerRoot, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies: {
@@ -251,10 +305,21 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
       installedBuildMetadata.kind !== 'colophon-package-build/1'
       || installedBuildMetadata.packageVersion !== '1.0.0'
       || !/^[0-9a-f]{40}$/.test(installedBuildMetadata.sourceCommit)
-      || JSON.stringify(installedBuildMetadata.qualifiedTargets) !== JSON.stringify(['linux/x64'])
+      || JSON.stringify(installedBuildMetadata.qualifiedTargets) !== JSON.stringify(['darwin/arm64', 'linux/x64'])
     ) {
       throw new Error(`cold-installed CLI has invalid build provenance or qualification: ${JSON.stringify(installedBuildMetadata)}`);
     }
+    for (const [, name] of PUBLIC_PACKAGES) {
+      const installed = join(consumerRoot, 'node_modules', ...name.split('/'));
+      if (!statSync(installed).isDirectory() || statSync(installed).isSymbolicLink()) throw new Error(`${name} was not cold-installed as a real package directory`);
+      if (!registry.requests.has(`tarball:${name}`)) {
+        throw new Error(`cold install did not fetch ${name} through the ephemeral registry; observed ${JSON.stringify([...registry.requests].sort())}`);
+      }
+    }
+    const lock = await readFile(join(consumerRoot, 'package-lock.json'), 'utf8');
+    if (lock.includes('portal:') || lock.includes(familyRoot)) throw new Error('cold install retained a workspace portal or source-tree path');
+    await rm(join(consumerRoot, 'node_modules'), { recursive: true, force: true });
+    await rm(join(temporaryRoot, 'npm-cache'), { recursive: true, force: true });
 
     // Exercise the public one-shot selector exactly as a cold visitor will. The
     // consumer install above proves types; this separate empty directory proves
@@ -263,29 +328,36 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     await writeFile(join(oneShotRoot, 'package.json'), JSON.stringify({ private: true }, null, 2));
     await writeFile(join(oneShotRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
     const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-    const isQualifiedRuntime = process.platform === 'linux' && process.arch === 'x64';
+    const oneShotCache = join(temporaryRoot, 'one-shot-npm-cache');
+    const qualifiedRuntime = `${process.platform}/${process.arch}`;
+    const isQualifiedRuntime = installedBuildMetadata.qualifiedTargets.includes(qualifiedRuntime);
     if (!isQualifiedRuntime) {
       const forbiddenOutput = join(temporaryRoot, 'unsupported-target-must-not-exist');
       const unsupported = await runExpectingExit(
         npx,
         ['--yes', '@colophon-claims/cli@1', 'demo', '--output', forbiddenOutput, '--no-open', '--json'],
         1,
-        { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'one-shot-npm-cache') } },
+        { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: oneShotCache } },
       );
       const response = JSON.parse(unsupported.stdout);
       if (response.ok !== false || !response.error?.detail?.includes(`not qualified for ${process.platform}/${process.arch}`) || existsSync(forbiddenOutput)) {
         throw new Error(`unsupported one-shot target did not fail before creation: ${unsupported.stdout}${unsupported.stderr}`);
       }
-      console.log(`Proved @1 one-shot resolution and fail-before-creation on ${process.platform}/${process.arch}; retained-sample execution remains qualified to linux/x64 CI.`);
+      console.log(`Proved @1 one-shot resolution and fail-before-creation on ${qualifiedRuntime}; retained-sample execution is qualified to darwin/arm64 and linux/x64.`);
     } else {
     const demo = JSON.parse(await run(
       npx,
       ['--yes', '@colophon-claims/cli@1', 'demo', '--no-open', '--json'],
-      { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'one-shot-npm-cache') } },
+      { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: oneShotCache } },
     ));
     if (demo.ok !== true || demo.result?.portableChecks?.length !== 6 || demo.result?.output?.retained !== true) {
       throw new Error(`cold-installed Colophon sample did not retain a six-check bundle: ${JSON.stringify(demo)}`);
     }
+    await proveViewer(
+      npxInstalledBinary(oneShotCache, process.platform === 'win32' ? 'colophon.cmd' : 'colophon'),
+      ['open', '--bundle', demo.result.output.bundle, '--no-browser'],
+      { cwd: oneShotRoot },
+    );
     const receipt = JSON.parse(await readFile(join(demo.result.output.root, 'quickstart-receipt.json'), 'utf8'));
     if (receipt.sourceCommit !== installedBuildMetadata.sourceCommit || receipt.colophonVersion !== '1.0.0') {
       throw new Error(`quickstart receipt did not preserve the packaged immutable provenance: ${JSON.stringify(receipt)}`);
@@ -310,18 +382,9 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
       throw new Error(`reader package did not fail closed on a tampered bundle: ${tamperedReader.stdout}${tamperedReader.stderr}`);
     }
     }
-    for (const [, name] of PUBLIC_PACKAGES) {
-      const installed = join(consumerRoot, 'node_modules', ...name.split('/'));
-      if (!statSync(installed).isDirectory() || statSync(installed).isSymbolicLink()) throw new Error(`${name} was not cold-installed as a real package directory`);
-      if (!registry.requests.has(`tarball:${name}`)) {
-        throw new Error(`cold install did not fetch ${name} through the ephemeral registry; observed ${JSON.stringify([...registry.requests].sort())}`);
-      }
-    }
-    const lock = await readFile(join(consumerRoot, 'package-lock.json'), 'utf8');
-    if (lock.includes('portal:') || lock.includes(familyRoot)) throw new Error('cold install retained a workspace portal or source-tree path');
     console.log(isQualifiedRuntime
-      ? `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages, ran the retained sample, and reverified it with the reader package.`
-      : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public @1 selectors; linux/x64 CI completes sample execution and reader reverification.`);
+      ? `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages, ran the retained sample, served its verified loopback viewer, and reverified it with the reader package.`
+      : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public @1 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
   } finally { await registry.close(); }
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

@@ -9,7 +9,7 @@ const TEST_BUILD: ColophonBuildMetadata = {
   kind: BUILD_METADATA_KIND,
   packageVersion: "1.0.0",
   sourceCommit: "b".repeat(40),
-  qualifiedTargets: ["linux/x64"],
+  qualifiedTargets: ["darwin/arm64", "linux/x64"],
 };
 
 describe("Colophon install surface", () => {
@@ -19,8 +19,8 @@ describe("Colophon install surface", () => {
     progress() {},
   } as const;
 
-  test("defaults public qualification to the proved Ubuntu x64 target, never the build host", () => {
-    expect(DEFAULT_QUALIFIED_TARGETS).toEqual(["linux/x64"]);
+  test("defaults public qualification to the proved macOS arm64 and Ubuntu x64 targets, never the build host", () => {
+    expect(DEFAULT_QUALIFIED_TARGETS).toEqual(["darwin/arm64", "linux/x64"]);
   });
 
   test("renders product help without exposing the contributor command as the default", async () => {
@@ -94,11 +94,11 @@ describe("Colophon install surface", () => {
       ...context,
       cwd: parent,
       buildMetadata: TEST_BUILD,
-      runtimeTarget: { platform: "darwin", architecture: "arm64" },
+      runtimeTarget: { platform: "win32", architecture: "x64" },
     });
     expect(answer.exitCode).toBe(1);
-    expect(answer.stderr).toContain("not qualified for darwin/arm64");
-    expect(answer.stderr).toContain("Supported targets: linux/x64");
+    expect(answer.stderr).toContain("not qualified for win32/x64");
+    expect(answer.stderr).toContain("Supported targets: darwin/arm64, linux/x64");
     expect(answer.stderr).toContain("nothing was created");
     expect(existsSync(output)).toBe(false);
   });

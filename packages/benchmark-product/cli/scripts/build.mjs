@@ -7,7 +7,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const webRoot = join(root, "..", "web");
 const localWebRoot = join(root, "dist", "local-web");
 const standaloneWebRoot = join(localWebRoot, "packages", "benchmark-product", "web");
-const DEFAULT_QUALIFIED_TARGETS = ["linux/x64"];
+const DEFAULT_QUALIFIED_TARGETS = ["darwin/arm64", "linux/x64"];
 
 async function run(command, args, cwd) {
   await new Promise((resolve, reject) => {

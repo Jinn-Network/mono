@@ -260,8 +260,32 @@ jobs:
           yarn playwright install --with-deps chromium
           BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn test:browser
 
+  # Qualification is target-specific evidence. This repeats the same packed,
+  # local-registry visitor journey on a clean Apple-silicon runner; it does not
+  # qualify Docker/Inspect or paid provider-agent execution on macOS.
+  macos_arm64_qualification:
+    needs: [architecture, product]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require the declared macOS arm64 target
+        run: |
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+          test "$RUNNER_ARCH" = "ARM64"
+      - name: Restore the product runtime distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          path: packages
+      - name: Qualify the zero-Docker sample, viewer, verifier, and CLI tarballs
+        run: node .github/scripts/benchmark-product-packed-types.test.mjs
+
   verify:
-    needs: [architecture, product, web]
+    needs: [architecture, product, web, macos_arm64_qualification]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -270,11 +294,13 @@ jobs:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           PRODUCT_RESULT: ${{ needs.product.result }}
           WEB_RESULT: ${{ needs.web.result }}
+          MACOS_ARM64_RESULT: ${{ needs.macos_arm64_qualification.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$PRODUCT_RESULT" \
-            "$WEB_RESULT"; do
+            "$WEB_RESULT" \
+            "$MACOS_ARM64_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4

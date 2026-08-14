@@ -1,12 +1,13 @@
 # Colophon self-serve experience
 
-- **Version:** 0.1
+- **Version:** 0.2
 - **Date:** 2026-08-13
+- **Updated:** 2026-08-14
 - **Status:** Accepted; implementation authorized 2026-08-13
 - **Decision owner:** Operator
 - **Design scope:** From a cold product-site visitor to a locally published, independently verified benchmark bundle
 - **Source of record:** This repository
-- **Review:** Architecture-boundary and standards/adversarial passes completed 2026-08-13; blocking findings resolved in this draft
+- **Review:** Architecture-boundary and standards/adversarial passes completed 2026-08-13; zero-Docker macOS arm64 qualification added 2026-08-14
 
 ## 1. Decision summary
 
@@ -370,7 +371,7 @@ Failure happens before expensive or destructive work whenever possible. Every re
 | Interrupted run | Preserve the owned workspace and print the exact resume command. The one-shot sample may clean only disposable staging after its output copy is durable. |
 | Verification failure | Preserve the bundle unchanged, exit non-zero, name the failed check/path, and never print “verified” or a partial success headline. |
 
-The first supported release matrix must be evidence-backed and explicit. The current CI qualifies Ubuntu with Node 22; macOS is likely the first visitor platform but must receive a real clean-install and process-containment test before it is promised. Windows remains unsupported until separately qualified.
+The v1 zero-Docker release matrix is **Ubuntu x64 and Apple-silicon macOS arm64 with Node 22**. Both targets run the same clean local-registry proof: resolve the public `@1` selectors, install real tarball directories, run and retain the sample, independently reverify and reject a tampered bundle, and serve the verified report from a loopback-only viewer. The package embeds this exact matrix rather than inferring support from its build host. Windows and Intel macOS remain unsupported until separately qualified. This matrix does not qualify Docker/Inspect or provider-agent execution; those paths retain their own `doctor`, runtime, credential, and cost gates.
 
 ## 6. Install and distribution decision
 
@@ -682,7 +683,8 @@ source import. Any proof that specifically requires public Jinn packages remains
 an explicit blocked release gate, not a simulated success.
 
 Publication remains held until demand, registry identity/custody, platform
-publication, supported-OS qualification, and release-policy gates are satisfied.
+publication, and release-policy gates are satisfied. Zero-Docker sample, reader,
+viewer, and CLI qualification is implemented for `linux/x64` and `darwin/arm64`.
 
 The implemented pre-publication seam supports protected API-key grants for both built-in
 adapters and a real protected credential-artifact storage/runtime path. Its harness-login
@@ -721,7 +723,10 @@ The operator must decide before public package publication:
 1. Reserve `@colophon-claims` and record who holds recovery and trusted-publisher authority.
 2. Which repository, homepage, bugs, author, and attribution metadata express `ritsukai` as the public face, the Jinn mono as current source of record, and `@jinn-network/*` as the platform without implying they are the same identity?
 3. May product-only Colophon releases use a demand-gated lane between Monday platform cuts, or do Rules 8–9 continue to gate them even though the dependency set is unchanged?
-4. Which OS/architecture is qualified first? Current CI evidence supports Ubuntu; macOS must be proved before the site promises it.
+
+The v1 zero-Docker target decision is resolved: `linux/x64` and `darwin/arm64` are
+qualified by target-specific cold-registry jobs. That decision does not widen the
+qualification table for real agent logins, provider calls, Docker, or Inspect.
 
 Later decisions are deliberately deferred:
 
