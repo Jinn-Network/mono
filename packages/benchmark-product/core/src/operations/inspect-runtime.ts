@@ -1,5 +1,5 @@
 import { isDraftMutable, transition, type LifecycleState } from "../domain/lifecycle.js";
-import { parseDraftSpec, type DraftDocument } from "../domain/draft.js";
+import { parseDraftSpec, resolveAssurance, type DraftDocument } from "../domain/draft.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import {
@@ -58,9 +58,6 @@ export function selectInspectEvaluation(
       }
       if (current.spec.taskSet.kind !== "pendingSample") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, "Inspect selection requires a draft with no benchmark attached");
-      }
-      if (current.spec.assurance.preset !== "direct-check" || current.spec.assurance.overrides !== undefined) {
-        refuse("validation", `drafts.${input.draftId}.assurance`, "the first Inspect slice supports direct-check only; same-execution Inspect scoring is not independent evaluation");
       }
       if ((input.scorer === undefined) === (input.scoring === undefined)) {
         refuse("validation", "inspect.selection", "select exactly one of scorer or scoring");
@@ -124,7 +121,11 @@ export function selectInspectEvaluation(
         benchmarkSha256: artifacts.benchmarkSha256,
         taskSha256: artifacts.taskSha256,
         evaluationSpecSha256: artifacts.evaluationSpecSha256,
-        runtimeMethod: describeInspectRuntimeMethod(manifest, artifacts.manifestSha256),
+        runtimeMethod: describeInspectRuntimeMethod(
+          manifest,
+          artifacts.manifestSha256,
+          resolveAssurance(current.spec.assurance),
+        ),
       };
     },
   });

@@ -48,6 +48,11 @@ import {
   inspectRuntimeMethodForBinding,
   type InspectRuntimeMethodDisclosure,
 } from "../runtime/inspect/disclosure.js";
+import {
+  deriveInspectEvaluationStrategy,
+  INSPECT_SEPARATE_ASSURANCE_LIMITATIONS,
+} from "../runtime/inspect/assurance.js";
+import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -83,10 +88,6 @@ export async function verifyRunWorkspace(
   input: RunVerifyInput,
 ): Promise<RunVerifyResult> {
       const document = readDraftDocument(context.workspaceDir, input.draftId);
-      const runtimeMethod = inspectRuntimeMethodForBinding(
-        context.workspaceDir,
-        document.spec.evaluationRuntime,
-      );
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
       }
@@ -99,13 +100,18 @@ export async function verifyRunWorkspace(
           `draft ${input.draftId} has no sealed Matrix yet — nothing to verify — run collect first`,
         );
       }
+      const runRecord = parseRun(getSealedBytes(context.workspaceDir, runState.runSha256));
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        context.workspaceDir,
+        document.spec.evaluationRuntime,
+        runRecord.policy.evaluation,
+      );
 
       const checks: RunVerifyCheck[] = [];
 
       // ── 1. matrix-rederivation ───────────────────────────────────────────────────────────
       const matrixBytes = getSealedBytes(context.workspaceDir, runState.matrixSha256);
       const matrixRecord = parseMatrix(matrixBytes);
-      const runRecord = parseRun(getSealedBytes(context.workspaceDir, runState.runSha256));
       const benchRecord = parseBenchmark(getSealedBytes(context.workspaceDir, document.spec.taskSet.benchmarkSha256));
       const expected = expectedCellSet(benchRecord, runRecord);
       const fold = foldRunJournal(readRunJournalEntries(context.workspaceDir, input.draftId));
@@ -208,6 +214,10 @@ export async function verifyRunWorkspace(
         runRecord,
         draftId: input.draftId,
         assurancePreset: document.spec.assurance.preset,
+        ...(document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+          && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
+          ? { additionalLimitations: INSPECT_SEPARATE_ASSURANCE_LIMITATIONS }
+          : {}),
         ...(previewLog === undefined
           ? {}
           : {
