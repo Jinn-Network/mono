@@ -243,11 +243,11 @@ export const productName: string = PRODUCT_BRANDING.displayName;
 const guiInitCapability = GUI_CAPABILITY_CATALOG.initWorkspace;
 export const guiInitOperation: string = guiInitCapability.status === 'shipped'
   ? guiInitCapability.action
-  : guiInitCapability.deferredTo;
+  : guiInitCapability.reason;
 const guiResultsCapability = GUI_CAPABILITY_CATALOG.runResults;
 export const guiResultsOperation: string = guiResultsCapability.status === 'shipped'
   ? guiResultsCapability.action
-  : guiResultsCapability.deferredTo;
+  : guiResultsCapability.reason;
 `,
   );
   await writeFile(join(consumerRoot, 'tsconfig.json'), JSON.stringify({
