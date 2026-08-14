@@ -20,13 +20,14 @@ describe("Colophon production presentation contract", () => {
     expect(source("public/brand/mark.svg")).toContain('aria-label="Colophon mark"');
   });
 
-  test("renders the Colophon public promise and real workspace CTA", () => {
+  test("renders the local three-choice self-serve home", () => {
     const page = source("src/app/page.tsx");
-    expect(page).toContain("categoryDescriptor");
-    expect(page).toContain("PRODUCT_BRANDING.tagline");
-    expect(page).toContain("PRODUCT_BRANDING.promise");
+    expect(page).toContain("Run the sample");
+    expect(page).toContain("Verify a bundle");
+    expect(page).toContain("Use my work");
+    expect(page).toContain("no account, no API key, no funds, no Docker");
+    expect(page).toContain('href="/workspace/new?journey=own-work"');
     expect(page).toContain('href="/workspace"');
-    expect(page).toContain('href="/preview/reports"');
   });
 
   test("keeps future hosted surfaces allowlisted, read-only, and visibly labelled", () => {

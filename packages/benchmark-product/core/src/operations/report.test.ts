@@ -1552,6 +1552,9 @@ describe("portable public bundle", () => {
     const manifest = JSON.parse(readFileSync(join(base, "bundle.json"), "utf8")) as { files: Array<{ path: string }> };
     const manifestPaths = new Set(manifest.files.map((file) => file.path));
     const casPaths = [...manifestPaths].filter((path) => /^records\/[a-f0-9]{64}\.bin$/u.test(path)).sort();
+    const reportHtml = readFileSync(join(base, "index.html"), "utf8");
+    expect(reportHtml).toContain("What happened, task by task");
+    expect(reportHtml).toContain("No comparative winner is stated");
     const renderedLinks = (path: string): string[] => {
       const body = readFileSync(join(base, path), "utf8");
       return [

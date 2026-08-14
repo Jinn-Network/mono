@@ -94,7 +94,7 @@ describe("private production web security contract", () => {
     expect(browser).toContain("results.violations, `${label}");
     expect(browser).not.toContain("violation.impact ===");
     for (const state of [
-      "landing route",
+      "local three-choice route",
       "new draft route",
       "uninitialized workspace",
       "initialized workspace",

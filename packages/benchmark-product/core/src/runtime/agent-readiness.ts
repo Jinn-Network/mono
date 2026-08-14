@@ -42,7 +42,7 @@ function requestedAdapter(pinning: Readonly<Record<string, unknown>>): AgentAdap
 }
 
 function executableRemediation(adapter: AgentAdapter): string {
-  return `Re-observe ${adapter} and replace its profile with colophon agent add --file <profile.json>.`;
+  return `Re-observe ${adapter} with colophon agent add --agent <id> --adapter ${adapter} --model <exact-model-id> --effort low.`;
 }
 
 function projectDoctorFinding(
@@ -79,7 +79,7 @@ function projectDoctorFinding(
       ready: false,
       code: "credential-missing",
       detail: `${adapter} has no usable Colophon credential grant. A real run may make paid provider calls.`,
-      remediation: `Configure one with colophon agent credentials --agent ${finding.agentId} --api-key-file <path>.`,
+      remediation: `Run colophon agent login --agent ${finding.agentId} for a qualified subscription build, or explicitly import an API key file.`,
     };
   }
   throw new Error("unreachable agent doctor state");
@@ -129,7 +129,7 @@ export function assessAgentRuntimeReadiness(
         ready: false,
         code: "profile-missing",
         detail: `No configured ${adapter} profile matches this arm's exact harness, model, effort, and executable digest.`,
-        remediation: `Add the exact profile with colophon agent add --file <profile.json>, then select it again.`,
+        remediation: `Add the exact profile with colophon agent add --agent <id> --adapter ${adapter} --model <exact-model-id> --effort low, then select it again.`,
       }];
     }
 

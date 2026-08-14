@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { doctorAgent } from "./doctor.js";
+import { captureQualifiedSubscriptionLogin } from "./login.js";
 import { profileArmPinning } from "./profile.js";
-import { configuredAgentRuntimes, credentialGrantDescriptor, readAgentProfile, readCredentialGrant, requireQualifiedHarnessLogin, storeAgentProfile, storeApiKeyCredential, storeQualifiedLoginArtifact } from "./store.js";
+import { configuredAgentRuntimes, credentialGrantDescriptor, observeAndStoreAgentProfile, readAgentProfile, readCredentialGrant, requireQualifiedHarnessLogin, storeAgentProfile, storeApiKeyCredential, storeQualifiedLoginArtifact } from "./store.js";
 
 let root: string;
 let dataDir: string;
@@ -42,6 +43,127 @@ function profile() {
 }
 
 describe("machine-local agent profiles", () => {
+  it("guided setup resolves a Codex npm shim to the native binary it actually launches", () => {
+    const packageRoot = join(root, "node_modules", "@openai", "codex");
+    const shim = join(packageRoot, "bin", "codex.js");
+    const native = join(packageRoot, "node_modules", "@openai", "codex-darwin-arm64", "vendor", "aarch64-apple-darwin", "bin", "codex");
+    mkdirSync(join(packageRoot, "bin"), { recursive: true });
+    mkdirSync(join(native, ".."), { recursive: true });
+    writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "@openai/codex", version: "0.147.0" }));
+    writeFileSync(shim, "#!/usr/bin/env node\n// Unified entry point for Codex CLI.\n", { mode: 0o700 });
+    writeFileSync(native, "#!/bin/sh\necho 'codex-cli 0.147.0'\n", { mode: 0o700 });
+    chmodSync(shim, 0o700);
+    chmodSync(native, 0o700);
+
+    const stored = observeAndStoreAgentProfile(dataDir, {
+      agentId: "codex-subscription",
+      adapter: "codex",
+      model: "gpt-5.3-codex-mini",
+      effort: "low",
+      executable: shim,
+    }, { platform: "darwin", arch: "arm64" });
+    expect(stored.executable).toEqual({
+      path: realpathSync(native),
+      version: "0.147.0",
+      sha256: createHash("sha256").update(readFileSync(native)).digest("hex"),
+    });
+    expect(profileArmPinning(stored)).toMatchObject({ harness: { digest: stored.executable.sha256 } });
+  });
+
+  it("guided setup refuses drifting model aliases", () => {
+    expect(() => observeAndStoreAgentProfile(dataDir, {
+      agentId: "claude-alias",
+      adapter: "claude-code",
+      model: "sonnet",
+      effort: "low",
+      executable,
+    })).toThrow(/exact provider model identifier/u);
+  });
+
+  it("captures a qualified Claude subscription token only inside owned temporary storage", () => {
+    const temporaryBase = join(root, "login-tmp");
+    mkdirSync(temporaryBase, { mode: 0o700 });
+    const qualified = {
+      ...profile(),
+      agentId: "claude-subscription",
+      adapter: "claude-code" as const,
+      executable: {
+        path: executable,
+        version: "2.1.222",
+        sha256: "c66a6cc6fa2e8145bb1a6e77831f2caf4b83690ff04650500dfa6e2c05ca997c",
+      },
+      model: "claude-haiku-4-5-20251001",
+      effort: "low" as const,
+    };
+    const grant = captureQualifiedSubscriptionLogin(dataDir, qualified, {
+      temporaryBase,
+      validateExecutable() {},
+      runner(invocation) {
+        expect(invocation.args).toEqual(["setup-token"]);
+        expect(invocation.captureStdout).toBe(true);
+        expect(invocation.env.HOME).toContain("colophon-subscription-login-");
+        expect(invocation.env.CLAUDE_CONFIG_DIR).toContain("colophon-subscription-login-");
+        return { status: 0, stdout: "created sk-ant-oat01-fixture_subscription_token_1234567890\n" };
+      },
+    });
+    expect(grant).toMatchObject({ agentId: "claude-subscription", kind: "credential-artifact" });
+    expect(readFileSync(credentialGrantDescriptor(dataDir, grant).file, "utf8")).toBe("sk-ant-oat01-fixture_subscription_token_1234567890");
+    expect(readdirSync(temporaryBase)).toEqual([]);
+  });
+
+  it("accepts only auth.json from an isolated qualified Codex device login", () => {
+    const temporaryBase = join(root, "codex-login-tmp");
+    mkdirSync(temporaryBase, { mode: 0o700 });
+    const qualified = {
+      ...profile(),
+      agentId: "codex-subscription",
+      executable: {
+        path: executable,
+        version: "0.147.0",
+        sha256: "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+      },
+      model: "gpt-5.3-codex-mini",
+      effort: "low" as const,
+    };
+    const grant = captureQualifiedSubscriptionLogin(dataDir, qualified, {
+      temporaryBase,
+      validateExecutable() {},
+      runner(invocation) {
+        expect(invocation.args).toEqual(["login", "--device-auth"]);
+        expect(invocation.captureStdout).toBe(false);
+        writeFileSync(join(invocation.env.CODEX_HOME!, "auth.json"), JSON.stringify({ tokens: { access_token: "private" } }), { mode: 0o600 });
+        return { status: 0, stdout: "" };
+      },
+    });
+    expect(grant).toMatchObject({ agentId: "codex-subscription", kind: "credential-artifact" });
+    expect(readdirSync(temporaryBase)).toEqual([]);
+  });
+
+  it("refuses and cleans a Codex device login that writes any unqualified extra file", () => {
+    const temporaryBase = join(root, "codex-login-extra-tmp");
+    mkdirSync(temporaryBase, { mode: 0o700 });
+    const qualified = {
+      ...profile(),
+      executable: {
+        path: executable,
+        version: "0.147.0",
+        sha256: "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+      },
+      model: "gpt-5.3-codex-mini",
+      effort: "low" as const,
+    };
+    expect(() => captureQualifiedSubscriptionLogin(dataDir, qualified, {
+      temporaryBase,
+      validateExecutable() {},
+      runner(invocation) {
+        writeFileSync(join(invocation.env.CODEX_HOME!, "auth.json"), "{}", { mode: 0o600 });
+        writeFileSync(join(invocation.env.CODEX_HOME!, "config.toml"), "unexpected", { mode: 0o600 });
+        return { status: 0, stdout: "" };
+      },
+    })).toThrow(/files other than/u);
+    expect(readdirSync(temporaryBase)).toEqual([]);
+  });
+
   it("stores strict profiles outside the workspace and compiles only identity evidence into an arm", () => {
     const stored = storeAgentProfile(dataDir, profile());
     expect(readAgentProfile(dataDir, "codex-main")).toEqual(stored);
@@ -72,7 +194,7 @@ describe("machine-local agent profiles", () => {
     expect(readCredentialGrant(dataDir, "codex-main")).toBeUndefined();
   });
 
-  it("keeps the credential-artifact seam closed while the internal qualification table is empty", () => {
+  it("keeps the credential-artifact seam closed for an executable outside the qualification table", () => {
     const stored = storeAgentProfile(dataDir, profile());
     expect(() => storeQualifiedLoginArtifact(dataDir, stored, secretSource)).toThrow(/not qualified/i);
 

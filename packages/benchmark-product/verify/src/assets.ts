@@ -7,6 +7,7 @@ import { Buffer } from "node:buffer";
 import { PRODUCT_BRANDING } from "./profile/branding.js";
 import { COLOPHON_MARK_SVG } from "./profile/branding-assets.js";
 import type { ClaimPackage } from "./profile/claim.js";
+import type { PublicComparisonCell, PublicComparisonView } from "./comparison.js";
 
 export interface PublicAssetInput {
   readonly claim: ClaimPackage;
@@ -17,6 +18,8 @@ export interface PublicAssetInput {
   /** Canonically sorted identities for every authenticated `records/<sha>.bin` closure member. */
   readonly recordSha256s: readonly string[];
   readonly dissentCellKeys: readonly string[];
+  /** Verifier-derived, authenticated human projection. Absent only for legacy bundle assets. */
+  readonly comparison?: PublicComparisonView;
 }
 
 interface WilsonArmFact {
@@ -335,6 +338,65 @@ function attritionRows(input: PublicAssetInput): string {
   ).join("");
 }
 
+function cellScore(cell: PublicComparisonCell): string {
+  return cell.primaryScore === undefined
+    ? "No primary score"
+    : `${cell.primaryScore.value} ${cell.primaryScore.name} (${cell.primaryScore.direction})`;
+}
+
+function descriptiveComparisonHtml(comparison: PublicComparisonView): string {
+  const fact = comparison.descriptiveComparison;
+  if (fact === undefined) return '<p class="neutral">No paired descriptive measurement is available. No comparative winner is stated.</p>';
+  return `<p class="neutral">Across ${fact.pairedCells} paired cells, ${escapeMarkup(fact.firstArm)} had lower ${fact.measurement} in ${fact.lowerByFirst}; ${escapeMarkup(fact.secondArm)} had lower ${fact.measurement} in ${fact.lowerBySecond}; ${fact.ties} tied. Lower is better. This is descriptive evidence, not a registered comparative winner.</p>`;
+}
+
+function comparisonMatrixHtml(comparison: PublicComparisonView): string {
+  const header = comparison.arms.map((arm) => `<th scope="col">${escapeMarkup(arm)}</th>`).join("");
+  const rows = comparison.tasks.map((task) => {
+    const armCells = comparison.arms.map((arm) => {
+      const cells = comparison.cells.filter((cell) => cell.taskDigest === task.digest && cell.armId === arm);
+      if (cells.length === 0) return "<td>Not accounted</td>";
+      return `<td>${cells.map((cell) => `<a href="index.html#cell-${escapeMarkup(cell.cellKey)}"><strong>${escapeMarkup(cell.outputSummary)}</strong><br>${escapeMarkup(cellScore(cell))}<br><span class="source-label">${escapeMarkup(cell.outcome)} · replicate ${cell.replicate}</span></a>`).join("<hr>")}</td>`;
+    }).join("");
+    return `<tr><th scope="row"><strong>${escapeMarkup(task.label)}</strong><br><span class="source-label">${escapeMarkup(task.summary)}</span></th>${armCells}</tr>`;
+  }).join("");
+  return `<div class="table-scroll" tabindex="0" role="region" aria-label="Authenticated task by arm comparison"><table class="comparison-table"><caption>Each configuration faced the same authenticated Tasks</caption><thead><tr><th scope="col">Task</th>${header}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function comparisonCellDetailsHtml(comparison: PublicComparisonView): string {
+  return comparison.cells.map((cell) => {
+    const outputLinks = cell.outputs.map((output) => `<li><a href="index.html#records-heading">${escapeMarkup(output.name)}</a>: ${escapeMarkup(output.summary)} <span class="digest">${escapeMarkup(output.sha256)}</span></li>`).join("");
+    const verdicts = cell.verdicts.map((verdict) => `<li><a href="index.html#records-heading">${escapeMarkup(verdict.evaluator)}</a>: ${escapeMarkup(verdict.verdict)}<pre>${escapeMarkup(canonicalText(verdict.measurements))}</pre></li>`).join("");
+    return `<details id="cell-${escapeMarkup(cell.cellKey)}" class="cell-detail"><summary><strong>${escapeMarkup(cell.armId)}</strong> · Task ${escapeMarkup(cell.taskDigest.slice(0, 12))} · replicate ${cell.replicate} · ${escapeMarkup(cellScore(cell))}</summary><p>${escapeMarkup(cell.outputSummary)}</p><h4>Authenticated outputs</h4><ul>${outputLinks || "<li>No solve output.</li>"}</ul><h4>Authenticated verdict evidence</h4><ul>${verdicts || "<li>No verdict evidence.</li>"}</ul></details>`;
+  }).join("");
+}
+
+function comparisonSectionHtml(comparison: PublicComparisonView | undefined): string {
+  if (comparison === undefined) return "";
+  const sampleDisclosure = comparison.sampleKind === "bundled-prediction"
+    ? '<p class="sample-note">This bundled sample demonstrates the evidence path, not agent quality. Its outcomes are synthetic and derived from the sample consensus inputs. No comparative winner is stated.</p>'
+    : "";
+  return `<section id="comparison" aria-labelledby="comparison-heading"><p class="eyebrow">Answer first</p><h2 id="comparison-heading">What happened, task by task</h2>${descriptiveComparisonHtml(comparison)}${sampleDisclosure}${comparisonMatrixHtml(comparison)}<h3>Open a cell to inspect its evidence</h3>${comparisonCellDetailsHtml(comparison)}</section>`;
+}
+
+function comparisonSectionMarkdown(comparison: PublicComparisonView | undefined): string {
+  if (comparison === undefined) return "";
+  const fact = comparison.descriptiveComparison;
+  const descriptive = fact === undefined
+    ? "No paired descriptive measurement is available. No comparative winner is stated."
+    : `Across ${fact.pairedCells} paired cells, ${escapeMarkdown(fact.firstArm)} had lower ${fact.measurement} in ${fact.lowerByFirst}; ${escapeMarkdown(fact.secondArm)} had lower ${fact.measurement} in ${fact.lowerBySecond}; ${fact.ties} tied. Lower is better. This is descriptive evidence, not a registered comparative winner.`;
+  const sample = comparison.sampleKind === "bundled-prediction"
+    ? "\n\nThis bundled sample demonstrates the evidence path, not agent quality. Its outcomes are synthetic and derived from the sample consensus inputs."
+    : "";
+  const tasks = comparison.tasks.map((task) => {
+    const cells = comparison.cells.filter((cell) => cell.taskDigest === task.digest).map((cell) =>
+      `  - **${escapeMarkdown(cell.armId)}**, replicate ${cell.replicate}: ${escapeMarkdown(cell.outputSummary)}; ${escapeMarkdown(cellScore(cell))}; outcome ${escapeMarkdown(cell.outcome)}. Task evidence \`${escapeMarkdownCode(task.evidencePath)}\`; outputs ${cell.outputs.map((output) => `\`${escapeMarkdownCode(output.evidencePath)}\``).join(", ") || "none"}; verdicts ${cell.verdicts.map((verdict) => `\`${escapeMarkdownCode(verdict.evidencePath)}\``).join(", ") || "none"}.`
+    ).join("\n");
+    return `- **${escapeMarkdown(task.label)}** — ${escapeMarkdown(task.summary)}\n${cells}`;
+  }).join("\n");
+  return `## What happened, task by task\n\n${descriptive}${sample}\n\n${tasks}\n\n`;
+}
+
 function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const outcome = input.matrix.completeness.runOutcome;
   const status = outcomeLabel(outcome);
@@ -385,7 +447,7 @@ ${embeddedFontCss()}
 ${reportFacts.kind === "wilson" ? '<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>' : `<p class="neutral">${escapeMarkup(pairedEstimateLine(reportFacts))}</p>`}
 </header>
 <main>
-<section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>
+<section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison)}`}
 <section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>
 <section aria-labelledby="matrix-heading"><h2 id="matrix-heading">Sealed Matrix accounting</h2><p class="source-label">Source: authenticated <a href="matrix.json">matrix.json</a>; values below are copied without reconciliation.</p><pre>${escapeMarkup(canonicalText({ completeness: input.matrix.completeness, attrition: input.matrix.attrition }))}</pre><h3>Completeness and attrition</h3><dl class="facts"><div><dt>Matrix run outcome</dt><dd>${escapeMarkup(outcome)}</dd></div><div><dt>Matrix expected</dt><dd>${input.matrix.completeness.expected}</dd></div><div><dt>Matrix judged</dt><dd>${input.matrix.completeness.judged}</dd></div><div><dt>Matrix floor</dt><dd>${escapeMarkup(input.matrix.completeness.floor)}</dd></div></dl><div class="table-scroll" tabindex="0" role="region" aria-label="Per-arm Matrix attrition"><table><caption>Exact per-arm attrition stored in the Matrix</caption><thead><tr><th scope="col">Arm</th><th scope="col">Expected</th><th scope="col">Judged</th><th scope="col">Unjudged</th><th scope="col">Unscorable</th><th scope="col">Expired</th><th scope="col">Invalidated</th><th scope="col">Excluded</th><th scope="col">Replacements</th></tr></thead><tbody>${attritionRows(input)}</tbody></table></div><h3>Matrix asymmetry flags</h3>${list(input.matrix.attrition.asymmetryFlags, "None recorded in the Matrix.")}</section>
 <section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>${reportFacts.kind === "wilson" ? "Sealed Report arm results" : "Sealed Report paired comparison"}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
@@ -507,7 +569,7 @@ Report SHA-256: \`${input.reportSha256}\`
 
 Matrix SHA-256: \`${input.matrixSha256}\`
 
-Read the [full report](index.html), [limitations](index.html#limitations), and [portable verification instructions](index.html#verification).
+Read the [full report](index.html), [limitations](index.html#limitations), and [portable verification instructions](index.html#verification).${input.comparison === undefined ? "" : `\n\n${comparisonSectionMarkdown(input.comparison).trimEnd()}`}
 
 ## Prominent adverse facts
 

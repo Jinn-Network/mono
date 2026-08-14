@@ -82,7 +82,7 @@ describe("guided own-work draft surface", () => {
           ready: false,
           code: "credential-missing",
           detail: "Codex has no usable Colophon credential grant. A real run may make paid provider calls.",
-          remediation: "Configure one with colophon agent credentials --agent codex-main --api-key-file <path>.",
+          remediation: "Run colophon agent login --agent codex-main for a qualified subscription build, or explicitly import an API key file.",
         }],
       },
     });
@@ -91,7 +91,7 @@ describe("guided own-work draft surface", () => {
 
     expect(markup).toContain("Real agent setup is not ready");
     expect(markup).toContain("This check makes no provider request.");
-    expect(markup).toContain("colophon agent credentials");
+    expect(markup).toContain("colophon agent login");
     expect(markup).toContain("<button disabled=\"\">Quote</button>");
     expect(markup).not.toContain(privateSentinel);
   });
