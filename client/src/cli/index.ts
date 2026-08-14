@@ -49,7 +49,6 @@ import solverPluginsCommand from './commands/solver-plugins.js';
 import integrationsCommand from './commands/integrations.js';
 import predictionScoreboardCommand from './commands/prediction-scoreboard.js';
 import captureCommand from './commands/capture.js';
-import codedigestRevertCheckCommand from './commands/codedigest-revert-check.js';
 import evalCommand from './commands/eval.js';
 import scrubCommand from './commands/scrub.js';
 import nativeRequesterCommand from './commands/native-requester.js';
@@ -97,7 +96,6 @@ const COMMANDS: CommandModule[] = [
   harnessesCommand,
   solverPluginsCommand,
   integrationsCommand,
-  codedigestRevertCheckCommand,
   evalCommand,
   scrubCommand,
   nativeRequesterCommand,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { ProductErrorCode } from "@jinn-network/benchmark-product-core";
+import type { ProductErrorCode } from "@colophon-claims/core";
 import { projectProductErrorForGui, projectPublishErrorForGui } from "./gui-error";
 
 const PRODUCT_ERROR_CODES: readonly ProductErrorCode[] = [

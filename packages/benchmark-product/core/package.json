@@ -1,8 +1,10 @@
 {
-  "name": "@jinn-network/benchmark-product-core",
-  "version": "0.1.0",
+  "name": "@colophon-claims/core",
+  "version": "1.0.0",
   "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product domain — workspace, draft model, lifecycle, audit journal, principals/authority, the operations-library facade, and the CLI agent surface.",
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -21,10 +23,17 @@
       "import": "./dist/index.js",
       "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./sample-lifecycle": {
+      "import": "./quickstart/sample-lifecycle.mjs",
+      "types": "./quickstart/sample-lifecycle.d.ts"
     }
   },
   "files": [
     "dist/",
+    "quickstart/ownership.mjs",
+    "quickstart/sample-lifecycle.d.ts",
+    "quickstart/sample-lifecycle.mjs",
     "README.md"
   ],
   "scripts": {
@@ -32,6 +41,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "public-quickstart": "./quickstart/public-quickstart.mjs",
+    "publication-release-rehearsal": "COLOPHON_PUBLICATION_RELEASE_REHEARSAL=1 vitest run src/conformance/publication-release-rehearsal.external.test.ts --reporter=verbose",
     "generate:parity": "node scripts/generate-parity-matrix.mjs",
     "check:parity": "node scripts/generate-parity-matrix.mjs --check",
     "p5:fixture:mint": "node scripts/mint-micro-slate.mjs",
@@ -43,6 +53,7 @@
     "prepack": "yarn build"
   },
   "dependencies": {
+    "@colophon-claims/verify": "1.0.0",
     "@fontsource-variable/newsreader": "5.3.0",
     "@fontsource-variable/public-sans": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
@@ -50,8 +61,13 @@
     "@jinn-network/benchmarking-aggregate": "0.1.0",
     "@jinn-network/benchmarking-interop": "0.1.0",
     "@jinn-network/benchmarking-local": "0.1.0",
+    "@jinn-network/benchmarking-publication": "0.1.0",
     "@jinn-network/benchmarking-records": "0.1.0",
     "@jinn-network/benchmarking-run": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/record-discovery-serve": "0.1.0",
+    "@jinn-network/record-discovery-transport-http": "0.1.0",
+    "@jinn-network/record-publication": "0.1.0",
     "@jinn-network/task-admission": "0.1.0",
     "@jinn-network/task-execution-backend": "0.1.0",
     "@jinn-network/task-execution-backend-local": "0.1.0",
@@ -67,10 +83,17 @@
     "zod": "4.4.3"
   },
   "resolutions": {
+    "@colophon-claims/verify": "portal:../verify",
     "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
     "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
     "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
     "@jinn-network/benchmarking-local": "portal:../../benchmarking/local",
+    "@jinn-network/benchmarking-publication": "portal:../../benchmarking/publication",
+    "@jinn-network/record-publication": "portal:../../discovery/publication",
+    "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
+    "@jinn-network/record-discovery-client": "portal:../../discovery/client",
+    "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",
+    "@jinn-network/record-discovery-transport-http": "portal:../../discovery/transport-http",
     "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
     "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
     "@jinn-network/environment-record": "portal:../../environments/record",
@@ -95,9 +118,5 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
-  },
-  "bin": {
-    "benchmark-product": "./dist/cli/bin.js",
-    "colophon": "./dist/cli/bin.js"
   }
 }

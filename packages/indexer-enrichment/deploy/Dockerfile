@@ -32,6 +32,33 @@ ENV JINN_ENRICHMENT_COMMIT=$JINN_ENRICHMENT_COMMIT
 
 ENV YARN_NODE_LINKER=node-modules
 
+# Hydrate the indexer's complete local record dependency closure first. The
+# enrichment bundle does not import these modules, but Yarn must still resolve
+# every portal in the indexer manifest during its immutable install.
+WORKDIR /app/task-execution/protocol
+COPY task-execution/protocol/package.json task-execution/protocol/yarn.lock task-execution/protocol/.yarnrc.yml ./
+RUN corepack enable && yarn install --immutable
+COPY task-execution/protocol/tsconfig.json task-execution/protocol/tsconfig.build.json ./
+COPY task-execution/protocol/scripts ./scripts
+COPY task-execution/protocol/src ./src
+RUN yarn build
+
+WORKDIR /app/trust/core
+COPY trust/core/package.json trust/core/yarn.lock trust/core/.yarnrc.yml ./
+RUN corepack enable && yarn install --immutable
+COPY trust/core/tsconfig.json trust/core/tsconfig.build.json ./
+COPY trust/core/scripts ./scripts
+COPY trust/core/src ./src
+RUN yarn build
+
+WORKDIR /app/benchmarking/records
+COPY benchmarking/records/package.json benchmarking/records/yarn.lock benchmarking/records/.yarnrc.yml ./
+RUN corepack enable && yarn install --immutable
+COPY benchmarking/records/tsconfig.json benchmarking/records/tsconfig.build.json ./
+COPY benchmarking/records/scripts ./scripts
+COPY benchmarking/records/src ./src
+RUN yarn build
+
 # Build @jinn-network/sdk first. The indexer's `portal:../sdk` dependency is a
 # symlink to /app/sdk; its dist/ must exist before the indexer/worker installs
 # resolve the portal, and must survive into the runtime stage.

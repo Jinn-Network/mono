@@ -1,6 +1,23 @@
 # v0 Testnet Deploy Runbook
 
-> Status: ready
+> **Archived 2026-08-14 — superseded in full; do not run this.** The v0 MVI stack it
+> deploys no longer exists.
+> [DR-2026-06-30](../../log/decisions/2026-06-30-tokenless-olas-native-pivot.md)
+> (tokenless, OLAS-native) dropped the JINN token, so Phase 2's L1 stack (JINN +
+> Distributor + Governor + Timelock + Messenger), Phase 3's `JinnClaimEmitter`, and
+> Phase 5's claim cycle all target contracts Jinn no longer deploys — OLAS is the unit
+> of both stake and reward, and rewards settle through the stOLAS reward-claim loop.
+> Phase 1's JinnRouter V2.1 is superseded by V3. Phase 5.1's daemon shape predates
+> Wave-4 D1/D2, which retired the TaskEngine and the delivery-watcher
+> ([DR-2026-08-05](../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)).
+>
+> Retained as the historical record of the 2026-04-29 deploy — the addresses, tx
+> hashes, and verify gates below are what actually ran that day, so nothing beneath
+> this banner is retro-edited. For the current operator path see
+> [`docs/operator-testnet.md`](../operator-testnet.md); for the current daemon loop set
+> see [`client/ARCHITECTURE.md`](../../client/ARCHITECTURE.md) §6.
+
+> Status: archived (was: ready)
 > Date: 2026-04-29
 > Branch: `jinn-mono/jinn-mono-1bo`
 > Coordinator: human operator (you) executes commands; agent verifies at each step.

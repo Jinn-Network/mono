@@ -55,8 +55,8 @@ again over it:
 | writer | when | what a replay does to it |
 | --- | --- | --- |
 | `teeNativeMarketplaceEvents` → `native_marketplace_events` | **inside `poll()`**, before the projector sees a log | Rows carry the finality tier the log was *first fetched at*. A replayed range is refetched below `finalized` (catch-up fast path), so rows first written `safe` come back `finalized`. `apply()` **upgrades the tier in place**. Before that fix it threw, and since `apply()` is one transaction the throw discarded the **whole batch** — including the newly mined blocks above the old cursor, which are never re-listed. |
-| projector loop → `projector_canonical_events`, `projector_observations`, `projector_cursor` | after `enrich` | Journals the re-offered events and advances the cursor. **This makes a replay one-shot per range**: `hasCanonicalEvent` then suppresses those events forever. The journal write happens *even when announcement publication throws* (`projector-loop.ts`'s announce-failure catch path returns empty announcements and falls through to the same `cursorStore.write`). A range that journals but fails to announce is spent — rewind again to retry. |
-| `anchorCheckedMaterial` / requester adoption | during announcement projection | No per-record `try`/`catch`. One record that cannot be anchored aborts the rest of that tick's announcements — and, per the row above, that tick's events are journalled anyway. |
+| projector loop → `projector_canonical_events`, `projector_observations`, `projector_cursor` | after `enrich` | Journals the re-offered events and advances the cursor. **This makes a replay one-shot per range**: `hasCanonicalEvent` then suppresses those events forever. The journal write happens *even when announcement publication throws* (`projector-loop.ts`'s announce-failure catch path returns empty announcements and falls through to the same `cursorStore.write`). A range that journals but fails to announce is spent for good — a further rewind re-offers the identical `event_key`, `hasCanonicalEvent` suppresses it the same way, and nothing shipped today clears or orphans the row to make it eligible again (follow-up filed). |
+| `anchorCheckedMaterial` / requester adoption | during announcement projection | Only `resolveRecord` is scoped to the record that threw: the throw is caught and recorded as an `announcement-record-unresolved` refusal (role + named cause), so the tick's *other* announcements still publish. `factsRecompute`, `referencedBytes` (a live IPFS fetch), and `writeRecord` remain unscoped — a throw from any of those falls straight through to the row above and drops the whole tick. Either way the unanchorable record itself is still fail-closed — no announcement — and its event is journalled regardless, so the drop is permanent: recovery needs its `projector_canonical_events` row cleared or orphaned by `event_key` BEFORE a rewind, which no shipped tool does today (follow-up filed). |
 
 None of that is signed material written *by the rewind*. It is signed material the daemon may now
 publish because it can finally see the events — which is the point of the procedure, and also why
@@ -98,12 +98,16 @@ publish because it can finally see the events — which is the point of the proc
    - **A requester still never sees the counterparty's mech `Deliver`.** That has not changed
      (`create-base-venue.ts` subscribes the router, the coordinator, the marketplace, and *this*
      operator's own `priorityMech`). What changed is that the record plane now supplies the witness
-     instead, so the missing `Deliver` is no longer fatal to the fold.
+     instead, so the missing `Deliver` is no longer fatal to the fold — and, since the announce
+     leg's `resolveRecord` resolves the counterparty's Delivery the same digest-verified way, no
+     longer fatal to the ANNOUNCEMENT either. Before that parity landed, a requester folded the
+     attempt correctly and then refused to publish it.
 
    **PRE-FLIGHT — mandatory, and do it BEFORE stopping the daemon.** The replay re-offers the range
    to the *current* resolvers exactly once. If a record is unresolvable at that moment the event
-   drops — recoverably now, but only by spending another rewind. Both serving planes must be up and
-   serving the exact records, with bytes that match their digests:
+   drops for good — the same permanent, journal-then-suppress loss as the table above, and no
+   shipped tool reopens it. Both serving planes must be up and serving the exact records, with bytes
+   that match their digests, BEFORE you spend the rewind:
 
    ```bash
    # The counterparty's plane — the solution Delivery record it published.
@@ -116,11 +120,15 @@ publish because it can finally see the events — which is the point of the proc
    worse than a 404: the resolver refuses it and you have spent the rewind either way.
 
    **Confirm RPC health too, immediately before `--apply`.** The requester's role gate reads the
-   coordinator twice per `SolutionDeliveryClaimed`, and `buildReadTodayDeliveryFacts`
-   (`client/src/daemon/composition-root.ts`) currently returns `undefined` on a read *failure* the
-   same way it does for a requestId that genuinely is not ours. That reads as "not the requester",
-   which is the one remaining path to a false rejection. Round-trip both reads against the
-   configured endpoint first:
+   coordinator twice per `SolutionDeliveryClaimed`, and the announce leg's counterparty resolver
+   reads the same anchor. Since #2647 a failed read is no longer mistaken for absence:
+   `buildReadTodayDeliveryFacts` (`client/src/daemon/composition-root.ts`) reports `'unavailable'`
+   distinctly from `undefined`, and the role now settles *before* that read, so a mid-tick blip on
+   the OBSERVE side is a replayable drop rather than a false `rejected`/`invalid-reference`
+   terminal. The pre-flight is still mandatory, for the leg that has no such affordance: the
+   ANNOUNCE side refuses on the same unavailable read, and per #2649 an announcement refused in a
+   tick that journaled its events is lost permanently. Round-trip both reads against the configured
+   endpoint first:
 
    ```bash
    cast call <coordinator> 'getRequestRef(bytes32)(uint256,uint32,bool)' <requestId> --rpc-url <rpc>
@@ -140,8 +148,10 @@ publish because it can finally see the events — which is the point of the proc
    **5th field**, `solutionCidDigest`, must be the non-zero anchor you are hunting the record for —
    decoded output looks like
    `(1236, 0, 0xc679BD…, 0x594af10a…, 0x743a947f…, 1000000000000000000, 1, 4)`. A revert, a timeout
-   or a 429 here means **do not apply yet** — the replay is one-shot, and a flaky read spends it. See
-   PR #2644's body follow-up 9 on gate 1's chain-read leg for the structural fix.
+   or a 429 here means **do not apply yet** — the replay is one-shot, and a flaky read spends it.
+   Neither view can revert for an unknown key (`contracts/src/tasks/TaskCoordinator.sol:437-465`
+   — both are plain mapping reads returning a zero record or `exists: false`), so anything that
+   throws here is your endpoint, not the chain's answer.
 
    The delivery digest is not on the coordinator (today generation anchors only its keccak), so read
    it off the counterparty's catalog. If the daemon already tried and dropped, its log names both the
@@ -151,6 +161,10 @@ publish because it can finally see the events — which is the point of the proc
    [projector-enrich] role=requester DROPPING SolutionDeliveryClaimed for task 1236 attempt 0
      (requestId 0x…, anchor 0x…): no record-plane Delivery witness -- …
    ```
+
+   `role=undetermined` with `anchor unread` is the #2647 variant: the chain read that establishes
+   the role failed, so there is no anchor to hunt yet. Fix the RPC and rewind — that drop says
+   nothing about either serving plane.
 
    Live example from the two-operator gate (#2644): `http://127.0.0.1:7402/records/ed1ba7ab…908c`
    for the delivery and `http://127.0.0.1:7401/records/c0c3d703…1204` for the task.

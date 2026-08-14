@@ -37,7 +37,6 @@
   },
   "dependencies": {
     "@jinn-network/benchmarking-records": "0.1.0",
-    "@jinn-network/task-execution-backend": "0.1.0",
     "@jinn-network/task-execution-profiles": "0.1.0",
     "@jinn-network/task-execution-protocol": "0.1.0"
   },
@@ -55,7 +54,8 @@
     "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
     "@jinn-network/task-execution-testing": "portal:../../task-execution/testing",
-    "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace"
+    "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
+    "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {
     "@jinn-network/benchmarking-testing": "0.1.0",
@@ -63,6 +63,7 @@
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0",
     "@jinn-network/execution-recorder": "0.1.0",
+    "@jinn-network/task-execution-backend": "0.1.0",
     "@jinn-network/task-execution-backend-local": "0.1.0",
     "@jinn-network/task-execution-launchers": "0.1.0",
     "@jinn-network/task-execution-supervisor": "0.1.0",

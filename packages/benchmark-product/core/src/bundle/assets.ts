@@ -393,7 +393,7 @@ ${reportFacts.kind === "wilson" ? '<p class="neutral">No comparative winner is s
 <section aria-labelledby="dissent-heading"><h2 id="dissent-heading">Verification assembly dissent</h2><p class="source-label">Source: authenticated <a href="verification/assembly.jsonl">verification assembly</a>.</p><dl class="facts"><div><dt>Dissenting cells</dt><dd>${input.dissentCellKeys.length}</dd></div></dl>${list(input.dissentCellKeys, "None recorded in the verification assembly.")}</section>
 <section id="limitations" aria-labelledby="limitations-heading"><h2 id="limitations-heading">Limitations by stored source</h2><h3>Sealed Report limitations</h3>${list(input.report.limitations ?? [], "None recorded in the sealed Report.")}<h3>Stored Claim limitations</h3>${list(input.claim.limitations, "None recorded in the stored Claim.")}<h3>Local self-run trust boundary stored in the Claim</h3><pre>${escapeMarkup(canonicalText(input.claim.venueHonesty))}</pre></section>
 <section aria-labelledby="records-heading"><h2 id="records-heading">Records and exact identities</h2><dl class="facts"><div><dt>Report SHA-256</dt><dd class="digest">${input.reportSha256}</dd></div><div><dt>Matrix SHA-256</dt><dd class="digest">${input.matrixSha256}</dd></div><div><dt>Run SHA-256</dt><dd class="digest">${input.claim.records.runSha256}</dd></div><div><dt>Report envelope SHA-256</dt><dd class="digest">${input.claim.records.reportEnvelopeSha256}</dd></div></dl><h3>Top-level records and catalogs</h3><ul class="compact-list">${topLevelFiles.map(([path, label]) => `<li><a href="${path}">${escapeMarkup(label)} <span class="digest">(${path})</span></a></li>`).join("")}</ul><h3>Every manifest-listed content-addressed record</h3><ul class="compact-list">${casFiles.map((path) => `<li><a href="${path}">CAS record <span class="digest">(${path})</span></a></li>`).join("")}</ul></section>
-<section id="verification" aria-labelledby="verification-heading"><h2 id="verification-heading">Portable verification</h2><p>Copy this entire directory, then run:</p><pre><code>${escapeMarkup(input.claim.verification.command)}</code></pre><h3>Named checks</h3>${list(input.claim.verification.checks, "No checks recorded.")}<h3>Trust root</h3><p>${escapeMarkup(input.claim.verification.trustRoot)}</p><p class="about">${escapeMarkup(PRODUCT_BRANDING.attribution)}</p></section>
+<section id="verification" aria-labelledby="verification-heading"><h2 id="verification-heading">Portable verification</h2><p>Copy this entire directory. Reproduce publication with the exact verifier:</p><pre><code>${escapeMarkup(input.claim.verification.command)}</code></pre><p>Use the compatible major line to receive fixes that preserve this bundle-format contract:</p><pre><code>${escapeMarkup(input.claim.verification.compatibleCommand)}</code></pre><h3>Named checks</h3>${list(input.claim.verification.checks, "No checks recorded.")}<h3>Trust root</h3><p>${escapeMarkup(input.claim.verification.trustRoot)}</p><p class="about">${escapeMarkup(PRODUCT_BRANDING.attribution)}</p></section>
 </main>
 <footer><nav aria-label="Report references"><a href="index.html#limitations">Read limitations</a> · <a href="index.html#verification">Verify this report</a></nav><p>Report <span class="digest">${input.reportSha256}</span></p><p class="about">${escapeMarkup(PRODUCT_BRANDING.attribution)}</p></footer>
 </body>
@@ -608,9 +608,13 @@ ${casLinks}
 
 ## Portable verification
 
-Copy the complete bundle directory and run:
+Copy the complete bundle directory. Reproduce publication with the exact verifier:
 
     ${input.claim.verification.command}
+
+Use the compatible major line to receive fixes that preserve this bundle-format contract:
+
+    ${input.claim.verification.compatibleCommand}
 
 The verifier authenticates the manifest, records, evidence graph, Matrix, Report, claim consistency, and every presentation byte using only bundle-carried public trust material. See [index.html#verification](index.html#verification). ${PRODUCT_BRANDING.attribution}
 

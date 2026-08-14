@@ -18,7 +18,6 @@ import { EventDetailPage } from './pages/EventDetail.js';
 import { LauncherPage } from './pages/Launcher.js';
 import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
-import { JoinFlow } from './pages/operator-catalog/JoinFlow.js';
 import { CapturesTab } from './captures/CapturesTab.js';
 import { OperatorShell } from './pages/operator/OperatorShell.js';
 import { ClaimPolicyTab } from './pages/operator/ClaimPolicyTab.js';
@@ -133,7 +132,6 @@ export default function App(): JSX.Element {
               <Route path="/events/:id"><EventDetailPage /></Route>
               <Route path="/events"><EventsPage /></Route>
               <Route path="/overview" component={OverviewPage} />
-              <Route path="/operator/join/:cid"><JoinFlow /></Route>
               <Route path="/operator/execution-data">
                 <OperatorShell>
                   <CapturesTab />
@@ -144,9 +142,12 @@ export default function App(): JSX.Element {
                   <ClaimPolicyTab onRestartPending={() => setRestartPending(true)} />
                 </OperatorShell>
               </Route>
+              {/* Read-only after Wave-4 D1 — OPERATOR-APP-SPEC §2.4 keeps
+                  Memberships as the legacy view until cutover stage 5, so it
+                  takes no `onRestartPending` (there is nothing to write). */}
               <Route path="/operator/memberships">
                 <OperatorShell>
-                  <MembershipsTab onRestartPending={() => setRestartPending(true)} />
+                  <MembershipsTab />
                 </OperatorShell>
               </Route>
               <Route path="/operator/registry">

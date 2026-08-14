@@ -4,6 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { createSandboxController } from "./sandbox-controller.mjs";
 
 const SAFE_NAME = /^[a-z0-9][a-z0-9_.-]{0,127}$/u;
 const dockerEnvironment = { LANG: "C.UTF-8" };
@@ -30,6 +31,25 @@ function dockerInput(dockerPath, args, input, timeout = 15_000) {
 function requireSuccess(result, label) {
   if (result.status !== 0) throw new Error(`${label} failed`);
   return result.stdout.trim();
+}
+
+function delay(milliseconds) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+}
+
+async function removeWorkerContainer(dockerPath, containerName) {
+  // Killing `docker run` can race Docker Engine's asynchronous container creation. A single
+  // `docker rm` may therefore report the container absent immediately before it appears in the
+  // Created state. Require two consecutive absent observations so cancellation cannot orphan it.
+  let absentObservations = 0;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    docker(dockerPath, ["rm", "--force", containerName]);
+    const inspection = docker(dockerPath, ["container", "inspect", containerName], 5_000);
+    if (inspection.status === 0) absentObservations = 0;
+    else absentObservations += 1;
+    if (absentObservations >= 2) return;
+    await delay(50);
+  }
 }
 
 function mountSource(args, destination) {
@@ -99,6 +119,13 @@ function populateVolume(dockerPath, imageDigest, volume, filename, input, mode, 
 
 function setupBroker(dockerPath, dockerArgs, containerName, imageDigest, connection, probeOnly = false) {
   if (!probeOnly) {
+    // Probe and verifier workers never call a model. In particular, the verifier input is an
+    // EvalLog rather than inspect-run.json, and must not acquire a broker, credential volume, or
+    // network merely because it shares this cancellation-safe OCI supervisor.
+    if ([
+      "/jinn/input/inspect-probe.json",
+      "/jinn/input/inspect-verify.json",
+    ].includes(dockerArgs.at(-1))) return undefined;
     const inputDir = mountSource(dockerArgs, "/jinn/input");
     if (inputDir === undefined) throw new Error("credentialed worker input mount is missing");
     const runInput = JSON.parse(readFileSync(join(inputDir, "inspect-run.json"), "utf8"));
@@ -229,85 +256,153 @@ if (command === "probe-broker") {
     process.exitCode = 1;
   }
 } else {
-const [dockerPath, ...dockerArgs] = process.argv.slice(2);
-if (dockerPath === undefined || dockerArgs[0] !== "run") {
-  process.stderr.write("usage: oci-runner.mjs <docker> run <args...>\n");
-  process.exitCode = 2;
-} else {
-  const nameArg = dockerArgs.find((argument) => argument.startsWith("--name="));
-  const containerName = nameArg?.slice("--name=".length);
-  const imageDigest = dockerArgs.find((argument) => /^sha256:[a-f0-9]{64}$/u.test(argument));
-  if (containerName === undefined || !SAFE_NAME.test(containerName) || imageDigest === undefined) {
-    process.stderr.write("OCI runner requires exact container and image identities\n");
-    process.exitCode = 2;
-  } else {
+  async function runWorker() {
+    const sandboxMode = command === "sandbox";
+    const runtimeArgs = process.argv.slice(sandboxMode ? 3 : 2);
+    const [dockerPath, maybeSandboxImage, ...remainingArgs] = runtimeArgs;
+    const sandboxImageDigest = sandboxMode ? maybeSandboxImage : undefined;
+    const dockerArgs = sandboxMode ? remainingArgs : [maybeSandboxImage, ...remainingArgs];
+    if (
+      dockerPath === undefined
+      || dockerArgs[0] !== "run"
+      || (sandboxMode && (sandboxImageDigest === undefined || !/^sha256:[a-f0-9]{64}$/u.test(sandboxImageDigest)))
+    ) {
+      process.stderr.write("usage: oci-runner.mjs [sandbox] <docker> [sandbox-image] run <args...>\n");
+      process.exitCode = 2;
+      return;
+    }
+    const nameArg = dockerArgs.find((argument) => argument.startsWith("--name="));
+    const containerName = nameArg?.slice("--name=".length);
+    const imageDigest = dockerArgs.find((argument) => /^sha256:[a-f0-9]{64}$/u.test(argument));
+    if (containerName === undefined || !SAFE_NAME.test(containerName) || imageDigest === undefined) {
+      process.stderr.write("OCI runner requires exact container and image identities\n");
+      process.exitCode = 2;
+      return;
+    }
+
     const terminationSignals = ["SIGTERM", "SIGINT", "SIGHUP"];
     let terminating = false;
     let settled = false;
     let terminationSignal;
     let broker;
+    let sandboxController;
     let child;
+    let cleanupChain = Promise.resolve();
+    let terminationPromise;
+    let settleChild;
+    const childSettled = new Promise((resolvePromise) => {
+      settleChild = resolvePromise;
+    });
 
     const cleanup = () => {
-      docker(dockerPath, ["rm", "--force", containerName]);
-      if (broker !== undefined) {
-        cleanupBroker(dockerPath, broker);
-      }
+      cleanupChain = cleanupChain.then(async () => {
+        await removeWorkerContainer(dockerPath, containerName);
+        if (broker !== undefined) cleanupBroker(dockerPath, broker);
+        await sandboxController?.cleanup();
+      });
+      return cleanupChain;
     };
     const finishTermination = () => {
-      cleanup();
-      for (const signal of terminationSignals) process.removeAllListeners(signal);
-      process.kill(process.pid, terminationSignal ?? "SIGTERM");
+      terminationPromise ??= (async () => {
+        if (child !== undefined && !settled) {
+          await Promise.race([childSettled, delay(5_000)]);
+          if (!settled) {
+            child.kill("SIGKILL");
+            await Promise.race([childSettled, delay(5_000)]);
+          }
+        }
+        await cleanup();
+        for (const signal of terminationSignals) process.removeAllListeners(signal);
+        process.kill(process.pid, terminationSignal ?? "SIGTERM");
+      })();
+      return terminationPromise;
     };
     const terminate = (signal) => {
       if (terminating || settled) return;
       terminating = true;
       terminationSignal = signal;
       child?.kill(signal);
-      cleanup();
-      if (child === undefined) finishTermination();
+      void finishTermination();
     };
 
-    // Cancellation can be requested as soon as the supervisor publishes a live attempt. Own the
-    // signals before any broker setup or Docker spawn so that startup cancellation cannot take the
-    // default Node signal path and strand a container created by the already-starting Docker CLI.
     for (const signal of terminationSignals) process.on(signal, () => terminate(signal));
 
     try {
       const connection = readConnection(process.env.JINN_INSPECT_HOST_CONNECTION_DESCRIPTOR);
       broker = setupBroker(dockerPath, dockerArgs, containerName, imageDigest, connection);
+      if (sandboxMode) {
+        sandboxController = createSandboxController({
+          dockerPath,
+          imageDigest: sandboxImageDigest,
+          containerPrefix: containerName,
+        });
+        const imageIndex = dockerArgs.lastIndexOf(imageDigest);
+        if (imageIndex < 1) throw new Error("worker image identity is missing");
+        dockerArgs.splice(imageIndex, 0, "--env=JINN_INSPECT_SANDBOX_PROTOCOL=1");
+      }
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : "unknown failure";
-      process.stderr.write(`OCI credential broker preflight failed: ${detail}\n`);
-      cleanup();
+      process.stderr.write(`OCI runtime preflight failed: ${detail}\n`);
+      await cleanup();
       for (const signal of terminationSignals) process.removeAllListeners(signal);
       process.exitCode = 1;
+      return;
     }
-    if (process.exitCode === undefined) {
-      child = spawn(dockerPath, dockerArgs, { stdio: "inherit", env: dockerEnvironment });
-      child.once("error", (error) => {
-        settled = true;
-        cleanup();
-        if (terminating) {
-          finishTermination();
-          return;
+
+    child = spawn(dockerPath, dockerArgs, {
+      stdio: sandboxMode ? ["pipe", "pipe", "inherit"] : "inherit",
+      env: dockerEnvironment,
+    });
+    let frameBuffer = "";
+    let frameChain = Promise.resolve();
+    if (sandboxMode) {
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        frameBuffer += chunk;
+        if (Buffer.byteLength(frameBuffer) > 24 * 1024 * 1024) child.kill("SIGKILL");
+        while (frameBuffer.includes("\n")) {
+          const newline = frameBuffer.indexOf("\n");
+          const line = frameBuffer.slice(0, newline);
+          frameBuffer = frameBuffer.slice(newline + 1);
+          frameChain = frameChain.then(async () => {
+            const frame = JSON.parse(line);
+            if (frame?.channel === "sandbox") {
+              const response = await sandboxController.handle(frame);
+              child.stdin.write(`${JSON.stringify(response)}\n`);
+            } else if (typeof frame?.ok === "boolean") {
+              process.stdout.write(`${JSON.stringify(frame)}\n`);
+            } else {
+              throw new Error("worker emitted an unknown protocol frame");
+            }
+          }).catch(() => child.kill("SIGKILL"));
         }
-        for (const signal of terminationSignals) process.removeAllListeners(signal);
-        process.stderr.write(`OCI runtime could not start: ${error instanceof Error ? error.name : "unknown error"}\n`);
-        process.exitCode = 1;
-      });
-      child.once("exit", (code, signal) => {
-        settled = true;
-        cleanup();
-        if (terminating) {
-          finishTermination();
-          return;
-        }
-        for (const terminationSignalName of terminationSignals) process.removeAllListeners(terminationSignalName);
-        if (signal !== null) process.kill(process.pid, signal);
-        else process.exitCode = code ?? 1;
       });
     }
+    child.once("error", (error) => {
+      settled = true;
+      settleChild();
+      void cleanup();
+      if (terminating) {
+        void finishTermination();
+        return;
+      }
+      for (const signal of terminationSignals) process.removeAllListeners(signal);
+      process.stderr.write(`OCI runtime could not start: ${error instanceof Error ? error.name : "unknown error"}\n`);
+      process.exitCode = 1;
+    });
+    child.once("exit", async (code, signal) => {
+      settled = true;
+      settleChild();
+      await frameChain;
+      await cleanup();
+      if (terminating) {
+        await finishTermination();
+        return;
+      }
+      for (const terminationSignalName of terminationSignals) process.removeAllListeners(terminationSignalName);
+      if (signal !== null) process.kill(process.pid, signal);
+      else process.exitCode = code ?? 1;
+    });
   }
-}
+  await runWorker();
 }

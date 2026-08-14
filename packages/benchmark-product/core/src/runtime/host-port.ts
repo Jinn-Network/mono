@@ -5,24 +5,32 @@ import { fileURLToPath } from "node:url";
 import { createLocalVenue, type LocalVenue, type LocalVenueOptions } from "../venue/venue.js";
 import { probeInspectSelection, type InspectHostBinding } from "./inspect/host.js";
 import { probeInspectOciSelection } from "./inspect/oci.js";
+import type { InspectSandboxExecutionRequest } from "./inspect/oci.js";
 import type {
   InspectArmConfiguration,
   InspectRunOptions,
+  InspectScoringSelectionRequest,
   InspectSelectionManifest,
 } from "./inspect/manifest.js";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import type { Demo1ClaudeRuntimeBinding } from "../venue/demo1-claude.js";
+import { configuredAgentRuntimes, profileMatchesArmPinning } from "../agent/index.js";
+import {
+  assessAgentRuntimeReadiness,
+  type AgentRuntimeReadiness,
+  type AgentRuntimeReadinessRequest,
+} from "./agent-readiness.js";
+import { resolveHarborSelection, type HarborRuntimeSelectionRequest, type HarborRuntimeSelectionResolution } from "./harbor/host.js";
 
 interface InspectRuntimeSelectionBase {
   readonly projectDir: string;
   readonly taskReference: string;
   readonly taskArgs?: Readonly<Record<string, unknown>>;
   readonly arms: readonly InspectArmConfiguration[];
-  readonly scorer: { readonly name: string; readonly passValue: string | number | boolean | null };
   readonly runOptions?: InspectRunOptions;
 }
 
-export type InspectRuntimeSelectionRequest = InspectRuntimeSelectionBase & ({
+export type InspectRuntimeSelectionRequest = InspectRuntimeSelectionBase & InspectScoringSelectionRequest & ({
   readonly execution?: "local-python";
   readonly pythonPath: string;
 } | {
@@ -30,6 +38,7 @@ export type InspectRuntimeSelectionRequest = InspectRuntimeSelectionBase & ({
   readonly dockerPath: string;
   readonly imageDigest: string;
   readonly datasetCacheDir: string;
+  readonly sandboxExecution?: InspectSandboxExecutionRequest;
   readonly runOptions: InspectRunOptions & { readonly sampleId: string | number };
 });
 
@@ -41,10 +50,13 @@ export interface InspectRuntimeSelectionResolution {
 /** Process-owning boundary. Product operations carry state; the injected host owns execution. */
 export interface BenchmarkRuntimeHost {
   resolveInspectSelection(input: InspectRuntimeSelectionRequest, signal?: AbortSignal): Promise<InspectRuntimeSelectionResolution>;
+  resolveHarborSelection(input: HarborRuntimeSelectionRequest, signal?: AbortSignal): Promise<HarborRuntimeSelectionResolution>;
   createVenue(
     binding: EvaluationRuntimeBinding | undefined,
     options: Omit<LocalVenueOptions, "evaluationRuntime">,
   ): LocalVenue;
+  /** Local, non-executing doctor gate for v1 provider-backed agent arms. */
+  assessAgentReadiness(requests: readonly AgentRuntimeReadinessRequest[]): readonly AgentRuntimeReadiness[];
 }
 
 export interface OpenAIHostConnection {
@@ -60,6 +72,8 @@ export interface BenchmarkRuntimeHostOptions {
   readonly repositoryRoot?: string;
   /** Explicit real Claude Code deployment used by Demo-1 repository-work arms. */
   readonly demo1ClaudeRuntime?: Demo1ClaudeRuntimeBinding;
+  /** Colophon OS user-data root; profiles and grants stay outside workspaces and repositories. */
+  readonly agentDataDir?: string;
 }
 
 function inside(path: string, root: string): boolean {
@@ -125,6 +139,10 @@ function createOpenAIConnectionDescriptor(
 export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeHostOptions = {}): BenchmarkRuntimeHost {
   const repositoryRoot = realpathSync(hostOptions.repositoryRoot ?? fileURLToPath(new URL("../../../../..", import.meta.url)));
   return {
+    assessAgentReadiness(requests) {
+      return assessAgentRuntimeReadiness(hostOptions.agentDataDir, requests);
+    },
+    resolveHarborSelection,
     async resolveInspectSelection(input, signal) {
       if (input.execution === "oci") {
         return probeInspectOciSelection({
@@ -132,10 +150,11 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
           imageDigest: input.imageDigest,
           projectDir: resolve(input.projectDir),
           datasetCacheDir: resolve(input.datasetCacheDir),
+          sandboxExecution: input.sandboxExecution,
           taskReference: input.taskReference,
           taskArgs: input.taskArgs,
           arms: input.arms,
-          scorer: input.scorer,
+          ...(input.scoring === undefined ? { scorer: input.scorer } : { scoring: input.scoring }),
           runOptions: input.runOptions,
         }, signal);
       }
@@ -150,7 +169,7 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
           taskReference: input.taskReference,
           taskArgs: input.taskArgs,
           arms: input.arms,
-          scorer: input.scorer,
+          ...(input.scoring === undefined ? { scorer: input.scorer } : { scoring: input.scoring }),
           runOptions: input.runOptions,
         }),
         binding,
@@ -168,6 +187,12 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
             : { demo1ClaudeRuntime: hostOptions.demo1ClaudeRuntime }),
           ...(binding === undefined ? {} : { evaluationRuntime: binding }),
           ...(descriptor.path === undefined ? {} : { inspectHostConnectionDescriptor: descriptor.path }),
+          ...(hostOptions.agentDataDir === undefined || venueOptions.agentProfileRequirements === undefined
+            ? {}
+            : {
+              agentRuntimes: configuredAgentRuntimes(hostOptions.agentDataDir).filter((binding) =>
+                venueOptions.agentProfileRequirements!.some((requirements) => profileMatchesArmPinning(binding.profile, requirements))),
+            }),
         });
         return {
           ...venue,

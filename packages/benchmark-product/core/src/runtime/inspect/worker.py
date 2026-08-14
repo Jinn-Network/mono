@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -135,7 +136,7 @@ def selected_samples_sha256(samples: list[Any]) -> str:
         dumped = sample.model_dump(mode="json")
         material.append({
             key: dumped.get(key)
-            for key in ("id", "input", "target", "choices", "metadata", "setup")
+            for key in ("id", "input", "target", "choices", "metadata", "setup", "sandbox", "files")
             if key in dumped
         })
     encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -220,32 +221,63 @@ def resolved_selection_components(
     reference: str,
     task_args: dict[str, Any],
     spec: Any,
-    scorer_name: str,
+    requested_scorer_names: list[str],
+    legacy_single_scorer: bool,
     selected_sample_id: str | int | None = None,
     samples: list[Any] | None = None,
+    declared_sandbox: Any | None = None,
+    sandbox_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if len(spec.scorers) != 1 or spec.scorers[0].name != scorer_name:
-        resolved = [scorer.name for scorer in spec.scorers]
+    scorers = list(spec.scorers or [])
+    resolved = [scorer.name for scorer in scorers]
+    if not scorers:
+        raise ValueError("selected Inspect task resolves no scorers")
+    if len(set(resolved)) != len(resolved):
+        raise ValueError("selected Inspect task has duplicate resolved scorer names")
+    if legacy_single_scorer and (len(scorers) != 1 or resolved != requested_scorer_names):
         raise ValueError(
-            f"first-slice selection requires exactly the named scorer {scorer_name!r}; resolved {resolved!r}"
+            f"legacy selection requires exactly the named scorer {requested_scorer_names!r}; resolved {resolved!r}"
         )
-    if spec.sandbox is not None:
+    if not legacy_single_scorer and any(name not in resolved for name in requested_scorer_names):
+        raise ValueError(f"scoring projection names an unresolved scorer; resolved {resolved!r}")
+    if sandbox_config is None and spec.sandbox is not None:
         raise ValueError(
             "first-slice selection refuses task-defined sandboxes until their provider/config/image identity can be pinned"
         )
+    if sandbox_config is not None:
+        if declared_sandbox is None or declared_sandbox.type != "docker" or declared_sandbox.config is not None:
+            raise ValueError("the first hosted-sandbox slice requires one task-level docker sandbox with no config")
+        expected_effective = {"type": "jinn-oci", "config": sandbox_config}
+        if spec.sandbox is None or spec.sandbox.model_dump(mode="json") != expected_effective:
+            raise ValueError("Inspect did not resolve the sealed jinn-oci sandbox override")
+        for sample in samples or []:
+            if sample.sandbox is not None or sample.files or sample.setup:
+                raise ValueError("the first hosted-sandbox slice refuses per-sample sandbox, files, and setup")
     dataset = spec.dataset
     attrib_version = spec.task_attribs.get("version") if spec.task_attribs else None
     resolved_version = str(attrib_version) if attrib_version is not None else (
         str(spec.task_version) if spec.task_version is not None else None
     )
+    scoring_components = (
+        {"scorer": scorers[0].model_dump(mode="json")}
+        if legacy_single_scorer
+        else {
+            "scorers": [scorer.model_dump(mode="json") for scorer in scorers],
+            "inspectMetrics": spec.model_dump(mode="json").get("metrics"),
+            "inspectEpochReducers": spec.config.epochs_reducer,
+        }
+    )
     return {
-        "scorer": spec.scorers[0].model_dump(mode="json"),
+        **scoring_components,
         "task": {
             "reference": reference,
             "args": task_args,
             "resolvedName": spec.task,
             "resolvedVersion": resolved_version,
-            "resolvedSandbox": None,
+            **({
+                "declaredSandbox": declared_sandbox.model_dump(mode="json"),
+                "resolvedSandbox": spec.sandbox.model_dump(mode="json"),
+            } if sandbox_config is not None else {"resolvedSandbox": None}),
             "source": resolve_source(project_dir, reference, spec.task_file),
             "dataset": {
                 "name": dataset.name,
@@ -260,6 +292,34 @@ def resolved_selection_components(
     }
 
 
+def configure_sandbox(sandbox_config: dict[str, Any] | None) -> Any | None:
+    if sandbox_config is None:
+        return None
+    from inspect_ai.util import SandboxEnvironmentSpec
+    from jinn_inspect_sandbox import JinnOciSandboxConfig
+
+    return SandboxEnvironmentSpec("jinn-oci", JinnOciSandboxConfig.model_validate(sandbox_config))
+
+
+def declared_sandbox_for_task(
+    reference: str,
+    task_args: dict[str, Any],
+    log_dir: str,
+) -> Any | None:
+    logs = inspect_eval(
+        reference,
+        task_args=task_args,
+        model="mockllm/jinn-sandbox-metadata",
+        run_samples=False,
+        log_dir=log_dir,
+        log_format="eval",
+        display="none",
+    )
+    if len(logs) != 1:
+        raise ValueError("sandbox metadata probe did not resolve exactly one task")
+    return read_eval_log(local_path(logs[0].location)).eval.sandbox
+
+
 def probe(config: dict[str, Any]) -> dict[str, Any]:
     runtime = {
         **require_runtime(),
@@ -267,6 +327,7 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
         "workerSha256": sha256_file(Path(__file__).resolve()),
         "brokerSha256": sha256_file(Path("/opt/jinn/broker.py")) if Path("/opt/jinn/broker.py").is_file() else None,
         "modelProviderSha256": sha256_file(Path("/opt/jinn/model_provider.py")) if Path("/opt/jinn/model_provider.py").is_file() else None,
+        "sandboxProviderSha256": project_tree_sha256(Path("/opt/jinn/sandbox_extension")) if Path("/opt/jinn/sandbox_extension").is_dir() else None,
     }
     project_dir = Path(config["projectDir"]).resolve()
     if not project_dir.is_dir():
@@ -278,6 +339,10 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
         os.chdir(project_dir)
         with tempfile.TemporaryDirectory(prefix="jinn-inspect-probe-") as log_dir:
             selected_sample_id = config.get("runOptions", {}).get("sampleId")
+            sandbox_config = config.get("sandboxExecution")
+            declared_sandbox = declared_sandbox_for_task(
+                reference, task_args, str(Path(log_dir) / "declared")
+            ) if sandbox_config is not None else None
             logs = inspect_eval(
                 reference,
                 task_args=task_args,
@@ -287,6 +352,7 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
                 log_dir=log_dir,
                 log_format="eval",
                 display="none",
+                sandbox=configure_sandbox(sandbox_config),
             )
             if len(logs) != 1:
                 raise ValueError(f"one task reference must resolve to exactly one EvalLog, got {len(logs)}")
@@ -299,9 +365,12 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
                 reference,
                 task_args,
                 log.eval,
-                config["scorerName"],
+                [config["scorerName"]] if "scorerName" in config else list(config["scorerNames"]),
+                "scorerName" in config,
                 selected_sample_id,
                 list(log.samples or []),
+                declared_sandbox,
+                sandbox_config,
             )
     finally:
         os.chdir(prior_cwd)
@@ -313,6 +382,242 @@ def probe(config: dict[str, Any]) -> dict[str, Any]:
 
 def scalar_equal(left: Any, right: Any) -> bool:
     return type(left) is type(right) and left == right
+
+
+def projected_scalar_equal(left: Any, right: Any) -> bool:
+    """Compare in the sealed JSON scalar type system (where integers and floats are numbers)."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    return type(left) is type(right) and left == right
+
+
+def is_projectable_scalar(value: Any) -> bool:
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return value is None or isinstance(value, (bool, int, str))
+
+
+def score_value_shape(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "list"
+    return "object"
+
+
+def project_multiple_scorer_observations(
+    manifest: dict[str, Any], samples: list[Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Bounded observations only; the TypeScript host owns the Jinn verdict."""
+    scorer_inventory = []
+    for declared in manifest["scorers"]:
+        scorer_name = declared["name"]
+        present_scores = [
+            sample.scores[scorer_name]
+            for sample in samples
+            if sample.scores is not None and scorer_name in sample.scores
+        ]
+        shapes = {score_value_shape(score.value) for score in present_scores}
+        scorer_inventory.append({
+            "name": scorer_name,
+            "presentSamples": len(present_scores),
+            "missingSamples": len(samples) - len(present_scores),
+            "valueShapes": [
+                shape for shape in ("null", "boolean", "number", "string", "list", "object")
+                if shape in shapes
+            ],
+        })
+
+    measurements = []
+    selected_unscorable = False
+    for projection in manifest["scoring"]["projections"]:
+        projected_values: list[Any] = []
+        missing = 0
+        invalid = 0
+        for sample in samples:
+            score = (sample.scores or {}).get(projection["scorerName"])
+            if score is None:
+                missing += 1
+                continue
+            value = score.value
+            if "subScoreKey" in projection:
+                if not isinstance(value, dict):
+                    invalid += 1
+                    continue
+                if projection["subScoreKey"] not in value:
+                    missing += 1
+                    continue
+                value = value[projection["subScoreKey"]]
+            if not is_projectable_scalar(value):
+                invalid += 1
+                continue
+            projected_values.append(value)
+        projection_unscorable = missing > 0 or invalid > 0 or not projected_values
+        selected_unscorable = selected_unscorable or projection_unscorable
+        measurements.append({
+            "measurementName": projection["measurementName"],
+            "scorerName": projection["scorerName"],
+            **({"subScoreKey": projection["subScoreKey"]} if "subScoreKey" in projection else {}),
+            "missingSamples": missing,
+            "invalidValueSamples": invalid,
+            "value": None if projection_unscorable else all(
+                projected_scalar_equal(value, projection["passValue"]) for value in projected_values
+            ),
+        })
+    return scorer_inventory, measurements, selected_unscorable
+
+
+def expected_sample_count(manifest: dict[str, Any], log: Any) -> int | None:
+    # Inspect preserves the source dataset cardinality in EvalSpec.dataset.samples even when
+    # sample_id selects a single row. The locked exact sample is the cell's expected work.
+    return 1 if manifest.get("runOptions", {}).get("sampleId") is not None else log.eval.dataset.samples
+
+
+def observe_native_log(manifest: dict[str, Any], log: Any, native_log: Path) -> dict[str, Any]:
+    """Return the bounded facts shared by execution summaries and separate verification."""
+    expected = expected_sample_count(manifest, log)
+    samples = log.samples or []
+    errors = sum(1 for sample in samples if sample.error is not None)
+    incomplete = expected is None or len(samples) != expected
+    common = {
+        "terminal": "unscorable",
+        "inspectStatus": log.status,
+        "expectedSamples": expected,
+        "observedSamples": len(samples),
+        "erroredSamples": errors,
+        "invalidated": bool(log.invalidated),
+        "nativeLogSha256": sha256_file(native_log),
+        "nativeLogBytes": native_log.stat().st_size,
+    }
+    if "scorer" in manifest:
+        scorer_name = manifest["scorer"]["name"]
+        pass_value = manifest["scorer"]["passValue"]
+        score_values: list[Any] = []
+        missing_scores = 0
+        for sample in samples:
+            score = (sample.scores or {}).get(scorer_name)
+            value = None if score is None else score.value
+            if score is None or isinstance(value, (list, dict)):
+                missing_scores += 1
+            else:
+                score_values.append(value)
+        unscorable = (
+            log.status != "success"
+            or bool(log.invalidated)
+            or errors > 0
+            or incomplete
+            or missing_scores > 0
+            or len(score_values) == 0
+        )
+        passed = (not unscorable) and all(scalar_equal(value, pass_value) for value in score_values)
+        return {
+            "schema": "jinn.network/benchmark-product/inspect-log-observation/1",
+            "summarySchema": "jinn.network/benchmark-product/inspect-cell-summary/1",
+            **common,
+            "terminal": "unscorable" if unscorable else "scored",
+            "missingScoreSamples": missing_scores,
+            "scorer": scorer_name,
+            "measurement": None if unscorable else passed,
+        }
+
+    scorer_inventory, measurements, selected_unscorable = project_multiple_scorer_observations(
+        manifest, samples
+    )
+    unscorable = (
+        log.status != "success"
+        or bool(log.invalidated)
+        or errors > 0
+        or incomplete
+        or selected_unscorable
+    )
+    if unscorable:
+        measurements = [{**measurement, "value": None} for measurement in measurements]
+    return {
+        "schema": "jinn.network/benchmark-product/inspect-log-observation/1",
+        "summarySchema": "jinn.network/benchmark-product/inspect-cell-summary/2",
+        **common,
+        "terminal": "unscorable" if unscorable else "scored",
+        "scorers": scorer_inventory,
+        "measurements": measurements,
+    }
+
+
+def verify_log_identity(manifest: dict[str, Any], log: Any, selection_sha256: str) -> None:
+    """Check identities available in the native log without importing the selected task."""
+    dumped = log.eval.model_dump(mode="json")
+    task = manifest["task"]
+    if dumped.get("task") != task["resolvedName"]:
+        raise ValueError("Inspect native log task identity differs from the sealed selection")
+    resolved_version = dumped.get("task_attribs", {}).get("version") or dumped.get("task_version")
+    if (None if resolved_version is None else str(resolved_version)) != task.get("resolvedVersion"):
+        raise ValueError("Inspect native log task version differs from the sealed selection")
+    dataset = dumped.get("dataset") or {}
+    expected_dataset = task["dataset"]
+    for key in ("name", "location", "samples"):
+        if dataset.get(key) != expected_dataset.get(key):
+            raise ValueError("Inspect native log dataset identity differs from the sealed selection")
+    scorers = dumped.get("scorers") or []
+    expected_scorers = (
+        [manifest["scorer"]["definition"]]
+        if "scorer" in manifest
+        else [scorer["definition"] for scorer in manifest["scorers"]]
+    )
+    if scorers != expected_scorers:
+        raise ValueError("Inspect native log scorer definitions differ from the sealed selection")
+    if "scoring" in manifest:
+        if dumped.get("metrics") != manifest["scoring"]["inspectMetrics"]:
+            raise ValueError("Inspect native log metric configuration differs from the sealed selection")
+        config = dumped.get("config") or {}
+        if config.get("epochs_reducer") != manifest["scoring"]["inspectEpochReducers"]:
+            raise ValueError("Inspect native log epoch reducers differ from the sealed selection")
+    metadata = dumped.get("metadata") or {}
+    if metadata.get("jinn.selection_manifest_sha256") != selection_sha256:
+        raise ValueError("Inspect native log selection identity is absent or changed")
+    arm_id = metadata.get("jinn.arm_id")
+    arm = next((candidate for candidate in manifest["arms"] if candidate["armId"] == arm_id), None)
+    if arm is None:
+        raise ValueError("Inspect native log arm identity is absent or changed")
+    if dumped.get("model") != arm["model"]:
+        raise ValueError("Inspect native log model identity differs from the sealed arm")
+    selected_sample_id = manifest.get("runOptions", {}).get("sampleId")
+    if selected_sample_id is not None:
+        if len(log.samples or []) != 1 or (log.samples or [None])[0].id != selected_sample_id:
+            raise ValueError("Inspect native log selected sample identity differs from the sealed selection")
+        if selected_samples_sha256(list(log.samples or [])) != expected_dataset["orderedSampleSha256"]:
+            raise ValueError("Inspect native log selected sample bytes differ from the sealed selection")
+
+
+def verify(config: dict[str, Any]) -> dict[str, Any]:
+    """Read and bound one genuine EvalLog without loading task, solver, scorer, or model code."""
+    runtime = require_runtime()
+    manifest = config["manifest"]
+    expected_runtime = manifest["runtime"]
+    pinned_runtime_fields = (
+        "inspectVersion",
+        "inspectWheelSha256",
+        "pythonVersion",
+        "pythonExecutableSha256",
+        "pythonEnvironmentSha256",
+        "inspectDistributionSha256",
+    )
+    if any(runtime.get(field) != expected_runtime.get(field) for field in pinned_runtime_fields):
+        raise ValueError("Inspect verifier runtime differs from the sealed selection")
+    if sha256_file(Path(__file__).resolve()) != expected_runtime["workerSha256"]:
+        raise ValueError("Inspect verifier worker differs from the sealed selection")
+    native_log = Path(config["nativeLogPath"]).resolve()
+    if not native_log.is_file():
+        raise ValueError("Inspect native log is missing")
+    log = read_eval_log(native_log)
+    verify_log_identity(manifest, log, config["selectionManifestSha256"])
+    return observe_native_log(manifest, log, native_log)
 
 
 def run(config: dict[str, Any]) -> dict[str, Any]:
@@ -330,6 +635,14 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         import model_provider
         model_provider.configure(config["cellKey"])
         provider_records = model_provider.records
+    execution = manifest["runtime"].get("execution")
+    sandbox_runtime = execution.get("sandbox") if execution is not None else None
+    sandbox_config = None if sandbox_runtime is None else {
+        "schema": "jinn.network/benchmark-product/inspect-sandbox/1",
+        "imageDigest": sandbox_runtime["imageDigest"],
+        "platform": sandbox_runtime["platform"],
+        "policySha256": sandbox_runtime["policySha256"],
+    }
     kwargs: dict[str, Any] = {
         "task_args": manifest["task"]["args"],
         "model": arm["model"],
@@ -346,6 +659,7 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             "jinn.arm_id": arm["armId"],
             "jinn.repetition": config["repetition"],
         },
+        "sandbox": configure_sandbox(sandbox_config),
     }
     if provider is not None:
         # These are Inspect GenerateConfig fields (eval **kwargs), not ModelAPI constructor
@@ -374,6 +688,10 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     prior_cwd = Path.cwd()
     try:
         os.chdir(project_dir)
+        with tempfile.TemporaryDirectory(prefix="jinn-inspect-declared-") as declared_log_dir:
+            declared_sandbox = declared_sandbox_for_task(
+                manifest["task"]["reference"], manifest["task"]["args"], declared_log_dir
+            ) if sandbox_config is not None else None
         logs = inspect_eval(manifest["task"]["reference"], **kwargs)
     finally:
         os.chdir(prior_cwd)
@@ -396,7 +714,6 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
         "adapterVersion": "1",
         "workerSha256": sha256_file(Path(__file__).resolve()),
     }
-    execution = manifest["runtime"].get("execution")
     if execution is not None:
         if runtime_now.get("inspectEvalsVersion") != execution["inspectEvalsVersion"]:
             raise ValueError("Inspect Evals package drifted during OCI execution")
@@ -408,20 +725,34 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("OCI broker source drifted from the sealed runtime identity")
         if sha256_file(Path("/opt/jinn/model_provider.py")) != execution["modelProviderSourceSha256"]:
             raise ValueError("OCI model provider source drifted from the sealed runtime identity")
+        if execution.get("sandbox") is not None:
+            if project_tree_sha256(Path("/opt/jinn/sandbox_extension")) != execution["sandbox"]["providerSourceSha256"]:
+                raise ValueError("OCI sandbox provider source drifted from the sealed runtime identity")
         actual_runtime["execution"] = execution
     actual_components = resolved_selection_components(
         project_dir,
         manifest["task"]["reference"],
         manifest["task"]["args"],
         log.eval,
-        manifest["scorer"]["name"],
+        [manifest["scorer"]["name"]] if "scorer" in manifest else [
+            projection["scorerName"] for projection in manifest["scoring"]["projections"]
+        ],
+        "scorer" in manifest,
         manifest.get("runOptions", {}).get("sampleId"),
         log.samples,
+        declared_sandbox,
+        sandbox_config,
     )
-    if actual_runtime != manifest["runtime"] or actual_components != {
-        "task": manifest["task"],
-        "scorer": manifest["scorer"]["definition"],
-    }:
+    expected_components = {"task": manifest["task"]}
+    if "scorer" in manifest:
+        expected_components["scorer"] = manifest["scorer"]["definition"]
+    else:
+        expected_components.update({
+            "scorers": [scorer["definition"] for scorer in manifest["scorers"]],
+            "inspectMetrics": manifest["scoring"]["inspectMetrics"],
+            "inspectEpochReducers": manifest["scoring"]["inspectEpochReducers"],
+        })
+    if actual_runtime != manifest["runtime"] or actual_components != expected_components:
         raise ValueError("Inspect runtime, task, source, scorer, dataset, or environment drifted during execution")
     native_log = output_dir / "inspect.eval"
     shutil.copyfile(source_log, native_log)
@@ -429,50 +760,26 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
     if reread.status != log.status:
         raise ValueError("copied native log changed status under the official Inspect reader")
 
-    # Inspect preserves the source dataset cardinality in EvalSpec.dataset.samples even when
-    # sample_id selects a single row. The locked exact sample is the cell's expected work; using
-    # the source cardinality here would incorrectly mark every exact-sample run incomplete.
-    expected = 1 if options.get("sampleId") is not None else log.eval.dataset.samples
     samples = log.samples or []
-    errors = sum(1 for sample in samples if sample.error is not None)
-    scorer_name = manifest["scorer"]["name"]
-    pass_value = manifest["scorer"]["passValue"]
-    score_values: list[Any] = []
-    missing_scores = 0
-    for sample in samples:
-        score = (sample.scores or {}).get(scorer_name)
-        value = None if score is None else score.value
-        if score is None or isinstance(value, (list, dict)):
-            missing_scores += 1
-        else:
-            score_values.append(value)
-    incomplete = expected is None or len(samples) != expected
-    unscorable = (
-        log.status != "success"
-        or bool(log.invalidated)
-        or errors > 0
-        or incomplete
-        or missing_scores > 0
-        or len(score_values) == 0
-    )
-    passed = (not unscorable) and all(scalar_equal(value, pass_value) for value in score_values)
-    summary = {
-        "schema": "jinn.network/benchmark-product/inspect-cell-summary/1",
-        "terminal": "unscorable" if unscorable else "scored",
-        "inspectStatus": log.status,
-        "expectedSamples": expected,
-        "observedSamples": len(samples),
-        "erroredSamples": errors,
-        "missingScoreSamples": missing_scores,
-        "invalidated": bool(log.invalidated),
-        "scorer": scorer_name,
-        "verdict": None if unscorable else ("pass" if passed else "fail"),
-        "measurement": None if unscorable else passed,
-        "evaluatedAt": __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
-        .isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        "nativeLogSha256": sha256_file(native_log),
-        "nativeLogBytes": native_log.stat().st_size,
-    }
+    evaluated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc) \
+        .isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    observed = observe_native_log(manifest, log, native_log)
+    if observed["summarySchema"] == "jinn.network/benchmark-product/inspect-cell-summary/1":
+        summary = {
+            "schema": "jinn.network/benchmark-product/inspect-cell-summary/1",
+            **{key: value for key, value in observed.items() if key not in {"schema", "summarySchema"}},
+            "verdict": None if observed["terminal"] == "unscorable" else (
+                "pass" if observed["measurement"] else "fail"
+            ),
+            "evaluatedAt": evaluated_at,
+        }
+    else:
+        summary = {
+            "schema": "jinn.network/benchmark-product/inspect-cell-summary/2",
+            **{key: value for key, value in observed.items() if key not in {"schema", "summarySchema"}},
+            "verdict": None,
+            "evaluatedAt": evaluated_at,
+        }
     if provider_records is not None:
         records = provider_records()
         summary["provider"] = {
@@ -485,6 +792,23 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
             "brokerProtocol": "jinn.network/model-broker/1",
             "brokerSourceSha256": manifest["runtime"]["execution"]["brokerSourceSha256"],
         }
+    if sandbox_runtime is not None:
+        sandbox_events = [
+            event for sample in samples for event in (sample.events or [])
+            if getattr(event, "event", None) == "sandbox"
+        ]
+        event_material = json.dumps(
+            [event.model_dump(mode="json") for event in sandbox_events],
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+        summary["sandbox"] = {
+            "provider": sandbox_runtime["provider"],
+            "protocol": sandbox_runtime["protocol"],
+            "imageDigest": sandbox_runtime["imageDigest"],
+            "environmentCount": 1,
+            "operationCount": len(sandbox_events),
+            "eventDigest": hashlib.sha256(event_material).hexdigest(),
+        }
     (output_dir / "inspect-summary.json").write_text(
         json.dumps(summary, sort_keys=True, separators=(",", ":")), encoding="utf-8"
     )
@@ -492,8 +816,8 @@ def run(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
-    if len(sys.argv) not in {2, 3} or sys.argv[1] not in {"probe", "run"}:
-        print(json.dumps({"ok": False, "error": "usage: worker.py probe|run [config.json]"}))
+    if len(sys.argv) not in {2, 3} or sys.argv[1] not in {"probe", "run", "verify"}:
+        print(json.dumps({"ok": False, "error": "usage: worker.py probe|run|verify [config.json]"}))
         return 2
     try:
         prepare_readonly_hf_dataset_cache()
@@ -501,7 +825,7 @@ def main() -> int:
         # Task imports and model/scorer code may print. Keep stdout reserved for the bounded
         # worker protocol; the host captures and discards stderr rather than reflecting it.
         with redirect_stdout(sys.stderr):
-            value = probe(config) if sys.argv[1] == "probe" else run(config)
+            value = probe(config) if sys.argv[1] == "probe" else verify(config) if sys.argv[1] == "verify" else run(config)
         print(json.dumps({"ok": True, "value": value}, sort_keys=True, separators=(",", ":")))
         return 0
     except BaseException as error:

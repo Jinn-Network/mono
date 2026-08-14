@@ -45,6 +45,15 @@ export {
   type SelectInspectEvaluationInput,
   type SelectInspectEvaluationResult,
 } from "./inspect-runtime.js";
+export { selectHarborRuntime, type SelectHarborRuntimeInput, type SelectHarborRuntimeResult } from "./harbor-runtime.js";
+export {
+  migrateTerminalBenchLegacyTask,
+  selectTerminalBench2Runtime,
+  type MigrateTerminalBenchLegacyTaskInput,
+  type MigrateTerminalBenchLegacyTaskResult,
+  type SelectTerminalBench2RuntimeInput,
+  type SelectTerminalBench2RuntimeResult,
+} from "./terminal-bench-2.js";
 
 export {
   armAdd,
@@ -80,6 +89,16 @@ export {
 } from "./run-quote.js";
 export { runLock, type RunLockInput, type RunLockResult } from "./run-lock.js";
 export {
+  publicationConfigure,
+  publicationRegister,
+  type PublicationConfigureInput,
+  type PublicationRegisterInput,
+  type PublicationRegisterDeps,
+  type PublicationRegistrationResult,
+} from "./publication-register.js";
+export { publicationAccounting, type PublicationAccountingInput, type PublicationAccountingResult } from "./publication-accounting.js";
+export { publicationStatus } from "./publication-status.js";
+export {
   runLaunch,
   runResume,
   type RunLaunchDeps,
@@ -106,6 +125,8 @@ export {
 // re-derives the Matrix (and, once reported, the Report and claim package) from the workspace's
 // own durable state.
 export { runReport, type RunReportInput, type RunReportResult } from "./report.js";
+// PUB-13c's programmatic signed-envelope stage; PUB-14 owns a user-facing command/surface.
+export { publicationReport, type PublicationReportDeps, type PublicationReportInput, type PublicationReportResult } from "./publication-report.js";
 export { runVerify, type RunVerifyCheck, type RunVerifyInput, type RunVerifyResult } from "./verify.js";
 export { runPublish, type RunPublishDeps, type RunPublishInput, type RunPublishResult } from "./publish.js";
 

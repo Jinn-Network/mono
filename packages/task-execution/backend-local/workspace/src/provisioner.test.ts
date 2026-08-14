@@ -240,7 +240,25 @@ describe("directory provisioner", () => {
       env: {
         OPENAI_API_KEY: "secrets/",
         OPENROUTER_API_KEY: "../secrets/key",
+        ANTHROPIC_API_KEY: "secrets/.",
+        CLAUDE_CODE_OAUTH_TOKEN: "secrets/..",
       },
     })).toEqual({});
+  });
+
+  it("forwards real-harness credential references only as portable secrets handles", () => {
+    expect(executionEnv({
+      cwd: "/attempt/work",
+      env: {
+        ANTHROPIC_API_KEY: "secrets/claude-api",
+        CLAUDE_CODE_OAUTH_TOKEN: "secrets/claude-login",
+        JINN_CODEX_AUTH_JSON: "secrets/codex-login",
+        OPENAI_API_KEY: "sk-live-value-must-not-cross",
+      },
+    })).toEqual({
+      ANTHROPIC_API_KEY: "secrets/claude-api",
+      CLAUDE_CODE_OAUTH_TOKEN: "secrets/claude-login",
+      JINN_CODEX_AUTH_JSON: "secrets/codex-login",
+    });
   });
 });

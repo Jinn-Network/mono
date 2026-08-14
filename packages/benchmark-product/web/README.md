@@ -1,7 +1,7 @@
-# Colophon web — `@jinn-network/benchmark-product-web`
+# Colophon web — `@colophon-claims/web`
 
 This private Next.js App Router application is Colophon's human surface. It is a server-only, in-process client of the public
-`@jinn-network/benchmark-product-core` entry. It contains no second lifecycle,
+`@colophon-claims/core` entry. It contains no second lifecycle,
 orchestrator, statistic, verifier, record reader, HTTP API route, or browser-side
 core import.
 
@@ -68,6 +68,14 @@ exist and is the direct Playwright command.
 - `/workspace/[draftId]/run` — launch, durable status, resume, cancel, collect.
 - `/workspace/[draftId]/results` — Matrix, Report, claim, verification, and local
   publication.
+- `/publication/[...path]` — fixed same-workspace exact-byte public archive; the browser
+  never selects a workspace.
+
+Set `BENCHMARK_PRODUCT_PUBLICATION_PUBLIC_BASE_URL` to the externally visible origin plus
+`/publication` when a proxy means the server cannot safely derive its public URL. It is only a
+locator: configure/register consent and exact-byte probes remain core operation gates.
+The GUI displays and uses this server-owned exact archive mount; it never accepts a browser URL.
+The CLI retains `--public-base-url` for deliberate remote/archive operation outside the GUI.
 
 All displayed facts and action receipts come from public core operations.
 Known failures preserve their typed recovery category. Unexpected errors,

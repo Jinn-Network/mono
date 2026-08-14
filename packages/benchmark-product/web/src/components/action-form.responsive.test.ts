@@ -11,6 +11,7 @@ describe("narrow viewport action-result containment", () => {
     );
 
     expect(actionForm).toMatch(/<form[^>]+className="[^"]*min-w-0/);
+    expect(actionForm).toMatch(/<Button[^>]+className="[^"]*max-w-full[^"]*whitespace-normal/);
     expect(actionForm).toMatch(/<div[^>]+aria-live="polite"[^>]+className="[^"]*min-w-0/);
     expect(actionForm).toMatch(/<pre[^>]+className="[^"]*max-w-full[^"]*overflow-x-auto[^"]*whitespace-pre-wrap[^"]*break-all/);
     expect(runPage).toMatch(/<CardContent className="[^"]*min-w-0[^"]*\[&>\*\]:min-w-0/);

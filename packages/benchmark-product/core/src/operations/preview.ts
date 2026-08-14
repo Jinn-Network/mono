@@ -27,7 +27,8 @@
 
 import { mkdirSync } from "node:fs";
 import { launchAndWatch, type CellStatusEvent } from "@jinn-network/benchmarking-run";
-import type { DraftDocument } from "../domain/draft.js";
+import { resolveAssurance, type DraftDocument } from "../domain/draft.js";
+import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { appendFsyncedLineSync, atomicWriteFileSync } from "../fs/atomic.js";
@@ -42,6 +43,10 @@ import {
 import { deriveRunOwner } from "../run/state.js";
 import { createLocalVenue, type LocalVenue } from "../venue/venue.js";
 import { createRuntimeVenue } from "../runtime/adapter.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { draftPreviewsDir, previewArtifactPath, previewDir, previewJournalPath, previewScratchDir } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
@@ -78,6 +83,7 @@ export interface RunPreviewResult {
   readonly draft: DraftDocument;
   readonly preview: PreviewArtifact;
   readonly previewCount: number;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 function computeCloseAt(at: string, closeAfterMs: number): string {
@@ -157,6 +163,12 @@ export function runPreview(
     inputs: input,
     run: async () => {
       const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+      const resolvedAssurance = resolveAssurance(document.spec.assurance);
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        clockedContext.workspaceDir,
+        document.spec.evaluationRuntime,
+        resolvedAssurance,
+      );
       const createVenue: typeof createLocalVenue = deps.createVenue
         ?? ((options) => createRuntimeVenue(document.spec.evaluationRuntime, options, context.runtimeHost));
 
@@ -199,6 +211,8 @@ export function runPreview(
           workspaceDir: previewScratchDir(clockedContext.workspaceDir, input.draftId, previewId),
           runtimeBindingWorkspaceDir: clockedContext.workspaceDir,
           now: context.clock,
+          evaluatorCount: resolvedAssurance.minVerdicts,
+          inspectEvaluationStrategy: deriveInspectEvaluationStrategy(resolvedAssurance),
         });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
@@ -271,7 +285,12 @@ export function runPreview(
       );
       const updatedLog = appendPreviewLogEntry(clockedContext.workspaceDir, input.draftId, logEntry);
 
-      return { draft: document, preview: artifact, previewCount: updatedLog.count };
+      return {
+        draft: document,
+        preview: artifact,
+        previewCount: updatedLog.count,
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+      };
     },
   });
 }

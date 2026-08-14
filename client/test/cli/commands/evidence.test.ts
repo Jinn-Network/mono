@@ -19,7 +19,7 @@ const runConformanceMock = vi.hoisted(() => vi.fn(async (_args: unknown) => ({})
 const getAutopilotDeliveryCandidatesMock = vi.hoisted(() =>
   vi.fn(async (_args: unknown) => ({}) as Record<string, unknown>),
 );
-const createHttpDiscoveryAPIMock = vi.hoisted(() =>
+const createHttpDiscoveryClientMock = vi.hoisted(() =>
   vi.fn((_opts: { url: string }) => ({
     getAutopilotDeliveryCandidates: getAutopilotDeliveryCandidatesMock,
   })),
@@ -32,8 +32,9 @@ vi.mock('../../../src/adapters/mech/ipfs.js', async (importOriginal) => ({
 vi.mock('../../../src/conformance/harness.js', () => ({
   runConformance: runConformanceMock,
 }));
-vi.mock('../../../src/discovery/http.js', () => ({
-  createHttpDiscoveryAPI: createHttpDiscoveryAPIMock,
+// One-swap R3b (issue #2494): `evidence find` reads the relocated slice.
+vi.mock('../../../src/discovery-client/http.js', () => ({
+  createHttpDiscoveryClient: createHttpDiscoveryClientMock,
 }));
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
@@ -143,7 +144,7 @@ describe('evidence command', () => {
     fetchSignedEnvelopeBytesRawMock.mockResolvedValue(encode(buildEnvelope()));
     runConformanceMock.mockReset();
     getAutopilotDeliveryCandidatesMock.mockReset();
-    createHttpDiscoveryAPIMock.mockClear();
+    createHttpDiscoveryClientMock.mockClear();
   });
 
   afterEach(() => {
@@ -324,7 +325,7 @@ describe('evidence command', () => {
       expect(envelope.hint).toMatch(/JINN_DISCOVERY_URL/);
       expect(exits).toEqual([11]);
       // No silent fall-through to the on-chain floor.
-      expect(createHttpDiscoveryAPIMock).not.toHaveBeenCalled();
+      expect(createHttpDiscoveryClientMock).not.toHaveBeenCalled();
     });
 
     it('returns the envelope CID for a ready lookup', async () => {
@@ -370,7 +371,7 @@ describe('evidence command', () => {
         publisherAgentId: '7',
       });
       expect(exits).toEqual([]);
-      expect(createHttpDiscoveryAPIMock).toHaveBeenCalledWith({
+      expect(createHttpDiscoveryClientMock).toHaveBeenCalledWith({
         url: 'https://indexer.example',
       });
       expect(getAutopilotDeliveryCandidatesMock).toHaveBeenCalledWith({

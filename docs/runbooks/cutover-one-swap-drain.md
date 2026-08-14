@@ -156,6 +156,16 @@ evidence (never the cited basis for any manifest flip — headless §7).
 
 ## After deploy
 
+> **Reframed 2026-08-13 (DR-2026-08-05 addendum, decision 1 — operator ruling).** The
+> Railway-hosted operator is retired, so there is no hosted fleet to roll out to and no
+> separate deploy event to wait on. Step 7's *"Then the fleet, one operator at a time"* is
+> **retired as written**: the swapped daemon runs on the local operator homes A (service 72)
+> and B (service 75), and the one-swap deploy milestone is discharged by the two-operator
+> gate run itself. Read every item below as **after gate closure** — gate artifact (i)
+> closed 2026-08-13 (task 1236, Base Sepolia 84532; the close-out ledger, with transaction
+> hashes, is in the DR's 2026-08-13 addendum). Step 7's boot assertions, the drain, and the
+> rollback pin are unchanged and still apply to the operators that actually run.
+
 - [ ] Gate evidence tables complete in the PR body
 - [ ] Straggler disposition recorded (empty, or the surviving-synthesis note per DR
       decision 4)

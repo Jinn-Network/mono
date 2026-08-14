@@ -84,7 +84,11 @@ import { KNOWN_MANIFEST_CID } from '../release/tier-2/fixtures/known-instance.js
 import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
-import { getMechDeliveryRate, getTimeoutBounds, claimEvaluation, claimDelivery, callDeliverToMarketplace } from '../../src/adapters/mech/contracts.js';
+import { getMechDeliveryRate, getTimeoutBounds, claimDelivery, callDeliverToMarketplace } from '../../src/adapters/mech/contracts.js';
+// Wave-4 D2: `contracts.ts`'s `claimEvaluation` retired with the mech adapter's
+// evaluation half; venue-base's verdict port is the surviving verdict tx path.
+import { createVerdictPorts } from '@jinn-network/marketplace-venue-base';
+import { createDirectSafeBroadcaster } from '../../src/adapters/mech/direct-safe-broadcaster.js';
 import { createClients } from '../../src/adapters/mech/safe.js';
 import { VerdictCode } from '../../src/adapters/mech/verdict-code.js';
 import { uploadToIpfs } from '../../src/adapters/mech/ipfs.js';
@@ -282,16 +286,22 @@ async function submitSelfEvaluation(args: {
   const evaluationTaskCidDigest = keccak256(
     toBytes(`evaluation:${posted.taskCid}:${posted.taskId}:${args.attemptIndex}`),
   ) as Hex;
-  const claimEvalResult = await claimEvaluation(
+  const claimEvalResult = await createVerdictPorts({
     publicClient,
-    walletClient,
-    evaluator.safeAddress as Address,
-    v3Env.routerAddress as Address,
-    posted.taskId,
-    args.attemptIndex,
-    v3Env.mockMechAddress as Address, // self-eval: same mech the solver claimed with
+    broadcaster: createDirectSafeBroadcaster(
+      publicClient,
+      walletClient,
+      evaluator.safeAddress as Address,
+    ) as never,
+    safeAddress: evaluator.safeAddress as Address,
+    routerAddress: v3Env.routerAddress as Address,
+    mechAddress: v3Env.mockMechAddress as Address, // self-eval: same mech the solver claimed with
+  }).openVerdictAttempt({
+    operationId: `e2e-open-verdict:${posted.taskId}:${args.attemptIndex}`,
+    taskId: BigInt(posted.taskId),
+    attemptIndex: args.attemptIndex,
     evaluationTaskCidDigest,
-  );
+  });
 
   const verdictPayload = SweRebenchV2VerdictPayloadSchema.parse({
     schemaVersion: 'swe-rebench-v2-verdict.v1',

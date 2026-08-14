@@ -38,6 +38,7 @@ import {
 import {
   assertMarketplaceTaskFunding,
   assertMarketplaceTaskRequestFreshness,
+  listMarketplaceLaunchedSolverNets,
   resolveMarketplaceTaskSolverNet,
   runMarketplaceTaskSubmitPreflight,
 } from '../../tasks/submit-preflight.js';
@@ -45,8 +46,8 @@ import {
   readMarketplaceTaskSelection,
   writeMarketplaceTaskSelection,
 } from '../../tasks/submit-selection.js';
-import { createHttpDiscoveryAPI } from '../../discovery/http.js';
-import type { DiscoveryAPI } from '../../discovery/types.js';
+import { createHttpDiscoveryClient } from '../../discovery-client/http.js';
+import type { DiscoveryClient } from '../../discovery-client/types.js';
 import { fetchFromIpfs } from '../../adapters/mech/ipfs.js';
 import { getJinnRouterAddress } from '../../contracts/addresses.js';
 import {
@@ -88,15 +89,16 @@ function machinePreflightChecks(args: {
   signerContext: CliSignerContext;
 }) {
   const signer = async () => args.signerContext;
-  let launchedPromise: ReturnType<ReturnType<typeof createHttpDiscoveryAPI>['listLaunchedSolverNets']> | undefined;
+  // One-swap R3b (issue #2494) retired this function's own
+  // `createHttpDiscoveryAPI(...).listLaunchedSolverNets(...)` leg. The read is
+  // unchanged, but `tasks/submit-preflight.ts` is now its single owner, so
+  // `jinn tasks submit` reaches the indexer through exactly one call site.
+  // The memo stays: `indexer` and `solverNet` both consume it within one run.
+  let launchedPromise:
+    | ReturnType<typeof listMarketplaceLaunchedSolverNets>
+    | undefined;
   const launched = async () => {
-    const discovery = args.config.discovery;
-    if (discovery?.mode !== 'http' || !discovery.url) {
-      throw new Error('HTTP discovery indexer must be configured for machine Task submission');
-    }
-    launchedPromise ??= createHttpDiscoveryAPI({
-      url: discovery.url,
-    }).listLaunchedSolverNets({ status: ['launched'] });
+    launchedPromise ??= listMarketplaceLaunchedSolverNets(args.config);
     return launchedPromise;
   };
   const primary = async () => {
@@ -956,13 +958,13 @@ export interface TasksWatchProgressEnvelope {
 }
 
 export interface TasksWatchDeps {
-  createDiscovery: (url: string) => Pick<DiscoveryAPI, 'getAutopilotDeliveryCandidates'>;
+  createDiscovery: (url: string) => Pick<DiscoveryClient, 'getAutopilotDeliveryCandidates'>;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
 }
 
 const DEFAULT_WATCH_DEPS: TasksWatchDeps = {
-  createDiscovery: (url: string) => createHttpDiscoveryAPI({ url }),
+  createDiscovery: (url: string) => createHttpDiscoveryClient({ url }),
   sleep: (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms); }),
   now: () => Date.now(),
 };

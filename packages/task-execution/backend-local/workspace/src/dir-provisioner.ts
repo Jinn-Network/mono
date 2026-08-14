@@ -58,7 +58,8 @@ async function sealInputAndSnapshot(paths: WorkspacePaths): Promise<void> {
 }
 
 function isDeclaredSecretReference(value: string): boolean {
-  return /^secrets\/[A-Za-z0-9._-]+$/.test(value);
+  const match = /^secrets\/([A-Za-z0-9._-]+)$/.exec(value);
+  return match !== null && match[1] !== "." && match[1] !== "..";
 }
 
 export function executionEnv(launch: LaunchEnv): Record<string, string> {
@@ -86,10 +87,22 @@ export function executionEnv(launch: LaunchEnv): Record<string, string> {
     "TMPDIR",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
+    // These are still generic launcher environment names. Values cross only as a declared
+    // `secrets/<portable-basename>` handle and are resolved by the exec-time bridge, never here.
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "JINN_CODEX_AUTH_JSON",
+  ]);
+  const secretReferenceKeys = new Set([
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "JINN_CODEX_AUTH_JSON",
   ]);
   for (const [key, value] of Object.entries(launch.env)) {
     if (
-      (key === "OPENAI_API_KEY" || key === "OPENROUTER_API_KEY")
+      secretReferenceKeys.has(key)
       && !isDeclaredSecretReference(value)
     ) continue;
     if (allowed.has(key)) result[key] = value;

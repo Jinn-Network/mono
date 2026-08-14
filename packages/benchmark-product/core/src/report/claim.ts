@@ -33,13 +33,14 @@ import { z } from "zod";
 import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
 import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
-import { PRODUCT_BRANDING } from "../branding.js";
+import {
+  PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_VERIFICATION_CHECKS as READER_VERIFICATION_CHECKS,
+  PUBLIC_BUNDLE_VERIFICATION_COMMAND as READER_VERIFICATION_COMMAND,
+} from "@colophon-claims/verify";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { claimPackageArtifactPath } from "../workspace/layout.js";
 import type { VenueHonesty } from "../operations/run-results.js";
-
-/** The preferred public CLI alias. The internal compatibility alias remains in package metadata. */
-const CLI_BIN_NAME = PRODUCT_BRANDING.commandName;
 
 export const CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/1";
 
@@ -169,6 +170,7 @@ export const ClaimPackageSchema = z.object({
   venueHonesty: z.unknown(),
   verification: z.object({
     command: z.string().min(1),
+    compatibleCommand: z.string().min(1),
     checks: z.array(z.string().min(1)).min(1),
     trustRoot: z.string().min(1),
   }),
@@ -204,7 +206,7 @@ export interface BuildClaimPackageInput {
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
   readonly venueHonesty: VenueHonesty;
-  /** The CLI verb this package's `verification.command` names, e.g. `"verify"`. */
+  /** Retained for source compatibility; reader instructions come from the verifier package. */
   readonly verificationCommandVerb: string;
   /** BP-21 (spec §6): the draft's assurance preset (a product-policy label) and the platform
    * primitives it resolved to. `buildClaimPackage` cross-checks the primitives against what the
@@ -357,14 +359,8 @@ function summedPinningUnverifiableCounts(perSubject: readonly DisclosurePerSubje
   return counts;
 }
 
-export const CLAIM_VERIFICATION_CHECKS: readonly string[] = [
-  "sealed-store digest re-verification on read (every referenced record's exact bytes are re-hashed against their own digest)",
-  "matrix re-derivation (verifyMatrix byte-compare against the exact recomputed Matrix)",
-  "report DSSE signature, method recompute, preregistration, and disclosures (verifyReport)",
-  "claim-package digest and content consistency against the records it cites",
-];
-
-export const PUBLIC_BUNDLE_VERIFICATION_COMMAND = `${CLI_BIN_NAME} bundle verify --bundle <bundle-dir> --json`;
+export const CLAIM_VERIFICATION_CHECKS: readonly string[] = READER_VERIFICATION_CHECKS;
+export const PUBLIC_BUNDLE_VERIFICATION_COMMAND = READER_VERIFICATION_COMMAND;
 export const SELF_RUN_TRUST_ROOT =
   "Signatures verify against the bundle-carried public keys minted by this workspace; there is no third-party trust anchor on the self-run venue.";
 
@@ -444,6 +440,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     venueHonesty: input.venueHonesty,
     verification: {
       command: PUBLIC_BUNDLE_VERIFICATION_COMMAND,
+      compatibleCommand: PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
       checks: [...CLAIM_VERIFICATION_CHECKS],
       trustRoot: SELF_RUN_TRUST_ROOT,
     },

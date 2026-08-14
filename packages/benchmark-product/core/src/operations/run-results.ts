@@ -32,6 +32,10 @@ import {
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
 import { refuse } from "../errors.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { venueIsolationPostureForPolicy } from "../venue/isolation.js";
 import { ClaimPackageSchema, type ClaimPackage } from "../report/claim.js";
@@ -129,6 +133,7 @@ export interface RunResultsDocument {
    * the Report's own results and in the claim package. */
   readonly dissentCells: readonly string[];
   readonly venueHonesty: VenueHonesty;
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
   readonly publication?: {
     readonly identity: string;
     readonly relativePath: string;
@@ -355,6 +360,11 @@ export function runResults(
       // once here, alongside the Matrix, never re-derived per cell.
       const journalFold = foldRunJournal(readRunJournalEntries(context.workspaceDir, input.draftId));
       const cells = matrix.cells.map((cell) => toResultsCell(context.workspaceDir, cell, journalFold.get(cell.cellKey)));
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        context.workspaceDir,
+        document.spec.evaluationRuntime,
+        runRecord.policy.evaluation,
+      );
 
       const results: RunResultsDocument = {
         draftId: input.draftId,
@@ -368,6 +378,7 @@ export function runResults(
         cells,
         dissentCells: dissentCellKeys(cells),
         venueHonesty: buildLocalVenueHonesty(matrix.cells, runRecord),
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
         ...(document.state === "reported" || document.state === "published-bundle"
           ? { report: readReportedProjection(context.workspaceDir, input.draftId, runState) }
           : {}),

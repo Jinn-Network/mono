@@ -44,7 +44,8 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@jinn-network/evidence-repository": "0.1.0"
+    "@jinn-network/evidence-repository": "0.1.0",
+    "@jinn-network/record-publication": "0.1.0"
   },
   "peerDependencies": {
     "vitest": "^4.1.8"
@@ -56,6 +57,9 @@
   },
   "devDependencies": {
     "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/record-discovery-serve": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
@@ -63,6 +67,10 @@
   "resolutions": {
     "@jinn-network/evidence-protocol": "portal:../protocol",
     "@jinn-network/evidence-repository": "portal:../repository",
+    "@jinn-network/record-publication": "portal:../../discovery/publication",
+    "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
+    "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",
+    "@jinn-network/trust-core": "portal:../../trust/core",
     "vite": "6.4.3"
   }
 }

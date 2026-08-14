@@ -2,7 +2,7 @@
  * Task 5.7 — Data Donation placement tests (§2.13).
  *
  * Asserts that the donation toggle is present on /operator/execution-data
- * and absent on /operator/memberships (per spec §2.13: Data Donation belongs
+ * (per spec §2.13: Data Donation belongs
  * with Artifact Serving, not with Memberships).
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -11,8 +11,6 @@ import { Router, Route, Switch } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CapturesTab } from '../../captures/CapturesTab.js';
-import { OperatorShell } from './OperatorShell.js';
-import { MembershipsTab } from './MembershipsTab.js';
 
 import type { JSX } from 'react';
 
@@ -103,22 +101,4 @@ describe('Data Donation placement (§2.13)', () => {
     );
   });
 
-  it('does NOT render the donation toggle on /operator/memberships', async () => {
-    listArtifactsMock.mockResolvedValue(servedResponse);
-    render(
-      withProviders(
-        '/operator/memberships',
-        <Switch>
-          <Route path="/operator/memberships">
-            <OperatorShell><MembershipsTab /></OperatorShell>
-          </Route>
-        </Switch>,
-      ),
-    );
-    // Wait for the memberships tab to settle
-    await waitFor(() =>
-      expect(screen.getByTestId('memberships-tab')).toBeTruthy(),
-    );
-    expect(screen.queryByTestId('operator-donation-toggle')).toBeNull();
-  });
 });

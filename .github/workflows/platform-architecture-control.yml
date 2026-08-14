@@ -36,6 +36,7 @@ jobs:
             .github/scripts/observation-reader-gate-boundary.test.mjs \
             .github/scripts/architecture-control.test.mjs \
             .github/scripts/branch-protection-audit.test.mjs \
+            .github/scripts/benchmark-product-source-boundaries.test.mjs \
             .github/scripts/architecture-control-workflow.test.mjs \
             .github/scripts/platform-verification-selection.test.mjs
           node .github/scripts/architecture-control.mjs \

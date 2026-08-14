@@ -14,12 +14,10 @@ import type { JSX } from 'react';
  */
 
 const listRegistryMock = vi.fn();
-const listJoinedMock = vi.fn();
 
 vi.mock('../../api/client.js', () => ({
   api: {
     operator: {
-      listJoined: () => listJoinedMock(),
     },
     solvernets: {
       listRegistry: () => listRegistryMock(),
@@ -42,8 +40,6 @@ function withProviders(node: JSX.Element, path = '/operator'): JSX.Element {
 describe('RegistryCatalog', () => {
   beforeEach(() => {
     listRegistryMock.mockReset();
-    listJoinedMock.mockReset();
-    listJoinedMock.mockResolvedValue({ joinedSolverNets: {} });
   });
 
   it('shows the spec §12 empty-state copy when no SolverNets are launched', async () => {
@@ -234,107 +230,6 @@ describe('RegistryCatalog', () => {
       '[data-testid="registry-status-badge"]',
     );
     expect(pendingBadge?.getAttribute('data-status')).toBe('launched');
-
-    // The Join CTA still routes by manifest cid for the degraded (launched) row.
-    const pendingCta = pendingCard.querySelector(
-      '[data-testid="registry-join-cta"]',
-    );
-    expect(pendingCta?.getAttribute('href')).toBe(
-      '/operator/join/bafybeipending',
-    );
-  });
-
-  it('hides SolverNets that are already joined from Discover', async () => {
-    listJoinedMock.mockResolvedValue({
-      joinedSolverNets: {
-        bafybeiaaa: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
-      },
-    });
-    listRegistryMock.mockResolvedValue({
-      summaries: [
-        {
-          manifestCid: 'bafybeiaaa',
-          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
-          name: 'Already Joined',
-          network: 'base-sepolia',
-          launcherAgentId: '5474',
-          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
-          status: 'launched',
-          statusUpdatedAt: '2026-05-05T00:00:00Z',
-          contractId: 'prediction',
-          contractVersion: 'v1',
-          solutionPriceWei: '10000000000',
-          verdictPriceWei: '5000000000',
-          openRoles: ['solver'],
-          anchorBlock: 1,
-        },
-        {
-          manifestCid: 'bafybeibbb',
-          solverNetId: 'agent9999_prediction.v1-1_bbbbbbbb',
-          name: 'Not Joined',
-          network: 'base-sepolia',
-          launcherAgentId: '9999',
-          launcherSafeAddress: '0xAA112233445566778899AABBCCDDEEFF11223344',
-          status: 'launched',
-          statusUpdatedAt: '2026-05-05T00:00:00Z',
-          contractId: 'prediction',
-          contractVersion: 'v1',
-          solutionPriceWei: '10000000000',
-          verdictPriceWei: '5000000000',
-          openRoles: ['solver'],
-          anchorBlock: 2,
-        },
-      ],
-      lastRefreshedAt: null,
-      lastError: null,
-    });
-
-    render(withProviders(<RegistryCatalog />));
-
-    await waitFor(() =>
-      expect(screen.queryAllByTestId('registry-card')).toHaveLength(1),
-    );
-    expect(screen.queryByText('Already Joined')).toBeNull();
-    expect(screen.getByText('Not Joined')).toBeTruthy();
-  });
-
-  it('shows the unjoined empty-state copy when all SolverNets are already joined', async () => {
-    listJoinedMock.mockResolvedValue({
-      joinedSolverNets: {
-        bafybeiaaa: { manifestCid: 'bafybeiaaa', roles: ['solver'] },
-      },
-    });
-    listRegistryMock.mockResolvedValue({
-      summaries: [
-        {
-          manifestCid: 'bafybeiaaa',
-          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
-          name: 'Already Joined',
-          network: 'base-sepolia',
-          launcherAgentId: '5474',
-          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
-          status: 'launched',
-          statusUpdatedAt: '2026-05-05T00:00:00Z',
-          contractId: 'prediction',
-          contractVersion: 'v1',
-          solutionPriceWei: '10000000000',
-          verdictPriceWei: '5000000000',
-          openRoles: ['solver'],
-          anchorBlock: 1,
-        },
-      ],
-      lastRefreshedAt: null,
-      lastError: null,
-    });
-
-    render(withProviders(<RegistryCatalog />));
-
-    await waitFor(() =>
-      expect(screen.getByTestId('registry-catalog-empty')).toBeTruthy(),
-    );
-    expect(
-      screen.getByText(/no unjoined solvernets available\./i),
-    ).toBeTruthy();
   });
 
   it('formats tiny live prices as gwei instead of scientific ETH notation', async () => {
@@ -369,34 +264,6 @@ describe('RegistryCatalog', () => {
     expect(screen.getByText('10 gwei')).toBeTruthy();
     expect(screen.getByText('5 gwei')).toBeTruthy();
     expect(screen.queryByText(/\d\.\d+e-/i)).toBeNull();
-  });
-
-  it('routes the Join CTA to /operator/join/<manifestCid> for launched nets', async () => {
-    listRegistryMock.mockResolvedValue({
-      summaries: [
-        {
-          manifestCid: 'bafybeiaaa',
-          solverNetId: 'agent5474_prediction.v1-1_aaaaaaaa',
-          name: 'Prediction Markets',
-          network: 'base-sepolia',
-          launcherAgentId: '5474',
-          launcherSafeAddress: '0xE64bAfABCDEF0123456789abcdef0123456789B5CF',
-          status: 'launched',
-          statusUpdatedAt: '2026-05-05T00:00:00Z',
-          contractId: 'prediction',
-          contractVersion: 'v1',
-          solutionPriceWei: '1000000000000000',
-          verdictPriceWei: '500000000000000',
-          openRoles: ['solver'],
-          anchorBlock: 1,
-        },
-      ],
-      lastRefreshedAt: null,
-      lastError: null,
-    });
-    render(withProviders(<RegistryCatalog />));
-    const cta = await screen.findByTestId('registry-join-cta');
-    expect(cta.getAttribute('href')).toBe('/operator/join/bafybeiaaa');
   });
 
   it('shows a loading state while the query resolves', () => {
@@ -589,7 +456,7 @@ describe('RegistryCatalog', () => {
     ).toBeNull();
   });
 
-  it('frames the demo CTA as "Try the demo"', async () => {
+  it('badges the canonical demo net as recommended', async () => {
     listRegistryMock.mockResolvedValue({
       summaries: [
         summary({ manifestCid: 'bafybeidemo', name: 'SWE-rebench v2', contractId: 'swe-rebench-v2' }),
@@ -609,15 +476,8 @@ describe('RegistryCatalog', () => {
     const predCard = cards.find(
       (c) => c.getAttribute('data-manifest-cid') === 'bafybeipred',
     )!;
-    const demoCta = demoCard.querySelector(
-      '[data-testid="registry-join-cta"]',
-    )!;
-    expect(demoCta.textContent).toMatch(/try the demo/i);
-    expect(demoCta.getAttribute('href')).toBe('/operator/join/bafybeidemo');
-    const predCta = predCard.querySelector(
-      '[data-testid="registry-join-cta"]',
-    )!;
-    expect(predCta.textContent).toBe('Join');
+    expect(demoCard.querySelector('[data-testid="registry-card-recommended"]')).toBeTruthy();
+    expect(predCard.querySelector('[data-testid="registry-card-recommended"]')).toBeNull();
   });
 
   it('excludes smoke / internal nets from Discover', async () => {

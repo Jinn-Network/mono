@@ -16,6 +16,20 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   const view = loadRunView(draftId);
   const status = view.ok && view.status.ok ? view.status.result : undefined;
   const state = status?.state;
+  const publication = view.ok && view.publication?.ok ? view.publication.result : undefined;
+  const publicationConfiguration = view.ok ? view.publicationConfiguration : undefined;
+  const postHoc = state === "closed" || state === "reported" || state === "published-bundle";
+  const reportStage = publication?.stages.find((stage) => stage.name === "report");
+  const accountingStage = publication?.stages.find((stage) => stage.name === "accounting");
+  const matrixStage = publication?.stages.find((stage) => stage.name === "matrix");
+  const accountingReady = accountingStage?.state === "complete" && accountingStage.receipt !== undefined
+    && matrixStage?.state === "complete" && matrixStage.receipt !== undefined;
+  const reportPublished = reportStage?.state === "complete"
+    && reportStage.receipt !== undefined
+    && reportStage.digests.payload !== undefined
+    && reportStage.digests.record !== undefined;
+  const reportNeedsRecovery = reportStage?.state === "in-progress"
+    || (reportStage?.state === "complete" && !reportPublished);
   const cancellationPending = status?.cancelRequested === true && state === "running";
   const poll = status?.driver?.status === "active" || cancellationPending;
 
@@ -39,12 +53,31 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
         {status.driver.status === "active" ? <p>A server restart may have interrupted this generation. Resume safely from the durable journal if progress stops.</p> : null}
         {status.driver.error ? <div role="alert" className="mt-3 rounded-md border border-destructive p-3"><p className="font-semibold">{status.driver.error.code}</p><p>{status.driver.error.detail}</p><p>Correct the condition, then retry with Resume.</p></div> : null}
       </CardContent></Card> : null}
-      <Card><CardHeader><CardTitle>Run controls</CardTitle></CardHeader><CardContent className="grid min-w-0 gap-5 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
+      <Card><CardHeader><CardTitle>Run controls</CardTitle></CardHeader><CardContent className="grid min-w-0 gap-5 [&>*]:min-w-0"><p role="note" className="rounded-md border border-amber-600/40 bg-amber-50 p-3 text-sm text-foreground dark:bg-amber-950/20"><strong>Provider network and possible charges.</strong> Launching a provider-backed Arm contacts its provider using your local Colophon credential and may create provider charges. The bundled sample needs no account, API key, funds, or provider connection.</p><div className="grid min-w-0 gap-5 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
         <ActionForm action={GUI_SERVER_ACTIONS["run.launch"]} submitLabel="Launch" gated disabled={state !== "locked"}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.resume"]} submitLabel="Resume" disabled={state !== "running" || status?.cancelRequested === true}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.cancel"]} submitLabel="Request / finalize cancel" gated disabled={state !== "running" && !(state === "closed" && status?.cancelRequested === true)}><HiddenDraft draftId={draftId} /></ActionForm>
         <ActionForm action={GUI_SERVER_ACTIONS["run.collect"]} submitLabel="Collect" disabled={state !== "running" || status?.cancelRequested === true}><HiddenDraft draftId={draftId} /></ActionForm>
-      </CardContent></Card>
+      </div></CardContent></Card>
+      <section aria-labelledby="publication-heading" className="grid gap-5 lg:grid-cols-2">
+        <Card><CardHeader><CardTitle id="publication-heading">Publication status</CardTitle></CardHeader><CardContent className="space-y-4">
+          {!publication ? <p role="status">Publication status becomes available after the Run is locked.</p> : <>
+            <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Mode</dt><dd>{publication.mode === "prospective" ? "Prospective public publication" : "Local-first (not public by default)"}</dd></div><div><dt className="font-medium">Analysis preregistration</dt><dd>{publication.analysisPreregistration === "fixed-in-run" ? "Fixed in sealed Run" : "Not locked"}</dd></div><div><dt className="font-medium">Public-registration timing</dt><dd>{publication.registrationTiming}</dd></div><div><dt className="font-medium">Public URL</dt><dd className="break-all">{publication.publicBaseUrl ?? "Not configured"}</dd></div></dl>
+            <div><h3 className="font-semibold">Stages</h3><ul aria-label="Publication stages" className="mt-2 space-y-1">{publication.stages.map((stage) => <li key={stage.name}><span className="font-medium">{stage.name}</span>: {stage.state}{stage.receipt ? ` · receipt ${stage.receipt.sourceSequence}` : ""}</li>)}</ul></div>
+            <p role="status">{publication.recovery.guidance}</p>
+            {publication.compatibility.status === "refused" ? <p role="alert">Accounting compatibility needs attention before public accounting can close.</p> : null}
+          </>}
+        </CardContent></Card>
+        <Card><CardHeader><CardTitle>Public publication controls</CardTitle></CardHeader><CardContent className="grid gap-5">
+          <p className="text-sm text-muted-foreground">Local-first is the default. Configure before dispatch only when you intend prospective public registration. The server never accepts a workspace path from this form.</p>
+          <p className="break-all text-sm" role="status">Server-configured archive mount: {publicationConfiguration?.publicBaseUrl ?? "Unavailable — set the publication public base URL on the server."}</p>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.configure"]} submitLabel={postHoc ? "Configure post-hoc public source (does not rerun)" : "Configure prospective public source"} gated disabled={!publicationConfiguration?.available || (state !== "locked" && !postHoc)}><HiddenDraft draftId={draftId} /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.register"]} submitLabel={postHoc ? "Register post-hoc (does not rerun)" : "Register before dispatch"} gated disabled={!publicationConfiguration?.available || (state !== "locked" && !postHoc)}><HiddenDraft draftId={draftId} /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.accounting"]} submitLabel="Publish accounting and Matrix (does not rerun)" gated disabled={!postHoc || publication?.postHocPublicationAvailable === false}><HiddenDraft draftId={draftId} /></ActionForm>
+          <ActionForm action={GUI_SERVER_ACTIONS["publication.report"]} submitLabel={reportPublished ? "Signed Report v2 published" : reportNeedsRecovery ? "Retry / resume signed Report v2" : "Publish signed Report v2 (does not rerun)"} gated disabled={!postHoc || !publicationConfiguration?.available || !accountingReady || reportPublished} notice="Requires authority and explicit consent"><HiddenDraft draftId={draftId} /><input type="hidden" name="consent" value="publish-signed-report-v2" /></ActionForm>
+          <p className="text-sm text-muted-foreground">Accounting can close a partial or cancelled managed run. It does not require a Report; signed Report v2 publication is optional, separately consented, and uses retained records without rerunning work.</p>
+        </CardContent></Card>
+      </section>
       <Card><CardHeader><CardTitle>Cells</CardTitle></CardHeader><CardContent><div tabIndex={0} role="region" aria-label="Run cells table" className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th scope="col">Arm</th><th scope="col">Replicate</th><th scope="col">Status</th><th scope="col">Dispatches</th><th scope="col">Failure / blame</th></tr></thead><tbody>{status?.cells.map((cell) => <tr key={cell.cellKey} className="border-t"><td className="py-2">{cell.armId}</td><td>{cell.replicate}</td><td>{cell.status}</td><td>{cell.dispatches}</td><td>{cell.detail ?? "—"}{cell.blame ? ` (${cell.blame})` : ""}</td></tr>)}</tbody></table></div></CardContent></Card>
     </>}
   </main>;

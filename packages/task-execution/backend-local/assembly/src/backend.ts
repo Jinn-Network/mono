@@ -345,9 +345,12 @@ function validateHostSecretForwardPlan(
         || forward.handle !== candidate.handle
         || forward.target !== candidate.target
         || forward.role !== candidate.role
-        || forward.evaluator !== candidate.evaluator
-        || forward.registrationId !== candidate.registrationId
-        || forward.evaluationMethodDigest !== candidate.evaluationMethodDigest;
+        || (forward.role === "evaluator" && (
+          candidate.role !== "evaluator"
+          || forward.evaluator !== candidate.evaluator
+          || forward.registrationId !== candidate.registrationId
+          || forward.evaluationMethodDigest !== candidate.evaluationMethodDigest
+        ));
     })
   ) throw new Error("LaunchPlan host secret forwards must exactly match the launcher capability declaration");
   const handles = new Set<string>();
@@ -356,10 +359,13 @@ function validateHostSecretForwardPlan(
     if (
       !validSecretForwardTarget(forward.handle)
       || !validSecretForwardTarget(forward.target)
-      || forward.role !== "evaluator"
-      || !nonEmptyString(forward.evaluator)
-      || !nonEmptyString(forward.registrationId)
-      || !/^sha256:[0-9a-f]{64}$/u.test(forward.evaluationMethodDigest)
+      || (forward.role !== "harness" && forward.role !== "evaluator")
+      || (forward.role === "evaluator" && (
+        !nonEmptyString(forward.evaluator)
+        || !nonEmptyString(forward.registrationId)
+        || typeof forward.evaluationMethodDigest !== "string"
+        || !/^sha256:[0-9a-f]{64}$/u.test(forward.evaluationMethodDigest)
+      ))
       || handles.has(forward.handle)
       || targets.has(forward.target)
     ) throw new Error("launcher host secret declarations are invalid");
@@ -490,16 +496,18 @@ function parseLaunchPlan(value: unknown): LaunchPlan {
   if (hostSecretForwards !== undefined) {
     if (!Array.isArray(hostSecretForwards) || !hostSecretForwards.every((candidate) =>
       isRecord(candidate)
-      && hasOnlyKeys(candidate, [
-        "handle", "target", "role", "evaluator", "registrationId", "evaluationMethodDigest",
-      ])
+      && (candidate.role === "harness"
+        ? hasOnlyKeys(candidate, ["handle", "target", "role"])
+        : hasOnlyKeys(candidate, ["handle", "target", "role", "evaluator", "registrationId", "evaluationMethodDigest"]))
       && validSecretForwardTarget(String(candidate.handle))
       && validSecretForwardTarget(String(candidate.target))
-      && candidate.role === "evaluator"
-      && nonEmptyString(candidate.evaluator)
-      && nonEmptyString(candidate.registrationId)
-      && typeof candidate.evaluationMethodDigest === "string"
-      && /^sha256:[0-9a-f]{64}$/u.test(candidate.evaluationMethodDigest))
+      && (candidate.role === "harness" || (
+        candidate.role === "evaluator"
+        && nonEmptyString(candidate.evaluator)
+        && nonEmptyString(candidate.registrationId)
+        && typeof candidate.evaluationMethodDigest === "string"
+        && /^sha256:[0-9a-f]{64}$/u.test(candidate.evaluationMethodDigest)
+      )))
     ) throw new TaskExecutionError("invalid-document", {
       detail: "journaled LaunchPlan host secret forwards are structurally invalid",
     });

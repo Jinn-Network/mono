@@ -10,16 +10,19 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // end-to-end without reaching the npm registry -- benchmarking-records/scripts/pack-smoke.mjs
 // precedent. Listed in dependency order (dependencies before dependents) because `yarn pack`
 // triggers each package's prepack build, whose type resolution reads the ones before it. The
-// `task-execution-launchers` devDependency is deliberately absent: a packed consumer installs
-// runtime dependencies only. This package is `"private": true` (never published, per the platform
-// manifest), and Yarn refuses to `yarn pack` a private package, so the product itself is packed
-// with `npm pack --ignore-scripts` after an explicit build instead.
+// runtime dependencies only. The reader verifier is packed separately below: core delegates to
+// that one authority instead of carrying a second verifier implementation.
 const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/task-execution-protocol", ["task-execution", "protocol"]],
   ["@jinn-network/trust-core", ["trust", "core"]],
   ["@jinn-network/environment-record", ["environments", "record"]],
   ["@jinn-network/task-execution-profiles", ["task-execution", "profiles"]],
   ["@jinn-network/benchmarking-records", ["benchmarking", "records"]],
+  ["@jinn-network/record-discovery-protocol", ["discovery", "protocol"]],
+  ["@jinn-network/record-discovery-serve", ["discovery", "serve"]],
+  ["@jinn-network/record-discovery-client", ["discovery", "client"]],
+  ["@jinn-network/record-discovery-transport-http", ["discovery", "transport-http"]],
+  ["@jinn-network/record-publication", ["discovery", "publication"]],
   ["@jinn-network/benchmarking-aggregate", ["benchmarking", "aggregate"]],
   ["@jinn-network/task-admission", ["task-supply", "admission"]],
   ["@jinn-network/benchmarking-interop", ["benchmarking", "interop"]],
@@ -38,6 +41,7 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/task-execution-backend-local", ["task-execution", "backend-local", "assembly"]],
   ["@jinn-network/benchmarking-run", ["benchmarking", "run"]],
   ["@jinn-network/benchmarking-local", ["benchmarking", "local"]],
+  ["@jinn-network/benchmarking-publication", ["benchmarking", "publication"]],
 ];
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-benchmark-product-core-"));
 const consumer = join(temporaryRoot, "consumer");
@@ -77,6 +81,9 @@ try {
     archives.set(name, archive);
   }
 
+  const verifierArchive = join(temporaryRoot, "colophon-verify.tgz");
+  await run("yarn", ["pack", "--out", verifierArchive], { cwd: join(packageRoot, "..", "verify") });
+
   await run("yarn", ["build"], { cwd: packageRoot });
   const packJson = await run(
     "npm",
@@ -94,23 +101,24 @@ try {
       type: "module",
       dependencies: {
         ...Object.fromEntries([...archives].map(([name, archive]) => [name, `file:${archive}`])),
-        "@jinn-network/benchmark-product-core": `file:${productArchive}`,
+        "@colophon-claims/verify": `file:${verifierArchive}`,
+        "@colophon-claims/core": `file:${productArchive}`,
       },
     }),
   );
   await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumer });
 
-  const installedRoot = join(consumer, "node_modules", "@jinn-network", "benchmark-product-core");
+  const installedRoot = join(consumer, "node_modules", "@colophon-claims", "core");
   const smokeScript = join(consumer, "smoke.mjs");
   await writeFile(
     smokeScript,
     `
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark, runCancel } from "@jinn-network/benchmark-product-core";
+import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, HARBOR_ADAPTER_ID, SUPPORTED_HARBOR_VERSION_RANGE, buildSampleBenchmark, createWorkspacePublicationHttpHandler, publicationConfigure, publicationRegister, runCancel } from "@colophon-claims/core";
 
 const require = createRequire(import.meta.url);
-const requiredEntry = require("@jinn-network/benchmark-product-core");
+const requiredEntry = require("@colophon-claims/core");
 if (typeof requiredEntry.runPreview !== "function") throw new Error("packed require entry lacks runPreview");
 for (const name of ["runResults", "runReport", "runVerify"]) {
   if (typeof requiredEntry[name] !== "function") throw new Error("packed require entry lacks " + name);
@@ -119,7 +127,7 @@ if (requiredEntry.PRODUCT_BRANDING.displayName !== PRODUCT_BRANDING.displayName)
   throw new Error("packed require/import branding entries diverged");
 }
 
-if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
+if (PRODUCT_VERSION !== "1.0.0") throw new Error("product version drifted");
 if (typeof runCancel !== "function") throw new Error("runCancel missing from packed public entrypoint");
 // The bundled sample must build from the PACKED graph: this proves the admission package ships
 // its golden fixture in the tarball and the whole intake path works for an external consumer.
@@ -133,17 +141,20 @@ if (PRODUCT_BRANDING.attribution !== "Built on Jinn." || PRODUCT_BRANDING.comman
   throw new Error("attribution copy drifted");
 }
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
-if (packageJson.bin?.colophon !== "./dist/cli/bin.js" || packageJson.bin?.["benchmark-product"] !== "./dist/cli/bin.js") {
-  throw new Error("preferred and compatibility CLI aliases are not both packed");
-}
+if (packageJson.bin !== undefined) throw new Error("core must not install a user-facing executable");
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = [
   "@jinn-network/attestation-issuer",
   "@jinn-network/benchmarking-aggregate",
   "@jinn-network/benchmarking-interop",
   "@jinn-network/benchmarking-local",
+  "@jinn-network/benchmarking-publication",
   "@jinn-network/benchmarking-records",
   "@jinn-network/benchmarking-run",
+  "@jinn-network/record-discovery-protocol",
+  "@jinn-network/record-discovery-serve",
+  "@jinn-network/record-discovery-transport-http",
+  "@jinn-network/record-publication",
   "@jinn-network/task-admission",
   "@jinn-network/task-execution-backend",
   "@jinn-network/task-execution-backend-local",

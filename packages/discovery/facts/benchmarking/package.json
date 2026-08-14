@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/record-discovery-facts-benchmarking",
   "version": "0.1.0",
-  "description": "Facts-profile documents and record-fact recompute functions for the Jinn Benchmarking Application record kinds (Benchmark, Run, Matrix, Report).",
+  "description": "Facts-profile documents and record-fact recompute functions for Benchmark, Run, Matrix, legacy/raw Report v1, signed Report v2, and BenchmarkAccounting records.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -39,12 +39,12 @@
   },
   "dependencies": {
     "@jinn-network/benchmarking-records": "0.1.0",
-    "@jinn-network/record-discovery-protocol": "0.1.0"
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0"
   },
   "devDependencies": {
     "@jinn-network/record-discovery-testing": "0.1.0",
     "@jinn-network/task-execution-protocol": "0.1.0",
-    "@jinn-network/trust-core": "0.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"

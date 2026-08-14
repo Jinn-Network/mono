@@ -24,4 +24,6 @@ export interface CliContext {
    * verb eventually returns; optional, and absent in every verb that isn't long-running. */
   readonly progress?: (line: string) => void;
   readonly runtimeHost?: BenchmarkRuntimeHost;
+  /** OS user-data directory supplied only by the process-owning CLI wrapper. */
+  readonly agentDataDir?: string;
 }

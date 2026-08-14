@@ -26,6 +26,8 @@ describe('buildHarnessReadinessRegistry', () => {
     };
     const registry = buildHarnessReadinessRegistry({ harnesses, config });
     await registry.refreshNow();
-    expect(registry.isReadyForClaim('bafkrei.x').ready).toBe(true);
+    const entry = registry.getSnapshot().harnesses.find((h) => h.harnessName === 'claude-code-learner');
+    expect(entry?.ready).toBe(true);
+    expect(entry?.manifestCids).toContain('bafkrei.x');
   });
 });

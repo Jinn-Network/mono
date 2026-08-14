@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'benchmarking');
-const benchmarkingDirectories = ['records', 'testing', 'aggregate', 'run', 'interop', 'marketplace', 'local'];
+const benchmarkingDirectories = ['records', 'testing', 'aggregate', 'run', 'publication', 'interop', 'marketplace', 'local'];
 
 // The whole benchmarking tree is forbidden to import any evidence-tree package, the two
 // I/O-free evidence producer packages, any record-discovery package, and — critically — every
@@ -79,10 +79,12 @@ const TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_AGGREGATE = [
   '@jinn-network/task-execution-protocol',
 ];
 
-// run (M4) may import the backend contract + protocol + profiles, but never a concrete
-// backend-local / evidence / marketplace / aggregate package (plan Task 4.1; tenet 3/4).
+// run (M4) consumes a narrow structural execution port plus protocol + profiles. Keeping the
+// full backend contract out of production source lets verification-only matrix assembly stay
+// independent of the execution package while concrete backends remain structurally compatible.
 const RUN_FORBIDDEN_EXTRA = [
   '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-backend-local',
   '@jinn-network/task-execution-workspace',
@@ -138,6 +140,13 @@ const LOCAL_FORBIDDEN_EXTRA = [
   '@jinn-network/task-execution-workspace',
   '@jinn-network/task-execution-launchers',
   '@jinn-network/task-execution-supervisor',
+];
+const PUBLICATION_FORBIDDEN_EXTRA = [
+  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-marketplace',
+  '@jinn-network/benchmarking-run', '@jinn-network/benchmarking-testing',
+  '@jinn-network/task-execution-backend', '@jinn-network/task-execution-profiles',
+  '@jinn-network/marketplace-*',
 ];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
@@ -435,6 +444,13 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
   assertBoundary(
     join(packages, 'run', 'src'),
     [...BENCHMARKING_FOREIGN_PACKAGES, ...RUN_FORBIDDEN_EXTRA],
+    FORBIDDEN_ROOTS,
+  );
+  // publication composes records, TEP, and the kind-neutral record-publication coordinator;
+  // it never imports products, venue/runtime adapters, or an outcome/report implementation.
+  assertBoundary(
+    join(packages, 'publication', 'src'),
+    [...BENCHMARKING_FOREIGN_PACKAGES.filter((pkg) => pkg !== '@jinn-network/record-publication'), ...PUBLICATION_FORBIDDEN_EXTRA],
     FORBIDDEN_ROOTS,
   );
   // interop depends on records + profiles + protocol; never run / aggregate / backends.

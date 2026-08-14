@@ -15,6 +15,7 @@ const packages = [
   ['testing', '@jinn-network/benchmarking-testing'],
   ['aggregate', '@jinn-network/benchmarking-aggregate'],
   ['run', '@jinn-network/benchmarking-run'],
+  ['publication', '@jinn-network/benchmarking-publication'],
   ['interop', '@jinn-network/benchmarking-interop'],
   ['marketplace', '@jinn-network/benchmarking-marketplace'],
   ['local', '@jinn-network/benchmarking-local'],
@@ -25,6 +26,7 @@ const codeEntrypoints = [
   '@jinn-network/benchmarking-testing',
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-run',
+  '@jinn-network/benchmarking-publication',
   '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-marketplace',
   '@jinn-network/benchmarking-local',
@@ -45,6 +47,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
+  ['@jinn-network/record-publication', join(root, 'packages', 'discovery', 'publication')],
   ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
   ['@jinn-network/marketplace-projector', join(root, 'packages', 'marketplace', 'projector')],
 ];

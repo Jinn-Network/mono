@@ -28,4 +28,11 @@ its digest, recomputes results and disclosures, and checks resolved Run comparab
 preregistration. The Report has no sealed timestamp, so `effectiveTime` is verifier context only;
 it is never inferred from a Report field or callback.
 
+`produceReportV2()` and `verifyReportV2()` add the public signed-record boundary without changing
+the legacy payload: `reportPayloadSha256` identifies exact immutable Report v1 payload bytes and
+`reportRecordSha256` identifies the exact DSSE envelope. V2 requires Matrix assembly 2.0 and its
+accounting publication binding. It derives the namespaced Report `publicRegistration` disclosure
+from exact BenchmarkAccounting bytes (including its `pre-dispatch`, `post-hoc`, or `unverifiable`
+status and the independent ordering-check result); it never overloads `Report.preregistered`.
+
 Shipped-surface record: `docs/superpowers/specs/2026-07-28-benchmarking-implementation-addendum.md`.

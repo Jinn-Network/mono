@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { cp, copyFile, mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,3 +28,11 @@ await copyFile(join(packageRoot, "src", "runtime", "inspect", "Dockerfile"), joi
 await copyFile(join(packageRoot, "src", "runtime", "inspect", "oci-runner.mjs"), join(runtimeAssetDir, "oci-runner.mjs"));
 await copyFile(join(packageRoot, "src", "runtime", "inspect", "broker.py"), join(runtimeAssetDir, "broker.py"));
 await copyFile(join(packageRoot, "src", "runtime", "inspect", "model_provider.py"), join(runtimeAssetDir, "model_provider.py"));
+await copyFile(join(packageRoot, "src", "runtime", "inspect", "sandbox-controller.mjs"), join(runtimeAssetDir, "sandbox-controller.mjs"));
+await copyFile(join(packageRoot, "src", "runtime", "inspect", "verifier-runtime.mjs"), join(runtimeAssetDir, "verifier-runtime.mjs"));
+await copyFile(join(packageRoot, "src", "runtime", "inspect", "projection-runtime.mjs"), join(runtimeAssetDir, "projection-runtime.mjs"));
+await cp(
+  join(packageRoot, "src", "runtime", "inspect", "sandbox_extension"),
+  join(runtimeAssetDir, "sandbox_extension"),
+  { recursive: true },
+);

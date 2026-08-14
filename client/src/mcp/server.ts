@@ -20,11 +20,11 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod/v3';
 import { Store } from '../store/store.js';
 import { createCorpus, type Corpus } from '../corpus/index.js';
-import { createHttpDiscoveryAPI } from '../discovery/http.js';
+import { createHttpDiscoveryClient } from '../discovery-client/http.js';
 import { handleInspectRecord, handleSearchRecords, type InspectRecordArgs } from './search-records.js';
 import { handleAcquireArtifact } from './acquire-artifact.js';
 import { handleGetCodeDigestReward } from './get-codedigest-reward.js';
-import type { DiscoveryAPI } from '../discovery/types.js';
+import type { DiscoveryClient } from '../discovery-client/types.js';
 import { SOLVER_TYPE_PAYLOADS } from '../types/payloads/index.js';
 import { CanonicalRoleSchema, normalizeEnvelopeRole } from '../types/envelope.js';
 
@@ -94,9 +94,11 @@ function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
     return null;
   }
 
-  // Build a DiscoveryAPI from the discovery env when a URL is available.
+  // Build the indexer read client from the discovery env when a URL is
+  // available. Only `queryEnvelopes` is consumed here (core's
+  // `CorpusDiscoveryPort`), which the client satisfies structurally.
   const discovery = hasDiscovery
-    ? createHttpDiscoveryAPI({ url: discoveryUrl, fetchImpl: globalThis.fetch })
+    ? createHttpDiscoveryClient({ url: discoveryUrl, fetchImpl: globalThis.fetch })
     : undefined;
 
   const full = createCorpus({
@@ -124,15 +126,15 @@ function buildReadOnlyCorpus(): Pick<Corpus, 'query' | 'fetchManifest'> | null {
 const corpus = buildReadOnlyCorpus();
 
 /**
- * Build a read-only DiscoveryAPI handle for tools that query the indexer
- * directly (e.g. get_codedigest_reward, #764). Returns null when no http
- * indexer is configured — tools then surface a structured "no discovery".
+ * Build a read-only indexer handle for tools that query the indexer directly
+ * (e.g. get_codedigest_reward, #764). Returns null when no http indexer is
+ * configured — tools then surface a structured "no discovery".
  */
-function buildDiscoveryForTools(): DiscoveryAPI | null {
+function buildDiscoveryForTools(): DiscoveryClient | null {
   const discoveryUrl = process.env['JINN_DISCOVERY_URL'] ?? '';
   const discoveryMode = process.env['JINN_DISCOVERY_MODE'] ?? (discoveryUrl ? 'http' : 'onchain');
   if (!discoveryUrl || discoveryMode !== 'http') return null;
-  return createHttpDiscoveryAPI({ url: discoveryUrl, fetchImpl: globalThis.fetch });
+  return createHttpDiscoveryClient({ url: discoveryUrl, fetchImpl: globalThis.fetch });
 }
 const discoveryForTools = buildDiscoveryForTools();
 

@@ -58,14 +58,30 @@ describe("public surface", () => {
       "sampleInit", "importSweBenchRows", "selectInspectEvaluation", "armAdd", "armUpdate", "armRemove", "armList",
       "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertSweBenchRows",
       "runPreview", "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
+      "publicationConfigure", "publicationRegister", "publicationAccounting", "publicationStatus",
       "runReport", "runVerify", "runPublish", "listRuntimeAdapters", "runtimeNativeArtifactPublicationPolicy", "createRuntimeVenue",
-      "createDefaultBenchmarkRuntimeHost",
+      "createDefaultBenchmarkRuntimeHost", "resolveHarborSelection", "harborEvidenceContributionFromArchive",
     ] as const) {
       expect(typeof entry[name], name).toBe("function");
     }
     expect(entry.LIFECYCLE_STATES).toContain("published-bundle");
     expect(entry.GATED_OPERATIONS).toContain("lock");
     expect(entry.LOCAL_VENUE_LIMITS).toContainEqual(expect.stringContaining("self-run"));
+    expect(entry.HARBOR_ADAPTER_ID).toBe("harbor");
     expect(publicTypesCompile).toBeUndefined();
+  });
+
+  test("keeps private Inspect host protocol and controller internals out of the product entry", () => {
+    for (const name of [
+      "createSandboxController",
+      "sandboxPolicySha256",
+      "SANDBOX_PROTOCOL",
+      "SANDBOX_POLICY",
+      "INSPECT_SANDBOX_PROTOCOL",
+      "INSPECT_SANDBOX_POLICY",
+      "INSPECT_SANDBOX_PROVIDER",
+    ]) {
+      expect(Object.hasOwn(entry, name), name).toBe(false);
+    }
   });
 });

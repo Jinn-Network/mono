@@ -33,3 +33,4 @@ export type { AttemptRecord, AttemptHarvestInput, AttemptOutputArtifact } from "
 export type { AttemptReality, ReconciliationResult, ReconciliationClassification } from "./reconciler.js";
 export type { CancellationAttempt, CancellationDriver, CancellationOptions, CancellationResult } from "./cancellation.js";
 export { fsyncBestEffort, fsyncBestEffortSync, isFsyncUnsupportedError } from "./fs-atomic.js";
+export { credentialExecArgv } from "./credential-exec.js";

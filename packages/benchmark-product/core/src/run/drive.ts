@@ -33,6 +33,7 @@
 
 import { parseCellKey } from "@jinn-network/benchmarking-records";
 import type { CellStatusEvent } from "@jinn-network/benchmarking-run";
+import { RECORD_KINDS } from "@jinn-network/record-discovery-protocol";
 import {
   TaskExecutionError,
   type AttemptUri,
@@ -47,7 +48,9 @@ import {
   type TwoPartyEngagement,
 } from "@jinn-network/task-execution-backend";
 import {
+  DeliveryRecordSchema,
   sealSubmission,
+  type DeliveryRecord,
   type ProtocolObservation,
   type ResourceDescriptor,
   type TaskExecutionErrorCategory,
@@ -62,6 +65,7 @@ import {
 } from "../venue/venue.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { appendRunJournalEntry } from "./journal.js";
+import { recordWorkspaceAuthorship } from "./publication-authority.js";
 import {
   canonicalRunPinningEvidenceBytes,
   type VerifiedRunPinningCheck,
@@ -90,6 +94,8 @@ export interface RecordingProxyDeps {
   readonly draftId: string;
   /** The live, unfrozen clock (see run-quote.ts's own note on why). */
   readonly liveClock: () => string;
+  /** Solve dispatches captured by LaunchCapturePort must not be post-ack duplicated here. */
+  readonly recordSolveSubmissions?: boolean;
 }
 
 /**
@@ -162,18 +168,31 @@ export function createRecordingProxy(
             deps.workspaceDir,
             canonicalRunPinningEvidenceBytes(pinningEvidence, ack.digest),
           );
-        appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
-          kind: "submission-accepted",
-          at: deps.liveClock(),
-          cellKey: coord.cellKey,
-          dispatch: coord.dispatch,
-          submissionSha256,
-          // The `eval:` prefix is this driver's own evaluation-nonce marker (see
-          // `cellKeyAndDispatchFromNonce`'s doc comment); everything else is a solve dispatch.
-          leg,
-          ...(evaluationCoordinate === undefined ? {} : evaluationCoordinate),
-          ...(pinningEvidenceSha256 === undefined ? {} : { pinningEvidenceSha256 }),
-        });
+        if (leg === "solve" && deps.recordSolveSubmissions === false) {
+          if (pinningEvidenceSha256 !== undefined) {
+            appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+              kind: "submission-pinning-evidence",
+              at: deps.liveClock(),
+              cellKey: coord.cellKey,
+              dispatch: coord.dispatch,
+              submissionSha256,
+              pinningEvidenceSha256,
+            });
+          }
+        } else {
+          appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+            kind: "submission-accepted",
+            at: deps.liveClock(),
+            cellKey: coord.cellKey,
+            dispatch: coord.dispatch,
+            submissionSha256,
+            // The `eval:` prefix is this driver's own evaluation-nonce marker (see
+            // `cellKeyAndDispatchFromNonce`'s doc comment); everything else is a solve dispatch.
+            leg,
+            ...(evaluationCoordinate === undefined ? {} : evaluationCoordinate),
+            ...(pinningEvidenceSha256 === undefined ? {} : { pinningEvidenceSha256 }),
+          });
+        }
       }
       return ack;
     },
@@ -223,6 +242,43 @@ function emitProgress(deps: DriveDeps, line: string): void {
   } catch {
     // Diagnostic sink only — deliberately swallowed.
   }
+}
+
+type CapturedDelivery = Pick<DeliveryRecord, "outputs" | "evidenceRecords"> & { readonly createdAt?: string };
+
+/** A managed LocalVenue which proves ownership returns product-captured records without foreign
+ * source coordinates. Bind only its locally-created Delivery and execution record families at
+ * that first durable boundary; result-evaluation is bound after this product fetches its bytes. */
+function recordManagedDeliveryAuthorship(
+  deps: DriveDeps,
+  deliverySha256: string,
+  deliveryBytes: Uint8Array,
+): CapturedDelivery {
+  const decoded = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(deliveryBytes)) as CapturedDelivery;
+  if (deps.venue.assertRunOwnership === undefined) return decoded;
+  deps.venue.assertRunOwnership();
+  const delivery = DeliveryRecordSchema.parse(decoded);
+  const localEvidence = (delivery.evidenceRecords ?? []).filter((candidate) => candidate.family !== "result-evaluation");
+  for (const reference of localEvidence) getSealedBytes(deps.workspaceDir, reference.digest.slice("sha256:".length));
+  recordWorkspaceAuthorship({
+    workspaceDir: deps.workspaceDir,
+    recordSha256: deliverySha256,
+    recordKind: RECORD_KINDS.delivery,
+    authoredAt: delivery.createdAt,
+  });
+  for (const reference of localEvidence) {
+    const digestHex = reference.digest.slice("sha256:".length);
+    const recordKind = reference.family === "execution-evidence"
+      ? RECORD_KINDS.executionEvidence
+      : RECORD_KINDS.executionVerification;
+    recordWorkspaceAuthorship({
+      workspaceDir: deps.workspaceDir,
+      recordSha256: digestHex,
+      recordKind,
+      authoredAt: delivery.createdAt,
+    });
+  }
+  return delivery;
 }
 
 /** ` e<i>/<n>` when minVerdicts > 1 and the line is leg-attributed; empty otherwise — keeps the
@@ -477,9 +533,7 @@ async function dispatchEvaluation(
   }
   const deliveryBytes = await deps.backend.fetchDelivery(deliveryRef);
   const evalDeliverySha256 = putSealedBytes(deps.workspaceDir, deliveryBytes);
-  const delivery = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(deliveryBytes)) as {
-    readonly outputs: readonly { readonly name: string; readonly digest?: { readonly sha256?: string } }[];
-  };
+  const delivery = recordManagedDeliveryAuthorship(deps, evalDeliverySha256, deliveryBytes);
   const verdictOutput = delivery.outputs.find((output) => output.name === "verdict");
   if (verdictOutput?.digest?.sha256 === undefined) {
     journalCouldNotGrade(deps, cellKey, "evaluation delivery carries no verdict output", {
@@ -499,6 +553,15 @@ async function dispatchEvaluation(
   }
   const envelopeBytes = await deps.backend.fetchArtifact({ digest: { sha256: verdictOutput.digest.sha256 } });
   const verdictSha256 = putSealedBytes(deps.workspaceDir, envelopeBytes);
+  if (deps.venue.assertRunOwnership !== undefined) {
+    deps.venue.assertRunOwnership();
+    recordWorkspaceAuthorship({
+      workspaceDir: deps.workspaceDir,
+      recordSha256: verdictSha256,
+      recordKind: RECORD_KINDS.resultEvaluation,
+      authoredAt: delivery.createdAt!,
+    });
+  }
 
   appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
     kind: "evaluation",
@@ -655,9 +718,7 @@ async function driveEvaluationForDelivery(deps: DriveDeps, event: CellStatusEven
     }
     const deliveryBytes = await deps.backend.fetchDelivery(deliveryRef);
     const deliverySha256 = putSealedBytes(deps.workspaceDir, deliveryBytes);
-    const deliveryDoc = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(deliveryBytes)) as {
-      readonly outputs: readonly { readonly name: string; readonly digest?: { readonly sha256?: string } }[];
-    };
+    const deliveryDoc = recordManagedDeliveryAuthorship(deps, deliverySha256, deliveryBytes);
 
     if (deps.backend.fetchArtifact === undefined) {
       journalCouldNotGradeLegs(deps, cellKey, "backend does not support fetchArtifact", allEvalIndexes(deps));

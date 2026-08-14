@@ -32,6 +32,10 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
 import type { OperationResult } from "./result.js";
+import {
+  inspectRuntimeMethodForBinding,
+  type InspectRuntimeMethodDisclosure,
+} from "../runtime/inspect/disclosure.js";
 
 export interface ArmInspection {
   readonly armId: string;
@@ -75,6 +79,7 @@ export interface DraftInspection {
    * registry-validated here, since that refusal belongs to compile time (Task 2), not inspection.
    */
   readonly analysis: { readonly method: string; readonly version: string };
+  readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
 }
 
 function resolveBenchmarkInspection(workspaceDir: string, benchmarkSha256: string): BenchmarkInspection {
@@ -126,6 +131,11 @@ export function inspectDraft(
         spec.taskSet.kind === "benchmark"
           ? resolveBenchmarkInspection(context.workspaceDir, spec.taskSet.benchmarkSha256)
           : undefined;
+      const runtimeMethod = inspectRuntimeMethodForBinding(
+        context.workspaceDir,
+        spec.evaluationRuntime,
+        resolveAssurance(spec.assurance),
+      );
 
       const inspection: DraftInspection = {
         draftId: document.draftId,
@@ -146,6 +156,7 @@ export function inspectDraft(
         analysis: spec.analysis === undefined
           ? { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION }
           : { method: spec.analysis.method, version: spec.analysis.version },
+        ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
         ...(benchmark !== undefined ? { benchmark } : {}),
       };
       return { inspection };

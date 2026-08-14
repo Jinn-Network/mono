@@ -49,7 +49,7 @@ export interface ResultContract {
  * to requester-controlled Submission capability grants. The backend supplies the exact Attempt,
  * Task, Submission, launcher, and deadline to its independent host resolver.
  */
-export interface HostSecretForwardDeclaration {
+export interface EvaluatorHostSecretForwardDeclaration {
   readonly handle: string;
   readonly target: string;
   readonly role: "evaluator";
@@ -57,6 +57,17 @@ export interface HostSecretForwardDeclaration {
   readonly registrationId: string;
   readonly evaluationMethodDigest: `sha256:${string}`;
 }
+
+/** A credential mapping selected by the deployment, never by requester capability grants. */
+export interface HarnessHostSecretForwardDeclaration {
+  readonly handle: string;
+  readonly target: string;
+  readonly role: "harness";
+}
+
+export type HostSecretForwardDeclaration =
+  | EvaluatorHostSecretForwardDeclaration
+  | HarnessHostSecretForwardDeclaration;
 
 /**
  * The resolved invocation a launcher plans and the supervisor spawns through the shim (design

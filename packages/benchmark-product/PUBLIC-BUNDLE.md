@@ -41,7 +41,8 @@ The manifest also includes one exact `records/<sha256>.bin` member for every
 record in the authenticated evidence graph. For an Inspect-backed Task this
 closure includes the exact canonical Inspect selection manifest under the
 `runtime-selection` evidence role. The verifier checks that the Task, selected
-arm, provider evidence, and native log all agree with that sealed selection; a
+arm, complete ordered scorer definitions, selected projections, Jinn verdict
+rule, provider evidence, and native log all agree with that sealed selection; a
 bundle is not portable if it retains the Task and log but omits the method that
 selected them. A cancelled run additionally has the optional
 `verification/cancel-requested.json`. When publication explicitly authorizes
@@ -60,13 +61,20 @@ version 1's closed schema in place.
 
 ## Portable verification
 
-Use the shipped built CLI, without the source workspace:
+Use the smaller reader package, without the product or source workspace:
+
+```bash
+npx @colophon-claims/verify@1 <bundle-dir>
+```
+
+The full installed product exposes the same implementation through:
 
 ```bash
 colophon bundle verify --bundle <bundle-dir> --json
 ```
 
-Success returns the bundle identity, record digests, and exactly **six checks**
+Success returns the bundle identity, record digests, an Inspect runtime-method
+summary when applicable, and exactly **six checks**
 in this order:
 
 1. `manifest`
