@@ -15,6 +15,7 @@ import {
   EVALUATION_HARNESS_EXIT_CONFIGURATION,
   EVALUATION_HARNESS_EXIT_INVALID_INPUT,
   EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE,
+  EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE,
   type EvaluationHarnessDeployment,
 } from "./runtime.js";
 import {
@@ -140,6 +141,12 @@ function launchPlan(
         match: { exitCode: EVALUATION_HARNESS_EXIT_INVALID_INPUT },
         blame: "task",
         reasonCode: "invalid-evaluation-input",
+      },
+      {
+        match: { exitCode: EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE },
+        blame: "infrastructure",
+        reasonCode: "evaluation-provider-unavailable",
+        category: "dependency-unavailable",
       },
       {
         match: { exitCode: EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE },

@@ -1,0 +1,51 @@
+{
+  "status": "FINAL P5 FIXTURE — minted after the P3b material contract",
+  "dataset": "nebius/SWE-rebench-leaderboard",
+  "config": "default",
+  "split": "test",
+  "mintedAt": "2026-08-13T08:43:46.163Z",
+  "parser": {
+    "id": "network.jinn.parser.swe-rebench-v2",
+    "version": "1.0.0",
+    "digest": "sha256:5b859d500777a1370bdadcee098ce9449f92772b7c9572709b502d9ee3be9e7a"
+  },
+  "graderProgramDigest": "sha256:8194eb47ad010d8e1ce2f5f4a5becd3354102f80c138aad836cfd3b0e8b2ab11",
+  "timeoutSeconds": 1800,
+  "exclusionRules": {
+    "maxFailToPass": 10,
+    "maxPassToPass": 100,
+    "minDistinctRepos": 3
+  },
+  "rows": [
+    {
+      "instance_id": "gerlero__foamlib-329",
+      "repo": "gerlero/foamlib",
+      "base_commit": "9627c7272f1ce4e23e12578a683bbb56f309c7d3",
+      "createdAt": "2025-03-09 16:35:28",
+      "sourceUrl": "https://huggingface.co/datasets/nebius/SWE-rebench-leaderboard",
+      "imageName": "swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329:latest",
+      "imageUri": "docker://swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781",
+      "imageDigest": "sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781"
+    },
+    {
+      "instance_id": "conan-io__conan-19604",
+      "repo": "conan-io/conan",
+      "base_commit": "ad7f30275329c63c924d3201463a1143ba1a739c",
+      "createdAt": "2026-02-11 16:04:19",
+      "sourceUrl": "https://huggingface.co/datasets/nebius/SWE-rebench-leaderboard",
+      "imageName": "swerebench/sweb.eval.x86_64.conan-io_1776_conan-19604:latest",
+      "imageUri": "docker://swerebench/sweb.eval.x86_64.conan-io_1776_conan-19604@sha256:a79eb716bef039cf4b3fa094ea7aca74067fcc3730412c90377a8501569a7b7b",
+      "imageDigest": "sha256:a79eb716bef039cf4b3fa094ea7aca74067fcc3730412c90377a8501569a7b7b"
+    },
+    {
+      "instance_id": "nesquena__hermes-webui-1818",
+      "repo": "nesquena/hermes-webui",
+      "base_commit": "a8de4e7c0a29750fc9a2e83e2ad8eed324b0467e",
+      "createdAt": "2026-05-07 13:43:28",
+      "sourceUrl": "https://huggingface.co/datasets/nebius/SWE-rebench-leaderboard",
+      "imageName": "swerebench/sweb.eval.x86_64.nesquena_1776_hermes-webui-1818:latest",
+      "imageUri": "docker://swerebench/sweb.eval.x86_64.nesquena_1776_hermes-webui-1818@sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6",
+      "imageDigest": "sha256:3dfbacf1f9bae59ad9cee8439f7c6d982cb6fdef72fe9be1c779de253f7734e6"
+    }
+  ]
+}

@@ -199,6 +199,10 @@ function planFromSpec(spec: DraftSpec, benchmarkDigestHex: string, owner: string
         evaluation: {
           minVerdicts: resolvedAssurance.minVerdicts,
           distinctEvaluator: resolvedAssurance.distinctEvaluator,
+          ...(resolvedAssurance.maxInfrastructureRetries === undefined
+            || resolvedAssurance.maxInfrastructureRetries === 0
+            ? {}
+            : { maxInfrastructureRetries: resolvedAssurance.maxInfrastructureRetries }),
         },
         submissionBaseline: runtimeSubmissionBaseline(spec.evaluationRuntime),
       },

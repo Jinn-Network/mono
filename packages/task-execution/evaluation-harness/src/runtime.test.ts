@@ -28,6 +28,7 @@ import { documentDigest, sealDelivery, sealTask } from "@jinn-network/task-execu
 import {
   EVALUATION_HARNESS_EXIT_INVALID_INPUT,
   EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE,
+  EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE,
   runEvaluationHarness,
   type EvaluationHarnessDeployment,
 } from "./runtime.js";
@@ -763,7 +764,7 @@ describe("runEvaluationHarness", () => {
     await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
   });
 
-  test("keeps an operational adapter failure on the no-verdict failing-exit path", async () => {
+  test("gives the exact provider-unavailable contract its typed no-verdict exit", async () => {
     const fixture = await makeFixture();
     const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(
       async () => {
@@ -781,7 +782,7 @@ describe("runEvaluationHarness", () => {
       deployment(fixture.spec, registration(evaluate)),
     );
 
-    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE);
+    expect(exitCode).toBe(EVALUATION_HARNESS_EXIT_PROVIDER_UNAVAILABLE);
     expect(evaluate).toHaveBeenCalledOnce();
     await expect(readFile(join(fixture.paths.out, "verdict"))).rejects.toThrow();
   });

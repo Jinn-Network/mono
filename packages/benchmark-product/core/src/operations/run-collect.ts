@@ -115,9 +115,10 @@ export function runCollect(
       const benchRecord = parseBenchmark(getSealedBytes(clockedContext.workspaceDir, document.spec.taskSet.benchmarkSha256));
       const expected = expectedCellSet(benchRecord, runRecord);
       const fold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
-
+      const minVerdicts = runRecord.policy.evaluation?.minVerdicts ?? 1;
+      const maxInfrastructureRetries = runRecord.policy.evaluation?.maxInfrastructureRetries ?? 0;
       const allTerminalAccounted = outstandingCells(expected, fold).length === 0
-        && evaluationGaps(fold, runRecord.policy.evaluation?.minVerdicts ?? 1).length === 0;
+        && evaluationGaps(fold, minVerdicts, maxInfrastructureRetries).length === 0;
       const closeBoundaryReached = Date.parse(at) >= Date.parse(runState.closeAt);
       if (!allTerminalAccounted && !closeBoundaryReached) {
         refuse(
@@ -126,7 +127,6 @@ export function runCollect(
           "not every expected solve cell and evaluation leg is terminal-accounted yet, and the run's closeAt has not passed — resume the run or wait for the close boundary",
         );
       }
-
       const receiptsByTaskDigest = scanPredictionSnapshotAdmissionReceipts(clockedContext.workspaceDir);
       const owner = runState.owner;
 

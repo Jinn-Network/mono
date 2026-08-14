@@ -404,9 +404,9 @@ A terminal disposition with a pending guard counts as closed for the pre-lock de
 
 ### H1 — Singleton clusters made the intervals ~3× too narrow
 - **Attack:** the importer keys task provenance on `repo@base_commit` (`packages/benchmarking/interop/src/import/swebench.ts:70`), so every task is its own cluster — measured 100/100 singletons against 77 distinct repositories. A cluster bootstrap over singleton clusters is just an i.i.d. bootstrap, and the published interval understates uncertainty by roughly the square root of the design effect.
-- **Check:** after the interop fix, derive the candidate slate's ordered repository cluster manifest pre-lock and assert `clusterCount < taskCount`. Post-lock/pre-dispatch, assert it equals the sealed Benchmark/Run task set. The e2e gate carries the standing regression guard `draws === resamples × clusterCount` — the identity is exact and a silent regression to singletons breaks it. Post-run, compare the sealed Report disclosure byte-for-byte with the locked manifest.
+- **Check:** after the interop fix, derive the candidate slate's ordered repository cluster manifest pre-lock and assert `clusterCount < taskCount`. Post-lock/pre-dispatch, assert it equals the sealed Benchmark/Run task set. When an interval is estimated, the e2e gate carries the standing regression guard `draws === resamples × clusterCount`; when the interval is withheld before resampling, it requires `draws === 0` and authenticates planned resamples plus the exact cluster manifest separately. Post-run, compare the sealed Report disclosure byte-for-byte with the locked manifest.
 - **Pass:** clusterCount equals the distinct-repository count on the locked slate; the e2e assertion is present and green; the cluster manifest (keys and members) appears unchanged in the sealed Report's method disclosures and handoff packet.
-- **Ratified mitigation:** the clustering-key fix lands in the interop packet pre-lock, and the `draws === resamples × clusterCount` assertion becomes a standing e2e guard so a regression to singleton clusters cannot pass CI silently.
+- **Ratified mitigation:** the clustering-key fix lands in the interop packet pre-lock. Estimated intervals enforce `draws === resamples × clusterCount`; pre-resampling withheld intervals enforce `draws === 0` while separately authenticating planned resamples and the cluster manifest, so a regression to singleton clusters cannot pass CI silently.
 - **Stage:** pre-lock manifest/disposition; post-lock/pre-dispatch sealed-slate equality `standing-guard`; post-run report/handoff guard
 - **Status:** open — mitigation ratified, verification pending · **Origin:** seeded
 
@@ -684,7 +684,7 @@ All figures below are recounted programmatically from this file's own headings a
 | D1 | Grader program frozen; its digest published at lock in the method document and asserted equal on every official verdict |
 | D2 | Task images digest-pinned and run with `--pull never` |
 | E1 | Timeout = FAIL declared pre-lock; per-arm timeout counts join per-arm retry counts as published disclosures |
-| H1 | Clustering-key fix lands pre-lock; `draws === resamples × clusterCount` becomes a standing e2e guard |
+| H1 | Clustering-key fix lands pre-lock; estimated intervals enforce `draws === resamples × clusterCount`, while pre-resampling withheld intervals enforce zero draws plus separate plan/cluster authentication |
 | H3 | Bootstrap seed bound pre-lock in the method document; sealed Run seed must equal it |
 | I6 | E4 public pre-registration committed, conditional on the e2e gate |
 | J8 | Clean-environment third-party recompute from handoff-supplied exact artifacts |

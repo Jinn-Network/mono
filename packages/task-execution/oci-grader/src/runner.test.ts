@@ -119,6 +119,22 @@ describe("ensurePinnedOciImage", () => {
     expect(calls[1]!.args).toEqual(["pull", "--platform", "linux/amd64", IMAGE]);
   });
 
+  it("does not reinterpret a host-policy refusal as an image miss", async () => {
+    const refused = new FakeChild();
+    const { spawn, calls } = recordingSpawner([refused]);
+    const promise = ensurePinnedOciImage(
+      { runtime: "docker", image: IMAGE, platform: "linux/amd64", timeoutMs: 60_000 },
+      { spawn },
+    );
+    refused.exit(78);
+
+    await expect(promise).rejects.toThrow(/local inspection failed with runtime exit 78/u);
+    expect(calls).toEqual([{
+      command: "docker",
+      args: ["image", "inspect", IMAGE],
+    }]);
+  });
+
   it("refuses an unpinned image before spawning anything", async () => {
     const { spawn, calls } = recordingSpawner([]);
     await expect(ensurePinnedOciImage(
@@ -143,6 +159,20 @@ describe("runPinnedOciGrader", () => {
       args: ["image", "inspect", IMAGE],
     }]);
     expect(calls.some((call) => call.args[0] === "pull")).toBe(false);
+  });
+
+  it("preserves a child-side host-policy refusal without pulling", async () => {
+    const input = scratchInput();
+    const refused = new FakeChild();
+    const { spawn, calls } = recordingSpawner([refused]);
+    const promise = runPinnedOciGrader(input, { spawn, imagePullPolicy: "never" });
+    refused.exit(78);
+
+    await expect(promise).rejects.toThrow(/local inspection failed with runtime exit 78/u);
+    expect(calls).toEqual([{
+      command: "docker",
+      args: ["image", "inspect", IMAGE],
+    }]);
   });
 
   it("returns the exact bytes the container left at the statement path", async () => {

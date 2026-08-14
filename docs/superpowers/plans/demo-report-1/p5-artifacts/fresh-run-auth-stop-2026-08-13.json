@@ -1,0 +1,82 @@
+{
+  "schema": "demo1.p5-fresh-run-auth-stop/1",
+  "recordedAt": "2026-08-13T08:49:10.235Z",
+  "sourceHead": "d8bfcc98d7fbe3a2895322bd67015b09a1eb2c18",
+  "publicationState": "not-published",
+  "run": {
+    "specSha256": "93aecd9f45b2d3b90478ffec185436d2f8870ff201583a6dad471b6ab073e331",
+    "runSha256": "00f9ffc80f46bd28f2aee477c86624d8b9ce6d90bb60e13027f466d45b13faf9",
+    "matrixSha256": "bc3edf382edf7649726bfbe87b640ed19b17434a71b2c8cb6ccf6fbd60c7d76c",
+    "reportSha256": "c47714eb0fefe882ea3839e61b43114dc4b3ce17c8ce1804b36d02572d24f494",
+    "reportEnvelopeSha256": "267b7655e1ed8982e435d7f95061eb8c5e570a9a4b99fa91fb1fc589a4cb0711",
+    "lockedAt": "2026-08-13T08:48:35.413Z",
+    "launchedAt": "2026-08-13T08:48:35.453Z",
+    "closedAt": "2026-08-13T08:49:10.118Z",
+    "runOutcome": "partial"
+  },
+  "preconditions": {
+    "exactImagesAvailable": true,
+    "goldPassEmptyFailControl": "passed",
+    "quoteExpectedCellCount": 12,
+    "quoteAccepted": true
+  },
+  "journalAccounting": {
+    "events": 52,
+    "submissionAccepted": 12,
+    "dispatch": 12,
+    "claimed": 12,
+    "error": 12,
+    "replaceableErrors": 0,
+    "additionalDispatches": 0
+  },
+  "matrixAccounting": {
+    "expected": 12,
+    "accounted": 12,
+    "judged": 0,
+    "expired": 12,
+    "runOutcome": "partial"
+  },
+  "runtimeObservation": {
+    "model": "claude-haiku-4-5-20251001",
+    "claudeCodeVersion": "2.1.222",
+    "apiKeySource": "none",
+    "authenticationError": "authentication_failed",
+    "message": "Not logged in · Please run /login",
+    "baselineCells": 6,
+    "baselinePluginNames": [],
+    "skillCells": 6,
+    "skillPluginNames": ["jinn-demo1-skill"],
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "totalCostUsd": 0
+  },
+  "normalizedCellEvidence": [
+    { "cellKey": "6108c5eab46e8db8093889d1fa8d2067ac5def52706c777d6789499b0f38bb44/claude-md-baseline/1", "attempt": "5bb7acdc-4fed-4e53-93f8-a6e5745cc4f2", "stdoutSha256": "981c3206450431290e8222ddacf14b1a0e043da185b9c1fa74e89293b27ef749" },
+    { "cellKey": "6108c5eab46e8db8093889d1fa8d2067ac5def52706c777d6789499b0f38bb44/claude-md-baseline/2", "attempt": "257a0a0a-e483-4440-ae47-8b56eb25b9ce", "stdoutSha256": "a9ec5e0d81113e971d1c58ca229691f24eee4debef5269082d7eeb9c1e6aa7de" },
+    { "cellKey": "6108c5eab46e8db8093889d1fa8d2067ac5def52706c777d6789499b0f38bb44/skill-candidate/1", "attempt": "c9bac330-6a95-4bd3-b9c2-82f392eae847", "stdoutSha256": "dc0f587f73a5855abb4f0cbf9eebc310e870766e9279b6701e5bb283aa15de19" },
+    { "cellKey": "6108c5eab46e8db8093889d1fa8d2067ac5def52706c777d6789499b0f38bb44/skill-candidate/2", "attempt": "293120b2-94db-4ee8-9920-5484256d4add", "stdoutSha256": "1cb11d36531367c21abb4c62086a41c17443b3edaa0188f7c31414e7f707f256" },
+    { "cellKey": "65041a231ddb1912af87e590dd2ca31d4898b0d504b5882574ed0d2e5dde8839/claude-md-baseline/1", "attempt": "b5f7fa3c-e6c2-4a52-a446-a8f9627dab38", "stdoutSha256": "0e0a1ff18930ecf61db429d4d4c35bc4788f893bfd8d8c0ee494db7b345278a8" },
+    { "cellKey": "65041a231ddb1912af87e590dd2ca31d4898b0d504b5882574ed0d2e5dde8839/claude-md-baseline/2", "attempt": "796f1835-7102-4e9a-8e1d-2a222931e447", "stdoutSha256": "ba57e8b0624d1909317838f0596952214fc12c238922632ef96cb869014321bc" },
+    { "cellKey": "65041a231ddb1912af87e590dd2ca31d4898b0d504b5882574ed0d2e5dde8839/skill-candidate/1", "attempt": "c2f4b4a9-b3ba-4d55-aa22-efa92b6625e5", "stdoutSha256": "302045dbb1aafd91a4426a4b7bb1f85b40a9308e37e75a06a618d8bb58ddcff4" },
+    { "cellKey": "65041a231ddb1912af87e590dd2ca31d4898b0d504b5882574ed0d2e5dde8839/skill-candidate/2", "attempt": "60c7bdd0-bcbe-4eee-badd-a78b563f670c", "stdoutSha256": "c1cf980bac8b6c480f0fabedf4ce7f6e5c0ff5965dbf185fae6a05655b3e534e" },
+    { "cellKey": "b74eb714c227dd67aa81536583f9da8e10bf7dafc2ef6466c98f534e2244f416/claude-md-baseline/1", "attempt": "5e30229f-4829-4bdd-b501-d03a57081808", "stdoutSha256": "2f213d95654765490cb1ae01c185900a1c88b3ba6e30fc3eb530e3e0ba6af1d2" },
+    { "cellKey": "b74eb714c227dd67aa81536583f9da8e10bf7dafc2ef6466c98f534e2244f416/claude-md-baseline/2", "attempt": "a63c162b-421c-4dca-addf-cd87ca37ffcc", "stdoutSha256": "6280f644a04f06bac08fe281efd7ccbe73b541145b5181135d8ef5467e2db269" },
+    { "cellKey": "b74eb714c227dd67aa81536583f9da8e10bf7dafc2ef6466c98f534e2244f416/skill-candidate/1", "attempt": "ef615090-f2cb-4bc1-ba6d-98e6eabb58d9", "stdoutSha256": "c8b34f41d197af7600c7344a86fc386e69b8b0310663b3be8d39776e8166fc81" },
+    { "cellKey": "b74eb714c227dd67aa81536583f9da8e10bf7dafc2ef6466c98f534e2244f416/skill-candidate/2", "attempt": "3ee2153a-d0a0-4384-8173-e343e7995306", "stdoutSha256": "89fc6b0f9aca0a299d5b4c5e30a47cf61d199843d6ae73805bfaf86925811700" }
+  ],
+  "sourceLogsRetentionDependency": false,
+  "cause": {
+    "ambientReadiness": "passed against the operator's default Claude configuration",
+    "attemptRuntime": "each attempt set CLAUDE_CONFIG_DIR to its isolated, initially empty harness-state directory",
+    "credentialForwarding": "none",
+    "conclusion": "ambient login state was not available inside the isolated attempts"
+  },
+  "stop": {
+    "classification": "post-dispatch-authentication-failure",
+    "freshRunConsumed": true,
+    "retryOrTopUpPermitted": false,
+    "bundleEmitted": false,
+    "capabilityClaimPermitted": false,
+    "nextRunRequires": "a separately authorized run after a dedicated attempt-safe Claude credential path is configured and proved by attempt-equivalent readiness"
+  }
+}

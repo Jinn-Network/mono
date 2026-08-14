@@ -138,6 +138,9 @@ export interface LaunchOptions {
   clock: Clock;
   mintSubmissionUri?: (idempotencyKey: string) => `urn:uuid:${string}`;
   requirementsOverride?: Record<string, unknown>;
+  /** Opaque requester grants sealed into each newly-created Submission. Values are handles only;
+   * the backend's resolver owns redemption and never returns them to this package. */
+  capabilityGrants?: Readonly<Record<string, unknown>>;
   /** Fallback when `capabilities().watch` is false / `backend.watch` absent. */
   waitForTerminal?: AttemptWaitPort;
   /** Exact accepted Submission bytes for resume (no package journal). */
@@ -302,6 +305,7 @@ async function sealNewSubmission(input: {
     // replicates and replacements are distinct visible cell dispatches.
     attempts: { maxTotal: 1, maxConcurrent: 1 },
     requirements,
+    ...(opts.capabilityGrants === undefined ? {} : { capabilityGrants: opts.capabilityGrants }),
     annotations: submissionExtensionBlock(runDigest, coord.cellKey, coord.armId),
   };
   const bytes = sealSubmission(submissionDocument);
