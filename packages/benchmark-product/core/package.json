@@ -32,6 +32,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "public-quickstart": "./quickstart/public-quickstart.mjs",
+    "publication-release-rehearsal": "COLOPHON_PUBLICATION_RELEASE_REHEARSAL=1 vitest run src/conformance/publication-release-rehearsal.external.test.ts --reporter=verbose",
     "generate:parity": "node scripts/generate-parity-matrix.mjs",
     "check:parity": "node scripts/generate-parity-matrix.mjs --check",
     "pack:smoke": "node scripts/pack-smoke.mjs",

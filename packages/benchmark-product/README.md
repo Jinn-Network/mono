@@ -51,6 +51,29 @@ copy. It prints a final JSON evidence envelope and removes only its exact
 owner-marked temporary root. It accepts no caller-selected filesystem path and
 does not use the in-memory kit backend.
 
+## Real Harbor publication rehearsal
+
+Before a release, run the opt-in external rehearsal in addition to the cold
+quickstart. It uses the operator-selected Harbor 0.21 executable and the local
+Docker daemon to run six real trials with Harbor's built-in `oracle` agent. The
+fixture is pinned to an immutable Ubuntu image, container networking is
+disabled, and no model API or model credential is used.
+
+```bash
+cd packages/benchmark-product/core
+COLOPHON_PUBLICATION_RELEASE_HARBOR="$(command -v harbor)" \
+  yarn publication-release-rehearsal
+yarn public-quickstart
+```
+
+The rehearsal fails unless registration is publicly retrievable before the
+first Submission reaches Harbor. It then requires all six Deliveries, complete
+Harbor Job/Trial evidence, pre-dispatch Accounting and Matrix v2, a signed
+Report v2, exact public `HEAD`/`GET` retrieval, and no Harbor invocation caused
+by publication. The first run may fetch the pinned container image. Set
+`COLOPHON_PUBLICATION_RELEASE_DOCKER` only when `docker` is not on `PATH`.
+Because this is an explicit local release gate, it is skipped by ordinary CI.
+
 ## Product surfaces
 
 - [Core and CLI](./core/README.md) — the operations library, complete agent
