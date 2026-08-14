@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { GUI_CAPABILITY_CATALOG } from "@jinn-network/benchmark-product-core";
+import { GUI_CAPABILITY_CATALOG } from "@colophon-claims/core";
 import { GUI_SERVER_ACTIONS } from "./gui-action-registry";
 
 describe("generated library / CLI / GUI parity", () => {

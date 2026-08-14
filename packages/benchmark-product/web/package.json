@@ -1,5 +1,5 @@
 {
-  "name": "@jinn-network/benchmark-product-web",
+  "name": "@colophon-claims/web",
   "version": "0.1.0",
   "description": "Private Next.js human surface for the standalone benchmark product, implemented as a server-side client of the benchmark-product core operations library.",
   "private": true,
@@ -24,10 +24,10 @@
     "test:browser:production": "BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn build && BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn test:browser"
   },
   "dependencies": {
+    "@colophon-claims/core": "1.0.0",
     "@fontsource-variable/newsreader": "5.3.0",
     "@fontsource-variable/public-sans": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
-    "@jinn-network/benchmark-product-core": "0.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.27.0",
@@ -40,8 +40,9 @@
   },
   "resolutions": {
     "@noble/hashes": "2.2.0",
+    "@colophon-claims/verify": "portal:../verify",
     "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
-    "@jinn-network/benchmark-product-core": "portal:../core",
+    "@colophon-claims/core": "portal:../core",
     "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
     "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
     "@jinn-network/benchmarking-local": "portal:../../benchmarking/local",

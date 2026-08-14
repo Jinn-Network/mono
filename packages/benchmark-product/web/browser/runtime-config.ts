@@ -9,6 +9,7 @@ export const RUN_ID_ENV = "BP50_BROWSER_RUN_ID";
 export const OWNERSHIP_TOKEN_ENV = "BP50_BROWSER_OWNERSHIP_TOKEN";
 export const RUNTIME_SECRET_ENV = "BP50_RUNTIME_SECRET_SENTINEL";
 export const CREDENTIAL_SECRET_ENV = "BP50_CREDENTIAL_SENTINEL";
+export const LOCAL_APP_CAPABILITY_ENV = "COLOPHON_LOCAL_APP_CAPABILITY";
 
 export interface BrowserRuntimeConfig extends RuntimeWorkspace {
   readonly buildSecret: string;
@@ -26,7 +27,7 @@ function required(environment: Environment, name: string): string {
  * global setup, the worker, and `next start`; no secondary process invents its own workspace. */
 export function createRuntimeEnvironment(environment: Environment = process.env): Readonly<Record<string, string>> {
   required(environment, BUILD_SECRET_ENV);
-  const inheritedNames = [RUN_ID_ENV, OWNERSHIP_TOKEN_ENV, RUNTIME_SECRET_ENV, CREDENTIAL_SECRET_ENV] as const;
+  const inheritedNames = [RUN_ID_ENV, OWNERSHIP_TOKEN_ENV, RUNTIME_SECRET_ENV, CREDENTIAL_SECRET_ENV, LOCAL_APP_CAPABILITY_ENV] as const;
   const inherited = inheritedNames.filter((name) => environment[name] !== undefined);
   if (inherited.length > 0) {
     if (inherited.length !== inheritedNames.length) {
@@ -40,6 +41,7 @@ export function createRuntimeEnvironment(environment: Environment = process.env)
     [OWNERSHIP_TOKEN_ENV]: randomUUID(),
     [RUNTIME_SECRET_ENV]: `BP50_RUNTIME_SECRET_${randomUUID()}`,
     [CREDENTIAL_SECRET_ENV]: `BP50_CREDENTIAL_${randomUUID()}`,
+    [LOCAL_APP_CAPABILITY_ENV]: `BP50_LOCAL_APP_${randomUUID()}`,
   };
 }
 

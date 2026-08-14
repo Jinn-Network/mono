@@ -34,6 +34,10 @@ export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCoun
 export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
   "bundle verify": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal",
   "demo1 prereg verify": "read-only post-lock/pre-dispatch gate verifies the exact local E4 witness without credentials or network access",
+  "agent add": "stores a strict machine-local built-in agent profile outside every workspace",
+  "agent credentials": "copies an explicitly selected API-key file into protected Colophon machine storage",
+  "agent login": "fails closed unless the exact harness version has a qualified isolated login-artifact flow",
+  "doctor": "checks local agent identity and credential readiness without making a provider request",
 };
 
 /**

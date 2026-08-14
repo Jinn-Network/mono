@@ -57,6 +57,9 @@ function assertArchiveShape(entries) {
     (entry) => entry.startsWith("package/dist/") && /(?:^|\/)[^/]*\.(?:test|spec)\./u.test(entry),
   );
   if (leaked.length > 0) throw new Error(`launchers archive contains tests: ${leaked.join(", ")}`);
+  if (entries.includes("package/dist/credential-exec.mjs")) {
+    throw new Error("launchers archive must not own the supervisor credential bridge");
+  }
 }
 
 try {

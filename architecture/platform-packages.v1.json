@@ -246,7 +246,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 14,
       "publishPolicies": [
         "private",
         "never"
@@ -789,7 +789,7 @@
       }
     },
     {
-      "name": "@jinn-network/benchmark-product-core",
+      "name": "@colophon-claims/core",
       "path": "packages/benchmark-product/core",
       "domain": "benchmark-product",
       "role": "benchmark product core",
@@ -804,6 +804,10 @@
           },
           {
             "path": "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md",
+            "status": "approved"
+          },
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
             "status": "approved"
           }
         ],
@@ -829,7 +833,79 @@
       "replacedBy": []
     },
     {
-      "name": "@jinn-network/benchmark-product-web",
+      "name": "@colophon-claims/cli",
+      "path": "packages/benchmark-product/cli",
+      "domain": "benchmark-product",
+      "role": "Colophon self-serve command and packaged local application",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@colophon-claims/verify",
+      "path": "packages/benchmark-product/verify",
+      "domain": "benchmark-product",
+      "role": "standalone Colophon public-bundle reader verifier",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@colophon-claims/web",
       "path": "packages/benchmark-product/web",
       "domain": "benchmark-product",
       "role": "benchmark product web application",
@@ -849,6 +925,10 @@
           {
             "path": "packages/benchmark-product/web/BENCHMARK-PRODUCT-WEB-SPEC.md",
             "status": "draft"
+          },
+          {
+            "path": "spec/2026-08-13-colophon-self-serve.md",
+            "status": "approved"
           }
         ],
         "decisionRecord": null

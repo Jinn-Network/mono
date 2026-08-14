@@ -8,17 +8,25 @@
  * spawning anything (mirrors `packages/policy-optimization/src/cli/bin.ts`).
  */
 
+import { join } from "node:path";
 import { runCli } from "./main.js";
 import { createDefaultBenchmarkRuntimeHost } from "../runtime/host-port.js";
 
+function agentDataDir(): string | undefined {
+  const root = process.env.XDG_DATA_HOME ?? (process.env.HOME === undefined ? undefined : join(process.env.HOME, "Library", "Application Support"));
+  return root === undefined ? undefined : join(root, "Colophon");
+}
+
 const runtimeHost = createDefaultBenchmarkRuntimeHost({
   openAI: { keyFilePath: () => process.env.BENCHMARK_PRODUCT_OPENAI_API_KEY_FILE },
+  agentDataDir: agentDataDir(),
 });
 
 const result = await runCli(process.argv.slice(2), {
   cwd: process.cwd(),
   clock: () => new Date().toISOString(),
   runtimeHost,
+  agentDataDir: agentDataDir(),
   // stderr, never stdout: --json mode's stdout must stay a single machine-parseable envelope,
   // and even in human mode stdout is reserved for the verb's final rendered result.
   progress: (line) => process.stderr.write(`${line}\n`),

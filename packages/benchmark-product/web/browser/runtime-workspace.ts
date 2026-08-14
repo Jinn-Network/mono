@@ -24,6 +24,7 @@ export interface RuntimeWorkspace {
   readonly ownershipToken: string;
   readonly runRoot: string;
   readonly workspaceDir: string;
+  readonly agentDataDir: string;
   readonly copiedBundleDir: string;
   readonly ownershipMarker: string;
 }
@@ -63,6 +64,7 @@ const MARKER_NAME = ".bp50-browser-owner.json";
 const MARKER_FORMAT = "benchmark-product-browser-owner/1";
 const ALLOWED_ROOT_DIRECTORIES = new Set([
   "workspace",
+  "agent-data",
   "copied-public-bundle",
   "copied-cancelled-public-bundle",
 ]);
@@ -211,6 +213,7 @@ export function deriveRuntimeWorkspace(input: {
     ownershipToken: input.ownershipToken,
     runRoot,
     workspaceDir: join(runRoot, "workspace"),
+    agentDataDir: join(runRoot, "agent-data"),
     copiedBundleDir: join(runRoot, "copied-public-bundle"),
     ownershipMarker: join(runRoot, MARKER_NAME),
   };
@@ -239,6 +242,7 @@ export function prepareRuntimeWorkspace(runtime: RuntimeWorkspace): RuntimeWorks
       closeSync(markerDescriptor);
     }
     mkdirSync(runtime.workspaceDir);
+    mkdirSync(runtime.agentDataDir, { mode: 0o700 });
     fsyncDirectory(runtime.runRoot);
     fsyncDirectory(dirname(runtime.runRoot));
     return {

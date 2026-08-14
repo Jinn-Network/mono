@@ -67,7 +67,6 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['run', {
     dependencies: [
       '@jinn-network/benchmarking-records',
-      '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
     ],
@@ -79,6 +78,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-backend-local',
       '@jinn-network/task-execution-launchers',
       '@jinn-network/task-execution-supervisor',
@@ -165,7 +165,7 @@ function readPackage(directory) {
 
 function packageManifests(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
+    if (!entry.isDirectory() || ['.next', 'dist', 'node_modules'].includes(entry.name)) return [];
     const child = join(directory, entry.name);
     const packageJson = join(child, 'package.json');
     return [
@@ -222,7 +222,7 @@ test('benchmarking package Jinn dependencies and portal resolutions match the ap
       assert.deepEqual(jinnDependencyNames(manifest, section), approved[section],
         `${directory} has unapproved Jinn ${section}`);
     }
-    const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
+    const declared = [...new Set(DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)))].sort();
     const portalResolutions = [...(approved.portalResolutions ?? [])].sort();
     const resolutions = manifest.resolutions ?? {};
     const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();

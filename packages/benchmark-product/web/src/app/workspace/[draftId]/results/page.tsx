@@ -1,7 +1,7 @@
 import "server-only";
 
 import Link from "next/link";
-import type { RunResultsCell, RunResultsDocument, RunResultsReport } from "@jinn-network/benchmark-product-core";
+import type { RunResultsCell, RunResultsDocument, RunResultsReport } from "@colophon-claims/core";
 import { ActionForm } from "@/components/action-form";
 import { LifecycleRail } from "@/components/lifecycle-rail";
 import { VerificationForm } from "@/components/verification-form";
@@ -308,7 +308,7 @@ export default async function ResultsPage({ params }: { readonly params: Promise
       </CardContent></Card>
       {results.report ? <Report report={results.report} /> : <Card><CardHeader><h2 className="text-xl font-semibold">Report not sealed</h2></CardHeader><CardContent><p>A gated report can be sealed once the draft is closed.</p></CardContent></Card>}
       <section aria-labelledby="verification-heading">
-        <Card className="min-w-0"><CardHeader><h2 id="verification-heading" className="text-xl font-semibold">Independent verification</h2></CardHeader><CardContent className="min-w-0 space-y-5"><p>{PRODUCT_BRANDING.attribution}</p>{results.report ? <><dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Portable bundle command</dt><dd className="break-all font-mono text-xs">{results.report.claimPackage.verification.command}</dd></div><div><dt className="font-medium">Workspace verification command</dt><dd className="break-all font-mono text-xs">{PRODUCT_BRANDING.commandName} verify --workspace &lt;workspace-dir&gt; --draft {draftId} --json</dd></div><div><dt className="font-medium">Trust root</dt><dd>{results.report.claimPackage.verification.trustRoot}</dd></div></dl><div><h3 className="font-semibold">Declared checks</h3><ul className="list-disc pl-5">{results.report.claimPackage.verification.checks.map((check) => <li key={check}>{check}</li>)}</ul></div></> : null}<VerificationForm action={GUI_SERVER_ACTIONS["run.verify"]} draftId={draftId} /></CardContent></Card>
+        <Card className="min-w-0"><CardHeader><h2 id="verification-heading" className="text-xl font-semibold">Independent verification</h2></CardHeader><CardContent className="min-w-0 space-y-5"><p>{PRODUCT_BRANDING.attribution}</p>{results.report ? <><dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Exact reader command</dt><dd className="break-all font-mono text-xs">{results.report.claimPackage.verification.command}</dd></div><div><dt className="font-medium">Compatible reader command</dt><dd className="break-all font-mono text-xs">{results.report.claimPackage.verification.compatibleCommand}</dd></div><div><dt className="font-medium">Workspace verification command</dt><dd className="break-all font-mono text-xs">{PRODUCT_BRANDING.commandName} verify --workspace &lt;workspace-dir&gt; --draft {draftId} --json</dd></div><div><dt className="font-medium">Trust root</dt><dd>{results.report.claimPackage.verification.trustRoot}</dd></div></dl><div><h3 className="font-semibold">Declared checks</h3><ul className="list-disc pl-5">{results.report.claimPackage.verification.checks.map((check) => <li key={check}>{check}</li>)}</ul></div></> : null}<VerificationForm action={GUI_SERVER_ACTIONS["run.verify"]} draftId={draftId} /></CardContent></Card>
       </section>
     </> : null}
   </main>;

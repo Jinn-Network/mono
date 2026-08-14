@@ -7,11 +7,11 @@ import {
   type BenchmarkRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
-import type {
-  ObservationSnapshot,
-  TaskExecutionBackend,
-} from "@jinn-network/task-execution-backend";
 import { sealSubmission } from "@jinn-network/task-execution-protocol";
+import type {
+  BenchmarkExecutionBackend,
+  BenchmarkObservationSnapshot,
+} from "./backend-port.js";
 import { assertCellCorrespondence, CellCorrespondenceError } from "./checks.js";
 
 export type CellStatusKind =
@@ -54,11 +54,11 @@ export type Clock = {
  */
 export type AttemptWaitPort = {
   waitUntilTerminal(input: {
-    backend: TaskExecutionBackend;
+    backend: BenchmarkExecutionBackend;
     attempt: string;
     signal?: AbortSignal;
     closeAt: string;
-  }): Promise<ObservationSnapshot>;
+  }): Promise<BenchmarkObservationSnapshot>;
 };
 
 /** Crash-safe resume: exact previously accepted Submission bytes for a dispatch. */
@@ -95,7 +95,7 @@ export type LaunchCapturePort = {
     dispatch: number;
     submission: `urn:uuid:${string}`;
     submissionDigest: `sha256:${string}`;
-    snapshot: ObservationSnapshot;
+    snapshot: BenchmarkObservationSnapshot;
   }): void | Promise<void>;
 };
 
@@ -107,7 +107,7 @@ export type HostTerminalFacts = {
 
 /** Classify a terminal observation into status + §7.4 replaceability. */
 export type TerminalClassifier = (input: {
-  snapshot: ObservationSnapshot;
+  snapshot: BenchmarkObservationSnapshot;
   cellKey: string;
   armId: string;
   hostFacts?: HostTerminalFacts;
@@ -151,7 +151,7 @@ export interface LaunchOptions {
     cellKey: string;
     armId: string;
     attempt: string;
-    snapshot: ObservationSnapshot;
+    snapshot: BenchmarkObservationSnapshot;
   }): HostTerminalFacts | undefined | Promise<HostTerminalFacts | undefined>;
 }
 
@@ -197,7 +197,7 @@ export function computeCellDeadline(
  * judged / unjudged / invalidated / delivered / cancelled / submit-rejection are not.
  */
 export function defaultClassifyTerminal(input: {
-  snapshot: ObservationSnapshot;
+  snapshot: BenchmarkObservationSnapshot;
   hostFacts?: HostTerminalFacts;
 }): ReturnType<TerminalClassifier> {
   if (input.hostFacts?.exclusionHit === true) {
@@ -238,11 +238,11 @@ export function defaultClassifyTerminal(input: {
 }
 
 async function waitForAttemptTerminal(
-  backend: TaskExecutionBackend,
+  backend: BenchmarkExecutionBackend,
   attempt: string,
   opts: LaunchOptions,
   closeAt: string,
-): Promise<ObservationSnapshot> {
+): Promise<BenchmarkObservationSnapshot> {
   const capabilities = await backend.capabilities();
   if (capabilities.watch && backend.watch !== undefined) {
     let latest = await backend.observe(attempt as never);
@@ -311,7 +311,7 @@ async function sealNewSubmission(input: {
 async function dispatchAndWatchCell(input: {
   run: RunRecord;
   runDigest: `sha256:${string}`;
-  backend: TaskExecutionBackend;
+  backend: BenchmarkExecutionBackend;
   coord: Coord;
   dispatch: number;
   opts: LaunchOptions;
@@ -494,7 +494,7 @@ function ownerCancelled(opts: LaunchOptions): boolean {
 export async function* launchAndWatch(
   bench: BenchmarkRecord,
   run: RunRecord,
-  backend: TaskExecutionBackend,
+  backend: BenchmarkExecutionBackend,
   opts: LaunchOptions,
 ): AsyncGenerator<CellStatusEvent> {
   const cells = expectedCellSet(bench, run);
@@ -607,7 +607,7 @@ export async function* launchAndWatch(
 export async function* resumeRun(
   bench: BenchmarkRecord,
   run: RunRecord,
-  backend: TaskExecutionBackend,
+  backend: BenchmarkExecutionBackend,
   opts: LaunchOptions & {
     outstanding: readonly {
       cellKey: string;

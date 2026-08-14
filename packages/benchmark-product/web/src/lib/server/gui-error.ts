@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { ProductErrorCode, ProductErrorEnvelope } from "@jinn-network/benchmark-product-core";
+import type { ProductErrorCode, ProductErrorEnvelope } from "@colophon-claims/core";
 
 const SAFE_DETAILS: Readonly<Record<ProductErrorCode, string>> = {
   validation: "The supplied input was not accepted. Correct the named fields and retry.",

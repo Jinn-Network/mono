@@ -19,19 +19,47 @@ real-world custody.
 ## Status and prerequisites
 
 - Node.js 22 (the verified runtime is 22.23.1) and Yarn 4.13.0.
+- The packaged zero-Docker sample, reader verifier, and loopback viewer are
+  qualified on Ubuntu x64 and Apple-silicon macOS arm64. Windows and Intel
+  macOS remain unsupported; real agent, Docker, and Inspect paths have separate gates.
 - A checkout with the portal dependency distributions built in the order used
-  by [Benchmark Product CI](../../.github/workflows/benchmark-product-ci.yml).
+  by [Benchmark Product CI](../../.github/workflows/benchmark-product-ci.yml) is
+  still required for mono development until the Jinn packages are public.
 - No account, network venue, API credential, or funds for the bundled sample
   and default real local venue.
 
-Both packages are private, `publishPolicy: never`, and not released. Deployment
-status is **none today**: the hosted account, team, billing, registry, and public
-report experiences shown in the preview catalog are deliberate views of the
-planned service, not available SaaS capabilities. Product `publish` currently
-means local immutable bundle emission only. The previews stay in the product so
-the intended hosted experience can be evaluated before its services exist.
+The self-serve source is now split into Colophon-owned Tier 4 packages:
+
+- `@colophon-claims/cli` — the installable `colophon` command;
+- `@colophon-claims/core` — product operations and local composition;
+- `@colophon-claims/verify` — the smaller reader-only verifier;
+- `@colophon-claims/web` — private source/build input for the local UI.
+
+They are implemented but not published. Registry publication remains held until
+the `@colophon-claims` organization and publisher custody are established and
+the exact Jinn dependency set is available from npm. There is no hosted service,
+account, telemetry, billing, or remote publication. Product `publish` means
+local immutable bundle emission only.
 
 ## Cold public quickstart
+
+The intended packaged command is:
+
+```bash
+npx @colophon-claims/cli@1
+```
+
+It runs the bundled zero-credential comparison, retains its copied bundle and
+receipt, verifies the copy, and opens a verified loopback viewer. It is not yet
+a registry command because the packages have not been published.
+
+For a received bundle, the smaller reader surface is:
+
+```bash
+npx @colophon-claims/verify@1 ./bundle
+```
+
+The contributor proof remains available from the mono:
 
 After the portal build order above has been completed, start from an empty
 product workspace using the built CLI:
@@ -42,7 +70,7 @@ yarn install --immutable
 yarn public-quickstart
 ```
 
-The command clean-builds core, creates a uniquely owned temporary workspace,
+The contributor command clean-builds core, creates a uniquely owned temporary workspace,
 uses the two bundled real subprocess arms, and drives sample → quote → lock →
 launch → status → resume → collect → results → Report → publish. It copies the
 bundle outside the source workspace, deletes that source, and requires the
@@ -76,8 +104,11 @@ Because this is an explicit local release gate, it is skipped by ordinary CI.
 
 ## Product surfaces
 
-- [Core and CLI](./core/README.md) — the operations library, complete agent
-  surface, typed errors, authority, and real-venue behavior.
+- [Installable CLI](./cli/README.md) — the no-argument sample and local viewer.
+- [Core](./core/README.md) — the operations library, complete agent surface,
+  typed errors, authority, and real-venue behavior.
+- [Reader verifier](./verify/README.md) — the independent small install for a
+  person checking a received bundle.
 - [Private web app](./web/README.md) — the server-only human client, local
   configuration, routes, and production browser gate.
 - [Public bundle](./PUBLIC-BUNDLE.md) — frozen
