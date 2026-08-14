@@ -1,34 +1,43 @@
 # GROWTH
 
-**What this doc is / is not.** This is the canonical statement of how Jinn grows: the strategy (what we distribute, to whom, with what call to action) and the engine (how growth attempts are measured and evolved). It is not a campaign log, an asset library, or a tactical playbook — those live in [`growth/.local/`](growth/.local/) (operator-private) and accrete as the engine runs. It is also not the thesis (see [`THESIS.md`](THESIS.md)), the voice canon (see [`BRAND.md`](BRAND.md)), or the positioning spine (see [`docs/positioning/2026-07-07-jinn-positioning-spine.md`](docs/positioning/2026-07-07-jinn-positioning-spine.md)); growth derives from all three and does not restate them.
+**What this doc is / is not.** This is the canonical statement of how Jinn grows: the strategy (what we distribute, to whom, with what call to action) and the engine (how growth attempts are measured and evolved). It is not a campaign log, an asset library, or a tactical playbook — those live in [`growth/.local/`](growth/.local/) (operator-private) and accrete as the engine runs. It is also not the thesis (see [`THESIS.md`](THESIS.md)), the voice canon (see [`BRAND.md`](BRAND.md)), or the product positioning (see the [GTM plan](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) §4); growth derives from all three and does not restate them.
 
-**Revision note (2026-07-07).** This rewrite reintroduces a strategy layer. The 2026-06-02 deprecation retired the *prior* strategy (bet, target cluster, GTM phases, channel canon — archived at [`growth/archive/`](growth/archive/), derivation in [Discussion #770](https://github.com/Jinn-Network/mono/discussions/770)); the engine it left behind is retained unchanged in §4–§8. The new strategy layer follows the harness-first pivot ([`spec/2026-07-02-jinn-harness-network.md`](spec/2026-07-02-jinn-harness-network.md)) and the positioning spine. Do not revive archived structure without running it through the loop as a single-knob test.
+**Revision note (2026-08-14).** This rewrite replaces the strategy layer with a product-led one, ratifying decision 1 of [DR-2026-08-10](log/decisions/2026-08-10-product-led-gtm-and-first-market.md). The harness-first strategy layer it retires (§1–§3 as they stood) is archived at [`growth/archive/2026-08-14-GROWTH.md`](growth/archive/2026-08-14-GROWTH.md), exactly as the pre-2026-07-07 strategy was. The engine (§4–§8) is retained: it survived the last strategy retirement and it survives this one. Do not revive archived structure without running it through the loop as a single-knob test.
 
-## 1. The strategy: harness-first
+**Revision note (2026-07-07).** The rewrite that reintroduced a strategy layer after the 2026-06-02 deprecation retired the *prior* strategy (bet, target cluster, GTM phases, channel canon — archived at [`growth/archive/`](growth/archive/), derivation in [Discussion #770](https://github.com/Jinn-Network/mono/discussions/770)).
 
-Jinn ships a harness, not a marketplace. **The product is Jinn — the agent a person runs — and using it is the funnel.** The network (contribution, verification, earning, steering) rides along with use. There is no marketplace-led or operator-recruitment-led motion; distribution is product adoption.
+## 1. The strategy: product-led
 
-All positioning, claims, and copy derive from the [positioning spine](docs/positioning/2026-07-07-jinn-positioning-spine.md). Its one-line core: *Jinn is the first agent that gets better as more people use it* — asserted as a bet, not a result, until the v0 gate ([#1307](https://github.com/Jinn-Network/mono/issues/1307)) produces evidence.
+Jinn grows through a product people buy, not by recruiting operators or selling the protocol. **The distribution surface is the benchmark product, and a published, verifiable report is the distribution object.** The network (contribution, verification, earning, steering) rides along with product use; Jinn is the infrastructure attribution, not the headline.
+
+Two motions, both product-led:
+
+- **Trigger-based outbound** to teams facing a live benchmark claim or decision.
+- **Artifact-led distribution** through published reports that carry their own evidence and survive outside the tool that made them.
+
+Positioning, claims, and copy derive from the [GTM plan](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) §4 and [`BRAND.md`](BRAND.md). Category: *verifiable benchmarking*. Primary pitch: **Make AI performance claims people can inspect.**
 
 ## 2. Audience
 
-- **Beachhead: Hermes / OpenClaw users.** Already run a memory-built generalised personal agent; already crypto-comfortable. The premise (agents need accumulated learning; chains are normal) is pre-accepted — the only fight is proof. Win here first.
-- **Expansion: broader AI power users** (Claude Code, Cursor, heavy assistant workflows). Later; requires premise-selling the beachhead does not.
+Defined by the presence of a high-value evaluation trigger, not by domain alone.
+
+- **Core profile:** a technically capable team that builds, buys, or deploys an AI system, has a real comparison or performance question, faces external or internal scrutiny over the answer, and needs the result by a meaningful deadline. Users and economic buyers are enumerated in the [GTM plan](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) §5.
+- **Default beachhead: coding-agent, harness, skill, plugin, tool, and loadout builders.** It is what the shipped product runs today and where distribution already reaches. This is a default, not a fixed decision — displaced only when another domain outperforms it on the GTM plan's selection rubric across completed, committed campaigns, and any change is recorded by DR ([DR-2026-08-10](log/decisions/2026-08-10-product-led-gtm-and-first-market.md) decision 2).
 - **Not a growth target: OLAS / crypto-operator outreach.** Operators arrive downstream of product adoption, not through growth spend.
 
-Single-audience evidence does not generalise (§7); log beachhead and expansion attempts separately.
+Single-audience evidence does not generalise (§7); log beachhead and other-domain attempts separately.
 
 ## 3. The funnel and the current call to action
 
 The funnel today, in order:
 
-1. **See the claim** — landing page at jinn.network, posts, threads. All derived from the spine.
-2. **Join the community** — the Telegram group ([t.me/jinnNetwork](https://t.me/jinnNetwork)) is the single call to action on every outward surface for now. One CTA, everywhere, until the loop says otherwise.
-3. **Run Jinn** — install and use the agent (reader mode needs no account, wallet, or consent).
-4. **Turn on contributing** — consent, first publish, ledger.
-5. **Evidence** — verified contributions accumulate toward the v0 gate.
+1. **See the claim** — a published report, or a post or thread carrying one.
+2. **Bring a claim** — the single call to action on every outward surface. The ask is not "are you interested in evals?" but *what AI performance claim or decision do you need other people to trust next?*
+3. **Run a benchmark** — self-serve, or operated together with the team (one product, four offers; [GTM plan](docs/superpowers/plans/2026-08-10-benchmark-product-gtm-plan.md) §7).
+4. **Publish the report** — the evidence package that outlives the originating tool.
+5. **Evidence** — published reports accumulate as the product's own proof, and the loop that produced them as Jinn's.
 
-The Telegram-first CTA is deliberate: before the capability bet has public evidence, the honest ask is "watch us test it", not "switch your daily driver". When the v0 gate produces a result, the primary CTA graduates from *join* to *run*.
+The claim-first CTA is deliberate: the value on offer is a more credible decision, so the honest ask is for the decision the team already has to defend, not for a tool switch.
 
 ## 4. The engine: the model
 
@@ -70,7 +79,7 @@ The first two are created by the skill on first PLAN call if absent. The skill i
 
 ## 7. Non-negotiables
 
-- **Every outward surface derives from the positioning spine** and respects its messaging do-not list. A surface that contradicts the spine is a bug.
+- **Every outward surface derives from the positioning in §1** and respects the GTM plan's what-the-product-is-not list. A surface that contradicts it is a bug.
 - **No written prediction → the attempt logs as inconclusive.** Hindsight verdicts are how loadouts get reverted on noise.
 - **One knob varies per attempt** unless explicitly overridden in the log entry.
 - **At least two attempts on the same rung-knob pair before EVOLVE acts.** N=1 is a data point, not a verdict.
@@ -82,9 +91,9 @@ The first two are created by the skill on first PLAN call if absent. The skill i
 - Automation that pulls metrics from X / Telegram / GitHub.
 - Cross-deployer pooling (Scope knob's network setting).
 - Dashboards, databases, schemas-as-code.
-- Expansion-audience campaigns (premise-selling to non-Hermes power users) before the beachhead loop produces verdicts.
+- Campaigns outside the default beachhead before the commitment gate opens them ([DR-2026-08-10](log/decisions/2026-08-10-product-led-gtm-and-first-market.md) decision 3).
 - Reintroducing retired clusters, framings, channels, or rituals from the archive without running them through the loop as a single-knob test.
 
 ---
 
-Changes to this document require a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions) and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md). *(The 2026-07-07 rewrite was owner-authorised directly, bypassing that pipeline at Oak's instruction.)*
+Changes to this document require a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions) and CODEOWNERS approval, per [`spec/2026-04-28-canonical-docs.md`](spec/2026-04-28-canonical-docs.md). *(The 2026-07-07 rewrite was owner-authorised directly, bypassing that pipeline at Oak's instruction. The 2026-08-14 product-led rewrite was likewise owner-authorised, at Ritsu's instruction: the Discussion step was waived explicitly, not overlooked, and the repository's canonical-doc check stayed red on this PR to record that no Discussion was linked.)*
