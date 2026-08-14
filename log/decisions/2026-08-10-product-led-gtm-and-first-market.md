@@ -1,10 +1,19 @@
 # DR-2026-08-10 — Product-Led GTM and Default First Market
 
 - **Date:** 2026-08-10
-- **Status:** Proposed (drafted in-session at operator direction, Ritsu, 2026-08-10.
-  Decision 1 additionally requires a linked GitHub Discussion + CODEOWNERS approval on
-  the GROWTH.md PR per [`spec/2026-04-28-canonical-docs.md`](../../spec/2026-04-28-canonical-docs.md) —
-  this DR proposes that change; it does not itself amend a canonical doc)
+- **Status:** **Accepted 2026-08-14.** Decisions 2 and 3 were already operative through the
+  charter and GTM plan §6. Decision 1 ratified when the GROWTH.md rewrite merged.
+  (Drafted in-session at operator direction, Ritsu, 2026-08-10.)
+- **Ratification note (2026-08-14).** Decision 1's stated path below was *"a linked GitHub
+  Discussion and a CODEOWNERS-approved GROWTH.md PR."* **The Discussion step was waived by
+  operator ruling (Ritsu, 2026-08-14)** — explicitly waived, not overlooked. The GROWTH.md
+  PR merged without a linked Discussion and with the repository's canonical-doc check red,
+  which is the honest record: the check correctly reported that no Discussion existed. This
+  follows the precedent of the 2026-07-07 GROWTH.md rewrite, which was owner-authorised
+  directly at Oak's instruction; both waivers are recorded in GROWTH.md's own footer rather
+  than left implicit. The waiver covers the Discussion step only — it does not amend
+  [`spec/2026-04-28-canonical-docs.md`](../../spec/2026-04-28-canonical-docs.md), which
+  still governs every other canonical-doc change.
 - **Owning docs:** [`GROWTH.md`](../../GROWTH.md) (strategy layer, decision 1); the
   standalone benchmark product charter v0.2 §5 (session-attached, not in-repo) and the
   program plan [`2026-08-05-standalone-benchmarking-product-program.md`](../../docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md) §3
@@ -63,7 +72,10 @@ has committed — never speculatively.
    strategy retirement and it survives this one. **Ratification path:** this decision
    ratifies only via the canonical-doc process — a linked GitHub Discussion and a
    CODEOWNERS-approved GROWTH.md PR. Until that PR merges, GROWTH.md remains
-   authoritative as written.
+   authoritative as written. *(Superseded 2026-08-14: the Discussion step was waived by
+   operator ruling — see the ratification note in the header. The clause is left as
+   written rather than rewritten, so the record shows what the bar was and that it was
+   deliberately lowered.)*
 
 2. **Coding-agent builders become the default beachhead, not a fixed decision.** The
    charter §5 / program plan §3 first-market sentence is amended from a closed decision
