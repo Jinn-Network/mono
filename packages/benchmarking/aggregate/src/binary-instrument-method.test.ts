@@ -33,6 +33,7 @@ const EVALUATION_METHOD_DIGEST = "sha256:41b36eaffbac8c78133afd2075ec32fd73ed324
 const RUN_OWNER = "urn:uuid:77777777-7777-5777-8777-777777777777";
 const RESPONSE_MEDIA_TYPE = "text/plain; charset=utf-8";
 const OBSERVATION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.observation.v1+json";
+const INSPECT_LOG_MEDIA_TYPE = "application/vnd.inspect-ai.eval-log+json";
 const ANALYSIS_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.analysis-context.v1+json";
 const LABEL_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.label-resolution.v1+json";
 
@@ -278,6 +279,12 @@ function makeFixture(options: {
   readonly extraRunArm?: boolean;
   readonly extraTestMaterial?: boolean;
   readonly extraParserField?: boolean;
+  readonly evaluationImageName?: string;
+  readonly evaluationImageDigest?: string;
+  readonly evaluationTimeout?: number;
+  readonly taskInstructions?: string;
+  readonly extraTaskField?: boolean;
+  readonly extraProfileField?: boolean;
 } = {}): {
   readonly input: MethodComputeInput;
   readonly matrix: MatrixRecord;
@@ -293,10 +300,10 @@ function makeFixture(options: {
     records.set(digest, bytes);
     return digest;
   };
-  const matrixArmIds = ["armA", "armB"] as const;
+  const matrixArmIds = ["armA", "armB", "armC", "armD"] as const;
   const instruments = new Map<string, `sha256:${string}`>();
   const instrumentDocuments = new Map<string, ReturnType<typeof makeInstrument>>();
-  for (const armId of options.extraRunArm === true ? ["armA", "armB", "armExtra"] : matrixArmIds) {
+  for (const armId of options.extraRunArm === true ? [...matrixArmIds, "armExtra"] : matrixArmIds) {
     const document = makeInstrument(armId, options.responseParserDigest ?? RESPONSE_PARSER_DIGEST);
     instrumentDocuments.set(armId, document);
     instruments.set(armId, put(canonicalJsonBytes(document)));
@@ -361,8 +368,8 @@ function makeFixture(options: {
       },
       familyBlock: {
         image: {
-          name: "binary-evaluator-image",
-          digest: { sha256: "c".repeat(64) },
+          name: options.evaluationImageName ?? "binary-judgment-evaluation-parser-semantics.json",
+          digest: { sha256: options.evaluationImageDigest ?? EVALUATION_METHOD_DIGEST.slice("sha256:".length) },
         },
         platform: "linux/amd64",
         workspace: {},
@@ -387,7 +394,7 @@ function makeFixture(options: {
           }] : []),
         ],
         transitions: { failToPass: [], passToPass: [] },
-        timeout: 60,
+        timeout: options.evaluationTimeout ?? 60,
       },
       measurements: MEASUREMENTS.map(([name, type]) => ({ name, type, required: true })),
       verdictRule: { threshold: { measurement: "agreement", op: "eq", value: true } },
@@ -399,17 +406,21 @@ function makeFixture(options: {
       profile: {
         uri: "https://spec.jinn.network/task-profiles/binary-judgment/1.0",
         digest: { sha256: (options.taskProfileDigest ?? TASK_PROFILE_DIGEST).slice("sha256:".length) },
+        ...(options.extraProfileField === true ? { "https://fixtures.example.test/profile-extra": true } : {}),
       },
-      instructions: "Return one binary decision.",
+      instructions: options.taskInstructions ?? "Return exactly ACCEPT or REJECT.",
       payload,
       outputs: [
         { name: "judge-response", mediaType: RESPONSE_MEDIA_TYPE, required: true },
         { name: "judge-observation", mediaType: OBSERVATION_MEDIA_TYPE, required: true },
+        { name: "inspect-log", mediaType: INSPECT_LOG_MEDIA_TYPE, required: false },
       ],
       evaluation: { digest: { sha256: evaluationSpecSha256.slice("sha256:".length) } },
+      author: "did:key:z6Mksynthetic",
       [ITEM_COMMITMENT_KEY]: options.tamper?.kind === "task-item" && seed.id === "correct"
         ? `sha256:${"f".repeat(64)}`
         : itemSha256,
+      ...(options.extraTaskField === true ? { "https://fixtures.example.test/task-extra": true } : {}),
     });
     const taskWire = put(taskBytes);
     items.push({
@@ -453,6 +464,10 @@ function makeFixture(options: {
   decisions.set(`${items[1]!.taskDigest}/armA`, [["ACCEPT", true], ["ACCEPT", true], ["REJECT", false]]);
   decisions.set(`${items[0]!.taskDigest}/armB`, [["REJECT", true], ["REJECT", true], ["ACCEPT", true]]);
   decisions.set(`${items[1]!.taskDigest}/armB`, [["REJECT", true], ["REJECT", true], ["REJECT", false]]);
+  decisions.set(`${items[0]!.taskDigest}/armC`, [["ACCEPT", true], ["ACCEPT", true], ["ACCEPT", true]]);
+  decisions.set(`${items[1]!.taskDigest}/armC`, [["ACCEPT", true], ["ACCEPT", true], ["REJECT", false]]);
+  decisions.set(`${items[0]!.taskDigest}/armD`, [["REJECT", true], ["REJECT", true], ["ACCEPT", true]]);
+  decisions.set(`${items[1]!.taskDigest}/armD`, [["REJECT", true], ["REJECT", true], ["REJECT", false]]);
 
   const cells = items.flatMap((item) => matrixArmIds.flatMap((armId) =>
     Array.from({ length: 3 }, (_, offset) => {
@@ -600,7 +615,7 @@ describe("binary-instrument@1 qualification oracle", () => {
     const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
     const result = method.compute!(fixture.input).perSubject[0]!.results as any;
 
-    expect(Object.keys(result.arms)).toEqual(["armA", "armB"]);
+    expect(Object.keys(result.arms)).toEqual(["armA", "armB", "armC", "armD"]);
     expect(result.arms.armA).toMatchObject({
       item: { expected: 2, complete: 2, excluded: 0, unstable: 1 },
       call: { expected: 6, evaluated: 6, parseInvalid: 1 },
@@ -631,8 +646,8 @@ describe("binary-instrument@1 qualification oracle", () => {
       withheldReason: "zero-denominator",
     });
     expect(result.arms.armA.byStratum.stress.falseAccept.estimate).toBe("1.0000");
-    expect(result.itemDecisions).toHaveLength(4);
-    expect(result.itemDecisions.filter((item: any) => item.unstable)).toHaveLength(2);
+    expect(result.itemDecisions).toHaveLength(8);
+    expect(result.itemDecisions.filter((item: any) => item.unstable)).toHaveLength(4);
     expect(result.excluded).toEqual({ count: 0, items: [] });
     expect(result).not.toHaveProperty("ranking");
     expect(result).not.toHaveProperty("selectedInstrument");
@@ -669,7 +684,7 @@ describe("binary-instrument@1 qualification oracle", () => {
     const result = method.compute!(fixture.input).perSubject[0]!.results as any;
 
     expect(result.configuration.truthAdmission).toBe("operator-only");
-    expect(result.itemDecisions).toHaveLength(4);
+    expect(result.itemDecisions).toHaveLength(8);
   });
 });
 
@@ -684,6 +699,19 @@ describe("binary-instrument@1 tamper refusals", () => {
     expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
       code: "binary-binding-mismatch",
     }));
+  });
+
+  test.each([
+    { evaluationImageName: "binary-evaluator-image" },
+    { evaluationImageDigest: "c".repeat(64) },
+    { evaluationTimeout: 61 },
+    { taskInstructions: "Return one binary decision." },
+    { extraTaskField: true },
+    { extraProfileField: true },
+  ])("rejects non-producible frozen Task/EvaluationSpec drift: %o", (drift) => {
+    const fixture = makeFixture(drift);
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).toThrow(MethodInputError);
   });
 
   test.each([

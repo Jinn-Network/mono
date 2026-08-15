@@ -207,7 +207,11 @@ function bareSha256(value: unknown, digest: string, label: string): string {
 }
 
 function digestObjectSha256(value: unknown, digest: string, label: string): string {
-  if (!isObject(value) || typeof value["sha256"] !== "string" || !SHA256.test(value["sha256"])) {
+  if (!isObject(value)) {
+    throw new MethodInputError("binary-record-malformed", digest, `${label} must carry one lowercase sha256 digest`);
+  }
+  requireExactKeys(value, ["sha256"], digest, label);
+  if (typeof value["sha256"] !== "string" || !SHA256.test(value["sha256"])) {
     throw new MethodInputError("binary-record-malformed", digest, `${label} must carry one lowercase sha256 digest`);
   }
   return value["sha256"];
@@ -367,34 +371,16 @@ function validateTaskPayload(value: unknown, digest: string): ResolvedBinaryPayl
 }
 
 function validateTaskOutputs(value: unknown, digest: string): void {
-  if (!Array.isArray(value) || value.length < 2 || value.length > 3) {
-    throw new MethodInputError("binary-record-malformed", digest, "Task must declare two or three binary judge outputs");
-  }
-  const expected = new Map<string, { readonly mediaType: string; readonly required: boolean }>([
-    ["judge-response", { mediaType: RESPONSE_MEDIA_TYPE, required: true }],
-    ["judge-observation", { mediaType: OBSERVATION_MEDIA_TYPE, required: true }],
-    ["inspect-log", { mediaType: INSPECT_LOG_MEDIA_TYPE, required: false }],
-  ]);
-  const seen = new Set<string>();
-  for (const [index, output] of value.entries()) {
-    if (!isObject(output)) {
-      throw new MethodInputError("binary-record-malformed", digest, `Task.outputs[${index}] must be an object`);
-    }
-    requireExactKeys(output, ["name", "mediaType", "required"], digest, `Task.outputs[${index}]`);
-    const name = output["name"];
-    const slot = typeof name === "string" ? expected.get(name) : undefined;
-    if (
-      slot === undefined
-      || seen.has(name as string)
-      || output["mediaType"] !== slot.mediaType
-      || output["required"] !== slot.required
-    ) {
-      throw new MethodInputError("binary-record-malformed", digest, `Task.outputs[${index}] is not a frozen binary judge slot`);
-    }
-    seen.add(name as string);
-  }
-  if (!seen.has("judge-response") || !seen.has("judge-observation")) {
-    throw new MethodInputError("binary-record-malformed", digest, "Task omits a required binary judge output");
+  const expected = [
+    { name: "judge-response", mediaType: RESPONSE_MEDIA_TYPE, required: true },
+    { name: "judge-observation", mediaType: OBSERVATION_MEDIA_TYPE, required: true },
+    { name: "inspect-log", mediaType: INSPECT_LOG_MEDIA_TYPE, required: false },
+  ];
+  if (
+    !Array.isArray(value)
+    || !bytesEqual(canonicalJsonBytes(value), canonicalJsonBytes(expected))
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "Task.outputs must equal the frozen three-slot binary judge contract");
   }
 }
 
@@ -562,14 +548,28 @@ function resolveTaskBinding(
 ): ExpectedTaskBinding {
   const taskWire = `sha256:${taskDigest}` as const;
   const task = resolveExactJson(taskWire, input.resolveTaskBytes, "Task");
-  if (task["protocol"] !== TASK_PROTOCOL || typeof task["instructions"] !== "string") {
+  requireExactKeys(
+    task,
+    ["protocol", "profile", "instructions", "payload", "outputs", "evaluation", "author", ITEM_COMMITMENT_KEY],
+    taskWire,
+    "Task",
+  );
+  if (
+    task["protocol"] !== TASK_PROTOCOL
+    || task["instructions"] !== "Return exactly ACCEPT or REJECT."
+    || typeof task["author"] !== "string"
+    || task["author"].length === 0
+  ) {
     throw new MethodInputError("binary-binding-mismatch", taskWire, "Task is not a binary task-execution/v1 record");
   }
   const profile = task["profile"];
+  if (isObject(profile)) {
+    requireExactKeys(profile, ["uri", "digest"], taskWire, "Task.profile");
+  }
   if (
     !isObject(profile)
     || digestObjectSha256(profile["digest"], taskWire, "Task.profile.digest") !== TASK_PROFILE_SHA256
-    || (profile["uri"] !== undefined && profile["uri"] !== TASK_PROFILE_URI)
+    || profile["uri"] !== TASK_PROFILE_URI
   ) {
     throw new MethodInputError("binary-binding-mismatch", taskWire, "Task does not pin the binary-judgment/1.0 profile");
   }
@@ -591,6 +591,7 @@ function resolveTaskBinding(
   if (!isObject(evaluation)) {
     throw new MethodInputError("binary-binding-mismatch", taskWire, "Task has no EvaluationSpec descriptor");
   }
+  requireExactKeys(evaluation, ["digest"], taskWire, "Task.evaluation");
   const evaluationSpecSha256 = digestObjectSha256(
     evaluation["digest"],
     taskWire,
@@ -684,6 +685,53 @@ function resolveTaskBinding(
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec analysis-context descriptor is not private exact material");
   }
   const analysisSha256 = digestObjectSha256(contexts[0]["digest"], specWire, "analysis-context.json digest");
+  const expectedSpec = {
+    protocol: EVALUATION_SPEC_PROTOCOL,
+    semanticsVersion: EVALUATION_SEMANTICS_VERSION,
+    family: "deterministic-process",
+    grader: {
+      name: EVALUATION_PARSER_ID,
+      digest: { sha256: EVALUATION_PARSER_SHA256 },
+      accessClass: "public",
+    },
+    familyBlock: {
+      image: {
+        name: "binary-judgment-evaluation-parser-semantics.json",
+        digest: { sha256: EVALUATION_PARSER_SHA256 },
+      },
+      platform: "linux/amd64",
+      workspace: {},
+      testMaterial: [{
+        name: "analysis-context.json",
+        digest: { sha256: analysisSha256 },
+        mediaType: ANALYSIS_CONTEXT_MEDIA_TYPE,
+        accessClass: "private",
+      }],
+      parser: {
+        id: EVALUATION_PARSER_ID,
+        version: EVALUATION_PARSER_VERSION,
+        digest: `sha256:${EVALUATION_PARSER_SHA256}`,
+      },
+      transitions: { failToPass: [], passToPass: [] },
+      timeout: 60,
+    },
+    measurements: [
+      { name: BINARY_INSTRUMENT_MEASUREMENTS.judgeDecision, type: "string", required: true },
+      { name: BINARY_INSTRUMENT_MEASUREMENTS.truthLabel, type: "string", required: true },
+      { name: BINARY_INSTRUMENT_MEASUREMENTS.agreement, type: "boolean", required: true },
+      { name: BINARY_INSTRUMENT_MEASUREMENTS.parseValid, type: "boolean", required: true },
+      { name: BINARY_INSTRUMENT_MEASUREMENTS.candidateClass, type: "string", required: true },
+      { name: BINARY_INSTRUMENT_MEASUREMENTS.stratum, type: "string", required: true },
+      { name: BINARY_INSTRUMENT_MEASUREMENTS.labelResolutionSha256, type: "string", required: true },
+      { name: BINARY_INSTRUMENT_MEASUREMENTS.instrumentSha256, type: "string", required: true },
+    ],
+    verdictRule: { threshold: { measurement: BINARY_INSTRUMENT_MEASUREMENTS.agreement, op: "eq", value: true } },
+    unscorable: [],
+    evidenceConventions: { requiredRefs: [LABEL_RESOLUTION_NAME] },
+  };
+  if (!bytesEqual(canonicalJsonBytes(spec), canonicalJsonBytes(expectedSpec))) {
+    throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec drifts from the frozen binary evaluator contract");
+  }
   const analysisWire = `sha256:${analysisSha256}` as const;
   const analysis = resolveExactJson(analysisWire, input.resolveRecordBytes, "analysis context");
   requireExactKeys(
@@ -903,10 +951,12 @@ function resolveArmInstruments(
   const matrixArms = [...new Set(matrix.cells.map((cell) => cell.armId))].sort(compareCodeUnitStrings);
   const runArms = run.arms.map((arm) => arm.armId).sort(compareCodeUnitStrings);
   if (
-    runArms.length !== matrixArms.length
+    runArms.length !== 4
+    || matrixArms.length !== 4
+    || runArms.length !== matrixArms.length
     || runArms.some((armId, index) => armId !== matrixArms[index])
   ) {
-    throw new MethodInputError("binary-binding-mismatch", matrixRunDigest(matrix), "Run arms and Matrix arms must match exactly");
+    throw new MethodInputError("binary-binding-mismatch", matrixRunDigest(matrix), "binary-instrument@1 requires exactly four matching Run and Matrix arms");
   }
   const instruments = new Map<string, ResolvedArmInstrument>();
   for (const arm of run.arms) {
