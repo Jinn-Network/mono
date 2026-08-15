@@ -290,18 +290,15 @@ describe('update command', () => {
         network: 'testnet',
         earningDir,
         dbPath: ':memory:',
-        // Issue #421: evaluator-role detection reads joinedSolverNets only.
-        joinedSolverNets: {
-          'legacy:swe': {
-            manifestCid: 'legacy:swe',
-            name: 'swe',
-            contract: { id: 'swe-rebench-v2', version: 'v1' },
-            roles: ['solver', 'evaluator'],
-            harness: 'codex-code-learner',
-            plugins: [],
-            disabledDefaultPlugins: [],
-          },
-        },
+        evaluator: { enabled: true },
+        executionWiring: [{
+          workKind: 'swe-rebench-v2.v1',
+          harness: 'swe-rebench-v2-evaluator',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: [],
+          credentialRef: 'swe-rebench-v2-evaluator-default',
+          isolationPolicy: 'process',
+        }],
       } as any);
       expect(readiness.ok).toBe(true);
       expect(readiness.solverReady).toBe(true);

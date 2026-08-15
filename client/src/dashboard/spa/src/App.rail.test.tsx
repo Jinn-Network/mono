@@ -23,7 +23,14 @@ vi.mock('./api/client.js', () => ({
     getBootstrap: async () => ({
       mode: 'running',
       chain: 'base-sepolia',
-      joinedSolverNets: { 'bafkreich-x': { manifestCid: 'bafkreich-x', roles: ['solver'] } },
+      executionWiring: [{
+        workKind: 'prediction.v1',
+        harness: 'claude-code',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'claude-code-default',
+        isolationPolicy: 'process',
+      }],
       onboardingComplete: true,
     }),
   },

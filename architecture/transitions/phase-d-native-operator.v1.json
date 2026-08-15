@@ -178,13 +178,7 @@
         "packages/marketplace/pipeline/src/index.ts"
       ],
       "replacement": "NativeTier4ClaimPolicy and injected native capability, model, harness, plugin, and credential ports.",
-      "consumers": [
-        "client/src/api/claim-policy-endpoints.ts",
-        "client/src/config.ts",
-        "client/src/daemon/composition-root.ts",
-        "client/src/daemon/engagement-ledger.ts",
-        "client/src/daemon/work-loop.ts"
-      ],
+      "consumers": [],
       "defaultMode": "legacy",
       "noNewUseGuard": {
         "path": ".github/scripts/marketplace-source-boundaries.test.mjs",
@@ -211,8 +205,9 @@
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
-      "targetPullRequest": "Phase D2/D4 wiring deletion",
-      "status": "planned"
+      "targetPullRequest": "Stage 5 PR 4 (retire legacy SolverNet config keys)",
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-05-cutover-one-swap-collapse.md"
     },
     {
       "id": "legacy-taskengine-carve",

@@ -36,7 +36,7 @@ Walks spec §6.7's nine-step builder loop end-to-end:
    a stub `IdentityRegistry` deployed locally on Anvil)
 4. Stub indexer picks up `MetadataSet` events → `PluginPublication` row
 5. Discovery API (`/v1/discovery/plugin-publications`) surfaces the new plug-in
-6. Operator installs via `jinn solver-nets add-plugin`
+6. Operator installs by appending the plug-in source onto `executionWiring[].plugins`
 7. stub-Hermes simulates a SWE-rebench v2 task run with the plug-in loaded
 8. Envelope carries `executor.plugins[]` attribution
 9. `/build` SPA panels render the new plug-in (skipped if `hfmf` not merged)

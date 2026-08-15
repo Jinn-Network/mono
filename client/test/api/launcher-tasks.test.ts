@@ -6,19 +6,20 @@ import { gatherLauncherTasks } from '../../src/api/launcher-tasks.js';
 import type { JinnConfig } from '../../src/config.js';
 import type { TaskStatusSnapshot } from '../../src/archive/types.js';
 
+const SWE_WIRING = {
+  workKind: 'swe-rebench-v2.v1',
+  harness: 'claude-code',
+  model: 'claude-haiku-4-5-20251001',
+  plugins: [],
+  credentialRef: 'claude-code-default',
+  isolationPolicy: 'process' as const,
+  legacyManifestDigest: 'bafymanifest',
+};
+
 describe('gatherLauncherTasks', () => {
-  it('labels posted tasks by joinedSolverNets display name when no solverNet is recorded', async () => {
+  it('labels posted tasks by executionWiring workKind when no solverNet is recorded', async () => {
     const config = {
-      joinedSolverNets: {
-        'legacy:swe-rebench-v2': {
-          manifestCid: 'legacy:swe-rebench-v2',
-          name: 'swe-rebench-v2',
-          contract: { id: 'swe-rebench-v2', version: 'v1' },
-          roles: ['solver'],
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      executionWiring: [SWE_WIRING],
     } as unknown as JinnConfig;
     const response = await gatherLauncherTasks({
       config,
@@ -33,12 +34,12 @@ describe('gatherLauncherTasks', () => {
         },
       ],
     });
-    expect(response.tasks[0]?.solverNet).toBe('swe-rebench-v2');
+    expect(response.tasks[0]?.solverNet).toBe('swe-rebench-v2.v1');
   });
 
-  it('falls through to "unknown" when no joined entry matches the posted task solverType', async () => {
+  it('falls through to "unknown" when no wiring entry matches the posted task solverType', async () => {
     const config = {
-      joinedSolverNets: {},
+      executionWiring: [],
     } as unknown as JinnConfig;
     const response = await gatherLauncherTasks({
       config,
@@ -61,16 +62,7 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
   // now() returns ms; claimWindowEnd is unix seconds. 2026-06-14 ≈ 1_780_000_000s.
   const NOW_MS = 1_780_000_000_000;
   const config = {
-    joinedSolverNets: {
-      'bafymanifest': {
-        manifestCid: 'bafymanifest',
-        name: 'swe-rebench-v2',
-        contract: { id: 'swe-rebench-v2', version: 'v1' },
-        roles: ['solver'],
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-    },
+    executionWiring: [SWE_WIRING],
   } as unknown as JinnConfig;
 
   function makeDeps(
@@ -243,30 +235,27 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
     expect(fetchTaskStatuses).toHaveBeenCalledWith('bafymanifest');
   });
 
-  it('scopes joined status lookup to manifest cids matching the current page solver type', async () => {
+  it('scopes status lookup to legacyManifestDigest matching the current page solver type', async () => {
     const fetchTaskStatuses = vi.fn(
       async () => new Map([['t1', { taskId: 't1', finalized: true, refunded: false }]]),
     );
     const response = await gatherLauncherTasks({
       config: {
-        joinedSolverNets: {
-          'bafy-unrelated': {
-            manifestCid: 'bafy-unrelated',
-            name: 'other',
-            contract: { id: 'other', version: 'v1' },
-            roles: ['solver'],
+        executionWiring: [
+          {
+            workKind: 'other.v1',
+            harness: 'claude-code',
+            model: 'claude-haiku-4-5-20251001',
             plugins: [],
-            disabledDefaultPlugins: [],
+            credentialRef: 'claude-code-default',
+            isolationPolicy: 'process',
+            legacyManifestDigest: 'bafy-unrelated',
           },
-          'bafy-current': {
-            manifestCid: 'bafy-current',
-            name: 'swe-rebench-v2',
-            contract: { id: 'swe-rebench-v2', version: 'v1' },
-            roles: ['solver'],
-            plugins: [],
-            disabledDefaultPlugins: [],
+          {
+            ...SWE_WIRING,
+            legacyManifestDigest: 'bafy-current',
           },
-        },
+        ],
       } as unknown as JinnConfig,
       creatorAddress: '0xabc',
       now: () => NOW_MS,
@@ -287,13 +276,13 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
     expect(response.tasks[0]?.onchainStatus).toBe('finalized');
   });
 
-  it('uses the provided launched manifest CID for statuses even when not joined', async () => {
+  it('uses the provided launched manifest CID for statuses even when not wired', async () => {
     const fetchTaskStatuses = vi.fn(
       async () => new Map([['t1', { taskId: 't1', finalized: true, refunded: false }]]),
     );
     const response = await gatherLauncherTasks(
       {
-        config: { joinedSolverNets: {} } as unknown as JinnConfig,
+        config: { executionWiring: [] } as unknown as JinnConfig,
         creatorAddress: '0xabc',
         now: () => NOW_MS,
         fetchPostedTasks: () => [
@@ -309,7 +298,7 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
     expect(response.tasks[0]?.onchainStatus).toBe('finalized');
   });
 
-  it('prefers the provided launched manifest CID instead of fanning out joined memberships', async () => {
+  it('prefers the provided launched manifest CID instead of fanning out wiring memberships', async () => {
     const fetchTaskStatuses = vi.fn(
       async (cid: string) =>
         new Map([
@@ -327,10 +316,26 @@ describe('gatherLauncherTasks — onchainStatus chip (#579)', () => {
     const response = await gatherLauncherTasks(
       {
         config: {
-          joinedSolverNets: {
-            'bafy-joined-a': { manifestCid: 'bafy-joined-a', roles: ['solver'] },
-            'bafy-joined-b': { manifestCid: 'bafy-joined-b', roles: ['solver'] },
-          },
+          executionWiring: [
+            {
+              workKind: 'a.v1',
+              harness: 'claude-code',
+              model: 'claude-haiku-4-5-20251001',
+              plugins: [],
+              credentialRef: 'claude-code-default',
+              isolationPolicy: 'process',
+              legacyManifestDigest: 'bafy-joined-a',
+            },
+            {
+              workKind: 'b.v1',
+              harness: 'claude-code',
+              model: 'claude-haiku-4-5-20251001',
+              plugins: [],
+              credentialRef: 'claude-code-default',
+              isolationPolicy: 'process',
+              legacyManifestDigest: 'bafy-joined-b',
+            },
+          ],
         } as unknown as JinnConfig,
         creatorAddress: '0xabc',
         now: () => NOW_MS,

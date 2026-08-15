@@ -21,20 +21,15 @@ import type { RewardsResponse, SolverNetsCatalogResponse, StakingRewardReadState
 interface BootstrapWithSolverNets {
   /** Operator's master EOA (the address that holds custody and seeds the node). */
   master_address?: string;
-  joinedSolverNets?: Record<
-    string,
-    {
-      name?: string;
-      manifestCid?: string;
-      /** Catalog contract identity — used to match this membership against the SolverNet catalog entry. */
-      contract?: { id: string; version: string };
-      roles?: string[];
-      harness?: string;
-      model?: string;
-      plugins?: string[];
-      disabledDefaultPlugins?: string[];
-    }
-  >;
+  executionWiring?: Array<{
+    workKind: string;
+    harness: string;
+    model?: string;
+    plugins: string[];
+    credentialRef?: string;
+    isolationPolicy?: string;
+    legacyManifestDigest?: string;
+  }>;
 }
 
 interface TaskRunRow {
@@ -282,43 +277,33 @@ export function OverviewPage(): JSX.Element {
 
   // ── Activity card inputs ────────────────────────────────────────────
   //
-  // Joined: project `bootstrap.joinedSolverNets` into the ActivityCard
-  // shape. Issue #421 retired the legacy short-name fallback; an empty
-  // joinedSolverNets cleanly maps to the no-active-SolverNet empty-state.
+  // Joined: project `bootstrap.executionWiring` into the ActivityCard
+  // shape. Empty wiring maps to the no-active-SolverNet empty-state.
   const joinedNets: ActivityJoinedNet[] = useMemo(() => {
     const out: ActivityJoinedNet[] = [];
-    const j = bootstrap?.joinedSolverNets;
-    if (!j) return out;
-    for (const [key, entry] of Object.entries(j)) {
-      if (!entry) continue;
-      // Match the catalog entry by contract identity. The daemon's
-      // bootstrap stores only the operator's explicit overrides; the
-      // catalog supplies the default-on plugins (e.g. swe-rebench-v2-runtime).
-      const catalogEntry = entry.contract
+    for (const entry of bootstrap?.executionWiring ?? []) {
+      const lastDot = entry.workKind.lastIndexOf('.');
+      const contract = lastDot > 0
+        ? { id: entry.workKind.slice(0, lastDot), version: entry.workKind.slice(lastDot + 1) }
+        : undefined;
+      const catalogEntry = contract
         ? catalog?.nets.find(
             (n) =>
-              n.contract.id === entry.contract?.id &&
-              n.contract.version === entry.contract?.version,
+              n.contract.id === contract.id &&
+              n.contract.version === contract.version,
           )
         : undefined;
       const plugins = computeEffectivePlugins({
         harness: entry.harness,
         explicit: Array.isArray(entry.plugins) ? entry.plugins : [],
-        disabledDefaults: Array.isArray(entry.disabledDefaultPlugins)
-          ? entry.disabledDefaultPlugins
-          : [],
+        disabledDefaults: [],
         catalogCompatible: catalogEntry?.compatiblePlugins,
       });
       out.push({
-        name: entry.name ?? entry.manifestCid ?? key,
-        manifestCid: entry.manifestCid ?? key,
-        // Derive the membership's solverType from its contract identity so the
-        // Activity table can scope runs by solverType instead of the delivery
-        // CID that delivered runs carry in manifestCid (#838).
-        solverType: entry.contract
-          ? `${entry.contract.id}.${entry.contract.version}`
-          : undefined,
-        roles: Array.isArray(entry.roles) ? entry.roles : [],
+        name: entry.workKind,
+        manifestCid: entry.legacyManifestDigest,
+        solverType: entry.workKind,
+        roles: ['solver'],
         harness: entry.harness,
         model: entry.model,
         plugins,

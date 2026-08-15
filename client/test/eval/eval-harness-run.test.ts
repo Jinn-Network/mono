@@ -8,7 +8,7 @@ import {
 } from '@/eval/eval-harness-run.js';
 import type { Harness, HarnessContext } from '@/harnesses/types.js';
 import type { Task } from '@/types/task.js';
-import type { JoinedSolverNetConfig } from '@/solver-nets/registry.js';
+import type { ExecutionWiringConfigEntry } from '@/config/shape-v2.js';
 import { resolveSweLearnerPluginRoots } from '../e2e/fixtures/swe-rebench-v2-learner-e2e.js';
 
 /** Real impl-state dir — the freeze-fence hashes it even in train mode. */
@@ -22,14 +22,14 @@ afterEach(() => {
   for (const dir of implStateDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const JOINED_SWE: Record<string, JoinedSolverNetConfig> = {
-  'bafy-test-swe-learner': {
-    manifestCid: 'bafy-test-swe-learner',
-    name: 'SWE-rebench v2',
-    contract: { id: 'swe-rebench-v2', version: 'v1' },
-    roles: ['solver'],
-  },
-};
+const JOINED_SWE: ExecutionWiringConfigEntry[] = [{
+  workKind: 'swe-rebench-v2.v1',
+  harness: 'claude-code',
+  model: 'claude-haiku-4-5-20251001',
+  plugins: [],
+  credentialRef: 'claude-code-default',
+  isolationPolicy: 'process',
+}];
 
 const TASK: Task = {
   id: 'swe-task-1',
@@ -49,8 +49,8 @@ describe('resolveRuntimePluginsForSolverType', () => {
   });
 
   it('fails loud (actionable message) when no SolverNet matches the solverType', async () => {
-    await expect(resolveRuntimePluginsForSolverType('swe-rebench-v2.v1', {})).rejects.toThrow(
-      /join.*SolverNet|joinedSolverNets|jinn harnesses enable|no SolverNet/i,
+    await expect(resolveRuntimePluginsForSolverType('swe-rebench-v2.v1', [])).rejects.toThrow(
+      /executionWiring|jinn harnesses enable|no SolverNet/i,
     );
   });
 });

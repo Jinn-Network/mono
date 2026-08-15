@@ -98,7 +98,61 @@ function workKindFromJoined(manifestCid: string, entry: JoinedEntry): string {
  * requires a non-empty string, so the migration must resolve that same
  * fallback at migration time rather than writing `''`.
  */
-function wiringFromJoined(
+function parseSolverTypeRef(
+  solverType: string | undefined,
+  fallbackId: string,
+): { id: string; version: string } {
+  if (typeof solverType !== 'string') {
+    return { id: fallbackId, version: 'v1' };
+  }
+  const dot = solverType.lastIndexOf('.');
+  if (dot <= 0 || dot === solverType.length - 1) {
+    return { id: fallbackId, version: 'v1' };
+  }
+  return { id: solverType.slice(0, dot), version: solverType.slice(dot + 1) };
+}
+
+function joinedFromLegacySolverNets(raw: Record<string, unknown>): Record<string, JoinedEntry> {
+  const legacy = raw['solverNets'];
+  if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) return {};
+  const joined: Record<string, JoinedEntry> = {};
+  for (const [name, entryRaw] of Object.entries(legacy as Record<string, unknown>)) {
+    if (!entryRaw || typeof entryRaw !== 'object') continue;
+    const entry = entryRaw as {
+      solverType?: string;
+      roles?: readonly string[];
+      harness?: string;
+      model?: string;
+      plugins?: readonly string[];
+    };
+    const contract = parseSolverTypeRef(entry.solverType, name);
+    const rolesIn = Array.isArray(entry.roles) && entry.roles.length > 0 ? entry.roles : ['solving'];
+    const roles: Array<'solver' | 'evaluator'> = [];
+    for (const role of rolesIn) {
+      if (role === 'solving') roles.push('solver');
+      else if (role === 'evaluating') roles.push('evaluator');
+    }
+    if (roles.length === 0) roles.push('solver');
+    joined[`legacy:${name}`] = {
+      manifestCid: `legacy:${name}`,
+      roles,
+      ...(typeof entry.harness === 'string' ? { harness: entry.harness } : {}),
+      ...(typeof entry.model === 'string' ? { model: entry.model } : {}),
+      plugins: Array.isArray(entry.plugins) ? [...entry.plugins] : [],
+      contract,
+      solverType: entry.solverType,
+    };
+  }
+  return joined;
+}
+
+function joinedFromRaw(raw: Record<string, unknown>): Record<string, JoinedEntry> {
+  const joined = (raw['joinedSolverNets'] ?? {}) as Record<string, JoinedEntry>;
+  if (Object.keys(joined).length > 0) return joined;
+  return joinedFromLegacySolverNets(raw);
+}
+
+export function wiringFromJoined(
   joined: Record<string, JoinedEntry>,
   operatorClaudeModel: string | undefined,
 ): ExecutionWiringConfigEntry[] {
@@ -147,7 +201,7 @@ export function migrateConfigShapeV2(options: MigrateConfigOptions): ConfigMigra
     return { migrated: false, wiringEntries: wiring, postingEntries: posting };
   }
 
-  const joined = (raw['joinedSolverNets'] ?? {}) as Record<string, JoinedEntry>;
+  const joined = joinedFromRaw(raw);
   const launchedDir =
     options.launchedRecordsDir ?? join(dirname(options.configPath), 'solvernets', 'launched');
   const operatorClaudeModel =
@@ -165,8 +219,11 @@ export function migrateConfigShapeV2(options: MigrateConfigOptions): ConfigMigra
   };
 
   const backupPath = backupConfigFile(options.configPath, options.now);
+  const rest = { ...raw };
+  delete rest['solverNets'];
+  delete rest['joinedSolverNets'];
   writeConfigFileAtomic(options.configPath, {
-    ...raw,
+    ...rest,
     configShapeVersion: CONFIG_SHAPE_VERSION,
     claimPolicy,
     executionWiring,

@@ -42,13 +42,7 @@ function service(index: number, safe: string, mech: string): unknown {
 
 function realReadinessDeps(earningDir: string, roles: Array<'solving' | 'evaluating'> = ['solving', 'evaluating']) {
   const { resolveTaskNativeReadiness: _unused, ...deps } = fakeDeps;
-  // Issue #421: the legacy `solverNets` block is retired; surface
-  // SolverNet membership via joinedSolverNets keyed by manifestCid.
-  const joinedRoles: Array<'solver' | 'evaluator'> = [];
-  for (const r of roles) {
-    if (r === 'solving') joinedRoles.push('solver');
-    else if (r === 'evaluating') joinedRoles.push('evaluator');
-  }
+  const evaluatorEnabled = roles.includes('evaluating');
   return {
     ...deps,
     loadConfig: () => ({
@@ -56,17 +50,15 @@ function realReadinessDeps(earningDir: string, roles: Array<'solving' | 'evaluat
       earningDir,
       dbPath: '/tmp/x',
       runtimeMode: undefined,
-      joinedSolverNets: {
-        'legacy:swe': {
-          manifestCid: 'legacy:swe',
-          name: 'swe',
-          contract: { id: 'swe-rebench-v2', version: 'v1' },
-          roles: joinedRoles,
-          harness: 'codex-code-learner',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      evaluator: { enabled: evaluatorEnabled },
+      executionWiring: [{
+        workKind: 'swe-rebench-v2.v1',
+        harness: evaluatorEnabled ? 'swe-rebench-v2-evaluator' : 'codex-code-learner',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'codex-code-learner-default',
+        isolationPolicy: 'process',
+      }],
     } as any),
   };
 }

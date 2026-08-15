@@ -24,9 +24,10 @@ vi.mock('../../api/client.js', () => ({
     },
     operator: {
       listArtifacts: (...args: unknown[]) => listArtifactsMock(...args),
-      listJoined: async () => ({ joinedSolverNets: {} }),
-      join: vi.fn(),
-      leave: vi.fn(),
+      getClaimPolicy: async () => ({
+        claimPolicy: { mode: 'match-legacy-manifest-digest' },
+        executionWiring: [],
+      }),
     },
     solvernets: {
       getManifest: vi.fn().mockRejectedValue(new Error('not found')),

@@ -94,7 +94,7 @@ vi.mock('./captures/CapturesTab.js', () => ({ CapturesTab: () => null }));
 vi.mock('./pages/operator/OperatorShell.js', () => ({
   OperatorShell: () => null,
 }));
-vi.mock('./pages/operator/MembershipsTab.js', () => ({ MembershipsTab: () => null }));
+vi.mock('./pages/operator/ClaimPolicyTab.js', () => ({ ClaimPolicyTab: () => null }));
 vi.mock('./pages/operator/RegistryTab.js', () => ({ RegistryTab: () => null }));
 vi.mock('./pages/operator/NetworkTab.js', () => ({ NetworkTab: () => null }));
 vi.mock('./pages/operator/SecurityTab.js', () => ({ SecurityTab: () => null }));

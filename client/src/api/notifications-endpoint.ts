@@ -84,7 +84,7 @@ export interface NotificationsRoutesConfig {
    * (main.ts's `lastL2Probe`) and `joinedSolverNets`, never for its assembled JSON.
    */
   getBootstrapExtras?: () =>
-    | { rpcSlotHealth?: readonly RpcSlotHealthLike[]; joinedSolverNets?: Record<string, unknown> }
+    | { rpcSlotHealth?: readonly RpcSlotHealthLike[]; executionWiring?: readonly unknown[] }
     | undefined;
   /** Overrides for the shared cache's underlying gather/assemble (tests only). */
   gatherRaw?: typeof gatherGatheredStatusRaw;
@@ -149,7 +149,7 @@ export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfi
         bootstrapBlockingReason: status?.earningDir
           ? readBootstrapError(status.earningDir)?.message // lint:no-error-leak-allow
           : undefined,
-        joinedSolverNets: extras?.joinedSolverNets ?? {},
+        executionWiring: extras?.executionWiring ?? [],
         funds: { chains },
         harness: assembled.harness,
         rpc: { reachable: assembled.rpc.ok },

@@ -78,11 +78,11 @@ describe('ActivityCard', () => {
     expect(history.at(-1)).toBe('/events');
   });
 
-  it('navigates to /operator/memberships when Settings · Edit is clicked', () => {
+  it('navigates to /operator/claim-policy when Settings · Edit is clicked', () => {
     const { history, ui } = wrap(<ActivityCard joined={joined} tasks={[]} />);
     render(ui);
     fireEvent.click(screen.getByTestId('activity-settings-edit'));
-    expect(history.at(-1)).toBe('/operator/memberships');
+    expect(history.at(-1)).toBe('/operator/claim-policy');
   });
 
   it('renders task rows from the input, showing run type + state + relative time', () => {

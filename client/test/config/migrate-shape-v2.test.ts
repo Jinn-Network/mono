@@ -37,7 +37,7 @@ const JOINED = {
 };
 
 describe('config shape v2 migration', () => {
-  it('writes one wiring entry per solver-role join and keeps joinedSolverNets', () => {
+  it('writes one wiring entry per solver-role join and drops retired SolverNet keys', () => {
     const { configPath, launchedDir } = workspace(JOINED);
     const report = migrateConfigShapeV2({ configPath, launchedRecordsDir: launchedDir });
     expect(report.migrated).toBe(true);
@@ -61,7 +61,8 @@ describe('config shape v2 migration', () => {
     // entries are still the operative claim predicate). No cap fields are
     // written — see the no-cap-fields test below.
     expect(written.claimPolicy.mode).toBe('match-legacy-manifest-digest');
-    expect(Object.keys(written.joinedSolverNets)).toEqual(['QmSolver', 'QmEvalOnly']);
+    expect(written.joinedSolverNets).toBeUndefined();
+    expect(written.solverNets).toBeUndefined();
   });
 
   // Amendment (coordinator amendment 1): spec §9's "behavior-identical on day
@@ -147,12 +148,11 @@ describe('config shape v2 migration', () => {
     expect(JSON.parse(readFileSync(report.backupPath!, 'utf-8')).configShapeVersion).toBeUndefined();
   });
 
-  it('leaves a prior daemon generation able to read the migrated file', () => {
+  it('keeps non-SolverNet keys so spend and other host config survive', () => {
     const { configPath, launchedDir } = workspace(JOINED);
     migrateConfigShapeV2({ configPath, launchedRecordsDir: launchedDir });
     const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    // The pre-cutover daemon reads only these keys; they must be byte-identical.
-    expect(written.joinedSolverNets).toEqual(JOINED.joinedSolverNets);
+    expect(written.joinedSolverNets).toBeUndefined();
     expect(written.spendCap).toEqual(JOINED.spendCap);
   });
 

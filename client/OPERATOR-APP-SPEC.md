@@ -127,42 +127,15 @@ ETH actually lives across three roles — the **agent address** (gas float for t
 
 ### 2.4 Network Memberships
 
-The SolverNets this operator has joined. One entry per joined SolverNet, keyed by manifest CID. As of the stage-1 cutover, membership no longer gates claiming — claim eligibility is governed by §2.15 Claim policy & wiring, derived from these memberships by the one-time boot migration; this page remains the legacy view of who the operator has joined until stage 5.
+**Retired at cutover stage 5.** This component no longer exists. The `joinedSolverNets` / `solverNets` config keys are gone from the parsed operator config (a stale on-disk copy is stripped, not a boot failure). Participation, harness, and model per work kind live on §2.15 Claim policy & wiring. Bookmarks to `/operator/memberships` redirect there. The Overview activity card reads `executionWiring` from bootstrap.
 
-**Read-only until cutover stage 5 (Wave-4 D1).** This component **has no actions.** Stating that explicitly rather than leaving the axis silent: joining, leaving, and editing a membership's environment were the three actions here, and all three retired with the `joinedSolverNets` claim gate — the routes behind them are gone and headless design §4.2 schedules no CLI twin. Membership is a configuration key (`joinedSolverNets` in the operator config) that the operator edits by hand and the daemon reads at boot; the app renders it and does not write it. The Static and Streams axes below are unaffected — the data is still there, still per-membership, still the operator's liveness view. What changed is that reaching this page no longer offers a way to change it. Stage 5 retires the key itself, and this component with it.
-
-**No longer onboarding-essential.** Joining a SolverNet used to be part of the Bootstrap completion criterion (§2.8). It is not: with no join action there is nothing for onboarding to require, and claim eligibility is §2.15's, not this page's. See §2.8.
-
-- **Static (per joined SolverNet)**
-  - name, manifest CID, contract, roles — as declared in the config entry.
-  - last action at — the timestamp of the most recent loop tick that produced an event for this SolverNet (claim attempt, delivery, evaluation, or no-op check). This is the operator's liveness indicator for the membership; the spec deliberately does not expose a derived "participation health" metric on top.
-  - environment
-    - harness
-    - model
-    - plugin
-    - etc.
-    - **Actions** — none. Harness and model per work kind are edited as §2.15 execution wiring; this axis renders the legacy per-membership values as configured.
-  - **Actions** — none. (Leaving a SolverNet is a config edit plus a restart. Browsing the catalog is §2.5, reachable from the Settings sub-navigation like any other section — this page does not need its own jump.)
-- **Streams (per joined SolverNet)**
-  - actions
-    - type
-    - result
-    - content
-    - datetime
-    - explorer txn url
-    - SolverNet
-    - task
-- **State messages**
-  - harness not ready
-  - no roles enabled
-  - SolverNet paused upstream
-  - SolverNet retired upstream
+Historical note: Wave-4 D1 made this page read-only after the join/leave write path retired; stage 5 deletes the page and its `GET /v1/operator/joined` read.
 
 ### 2.5 SolverNet Registry
 
 The catalog of launched SolverNets the operator can discover.
 
-Distinct from §2.4 Memberships: the Registry lists the SolverNets that exist on this network; Memberships lists the ones this operator's config declares.
+Distinct from §2.15 Claim policy & wiring: the Registry lists the SolverNets that exist on this network; wiring lists the work kinds this operator's config declares.
 
 - **Static**
   - launched SolverNets
@@ -173,7 +146,7 @@ Distinct from §2.4 Memberships: the Registry lists the SolverNets that exist on
     - lifecycle status
 - **Actions**
   - view manifest
-  - *(the **join SolverNet** action was removed by Wave-4 D1 — headless design §4.2 retires join/leave at stage 1 with no CLI twin. The Registry is a browse surface; participation is a config edit, see §2.4.)*
+  - *(the **join SolverNet** action was removed by Wave-4 D1 — headless design §4.2 retires join/leave at stage 1 with no CLI twin. The Registry is a browse surface; participation is a config edit, see §2.15.)*
 - **Streams**
   - new SolverNets registered
   - lifecycle transitions (paused, retired)
@@ -184,7 +157,7 @@ Distinct from §2.4 Memberships: the Registry lists the SolverNets that exist on
 
 The tasks currently mid-execution on this node.
 
-Distinct from the per-membership stream in §2.4: streams are historical; the in-flight view is live.
+Streams of completed work are historical; the in-flight view is live.
 
 - **Static (per task)**
   - SolverNet
@@ -220,15 +193,15 @@ The OLAS the operator has earned. In standard staking mode the daemon's periodic
 
 The state of joining the network for the first time.
 
-A separate component because it is a finite, single-pass state machine with its own blocking states. Once complete, the component is dormant; until then, the operator app treats it as a takeover surface — the operator should not be navigating to Memberships or Tasks while Bootstrap is blocked.
+A separate component because it is a finite, single-pass state machine with its own blocking states. Once complete, the component is dormant; until then, the operator app treats it as a takeover surface — the operator should not be navigating to Claim policy or Tasks while Bootstrap is blocked.
 
 **Completion criterion (amended by Wave-4 D1).** Bootstrap is complete when the earning state machine (wallet → Safe → service → stake → mech) reaches its terminal step **and the operator dismisses the takeover**. The criterion no longer includes a joined SolverNet or a selected solver harness + model.
 
-The reason is not that eligibility stopped mattering — it is that the takeover can no longer establish it. D1 removed the join write path, so nothing the takeover collects about membership, harness, or model can be saved; a step that asked would discard the answer. Both are configuration: memberships are `joinedSolverNets` (§2.4, read-only until stage 5) and harness + model per work kind are `executionWiring` (§2.15). The operator sets them in the config file and restarts.
+The reason is not that eligibility stopped mattering — it is that the takeover can no longer establish it. D1 removed the join write path, so nothing the takeover collects about membership, harness, or model can be saved; a step that asked would discard the answer. Both are configuration: harness + model per work kind live on `executionWiring` (§2.15). The operator sets them in the config file and restarts.
 
 **Four steps, the last of which asks nothing.** The takeover is: (1) provisioning your wallet, (2) fund your wallet, (3) joining Jinn, (4) **check your harness**. Step 4 reports the daemon's composed per-harness readiness — what this machine can actually run — and offers no choice. Readiness is **shown, not enforced**: it does not gate completion, because the takeover cannot install or authenticate a harness and holding the operator there strands them somewhere less useful than the dashboard.
 
-**The former "land config before the flip" clause is re-homed.** It read: onboarding-essential selections land config *before* the bootstrap→running flip, so the first running-mode boot composes the readiness registry and generators from the resulting `joinedSolverNets` and the node enters running mode already eligible to claim. That property is now owned by the **config/CLI surface**, not by onboarding — an operator whose `joinedSolverNets` / `executionWiring` are already on disk (the ordinary case: config file written before `jinn run`) still gets exactly that first-boot composition. What is gone is the guarantee that a *fresh* operator arrives eligible: a node that boots with no wiring is **live but idle**, and the app says so through §2.10 `no_solvernets_joined` in running mode rather than through a takeover gate. (Cross-ref §3.2.)
+**The former "land config before the flip" clause is re-homed.** It read: onboarding-essential selections land config *before* the bootstrap→running flip, so the first running-mode boot composes the readiness registry and generators from the resulting `joinedSolverNets` and the node enters running mode already eligible to claim. That property is now owned by the **config/CLI surface**, not by onboarding — an operator whose `executionWiring` is already on disk (the ordinary case: config file written before `jinn run`) still gets exactly that first-boot composition. What is gone is the guarantee that a *fresh* operator arrives eligible: a node that boots with no wiring is **live but idle**, and the app says so through §2.10 `no_solvernets_joined` in running mode rather than through a takeover gate. (Cross-ref §3.2.)
 
 **Evaluator role is not gated in onboarding.** Unchanged, and now moot on the solver side too: the evaluator harness is **manifest-bound and runs automatically** (§2.9), and onboarding gates on no harness at all.
 
@@ -261,7 +234,7 @@ The surface for choosing an execution harness for a SolverNet's solver role and 
 
 **Not a standalone dashboard surface.** This component is *not* a first-class card on the overview. Its only useful moments are *while selecting or readying a harness*, so it renders in exactly two places, sharing one model: **(a) onboarding** (the harness step of the Bootstrap takeover, §2.8) and **(b) §2.11 Settings** (the canonical post-onboarding home). Harness readiness cross-cuts the work this node runs — a single harness serves many work kinds, so the operator fixes "harness not authenticated" once — but the operator reaches that fix *through* this surface, not via a buried readiness card.
 
-**Two renderings, one model, different action surfaces (amended by Wave-4 D1).** The **onboarding rendering (a) is a report**: it lists every harness this build registers with its readiness verdict and that harness's own next step, and it exposes only *re-check*. It has no *select* action, because the takeover has no write path to persist a selection (§2.8). The **Settings rendering (b)** keeps the full surface, and the thing it selects into is §2.15's **execution wiring** (harness + model per work kind), not a per-membership environment — §2.4 is read-only.
+**Two renderings, one model, different action surfaces (amended by Wave-4 D1).** The **onboarding rendering (a) is a report**: it lists every harness this build registers with its readiness verdict and that harness's own next step, and it exposes only *re-check*. It has no *select* action, because the takeover has no write path to persist a selection (§2.8). The **Settings rendering (b)** keeps the full surface, and the thing it selects into is §2.15's **execution wiring** (harness + model per work kind), not a per-membership environment — §2.4 is retired.
 
 **Scope (#983).** The **onboarding rendering** (a) ships in #983. The **Settings home** (b) and the **removal of the legacy standalone overview readiness card** ship as a separate follow-up (the #983 split). Until that follow-up lands, the legacy overview card may persist; #983 itself only adds the onboarding rendering. (#983 also suppressed `no_solvernets_joined` for a freshly-onboarded node, on the premise that onboarding had just guaranteed a membership. Wave-4 D1 removed that guarantee, and §2.10 widens the message accordingly.)
 
@@ -331,7 +304,7 @@ Components raise state messages locally. The Notifications component is the unio
 - `rpc_unreachable`
 - `rpc_all_failed` — every slot in the RPC fallback chain has failed (`AllRpcsFailedError`). Severity: action_required. The masked host list is included.
 - `rpc_primary_degraded` — slot 0 returned HTTP 429 / 5xx during the boot probe or steady-state traffic; a secondary slot served. Severity: informational.
-- `no_solvernets_joined` — fires for **any** running node with no memberships, whether it left them or never had them. Wave-4 D1 widened this: it previously fired only for a node that had left all its SolverNets *after* onboarding, because onboarding's completion criterion guaranteed ≥1 membership and a takeover-local "join a SolverNet to finish" prompt covered the pre-flip case. Both are gone (§2.8) — there is no join action for onboarding to require, so a freshly-onboarded node with no configured memberships is a normal state and this is the message that names it. Severity is unchanged; the fix is a config edit plus a restart (§2.4).
+- `no_solvernets_joined` — fires for **any** running node with no memberships, whether it left them or never had them. Wave-4 D1 widened this: it previously fired only for a node that had left all its SolverNets *after* onboarding, because onboarding's completion criterion guaranteed ≥1 membership and a takeover-local "join a SolverNet to finish" prompt covered the pre-flip case. Both are gone (§2.8) — there is no join action for onboarding to require, so a freshly-onboarded node with no configured memberships is a normal state and this is the message that names it. Severity is unchanged; the fix is a config edit plus a restart (§2.15).
 - `safe_binding_pending`
 - `claim_failed`
 - `config_migrated` — the operator's config was migrated to shape v2 on this boot: a claim policy and execution wiring were derived from the existing SolverNet memberships, beside the legacy keys. Severity: info. Names how many wiring and posting entries were created, and whether per-claim caps are unset (in which case the USD spend gates remain the operative bound). Jumps to §2.15 Claim policy & wiring. Fires once per migrating boot; a re-run is a no-op.
@@ -342,7 +315,7 @@ Components raise state messages locally. The Notifications component is the unio
 
 Operator-tunable configuration.
 
-**Harness Selection home.** Settings is the canonical *post-onboarding* home for the §2.9 Harness Selection surface — the same model onboarding renders during the Bootstrap takeover, rendered here once the node is running. An operator changes a membership's harness/model (§2.4 "change environment") or readies a harness through this hosted surface, not through a standalone overview card. Onboarding and Settings share one §2.9 model so the operator learns it once. **Scope:** this Settings home ships in the #983 follow-up (alongside removing the legacy overview readiness card), not in #983 itself — #983 delivers only the onboarding rendering.
+**Harness Selection home.** Settings is the canonical *post-onboarding* home for the §2.9 Harness Selection surface — the same model onboarding renders during the Bootstrap takeover, rendered here once the node is running. An operator changes a work kind's harness/model (§2.15) or readies a harness through this hosted surface, not through a standalone overview card. Onboarding and Settings share one §2.9 model so the operator learns it once. **Scope:** this Settings home ships in the #983 follow-up (alongside removing the legacy overview readiness card), not in #983 itself — #983 delivers only the onboarding rendering.
 
 **Harness auth status (#564).** Settings → Security also hosts a read-only **Harness auth status** table — per-harness auth source, masked key suffix, credential mtime, and a `loaded`/`missing`/`unknown` state — sourced from `GET /v1/harnesses/auth-status` (suffix + metadata only, never full keys). See §2.9's "State (per harness, auth source)" sub-group and `docs/runbooks/rotating-harness-keys.md`.
 
@@ -431,7 +404,7 @@ Rendered inside a launched-SolverNet detail view, this panel surfaces the live s
 ### 2.15 Claim policy & wiring
 
 How this operator decides what to claim and what runs it. Replaces `joinedSolverNets` as the
-claim authority at cutover stage 1; memberships (§2.4) remain the legacy view until stage 5.
+claim authority; stage 5 retires the memberships view (§2.4). This is the only participation surface.
 
 - **Static**
   - claim predicate mode — `claim-nothing` | `every-runnable` | `match-legacy-manifest-digest`

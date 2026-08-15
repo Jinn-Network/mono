@@ -58,12 +58,7 @@ import {
   buildPredictionOperatorStatus,
   type PredictionOperatorStatus,
 } from '../solver-nets/prediction-operator-ux.js';
-import {
-  findJoinedByName,
-  joinedDisplayName,
-  rolesFromJoinedConfig,
-  solverTypeFromJoinedContract,
-} from '../solver-nets/registry.js';
+import { findWiringByName } from '../config/participation.js';
 import { buildHarnessRollup } from './status-harness-rollup.js';
 import type {
   HarnessReadinessSnapshot,
@@ -242,10 +237,10 @@ function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
  * manifestCid, with migrated-legacy entries carrying a populated `contract`.
  */
 export function derivePredictionSolverNetName(config: JinnConfig): string {
-  for (const [cid, entry] of Object.entries(config.joinedSolverNets ?? {})) {
-    if (entry.contract?.id === 'prediction') return joinedDisplayName(cid, entry);
-  }
-  return 'prediction';
+  const entry = (config.executionWiring ?? []).find((candidate) =>
+    candidate.workKind.startsWith('prediction.'),
+  );
+  return entry?.workKind ?? 'prediction';
 }
 
 function predictionOperatorCacheKey(configPath: string, name: string): string {
@@ -285,22 +280,18 @@ function predictionOperatorUnavailable(
   // Resolve the matching joined entry by display name (or manifestCid) so
   // the diagnostic can still surface the operator's configured roles when
   // possible.
-  const joined = findJoinedByName(config.joinedSolverNets, name);
+  const wiring = findWiringByName(config.executionWiring, name);
   const diagnostic = {
     code: 'prediction_operator_status_unavailable',
     severity: 'error' as const,
     message,
     nextAction: {
-      description: 'Inspect Prediction SolverNet configuration via Operator > SolverNets and restart the daemon after fixing it.',
-      url: '/operator#solvernets',
+      description: 'Inspect Prediction SolverNet configuration via Operator > Claim policy and restart the daemon after fixing it.',
+      url: '/operator/claim-policy',
     },
   };
 
-  // Roles are best-effort: an unavailable status path means the daemon
-  // could not load the SolverNet, so we surface whatever the operator
-  // joined.
-  const netRoles = joined ? rolesFromJoinedConfig(joined) : [];
-  const solverType = (joined && solverTypeFromJoinedContract(joined)) ?? 'prediction.v1';
+  const solverType = wiring?.workKind ?? 'prediction.v1';
 
   return {
     kind: 'prediction.v1.operatorStatus',
@@ -308,10 +299,10 @@ function predictionOperatorUnavailable(
     configPath,
     solverNet: {
       name,
-      enabled: joined ? netRoles.length > 0 : false,
+      enabled: wiring !== undefined,
       solverType,
-      roles: netRoles,
-      harness: joined?.harness,
+      roles: wiring ? ['solving'] : [],
+      harness: wiring?.harness,
       taskGeneratorEnabled: false,
     },
     runtimePlugins: [],

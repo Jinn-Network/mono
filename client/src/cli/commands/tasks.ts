@@ -26,10 +26,9 @@ import { walletPrivateKeyAtIndex } from '../../earning/wallet.js';
 import { isOperationalServiceStep } from '../../earning/types.js';
 import { getConfigPathFromArgs, loadConfig } from '../../config.js';
 import {
-  findJoinedByName,
-  joinedDisplayName,
-  solverTypeFromJoinedContract,
-} from '../../solver-nets/registry.js';
+  cidFromParticipationDigest,
+  findWiringByName,
+} from '../../config/participation.js';
 import {
   TaskSubmitRequestV1Schema,
   TaskSubmitResultV1Schema,
@@ -432,16 +431,19 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   // `findJoinedByName` matches against the joined display name or the
   // manifest CID — synthetic `legacy:<short-name>` keys (from on-disk
   // migrations) are reached by either branch.
-  const matchedJoined = requestedSolverNet
-    ? findJoinedByName(config.joinedSolverNets, requestedSolverNet)
+  const matchedWiring = requestedSolverNet
+    ? findWiringByName(config.executionWiring, requestedSolverNet)
+      ?? (config.posting ?? []).find((entry) =>
+        entry.workKind === requestedSolverNet
+        || entry.legacyManifestDigest === requestedSolverNet,
+      )
     : undefined;
-  const solverTypeFromNet = matchedJoined
-    ? solverTypeFromJoinedContract(matchedJoined)
-    : undefined;
+  const solverTypeFromNet = matchedWiring?.workKind;
   if (!machineRequest && requestedSolverNet && !solverTypeFromNet) {
-    const available = Object.entries(config.joinedSolverNets ?? {})
-      .map(([cid, entry]) => joinedDisplayName(cid, entry))
-      .join('|');
+    const available = [
+      ...(config.executionWiring ?? []).map((entry) => entry.workKind),
+      ...(config.posting ?? []).map((entry) => entry.workKind),
+    ].join('|');
     emitEnvelope(
       {
         code: 'invalid_invocation',
@@ -701,14 +703,14 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     // need to supply a cid.
     const explicitManifestCid = selectedMachineManifestCid
       ?? parsed.values['manifest-cid'] as string | undefined;
-    const joinedManifestCid = matchedJoined?.manifestCid;
+    const joinedManifestCid = cidFromParticipationDigest(matchedWiring?.legacyManifestDigest);
     const solverNetManifestCid = explicitManifestCid ?? joinedManifestCid;
     if (!solverNetManifestCid) {
       emitEnvelope(
         {
           code: 'invalid_invocation',
           message:
-            '--manifest-cid is required (or --solver-net pointing at an entry in joinedSolverNets with a manifestCid). ' +
+            '--manifest-cid is required (or --solver-net pointing at a posting/wiring entry whose legacyManifestDigest is a CID). ' +
             'Spec/2026-05-05-solvernet-creation-and-launch.md §14: the on-chain manifestDigest derives from keccak256(manifestCid).',
           exampleCli:
             'jinn tasks submit --id my-task --description "..." --solver-type prediction.v1 --manifest-cid <bafy…> --dry-run',

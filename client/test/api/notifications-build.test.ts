@@ -17,7 +17,7 @@ import {
 
 const baseInput: NotificationsBuildInput = {
   bootstrapMode: 'running',
-  joinedSolverNets: { 'bafkreic-x': {} },
+  executionWiring: [{ workKind: 'bafkreic-x' }],
   funds: {
     chains: [{ chain: 'Base Sepolia', wallet: '0xM', runwayDays: 30, empty: false }],
   },
@@ -58,8 +58,8 @@ describe('buildNotifications', () => {
     );
   });
 
-  it('emits no_solvernets_joined when joinedSolverNets is empty', () => {
-    const out = buildNotifications({ ...baseInput, joinedSolverNets: {} });
+  it('emits no_solvernets_joined when executionWiring is empty', () => {
+    const out = buildNotifications({ ...baseInput, executionWiring: [] });
     expect(out.map((n) => n.kind)).toContain('no_solvernets_joined');
   });
 
@@ -152,7 +152,7 @@ describe('funding notifications (issue #1296, ported)', () => {
   function fundsInput(chains: NotificationsBuildInput['funds']['chains']): NotificationsBuildInput {
     return {
       bootstrapMode: 'running',
-      joinedSolverNets: { cid1: {} },
+      executionWiring: [{ workKind: 'cid1' }],
       funds: { chains },
       harness: { ready: true, name: null, reason: null },
       rpc: { reachable: true },

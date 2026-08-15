@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadSolverNets, type JoinedSolverNetConfig } from '../../../src/solver-nets/registry.js';
+import { loadSolverNets } from '../../../src/solver-nets/registry.js';
+import { wiringFromJoined } from '../../../src/config/migrate-shape-v2.js';
+import type { JoinedSolverNetConfig } from '../../../src/solver-nets/registry.js';
 
 /**
  * Joined-SolverNet config the e2e uses for plugin resolution. Exported so the
@@ -22,7 +24,9 @@ export async function resolveSweLearnerPluginRoots(): Promise<{
   roots: string[];
   names: string[];
 }> {
-  const registry = await loadSolverNets({ joinedSolverNets: E2E_SWE_JOINED });
+  const registry = await loadSolverNets({
+    executionWiring: wiringFromJoined(E2E_SWE_JOINED, 'claude-haiku-4-5-20251001'),
+  });
   const net = registry.forSolverType('swe-rebench-v2.v1', 'restoration');
   if (!net) {
     throw new Error('E2E fixture: no restoration SolverNet for swe-rebench-v2.v1');

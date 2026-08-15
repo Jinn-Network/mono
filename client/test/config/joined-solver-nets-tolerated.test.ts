@@ -1,20 +1,7 @@
 /**
- * Wave-4 D1 regression pin (DR-2026-08-05 decision 7, composition program contract 4):
- * the `joinedSolverNets` CLAIM GATE retires in this wave, but the config KEY stays
- * parseable until stage 5. The live Base Sepolia gate operators (services 72 and 75)
- * both carry `joinedSolverNets` in `~/.jinn-client/config.json`; a parse refusal would
- * brick them, so the loader must tolerate the key rather than reject it.
- *
- * The entry SHAPE below is the live one, verified read-only against an operator home
- * on 2026-08-13: `{ manifestCid, name, contract, roles, harness, model?, plugins,
- * disabledDefaultPlugins }`.
- *
- * The fixture is a two-entry reduction of that home, not a copy of it — the live map
- * carries three entries (two manifest-CID keys plus the synthetic `legacy:prediction`
- * key). Two is what the parse claim needs: one entry per KEY FORM, since a CID key and
- * a `legacy:<name>` key are the two things the loader has to accept. A third CID-keyed
- * entry would exercise the same branch again. Counting entries is not the assertion —
- * accepting both key forms, with and without the optional `model`, is.
+ * Stage 5: `joinedSolverNets` is no longer on the parsed config. A stale
+ * on-disk copy is stripped (Zod), not a boot failure — live operators who
+ * still carry the key must keep booting.
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,7 +31,7 @@ const LIVE_SHAPED_JOINED = {
   },
 };
 
-describe('joinedSolverNets is tolerated by the config loader after the gate retires', () => {
+describe('joinedSolverNets is stripped by the config loader at stage 5', () => {
   let dir: string;
   let configPath: string;
 
@@ -57,19 +44,24 @@ describe('joinedSolverNets is tolerated by the config loader after the gate reti
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('parses a config carrying live-shaped joinedSolverNets entries', () => {
+  it('parses a config carrying live-shaped joinedSolverNets entries and strips the key', () => {
     writeFileSync(
       configPath,
-      JSON.stringify({ network: 'testnet', joinedSolverNets: LIVE_SHAPED_JOINED }),
+      JSON.stringify({
+        network: 'testnet',
+        configShapeVersion: 2,
+        joinedSolverNets: LIVE_SHAPED_JOINED,
+      }),
     );
     const config = loadConfig(configPath);
-    expect(Object.keys(config.joinedSolverNets ?? {}).sort()).toEqual(
-      Object.keys(LIVE_SHAPED_JOINED).sort(),
-    );
+    expect(config).not.toHaveProperty('joinedSolverNets');
   });
 
   it('does not refuse an empty joinedSolverNets map', () => {
-    writeFileSync(configPath, JSON.stringify({ network: 'testnet', joinedSolverNets: {} }));
+    writeFileSync(
+      configPath,
+      JSON.stringify({ network: 'testnet', configShapeVersion: 2, joinedSolverNets: {} }),
+    );
     expect(() => loadConfig(configPath)).not.toThrow();
   });
 

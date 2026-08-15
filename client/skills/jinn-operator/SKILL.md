@@ -138,8 +138,6 @@ Once configured, these MCP tools become available:
 | `jinn_rewards` | Pending and claimed reward balances per staked service. Read-only. Requires RPC access. Fast (<5s). Returns per-service pending/claimed amounts and next checkpoint time. |
 | `jinn_solver_nets_list` | List configured SolverNets with their enabled state. Read-only. Fast (<2s). |
 | `jinn_solver_nets_show` | Detailed status for one SolverNet. Read-only. Fast (<2s). |
-| `jinn_solver_nets_enable` | MUTATING: Enable a SolverNet. Idempotent. Optionally selects the restoration Harness for that SolverNet. |
-| `jinn_solver_nets_disable` | MUTATING: Disable a SolverNet. Writes config. Idempotent. Fast (<1s). |
 | `jinn_init` | MUTATING. Create the master wallet and write the encrypted keystore. Idempotent: re-runs return the existing master address. Requires confirm: true; default is preview (no filesystem write). |
 | `jinn_run` | MUTATING: Run the Jinn daemon end-to-end. Initializes the keystore (if missing), bootstraps the fleet (with funding poll), and starts the daemon loops. Idempotent — safe to call repeatedly; resumes from the last completed step. Long-running: can take up to 30 minutes if funding is required. Returns a progress stream via --json-progress; poll jinn_status to monitor after this returns. Use no_daemon=true to exit after bootstrap (useful for CI or when the daemon is managed separately). Requires confirm: true; default is preview (no mutation). |
 | `jinn_bootstrap` | MUTATING. Advance the fleet state machine. Idempotent. May take several minutes; can post on-chain transactions and request testnet faucet funds. Returns funding_required if a wallet needs ETH. Requires confirm: true; default is preview (no chain or filesystem mutation). |

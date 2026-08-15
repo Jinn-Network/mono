@@ -25,9 +25,9 @@ import { runHarnessWithFreezeFence } from '../daemon/freeze-fence.js';
 import { TrajectoryCollector } from '../trajectory/index.js';
 import {
   loadSolverNets,
-  type JoinedSolverNetConfig,
   type SolverNetTaskRole,
 } from '../solver-nets/registry.js';
+import type { ExecutionWiringConfigEntry } from '../config/shape-v2.js';
 
 /** Wall-clock budget for a single eval harness run (1h) when the task carries no window. */
 const EVAL_RUN_BUDGET_MS = 3_600_000;
@@ -44,17 +44,16 @@ const EVAL_RUN_BUDGET_MS = 3_600_000;
  */
 export async function resolveRuntimePluginsForSolverType(
   solverType: string,
-  joinedSolverNets: Record<string, JoinedSolverNetConfig> | undefined,
+  executionWiring: readonly ExecutionWiringConfigEntry[] | undefined,
   role: SolverNetTaskRole = 'restoration',
 ): Promise<RuntimePlugin[]> {
-  const registry = await loadSolverNets({ joinedSolverNets });
+  const registry = await loadSolverNets({ executionWiring });
   const net = registry.forSolverType(solverType, role);
   if (!net) {
     throw new Error(
       `no SolverNet for solverType ${solverType} (role ${role}): the eval runs the agent with the ` +
-        `SAME runtime plugins the daemon would, but this operator has not joined a SolverNet for it. ` +
-        `Join the SolverNet and install its plugins (e.g. set joinedSolverNets[<manifestCid>] in your ` +
-        `config and run \`jinn harnesses enable\`), then re-run eval.`,
+        `SAME runtime plugins the daemon would, but this operator has no executionWiring entry for it. ` +
+        `Add an executionWiring row for this work kind and run \`jinn harnesses enable\`, then re-run eval.`,
     );
   }
   if (net.runtimePlugins.length === 0) {

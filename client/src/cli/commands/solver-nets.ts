@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
@@ -6,15 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
+import { findWiringByName } from '../../config/participation.js';
 import { loadConfig } from '../../config.js';
-import { buildHarnesses } from '../../harnesses/impls/index.js';
-import { canonicalHarnessName, CLAUDE_CODE_HARNESS, harnessNameMatches } from '../../harnesses/names.js';
-import {
-  findJoinedByName,
-  loadSolverNets,
-  solverTypeFromJoinedContract,
-  type JoinedSolverNetConfig,
-} from '../../solver-nets/registry.js';
 import {
   buildPredictionOperatorStatus,
   runPredictionSample,
@@ -199,39 +192,12 @@ function readConfig(path: string): ConfigShape {
   }
 }
 
-function writeConfig(path: string, cfg: ConfigShape): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
-}
-
-function ensureSolverNets(cfg: ConfigShape): Record<string, SolverNetConfig> {
-  cfg.solverNets ??= {};
-  return cfg.solverNets;
-}
-
-function predictionDefault(): SolverNetConfig {
+function solverNetFromWiring(workKind: string, harness?: string, plugins: SolverPluginEntry[] = []): SolverNetConfig {
   return {
     enabled: true,
-    solverType: 'prediction.v1',
-    harness: CLAUDE_CODE_HARNESS,
-    plugins: [],
-    taskGenerator: { enabled: true },
-  };
-}
-
-/**
- * Project a joined-config entry into the legacy `SolverNetConfig` display
- * shape used by the show/doctor/sample renderers. Mid-migration entries may
- * lack `contract`, in which case `solverType` is reported as `'(unknown)'`.
- */
-function solverNetFromJoined(net: JoinedSolverNetConfig): SolverNetConfig {
-  return {
-    enabled: true,
-    solverType: solverTypeFromJoinedContract(net) ?? '(unknown)',
-    ...(net.harness ? { harness: net.harness } : {}),
-    plugins: Array.isArray(net.plugins) ? net.plugins : [],
-    // Generator ownership is launched-record-driven (issue #421); a joined
-    // entry never carries a taskGenerator block of its own.
+    solverType: workKind,
+    ...(harness ? { harness } : {}),
+    plugins,
     taskGenerator: { enabled: false },
   };
 }
@@ -255,28 +221,17 @@ function solverNetFromJoined(net: JoinedSolverNetConfig): SolverNetConfig {
  */
 function resolveReadOnlySolverNet(
   configPath: string,
-  cfg: ConfigShape,
+  _cfg: ConfigShape,
   name: string,
 ): SolverNetConfig | undefined {
-  // 1. Legacy on-disk file shape (untouched by in-memory migration). Keeps
-  // canonicalPlugin promotion working for operators who haven't re-saved
-  // their config yet.
-  const legacy = cfg.solverNets?.[name];
-  if (legacy) return legacy;
-
-  // 2. Joined view — the post-SPA-join authoritative shape.
   try {
     const loaded = loadConfig(configPath);
-    const joined = findJoinedByName(loaded.joinedSolverNets, name);
-    if (joined) return solverNetFromJoined(joined);
+    const wiring = findWiringByName(loaded.executionWiring, name);
+    if (!wiring) return undefined;
+    return solverNetFromWiring(wiring.workKind, wiring.harness, [...wiring.plugins]);
   } catch {
-    // If loadConfig fails (malformed schema, missing file when configPath
-    // was explicit, etc.), surface `undefined` so the caller reports the
-    // unresolved name rather than throwing through to the operator.
+    return undefined;
   }
-
-  // 3. Nothing matched.
-  return undefined;
 }
 
 function sourceOf(entry: SolverPluginEntry): string {
@@ -398,38 +353,12 @@ function renderPredictionStatusHuman(value: unknown): string {
   return lines.join('\n');
 }
 
-function enableArgs(rest: string[]): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = {};
-  for (let i = 0; i < rest.length; i += 1) {
-    const arg = rest[i]!;
-    if (!arg.startsWith('--')) continue;
-    const stripped = arg.slice(2);
-    const eq = stripped.indexOf('=');
-    const key = eq >= 0 ? stripped.slice(0, eq) : stripped;
-    if (key === 'config' || key === 'harness' || key === 'json' || key === 'human') {
-      if (eq < 0 && (key === 'config' || key === 'harness')) i += 1;
-      continue;
-    }
-    out[key] = eq >= 0
-      ? stripped.slice(eq + 1)
-      : rest[i + 1] && !rest[i + 1]!.startsWith('--')
-        ? rest[++i]
-        : '';
-  }
-  return out;
-}
-
 const command: CommandModule = {
   name: 'solver-nets',
   summary: 'Manage SolverNet activation, Harness selection, and SolverNet-scoped plugins',
   helpText: `Usage:
   jinn solver-nets list [--human|--json] [--config <path>]
   jinn solver-nets show <name> [--human|--json] [--config <path>]
-  jinn solver-nets enable <name> [--harness <name>] [--config <path>]
-  jinn solver-nets disable <name> [--config <path>]
-  jinn solver-nets set-harness <name> <harness> [--config <path>]
-  jinn solver-nets add-plugin <name> <source> [--config <path>]
-  jinn solver-nets remove-plugin <name> <source-or-name> [--config <path>]
   jinn solver-nets doctor <name> [--human|--json] [--config <path>]
   jinn solver-nets sample <name> [--closed-window]
   jinn solver-nets validate-pool swe-rebench-v2 [--limit <n>] [--force]
@@ -512,7 +441,7 @@ Output flags:
     });
     const human = Boolean(parsed.values['human']);
     const json = Boolean(parsed.values['json']);
-    const [name, arg2] = parsed.positionals;
+    const [name] = parsed.positionals;
 
     if (!subverb || subverb === 'list') {
       // Issue #421: the legacy `solverNets` block has been retired. `loadConfig`
@@ -520,14 +449,14 @@ Output flags:
       // synthetic `legacy:<short-name>` keys, so the joined-only iteration
       // here surfaces both modern and migrated entries.
       const loaded = loadConfig(configPath);
-      const joined = Object.entries(loaded.joinedSolverNets ?? {}).map(([cid, net]) => ({
-        name: net.name ?? cid,
-        source: 'joined' as const,
-        manifestCid: cid,
+      const joined = (loaded.executionWiring ?? []).map((entry) => ({
+        name: entry.workKind,
+        source: 'executionWiring' as const,
+        manifestCid: entry.legacyManifestDigest,
         enabled: true,
-        solverType: net.contract ? `${net.contract.id}.${net.contract.version}` : '(unknown)',
-        harness: net.harness,
-        pluginCount: (net.plugins ?? []).length,
+        solverType: entry.workKind,
+        harness: entry.harness,
+        pluginCount: entry.plugins.length,
         taskGeneratorEnabled: false,
       }));
       const value = {
@@ -809,36 +738,29 @@ Output flags:
       return;
     }
 
+    const mutationSubverbs = new Set([
+      'enable',
+      'disable',
+      'set-harness',
+      'add-plugin',
+      'remove-plugin',
+    ]);
+    if (mutationSubverbs.has(subverb)) {
+      fail(
+        ctx,
+        `solver-nets ${subverb} was retired. Edit executionWiring in the operator config and restart.`,
+      );
+      return;
+    }
+
     const isReadOnlySubverb = subverb === 'show' || subverb === 'doctor' || subverb === 'sample';
 
-    if (!isReadOnlySubverb) {
-      // Issue #421: these subverbs still edit the legacy solverNets file shape
-      // for one upgrade cycle. The daemon's loadConfig migrates any on-disk
-      // legacy entries into joinedSolverNets on next start; the canonical join
-      // flow is the SPA (Operator > SolverNets).
-      process.stderr.write(
-        `[solver-nets] WARNING: subverb '${subverb}' edits the legacy solverNets ` +
-        `file shape (issue #421). The daemon auto-migrates this on next load; ` +
-        `re-join via the SPA (Operator > SolverNets) to replace synthetic legacy:* ` +
-        `keys with real manifest CIDs.\n`,
-      );
+    if (!isReadOnlySubverb && subverb !== 'yield-report' && subverb !== 'mint-tasks') {
+      fail(ctx, `Unknown solver-nets subverb: ${subverb}`);
+      return;
     }
 
-    // Resolve the SolverNet to operate on. Read-only subverbs prefer the
-    // joined view (issue #421 F4) so an operator who has rejoined via the
-    // SPA sees their real entry rather than a synthetic predictionDefault()
-    // stub. Mutation subverbs keep the legacy on-disk shape because they
-    // write through it for the one-cycle bridge.
-    let net: SolverNetConfig | undefined;
-    if (isReadOnlySubverb) {
-      net = resolveReadOnlySolverNet(configPath, cfg, name);
-    } else {
-      const solverNets = ensureSolverNets(cfg);
-      if (name === 'prediction' && !solverNets[name]) {
-        solverNets[name] = predictionDefault();
-      }
-      net = solverNets[name];
-    }
+    const net = resolveReadOnlySolverNet(configPath, cfg, name);
     if (!net) {
       fail(ctx, `Unknown SolverNet: ${name}`);
       return;
@@ -911,83 +833,6 @@ Output flags:
         closedWindow: Boolean(parsed.values['closed-window']),
       });
       writeJson(ctx, { verb: 'solver-nets sample', configPath, name, ...sample });
-      return;
-    }
-
-    if (subverb === 'enable') {
-      net.enabled = true;
-      if (typeof parsed.values.harness === 'string') net.harness = canonicalHarnessName(parsed.values.harness);
-      writeConfig(configPath, cfg);
-      const loaded = loadConfig(configPath);
-      const registry = await loadSolverNets(loaded);
-      const loadedNet = registry.get(name);
-      const selectedHarness = loadedNet?.harness ?? net.harness;
-      let enableResult: unknown = null;
-      if (loadedNet && selectedHarness) {
-        const harness = buildHarnesses({
-          stub: true,
-          rpcUrl: loaded.rpcUrl,
-          archiveRpcUrl: loaded.archiveRpcUrl,
-          claudePath: loaded.claudePath,
-          claudeModel: loaded.claudeModel,
-          implStateDirRoot: loaded.engine.implStateDirRoot,
-        }).find((candidate) => harnessNameMatches(candidate.name, selectedHarness));
-        if (harness?.onEnable) {
-          enableResult = await harness.onEnable({
-            solverNet: { name: loadedNet.name, solverType: loadedNet.solverType },
-            runtimePlugins: loadedNet.runtimePlugins,
-            args: enableArgs(rest),
-          });
-        }
-      }
-      writeJson(ctx, { verb: 'solver-nets enable', configPath, name, solverNet: net, enableResult });
-      return;
-    }
-
-    if (subverb === 'disable') {
-      net.enabled = false;
-      writeConfig(configPath, cfg);
-      writeJson(ctx, { verb: 'solver-nets disable', configPath, name, solverNet: net });
-      return;
-    }
-
-    if (subverb === 'set-harness') {
-      if (!arg2) {
-        fail(ctx, 'solver-nets set-harness requires <harness>');
-        return;
-      }
-      const harness = canonicalHarnessName(arg2);
-      net.harness = harness;
-      writeConfig(configPath, cfg);
-      writeJson(ctx, { verb: 'solver-nets set-harness', configPath, name, harness });
-      return;
-    }
-
-    if (subverb === 'add-plugin') {
-      if (!arg2) {
-        fail(ctx, 'solver-nets add-plugin requires <source>');
-        return;
-      }
-      const current = net.plugins ?? [];
-      if (!current.some((entry) => sourceOf(entry) === arg2)) {
-        net.plugins = [...current, arg2];
-      }
-      writeConfig(configPath, cfg);
-      writeJson(ctx, { verb: 'solver-nets add-plugin', configPath, name, source: arg2 });
-      return;
-    }
-
-    if (subverb === 'remove-plugin') {
-      if (!arg2) {
-        fail(ctx, 'solver-nets remove-plugin requires <source-or-name>');
-        return;
-      }
-      const current = net.plugins ?? [];
-      net.plugins = current.filter((entry) =>
-        typeof entry === 'string' ? entry !== arg2 : entry.source !== arg2 && entry.name !== arg2,
-      );
-      writeConfig(configPath, cfg);
-      writeJson(ctx, { verb: 'solver-nets remove-plugin', configPath, name, removed: arg2 });
       return;
     }
 

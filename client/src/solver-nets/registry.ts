@@ -3,6 +3,8 @@ import type { SolverPluginEntry } from '../plugins/types.js';
 import type { RuntimePlugin } from '../harnesses/types.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from '../harnesses/names.js';
 import type { ProviderRef } from '../harnesses/provider-ref.js';
+import type { ExecutionWiringConfigEntry } from '../config/shape-v2.js';
+import { contractRefFromWorkKind, digestMatchesCid } from '../config/participation.js';
 import { getSolverNetContract, type SolverNetContract } from './contracts.js';
 
 export const JINN_NETWORK_TOOLS_PLUGIN = 'bundled:network-tools' as const;
@@ -227,7 +229,9 @@ export class SolverNetRegistry {
    */
   forManifestCid(manifestCid: string, taskRole?: SolverNetTaskRole): LoadedSolverNet | undefined {
     return [...this.nets.values()].find((net) =>
-      net.enabled && net.manifestCid === manifestCid && this.matchesTaskRole(net, taskRole),
+      net.enabled
+      && (net.manifestCid === manifestCid || digestMatchesCid(net.manifestCid, manifestCid))
+      && this.matchesTaskRole(net, taskRole),
     );
   }
 
@@ -350,14 +354,36 @@ export async function registerJoinedNet(
   });
 }
 
+export async function registerWiringEntry(
+  registry: SolverNetRegistry,
+  entry: ExecutionWiringConfigEntry,
+): Promise<void> {
+  const contractRef = contractRefFromWorkKind(entry.workKind);
+  if (!contractRef) {
+    console.warn(
+      `[solver-nets] executionWiring workKind ${entry.workKind} did not resolve to a known SolverNet — entry will not participate in claim flow`,
+    );
+    return;
+  }
+  await registerJoinedNet(registry, entry.legacyManifestDigest ?? entry.workKind, {
+    manifestCid: entry.legacyManifestDigest ?? entry.workKind,
+    name: entry.workKind,
+    contract: contractRef,
+    roles: ['solver'],
+    harness: entry.harness,
+    model: entry.model,
+    plugins: [...entry.plugins],
+  });
+}
+
 export async function loadSolverNets(
   config: {
-    joinedSolverNets?: Record<string, JoinedSolverNetConfig>;
+    executionWiring?: readonly ExecutionWiringConfigEntry[];
   },
 ): Promise<SolverNetRegistry> {
   const registry = new SolverNetRegistry();
-  for (const [cid, joined] of Object.entries(config.joinedSolverNets ?? {})) {
-    await registerJoinedNet(registry, cid, joined);
+  for (const entry of config.executionWiring ?? []) {
+    await registerWiringEntry(registry, entry);
   }
 
   return registry;

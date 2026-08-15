@@ -120,18 +120,15 @@ async function main(): Promise<void> {
     // bundled jinn-repo-runtime plugin into the solver's plugin roots — that
     // SKILL tells the agent to checkout mono@base_commit into $workingDir/repo.
     const solverNetRegistry = await loadSolverNets({
-      joinedSolverNets: {
-        'jinn-repo.v1': {
-          manifestCid: 'jinn-repo.v1',
-          name: 'jinn-repo-loop',
-          contract: { id: 'jinn-repo', version: 'v1' },
-          roles: ['solver', 'evaluator'],
-          harness: 'claude-code',
-          ...(process.env['JINN_CLAUDE_MODEL']
-            ? { model: process.env['JINN_CLAUDE_MODEL'] }
-            : {}),
-        },
-      },
+      executionWiring: [{
+        workKind: 'jinn-repo.v1',
+        harness: 'claude-code',
+        model: process.env['JINN_CLAUDE_MODEL'] ?? 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'claude-code-default',
+        isolationPolicy: 'process',
+        legacyManifestDigest: 'jinn-repo.v1',
+      }],
     });
 
     // Force jinn-repo.v1 restoration onto the claude-code learner. The

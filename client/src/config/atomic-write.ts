@@ -4,12 +4,13 @@ import {
   existsSync,
   fsyncSync,
   openSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 
 function basicTimestamp(date: Date): string {
   return `${date.toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z')}`;
@@ -50,4 +51,23 @@ export function backupConfigFile(
   const backupPath = `${filePath}.backup-${basicTimestamp(now())}`;
   copyFileSync(filePath, backupPath);
   return backupPath;
+}
+
+/** Stage-1 atomic-write backup: `<filePath>.backup-<ISO-basic>`. */
+const MIGRATION_BACKUP_PATTERN = /^config\.json\.backup-\d{8}T\d{6}Z$/u;
+
+/**
+ * Stage-5 completion of the config migration: prune timestamped pre-v2
+ * backups once the legacy keys are gone. The backups can carry paid RPC
+ * keys, so they do not linger indefinitely.
+ */
+export function pruneMigrationBackups(configDir: string): { removed: string[] } {
+  if (!existsSync(configDir)) return { removed: [] };
+  const removed: string[] = [];
+  for (const entry of readdirSync(configDir)) {
+    if (!MIGRATION_BACKUP_PATTERN.test(entry)) continue;
+    rmSync(join(configDir, entry), { force: true });
+    removed.push(entry);
+  }
+  return { removed: removed.sort() };
 }

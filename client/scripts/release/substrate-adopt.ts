@@ -82,7 +82,16 @@ interface SourceEarningState {
 interface SourceConfig {
   rpcUrl?: string;
   apiPort?: number;
+  executionWiring?: Array<{ workKind?: string; legacyManifestDigest?: string }>;
   joinedSolverNets?: Record<string, unknown>;
+}
+
+function participationIds(cfg: SourceConfig): string[] {
+  if (Array.isArray(cfg.executionWiring) && cfg.executionWiring.length > 0) {
+    return cfg.executionWiring.map((entry) => entry.legacyManifestDigest ?? entry.workKind ?? '').filter((id) => id.length > 0);
+  }
+  if (cfg.joinedSolverNets) return Object.keys(cfg.joinedSolverNets);
+  return [];
 }
 
 export async function adoptOperator(opts: AdoptOptions): Promise<void> {
@@ -151,7 +160,7 @@ export async function adoptOperator(opts: AdoptOptions): Promise<void> {
     config: {
       apiPort: opts.apiPort,
       rpcUrl: cfg.rpcUrl,
-      joinedSolverNets: cfg.joinedSolverNets ? Object.keys(cfg.joinedSolverNets) : [],
+      joinedSolverNets: participationIds(cfg),
     },
   };
 

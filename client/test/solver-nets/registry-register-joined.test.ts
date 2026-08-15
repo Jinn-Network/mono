@@ -3,8 +3,10 @@ import {
   SolverNetRegistry,
   loadSolverNets,
   registerJoinedNet,
+  registerWiringEntry,
   type JoinedSolverNetConfig,
 } from '../../src/solver-nets/registry.js';
+import type { ExecutionWiringConfigEntry } from '../../src/config/shape-v2.js';
 
 // A swe-rebench-v2 joined entry exercises the default-plugin seeding path
 // (defaultRuntimePluginsForSolverType returns 'bundled:swe-rebench-v2-runtime').
@@ -20,14 +22,21 @@ const joined: JoinedSolverNetConfig = {
 };
 
 describe('registerJoinedNet', () => {
-  it('produces the same LoadedSolverNet as loadSolverNets for the same entry', async () => {
-    const viaBoot = await loadSolverNets({ joinedSolverNets: { [CID]: joined } });
-    const expected = viaBoot.list();
-
+  it('produces the same LoadedSolverNet as loadSolverNets for the same wiring row', async () => {
+    const wiring: ExecutionWiringConfigEntry = {
+      workKind: 'swe-rebench-v2.v1',
+      harness: 'codex',
+      model: 'claude-haiku-4-5-20251001',
+      plugins: [],
+      credentialRef: 'codex-default',
+      isolationPolicy: 'process',
+      legacyManifestDigest: CID,
+    };
+    const viaBoot = await loadSolverNets({ executionWiring: [wiring] });
     const live = new SolverNetRegistry();
-    await registerJoinedNet(live, CID, joined);
+    await registerWiringEntry(live, wiring);
 
-    expect(live.list()).toEqual(expected);
+    expect(live.list()).toEqual(viaBoot.list());
   });
 
   it('is a no-op when the joined entry has no resolvable contract', async () => {

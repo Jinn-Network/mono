@@ -28,7 +28,7 @@ import {
 import { GeneratorStateStore } from '../solver-types/_swe-rebench-v2-state.js';
 import { fetchAttemptedInstanceIds } from './screen-discovery.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../config.js';
-import { solverTypeFromJoinedContract } from '../solver-nets/registry.js';
+import { cidFromParticipationDigest } from '../config/participation.js';
 import { SweRebenchV2Evaluator } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import { HttpHfFetcher } from '../harnesses/impls/swe-rebench-v2-evaluator/hf-fetcher.js';
 import { PythonEvalRunner } from '../harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
@@ -96,7 +96,7 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
   const evaluator = new SweRebenchV2Evaluator({ fetcher, runner: new PythonEvalRunner({ upstreamRepoDir }) });
   const validatedStore = getSweRebenchV2ValidatedPoolStore(stateDir);
   const runtimePlugins: RuntimePlugin[] = await resolveRuntimePluginsForSolverType(
-    DISPATCH_SOLVER_TYPE, config.joinedSolverNets,
+    DISPATCH_SOLVER_TYPE, config.executionWiring,
   );
 
   // Common adapter wiring (mirrors buildEvalHarness in cli/commands/eval.ts).
@@ -151,11 +151,12 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
   let attemptedIds = new Set<string>();
   const discoveryUrl = config.discovery?.url?.trim()
     || (config.network === 'testnet' ? DEFAULT_TESTNET_DISCOVERY_URL : undefined);
-  const joinedNet = Object.values(config.joinedSolverNets ?? {}).find(
-    (n) => solverTypeFromJoinedContract(n) === DISPATCH_SOLVER_TYPE,
-  );
-  if (discoveryUrl && joinedNet?.manifestCid) {
-    attemptedIds = await fetchAttemptedInstanceIds(discoveryUrl, joinedNet.manifestCid);
+  const wiring = (config.executionWiring ?? []).find((entry) => entry.workKind === DISPATCH_SOLVER_TYPE);
+  const posting = (config.posting ?? []).find((entry) => entry.workKind === DISPATCH_SOLVER_TYPE);
+  const lookupCid = cidFromParticipationDigest(posting?.legacyManifestDigest)
+    ?? cidFromParticipationDigest(wiring?.legacyManifestDigest);
+  if (discoveryUrl && lookupCid) {
+    attemptedIds = await fetchAttemptedInstanceIds(discoveryUrl, lookupCid);
     log(`[screen] indexer: ${attemptedIds.size} instance(s) already attempted on-network (authoritative, cross-operator) → excluded`);
   } else {
     log('[screen] WARNING: no discovery URL / manifestCid — cannot exclude already-attempted instances; relying on the local posted ledger, which may be stale');

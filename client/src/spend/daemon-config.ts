@@ -1,10 +1,11 @@
 import type { JinnConfig } from '../config.js';
+import { wiringParticipationKey } from '../config/participation.js';
 import { resolveCredentialId, type CredentialId } from './credential.js';
 
 export interface SpendCapDaemonConfig {
   /** credentialId -> USD/day cap. */
   caps: Record<CredentialId, number>;
-  /** manifest CID -> the credential its harness bills against. */
+  /** participation key -> the credential its harness bills against. */
   manifestCredentials: Record<string, CredentialId>;
 }
 
@@ -13,7 +14,7 @@ export interface SpendCapDaemonConfig {
  * undefined when no credential ends up with a cap (the gate then stays off).
  */
 export function buildSpendCapConfig(
-  config: Pick<JinnConfig, 'joinedSolverNets' | 'spendCaps'>,
+  config: Pick<JinnConfig, 'executionWiring' | 'spendCaps'>,
   env: NodeJS.ProcessEnv,
 ): SpendCapDaemonConfig | undefined {
   const blanketRaw = env['JINN_SPEND_CAP_USD'];
@@ -21,9 +22,9 @@ export function buildSpendCapConfig(
   const blanket = Number.isFinite(blanketNum) && blanketNum > 0 ? blanketNum : undefined;
 
   const manifestCredentials: Record<string, CredentialId> = {};
-  for (const [manifestCid, entry] of Object.entries(config.joinedSolverNets ?? {})) {
+  for (const entry of config.executionWiring ?? []) {
     const credentialId = resolveCredentialId(entry.harness, env);
-    if (credentialId) manifestCredentials[manifestCid] = credentialId;
+    if (credentialId) manifestCredentials[wiringParticipationKey(entry)] = credentialId;
   }
 
   const caps: Record<CredentialId, number> = {};

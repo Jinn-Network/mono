@@ -88,7 +88,7 @@ describe('GET /v1/notifications', () => {
       gatherRaw: async () =>
         minimalRaw({ fleet: { services: [{ step: 'complete' }] } as unknown as GatheredStatusRaw['fleet'] }),
       assemble: () => minimalAssembled(),
-      getBootstrapExtras: () => ({ joinedSolverNets: { cid1: {} } }),
+      getBootstrapExtras: () => ({ executionWiring: [{ workKind: 'cid1' }] }),
     });
 
     const res = await app.request('/v1/notifications');
@@ -121,7 +121,7 @@ describe('GET /v1/notifications', () => {
       gatherRaw: async () =>
         minimalRaw({ fleet: { services: [{ step: 'complete' }] } as unknown as GatheredStatusRaw['fleet'] }),
       assemble: () => minimalAssembled(),
-      getBootstrapExtras: () => ({ joinedSolverNets: { cid1: {} } }),
+      getBootstrapExtras: () => ({ executionWiring: [{ workKind: 'cid1' }] }),
     });
 
     const res = await app.request('/v1/notifications');

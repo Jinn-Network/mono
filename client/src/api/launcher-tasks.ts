@@ -29,7 +29,6 @@
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import type { JinnConfig } from '../config.js';
 import type { TaskOnchainStatus, TaskStatusSnapshot } from '../archive/types.js';
-import { joinedDisplayName, solverTypeFromJoinedContract } from '../solver-nets/registry.js';
 
 export type LauncherTaskState =
   | 'open'
@@ -97,7 +96,7 @@ export interface FetchPostedTasksOptions {
 }
 
 export interface GatherLauncherTasksDeps {
-  config: Pick<JinnConfig, 'joinedSolverNets'>;
+  config: Pick<JinnConfig, 'executionWiring' | 'posting'>;
   creatorAddress: string;
   fetchPostedTasks: (
     opts: FetchPostedTasksOptions,
@@ -151,14 +150,12 @@ function claimMaxFallbackForSolverType(solverType: string | undefined): number {
  * exclusively; solverType is synthesised from `joined.contract`.
  */
 function buildSolverTypeToNetIndex(
-  joinedSolverNets: JinnConfig['joinedSolverNets'] | undefined,
+  wiring: JinnConfig['executionWiring'] | undefined,
 ): Map<string, string> {
   const index = new Map<string, string>();
-  if (!joinedSolverNets) return index;
-  for (const [cid, joined] of Object.entries(joinedSolverNets)) {
-    const solverType = solverTypeFromJoinedContract(joined);
-    if (!solverType || index.has(solverType)) continue;
-    index.set(solverType, joinedDisplayName(cid, joined));
+  for (const entry of wiring ?? []) {
+    if (index.has(entry.workKind)) continue;
+    index.set(entry.workKind, entry.workKind);
   }
   return index;
 }
@@ -169,7 +166,8 @@ function normalizeManifestCid(raw: string | undefined): string | undefined {
 }
 
 function statusLookupManifestCids(
-  joinedSolverNets: JinnConfig['joinedSolverNets'] | undefined,
+  wiring: JinnConfig['executionWiring'] | undefined,
+  posting: JinnConfig['posting'] | undefined,
   launchedManifestCid: string | undefined,
   records: readonly PostedTaskRecord[],
 ): string[] {
@@ -177,21 +175,28 @@ function statusLookupManifestCids(
   if (scopedCid) return [scopedCid];
 
   const solverTypes = new Set(records.map((record) => record.solverType).filter(Boolean));
+  const cids = new Set<string>();
   if (solverTypes.size > 0) {
-    const cids = new Set<string>();
-    for (const [cid, joined] of Object.entries(joinedSolverNets ?? {})) {
-      const solverType = solverTypeFromJoinedContract(joined);
-      if (!solverType || !solverTypes.has(solverType)) continue;
-      const normalized = normalizeManifestCid(joined.manifestCid) ?? normalizeManifestCid(cid);
-      if (normalized) cids.add(normalized);
+    for (const entry of wiring ?? []) {
+      if (!solverTypes.has(entry.workKind)) continue;
+      const digest = normalizeManifestCid(entry.legacyManifestDigest);
+      if (digest) cids.add(digest);
+    }
+    for (const entry of posting ?? []) {
+      if (!solverTypes.has(entry.workKind)) continue;
+      const digest = normalizeManifestCid(entry.legacyManifestDigest);
+      if (digest) cids.add(digest);
     }
     return [...cids];
   }
 
-  const cids = new Set<string>();
-  for (const [cid, joined] of Object.entries(joinedSolverNets ?? {})) {
-    const normalized = normalizeManifestCid(joined.manifestCid) ?? normalizeManifestCid(cid);
-    if (normalized) cids.add(normalized);
+  for (const entry of posting ?? []) {
+    const digest = normalizeManifestCid(entry.legacyManifestDigest);
+    if (digest) cids.add(digest);
+  }
+  for (const entry of wiring ?? []) {
+    const digest = normalizeManifestCid(entry.legacyManifestDigest);
+    if (digest) cids.add(digest);
   }
   return [...cids];
 }
@@ -294,7 +299,7 @@ export async function gatherLauncherTasks(
   });
   const pageRecords = sorted.slice(0, limit);
 
-  const solverTypeIndex = buildSolverTypeToNetIndex(deps.config.joinedSolverNets);
+  const solverTypeIndex = buildSolverTypeToNetIndex(deps.config.executionWiring);
 
   // Build a merged on-chain status map keyed by taskId. The launched-SolverNet
   // page scopes this to its manifest CID; the generic fallback only checks
@@ -307,7 +312,8 @@ export async function gatherLauncherTasks(
   const fetchTaskStatuses = deps.fetchTaskStatuses;
   if (fetchTaskStatuses) {
     for (const cid of statusLookupManifestCids(
-      deps.config.joinedSolverNets,
+      deps.config.executionWiring,
+      deps.config.posting,
       opts.manifestCid,
       pageRecords,
     )) {

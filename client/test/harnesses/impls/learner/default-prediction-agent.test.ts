@@ -28,18 +28,14 @@ describe('default prediction agent runtime plugins', () => {
     // joined SolverNet `plugins` array. Issue #421 retired the legacy
     // `solverNets` block; the registry reads joinedSolverNets exclusively.
     const registry = await loadSolverNets({
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'claude-code-learner',
-          model: 'claude-opus-test',
-          plugins: ['bundled:jinn-prediction-plugin'],
-          disabledDefaultPlugins: [],
-        },
-      },
+      executionWiring: [{
+        workKind: 'prediction.v1',
+        harness: 'claude-code-learner',
+        model: 'claude-opus-test',
+        plugins: ['bundled:jinn-prediction-plugin'],
+        credentialRef: 'claude-code-learner-default',
+        isolationPolicy: 'process',
+      }],
     });
     const net = registry.forSolverType('prediction.v1');
     expect(net).toBeDefined();
