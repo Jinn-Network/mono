@@ -27,12 +27,22 @@ const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 
 const INSTRUMENT_REQUIREMENT_KEY = "network.jinn.binary-judgment.instrument";
 const ITEM_COMMITMENT_KEY = "network.jinn.binary-judgment.item-sha256";
+const TASK_PROTOCOL = "https://spec.jinn.network/profiles/task-execution/v1";
 const TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/binary-judgment/1.0";
 const TASK_PROFILE_SHA256 = "40f43e4ab9942f310da716e28ba2c1b8731fdf3c3837bb821573d4d8a0ec259d";
 const INSTRUMENT_PROTOCOL = "https://spec.jinn.network/binary-judgment/judge-instrument/v1";
+const OBSERVATION_PROTOCOL = "https://spec.jinn.network/binary-judgment/judge-observation/v1";
 const ANALYSIS_CONTEXT_PROTOCOL = "https://spec.jinn.network/binary-judgment/analysis-context/v1";
 const LABEL_RESOLUTION_PROTOCOL = "https://spec.jinn.network/binary-judgment/label-resolution/v1";
 const EVALUATION_SPEC_PROTOCOL = "https://spec.jinn.network/profiles/evaluation-spec/v1";
+const EVALUATION_SEMANTICS_VERSION = "4";
+const RESPONSE_MEDIA_TYPE = "text/plain; charset=utf-8";
+const OBSERVATION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.observation.v1+json";
+const INSPECT_LOG_MEDIA_TYPE = "application/vnd.inspect-ai.eval-log+json";
+const ANALYSIS_CONTEXT_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.analysis-context.v1+json";
+const LABEL_RESOLUTION_MEDIA_TYPE = "application/vnd.jinn.binary-judgment.label-resolution.v1+json";
+const LABEL_RESOLUTION_NAME = "label-resolution.json";
+const MODEL_ID = "gpt-5.6-luna";
 const EVALUATION_PARSER_ID = "network.jinn.parser.binary-judgment-evaluation";
 const EVALUATION_PARSER_VERSION = "1.0.0";
 const EVALUATION_PARSER_SHA256 = "41b36eaffbac8c78133afd2075ec32fd73ed324395fe281dee525db17653937f";
@@ -275,6 +285,119 @@ function requireSortedUniqueDigestPair(
   }
 }
 
+function requireDigestDescriptor(
+  value: unknown,
+  digest: string,
+  label: string,
+): string {
+  if (!isObject(value)) {
+    throw new MethodInputError("binary-record-malformed", digest, `${label} must be a descriptor`);
+  }
+  const digestMap = value["digest"];
+  if (!isObject(digestMap)) {
+    throw new MethodInputError("binary-record-malformed", digest, `${label}.digest is required`);
+  }
+  requireExactKeys(digestMap, ["sha256"], digest, `${label}.digest`);
+  return digestObjectSha256(digestMap, digest, `${label}.digest`);
+}
+
+function requireSourceDescriptor(value: unknown, digest: string, label: string): void {
+  if (!isObject(value)) {
+    throw new MethodInputError("binary-record-malformed", digest, `${label} must be a source descriptor`);
+  }
+  const allowed = ["name", "uri", "digest", "mediaType", "downloadLocation"];
+  const keys = Object.keys(value);
+  if (keys.some((key) => !allowed.includes(key))) {
+    throw new MethodInputError("binary-record-malformed", digest, `${label} has an unsupported field set`);
+  }
+  for (const key of ["uri"] as const) {
+    if (typeof value[key] !== "string" || value[key].length === 0) {
+      throw new MethodInputError("binary-record-malformed", digest, `${label}.${key} must be non-empty`);
+    }
+  }
+  for (const key of ["name", "mediaType", "downloadLocation"] as const) {
+    if (value[key] !== undefined && (typeof value[key] !== "string" || value[key].length === 0)) {
+      throw new MethodInputError("binary-record-malformed", digest, `${label}.${key} must be non-empty when present`);
+    }
+  }
+  requireDigestDescriptor(value, digest, label);
+}
+
+interface ResolvedBinaryPayload {
+  readonly itemId: string;
+  readonly question: string;
+  readonly referenceAnswer: string;
+  readonly candidateAnswer: string;
+  readonly provenance: readonly Readonly<Record<string, unknown>>[];
+}
+
+function validateTaskPayload(value: unknown, digest: string): ResolvedBinaryPayload {
+  if (!isObject(value)) {
+    throw new MethodInputError("binary-record-malformed", digest, "Task.payload must be an object");
+  }
+  requireExactKeys(
+    value,
+    ["itemId", "question", "referenceAnswer", "candidateAnswer", "provenance"],
+    digest,
+    "Task.payload",
+  );
+  if (
+    typeof value["itemId"] !== "string"
+    || !/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value["itemId"])
+  ) {
+    throw new MethodInputError("binary-record-malformed", digest, "Task.payload.itemId must be an opaque UUID URN");
+  }
+  for (const key of ["question", "referenceAnswer", "candidateAnswer"] as const) {
+    if (typeof value[key] !== "string") {
+      throw new MethodInputError("binary-record-malformed", digest, `Task.payload.${key} must be a string`);
+    }
+  }
+  const provenance = value["provenance"];
+  if (!Array.isArray(provenance) || provenance.length === 0) {
+    throw new MethodInputError("binary-record-malformed", digest, "Task.payload.provenance must be non-empty");
+  }
+  for (const [index, descriptor] of provenance.entries()) {
+    if (!isObject(descriptor)) {
+      throw new MethodInputError("binary-record-malformed", digest, `Task.payload.provenance[${index}] must be an object`);
+    }
+    requireExactKeys(descriptor, ["digest"], digest, `Task.payload.provenance[${index}]`);
+    requireDigestDescriptor(descriptor, digest, `Task.payload.provenance[${index}]`);
+  }
+  return value as unknown as ResolvedBinaryPayload;
+}
+
+function validateTaskOutputs(value: unknown, digest: string): void {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 3) {
+    throw new MethodInputError("binary-record-malformed", digest, "Task must declare two or three binary judge outputs");
+  }
+  const expected = new Map<string, { readonly mediaType: string; readonly required: boolean }>([
+    ["judge-response", { mediaType: RESPONSE_MEDIA_TYPE, required: true }],
+    ["judge-observation", { mediaType: OBSERVATION_MEDIA_TYPE, required: true }],
+    ["inspect-log", { mediaType: INSPECT_LOG_MEDIA_TYPE, required: false }],
+  ]);
+  const seen = new Set<string>();
+  for (const [index, output] of value.entries()) {
+    if (!isObject(output)) {
+      throw new MethodInputError("binary-record-malformed", digest, `Task.outputs[${index}] must be an object`);
+    }
+    requireExactKeys(output, ["name", "mediaType", "required"], digest, `Task.outputs[${index}]`);
+    const name = output["name"];
+    const slot = typeof name === "string" ? expected.get(name) : undefined;
+    if (
+      slot === undefined
+      || seen.has(name as string)
+      || output["mediaType"] !== slot.mediaType
+      || output["required"] !== slot.required
+    ) {
+      throw new MethodInputError("binary-record-malformed", digest, `Task.outputs[${index}] is not a frozen binary judge slot`);
+    }
+    seen.add(name as string);
+  }
+  if (!seen.has("judge-response") || !seen.has("judge-observation")) {
+    throw new MethodInputError("binary-record-malformed", digest, "Task omits a required binary judge output");
+  }
+}
+
 function validateLabelResolution(
   resolution: Record<string, unknown>,
   digest: `sha256:${string}`,
@@ -359,6 +482,7 @@ interface ExpectedTaskBinding {
   readonly taskDigest: string;
   readonly evaluationSpecSha256: string;
   readonly evaluationMethodSha256: string;
+  readonly payload: ResolvedBinaryPayload;
   readonly context: BinaryInstrumentItemContext;
 }
 
@@ -367,23 +491,66 @@ function measurementDeclarations(spec: Record<string, unknown>, digest: string):
   if (!Array.isArray(measurements) || measurements.length !== MEASUREMENT_NAMES.length) {
     throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec must declare exactly the binary-instrument@1 measurements");
   }
-  const seen = new Set<string>();
+  const expected = [
+    [BINARY_INSTRUMENT_MEASUREMENTS.judgeDecision, "string"],
+    [BINARY_INSTRUMENT_MEASUREMENTS.truthLabel, "string"],
+    [BINARY_INSTRUMENT_MEASUREMENTS.agreement, "boolean"],
+    [BINARY_INSTRUMENT_MEASUREMENTS.parseValid, "boolean"],
+    [BINARY_INSTRUMENT_MEASUREMENTS.candidateClass, "string"],
+    [BINARY_INSTRUMENT_MEASUREMENTS.stratum, "string"],
+    [BINARY_INSTRUMENT_MEASUREMENTS.labelResolutionSha256, "string"],
+    [BINARY_INSTRUMENT_MEASUREMENTS.instrumentSha256, "string"],
+  ] as const;
   for (const [index, measurement] of measurements.entries()) {
     if (!isObject(measurement) || typeof measurement["name"] !== "string") {
       throw new MethodInputError("binary-record-malformed", digest, `measurements[${index}] is invalid`);
     }
-    const name = measurement["name"];
-    const expectedType = MEASUREMENT_TYPES.get(name);
-    if (expectedType === undefined || seen.has(name)) {
-      throw new MethodInputError("binary-binding-mismatch", digest, `unsupported or duplicate measurement ${name}`);
-    }
-    seen.add(name);
-    if (measurement["type"] !== expectedType || measurement["required"] !== true) {
-      throw new MethodInputError("binary-binding-mismatch", digest, `measurement ${name} has the wrong required type`);
+    requireExactKeys(measurement, ["name", "type", "required"], digest, `measurements[${index}]`);
+    const [expectedName, expectedType] = expected[index]!;
+    if (
+      measurement["name"] !== expectedName
+      || measurement["type"] !== expectedType
+      || measurement["required"] !== true
+    ) {
+      throw new MethodInputError("binary-binding-mismatch", digest, `measurement ${index} drifts from the frozen profile`);
     }
   }
-  if (MEASUREMENT_NAMES.some((name) => !seen.has(name))) {
-    throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec measurement profile is incomplete");
+}
+
+function requireEmptyObject(value: unknown, digest: string, label: string): void {
+  if (!isObject(value) || Object.keys(value).length !== 0) {
+    throw new MethodInputError("binary-binding-mismatch", digest, `${label} must be an empty object`);
+  }
+}
+
+function validateEvaluationSpecShape(spec: Record<string, unknown>, digest: `sha256:${string}`): void {
+  requireExactKeys(
+    spec,
+    ["protocol", "semanticsVersion", "family", "grader", "familyBlock", "measurements", "verdictRule", "unscorable", "evidenceConventions"],
+    digest,
+    "EvaluationSpec",
+  );
+  if (
+    spec["protocol"] !== EVALUATION_SPEC_PROTOCOL
+    || spec["semanticsVersion"] !== EVALUATION_SEMANTICS_VERSION
+    || spec["family"] !== "deterministic-process"
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec identity is not the frozen deterministic binary profile");
+  }
+  if (!Array.isArray(spec["unscorable"]) || spec["unscorable"].length !== 0) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec.unscorable must be empty");
+  }
+  const evidence = spec["evidenceConventions"];
+  if (!isObject(evidence)) {
+    throw new MethodInputError("binary-record-malformed", digest, "EvaluationSpec.evidenceConventions must be an object");
+  }
+  requireExactKeys(evidence, ["requiredRefs"], digest, "EvaluationSpec.evidenceConventions");
+  if (
+    !Array.isArray(evidence["requiredRefs"])
+    || evidence["requiredRefs"].length !== 1
+    || evidence["requiredRefs"][0] !== LABEL_RESOLUTION_NAME
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "EvaluationSpec must require exact label-resolution evidence");
   }
 }
 
@@ -395,6 +562,9 @@ function resolveTaskBinding(
 ): ExpectedTaskBinding {
   const taskWire = `sha256:${taskDigest}` as const;
   const task = resolveExactJson(taskWire, input.resolveTaskBytes, "Task");
+  if (task["protocol"] !== TASK_PROTOCOL || typeof task["instructions"] !== "string") {
+    throw new MethodInputError("binary-binding-mismatch", taskWire, "Task is not a binary task-execution/v1 record");
+  }
   const profile = task["profile"];
   if (
     !isObject(profile)
@@ -403,7 +573,13 @@ function resolveTaskBinding(
   ) {
     throw new MethodInputError("binary-binding-mismatch", taskWire, "Task does not pin the binary-judgment/1.0 profile");
   }
+  const payload = validateTaskPayload(task["payload"], taskWire);
+  validateTaskOutputs(task["outputs"], taskWire);
   const taskItemSha256 = wireSha256(task[ITEM_COMMITMENT_KEY], taskWire, `Task.${ITEM_COMMITMENT_KEY}`);
+  const recomputedItemSha256 = recordDigest(canonicalJsonBytes(payload));
+  if (taskItemSha256 !== recomputedItemSha256) {
+    throw new MethodInputError("binary-binding-mismatch", taskWire, "Task item commitment does not match the closed solver-visible payload");
+  }
   const taskRequirements = task["requirements"];
   if (
     Object.hasOwn(task, INSTRUMENT_REQUIREMENT_KEY)
@@ -422,9 +598,7 @@ function resolveTaskBinding(
   );
   const specWire = `sha256:${evaluationSpecSha256}` as const;
   const spec = resolveExactJson(specWire, input.resolveRecordBytes, "EvaluationSpec");
-  if (spec["protocol"] !== EVALUATION_SPEC_PROTOCOL || spec["family"] !== "deterministic-process") {
-    throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec is not the deterministic binary-instrument profile");
-  }
+  validateEvaluationSpecShape(spec, specWire);
   measurementDeclarations(spec, specWire);
   const verdictRule = spec["verdictRule"];
   if (
@@ -437,7 +611,11 @@ function resolveTaskBinding(
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec verdictRule must pass exactly on agreement=true");
   }
   const grader = spec["grader"];
-  if (!isObject(grader) || grader["name"] !== EVALUATION_PARSER_ID) {
+  if (!isObject(grader)) {
+    throw new MethodInputError("binary-record-malformed", specWire, "EvaluationSpec grader must be one descriptor");
+  }
+  requireExactKeys(grader, ["name", "digest", "accessClass"], specWire, "EvaluationSpec.grader");
+  if (grader["name"] !== EVALUATION_PARSER_ID || grader["accessClass"] !== "public") {
     throw new MethodInputError("binary-binding-mismatch", specWire, `EvaluationSpec grader must be ${EVALUATION_PARSER_ID}`);
   }
   const evaluationMethodSha256 = digestObjectSha256(grader["digest"], specWire, "EvaluationSpec.grader.digest");
@@ -448,7 +626,37 @@ function resolveTaskBinding(
   if (!isObject(familyBlock)) {
     throw new MethodInputError("binary-record-malformed", specWire, "EvaluationSpec.familyBlock must be an object");
   }
+  requireExactKeys(
+    familyBlock,
+    ["image", "platform", "workspace", "testMaterial", "parser", "transitions", "timeout"],
+    specWire,
+    "EvaluationSpec.familyBlock",
+  );
+  requireDigestDescriptor(familyBlock["image"], specWire, "EvaluationSpec.familyBlock.image");
+  if (familyBlock["platform"] !== "linux/amd64") {
+    throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec platform must be linux/amd64");
+  }
+  requireEmptyObject(familyBlock["workspace"], specWire, "EvaluationSpec.familyBlock.workspace");
+  const transitions = familyBlock["transitions"];
+  if (!isObject(transitions)) {
+    throw new MethodInputError("binary-record-malformed", specWire, "EvaluationSpec transitions must be an object");
+  }
+  requireExactKeys(transitions, ["failToPass", "passToPass"], specWire, "EvaluationSpec.familyBlock.transitions");
+  if (
+    !Array.isArray(transitions["failToPass"])
+    || transitions["failToPass"].length !== 0
+    || !Array.isArray(transitions["passToPass"])
+    || transitions["passToPass"].length !== 0
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec transitions must be empty");
+  }
+  if (!Number.isSafeInteger(familyBlock["timeout"]) || (familyBlock["timeout"] as number) < 1) {
+    throw new MethodInputError("binary-record-malformed", specWire, "EvaluationSpec timeout must be a positive safe integer");
+  }
   const parser = familyBlock["parser"];
+  if (isObject(parser)) {
+    requireExactKeys(parser, ["id", "version", "digest"], specWire, "EvaluationSpec.familyBlock.parser");
+  }
   if (
     !isObject(parser)
     || parser["id"] !== EVALUATION_PARSER_ID
@@ -459,12 +667,21 @@ function resolveTaskBinding(
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec parser identity drifts from its grader");
   }
   const testMaterial = familyBlock["testMaterial"];
-  if (!Array.isArray(testMaterial)) {
+  if (!Array.isArray(testMaterial) || testMaterial.length !== 1) {
     throw new MethodInputError("binary-record-malformed", specWire, "EvaluationSpec testMaterial must be an array");
   }
   const contexts = testMaterial.filter((value) => isObject(value) && value["name"] === "analysis-context.json");
   if (contexts.length !== 1 || !isObject(contexts[0])) {
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec must name one analysis-context.json");
+  }
+  requireExactKeys(
+    contexts[0],
+    ["name", "digest", "mediaType", "accessClass"],
+    specWire,
+    "EvaluationSpec analysis-context descriptor",
+  );
+  if (contexts[0]["mediaType"] !== ANALYSIS_CONTEXT_MEDIA_TYPE || contexts[0]["accessClass"] !== "private") {
+    throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec analysis-context descriptor is not private exact material");
   }
   const analysisSha256 = digestObjectSha256(contexts[0]["digest"], specWire, "analysis-context.json digest");
   const analysisWire = `sha256:${analysisSha256}` as const;
@@ -488,6 +705,9 @@ function resolveTaskBinding(
     || !/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(itemId)
   ) {
     throw new MethodInputError("binary-record-malformed", analysisWire, "analysisContext.itemId is not an opaque UUID URN");
+  }
+  if (itemId !== payload.itemId) {
+    throw new MethodInputError("binary-binding-mismatch", analysisWire, "analysis context itemId drifts from the Task payload");
   }
   const labelResolutionWire = wireSha256(
     analysis["labelResolutionSha256"],
@@ -523,6 +743,7 @@ function resolveTaskBinding(
     taskDigest,
     evaluationSpecSha256,
     evaluationMethodSha256,
+    payload,
     context: {
       analysisContextSha256: analysisSha256,
       truthLabel,
@@ -533,11 +754,144 @@ function resolveTaskBinding(
   };
 }
 
+interface ResolvedArmInstrument {
+  readonly digest: string;
+  readonly document: Readonly<Record<string, unknown>>;
+}
+
+function exactGeneration(value: unknown, digest: string): void {
+  if (!isObject(value)) {
+    throw new MethodInputError("binary-record-malformed", digest, "instrument generation must be an object");
+  }
+  requireExactKeys(
+    value,
+    [
+      "reasoningEffort", "maxOutputTokens", "store", "background", "stream", "serviceTier",
+      "tools", "fallbackModels", "retries", "persistedConversation", "metadata", "promptCacheIdentifier",
+    ],
+    digest,
+    "instrument.model.generation",
+  );
+  if (
+    (value["reasoningEffort"] !== "none" && value["reasoningEffort"] !== "low")
+    || value["maxOutputTokens"] !== 128
+    || value["store"] !== false
+    || value["background"] !== false
+    || value["stream"] !== false
+    || value["serviceTier"] !== "default"
+    || !Array.isArray(value["tools"])
+    || value["tools"].length !== 0
+    || !Array.isArray(value["fallbackModels"])
+    || value["fallbackModels"].length !== 0
+    || value["retries"] !== 0
+    || value["persistedConversation"] !== false
+    || value["metadata"] !== null
+    || value["promptCacheIdentifier"] !== null
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument generation drifts from the frozen Luna call policy");
+  }
+}
+
+function validateInstrument(
+  instrument: Record<string, unknown>,
+  digest: `sha256:${string}`,
+  armId: string,
+): void {
+  requireExactKeys(
+    instrument,
+    ["protocol", "instrumentId", "messages", "promptTemplateSha256", "promptSource", "license", "attribution", "model", "response"],
+    digest,
+    "instrument",
+  );
+  if (
+    instrument["protocol"] !== INSTRUMENT_PROTOCOL
+    || instrument["instrumentId"] !== armId
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument identity does not match the Run arm");
+  }
+  const messages = instrument["messages"];
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new MethodInputError("binary-record-malformed", digest, "instrument.messages must be non-empty");
+  }
+  const usedFields = new Set<string>();
+  for (const [messageIndex, message] of messages.entries()) {
+    if (!isObject(message)) {
+      throw new MethodInputError("binary-record-malformed", digest, `instrument.messages[${messageIndex}] must be an object`);
+    }
+    requireExactKeys(message, ["role", "segments"], digest, `instrument.messages[${messageIndex}]`);
+    if (message["role"] !== "developer" && message["role"] !== "user") {
+      throw new MethodInputError("binary-record-malformed", digest, `instrument.messages[${messageIndex}].role is unsupported`);
+    }
+    const segments = message["segments"];
+    if (!Array.isArray(segments) || segments.length === 0) {
+      throw new MethodInputError("binary-record-malformed", digest, `instrument.messages[${messageIndex}].segments must be non-empty`);
+    }
+    for (const [segmentIndex, segment] of segments.entries()) {
+      if (!isObject(segment)) {
+        throw new MethodInputError("binary-record-malformed", digest, `instrument message segment ${segmentIndex} is invalid`);
+      }
+      const keys = Object.keys(segment);
+      if (keys.length !== 1 || (keys[0] !== "literal" && keys[0] !== "field")) {
+        throw new MethodInputError("binary-record-malformed", digest, "instrument message segment has an unsupported field set");
+      }
+      if (keys[0] === "literal" && typeof segment["literal"] !== "string") {
+        throw new MethodInputError("binary-record-malformed", digest, "instrument literal segment must be a string");
+      }
+      if (keys[0] === "field") {
+        const field = segment["field"];
+        if (field !== "question" && field !== "referenceAnswer" && field !== "candidateAnswer") {
+          throw new MethodInputError("binary-record-malformed", digest, "instrument field segment is unsupported");
+        }
+        usedFields.add(field);
+      }
+    }
+  }
+  if (["question", "referenceAnswer", "candidateAnswer"].some((field) => !usedFields.has(field))) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument prompt must interpolate every solver-visible field");
+  }
+  const promptTemplateSha256 = wireSha256(instrument["promptTemplateSha256"], digest, "instrument.promptTemplateSha256");
+  if (promptTemplateSha256 !== recordDigest(canonicalJsonBytes(messages))) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument prompt digest does not match its message templates");
+  }
+  requireSourceDescriptor(instrument["promptSource"], digest, "instrument.promptSource");
+  requireSourceDescriptor(instrument["license"], digest, "instrument.license");
+  requireSourceDescriptor(instrument["attribution"], digest, "instrument.attribution");
+  const model = instrument["model"];
+  if (!isObject(model)) {
+    throw new MethodInputError("binary-record-malformed", digest, "instrument.model must be an object");
+  }
+  requireExactKeys(model, ["adapter", "requested", "generation"], digest, "instrument.model");
+  if (model["adapter"] !== "jinn-openai" || model["requested"] !== MODEL_ID) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument must use the frozen Luna adapter/model");
+  }
+  exactGeneration(model["generation"], digest);
+  const response = instrument["response"];
+  if (!isObject(response)) {
+    throw new MethodInputError("binary-record-malformed", digest, "instrument.response must be an object");
+  }
+  requireExactKeys(response, ["mediaType", "parser", "invalidOutputDecision"], digest, "instrument.response");
+  if (response["mediaType"] !== RESPONSE_MEDIA_TYPE || response["invalidOutputDecision"] !== "REJECT") {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument response contract is unsupported");
+  }
+  const parser = response["parser"];
+  if (!isObject(parser)) {
+    throw new MethodInputError("binary-record-malformed", digest, "instrument parser must be an object");
+  }
+  requireExactKeys(parser, ["id", "version", "digest"], digest, "instrument.response.parser");
+  if (
+    parser["id"] !== RESPONSE_PARSER_ID
+    || parser["version"] !== RESPONSE_PARSER_VERSION
+    || parser["digest"] !== RESPONSE_PARSER_DIGEST
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "instrument parser is not the frozen ACCEPT/REJECT semantics");
+  }
+}
+
 function resolveArmInstruments(
   matrix: MatrixRecord,
   input: Pick<MethodComputeInput, "resolveRunBytes" | "resolveRecordBytes">,
   k: number,
-): Map<string, string> {
+): Map<string, ResolvedArmInstrument> {
   const run = resolveRun(matrixRunDigest(matrix), input);
   if (run.replicates !== k) {
     throw new MethodInputError(
@@ -547,32 +901,26 @@ function resolveArmInstruments(
     );
   }
   const matrixArms = [...new Set(matrix.cells.map((cell) => cell.armId))].sort(compareCodeUnitStrings);
-  const instruments = new Map<string, string>();
+  const runArms = run.arms.map((arm) => arm.armId).sort(compareCodeUnitStrings);
+  if (
+    runArms.length !== matrixArms.length
+    || runArms.some((armId, index) => armId !== matrixArms[index])
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", matrixRunDigest(matrix), "Run arms and Matrix arms must match exactly");
+  }
+  const instruments = new Map<string, ResolvedArmInstrument>();
   for (const arm of run.arms) {
-    if (!matrixArms.includes(arm.armId)) continue;
     const instrumentWire = wireSha256(
       arm.pinning[INSTRUMENT_REQUIREMENT_KEY],
       matrixRunDigest(matrix),
       `Run arm ${arm.armId} instrument pin`,
     );
     const instrument = resolveExactJson(instrumentWire, input.resolveRecordBytes, `arm ${arm.armId} instrument`);
-    if (instrument["protocol"] !== INSTRUMENT_PROTOCOL) {
-      throw new MethodInputError("binary-binding-mismatch", instrumentWire, "instrument protocol is unsupported");
-    }
-    const response = instrument["response"];
-    if (!isObject(response) || response["invalidOutputDecision"] !== "REJECT") {
-      throw new MethodInputError("binary-binding-mismatch", instrumentWire, "instrument must map invalid output to REJECT");
-    }
-    const parser = response["parser"];
-    if (
-      !isObject(parser)
-      || parser["id"] !== RESPONSE_PARSER_ID
-      || parser["version"] !== RESPONSE_PARSER_VERSION
-      || parser["digest"] !== RESPONSE_PARSER_DIGEST
-    ) {
-      throw new MethodInputError("binary-binding-mismatch", instrumentWire, "instrument parser is not the frozen ACCEPT/REJECT semantics");
-    }
-    instruments.set(arm.armId, instrumentWire.slice("sha256:".length));
+    validateInstrument(instrument, instrumentWire, arm.armId);
+    instruments.set(arm.armId, {
+      digest: instrumentWire.slice("sha256:".length),
+      document: instrument,
+    });
   }
   if (
     instruments.size !== matrixArms.length
@@ -624,12 +972,167 @@ function descriptorDigest(
   return digestObjectSha256(descriptor["digest"], verdictDigest, `${label}.digest`);
 }
 
+function renderSemanticRequest(
+  payload: ResolvedBinaryPayload,
+  instrument: Readonly<Record<string, unknown>>,
+  digest: string,
+): Record<string, unknown> {
+  const messages = instrument["messages"] as readonly Readonly<Record<string, unknown>>[];
+  const rendered = messages.map((message) => ({
+    role: message["role"],
+    text: (message["segments"] as readonly Readonly<Record<string, unknown>>[]).map((segment) => {
+      if (Object.hasOwn(segment, "literal")) return segment["literal"] as string;
+      const field = segment["field"] as "question" | "referenceAnswer" | "candidateAnswer";
+      return payload[field];
+    }).join(""),
+  }));
+  const model = instrument["model"];
+  if (!isObject(model)) {
+    throw new MethodInputError("binary-record-malformed", digest, "instrument.model is unavailable for request replay");
+  }
+  return {
+    model: MODEL_ID,
+    messages: rendered,
+    generation: model["generation"],
+  };
+}
+
+function parseFrozenResponse(bytes: Uint8Array): {
+  readonly decision: "ACCEPT" | "REJECT";
+  readonly parseValid: boolean;
+} {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return { decision: "REJECT", parseValid: false };
+  }
+  const token = text.replace(/^[ \t\r\n]+|[ \t\r\n]+$/gu, "");
+  return token === "ACCEPT" || token === "REJECT"
+    ? { decision: token, parseValid: true }
+    : { decision: "REJECT", parseValid: false };
+}
+
+function validateObservation(
+  observation: Record<string, unknown>,
+  digest: `sha256:${string}`,
+  expected: {
+    readonly cell: MatrixRecord["cells"][number];
+    readonly instrument: ResolvedArmInstrument;
+    readonly responseSha256: string;
+    readonly requestSha256: string;
+  },
+): void {
+  requireExactKeys(
+    observation,
+    ["protocol", "taskDigest", "armId", "replicate", "instrumentSha256", "requestSha256", "response", "provider", "call", "limitations"],
+    digest,
+    "judge observation",
+  );
+  if (
+    observation["protocol"] !== OBSERVATION_PROTOCOL
+    || observation["taskDigest"] !== `sha256:${expected.cell.taskDigest}`
+    || observation["armId"] !== expected.cell.armId
+    || observation["replicate"] !== expected.cell.replicate
+    || observation["instrumentSha256"] !== `sha256:${expected.instrument.digest}`
+    || observation["requestSha256"] !== expected.requestSha256
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "judge observation drifts from its exact Matrix cell or semantic request");
+  }
+  const response = observation["response"];
+  if (!isObject(response)) {
+    throw new MethodInputError("binary-record-malformed", digest, "judge observation response must be an object");
+  }
+  requireExactKeys(response, ["digest", "mediaType"], digest, "judge observation response");
+  if (response["digest"] !== `sha256:${expected.responseSha256}` || response["mediaType"] !== RESPONSE_MEDIA_TYPE) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "judge observation response binding is inconsistent");
+  }
+  const provider = observation["provider"];
+  if (!isObject(provider)) {
+    throw new MethodInputError("binary-record-malformed", digest, "judge observation provider must be an object");
+  }
+  requireExactKeys(provider, ["requestedModel", "resolvedModel", "responseId", "eventSha256", "usage"], digest, "judge observation provider");
+  if (
+    provider["requestedModel"] !== MODEL_ID
+    || provider["resolvedModel"] !== MODEL_ID
+    || typeof provider["responseId"] !== "string"
+    || provider["responseId"].length === 0
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "judge observation provider identity is unsupported");
+  }
+  wireSha256(provider["eventSha256"], digest, "judge observation provider eventSha256");
+  const usage = provider["usage"];
+  if (!isObject(usage)) {
+    throw new MethodInputError("binary-record-malformed", digest, "judge observation usage must be an object");
+  }
+  requireExactKeys(usage, ["inputTokens", "outputTokens", "totalTokens"], digest, "judge observation usage");
+  const inputTokens = usage["inputTokens"];
+  const outputTokens = usage["outputTokens"];
+  const totalTokens = usage["totalTokens"];
+  if (
+    !Number.isSafeInteger(inputTokens) || (inputTokens as number) < 0
+    || !Number.isSafeInteger(outputTokens) || (outputTokens as number) < 0
+    || !Number.isSafeInteger(totalTokens) || (totalTokens as number) < 0
+    || totalTokens !== (inputTokens as number) + (outputTokens as number)
+  ) {
+    throw new MethodInputError("binary-record-malformed", digest, "judge observation token usage is inconsistent");
+  }
+  const call = observation["call"];
+  if (!isObject(call)) {
+    throw new MethodInputError("binary-record-malformed", digest, "judge observation call must be an object");
+  }
+  requireExactKeys(call, ["count", "retries", "fallbacks"], digest, "judge observation call");
+  if (call["count"] !== 1 || call["retries"] !== 0 || call["fallbacks"] !== 0) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "judge observation does not describe one frozen call");
+  }
+  if (
+    !Array.isArray(observation["limitations"])
+    || observation["limitations"].length !== 1
+    || observation["limitations"][0] !== "mutable-model-alias"
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", digest, "judge observation limitations are not the frozen disclosure");
+  }
+}
+
+function subjectByName(
+  subjects: readonly unknown[],
+  name: string,
+  verdictDigest: string,
+): Record<string, unknown> {
+  const matches = subjects.filter((subject) => isObject(subject) && subject["name"] === name);
+  if (matches.length !== 1 || !isObject(matches[0])) {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, `Result Evaluation must name exactly one ${name} subject`);
+  }
+  return matches[0];
+}
+
+function resolveSubjectBytes(
+  descriptor: Record<string, unknown>,
+  verdictDigest: string,
+  label: string,
+  resolve: ((digest: string) => Uint8Array | undefined) | undefined,
+): { readonly sha256: string; readonly bytes: Uint8Array } {
+  const sha256 = descriptorDigest(descriptor, verdictDigest, label);
+  if (resolve === undefined) {
+    throw new MethodInputError("binary-record-unavailable", verdictDigest, `${label} requires resolveRecordBytes`);
+  }
+  const bytes = resolve(`sha256:${sha256}`);
+  if (bytes === undefined) {
+    throw new MethodInputError("binary-record-unavailable", `sha256:${sha256}`, `${label} bytes are unavailable`);
+  }
+  const actual = recordDigest(bytes);
+  if (actual !== `sha256:${sha256}`) {
+    throw new MethodInputError("binary-record-digest-mismatch", `sha256:${sha256}`, `${label} bytes hash to ${actual}`);
+  }
+  return { sha256, bytes };
+}
+
 function resolveCellInput(
   verdictDigest: string,
   cell: MatrixRecord["cells"][number],
   binding: ExpectedTaskBinding,
-  expectedInstrument: string,
-  input: Pick<MethodComputeInput, "resolveVerdictBytes">,
+  expectedInstrument: ResolvedArmInstrument,
+  input: Pick<MethodComputeInput, "resolveVerdictBytes" | "resolveRecordBytes">,
 ): BinaryInstrumentParsedCellInput {
   const { statement, predicate } = resolveResultEvaluationStatement(verdictDigest, input);
   if (
@@ -657,6 +1160,74 @@ function resolveCellInput(
   ) {
     throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation does not bind the exact Matrix Task");
   }
+  const resultSubjects = predicate["resultSubjects"];
+  if (!Array.isArray(resultSubjects)) {
+    throw new MethodInputError("verdict-record-malformed", verdictDigest, "Result Evaluation resultSubjects must be an array");
+  }
+  const expectedResultNames = resultSubjects.includes("inspect-log")
+    ? ["judge-response", "judge-observation", "inspect-log"]
+    : ["judge-response", "judge-observation"];
+  if (
+    resultSubjects.length !== expectedResultNames.length
+    || new Set(resultSubjects).size !== resultSubjects.length
+    || expectedResultNames.some((name) => !resultSubjects.includes(name))
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation must bind the exact binary judge Results");
+  }
+  const expectedSubjectNames = new Set([taskSubject, ...expectedResultNames]);
+  if (
+    subjects.length !== expectedSubjectNames.size
+    || subjects.some((subject) => !isObject(subject) || !expectedSubjectNames.has(subject["name"] as string))
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation subject-name crosswalk is not exact");
+  }
+  const responseDescriptor = subjectByName(subjects, "judge-response", verdictDigest);
+  const observationDescriptor = subjectByName(subjects, "judge-observation", verdictDigest);
+  if (responseDescriptor["mediaType"] !== RESPONSE_MEDIA_TYPE || observationDescriptor["mediaType"] !== OBSERVATION_MEDIA_TYPE) {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation result media types are inconsistent");
+  }
+  if (resultSubjects.includes("inspect-log")) {
+    const inspectDescriptor = subjectByName(subjects, "inspect-log", verdictDigest);
+    if (inspectDescriptor["mediaType"] !== INSPECT_LOG_MEDIA_TYPE) {
+      throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation inspect-log media type is inconsistent");
+    }
+  }
+  const responseMaterial = resolveSubjectBytes(
+    responseDescriptor,
+    verdictDigest,
+    "judge-response",
+    input.resolveRecordBytes,
+  );
+  const observationMaterial = resolveSubjectBytes(
+    observationDescriptor,
+    verdictDigest,
+    "judge-observation",
+    input.resolveRecordBytes,
+  );
+  const observationWire = `sha256:${observationMaterial.sha256}` as const;
+  const observation = resolveExactJson(observationWire, input.resolveRecordBytes, "judge observation");
+  const requestSha256 = recordDigest(canonicalJsonBytes(
+    renderSemanticRequest(binding.payload, expectedInstrument.document, verdictDigest),
+  ));
+  validateObservation(observation, observationWire, {
+    cell,
+    instrument: expectedInstrument,
+    responseSha256: responseMaterial.sha256,
+    requestSha256,
+  });
+  const responseParse = parseFrozenResponse(responseMaterial.bytes);
+  const evidence = predicate["evidence"];
+  if (!Array.isArray(evidence) || evidence.length !== 1 || !isObject(evidence[0])) {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation must carry one exact label-resolution evidence reference");
+  }
+  const labelEvidence = evidence[0];
+  if (
+    labelEvidence["name"] !== LABEL_RESOLUTION_NAME
+    || labelEvidence["mediaType"] !== LABEL_RESOLUTION_MEDIA_TYPE
+    || descriptorDigest(labelEvidence, verdictDigest, "label resolution evidence") !== binding.context.labelResolutionSha256
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "Result Evaluation label-resolution evidence drifts from admitted truth");
+  }
   const measurements = measurementMap(predicate, verdictDigest);
   const judgeDecision = measurements.get(BINARY_INSTRUMENT_MEASUREMENTS.judgeDecision);
   const truthLabel = measurements.get(BINARY_INSTRUMENT_MEASUREMENTS.truthLabel);
@@ -683,6 +1254,9 @@ function resolveCellInput(
   if (typeof agreement !== "boolean" || typeof parseValid !== "boolean") {
     throw new MethodInputError("verdict-record-malformed", verdictDigest, "agreement and parseValid must be boolean");
   }
+  if (judgeDecision !== responseParse.decision || parseValid !== responseParse.parseValid) {
+    throw new MethodInputError("binary-binding-mismatch", verdictDigest, "signed response measurements do not replay from exact judge-response bytes");
+  }
   if (parseValid === false && judgeDecision !== "REJECT") {
     throw new MethodInputError("binary-binding-mismatch", verdictDigest, "parser-invalid output must deterministically map to REJECT");
   }
@@ -704,7 +1278,7 @@ function resolveCellInput(
   ) {
     throw new MethodInputError("binary-binding-mismatch", verdictDigest, "signed measurements drift from the admitted analysis context");
   }
-  if (instrumentSha256 !== expectedInstrument) {
+  if (instrumentSha256 !== expectedInstrument.digest) {
     throw new MethodInputError("binary-binding-mismatch", verdictDigest, "signed instrument drifts from the Run arm pin");
   }
   return {
@@ -865,7 +1439,7 @@ export function computeBinaryInstrumentQualification(
       context: bindings.get(taskDigest)!.context,
     })),
     instruments: [...instruments.entries()]
-      .map(([armId, instrumentSha256]) => ({ armId, instrumentSha256 }))
+      .map(([armId, instrument]) => ({ armId, instrumentSha256: instrument.digest }))
       .sort((left, right) => compareCodeUnitStrings(left.armId, right.armId)),
     cells,
   });
@@ -894,7 +1468,7 @@ export function computeBinaryInstrumentQualification(
       );
     }
     arms[armId] = {
-      instrumentSha256: `sha256:${instruments.get(armId)!}`,
+      instrumentSha256: `sha256:${instruments.get(armId)!.digest}`,
       ...projection(armItems, armExcluded, armCalls, parameters.k),
       byCandidateClass,
       byStratum,
