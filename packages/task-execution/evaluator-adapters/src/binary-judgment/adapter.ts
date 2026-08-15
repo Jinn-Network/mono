@@ -102,6 +102,64 @@ export function binaryJudgmentEvaluationSpecVerdictRule(): EvaluationSpec["verdi
   };
 }
 
+function bareSha256(digest: `sha256:${string}`, label: string): string {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(digest)) {
+    throw new TypeError(`${label} must be a canonical sha256 digest`);
+  }
+  return digest.slice("sha256:".length);
+}
+
+/**
+ * Builds the sole EvaluationSpec served by the binary-judgment evaluator.
+ *
+ * The admitted analysis-context digest is the only item-varying input. Everything executable
+ * or interpretation-bearing is pinned here so producers and the registration compatibility
+ * gate share one byte-level authority rather than parallel hand-authored shapes.
+ */
+export function buildBinaryJudgmentEvaluationSpecification(
+  analysisContextSha256: `sha256:${string}`,
+): EvaluationSpec {
+  const analysisContextDigest = bareSha256(
+    analysisContextSha256,
+    "binary judgment analysis context",
+  );
+  const parserDigest = bareSha256(
+    BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest,
+    "binary judgment evaluation parser",
+  );
+  return {
+    protocol: EVALUATION_SPEC_FORMAT_URI,
+    semanticsVersion: EVAL_SEMANTICS_VERSION,
+    family: "deterministic-process",
+    grader: {
+      name: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
+      digest: { sha256: parserDigest },
+      accessClass: "public",
+    },
+    familyBlock: {
+      image: {
+        name: "binary-judgment-evaluation-parser-semantics.json",
+        digest: { sha256: parserDigest },
+      },
+      platform: "linux/amd64",
+      workspace: {},
+      testMaterial: [{
+        name: BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME,
+        digest: { sha256: analysisContextDigest },
+        mediaType: BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
+        accessClass: "private",
+      }],
+      parser: { ...BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY },
+      transitions: { failToPass: [], passToPass: [] },
+      timeout: 60,
+    },
+    measurements: binaryJudgmentEvaluationSpecMeasurements(),
+    verdictRule: binaryJudgmentEvaluationSpecVerdictRule(),
+    unscorable: [],
+    evidenceConventions: { requiredRefs: [BINARY_JUDGMENT_LABEL_RESOLUTION_NAME] },
+  };
+}
+
 /** The method bytes are the profiles-owned, code-free umbrella parser semantics. */
 export function binaryJudgmentEvaluationMethodDescriptor(): ResourceDescriptor {
   return {
@@ -490,46 +548,41 @@ function sameJson(left: unknown, right: unknown): boolean {
   return bytesEqual(canonicalJsonBytes(left), canonicalJsonBytes(right));
 }
 
-function exactAnalysisDescriptor(block: DeterministicProcessBlock): boolean {
-  if (block.testMaterial.length !== 1) return false;
+function exactAnalysisDescriptorDigest(
+  block: DeterministicProcessBlock,
+): `sha256:${string}` | undefined {
+  if (block.testMaterial.length !== 1) return undefined;
   const descriptor = block.testMaterial[0]!;
-  return descriptor.name === BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME
+  const digest = digestFromDescriptor(descriptor);
+  const exact = descriptor.name === BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME
     && descriptor.mediaType === BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE
     && descriptor.accessClass === "private"
-    && digestFromDescriptor(descriptor) !== undefined
+    && digest !== undefined
     && exactKeys(descriptor, ["name", "digest", "mediaType", "accessClass"])
     && descriptor.digest !== undefined
     && exactKeys(descriptor.digest, ["sha256"]);
+  return exact ? digest : undefined;
 }
 
-/** Exact registration gate for the one closed binary-judgment evaluation contract. */
+/**
+ * Exact registration gate for the one closed binary-judgment evaluation contract.
+ * Canonical equality with the shared builder rejects drift and unknown fields at every depth.
+ */
 export function isBinaryJudgmentEvaluationSpecification(
   specification: EvaluationSpec,
 ): boolean {
-  if (
-    specification.protocol !== EVALUATION_SPEC_FORMAT_URI
-    || specification.semanticsVersion !== EVAL_SEMANTICS_VERSION
-    || specification.family !== "deterministic-process"
-  ) return false;
-  const block = specification.familyBlock as DeterministicProcessBlock;
-  const grader = specification.grader;
-  if (Array.isArray(grader)) return false;
-  return block.parser.id === BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id
-    && block.parser.version === BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.version
-    && block.parser.digest === BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest
-    && grader.name === BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id
-    && digestFromDescriptor(grader) === BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest
-    && grader.accessClass === "public"
-    && block.transitions.failToPass.length === 0
-    && block.transitions.passToPass.length === 0
-    && exactAnalysisDescriptor(block)
-    && sameJson(specification.measurements, binaryJudgmentEvaluationSpecMeasurements())
-    && sameJson(specification.verdictRule, binaryJudgmentEvaluationSpecVerdictRule())
-    && specification.unscorable.length === 0
-    && sameJson(
-      specification.evidenceConventions.requiredRefs,
-      [BINARY_JUDGMENT_LABEL_RESOLUTION_NAME],
+  try {
+    if (specification.family !== "deterministic-process") return false;
+    const block = specification.familyBlock as DeterministicProcessBlock;
+    const analysisContextSha256 = exactAnalysisDescriptorDigest(block);
+    if (analysisContextSha256 === undefined) return false;
+    return sameJson(
+      specification,
+      buildBinaryJudgmentEvaluationSpecification(analysisContextSha256),
     );
+  } catch {
+    return false;
+  }
 }
 
 export interface BinaryJudgmentAdapterOptions {

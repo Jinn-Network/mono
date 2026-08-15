@@ -15,7 +15,6 @@ import {
 import {
   BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
   BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
-  BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
   BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
   BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
@@ -25,8 +24,6 @@ import {
   BINARY_JUDGMENT_PROFILE_DIGEST,
   BINARY_JUDGMENT_PROFILE_URI,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
-  EVALUATION_SPEC_FORMAT_URI,
-  EVAL_SEMANTICS_VERSION,
   binaryJudgmentPromptTemplateDigest,
   binaryJudgmentSemanticRequestDigest,
   canonicalJsonBytes,
@@ -55,8 +52,7 @@ import {
   BINARY_JUDGMENT_LABEL_RESOLUTION_NAME,
   BINARY_JUDGMENT_MEASUREMENTS,
   binaryJudgmentEvaluationMethodDescriptor,
-  binaryJudgmentEvaluationSpecMeasurements,
-  binaryJudgmentEvaluationSpecVerdictRule,
+  buildBinaryJudgmentEvaluationSpecification,
   contextBinaryJudgmentMaterialSource,
   createBinaryJudgmentEvaluatorAdapter,
   isBinaryJudgmentEvaluationSpecification,
@@ -201,36 +197,7 @@ function makeFixture(options: {
     candidateClass,
     stratum,
   });
-  const specification: EvaluationSpec = {
-    protocol: EVALUATION_SPEC_FORMAT_URI,
-    semanticsVersion: EVAL_SEMANTICS_VERSION,
-    family: "deterministic-process",
-    grader: {
-      name: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
-      digest: {
-        sha256: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest.slice("sha256:".length),
-      },
-      accessClass: "public",
-    },
-    familyBlock: {
-      image: { name: "binary-evaluator-image", digest: { sha256: "c".repeat(64) } },
-      platform: "linux/amd64",
-      workspace: {},
-      testMaterial: [{
-        name: "analysis-context.json",
-        digest: { sha256: analysisContext.digest.slice("sha256:".length) },
-        mediaType: BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
-        accessClass: "private",
-      }],
-      parser: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
-      transitions: { failToPass: [], passToPass: [] },
-      timeout: 60,
-    },
-    measurements: binaryJudgmentEvaluationSpecMeasurements(),
-    verdictRule: binaryJudgmentEvaluationSpecVerdictRule(),
-    unscorable: [],
-    evidenceConventions: { requiredRefs: [BINARY_JUDGMENT_LABEL_RESOLUTION_NAME] },
-  };
+  const specification = buildBinaryJudgmentEvaluationSpecification(analysisContext.digest);
   const sealedSpecification = sealEvaluationSpec(specification);
   const taskBytes = sealTask({
     protocol: "https://spec.jinn.network/profiles/task-execution/v1",
@@ -313,6 +280,37 @@ async function evaluate(fixture: Fixture, signal = new AbortController().signal)
     ATTEMPT,
     signal,
   );
+}
+
+function mutateSpecification(
+  specification: EvaluationSpec,
+  path: readonly (string | number)[],
+  value: unknown,
+): EvaluationSpec {
+  const clone = structuredClone(specification) as unknown;
+  let cursor = clone;
+  for (const segment of path.slice(0, -1)) {
+    if (typeof segment === "number") {
+      if (!Array.isArray(cursor)) throw new TypeError("tamper path expected an array");
+      cursor = cursor[segment];
+    } else {
+      if (typeof cursor !== "object" || cursor === null || Array.isArray(cursor)) {
+        throw new TypeError("tamper path expected an object");
+      }
+      cursor = (cursor as Record<string, unknown>)[segment];
+    }
+  }
+  const final = path.at(-1);
+  if (typeof final === "number") {
+    if (!Array.isArray(cursor)) throw new TypeError("tamper path expected an array");
+    cursor[final] = value;
+  } else if (final !== undefined) {
+    if (typeof cursor !== "object" || cursor === null || Array.isArray(cursor)) {
+      throw new TypeError("tamper path expected an object");
+    }
+    (cursor as Record<string, unknown>)[final] = value;
+  }
+  return clone as EvaluationSpec;
 }
 
 async function buildHarnessWorkspace(fixture: Fixture): Promise<WorkspacePaths> {
@@ -537,20 +535,63 @@ describe("binary judgment evaluator", () => {
     expect((error as EvaluationOperationalError).canonicalCode).toBe("CANCELLED");
   });
 
-  test("the registration compatibility gate rejects parser and contract drift", () => {
+  test("the shared builder emits the exact admitted specification", () => {
     const fixture = makeFixture({ truthLabel: "CORRECT", response: encoder.encode("ACCEPT") });
     expect(isBinaryJudgmentEvaluationSpecification(fixture.specification)).toBe(true);
-    expect(isBinaryJudgmentEvaluationSpecification({
-      ...fixture.specification,
-      familyBlock: {
-        ...(fixture.specification.familyBlock as EvaluationSpec["familyBlock"] & Record<string, unknown>),
-        parser: { ...BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY, digest: sha("f") },
-      },
-    })).toBe(false);
-    expect(isBinaryJudgmentEvaluationSpecification({
-      ...fixture.specification,
-      measurements: [{ name: "agreement", type: "boolean", required: true }],
-    })).toBe(false);
+    expect(() => buildBinaryJudgmentEvaluationSpecification("sha256:short"))
+      .toThrow("binary judgment analysis context must be a canonical sha256 digest");
+  });
+
+  test.each([
+    ["protocol", ["protocol"], "https://example.test/evaluation-spec"],
+    ["semantics version", ["semanticsVersion"], "drifted"],
+    ["family", ["family"], "model-graded"],
+    ["grader name", ["grader", "name"], "drifted-grader"],
+    ["grader digest", ["grader", "digest", "sha256"], "f".repeat(64)],
+    ["grader access class", ["grader", "accessClass"], "private"],
+    ["grader extra field", ["grader", "https://example.test/extra"], true],
+    ["image name", ["familyBlock", "image", "name"], "binary-evaluator-image"],
+    ["image digest", ["familyBlock", "image", "digest", "sha256"], "f".repeat(64)],
+    ["image extra field", ["familyBlock", "image", "mediaType"], "application/json"],
+    ["platform", ["familyBlock", "platform"], "linux/arm64"],
+    ["workspace", ["familyBlock", "workspace", "unexpected"], true],
+    ["extra test material", ["familyBlock", "testMaterial", 1], {
+      name: "extra.json",
+      digest: { sha256: "f".repeat(64) },
+      accessClass: "private",
+    }],
+    ["analysis-context name", ["familyBlock", "testMaterial", 0, "name"], "context.json"],
+    ["analysis-context digest syntax", ["familyBlock", "testMaterial", 0, "digest", "sha256"], "F".repeat(64)],
+    ["analysis-context media type", ["familyBlock", "testMaterial", 0, "mediaType"], "application/json"],
+    ["analysis-context access class", ["familyBlock", "testMaterial", 0, "accessClass"], "public"],
+    ["analysis-context descriptor extra field", ["familyBlock", "testMaterial", 0, "uri"], "file:///context.json"],
+    ["analysis-context digest extra field", ["familyBlock", "testMaterial", 0, "digest", "sha512"], "f".repeat(128)],
+    ["parser id", ["familyBlock", "parser", "id"], "drifted-parser"],
+    ["parser version", ["familyBlock", "parser", "version"], "2.0.0"],
+    ["parser digest", ["familyBlock", "parser", "digest"], sha("f")],
+    ["parser extra field", ["familyBlock", "parser", "source"], "inline"],
+    ["fail-to-pass transition", ["familyBlock", "transitions", "failToPass"], ["test"]],
+    ["pass-to-pass transition", ["familyBlock", "transitions", "passToPass"], ["test"]],
+    ["transitions extra field", ["familyBlock", "transitions", "https://example.test/extra"], []],
+    ["timeout", ["familyBlock", "timeout"], 61],
+    ["setup policy", ["familyBlock", "setupPolicy"], {}],
+    ["family-block extra field", ["familyBlock", "https://example.test/extra"], true],
+    ["measurements", ["measurements"], [{ name: "agreement", type: "boolean", required: true }]],
+    ["measurement extra field", ["measurements", 0, "direction"], "none"],
+    ["verdict measurement", ["verdictRule", "threshold", "measurement"], "parseValid"],
+    ["verdict operation", ["verdictRule", "threshold", "op"], "neq"],
+    ["verdict value", ["verdictRule", "threshold", "value"], false],
+    ["threshold extra field", ["verdictRule", "threshold", "https://example.test/extra"], true],
+    ["verdict extra field", ["verdictRule", "https://example.test/extra"], true],
+    ["unscorable policy", ["unscorable"], [{ when: "always" }]],
+    ["evidence references", ["evidenceConventions", "requiredRefs"], []],
+    ["evidence-conventions extra field", ["evidenceConventions", "https://example.test/extra"], true],
+    ["top-level extra field", ["https://example.test/extra"], true],
+  ] as const)("the exact specification gate rejects drift in %s", (_label, path, value) => {
+    const fixture = makeFixture({ truthLabel: "CORRECT", response: encoder.encode("ACCEPT") });
+    expect(isBinaryJudgmentEvaluationSpecification(
+      mutateSpecification(fixture.specification, path, value),
+    )).toBe(false);
   });
 
   test("method descriptor is generated from the profiles-owned umbrella bytes", () => {

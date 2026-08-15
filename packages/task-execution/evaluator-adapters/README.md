@@ -23,6 +23,12 @@ is an operational no-verdict path. Its strict response parser uses fatal UTF-8 d
 trims only ASCII space/tab/CR/LF at the edges, performs no normalization, and compares exact
 tokens. The allowlist identity and generated evaluation-method descriptor come from the
 profiles package's sealed umbrella semantics, so there is no second parser oracle here.
+`buildBinaryJudgmentEvaluationSpecification(analysisContextSha256)` is likewise the sole
+producer authority for the served `EvaluationSpec`; its matching
+`isBinaryJudgmentEvaluationSpecification` gate requires canonical equality with that builder,
+including the exact image, platform, empty workspace, parser, transitions, timeout, grader,
+measurements, verdict, evidence conventions, and absence of extension fields. The admitted
+analysis-context digest is its only varying input.
 
 Each adapter is a thin composition of one **pure ingestion parser** (raw grader
 report or raw solver Result → a normalized outcome, or a typed ungradeable

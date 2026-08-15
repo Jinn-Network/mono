@@ -5,8 +5,6 @@ import {
   type EvaluationHarnessDeployment,
 } from "@jinn-network/task-execution-evaluation-harness";
 import {
-  BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
-  BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   EVALUATION_SPEC_FORMAT_URI,
   EVAL_SEMANTICS_VERSION,
   parserAllowlistKey,
@@ -16,19 +14,13 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import { describe, expect, test } from "vitest";
 import {
-  BINARY_JUDGMENT_PARSER,
   evaluatorAdaptersParserAllowlist,
   PREDICTION_PARSER,
   SWE_REBENCH_PARSER,
 } from "./parser-identity.js";
 import { contextGraderReportSource } from "./swe-rebench/adapter.js";
 import { contextResolutionSnapshotSource } from "./prediction/adapter.js";
-import {
-  BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME,
-  BINARY_JUDGMENT_LABEL_RESOLUTION_NAME,
-  binaryJudgmentEvaluationSpecMeasurements,
-  binaryJudgmentEvaluationSpecVerdictRule,
-} from "./binary-judgment/adapter.js";
+import { buildBinaryJudgmentEvaluationSpecification } from "./binary-judgment/adapter.js";
 import {
   BINARY_JUDGMENT_REGISTRATION_ID,
   createBinaryJudgmentEvaluatorRegistration,
@@ -66,36 +58,7 @@ function registrations() {
 }
 
 function binaryJudgmentSpec(): EvaluationSpec {
-  return {
-    protocol: EVALUATION_SPEC_FORMAT_URI,
-    semanticsVersion: EVAL_SEMANTICS_VERSION,
-    family: "deterministic-process",
-    grader: {
-      name: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
-      digest: {
-        sha256: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest.slice("sha256:".length),
-      },
-      accessClass: "public",
-    },
-    familyBlock: {
-      image: { name: "binary-evaluator", digest: { sha256: "1".repeat(64) } },
-      platform: "linux/amd64",
-      workspace: {},
-      testMaterial: [{
-        name: BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME,
-        digest: { sha256: "2".repeat(64) },
-        mediaType: BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
-        accessClass: "private",
-      }],
-      parser: BINARY_JUDGMENT_PARSER,
-      transitions: { failToPass: [], passToPass: [] },
-      timeout: 60,
-    },
-    measurements: binaryJudgmentEvaluationSpecMeasurements(),
-    verdictRule: binaryJudgmentEvaluationSpecVerdictRule(),
-    unscorable: [],
-    evidenceConventions: { requiredRefs: [BINARY_JUDGMENT_LABEL_RESOLUTION_NAME] },
-  } as EvaluationSpec;
+  return buildBinaryJudgmentEvaluationSpecification(`sha256:${"2".repeat(64)}`);
 }
 
 function specFor(parser: ParserIdentity): EvaluationSpec {
