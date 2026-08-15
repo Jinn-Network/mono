@@ -99,6 +99,29 @@ try {
     throw new Error("evaluation-harness archive contains tests");
   }
 
+  const adaptersArchive = archives.get(
+    "@jinn-network/task-execution-evaluator-adapters",
+  );
+  const adapterEntries = (await output("tar", ["-tzf", adaptersArchive]))
+    .split(/\r?\n/u)
+    .filter(Boolean);
+  for (const required of [
+    "package/README.md",
+    "package/dist/index.d.ts",
+    "package/dist/index.js",
+    "package/dist/binary-judgment/adapter.d.ts",
+    "package/dist/binary-judgment/adapter.js",
+    "package/dist/binary-judgment/parse.d.ts",
+    "package/dist/binary-judgment/parse.js",
+  ]) {
+    if (!adapterEntries.includes(required)) {
+      throw new Error(`evaluator-adapters archive is missing ${required}`);
+    }
+  }
+  if (adapterEntries.some((entry) => /(?:^|\/)[^/]*\.(?:test|spec)\./u.test(entry))) {
+    throw new Error("evaluator-adapters archive contains tests");
+  }
+
   await mkdir(consumerRoot);
   await writeFile(
     join(consumerRoot, "package.json"),
@@ -141,6 +164,15 @@ import type {
   EvaluationLauncherOptions,
 } from "@jinn-network/task-execution-evaluation-harness/launcher";
 import {
+  BINARY_JUDGMENT_PARSER,
+  binaryJudgmentEvaluationMethodDescriptor,
+  contextBinaryJudgmentMaterialSource,
+  createBinaryJudgmentEvaluatorAdapter,
+  createBinaryJudgmentEvaluatorRegistration,
+  parseBinaryJudgmentResponse,
+  validateBinaryJudgmentCompletedEvaluation,
+} from "@jinn-network/task-execution-evaluator-adapters";
+import {
   EVALUATION_LAUNCHER_ID,
 } from "@jinn-network/task-execution-evaluation-harness/launcher";
 
@@ -164,6 +196,13 @@ void EVALUATION_LAUNCHER_ID;
 void makeSecretsSigner;
 void pathsFromEnv;
 void runEvaluationHarness;
+void BINARY_JUDGMENT_PARSER;
+void binaryJudgmentEvaluationMethodDescriptor;
+void contextBinaryJudgmentMaterialSource;
+void createBinaryJudgmentEvaluatorAdapter;
+void createBinaryJudgmentEvaluatorRegistration;
+void parseBinaryJudgmentResponse;
+void validateBinaryJudgmentCompletedEvaluation;
 `,
   );
   await writeFile(
@@ -202,6 +241,7 @@ void runEvaluationHarness;
 import { readFile, readdir } from "node:fs/promises";
 const harness = await import("@jinn-network/task-execution-evaluation-harness");
 const launcher = await import("@jinn-network/task-execution-evaluation-harness/launcher");
+const adapters = await import("@jinn-network/task-execution-evaluator-adapters");
 if (typeof harness.validateCompletedEvaluation !== "function") {
   throw new Error("root runtime exports are incomplete");
 }
@@ -217,6 +257,14 @@ if (
   typeof launcher.makeEvaluationLauncher !== "function"
 ) {
   throw new Error("evaluation launcher exports are incomplete");
+}
+if (
+  typeof adapters.parseBinaryJudgmentResponse !== "function" ||
+  typeof adapters.createBinaryJudgmentEvaluatorRegistration !== "function" ||
+  typeof adapters.binaryJudgmentEvaluationMethodDescriptor !== "function" ||
+  adapters.BINARY_JUDGMENT_PARSER?.id !== "network.jinn.parser.binary-judgment-evaluation"
+) {
+  throw new Error("binary judgment evaluator exports are incomplete");
 }
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const actual = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();

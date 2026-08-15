@@ -1,9 +1,13 @@
 # `@jinn-network/task-execution-evaluator-adapters`
 
 Concrete evaluator adapters for the Jinn evaluation harness
-(`@jinn-network/task-execution-evaluation-harness`). This package ships two
+(`@jinn-network/task-execution-evaluation-harness`). This package ships three
 `EvaluatorAdapter` implementations plus the deployment-allowlist entries that let
 `runEvaluationHarness` resolve them:
+
+- **binary judgment** — reconstructs the sealed Luna request, verifies every Task,
+  specification, observation, response, instrument, truth, and analysis-context digest
+  join, then compares an exact `ACCEPT` / `REJECT` parse with admitted truth.
 
 - **swe-rebench** — parses the upstream SWE-rebench-V2 grader report into a
   `CompletedEvaluation`, classifying container/tooling failures as unscorable rather
@@ -11,6 +15,14 @@ Concrete evaluator adapters for the Jinn evaluation harness
 - **prediction** — scores a solver's probability submission against a prediction
   market's resolution outcome (Brier loss), modeled as a `deterministic-process`
   evaluation whose resolution data arrives as supporting context.
+
+The binary-judgment layer is intentionally Inspect-neutral: it invokes no model, broker,
+repository, or launcher. Invalid delivered response bytes are completed scientific output
+(`REJECT`, `parseValid=false`); missing, malformed, drifted, or cancelled evaluator material
+is an operational no-verdict path. Its strict response parser uses fatal UTF-8 decoding,
+trims only ASCII space/tab/CR/LF at the edges, performs no normalization, and compares exact
+tokens. The allowlist identity and generated evaluation-method descriptor come from the
+profiles package's sealed umbrella semantics, so there is no second parser oracle here.
 
 Each adapter is a thin composition of one **pure ingestion parser** (raw grader
 report or raw solver Result → a normalized outcome, or a typed ungradeable
@@ -21,6 +33,10 @@ grammar, which the harness runtime turns into the signed Result Evaluation.
 
 ## Injected provider ports
 
+- `BinaryJudgmentMaterialSource` — resolves the strict evaluator-only context containing the
+  instrument, admitted label resolution, and analysis projection. The in-package
+  `contextBinaryJudgmentMaterialSource` decodes, hashes, parses, and canonical-byte-checks all
+  three embedded materials. It never fetches prompt or human-review authority bodies.
 - `GraderReportSource` — resolves a swe-rebench grader report. Two implementations
   ship here. `contextGraderReportSource` reads an already-produced report from the
   runner design's §8.3 "supporting context" (`runtime.ts`'s `optionalContext`) and

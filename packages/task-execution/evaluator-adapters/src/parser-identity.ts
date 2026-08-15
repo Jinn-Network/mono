@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   parserAllowlistKey,
   type ParserIdentity,
 } from "@jinn-network/task-execution-profiles";
@@ -34,12 +35,22 @@ export const PREDICTION_PARSER: ParserIdentity = Object.freeze({
 });
 
 /**
+ * This identity is generated and sealed by the profiles package from the complete response
+ * parser registry plus its truth-comparison map. Keep the oracle single-sourced there rather
+ * than copying a semantics fixture into this adapter package.
+ */
+export const BINARY_JUDGMENT_PARSER: ParserIdentity = Object.freeze({
+  ...BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+});
+
+/**
  * The deployment-side execution allowlist this package contributes. A host merges it into
  * `EvaluationHarnessDeployment.parserAllowlist`; a spec naming any other parser identity is
  * refused by the harness runtime before an adapter is selected.
  */
 export function evaluatorAdaptersParserAllowlist(): ReadonlySet<string> {
   return new Set([
+    parserAllowlistKey(BINARY_JUDGMENT_PARSER),
     parserAllowlistKey(SWE_REBENCH_PARSER),
     parserAllowlistKey(PREDICTION_PARSER),
   ]);
