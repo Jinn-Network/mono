@@ -591,6 +591,30 @@ describe("binary judgment evaluator", () => {
       measurements,
     })).toThrow(EvaluationOperationalError);
   });
+
+  test.each([
+    ["itemId", "not-an-opaque-uuid", undefined],
+    ["candidateClass", "not a closed class", BINARY_JUDGMENT_MEASUREMENTS.candidateClass],
+    ["labelResolutionSha256", `sha256:${"A".repeat(64)}`, BINARY_JUDGMENT_MEASUREMENTS.labelResolutionSha256],
+    ["instrumentSha256", "sha256:short", BINARY_JUDGMENT_MEASUREMENTS.instrumentSha256],
+  ] as const)(
+    "outcome validation refuses an invalid %s",
+    async (field, value, measurementName) => {
+      const completed = await evaluate(makeFixture({
+        truthLabel: "CORRECT",
+        response: encoder.encode("ACCEPT"),
+      }));
+      const outcome = completed.detailedOutcome as Record<string, unknown>;
+      const measurements = completed.measurements!.map((measurement) =>
+        measurement.name === measurementName ? { ...measurement, value } : measurement
+      );
+      expect(() => validateBinaryJudgmentCompletedEvaluation({
+        ...completed,
+        detailedOutcome: { ...outcome, [field]: value },
+        measurements,
+      })).toThrow(EvaluationOperationalError);
+    },
+  );
 });
 
 describe("binary judgment evaluator through the real evaluation harness", () => {
