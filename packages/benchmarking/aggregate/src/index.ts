@@ -51,6 +51,13 @@ export type {
   BinaryInstrumentStratum,
   BinaryInstrumentTruthLabel,
 } from "./binary-instrument.js";
+export {
+  BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+  BINARY_INSTRUMENT_MEASUREMENTS,
+  BINARY_INSTRUMENT_PARAMETER_SCHEMA,
+  validateBinaryInstrumentParameters,
+} from "./binary-instrument-method.js";
+export type { BinaryInstrumentParameters } from "./binary-instrument-method.js";
 
 // --- the reference statistics library (design §9.2, adopted from the capability-eval seed) ---
 export { wilsonInterval } from "./stats/wilson.js";
