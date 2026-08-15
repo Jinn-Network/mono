@@ -1,0 +1,1 @@
+{"accepted":["ACCEPT","REJECT"],"input":{"mediaType":"text/plain; charset=utf-8","normalization":"none","trimCodePoints":["U+0020","U+0009","U+000D","U+000A"],"utf8":"strict"},"invalidOutputDecision":"REJECT","parser":{"id":"network.jinn.parser.binary-accept-reject","version":"1.0.0"},"protocol":"https://spec.jinn.network/binary-judgment/parser-semantics/v1"}

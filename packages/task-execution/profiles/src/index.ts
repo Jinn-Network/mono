@@ -21,6 +21,8 @@ export * from "./task-profile/sub-profile.js";
 export * from "./documents/repository-work-1.0.js";
 export * from "./documents/prediction-forecast-1.0.js";
 export * from "./documents/evaluation-task-1.0.js";
+export * from "./documents/binary-judgment-1.0.js";
+export * from "./binary-judgment/contracts.js";
 export * from "./evaluation-subject.js";
 export * from "./result-evaluation.js";
 export * from "./documents/swe-rebench.js";
