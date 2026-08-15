@@ -340,7 +340,6 @@ export const BinaryJudgmentObservationSchema = z.strictObject({
     retries: z.literal(0),
     fallbacks: z.literal(0),
   }),
-  brokerProtocol: z.literal("jinn.network/model-broker/1"),
   limitations: z.tuple([z.literal("mutable-model-alias")]),
 }).superRefine((observation, ctx) => {
   if (

@@ -231,7 +231,6 @@ describe("binary-judgment closed contracts", () => {
         usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
       },
       call: { count: 1 as const, retries: 0 as const, fallbacks: 0 as const },
-      brokerProtocol: "jinn.network/model-broker/1" as const,
       limitations: ["mutable-model-alias"] as ["mutable-model-alias"],
     };
     expect(BinaryJudgmentObservationSchema.parse(observation)).toStrictEqual(observation);
