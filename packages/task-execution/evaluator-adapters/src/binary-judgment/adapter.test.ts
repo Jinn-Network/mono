@@ -270,7 +270,6 @@ function makeFixture(options: {
       usage: { inputTokens: 100, outputTokens: 1, totalTokens: 101 },
     },
     call: { count: 1, retries: 0, fallbacks: 0 },
-    brokerProtocol: "jinn.network/model-broker/1",
     limitations: ["mutable-model-alias"],
   });
   const evaluationContext = {
