@@ -1,12 +1,7 @@
 /**
- * The CLI's dispatch table (spec §5.2) — the complete agent surface through
- * BP-51. Twenty-seven parity operations over the operations facade (`init`,
- * `draft create`, `draft update`, `draft show`, `draft list`, `inspect`,
- * `sample init`, `import swebench`, `arm add`, `arm update`, `arm remove`,
- * `arm list`, `authority grant`, `authority revoke`, `authority show`,
- * `quote`, `lock`, `launch`, `resume`, `status`, `collect`, `results`,
- * `cancel`, `report`, `verify`, `publish`), plus the path-oriented standalone
- * `bundle verify` and Demo-1 preregistration-verifier exclusions, plus `help`.
+ * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
+ * 39 parity operations over the operations facade, plus the path-oriented
+ * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
  * `process` — `bin.ts` is the only file in this package that does.
@@ -25,8 +20,8 @@
  * only the final rendered result.
  *
  * `CLI_VERB_NAMES` is the dispatch inventory. The generated parity artifact
- * checks the 27 workspace operations against the facade and records the two
- * read-only standalone verifiers separately.
+ * checks every workspace operation against the facade and records read-only
+ * standalone verifiers separately.
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
@@ -43,6 +38,9 @@ import {
   createDraft,
   getDraft,
   importSweBenchRows,
+  admitHumanTruth,
+  createHumanReviewPackets,
+  signHumanReviewResponse,
   initWorkspace,
   inspectDraft,
   listDrafts,
@@ -78,6 +76,9 @@ import {
   type SelectHarborRuntimeInput,
   type SelectTerminalBench2RuntimeInput,
   type MigrateTerminalBenchLegacyTaskInput,
+  type AdmitHumanTruthInput,
+  type CreateHumanReviewPacketsInput,
+  type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
@@ -102,6 +103,12 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   import swebench  --workspace <dir> --principal <id> --draft <draftId> --file <rows.json>
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
+  human-review packet create --workspace <dir> --principal <id> --draft <draftId>
+                   --file <packet-request.json>
+  human-review response sign --workspace <dir> --principal <id> --draft <draftId>
+                   --file <response.json> --signer <configured-signer.json>
+  human-review admit --workspace <dir> --principal <id> --draft <draftId>
+                   --file <admission-manifest.json>
   runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
   runtime harbor select --workspace <dir> --principal <id> --draft <draftId>
@@ -166,6 +173,9 @@ const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
+const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
+const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
@@ -427,6 +437,79 @@ function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: b
     jsonMode,
     (value) =>
       `imported ${value.taskSha256s.length} task(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}\n`,
+  );
+}
+
+function handleHumanReviewPacketCreate(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, HUMAN_REVIEW_PACKET_CREATE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    CreateHumanReviewPacketsInput,
+    "draftId"
+  >;
+  const result = createHumanReviewPackets(opContext, {
+    draftId: required(args, "draft"),
+    item: request.item,
+    evaluatorIds: request.evaluatorIds,
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `created ${value.packets.length} blind review packets for ${value.itemSha256}\n`,
+  );
+}
+
+async function handleHumanReviewResponseSign(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): Promise<CliResult> {
+  assertKnownFlags(args, HUMAN_REVIEW_RESPONSE_SIGN_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const response = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    SignHumanReviewResponseInput,
+    "draftId" | "configuredEvaluatorIds" | "activeEvaluatorId"
+  >;
+  const signer = readJsonFile(pathFrom(context.cwd, required(args, "signer"))) as Pick<
+    SignHumanReviewResponseInput,
+    "configuredEvaluatorIds" | "activeEvaluatorId"
+  >;
+  const result = await signHumanReviewResponse(opContext, {
+    draftId: required(args, "draft"),
+    configuredEvaluatorIds: signer.configuredEvaluatorIds,
+    activeEvaluatorId: signer.activeEvaluatorId,
+    packetSha256: response.packetSha256,
+    visibilityReceiptSha256: response.visibilityReceiptSha256,
+    label: response.label,
+    complete: response.complete,
+    completedAt: response.completedAt,
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `signed human review ${value.verdictSha256} as configured evaluator ${value.evaluatorId}\n`,
+  );
+}
+
+function handleHumanReviewAdmit(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, HUMAN_REVIEW_ADMIT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    AdmitHumanTruthInput,
+    "draftId"
+  >;
+  const result = admitHumanTruth(opContext, {
+    draftId: required(args, "draft"),
+    truthAdmission: request.truthAdmission,
+    candidates: request.candidates,
+    ...(request.evidenceEnvelopesBase64 === undefined
+      ? {}
+      : { evidenceEnvelopesBase64: request.evidenceEnvelopesBase64 }),
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `admitted ${value.resolutions.length} truth resolution(s); publication-grade=${value.publicationGrade}\n`,
   );
 }
 
@@ -975,6 +1058,9 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["inspect", handleInspect],
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
+  ["human-review packet create", handleHumanReviewPacketCreate],
+  ["human-review response sign", handleHumanReviewResponseSign],
+  ["human-review admit", handleHumanReviewAdmit],
   ["runtime inspect select", handleInspectRuntimeSelect],
   ["runtime harbor select", handleHarborRuntimeSelect],
   ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],

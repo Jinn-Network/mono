@@ -3,6 +3,16 @@
   "generatedFrom": "@colophon-claims/core@1.0.0",
   "entries": [
     {
+      "operation": "admitHumanTruth",
+      "cliVerb": "human-review admit",
+      "authorityGated": false,
+      "description": "Validates two-person unanimous truth or explicit operator-only truth and derives resolution and analysis records.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires local signed-review, roster, and licensed truth evidence files"
+      }
+    },
+    {
       "operation": "armAdd",
       "cliVerb": "arm add",
       "authorityGated": false,
@@ -80,6 +90,16 @@
       "gui": {
         "status": "shipped",
         "action": "draft.create"
+      }
+    },
+    {
+      "operation": "createHumanReviewPackets",
+      "cliVerb": "human-review packet create",
+      "authorityGated": false,
+      "description": "Creates blind, digest-bound binary-judgment review packets and visibility receipts.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires local licensed item files and evaluator packet custody; browser upload is intentionally unavailable"
       }
     },
     {
@@ -350,6 +370,16 @@
       "gui": {
         "status": "unavailable",
         "reason": "requires server-configured Terminal-Bench and Harbor host paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
+      "operation": "signHumanReviewResponse",
+      "cliVerb": "human-review response sign",
+      "authorityGated": false,
+      "description": "Signs one human response with a configured evaluator identity and stores compact Result Evaluation evidence.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires a machine-local configured signer key; browser key custody is forbidden"
       }
     },
     {

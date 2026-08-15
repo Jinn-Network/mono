@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **36 generated operations**, all shipped through the library and CLI
+contains **39 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -60,6 +60,9 @@ with an explicit shipped/deferred GUI disposition:
 | `authorityShow` | `colophon authority show` | Read the authority policy. |
 | `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
 | `getDraft` | `colophon draft show` | Read one draft. |
+| `createHumanReviewPackets` | `colophon human-review packet create` | Create blind item packets and visibility receipts before lock. |
+| `signHumanReviewResponse` | `colophon human-review response sign` | Seal a response as compact Result Evaluation evidence with a configured evaluator signer. |
+| `admitHumanTruth` | `colophon human-review admit` | Derive two-person unanimous or explicitly operator-only truth records, including exclusion/replacement accounting. |
 | `importSweBenchRows` | `colophon import swebench` | Import SWE-bench-shaped rows through interop. |
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
@@ -120,6 +123,15 @@ contract and post-dispatch ordering check are in the
 
 Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 `--json`; command-specific flags are listed by `colophon help`.
+
+Human-review commands are intentionally CLI/core-only: they handle licensed local files and
+machine-local signing keys, so browser uploads and browser key custody are unavailable. Reviewer
+responses select an identity from a configured signer inventory; no command accepts raw private
+key material. Publication-grade truth requires two complete, matching reviews from distinct keys
+and roster-attested distinct people with no declared conflicts. Disagreement, incomplete review,
+or `indeterminate` excludes the item and requires a later same-class/stratum reserve before lock.
+Operator-only truth is sealed and signed for auditability but is always reported as
+non-publication-grade.
 
 ## Authority and lifecycle behavior
 

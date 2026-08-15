@@ -41,6 +41,22 @@ export { sampleInit, type SampleInitInput, type SampleInitResult, type SampleIni
 export { importSweBenchRows, type ImportSweBenchRowsInput, type ImportSweBenchRowsResult } from "./import.js";
 
 export {
+  admitHumanTruth,
+  createHumanReviewPackets,
+  signHumanReviewResponse,
+  type AdmitHumanTruthInput,
+  type AdmitHumanTruthResult,
+  type CreateHumanReviewPacketsInput,
+  type CreateHumanReviewPacketsResult,
+  type HumanAdmissionCandidateInput,
+  type HumanAdmissionExclusionSummary,
+  type HumanAdmissionResolutionSummary,
+  type HumanReviewPacketSummary,
+  type SignHumanReviewResponseInput,
+  type SignHumanReviewResponseResult,
+} from "./human-review.js";
+
+export {
   selectInspectEvaluation,
   type SelectInspectEvaluationInput,
   type SelectInspectEvaluationResult,

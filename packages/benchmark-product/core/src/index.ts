@@ -14,6 +14,8 @@ export * from "./agent/index.js";
 export { BENCHMARKING_PROTOCOL } from "./platform.js";
 export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js";
 export type { GuiCapability } from "./cli/parity-map.js";
+export * from "./human-review/contracts.js";
+export * from "./human-review/application.js";
 
 // Typed errors (spec §4.3): callers branch on `code`, never on `message`.
 export { BenchmarkProductError, PRODUCT_ERROR_CODES, toErrorEnvelope } from "./errors.js";
@@ -367,6 +369,9 @@ export {
   createDraft,
   getDraft,
   importSweBenchRows,
+  admitHumanTruth,
+  createHumanReviewPackets,
+  signHumanReviewResponse,
   initWorkspace,
   inspectDraft,
   listDrafts,
@@ -409,6 +414,16 @@ export type {
   DraftSummary,
   ImportSweBenchRowsInput,
   ImportSweBenchRowsResult,
+  AdmitHumanTruthInput,
+  AdmitHumanTruthResult,
+  CreateHumanReviewPacketsInput,
+  CreateHumanReviewPacketsResult,
+  HumanAdmissionCandidateInput,
+  HumanAdmissionExclusionSummary,
+  HumanAdmissionResolutionSummary,
+  HumanReviewPacketSummary,
+  SignHumanReviewResponseInput,
+  SignHumanReviewResponseResult,
   OperationContext,
   OperationResult,
   MigrateTerminalBenchLegacyTaskInput,
