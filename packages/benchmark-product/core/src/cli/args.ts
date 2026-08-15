@@ -120,3 +120,12 @@ export function readJsonFile(path: string): unknown {
     refuse("validation", path, `${path} is not valid JSON`);
   }
 }
+
+/** Reads an exact UTF-8 text manifest; semantic/canonical validation belongs to the operation. */
+export function readTextFile(path: string): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path));
+  } catch {
+    refuse("validation", path, `cannot read ${path}`);
+  }
+}

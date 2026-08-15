@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { BenchmarkProductError } from "../errors.js";
-import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
+import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
 
 function catchError(run: () => void): BenchmarkProductError {
   try {
@@ -136,5 +136,29 @@ describe("readJsonFile", () => {
     const error = catchError(() => readJsonFile(path));
     expect(error.code).toBe("validation");
     expect(error.issues[0]?.path).toBe(path);
+  });
+});
+
+describe("readTextFile", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "binary-jsonl-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("preserves exact valid UTF-8 text and rejects invalid UTF-8 bytes", () => {
+    const valid = join(dir, "valid.jsonl");
+    writeFileSync(valid, "{\"text\":\"café\"}\n");
+    expect(readTextFile(valid)).toBe("{\"text\":\"café\"}\n");
+
+    const invalid = join(dir, "invalid.jsonl");
+    writeFileSync(invalid, new Uint8Array([0xff, 0x0a]));
+    const error = catchError(() => readTextFile(invalid));
+    expect(error.code).toBe("validation");
+    expect(error.issues[0]?.path).toBe(invalid);
   });
 });

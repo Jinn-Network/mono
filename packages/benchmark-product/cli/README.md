@@ -10,7 +10,22 @@ The sample needs Node 22 or newer and is qualified on Ubuntu x64 and Apple-silic
 
 To move from the sample to your own tasks, run `colophon open`. The local app uses
 `./colophon-workspace` unless you select another workspace on the command line. It binds only to
-loopback and does not send telemetry. SWE-bench is the first supported importer.
+loopback and does not send telemetry. SWE-bench and admitted binary-judgment item banks are the
+supported import paths.
+
+The binary path accepts only exact local manifests and reuses the core admission and evaluation
+contracts:
+
+```sh
+colophon import item-bank --workspace ./colophon-workspace --principal <id> \
+  --profile binary-judgment@1 --draft <draftId> \
+  --items ./items.jsonl --sources ./sources.jsonl --admissions ./admissions.jsonl
+```
+
+The item file contains solver-visible question/reference/candidate payloads with digest-only
+provenance. The source file separately maps those digests to full source/license descriptors;
+the admission file names truth records previously sealed by `colophon human-review admit`.
+No source bytes are fetched and no provider is called during import.
 
 Claude Code and Codex arms use strict machine-local profiles. Add a profile by naming the adapter,
 exact model, effort, and optional executable; Colophon observes and hashes the executable itself.

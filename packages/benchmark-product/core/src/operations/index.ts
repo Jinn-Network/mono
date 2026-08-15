@@ -39,6 +39,12 @@ export {
 export { sampleInit, type SampleInitInput, type SampleInitResult, type SampleInitTaskSummary } from "./sample.js";
 
 export { importSweBenchRows, type ImportSweBenchRowsInput, type ImportSweBenchRowsResult } from "./import.js";
+export {
+  BINARY_ITEM_BANK_PROFILE,
+  importBinaryItemBank,
+  type ImportBinaryItemBankInput,
+  type ImportBinaryItemBankResult,
+} from "./import-item-bank.js";
 
 export {
   admitHumanTruth,

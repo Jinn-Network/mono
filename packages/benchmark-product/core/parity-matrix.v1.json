@@ -113,6 +113,16 @@
       }
     },
     {
+      "operation": "importBinaryItemBank",
+      "cliVerb": "import item-bank",
+      "authorityGated": false,
+      "description": "Imports admitted binary-judgment items from exact local JSONL manifests as a sealed benchmark.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires local licensed item, source/license, and human-admission manifests; browser upload is intentionally unavailable"
+      }
+    },
+    {
       "operation": "importSweBenchRows",
       "cliVerb": "import swebench",
       "authorityGated": false,

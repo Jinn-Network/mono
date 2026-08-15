@@ -1,6 +1,6 @@
 /**
  * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
- * 39 parity operations over the operations facade, plus the path-oriented
+ * 40 parity operations over the operations facade, plus the path-oriented
  * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
@@ -37,6 +37,7 @@ import {
   authorityShow,
   createDraft,
   getDraft,
+  importBinaryItemBank,
   importSweBenchRows,
   admitHumanTruth,
   createHumanReviewPackets,
@@ -78,6 +79,7 @@ import {
   type MigrateTerminalBenchLegacyTaskInput,
   type AdmitHumanTruthInput,
   type CreateHumanReviewPacketsInput,
+  type ImportBinaryItemBankInput,
   type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
@@ -85,7 +87,7 @@ import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregist
 import { readRunJournalEntries } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { readDraftDocument } from "../operations/drafts.js";
-import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
+import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
 export const USAGE = `${PRODUCT_BRANDING.displayName} — ${PRODUCT_BRANDING.tagline}
@@ -103,6 +105,10 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   import swebench  --workspace <dir> --principal <id> --draft <draftId> --file <rows.json>
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
+  import item-bank --workspace <dir> --principal <id> --profile binary-judgment@1
+                   --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
+                   --admissions <admissions.jsonl>
+                   [--name <name>] [--description <text>] [--version <ver>]
   human-review packet create --workspace <dir> --principal <id> --draft <draftId>
                    --file <packet-request.json>
   human-review response sign --workspace <dir> --principal <id> --draft <draftId>
@@ -172,6 +178,10 @@ const INSPECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
+] as const;
+const IMPORT_ITEM_BANK_FLAGS = [
+  "workspace", "principal", "json", "profile", "draft", "items", "sources", "admissions",
+  "name", "description", "version",
 ] as const;
 const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
@@ -437,6 +447,34 @@ function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: b
     jsonMode,
     (value) =>
       `imported ${value.taskSha256s.length} task(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}\n`,
+  );
+}
+
+function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, IMPORT_ITEM_BANK_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const profile = required(args, "profile");
+  if (profile !== "binary-judgment@1") {
+    refuse("invalid-invocation", "--profile", "--profile must be binary-judgment@1");
+  }
+  const name = optional(args, "name");
+  const description = optional(args, "description");
+  const version = optional(args, "version");
+  const input: ImportBinaryItemBankInput = {
+    profile,
+    draftId: required(args, "draft"),
+    itemBankJsonl: readTextFile(pathFrom(context.cwd, required(args, "items"))),
+    sourceManifestJsonl: readTextFile(pathFrom(context.cwd, required(args, "sources"))),
+    admissionIndexJsonl: readTextFile(pathFrom(context.cwd, required(args, "admissions"))),
+    ...(name === undefined ? {} : { name }),
+    ...(description === undefined ? {} : { description }),
+    ...(version === undefined ? {} : { version }),
+  };
+  const operation = importBinaryItemBank(opContext, input);
+  return renderResult(
+    operation,
+    jsonMode,
+    (value) => `imported ${value.taskSha256s.length} admitted binary item(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}; excluded ${value.excludedItemSha256s.length}, held back ${value.nonAdmittedItemSha256s.length}\n`,
   );
 }
 
@@ -1058,6 +1096,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["inspect", handleInspect],
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
+  ["import item-bank", handleImportItemBank],
   ["human-review packet create", handleHumanReviewPacketCreate],
   ["human-review response sign", handleHumanReviewResponseSign],
   ["human-review admit", handleHumanReviewAdmit],

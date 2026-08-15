@@ -366,8 +366,10 @@ export {
   authorityGrant,
   authorityRevoke,
   authorityShow,
+  BINARY_ITEM_BANK_PROFILE,
   createDraft,
   getDraft,
+  importBinaryItemBank,
   importSweBenchRows,
   admitHumanTruth,
   createHumanReviewPackets,
@@ -412,6 +414,8 @@ export type {
   CreateDraftInput,
   DraftInspection,
   DraftSummary,
+  ImportBinaryItemBankInput,
+  ImportBinaryItemBankResult,
   ImportSweBenchRowsInput,
   ImportSweBenchRowsResult,
   AdmitHumanTruthInput,
@@ -517,6 +521,28 @@ export { buildSampleBenchmark, SAMPLE_ISSUER } from "./intake/sample.js";
 export type { SampleBenchmark, SampleBenchmarkTask } from "./intake/sample.js";
 export { convertSweBenchRows } from "./intake/swebench.js";
 export type { ConvertSweBenchRowsOptions } from "./intake/swebench.js";
+export {
+  BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
+  BINARY_ITEM_BANK_ENTRY_PROTOCOL,
+  BINARY_ITEM_BANK_INTAKE_EXTENSION,
+  BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
+  BinaryAdmissionIndexEntrySchema,
+  BinaryItemBankEntrySchema,
+  BinaryItemBankIntakeExtensionSchema,
+  BinarySourceManifestEntrySchema,
+  convertBinaryItemBank,
+  parseBinaryItemBankIntakeExtension,
+  renderCanonicalJsonl,
+} from "./intake/binary-item-bank.js";
+export type {
+  BinaryAdmissionIndexEntry,
+  BinaryItemBankEntry,
+  BinaryItemBankIntakeExtension,
+  BinarySourceManifestEntry,
+  ConvertBinaryItemBankInput,
+  ConvertedBinaryItem,
+  ConvertedBinaryItemBank,
+} from "./intake/binary-item-bank.js";
 
 // The CLI as a library (spec §5.2): `runCli` is a pure function of argv and its context;
 // only dist/cli/bin.js touches the process.
