@@ -24,6 +24,8 @@ export const BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI =
   "https://spec.jinn.network/binary-judgment/analysis-context/v1" as const;
 export const BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI =
   "https://spec.jinn.network/binary-judgment/evaluation-context/v1" as const;
+export const BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI =
+  "https://spec.jinn.network/binary-judgment/label-resolution/v1" as const;
 export const BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI =
   "https://spec.jinn.network/binary-judgment/parser-semantics/v1" as const;
 
@@ -38,6 +40,8 @@ export const BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE =
   "application/vnd.jinn.binary-judgment.analysis-context.v1+json" as const;
 export const BINARY_JUDGMENT_EVALUATION_CONTEXT_MEDIA_TYPE =
   "application/vnd.jinn.binary-judgment.evaluation-context.v1+json" as const;
+export const BINARY_JUDGMENT_LABEL_RESOLUTION_MEDIA_TYPE =
+  "application/vnd.jinn.binary-judgment.label-resolution.v1+json" as const;
 export const BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE = "text/plain; charset=utf-8" as const;
 export const BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE =
   "application/vnd.inspect-ai.eval-log+json" as const;
