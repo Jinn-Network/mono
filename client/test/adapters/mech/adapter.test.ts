@@ -632,16 +632,6 @@ describe('MechAdapter TaskCoordinator flow', () => {
       TEST_CONFIG,
       makeConfigStore() as never,
     );
-    (adapter as any).taskRuns = {
-      getByRequestId: vi.fn().mockReturnValue({
-        solverType: 'jinn-repo.v1',
-        task: {
-          contractId: 'jinn-repo',
-          contractVersion: 'v1',
-          spec: { source: 'autopilot-session' },
-        },
-      }),
-    };
     await adapter.initialize();
     (adapter as any).publicClient.getBlockNumber =
       vi.fn().mockResolvedValue(101n);
@@ -650,7 +640,12 @@ describe('MechAdapter TaskCoordinator flow', () => {
     (adapter as any).deliveryBlockCursor = 100n;
     (adapter as any).originalStates.set(
       REQUEST_ID,
-      { id: 'autopilot-task', description: 'test' },
+      {
+        id: 'autopilot-task',
+        description: 'test',
+        solverType: 'jinn-repo.v1',
+        spec: { source: 'autopilot-session' },
+      },
     );
 
     const iterator = adapter.watchForDeliveries()[Symbol.asyncIterator]();

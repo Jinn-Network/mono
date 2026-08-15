@@ -11,8 +11,6 @@ import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { addLauncherRoutes } from '../../src/api/launcher-endpoints.js';
 import { requireUiToken } from '../../src/api/handshake.js';
-import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
-import { TaskRunState } from '../../src/harnesses/engine/state.js';
 import { migrateLegacySolverNets, type JinnConfig } from '../../src/config.js';
 import type { LauncherGeneratorStateSnapshot } from '../../src/api/launcher-status.js';
 import type {
@@ -21,6 +19,7 @@ import type {
 } from '../../src/api/launcher-tasks.js';
 import type { TaskStatusSnapshot } from '../../src/archive/types.js';
 import { withTempStore } from '@test/store.js';
+import { seedNativeRun } from '@test/seed-native-run.js';
 
 const UI_TOKEN = 'ui-token-test';
 const SAFE_ADDRESS = '0x0000000000000000000000000000000000000abc';
@@ -481,6 +480,18 @@ describe('GET /v1/launcher/tasks', () => {
         firstPostedAt: postedAt,
         lastPostedAt: postedAt,
         postCount: 1,
+        canonicalTaskJson: JSON.stringify({
+          id: 'swe-task-1',
+          description: 'SWE task',
+          solverType: 'swe-rebench-v2.v1',
+          role: 'restoration',
+          claimPolicy: {
+            mode: 'parallel',
+            maxClaims: 50,
+            maxClaimsPerOperator: 5,
+            claimLeaseTtlSeconds: 3_600,
+          },
+        }),
       });
       store.recordActivityEvent({
         ts: postedAt,
@@ -489,17 +500,15 @@ describe('GET /v1/launcher/tasks', () => {
         solverType: 'swe-rebench-v2.v1',
       });
 
-      const persistence = new TaskRunPersistence(store.db);
-      persistence.insertDiscovered({
+      seedNativeRun(store, {
         requestId: 'claim-request-1',
         taskId: 'swe-task-1',
         taskCid: 'bafy-swe-task-1',
-        onchainCreationTx: '0xabc',
-        onchainCreationBlock: 1,
         solverType: 'swe-rebench-v2.v1',
         taskRole: 'restoration',
         windowStartTs: 1_000,
         windowEndTs: 2_000,
+        state: 'WAITING',
         task: {
           id: 'swe-task-1',
           description: 'SWE task',
@@ -513,8 +522,6 @@ describe('GET /v1/launcher/tasks', () => {
           },
         },
       });
-      persistence.transition('claim-request-1', TaskRunState.CLAIMED);
-      persistence.transition('claim-request-1', TaskRunState.WAITING);
 
       const { app, token } = buildTestApp({
         solverNets: {

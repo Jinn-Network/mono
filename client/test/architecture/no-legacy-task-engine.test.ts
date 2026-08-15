@@ -6,8 +6,8 @@
  * for these assertions; that file was a stage-2 Task-15 artifact that never landed on
  * `integration/evidence-v1`, so the pin lives here under its own name instead.
  *
- * `persistence.ts` (`TaskRunPersistence`) is KEEP-until-stage-5 per Task 16's Keep
- * list and DR decision 7 (`legacy-task-run-store-coupling` stays unflipped).
+ * `persistence.ts` (`TaskRunPersistence`) retired in Stage 5 PR 3 with
+ * `legacy-task-run-store-coupling` → deleted.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,9 +37,9 @@ describe('the legacy TaskEngine is retired', () => {
     expect(existsSync(join(root, 'harnesses/engine/recovery.ts'))).toBe(false);
   });
 
-  it('keeps task_runs readable for the API until stage 5', () => {
-    expect(existsSync(join(root, 'harnesses/engine/persistence.ts'))).toBe(true);
-    expect(existsSync(join(root, 'store/task-run-persistence.ts'))).toBe(true);
+  it('has no retired engine-table persistence', () => {
+    expect(existsSync(join(root, 'harnesses/engine/persistence.ts'))).toBe(false);
+    expect(existsSync(join(root, 'store/task-run-persistence.ts'))).toBe(false);
   });
 
   it('starts no engine loops', () => {

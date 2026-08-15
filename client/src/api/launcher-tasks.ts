@@ -15,7 +15,7 @@
  *     back to the SolverNet name in config (the only solver-type → net mapping
  *     in v1 is 1:1, so the lookup is straightforward).
  *   ✓ state / claims.current / claims.max — sourced from local task_posts and
- *     matching task_runs when available. This is a pragmatic local projection,
+ *     matching native engagements when available. This is a pragmatic local projection,
  *     not a full chain index; unresolved fields still use explicit unavailable
  *     fallbacks.
  *   ✗ budget.remainingWei — requires on-chain accounting that the v1 daemon

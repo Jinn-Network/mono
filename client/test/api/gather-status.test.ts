@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JinnConfig } from '../../src/config.js';
 import { FleetStateStore } from '../../src/earning/store.js';
-import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import type { PredictionOperatorStatus } from '../../src/solver-nets/prediction-operator-ux.js';
 import { withTempStore } from '@test/store.js';
+import { seedNativeRun } from '@test/seed-native-run.js';
 
 describe('gatherStatusForApi', () => {
   afterEach(() => {
@@ -35,17 +35,14 @@ describe('gatherStatusForApi', () => {
     });
   }
 
-  it('keeps core status available when prediction lifecycle rows cannot be read', async () => {
+  it('keeps core status available when a native capability blob is malformed', async () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      persistence.insertDiscovered({
+      seedNativeRun(store, {
         requestId: 'bad-prediction-row',
         taskId: 'prediction-task',
         taskCid: 'bafy-bad-prediction-row',
-        onchainCreationTx: '0xbad',
-        onchainCreationBlock: 1,
         solverType: 'prediction.v1',
         taskRole: 'restoration',
         windowStartTs: 1_000,
@@ -58,16 +55,13 @@ describe('gatherStatusForApi', () => {
         },
       });
       store.db.prepare(
-        `UPDATE task_runs
-         SET task_payload = ?
-         WHERE request_id = ?`,
+        `UPDATE native_engagements SET capability_json = ? WHERE request_id = ?`,
       ).run('{', 'bad-prediction-row');
 
       const status = await gatherStatusForApi(store, undefined);
 
       expect(status.statusMode).toBe('sqlite_only');
       expect(status.predictionV1?.operator).toBeNull();
-      expect(status.predictionV1?.operatorError).toMatch(/Prediction lifecycle unavailable/);
       expect(status.predictionV1?.totals).toEqual({
         observedTasks: 0,
         activeTaskRuns: 0,
@@ -139,17 +133,16 @@ describe('gatherStatusForApi', () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      persistence.insertDiscovered({
+      seedNativeRun(store, {
         requestId: 'swe-request-1',
         taskId: '15',
         taskCid: 'bafy-swe-task',
-        onchainCreationTx: '0xabc',
-        onchainCreationBlock: 1,
         solverType: 'swe-rebench-v2.v1',
         taskRole: 'restoration',
         windowStartTs: 1_000,
         windowEndTs: 2_000,
+        state: 'RUNNING',
+        stateUpdatedAt: 1_500,
         task: {
           id: 'swe-task',
           description: 'SWE-rebench task',
@@ -157,12 +150,6 @@ describe('gatherStatusForApi', () => {
           role: 'restoration',
         },
       });
-      store.db.prepare(
-        `UPDATE task_runs
-         SET state = 'RUNNING',
-             state_updated_at = ?
-         WHERE request_id = ?`,
-      ).run(1_500, 'swe-request-1');
 
       const status = await gatherStatusForApi(store, undefined);
 
@@ -182,17 +169,17 @@ describe('gatherStatusForApi', () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      persistence.insertDiscovered({
+      const digest = `sha256:${'a'.repeat(64)}`;
+      seedNativeRun(store, {
         requestId: 'swe-complete',
         taskId: '42',
-        taskCid: 'bafy-swe-complete',
-        onchainCreationTx: '0xabc',
-        onchainCreationBlock: 1,
+        taskCid: digest,
         solverType: 'swe-rebench-v2.v1',
         taskRole: 'restoration',
         windowStartTs: 1_000,
         windowEndTs: 2_000,
+        state: 'COMPLETE',
+        stateUpdatedAt: 2_500,
         task: {
           id: 'swe-complete',
           description: 'SWE task',
@@ -200,28 +187,11 @@ describe('gatherStatusForApi', () => {
           role: 'restoration',
         },
       });
-      store.db.prepare(
-        `UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`,
-      ).run(2_500, 'swe-complete');
-
-      const digest = `sha256:${'a'.repeat(64)}`;
       store.db.exec(`
         CREATE TABLE IF NOT EXISTS native_canonical_observations (
           observation_id TEXT PRIMARY KEY, observation_json TEXT NOT NULL, accepted_at TEXT NOT NULL
         );
       `);
-      store.db
-        .prepare(
-          `INSERT INTO native_engagements
-            (engagement_id, chain_id, coordinator, task_id, role, operator_agent, task_digest,
-             submission_uri, submission_digest, state, attempt_index, attempt_uri, request_id,
-             policy_json, capability_json, created_at, updated_at)
-           VALUES ('eng-42', '84532', '0xcoord', '42', 'solver', '0xop', ?,
-                   'urn:uuid:00000000-0000-0000-0000-000000000042', 'sha256:${'b'.repeat(64)}',
-                   'solution-settled', 0, NULL, '0xreq42', '{}', '{}',
-                   '2026-08-01T00:00:02.000Z', '2026-08-01T00:00:05.000Z')`,
-        )
-        .run(digest);
       store.db
         .prepare(
           `INSERT INTO native_canonical_observations (observation_id, observation_json, accepted_at)
@@ -260,17 +230,16 @@ describe('gatherStatusForApi', () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      persistence.insertDiscovered({
+      seedNativeRun(store, {
         requestId: 'swe-complete-nodisc',
         taskId: '43',
         taskCid: 'bafy-swe-complete-nodisc',
-        onchainCreationTx: '0xabc',
-        onchainCreationBlock: 1,
         solverType: 'swe-rebench-v2.v1',
         taskRole: 'restoration',
         windowStartTs: 1_000,
         windowEndTs: 2_000,
+        state: 'COMPLETE',
+        stateUpdatedAt: 2_500,
         task: {
           id: 'swe-complete-nodisc',
           description: 'SWE task',
@@ -278,9 +247,6 @@ describe('gatherStatusForApi', () => {
           role: 'restoration',
         },
       });
-      store.db.prepare(
-        `UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`,
-      ).run(2_500, 'swe-complete-nodisc');
 
       const status = await gatherStatusForApi(store, undefined);
       const row = status.taskRuns?.recentTasks.find((r) => r.requestId === 'swe-complete-nodisc');
@@ -688,7 +654,7 @@ describe('gatherStatusForApi', () => {
 
   // ── #959: loop-completion + impl-state commit cadence on /v1/status ──────────
 
-  /** Seed a task_runs row with explicit solution_outputs_json + delivery_tx_hash. */
+  /** Seed a native run the loop-completion rollup can see. */
   function seedGatingRow(
     store: { db: import('better-sqlite3').Database },
     args: {
@@ -697,28 +663,19 @@ describe('gatherStatusForApi', () => {
       deliveryTxHash?: string | null;
     },
   ): void {
-    const persistence = new TaskRunPersistence(store.db);
-    persistence.insertDiscovered({
+    seedNativeRun(store as import('../../src/store/store.js').Store, {
       requestId: args.requestId,
       taskId: args.requestId,
       taskCid: `bafy-${args.requestId}`,
-      onchainCreationTx: `0x${args.requestId}`,
-      onchainCreationBlock: 1,
       solverType: 'swe-rebench-v2.v1',
       taskRole: 'restoration',
       windowStartTs: 1_000,
       windowEndTs: 2_000,
+      deliveryTxHash: args.deliveryTxHash,
     });
-    store.db
-      .prepare(
-        `UPDATE task_runs
-         SET solution_outputs_json = ?, delivery_tx_hash = ?
-         WHERE request_id = ?`,
-      )
-      .run(args.solutionOutputsJson, args.deliveryTxHash ?? null, args.requestId);
   }
 
-  it('rolls up loop-completion phases across task_runs.solution_outputs_json', async () => {
+  it('rolls up loop-completion with native phase counters at zero', async () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     // Exercises the SQL `json_extract` path in getGatingRows: each seeded
@@ -759,17 +716,12 @@ describe('gatherStatusForApi', () => {
       expect(status.loopCompletion).toEqual({
         total: 4,
         delivered: 1,
-        withGating: 2,
-        reachedExecute: 2,
-        reachedImprove: 1,
-        reachedMemoryConsolidation: 1,
-        fullLoop: 1,
-        phaseCounts: {
-          plan: 2,
-          execute: 2,
-          improve: 1,
-          'memory-consolidation': 1,
-        },
+        withGating: 0,
+        reachedExecute: 0,
+        reachedImprove: 0,
+        reachedMemoryConsolidation: 0,
+        fullLoop: 0,
+        phaseCounts: {},
       });
     });
   });

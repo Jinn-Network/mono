@@ -75,7 +75,6 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn update` | Update the client package, run local Task-native preflight, and refresh integrations |
 | `jinn mcp` | Run the operator MCP server over stdio |
 | `jinn migrate-agent-id` | Backfill ERC-8004 agent_id on legacy complete services (jinn-mono-jgp) |
-| `jinn backfill-failed-deliveries` | Reclassify FAILED runs as COMPLETE when their delivery tx actually succeeded (#506) |
 | `jinn conformance` | Run the envelope + trajectory conformance suite against a signed envelope CID |
 | `jinn evidence` | Read delivered evidence — resolve a task id to an envelope, and an envelope to its result |
 | `jinn create` | Scaffold a new Jinn external harness or SolverPlugin package |

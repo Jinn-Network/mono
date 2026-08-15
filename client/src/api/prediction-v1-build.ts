@@ -1,9 +1,9 @@
 /**
  * prediction.v1 dashboard data assembly.
  *
- * Uses the generic task_runs table as the first operator-visible lifecycle
+ * Uses the generic task-run read model as the first operator-visible lifecycle
  * source. Envelope projections remain the richer corpus source once production
- * writes them, but task_runs is available in the daemon today.
+ * writes them.
  */
 
 import type { PersistedTaskRun } from '../types/task-run.js';

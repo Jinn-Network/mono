@@ -8,9 +8,9 @@
  * projector cursor, and `task_runs` already use — because the R1 read-plane repoint needs the
  * native tables in the database the API layer already opens.
  *
- * This file pins that coexistence: one connection, both DDLs, interleaved writes and reads from
- * both planes, plus the concurrency posture (WAL + busy timeout) two Store handles on one file
- * actually get.
+ * This file pins that coexistence: one connection, native DDL plus remaining
+ * activity/ledger tables, interleaved writes and reads, plus the concurrency
+ * posture (WAL + busy timeout) two Store handles on one file actually get.
  */
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,7 +23,6 @@ import {
   NativeOperatorStateRepository,
 } from '../../src/daemon/native-operator-state.js';
 import { engagementId } from '../../src/daemon/native-operation-identity.js';
-import { TaskRunPersistence } from '../../src/store/task-run-persistence.js';
 
 const SOURCE = {
   cardId: 1,
@@ -63,8 +62,8 @@ const NATIVE_TABLES = [
   'native_discovery_cards',
 ] as const;
 
-/** Legacy tables that must be untouched by the native DDL landing beside them. */
-const LEGACY_TABLES = ['task_runs', 'activity_events', 'engagement_ledger'] as const;
+/** Remaining operator tables that must be untouched by the native DDL landing beside them. */
+const LEGACY_TABLES = ['activity_events', 'engagement_ledger'] as const;
 
 let root: string;
 let dbPath: string;
@@ -149,30 +148,19 @@ describe('native repositories over the shared daemon Store', () => {
     expect(offenders).toEqual(['native-operator-state.ts']);
   });
 
-  it('interleaves native writes with legacy task_runs and activity reads on one connection', () => {
+  it('interleaves native writes with activity reads on one connection', () => {
     const store = new Store(dbPath);
     try {
       const state = new NativeOperatorStateRepository(store, {
         now: () => new Date('2026-08-06T00:00:00Z'),
       });
-      const taskRuns = new TaskRunPersistence(store.db);
       seedDiscoveryCard(store);
 
-      // legacy write -> native write -> legacy read -> native read, all on the one handle.
-      taskRuns.insertDiscovered({
-        requestId: '0xrequest-1',
-        taskCid: 'bafyLegacy',
-        onchainCreationTx: '0xtx',
-        onchainCreationBlock: 1,
-        windowStartTs: 0,
-        windowEndTs: 0,
-      });
       store.recordActivityEvent({ ts: '2026-08-06T00:00:00.000Z', kind: 'legacy_claimed' });
 
       const admitted = state.recordDecision(ADMISSION);
       expect(admitted.kind).toBe('admitted');
 
-      expect(taskRuns.getByRequestId('0xrequest-1')?.state).toBe('DISCOVERED');
       expect(store.getRecentActivityEvents(10).map(({ kind }) => kind)).toContain('legacy_claimed');
       expect(store.getActivityCountsByKind()['legacy_claimed']).toBe(1);
 
@@ -180,8 +168,6 @@ describe('native repositories over the shared daemon Store', () => {
         engagementId(ADMISSION),
       ]);
 
-      // Neither plane's row count moved as a side effect of the other's write.
-      expect(store.db.prepare(`SELECT COUNT(*) AS n FROM task_runs`).get()).toEqual({ n: 1 });
       expect(store.db.prepare(`SELECT COUNT(*) AS n FROM native_engagements`).get()).toEqual({ n: 1 });
     } finally {
       store.close();

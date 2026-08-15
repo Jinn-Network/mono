@@ -54,7 +54,6 @@ import { type MechAdapterConfig } from './types.js';
 import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { Store } from '../../store/store.js';
-import { TaskRunPersistence } from '../../store/task-run-persistence.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
@@ -154,7 +153,6 @@ export class MechAdapter implements ExecutionAdapter {
   // so we can yield accurate Task in DeliveredResult
   private originalStates = new Map<string, Task>();
   private store?: Store;
-  private taskRuns: TaskRunPersistence | undefined;
 
   constructor(config: MechAdapterConfig, store?: Store) {
     this.config = config;
@@ -812,18 +810,19 @@ export class MechAdapter implements ExecutionAdapter {
   }
 
   private engineOwnsAutopilotSettlement(requestId: string): boolean {
-    if (this.store === undefined) return false;
-    try {
-      this.taskRuns ??= new TaskRunPersistence(this.store.db);
-      const run = this.taskRuns.getByRequestId(requestId);
-      const spec = run?.task?.spec;
+    const live = this.originalStates.get(requestId) ?? this.pendingEvaluations.get(requestId);
+    if (live !== undefined) {
+      const spec = live.spec;
       return (
-        run?.solverType === 'jinn-repo.v1'
+        live.solverType === 'jinn-repo.v1'
         && spec !== null
         && typeof spec === 'object'
-        && (spec as Record<string, unknown>)['source']
-          === 'autopilot-session'
+        && (spec as Record<string, unknown>)['source'] === 'autopilot-session'
       );
+    }
+    if (this.store === undefined) return false;
+    try {
+      return this.store.engagementIsAutopilotSession(requestId);
     } catch (error) {
       console.error(
         `[mech] refusing legacy delivery settlement for ${requestId}: `

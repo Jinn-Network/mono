@@ -37,7 +37,6 @@ import keysCommand from './commands/keys-backup.js';
 import updateCommand from './commands/update.js';
 import mcpCommand from './commands/mcp.js';
 import migrateAgentIdCommand from './commands/migrate-agent-id.js';
-import backfillFailedDeliveriesCommand from './commands/backfill-failed-deliveries.js';
 import conformanceCommand from './commands/conformance.js';
 import evidenceCommand from './commands/evidence.js';
 import createCommand from './commands/create.js';
@@ -84,7 +83,6 @@ const COMMANDS: CommandModule[] = [
   updateCommand,
   mcpCommand,
   migrateAgentIdCommand,
-  backfillFailedDeliveriesCommand,
   conformanceCommand,
   evidenceCommand,
   createCommand,

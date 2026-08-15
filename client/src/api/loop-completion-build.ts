@@ -5,7 +5,7 @@
  * SQLite script (`measure-learning.sh`):
  *
  *  - `gatherLoopCompletion` aggregates `gating.phasesCompleted` across every
- *    `task_runs` row (extracted in SQL, not by parsing the full solution blob) —
+ *    persisted run (extracted in SQL, not by parsing the full solution blob) —
  *    how far the engine loop got, and how many runs completed the full
  *    self-improvement loop.
  *  - `gatherImplStateCadence` reports per-repo commit count + last-commit
@@ -26,7 +26,7 @@ import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 const FULL_LOOP_PHASES = ['improve', 'memory-consolidation'] as const;
 
 export interface LoopCompletionStatus {
-  /** Total task_runs rows scanned. */
+  /** Total persisted-run rows scanned. */
   total: number;
   /** Rows with a non-null delivery_tx_hash. */
   delivered: number;
@@ -77,7 +77,7 @@ type LoopCompletionCacheEntry = { at: number; value: LoopCompletionStatus };
 const loopCompletionCache = new WeakMap<object, LoopCompletionCacheEntry>();
 
 /**
- * Aggregate loop-completion across all task_runs. A row's phases come from the
+ * Aggregate loop-completion across all persisted runs. A row's phases come from the
  * `gating.phasesCompleted` array, which `getGatingRows` extracts in SQL via
  * `json_extract` so the fat `solution_outputs_json` blob never leaves SQLite
  * (this endpoint is hard-polled ~1.5s by the SPA). `phasesJson` is the JSON

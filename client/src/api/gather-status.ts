@@ -590,16 +590,11 @@ async function gatherServiceBalances(
 }
 
 /**
- * Which read-plane source `Store.taskRunReadModel()` should sit behind for this
- * boot (one-swap R1, umbrella #2461, DR-2026-08-05). `compositionMode: "native"`
- * — set only by Wave 3's deploy PR, and validly reachable only after
- * `assertNativeDeployment` passed at boot — reads the native aggregate tables;
- * every other value (absent / `"legacy"`) keeps the byte-unchanged legacy
- * `task_runs` read. Dark until the deploy flips the key, so on every legacy
- * boot this returns `"legacy"` and the read plane is unchanged.
+ * Which read-plane source `Store.taskRunReadModel()` sits behind. Stage 5
+ * deleted the engine table; native aggregates are the only source.
  */
-function readPlaneMode(status: StatusGatherConfig | undefined): 'legacy' | 'native' {
-  return status?.config?.compositionMode === 'native' ? 'native' : 'legacy';
+function readPlaneMode(_status: StatusGatherConfig | undefined): 'legacy' | 'native' {
+  return 'native';
 }
 
 /** Collect status inputs without assembling the legacy mega-response. */

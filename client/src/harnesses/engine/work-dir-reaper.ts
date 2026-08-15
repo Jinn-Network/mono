@@ -24,8 +24,7 @@
  *      DB has not observed yet.
  *
  * It is pure I/O over the filesystem plus two caller-supplied id sets, which
- * makes it trivially testable and equally usable from the one-shot cleanup
- * script (`scripts/cleanup-engine-work.ts`).
+ * makes it trivially testable.
  */
 
 import { readdirSync, statSync, rmSync } from 'node:fs';

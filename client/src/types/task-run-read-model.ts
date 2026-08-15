@@ -1,11 +1,9 @@
 /**
  * Read-only task-run port consumed by the status/build endpoints (#1584).
  *
- * The API build functions depend on this neutral interface rather than on the
- * concrete `TaskRunPersistence` engine class. `TaskRunPersistence` structurally
- * satisfies it; `Store.taskRunReadModel()` is the factory that hands one to the
- * composition seam (`api/gather-status.ts`). This keeps `api/` free of any
- * `store/task-run-persistence` import.
+ * The API build functions depend on this neutral interface rather than on a
+ * concrete store class. `Store.taskRunReadModel()` is the factory that hands
+ * one to the composition seam (`api/gather-status.ts`).
  */
 import type { PersistedTaskRun, TaskRunState } from './task-run.js';
 

@@ -150,16 +150,14 @@ function toVerdict(task: PersistedTaskRun): VerdictSummary {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Gather portfolio.v0 dashboard data from SQLite. Safe to call even when the
- * task_runs table does not exist yet (table created on first Store
- * construction, so this is always present when the daemon is running).
+ * Gather portfolio.v0 dashboard data from SQLite.
  */
 export function gatherPortfolioV0Status(
   runs: TaskRunReadModel,
   store: Store,
   workingDirRoot: string = DEFAULT_ENGINE_WORKING_DIR_ROOT,
 ): PortfolioV0Status {
-  // portfolio.v0 is a solver-specific status payload — filter task_runs by
+  // portfolio.v0 is a solver-specific status payload — filter the read model by
   // the daemon's internal routing key so other SolverNets' runs don't leak
   // into these counters (jinn-mono-0t6p) while historical rows can still be
   // classified from canonical `contractId` / `contractVersion` or the legacy

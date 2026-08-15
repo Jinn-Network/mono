@@ -1,13 +1,11 @@
 /**
  * Neutral task-run row + state types (#1584).
  *
- * `PersistedTaskRun` is the canonical persisted-row shape read by both the
- * engine persistence layer and the API read path. It lives here — in the
- * neutral `types/` layer — so the API can type-import it without depending on
- * `store/task-run-persistence`. `store/task-run-persistence.ts` re-exports
- * it for back-compat. `TaskRunState` is re-exported from
- * `harnesses/engine/state.ts` (its canonical const+type home) for one-stop
- * neutral access.
+ * `PersistedTaskRun` is the canonical persisted-row shape the API read path
+ * consumes. It lives here — in the neutral `types/` layer — so the API can
+ * type-import it without depending on store internals. `TaskRunState` is
+ * re-exported from `harnesses/engine/state.ts` (its canonical const+type home)
+ * for one-stop neutral access.
  */
 import type { Task } from './task.js';
 import type {

@@ -2,9 +2,10 @@
  * Work-loop corpus persistence (#1393, E47).
  *
  * Stage-1 solution deliveries no longer pass through `TaskEngine.pack()`, so the
- * work loop must mirror pack()'s local corpus side effects: envelope projection,
- * served_artifacts, and task_runs.manifestCid after delivery; corpus-knowledge
- * autoload before harness submit on subsequent runs.
+ * work loop must mirror pack()'s local corpus side effects: envelope projection
+ * and served_artifacts after delivery; corpus-knowledge autoload before harness
+ * submit on subsequent runs. Knowledge skip-state lives on activity events, not
+ * a retired engine table.
  */
 import { computeRawCodecCid } from '@jinn-network/marketplace-binding';
 import type { TaskExecutionBackend } from '@jinn-network/task-execution-backend';
@@ -14,12 +15,10 @@ import {
   loadCorpusKnowledge,
   type CorpusKnowledgeRecordRef,
 } from '../harnesses/engine/corpus-knowledge.js';
-import { TaskRunPersistence } from '../store/task-run-persistence.js';
 import { projectEnvelope } from '../corpus/envelope-projection.js';
 import { emitEvent } from '../observability/emit-event.js';
 import type { Store } from '../store/store.js';
 import { SignedEnvelopeSchema } from '../types/envelope.js';
-import type { Task } from '../types/task.js';
 import {
   isBridgedTepDeliveryBytes,
   legacyRestorationResultFromDelivery,
@@ -31,43 +30,10 @@ function envelopeCidFromSignedEnvelope(envelope: ReturnType<typeof SignedEnvelop
   return computeRawCodecCid(jcsBytes).cid;
 }
 
-function minimalTaskForWorkLoop(facts: SubmissionFacts): Task {
-  return {
-    id: facts.taskId.toString(),
-    solverType: facts.workKind,
-    role: 'restoration',
-    description: `work-loop ${facts.workKind}`,
-    window: {
-      startTs: Date.now() - 60_000,
-      endTs: Date.now() + 3_600_000,
-    },
-  };
-}
-
-function ensureWorkLoopTaskRunRow(
-  persistence: TaskRunPersistence,
-  requestId: string,
-  facts: SubmissionFacts,
-): void {
-  if (persistence.getByRequestId(requestId) !== null) return;
-  persistence.insertDiscovered({
-    requestId,
-    taskId: facts.taskId.toString(),
-    taskCid: facts.taskDigest,
-    onchainCreationTx: '0x',
-    onchainCreationBlock: 0,
-    solverType: facts.workKind,
-    taskRole: 'restoration',
-    windowStartTs: Date.now() - 60_000,
-    windowEndTs: Date.now() + 3_600_000,
-    task: minimalTaskForWorkLoop(facts),
-  });
-}
-
 /**
  * After a successful work-loop delivery, project the nested legacy envelope into
- * the local corpus index and persist manifestCid on the solution requestId row.
- * Never throws — corpus projection failure must not fail settlement.
+ * the local corpus index. Never throws — corpus projection failure must not fail
+ * settlement.
  */
 export function persistWorkLoopDeliveredCorpus(input: {
   readonly store: Store;
@@ -92,8 +58,6 @@ export function persistWorkLoopDeliveredCorpus(input: {
   }
 
   const envelopeCid = envelopeCidFromSignedEnvelope(envelope);
-  const persistence = new TaskRunPersistence(input.store.db);
-  ensureWorkLoopTaskRunRow(persistence, input.requestId, input.facts);
 
   try {
     input.store.saveEnvelopeProjection({
@@ -106,8 +70,6 @@ export function persistWorkLoopDeliveredCorpus(input: {
       + `${err instanceof Error ? err.message : String(err)}`,
     );
   }
-
-  persistence.setManifestCid(input.requestId, envelopeCid);
 
   if (envelope.solverType === 'prediction.v1' && envelope.payload != null) {
     try {
@@ -132,29 +94,26 @@ export function persistWorkLoopDeliveredCorpus(input: {
   }
 }
 
+function alreadyLoadedCorpusKnowledge(store: Store, requestId: string): boolean {
+  return store.db.prepare(
+    `SELECT 1 AS ok FROM activity_events WHERE request_id = ? AND kind = 'corpus_knowledge' LIMIT 1`,
+  ).get(requestId) !== undefined;
+}
+
 async function injectCorpusKnowledgeBeforeSubmit(input: {
   readonly store: Store;
   readonly requestId: string;
   readonly solverType: string;
 }): Promise<void> {
-  const persistence = new TaskRunPersistence(input.store.db);
-  const existing = persistence.getByRequestId(input.requestId);
-  if (existing?.consumedRefsJson !== null && existing?.consumedRefsJson !== undefined) {
-    return;
-  }
+  if (alreadyLoadedCorpusKnowledge(input.store, input.requestId)) return;
 
   const knowledgePayload = await loadCorpusKnowledge({
     corpus: null,
     store: input.store,
     solverType: input.solverType,
   });
-  if (!knowledgePayload) {
-    persistence.setConsumedRefsJson(input.requestId, null);
-    return;
-  }
+  if (!knowledgePayload) return;
 
-  const consumedRefsJson = JSON.stringify(knowledgePayload.records);
-  persistence.setConsumedRefsJson(input.requestId, consumedRefsJson);
   emitEvent(input.store, {
     kind: 'corpus_knowledge',
     requestId: input.requestId,
@@ -169,7 +128,8 @@ async function injectCorpusKnowledgeBeforeSubmit(input: {
 
 /**
  * Wraps the composition backend so the first `submit()` for a today-generation
- * claim loads corpus knowledge into the persisted task_runs row (#1393).
+ * claim loads corpus knowledge (#1393). Skip-state is the corpus_knowledge
+ * activity event for this request.
  */
 export function wrapBackendWithWorkLoopCorpus(
   backend: TaskExecutionBackend,
@@ -189,8 +149,6 @@ export function wrapBackendWithWorkLoopCorpus(
         ) => {
           const requestId = input.getRequestId();
           if (requestId !== undefined) {
-            const persistence = new TaskRunPersistence(input.store.db);
-            ensureWorkLoopTaskRunRow(persistence, requestId, input.facts);
             await injectCorpusKnowledgeBeforeSubmit({
               store: input.store,
               requestId,

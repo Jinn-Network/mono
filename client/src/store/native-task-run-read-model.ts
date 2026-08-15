@@ -2,30 +2,22 @@
  * Native-backed {@link TaskRunReadModel} (one-swap R1, umbrella #2461,
  * DR-2026-08-05).
  *
- * The API read plane reaches `task_runs` ONLY through the neutral
- * {@link TaskRunReadModel} port, handed over by `Store.taskRunReadModel()`. In
- * native mode (`compositionMode: "native"`) the legacy engine flows never run,
- * so `task_runs` stays empty and the dashboard / `/v1/status` would go blind to
- * native activity. This read model repoints the SAME port at the native tables
- * the native solver / evaluator write — `native_engagements` (M3) and
- * `native_evaluations` (M4a) — mapping each native aggregate row onto the
- * `PersistedTaskRun` row shape the five status builders already consume. The
- * port interface and the builders are unchanged; only the data source moves,
- * so the SPA needs no change.
+ * The API read plane reaches persisted work ONLY through the neutral
+ * {@link TaskRunReadModel} port, handed over by `Store.taskRunReadModel()`. This
+ * read model sits on the native tables the solver / evaluator write —
+ * `native_engagements` (M3) and `native_evaluations` (M4a) — mapping each native
+ * aggregate row onto the `PersistedTaskRun` row shape the five status builders
+ * already consume. The port interface and the builders are unchanged; only the
+ * data source moves, so the SPA needs no change.
  *
  * This lives under `store/` (not `api/`) on purpose: `Store` is the neutral
  * seam that already imports the native daemon schemas, and the #1584 boundary
  * forbids `api/` from importing `daemon/` or the persistence internals. `api/`
- * still only ever sees the port returned by `Store.taskRunReadModel(mode)`.
- *
- * Dual-read: `Store.taskRunReadModel()` selects THIS model only when the caller
- * passes `'native'`; every other caller keeps the byte-unchanged legacy
- * `TaskRunPersistence`. Both boots therefore work while the daemon is dark —
- * legacy operators read `task_runs`, a flipped native operator reads the native
- * tables — with no overlap in a single boot.
+ * still only ever sees the port returned by `Store.taskRunReadModel()`.
  */
 import type { Database as DatabaseType } from 'better-sqlite3';
 import type { PersistedTaskRun, TaskRunState } from '../types/task-run.js';
+import type { Task } from '../types/task.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import { TERMINAL_STATES } from '../harnesses/engine/state.js';
 import type { NativeEngagementState } from '../daemon/native-operator-state.js';
@@ -71,6 +63,14 @@ const EVALUATION_STATE_TO_RUN_STATE: Record<NativeEvaluationState, TaskRunState>
   failed: 'FAILED',
 };
 
+interface CapabilityFields {
+  solverType: string | null;
+  failureReason: string | null;
+  manifestCid: string | null;
+  runStartedAt: number | null;
+  task: Task | null;
+}
+
 interface RawEngagementReadRow {
   engagement_id: string;
   task_id: string;
@@ -78,6 +78,7 @@ interface RawEngagementReadRow {
   task_digest: string;
   attempt_index: number | null;
   state: NativeEngagementState;
+  capability_json: string;
   created_at: string;
   updated_at: string;
   delivery_tx_hash: string | null;
@@ -91,6 +92,7 @@ interface RawEvaluationReadRow {
   subject_task_digest: string;
   solution_attempt_index: number;
   state: NativeEvaluationState;
+  sibling_capability_json: string | null;
   created_at: string;
   updated_at: string;
   delivery_tx_hash: string | null;
@@ -106,6 +108,31 @@ function toMillis(iso: string): number {
 function toSeconds(iso: string): number {
   const ms = toMillis(iso);
   return ms === 0 ? 0 : Math.floor(ms / 1000);
+}
+
+function parseCapability(json: string | null | undefined): CapabilityFields {
+  const empty: CapabilityFields = {
+    solverType: null,
+    failureReason: null,
+    manifestCid: null,
+    runStartedAt: null,
+    task: null,
+  };
+  if (!json) return empty;
+  try {
+    const cap = JSON.parse(json) as Record<string, unknown>;
+    const solverType =
+      typeof cap.solverType === 'string' ? cap.solverType
+        : typeof cap.workKind === 'string' ? cap.workKind
+          : null;
+    const failureReason = typeof cap.failureReason === 'string' ? cap.failureReason : null;
+    const manifestCid = typeof cap.manifestCid === 'string' ? cap.manifestCid : null;
+    const runStartedAt = typeof cap.runStartedAt === 'number' ? cap.runStartedAt : null;
+    const task = cap.task !== null && typeof cap.task === 'object' ? cap.task as Task : null;
+    return { solverType, failureReason, manifestCid, runStartedAt, task };
+  } catch {
+    return empty;
+  }
 }
 
 /**
@@ -124,9 +151,10 @@ function baseRun(input: {
   createdAt: string;
   updatedAt: string;
   deliveryTxHash: string | null;
+  capability: CapabilityFields;
 }): PersistedTaskRun {
   const stateUpdatedAt = toMillis(input.updatedAt);
-  const runStartedAt = toMillis(input.createdAt);
+  const runStartedAt = input.capability.runStartedAt ?? toMillis(input.createdAt);
   return {
     requestId: input.requestId,
     taskId: input.taskId,
@@ -135,7 +163,7 @@ function baseRun(input: {
     onchainCreationTx: '',
     onchainCreationBlock: 0,
     onchainCreationTimestamp: null,
-    solverType: null,
+    solverType: input.capability.solverType,
     solverNetManifestCid: null,
     taskRole: input.taskRole,
     implName: null,
@@ -154,7 +182,7 @@ function baseRun(input: {
     gatingClaim: null,
     informationalClaim: null,
     artifactCids: null,
-    manifestCid: null,
+    manifestCid: input.capability.manifestCid,
     deliveryTxHash: input.deliveryTxHash,
     deliveryDigest: null,
     deliveryDiscoveryAnchorTxHash: null,
@@ -169,14 +197,14 @@ function baseRun(input: {
     adoptionLastError: null,
     manifestGeneratedAt: null,
     evidenceHash: null,
-    task: null,
+    task: input.capability.task,
     solutionOutputsJson: null,
     intermediateFailureDiffsJson: null,
     runtimePluginsJson: null,
     consumedRefsJson: null,
     executorMode: null,
     executorCodeDigest: null,
-    failureReason: null,
+    failureReason: input.capability.failureReason,
     failureAt: null,
   };
 }
@@ -211,7 +239,7 @@ export class NativeTaskRunReadModel implements TaskRunReadModel {
     const rows = this.db
       .prepare(
         `SELECT e.engagement_id, e.task_id, e.request_id, e.task_digest, e.attempt_index,
-                e.state, e.created_at, e.updated_at,
+                e.state, e.capability_json, e.created_at, e.updated_at,
                 (SELECT o.tx_hash FROM native_operations o
                    WHERE o.engagement_id = e.engagement_id
                      AND o.kind = 'solution-settlement'
@@ -232,6 +260,7 @@ export class NativeTaskRunReadModel implements TaskRunReadModel {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         deliveryTxHash: row.delivery_tx_hash,
+        capability: parseCapability(row.capability_json),
       }),
     );
   }
@@ -250,7 +279,9 @@ export class NativeTaskRunReadModel implements TaskRunReadModel {
       .prepare(
         `SELECT v.evaluation_id, v.task_id, v.evaluation_request_id, v.solution_request_id,
                 v.subject_task_digest, v.solution_attempt_index, v.state, v.created_at, v.updated_at,
-                ${deliverySelect} AS delivery_tx_hash
+                ${deliverySelect} AS delivery_tx_hash,
+                (SELECT e.capability_json FROM native_engagements e
+                   WHERE e.task_id = v.task_id LIMIT 1) AS sibling_capability_json
            FROM native_evaluations v
           ORDER BY v.created_at ASC, v.evaluation_id ASC`,
       )
@@ -266,6 +297,16 @@ export class NativeTaskRunReadModel implements TaskRunReadModel {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         deliveryTxHash: row.delivery_tx_hash,
+        capability: (() => {
+          const sibling = parseCapability(row.sibling_capability_json);
+          return {
+            solverType: sibling.solverType,
+            task: sibling.task,
+            failureReason: null,
+            manifestCid: null,
+            runStartedAt: null,
+          };
+        })(),
       }),
     );
   }

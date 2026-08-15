@@ -13,7 +13,7 @@
  *
  * 1. **The shared `Store`.** `native-solver-production.ts` opens `stateDir/solver.sqlite`; this
  *    runs over `Store(config.dbPath)`, where the legacy readers, the projector cursor and
- *    `task_runs` already live, because the R1 read-plane repoint needs the native tables in the
+ *    native aggregates already live, because the R1 read-plane needs the native tables in the
  *    database the API layer already opens. The caller passes the Store in.
  * 2. **Config, not `NativeProductConfig`.** Sources come off the shape-v2 `config.json`
  *    (`recordSources`), not the role-scoped schema of the entry point retiring at stage 5.
