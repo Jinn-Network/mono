@@ -230,4 +230,19 @@ describe("Demo-1 v3 deterministic freeze", () => {
     expect(staticallyIneligible.derived.candidates.find((entry) => entry.repositoryPath === "skills/brand-guidelines"))
       .toMatchObject({ domainCompatibleTaskCount: 21, staticCapacityPossible: false, preE2Ready: false });
   });
+
+  it.each([
+    ["suitability", "6-task/6-repository"],
+    ["rehearsal", "10-task/5-repository"],
+  ] as const)("refuses a caller-weakened v3 %s requirement", (pool, expected) => {
+    const repositories = Array.from({ length: 13 }, (_, repository) => `repo/${repository}`);
+    const input = v3Input(taskEvidence(
+      Array.from({ length: 21 }, (_, index) => task(index, repositories[index % repositories.length]!)),
+      true,
+    )) as unknown as {
+      method: { poolRequirements: Record<typeof pool, { tasks: number; repositories: number }> };
+    };
+    input.method.poolRequirements[pool] = { tasks: 1, repositories: 1 };
+    expect(() => buildDemo1PreRunFreezeV3(input as unknown as Demo1PreRunFreezeV3Input)).toThrow(expected);
+  });
 });

@@ -101,19 +101,19 @@ Only a candidate with all seven checks at `match` can become the pre-E2 winner. 
 implementation is exposed only through the verified v3-to-v2 adapter after v3 earns `ready`; a
 `stop` artifact throws before E2.
 
+The fixed six-task/six-repository suitability, ten-task/five-repository rehearsal, and
+five-task/two-repository official-feasibility floors are product-owned constants. Both the v2
+normalizer and the v3 verifier reject any caller attempt to weaken them.
+
 The dynamic control coordinator is sequential and crash-resumable. It checkpoints before and
 after image and grader operations, allows one recorded infrastructure retry, requires the current
 OCI path to run with the pinned image, `--pull never`, and networking disabled, and requires gold
-PASS plus empty FAIL before sealing evidence. Its cleanup policy is configurable:
-
-- `run-owned` (default): after evidence is sealed, remove only exact image digests that were absent
-  at run start and pulled by this scan;
-- `manual`: retain those images for an operator; or
-- `none`: perform no image cleanup.
-
-No policy can delete pre-existing images, the completed P5 images, build cache, volumes, the Core
-Desktop VM, or user data. A failed or unsealed run performs no automatic cleanup. The current STOP
-never entered Docker, so the cleanup boundary was not invoked.
+PASS plus empty FAIL before sealing evidence. Docker does not provide exclusive cache ownership
+from before/after image inventories: another process can pull or begin using the same digest during
+the run. The coordinator therefore performs no automatic image cleanup at all. Any image or cache
+removal is a separate operator action after inspecting the sealed evidence and current Docker use;
+the coordinator cannot delete pre-existing images, the completed P5 images, build cache, volumes,
+the Core Desktop VM, or user data. The current STOP never entered Docker.
 
 ## Execution accounting and resumption boundary
 

@@ -10,8 +10,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-export const DEMO1_TASK_EVIDENCE_RUN_SCHEMA = "jinn.demo1.task-evidence-run.v1";
-export const DEMO1_TASK_EVIDENCE_CLEANUP_POLICIES = ["run-owned", "manual", "none"];
+export const DEMO1_TASK_EVIDENCE_RUN_SCHEMA = "jinn.demo1.task-evidence-run.v2";
 const STATE_NAME = "task-evidence-run.json";
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 
@@ -67,15 +66,11 @@ function normalizedJobs(jobs) {
   return values;
 }
 
-function newState(jobs, cleanupPolicy, preExistingImages) {
+function newState(jobs) {
   const planSha256 = sha256(canonical(jobs));
   return {
     schema: DEMO1_TASK_EVIDENCE_RUN_SCHEMA,
     planSha256,
-    cleanupPolicy,
-    preExistingImages: [...new Set(preExistingImages)].sort(),
-    ownedImages: [],
-    cleanupIntents: [],
     jobs: jobs.map((job) => ({ ...job, status: "pending", attempts: 0, result: null, error: null })),
     evidence: { sealed: false, sha256: null },
   };
@@ -85,14 +80,10 @@ function readState(runRoot) {
   return JSON.parse(readFileSync(join(runRoot, STATE_NAME), "utf8"));
 }
 
-function validateState(state, jobs, cleanupPolicy) {
+function validateState(state, jobs) {
   if (state?.schema !== DEMO1_TASK_EVIDENCE_RUN_SCHEMA
     || state.planSha256 !== sha256(canonical(jobs))
-    || state.cleanupPolicy !== cleanupPolicy
-    || !Array.isArray(state.jobs)
-    || !Array.isArray(state.preExistingImages)
-    || !Array.isArray(state.ownedImages)
-    || !Array.isArray(state.cleanupIntents)) {
+    || !Array.isArray(state.jobs)) {
     throw new Error("task-evidence checkpoint does not match the immutable run plan");
   }
   for (const job of state.jobs) {
@@ -109,41 +100,28 @@ function safeError(error) {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
-async function finishCleanup(runRoot, state, ports) {
-  if (!state.evidence.sealed || state.cleanupPolicy !== "run-owned") return;
-  for (const image of state.ownedImages) {
-    if (image.removed) continue;
-    if (!state.cleanupIntents.includes(image.digest)) {
-      state.cleanupIntents.push(image.digest);
-      writeState(runRoot, state);
-    }
-    const present = new Set(await ports.listImages());
-    if (present.has(image.digest)) await ports.removeImage(image.digest);
-    image.removed = true;
-    writeState(runRoot, state);
-  }
-}
-
 /**
  * Sequential, crash-resumable evidence controls. The supplied `control` port is the existing
- * no-network OCI grader boundary and must return gold PASS plus empty FAIL. This coordinator never
- * deletes caches, volumes, user data, or pre-existing images; automatic cleanup is limited to
- * exact image digests first observed as absent and then pulled by this run.
+ * no-network OCI grader boundary and must return gold PASS plus empty FAIL. Shared Docker image
+ * ownership cannot be proven from before/after inventories, so this coordinator never deletes
+ * images, caches, volumes, user data, or other shared state. Any cleanup is a separate, explicit
+ * operator action after inspecting the sealed evidence and current Docker use.
  */
 export async function runDemo1TaskEvidenceControls({
   runRoot,
   jobs,
   ports,
-  cleanupPolicy = "run-owned",
+  cleanupPolicy,
 }) {
-  if (!DEMO1_TASK_EVIDENCE_CLEANUP_POLICIES.includes(cleanupPolicy)) throw new TypeError("unknown task-evidence cleanup policy");
+  if (cleanupPolicy !== undefined) {
+    throw new TypeError("task-evidence cleanup policies are unsupported; shared Docker images require a separate operator action");
+  }
   const plan = normalizedJobs(jobs);
   const statePath = join(runRoot, STATE_NAME);
   const state = existsSync(statePath)
-    ? validateState(readState(runRoot), plan, cleanupPolicy)
-    : newState(plan, cleanupPolicy, await ports.listImages());
+    ? validateState(readState(runRoot), plan)
+    : newState(plan);
   writeState(runRoot, state);
-  await finishCleanup(runRoot, state, ports);
   if (state.evidence.sealed) return state;
 
   for (const job of state.jobs) {
@@ -155,15 +133,9 @@ export async function runDemo1TaskEvidenceControls({
     writeState(runRoot, state);
     try {
       await ports.assertDisk(`task-evidence image ${job.taskId}`);
-      const before = new Set(await ports.listImages());
       await ports.ensureImage(job);
       const after = new Set(await ports.listImages());
       if (!after.has(job.imageDigest)) throw Object.assign(new Error("exact pinned image is absent after pre-stage"), { infrastructure: true });
-      if (!before.has(job.imageDigest) && !state.preExistingImages.includes(job.imageDigest)
-        && !state.ownedImages.some((image) => image.digest === job.imageDigest)) {
-        state.ownedImages.push({ digest: job.imageDigest, removed: false });
-        writeState(runRoot, state);
-      }
       await ports.assertDisk(`task-evidence grader ${job.taskId}`);
       const result = await ports.control(job);
       if (result?.gold !== "pass" || result?.empty !== "fail"
@@ -189,7 +161,7 @@ export async function runDemo1TaskEvidenceControls({
     }
   }
   if (!state.jobs.every((job) => job.status === "complete")) {
-    return runDemo1TaskEvidenceControls({ runRoot, jobs: plan, ports, cleanupPolicy });
+    return runDemo1TaskEvidenceControls({ runRoot, jobs: plan, ports });
   }
   const evidenceSha256 = await ports.sealEvidence(state.jobs.map((job) => ({
     candidate: job.candidate,
@@ -204,7 +176,6 @@ export async function runDemo1TaskEvidenceControls({
   }
   state.evidence = { sealed: true, sha256: evidenceSha256 };
   writeState(runRoot, state);
-  await finishCleanup(runRoot, state, ports);
   return state;
 }
 

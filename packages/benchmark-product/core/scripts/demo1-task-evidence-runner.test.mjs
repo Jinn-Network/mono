@@ -67,7 +67,7 @@ function ports({ images = [], failOnce = false } = {}) {
   };
 }
 
-test("task-evidence controls retry infrastructure once, checkpoint, seal, and clean only a run-owned image", async () => {
+test("task-evidence controls retry infrastructure once, checkpoint, seal, and retain the shared image", async () => {
   const runRoot = root();
   try {
     const image = digest("new-image");
@@ -80,8 +80,8 @@ test("task-evidence controls retry infrastructure once, checkpoint, seal, and cl
     assert.equal(state.jobs[0].attempts, 2);
     assert.equal(state.jobs[0].status, "complete");
     assert.equal(state.evidence.sealed, true);
-    assert.deepEqual(runtime.calls.removed, [image]);
-    assert.equal(state.ownedImages[0].removed, true);
+    assert.deepEqual(runtime.calls.removed, []);
+    assert.equal("ownedImages" in state, false);
     assert.equal(runtime.calls.control.length, 1);
     assert.equal(runtime.calls.sealed, 1);
   } finally {
@@ -89,7 +89,7 @@ test("task-evidence controls retry infrastructure once, checkpoint, seal, and cl
   }
 });
 
-test("manual cleanup preserves newly pulled images and resume never repeats completed controls", async () => {
+test("resume preserves images and never repeats completed controls", async () => {
   const runRoot = root();
   try {
     const image = digest("manual-image");
@@ -98,14 +98,30 @@ test("manual cleanup preserves newly pulled images and resume never repeats comp
       runRoot,
       jobs: [{ ...job("task-2", image), candidate: "skills/brand-guidelines" }],
       ports: runtime.port,
-      cleanupPolicy: "manual",
     };
     await runDemo1TaskEvidenceControls(input);
     await runDemo1TaskEvidenceControls(input);
     assert.equal(runtime.calls.control.length, 1);
     assert.equal(runtime.calls.sealed, 1);
     assert.deepEqual(runtime.calls.removed, []);
-    assert.equal(readDemo1TaskEvidenceRun(runRoot).ownedImages[0].removed, false);
+    assert.equal("ownedImages" in readDemo1TaskEvidenceRun(runRoot), false);
+  } finally {
+    rmSync(runRoot, { recursive: true, force: true });
+  }
+});
+
+test("refuses the former automatic cleanup policy before touching shared Docker state", async () => {
+  const runRoot = root();
+  try {
+    const runtime = ports();
+    await assert.rejects(runDemo1TaskEvidenceControls({
+      runRoot,
+      jobs: [job("task-legacy-cleanup", digest("shared-image"))],
+      ports: runtime.port,
+      cleanupPolicy: "run-owned",
+    }), /cleanup policies are unsupported/u);
+    assert.deepEqual(runtime.calls.ensure, []);
+    assert.deepEqual(runtime.calls.removed, []);
   } finally {
     rmSync(runRoot, { recursive: true, force: true });
   }

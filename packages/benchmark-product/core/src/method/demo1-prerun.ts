@@ -34,6 +34,14 @@ export const DEMO1_INSTRUCTION_TRANSFORM_SPEC = [
   "CLAUDE.md is source.md byte-for-byte.",
   "SKILL.md is deterministic name/description frontmatter followed by source.md byte-for-byte.",
 ].join("\n");
+export const DEMO1_SUITABILITY_POOL_REQUIREMENT = {
+  tasks: 6,
+  repositories: 6,
+} as const;
+export const DEMO1_REHEARSAL_POOL_REQUIREMENT = {
+  tasks: 10,
+  repositories: 5,
+} as const;
 export const DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR = {
   tasks: 5,
   repositories: 2,
@@ -125,8 +133,8 @@ export interface Demo1PreRunFreezeInput {
     readonly specSha256: string;
   };
   readonly poolRequirements: {
-    readonly suitability: { readonly tasks: number; readonly repositories: number };
-    readonly rehearsal: { readonly tasks: number; readonly repositories: number };
+    readonly suitability: typeof DEMO1_SUITABILITY_POOL_REQUIREMENT;
+    readonly rehearsal: typeof DEMO1_REHEARSAL_POOL_REQUIREMENT;
     readonly officialFeasibilityFloor: typeof DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR;
   };
   readonly officialDesign: {
@@ -362,22 +370,6 @@ function normalizeCheck(check: Demo1EvidenceCheck, field: string): Demo1Evidence
     ...(check.detail === undefined ? {} : { detail: nonEmpty(check.detail, `${field} detail`) }),
     evidence,
   };
-}
-
-function positiveInteger(value: number, field: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${field} must be a positive safe integer`);
-  return value;
-}
-
-function poolRequirement(tasks: number, repositories: number, field: string) {
-  const normalized = {
-    tasks: positiveInteger(tasks, `${field} task count`),
-    repositories: positiveInteger(repositories, `${field} repository count`),
-  };
-  if (normalized.repositories > normalized.tasks) {
-    throw new TypeError(`${field} repository count cannot exceed task count`);
-  }
-  return normalized;
 }
 
 function expectedCandidate(repositoryPath: string): Demo1PinnedCandidateSource {
@@ -679,8 +671,12 @@ function normalizeInputs(input: Demo1PreRunFreezeInput): Demo1PreRunFreezeInput 
   assertExactKeys(input.poolRequirements, ["suitability", "rehearsal", "officialFeasibilityFloor"], "pool requirements");
   assertExactKeys(input.poolRequirements.suitability, ["tasks", "repositories"], "suitability requirement");
   assertExactKeys(input.poolRequirements.rehearsal, ["tasks", "repositories"], "rehearsal requirement");
-  const suitability = poolRequirement(input.poolRequirements.suitability.tasks, input.poolRequirements.suitability.repositories, "suitability");
-  const rehearsal = poolRequirement(input.poolRequirements.rehearsal.tasks, input.poolRequirements.rehearsal.repositories, "rehearsal");
+  if (!canonicalEqual(input.poolRequirements.suitability, DEMO1_SUITABILITY_POOL_REQUIREMENT)) {
+    throw new TypeError("suitability pool requirement must remain the product-owned 6-task/6-repository floor");
+  }
+  if (!canonicalEqual(input.poolRequirements.rehearsal, DEMO1_REHEARSAL_POOL_REQUIREMENT)) {
+    throw new TypeError("rehearsal pool requirement must remain the product-owned 10-task/5-repository floor");
+  }
   if (!canonicalEqual(input.poolRequirements.officialFeasibilityFloor, DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR)) {
     throw new TypeError("official feasibility floor must remain the objective paired-delta admissibility floor");
   }
@@ -710,8 +706,8 @@ function normalizeInputs(input: Demo1PreRunFreezeInput): Demo1PreRunFreezeInput 
     outcomeBlindTaskChecks: DEMO1_OUTCOME_BLIND_TASK_CHECKS,
     transform: expectedTransform,
     poolRequirements: {
-      suitability,
-      rehearsal,
+      suitability: DEMO1_SUITABILITY_POOL_REQUIREMENT,
+      rehearsal: DEMO1_REHEARSAL_POOL_REQUIREMENT,
       officialFeasibilityFloor: DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR,
     },
     officialDesign: expectedOfficialDesign,
