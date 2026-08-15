@@ -150,7 +150,7 @@ describe("readTextFile", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("preserves exact valid UTF-8 text and rejects invalid UTF-8 bytes", () => {
+  test("preserves exact valid UTF-8 text and rejects invalid UTF-8 bytes or a BOM", () => {
     const valid = join(dir, "valid.jsonl");
     writeFileSync(valid, "{\"text\":\"café\"}\n");
     expect(readTextFile(valid)).toBe("{\"text\":\"café\"}\n");
@@ -160,5 +160,12 @@ describe("readTextFile", () => {
     const error = catchError(() => readTextFile(invalid));
     expect(error.code).toBe("validation");
     expect(error.issues[0]?.path).toBe(invalid);
+
+    const bom = join(dir, "bom.jsonl");
+    writeFileSync(bom, new Uint8Array([0xef, 0xbb, 0xbf, 0x7b, 0x7d, 0x0a]));
+    const bomError = catchError(() => readTextFile(bom));
+    expect(bomError.code).toBe("validation");
+    expect(bomError.issues[0]?.path).toBe(bom);
+    expect(bomError.message).toContain("BOM");
   });
 });
