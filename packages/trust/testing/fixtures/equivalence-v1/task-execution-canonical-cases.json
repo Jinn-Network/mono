@@ -1,0 +1,15 @@
+[
+  {
+    "name": "simple-object",
+    "value": { "b": 1, "a": 2 }
+  },
+  {
+    "name": "task-shaped",
+    "value": {
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+      "requirements": { "cpu": 2, "memory": 4096 },
+      "tags": ["restoration", "evaluation"],
+      "unicode": "jinn — 日本語"
+    }
+  }
+]

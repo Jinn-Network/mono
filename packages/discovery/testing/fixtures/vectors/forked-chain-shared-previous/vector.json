@@ -1,0 +1,43 @@
+{
+  "name": "forked-chain-shared-previous",
+  "kind": "source-chain",
+  "description": "Two observed heads for the same origin at the same sequence citing different entry digests -- the §5.3 fork rule with no benign reading.",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": null
+    },
+    "headA": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "edcfcf8cdd795a069aed5f2a0a1f036cadc46d7145b9a0c82145df21f1392e2c:key-1"
+        }
+      ]
+    },
+    "headB": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:8f3d10ec061a3a6ffcb905fb58356a94b5e882477a0d7297248afb5a15f04d01\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "661feddd60e4c735698008f1b087b41cab6429cbbb6ff4dda7c5956f021e778f:key-1"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "status": "forked"
+  }
+}

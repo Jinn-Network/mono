@@ -160,14 +160,7 @@ export async function loadExternalImpl({
 
   let impl: Harness;
   try {
-    // The signed manifest, not a caller placeholder, is authoritative for
-    // the factory identity. This also lets boot-time callers construct the
-    // environment before the manifest has been loaded.
-    impl = mod.default({
-      ...env,
-      implName: manifest.name,
-      implVersion: manifest.version,
-    });
+    impl = mod.default(env);
   } catch (err) {
     return {
       kind: 'error',

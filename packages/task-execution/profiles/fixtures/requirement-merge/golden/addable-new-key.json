@@ -1,0 +1,11 @@
+{
+  "input": {
+    "task": {},
+    "submission": { "loadout": { "uri": "https://example.test/skill.tar", "kind": "jinn.skill.v1" } },
+    "keyClasses": { "loadout": "addable" }
+  },
+  "expect": {
+    "ok": true,
+    "effective": { "loadout": { "uri": "https://example.test/skill.tar", "kind": "jinn.skill.v1" } }
+  }
+}

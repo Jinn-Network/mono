@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeIpfsGatewayBase } from '../src/adapters/mech/ipfs.js';
 import { distillCaptureToTasks } from '../src/solver-types/_session-derived-distill.js';
-import { createHttpDiscoveryAPI } from '../src/discovery/index.js';
+import { createHttpDiscoveryClient } from '../src/discovery-client/http.js';
 import { DEFAULT_TESTNET_DISCOVERY_URL } from '../src/config.js';
 
 interface CaptureSummary {
@@ -428,7 +428,7 @@ async function waitForCaptureIndex(
   envelopeCid: string,
   timeoutMs = Number(process.env['JINN_CAPTURE_INDEX_TIMEOUT_MS'] ?? 120_000),
 ): Promise<Record<string, unknown>> {
-  const discovery = createHttpDiscoveryAPI({ url: discoveryUrl });
+  const discovery = createHttpDiscoveryClient({ url: discoveryUrl });
   const started = Date.now();
   let lastError = 'not indexed yet';
   while (Date.now() - started < timeoutMs) {

@@ -1,0 +1,22 @@
+{
+  "input": {
+    "op": "resolve",
+    "descriptorUri": "https://spec.jinn.network/task-profiles/example-domain/1.0",
+    "doc": {
+      "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+      "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0",
+      "description": "Resolution fixture: resolvable document.",
+      "payloadSchema": {
+        "type": "object",
+        "properties": { "note": { "type": "string" } },
+        "required": ["note"],
+        "additionalProperties": true
+      },
+      "inputConventions": { "slots": [] },
+      "outputConventions": { "slots": [] },
+      "evaluationFamilies": [],
+      "requirementKeys": []
+    }
+  },
+  "expect": { "ok": true, "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0" }
+}

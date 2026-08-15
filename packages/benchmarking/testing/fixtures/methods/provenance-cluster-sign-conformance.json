@@ -1,0 +1,13 @@
+{
+  "conflicts": true,
+  "methodId": "jinn.benchmarking.method/provenance-cluster-sign",
+  "parameters": {
+    "baseline": "armA",
+    "candidate": "armB"
+  },
+  "pinnedClustering": "task-provenance-source",
+  "replicateBoundary": {
+    "r1": "compute-exact",
+    "rGreaterThan1": "typed-incompatible-input"
+  }
+}

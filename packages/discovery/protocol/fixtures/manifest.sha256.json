@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "derivation-annotation-tolerance/annotation-with-registered-additions.json",
+      "sha256": "caa877e70823c18944b167249ddb287739695ed45050bbf6c88797bd94e33117"
+    },
+    {
+      "id": "equivalence/key-shuffled.json",
+      "sha256": "7692da97b234fe7a86672f35dd1bad5c50f3e52f880c5d2d7d3ac34e7bea512b"
+    },
+    {
+      "id": "equivalence/nested.json",
+      "sha256": "7fee0b00cc6c6cecb2371be5b46141b670cd590244beeccc1074109bb82962a8"
+    },
+    {
+      "id": "equivalence/simple.json",
+      "sha256": "40fc0a61d3958216e2236a0889ae2c0b636d87d2e1f1cba0289b89e7641ef6b8"
+    },
+    {
+      "id": "expected-digests.json",
+      "sha256": "bc6b21bed8db273ac81f0f00ade6b1c4db512a2d8c3c08148b40838c943be2d5"
+    },
+    {
+      "id": "golden-entries/available-withdrawn.json",
+      "sha256": "7bc99b08f30a7357ad4c26d7c67a0797af58a82f66dd0326dbe2a2724e8b6061"
+    },
+    {
+      "id": "golden-entries/genesis-shuffled-keys.json",
+      "sha256": "4d486a6277d9c257914cc9b49d6ae3ecfd798ece3ae8d888e1f2a8561d2c7918"
+    },
+    {
+      "id": "golden-entries/genesis.json",
+      "sha256": "e16f4326006c032b13b6e8e567cdeeb3f27c24d55c0329cb60a1934724e58c94"
+    },
+    {
+      "id": "golden-heads/head.json",
+      "sha256": "02ba3b1677dd98d013dd987871f3c43855428c69e0db389fd969991b60e6dd00"
+    }
+  ],
+  "errata": []
+}

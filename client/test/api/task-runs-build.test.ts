@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { gatherTaskRunsStatus, applyOutcomes, type TaskRunSummary } from '../../src/api/task-runs-build.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
-import type { VerdictTallyResult } from '../../src/discovery/types.js';
+import type { VerdictTallyResult } from '../../src/archive/types.js';
 import { withTempStore } from '@test/store.js';
 
 function makeSummary(overrides: Partial<TaskRunSummary>): TaskRunSummary {

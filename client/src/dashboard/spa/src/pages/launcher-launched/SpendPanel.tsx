@@ -4,7 +4,7 @@ import type {
   LauncherStatusResponse,
   LaunchedSolverNetRecord,
   SolverNetManifestV1,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 import { Card } from '../../components/ui/card.js';
 import {
   Tooltip,

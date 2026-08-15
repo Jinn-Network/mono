@@ -1,0 +1,16 @@
+{
+  "name": "consumer-hostile-locator-wrong-content-type",
+  "kind": "consumer",
+  "description": "§7 / §14: a location that serves an unexpected content type (e.g. an HTML error page instead of the vendor media type) is rejected.",
+  "input": {
+    "location": {
+      "profile": "https://spec.jinn.network/record-discovery/location/https/v1",
+      "locator": "https://example.org/records/x"
+    },
+    "servedContentType": "text/html"
+  },
+  "expect": {
+    "rejected": true,
+    "reason": "wrong-content-type"
+  }
+}

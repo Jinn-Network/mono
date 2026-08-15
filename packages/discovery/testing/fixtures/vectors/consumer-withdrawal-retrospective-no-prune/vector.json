@@ -1,0 +1,13 @@
+{
+  "name": "consumer-withdrawal-retrospective-no-prune",
+  "kind": "consumer",
+  "description": "§5.1: retrospective-kind items (evidence, evaluations, verifications) are immune to pruning on withdrawal except `reorged` -- a `delisted` withdrawal of already-ingested evidence must not remove it from the decision store.",
+  "input": {
+    "itemKind": "https://spec.jinn.network/records/execution-evidence/v1",
+    "withdrawalReason": "delisted",
+    "itemPreviouslyIngested": true
+  },
+  "expect": {
+    "prunedFromDecisionStore": false
+  }
+}

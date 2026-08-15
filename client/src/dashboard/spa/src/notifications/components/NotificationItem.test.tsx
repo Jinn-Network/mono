@@ -18,6 +18,7 @@ describe('NotificationItem', () => {
     const notice: OperatorNotification = {
       kind: 'harness_not_ready',
       severity: 'blocking',
+      title: 'Harness not ready',
       message: 'Claude not authenticated',
       jumpTo: '/operator/memberships',
     };
@@ -32,6 +33,7 @@ describe('NotificationItem', () => {
     const notice: OperatorNotification = {
       kind: 'funding_low',
       severity: 'warning',
+      title: 'Gas runway low',
       message: 'Top up gas',
     };
     render(wrap(<NotificationItem notice={notice} />));
@@ -45,12 +47,14 @@ describe('NotificationItem', () => {
     const withLink: OperatorNotification = {
       kind: 'restart_required',
       severity: 'warning',
+      title: 'Restart required',
       message: 'restart pending',
       jumpTo: '/overview',
     };
     const withoutLink: OperatorNotification = {
       kind: 'update_available',
       severity: 'info',
+      title: 'Update available',
       message: 'new version available',
     };
 
@@ -65,6 +69,7 @@ describe('NotificationItem', () => {
     const notice: OperatorNotification = {
       kind: 'rpc_unreachable',
       severity: 'blocking',
+      title: 'RPC unreachable',
       message: 'daemon offline',
     };
     const { container } = render(wrap(<NotificationItem notice={notice} />));
@@ -83,6 +88,7 @@ describe('NotificationItem', () => {
       const notice: OperatorNotification = {
         kind: 'restart_required',
         severity,
+        title: 'Restart required',
         message: 'severity test',
       };
       const { container, unmount } = render(wrap(<NotificationItem notice={notice} />));

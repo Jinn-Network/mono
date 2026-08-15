@@ -1,6 +1,8 @@
 import {
   createPublicClient,
   createWalletClient,
+  encodePacked,
+  keccak256,
   type Address,
   type Hex,
   type PublicClient,
@@ -9,20 +11,7 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
-import { SAFE_ABI } from './types.js';
-import {
-  SAFE_STALE_NONCE_ERROR_TOKEN,
-  isNonceTooLowError,
-  isReplacementUnderpricedError,
-  type TxSubmissionLedger,
-  withNonceLedger,
-  withRecoverableRetry,
-} from '../../tx-retry.js';
-import {
-  SafeInnerRevertError,
-  decodeSafeInnerRevert,
-  formatDecodedRevert,
-} from './safe-revert.js';
+import type { TxSubmissionLedger } from '../../tx-retry.js';
 import { buildFallbackTransport, parseRpcUrls } from '../../rpc/transport.js';
 
 export function buildSafeSignature(signerAddress: string): Hex {
@@ -40,6 +29,10 @@ export interface SafeTransactionParams {
 }
 
 export interface SafeExecutionOptions {
+  /**
+   * Inert since the single-broadcaster cutover (venue-base owns the submission ledger; contract
+   * 12, plan Task 7). Kept only so existing callers keep compiling; stage 5 deletes this field.
+   */
   ledger?: TxSubmissionLedger;
   beforeBroadcast?: () => void | Promise<void>;
   onBroadcast?: (txHash: Hex) => void | Promise<void>;
@@ -66,318 +59,101 @@ export class SafePostBroadcastHookError extends Error {
   }
 }
 
-// Per-Safe transaction lock to prevent nonce races when concurrent
-// loops (creator + harness) share the same Safe
-const safeLocks = new Map<string, Promise<void>>();
-
-export async function executeSafeTransaction(
-  publicClient: PublicClient,
-  walletClient: WalletClient,
-  params: SafeTransactionParams,
-  options: SafeExecutionOptions = {},
-): Promise<Hex> {
-  const lockKey = params.safeAddress.toLowerCase();
-
-  // Wait for any pending transaction on this Safe to complete
-  const pending = safeLocks.get(lockKey) ?? Promise.resolve();
-
-  let releaseLock!: () => void;
-  const newLock = new Promise<void>(resolve => { releaseLock = resolve; });
-  safeLocks.set(lockKey, newLock);
-
-  await pending;
-
-  try {
-    const hash = await executeSafeTransactionInner(publicClient, walletClient, params, options);
-    return hash;
-  } finally {
-    releaseLock();
-  }
+/**
+ * The generic venue-base broadcast port (execution finding E5). Each daemon/CLI-verb/composition
+ * constructs exactly one broadcaster, bound to one Safe at construction — `execute` takes only
+ * `{to, value, data, logicalTx, operation?}`, not `safeAddress`, and `SafeBroadcastReceipt`
+ * (venue-base) structurally satisfies the narrower return shape below (it carries `txHash` plus
+ * block/log/`alreadySettled` fields this port does not need). Kept as a structural port —
+ * client/src/adapters never imports venue-base directly; the composition root (Task 12) is the
+ * only place that binds a real `BaseVenueSafeBroadcaster` to this interface.
+ *
+ * Per finding E16 / the C2 ruling (cutover stage 1 close-out): there is NO process-global
+ * broadcaster. Each owner (composition root, CLI verb, e2e harness) constructs its own and
+ * threads it explicitly to `executeSafeTransaction` — this is what lets two daemons in one
+ * process each hold a different Safe's broadcaster without racing.
+ */
+export interface VenueBroadcaster {
+  /** The Safe this broadcaster is bound to — fixed at venue construction (finding E5). */
+  readonly safeAddress: `0x${string}`;
+  execute(request: {
+    readonly to: `0x${string}`;
+    readonly value: bigint;
+    readonly data: `0x${string}`;
+    readonly logicalTx: string;
+    readonly operation?: 0 | 1;
+  }): Promise<{ readonly txHash: `0x${string}` }>;
 }
 
-async function executeSafeTransactionInner(
-  publicClient: PublicClient,
-  walletClient: WalletClient,
+/**
+ * Derives a deterministic logical-operation identity for the venue broadcaster's reconcile path
+ * (finding E5): `existing.logicalTx === request.logicalTx` is how the broadcaster's retry loop
+ * adopts an already-pending tx instead of re-signing and double-broadcasting. Identical calldata
+ * to the same target from the same Safe IS the same logical operation (a retry of the exact same
+ * call), so it is correct for a retry to adopt the pending tx. Distinct operations differ in
+ * `data` — the calldata encodes the function selector and its arguments (requestId, taskId,
+ * digest, ...) — so they never collide here.
+ */
+function deriveLogicalTx(params: SafeTransactionParams): string {
+  const encoded = encodePacked(
+    ['address', 'address', 'uint256', 'bytes'],
+    [params.safeAddress, params.to, params.value, params.data],
+  );
+  return `legacy:${keccak256(encoded)}`;
+}
+
+/**
+ * Single-broadcaster-per-Safe rule (composition design §6.1, cutover stage 1; per-daemon state
+ * per the C2 ruling). Every legacy transaction leg still calls this function with its exact
+ * original signature plus one addition — `broadcaster` is now supplied explicitly by the caller
+ * rather than read from module state — and does nothing but derive the logical-operation identity
+ * and hand the Safe call to that broadcaster. Two independent nonce stacks against one Safe is the
+ * #525/#562/#897 failure class and is excluded here by construction as long as every call site for
+ * a given Safe is threaded the SAME broadcaster instance (venue-base owns the nonce ledger and
+ * retry loop, contract 12); `_publicClient`/`_walletClient` are accepted only so call sites do not
+ * need to change their positional shape further.
+ */
+export async function executeSafeTransaction(
+  _publicClient: PublicClient,
+  _walletClient: WalletClient,
   params: SafeTransactionParams,
-  options: SafeExecutionOptions,
+  broadcaster: VenueBroadcaster | undefined,
+  options: SafeExecutionOptions = {},
 ): Promise<Hex> {
-  const { safeAddress, to, value, data } = params;
-  const account = walletClient.account;
-  if (!account) throw new Error('Wallet client has no account');
-  const from = account.address;
+  if (broadcaster === undefined) {
+    throw new Error(
+      'executeSafeTransaction: no venue broadcaster supplied for this call — the caller (composition root, CLI verb, or harness) must construct one and pass it explicitly',
+    );
+  }
+  if (broadcaster.safeAddress.toLowerCase() !== params.safeAddress.toLowerCase()) {
+    throw new Error(
+      `executeSafeTransaction: params.safeAddress (${params.safeAddress}) does not match the ` +
+        `installed venue broadcaster's Safe (${broadcaster.safeAddress}) — refusing to ` +
+        'broadcast from the wrong Safe',
+    );
+  }
 
-  return withNonceLedger({
-    publicClient,
-    walletClient,
-    ledger: options.ledger,
-    from,
-    recoverStuckNonce: true,
-  }, async (nonceLedger) => withRecoverableRetry(
-    async (attemptIndex) => {
-      const nonce = await publicClient.readContract({
-        address: safeAddress,
-        abi: SAFE_ABI,
-        functionName: 'nonce',
-      });
+  try {
+    await options.beforeBroadcast?.();
+  } catch (fenceError) {
+    throw new SafeBroadcastFenceError(fenceError);
+  }
 
-      const txHash = await publicClient.readContract({
-        address: safeAddress,
-        abi: SAFE_ABI,
-        functionName: 'getTransactionHash',
-        args: [
-          to,
-          value,
-          data,
-          0,
-          0n,
-          0n,
-          0n,
-          '0x0000000000000000000000000000000000000000' as Address,
-          '0x0000000000000000000000000000000000000000' as Address,
-          nonce,
-        ],
-      });
+  const receipt = await broadcaster.execute({
+    to: params.to,
+    value: params.value,
+    data: params.data,
+    logicalTx: deriveLogicalTx(params),
+  });
+  const txHash = receipt.txHash as Hex;
 
-      const ethSignature = await walletClient.signMessage({
-        account,
-        message: { raw: txHash as Hex },
-      });
+  try {
+    await options.onBroadcast?.(txHash);
+  } catch (hookError) {
+    throw new SafePostBroadcastHookError(txHash, hookError);
+  }
 
-      const sigBytes = Buffer.from((ethSignature as string).slice(2), 'hex');
-      sigBytes[64] = sigBytes[64] + 4;
-      const safeSignature = `0x${sigBytes.toString('hex')}` as Hex;
-
-      const feeResult = await nonceLedger.feeResultForAttempt(attemptIndex, {
-        forceEstimate: true,
-      });
-
-      try {
-        await options.beforeBroadcast?.();
-      } catch (fenceError) {
-        throw new SafeBroadcastFenceError(fenceError);
-      }
-
-      let hash: Hex;
-      try {
-        hash = await walletClient.writeContract({
-          address: safeAddress,
-          abi: SAFE_ABI,
-          functionName: 'execTransaction',
-          args: [
-            to,
-            value,
-            data,
-            0,
-            0n,
-            0n,
-            0n,
-            '0x0000000000000000000000000000000000000000' as Address,
-            '0x0000000000000000000000000000000000000000' as Address,
-            safeSignature,
-          ],
-          account,
-          chain: walletClient.chain,
-          value: params.value,
-          nonce: nonceLedger.nonce,
-          ...feeResult.overrides,
-        });
-      } catch (writeErr) {
-        const nonceTooLow = isNonceTooLowError(writeErr);
-        const replacementUnderpriced = isReplacementUnderpricedError(writeErr);
-
-        // Issue #897: before re-signing at a fresh nonce, reconcile against the
-        // tx already submitted at the currently-pinned nonce. The original EOA
-        // tx may have mined mid-retry (nonce-too-low = it mined; replacement-
-        // underpriced = it is still pending but the bump was too small and it
-        // may mine before the next attempt). Re-signing a NEW Safe
-        // execTransaction at the advanced Safe nonce is NOT idempotent — it
-        // re-attempts the delivery and reverts as already-claimed. So if the
-        // original receipt is already a success, short-circuit and return it;
-        // otherwise refresh the pinned nonce so the next attempt bumps fees
-        // against the fresh value and detects a mid-retry mine on the following
-        // pass.
-        if (nonceTooLow || replacementUnderpriced) {
-          // The ledger lookup MUST use the ORIGINAL pinned nonce
-          // (nonceLedger.nonce) — read it here, before refreshNonce() below
-          // advances it. Moving refreshNonce() earlier would break
-          // reconciliation by looking up the wrong (advanced) nonce key.
-          const existing = await nonceLedger.ledger.getTxSubmission({
-            chainId: nonceLedger.chainId,
-            from: nonceLedger.from,
-            nonce: nonceLedger.nonce,
-          });
-          // The tx-submission ledger is SHARED across every logical Safe tx the
-          // daemon broadcasts from this one agent EOA (claim, deliver,
-          // setMetadata, reStake) and is keyed only on the EOA nonce. A
-          // stuck-then-mined UNRELATED tx at the same nonce would otherwise let
-          // us return a foreign tx's hash and false-mark THIS delivery as
-          // landed. Gate the reconcile on the ledger entry actually being this
-          // call's own transaction: recordSubmitted stores `to: safeAddress`
-          // and `data: params.data`, so require both to match before trusting
-          // existing.hash. On mismatch, fall through to refresh + re-sign
-          // exactly as if no success receipt were found. (`to`/safeAddress are
-          // addresses — compare case-insensitively; data is calldata hex —
-          // normalize both to be safe.)
-          const entryMatchesThisTx =
-            existing?.to?.toLowerCase() === params.safeAddress.toLowerCase() &&
-            existing?.data?.toLowerCase() === params.data.toLowerCase();
-          if (existing?.hash && entryMatchesThisTx) {
-            try {
-              const reconciled = await publicClient.getTransactionReceipt({ hash: existing.hash });
-              if (reconciled.status === 'success') {
-                console.error(
-                  `[safe/viem] execTransaction reconciled: original tx ${existing.hash} mined ` +
-                    `at pinned nonce ${nonceLedger.nonce} — delivery already landed`,
-                );
-                await nonceLedger.markResolved();
-                return existing.hash;
-              }
-            } catch (receiptErr) {
-              // TransactionReceiptNotFoundError: the original is not yet mined.
-              // Any other failure (transient RPC fault) is also tolerated —
-              // we fall through to refresh + re-sign rather than rethrow — but
-              // log it so a persistent fault is observable, not masked.
-              const reason = receiptErr instanceof Error ? receiptErr.message : String(receiptErr);
-              console.error(
-                `[safe/viem] execTransaction reconcile receipt lookup for ${existing.hash} ` +
-                  `failed (${reason}) — treating as not-yet-mined, refreshing nonce`,
-              );
-            }
-          }
-
-          const refreshed = await nonceLedger.refreshNonce();
-          console.error(`[safe/viem] execTransaction refreshed pinned nonce -> ${refreshed}`);
-        }
-        // viem pre-flight gas estimation may revert with GS013 when the inner
-        // call would fail. Decode the inner reason so callers (and tx-retry)
-        // can distinguish self-already-claimed from lost-race from transient.
-        const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
-        if (msg.includes('GS013') || msg.includes('GS026')) {
-          if (msg.includes('GS026')) {
-            const signerIsOwner = await publicClient.readContract({
-              address: safeAddress,
-              abi: SAFE_ABI,
-              functionName: 'isOwner',
-              args: [from],
-            });
-            if (!signerIsOwner) {
-              throw new Error(
-                'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
-                  'Repair the Safe owner set or repoint the agent signing key to a current owner.',
-              );
-            }
-          }
-          const inner = await decodeSafeInnerRevert(publicClient, params);
-          if (inner.decodedName) {
-            const formatted = formatDecodedRevert(inner.decodedName, inner.decodedArgs);
-            throw new SafeInnerRevertError(
-              `Safe execTransaction inner revert (estimate): ${formatted}`,
-              inner.innerSelector,
-              inner.innerData,
-              inner.decodedName,
-              inner.decodedArgs,
-              null,
-            );
-          }
-          if (inner.innerSelector) {
-            // Deterministic inner revert with an undecoded selector — terminal.
-            // Surface it structurally so tx-retry does not retry the GS013.
-            throw new SafeInnerRevertError(
-              `Safe execTransaction inner revert (estimate, undecoded selector ${inner.innerSelector})`,
-              inner.innerSelector,
-              inner.innerData,
-              null,
-              null,
-              null,
-            );
-          }
-          if (msg.includes('GS026')) {
-            throw new Error(`Safe execTransaction reverted (${SAFE_STALE_NONCE_ERROR_TOKEN})`);
-          }
-        }
-        throw writeErr;
-      }
-      await nonceLedger.recordSubmitted({
-        hash,
-        logicalTx: 'safe.execTransaction',
-        fees: feeResult.snapshot,
-        to: safeAddress,
-        value: params.value,
-        data,
-      });
-      try {
-        await options.onBroadcast?.(hash);
-      } catch (hookError) {
-        throw new SafePostBroadcastHookError(hash, hookError);
-      }
-      // Wait inside the retry attempt so reverted Safe executions caused by
-      // stale nonce / signature races re-read nonce and re-sign.
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      if (receipt.status !== 'success') {
-        // Probe ownership before re-simulation or the stale-nonce fallback.
-        // A broadcast that later reverts because the signer was removed (or
-        // never was an owner) must not surface as a retryable nonce race —
-        // same terminal diagnosis as estimate-path GS026. Issue #1986 / #2090.
-        const signerIsOwner = await publicClient.readContract({
-          address: safeAddress,
-          abi: SAFE_ABI,
-          functionName: 'isOwner',
-          args: [from],
-        });
-        if (!signerIsOwner) {
-          throw new Error(
-            'Safe execTransaction rejected (GS026: invalid owner — signing key is not a Safe owner). ' +
-              'Repair the Safe owner set or repoint the agent signing key to a current owner.',
-          );
-        }
-        // Safe v1.3 wraps inner reverts as GS013 — re-simulate to recover
-        // the actual selector + args for diagnostics and to let tx-retry
-        // mark known-permanent inner errors as non-recoverable.
-        const inner = await decodeSafeInnerRevert(publicClient, params);
-        if (inner.decodedName) {
-          const formatted = formatDecodedRevert(inner.decodedName, inner.decodedArgs);
-          throw new SafeInnerRevertError(
-            `Safe execTransaction inner revert: ${formatted} (txHash=${hash})`,
-            inner.innerSelector,
-            inner.innerData,
-            inner.decodedName,
-            inner.decodedArgs,
-            hash as Hex,
-          );
-        }
-        if (inner.innerSelector) {
-          // The inner call reverts deterministically with a selector we don't
-          // decode (e.g. a newer custom error like TACTaskAlreadyCredited).
-          // Surface it as a SafeInnerRevertError — even without a decoded name —
-          // so tx-retry classifies it non-recoverable instead of retrying the
-          // wrapping GS013 forever. Re-running the same inner call reverts
-          // identically.
-          throw new SafeInnerRevertError(
-            `Safe execTransaction inner revert (undecoded selector ${inner.innerSelector}, txHash=${hash})`,
-            inner.innerSelector,
-            inner.innerData,
-            null,
-            null,
-            hash as Hex,
-          );
-        }
-        // No inner revert on re-simulation: likely a stale Safe nonce or
-        // signature race — retryable, self-heals on re-sign. Do not embed
-        // GS026/GS013 in the message: estimate-path GS026 is classified after
-        // probing Safe ownership, and bare GS013 is terminal. Issue #1986.
-        throw new Error(
-          `Safe execTransaction reverted (${SAFE_STALE_NONCE_ERROR_TOKEN}, txHash=${hash})`,
-        );
-      }
-      await nonceLedger.markResolved();
-      return hash;
-    },
-    {
-      onRetry: ({ attempt, message }) => {
-        console.error(`[safe/viem] execTransaction retry ${attempt}: ${message}`);
-      },
-    },
-  ));
+  return txHash;
 }
 
 export function createClients(

@@ -1,0 +1,73 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "run": {
+    "digest": {
+      "sha256": "4e65d3fbe8ad6535681b021b30785b12b6c0e3f8878859a4148b3f58b8835db0"
+    }
+  },
+  "closeBoundary": {
+    "at": "2026-08-04T00:00:00Z"
+  },
+  "cells": [
+    {
+      "cellKey": "7afaa346b4bf92bf9dc21e9ae809887412a86beb766842e99df7fee6573a4781/armA/1",
+      "taskDigest": "7afaa346b4bf92bf9dc21e9ae809887412a86beb766842e99df7fee6573a4781",
+      "armId": "armA",
+      "replicate": 1,
+      "dispatches": 1,
+      "accounted": 1,
+      "submission": "sha256:9c0fe064ddc879955d1a922bdd2f4a43c2e6484d5e0767beeb5773902b5c1be5",
+      "attempt": "urn:uuid:33333333-3333-5333-8333-333333333333",
+      "delivery": "sha256:0b220df1969115139ffebb337981298d243a44f84dad5d20d7e7da5fdb34de43",
+      "verdicts": [
+        "sha256:133e200534a1e3d482abcb8f867793c134712c315a0b9af38c7ba33ddcac782f"
+      ],
+      "validVerdicts": [
+        "sha256:133e200534a1e3d482abcb8f867793c134712c315a0b9af38c7ba33ddcac782f"
+      ],
+      "outcome": "judged",
+      "verification": {
+        "harness": "match",
+        "model": "match",
+        "loadout": "match",
+        "isolation": "match",
+        "checksFailed": []
+      },
+      "integrityTier": "re-derivable",
+      "solver": "urn:uuid:44444444-4444-5444-8444-444444444444",
+      "evaluator": "urn:uuid:55555555-5555-5555-8555-555555555555",
+      "cost": {
+        "value": "0.10",
+        "unit": "OLAS",
+        "source": "reported"
+      },
+      "latencyMs": 4200
+    }
+  ],
+  "exclusions": [],
+  "attrition": {
+    "perArm": {
+      "armA": {
+        "expected": 1,
+        "judged": 1,
+        "unjudged": 0,
+        "unscorable": 0,
+        "expired": 0,
+        "invalidated": 0,
+        "excluded": 0,
+        "replacements": 0
+      }
+    },
+    "asymmetryFlags": []
+  },
+  "completeness": {
+    "expected": 2,
+    "judged": 1,
+    "floor": "0.8",
+    "runOutcome": "complete"
+  },
+  "assembly": {
+    "procedure": "jinn.benchmarking.assembly",
+    "version": "1.0"
+  }
+}

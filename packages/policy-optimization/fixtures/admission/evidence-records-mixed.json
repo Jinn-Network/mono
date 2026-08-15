@@ -1,0 +1,45 @@
+{
+  "_comment": "A retrieval result in the query's own ranking order, mixing records that are inside the boundary of held-out-boundary.json with records that are outside it, plus one carrying no attribution at all. Ruling R5's filter must keep exactly the three clean records; assembly must refuse the whole list until they are the only ones left.",
+  "records": [
+    {
+      "record": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "instanceId": "sympy__sympy-20154",
+      "repo": "sympy/sympy"
+    },
+    {
+      "record": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "instanceId": "astropy__astropy-12907",
+      "repo": "astropy/astropy"
+    },
+    {
+      "record": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "instanceId": "requests__requests-1142",
+      "repo": "psf/requests"
+    },
+    {
+      "record": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "instanceId": "django__django-15790",
+      "repo": "django/django"
+    },
+    {
+      "record": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "record": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "instanceId": "flask__flask-4045",
+      "repo": "pallets/flask"
+    }
+  ],
+  "expected": {
+    "kept": [
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    ],
+    "excluded": [
+      { "record": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "axis": "instance", "value": "astropy__astropy-12907" },
+      { "record": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "axis": "repo", "value": "django/django" },
+      { "record": "sha256:3333333333333333333333333333333333333333333333333333333333333333", "axis": "unattributable", "value": "" }
+    ]
+  }
+}

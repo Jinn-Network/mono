@@ -1,0 +1,7 @@
+{
+  "input": {
+    "rule": { "threshold": { "measurement": "coverage", "op": "eq", "value": "0.50" } },
+    "measurements": { "coverage": "0.5" }
+  },
+  "expect": { "verdict": "pass" }
+}

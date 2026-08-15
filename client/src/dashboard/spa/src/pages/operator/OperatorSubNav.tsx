@@ -12,6 +12,7 @@ import { Button } from '../../components/ui/button.js';
 import type { JSX } from 'react';
 
 const TABS = [
+  { to: '/operator/claim-policy', label: 'Claim policy & wiring' },
   { to: '/operator/memberships', label: 'Memberships' },
   { to: '/operator/registry', label: 'Registry' },
   { to: '/operator/execution-data', label: 'Execution data' },

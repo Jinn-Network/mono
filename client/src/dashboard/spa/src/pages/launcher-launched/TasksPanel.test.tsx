@@ -12,7 +12,7 @@ import type {
   LaunchedSolverNetRecord,
   LauncherTaskEntry,
   LauncherTasksResponse,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 

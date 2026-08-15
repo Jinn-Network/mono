@@ -1,0 +1,53 @@
+{
+  "name": "derivation-consistency-present",
+  "kind": "derivation-consistency",
+  "description": "The projection's derivation annotation matches the substrate event it claims to project -- confirmed present.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/delivery/v1",
+        "digest": "sha256:f226ccc53fea7efca138e37a55ef7efc31d91516a242f407e16000f5613bbde7"
+      },
+      "facts": {},
+      "locations": [],
+      "provenance": {
+        "source": {
+          "agent": "did:key:zProjector",
+          "name": "marketplace"
+        },
+        "entry": "sha256:9157dcfc8b96b6d0435e87f37cab5547a1b7fd830dec6c6c6f7a9072facf5a48",
+        "announcementId": "ann-derivation-consistency-present",
+        "derivation": {
+          "substrateRef": "sha256:dccf178446e74c8f94818405d5a015e7a83c39ae52b82bb9225440aca967dcd7"
+        }
+      }
+    },
+    "recordBytes": {
+      "note": "derivation-consistency-present fixture record bytes",
+      "kind": "delivery"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zProjector",
+        "name": "marketplace"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-derivation-consistency-present",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/delivery/v1",
+            "digest": "sha256:f226ccc53fea7efca138e37a55ef7efc31d91516a242f407e16000f5613bbde7"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "derivation": "present"
+  }
+}

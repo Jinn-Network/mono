@@ -1,0 +1,63 @@
+{
+  "name": "unknown-facts-field-skip",
+  "kind": "facts-consistency",
+  "description": "The facts card carries an extra field (`aFieldFromANewerProfileVersion`) the consumer's profile does not name -- skipped, never an error; the named fields still check out consistent (§15).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:7313e872c619f9782567f9a2fd6d9d132ca585d59bde818878e210c0dfdd1e69"
+      },
+      "facts": {
+        "taskDigest": "sha256:a0dc99e1111fb9bbcd21a4aed59d17fe4e6d651b37a7a637ac17f4d7f231b422",
+        "aFieldFromANewerProfileVersion": "unrecognized"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:5e64b59f2f5693415c456f5a7411e4008a413f2fd9def84076ba179e0dfd40b7",
+        "announcementId": "ann-4"
+      }
+    },
+    "profile": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "kind": "https://spec.jinn.network/records/submission/v1",
+      "profile": "https://spec.jinn.network/facts/submission/v1",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:a0dc99e1111fb9bbcd21a4aed59d17fe4e6d651b37a7a637ac17f4d7f231b422"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-4",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:7313e872c619f9782567f9a2fd6d9d132ca585d59bde818878e210c0dfdd1e69"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "facts": "consistent"
+  }
+}

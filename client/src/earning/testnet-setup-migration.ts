@@ -93,6 +93,12 @@ export function detectDeprecatedTestnetSetup(params: {
   stakingMode: StakingMode;
   currentStakingContract: string;
 }): TestnetSetupMigrationPlan {
+  // Closed-loop / release runners may pin gold operators that still sit on a
+  // deprecated staking proxy but already have a live Safe+mech. Migrating them
+  // mid-gate archives the complete fleet and fails agent_already_bound.
+  if (process.env['JINN_SKIP_TESTNET_SETUP_MIGRATION'] === '1') {
+    return { services: [] };
+  }
   if (params.chain !== 'base-sepolia' || params.stakingMode !== 'standard') {
     return { services: [] };
   }

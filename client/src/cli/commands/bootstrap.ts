@@ -10,6 +10,10 @@ import {
   logRpcLocalDevToStderr as defaultLogRpcLocalDevToStderr,
   rpcNetworkFailureHint as defaultRpcNetworkFailureHint,
 } from '../../preflight/rpc-network.js';
+import {
+  checkDaemonGuard as defaultCheckDaemonGuard,
+  daemonGuardEnvelope,
+} from '../daemon-guard.js';
 
 /** §6.2 — `stack` only when `JINN_DEBUG=1` (exact string). */
 function envelopeDebug(env: NodeJS.ProcessEnv): boolean {
@@ -39,6 +43,7 @@ export interface BootstrapDeps extends BaseCommandDeps {
   logRpcLocalDevToStderr: typeof defaultLogRpcLocalDevToStderr;
   bootstrapperFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => FleetBootstrapper;
   resolveCliPassword: typeof defaultResolveCliPassword;
+  checkDaemonGuard: typeof defaultCheckDaemonGuard;
 }
 
 const PRODUCTION_DEPS: BootstrapDeps = {
@@ -47,6 +52,7 @@ const PRODUCTION_DEPS: BootstrapDeps = {
   checkRpcNetwork: defaultCheckRpcNetwork,
   rpcNetworkFailureHint: defaultRpcNetworkFailureHint,
   logRpcLocalDevToStderr: defaultLogRpcLocalDevToStderr,
+  checkDaemonGuard: defaultCheckDaemonGuard,
   bootstrapperFactory: (config) => new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: config.network === 'testnet' ? 'base-sepolia' : 'base',
@@ -134,6 +140,18 @@ export function createBootstrapCommand(deps: BootstrapDeps = PRODUCTION_DEPS): C
     // Log to real stderr; `ctx.writer` is stdout and must stay a single JSON (or
     // human) line for `emitResult` / `emitEnvelope` contracts.
     deps.logRpcLocalDevToStderr(rpcPreflight);
+
+    // D0a P3 (#525/#562/#897): `bootstrap` signs Safe writes with the agent
+    // EOA via `executeSafeTxDirect`/`executeSafeTxBatch`, with no cross-process
+    // lock against a concurrently running daemon signing from the same EOA.
+    const daemonGuard = deps.checkDaemonGuard({ earningDir: config.earningDir, env: ctx.env });
+    if (daemonGuard.blocked) {
+      emitEnvelope(
+        daemonGuardEnvelope(daemonGuard, 'jinn bootstrap --json'),
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
 
     // Pass env into config so bootstrapperFactory can forward it to FleetBootstrapper.
     const configWithEnv = { ...config, env: ctx.env };

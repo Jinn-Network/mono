@@ -72,7 +72,7 @@ If (2) does not auto-deploy, the base is rootDirectory-relative → set `watchPa
 
 ### Built-in Ponder endpoints
 
-- `/graphql` — auto-generated GraphQL endpoint over the schema. This is the daemon's primary read path (`client/src/discovery/http.ts` hits `<indexer-url>/graphql`).
+- `/graphql` — auto-generated GraphQL endpoint over the schema. This is the daemon's primary read path (`client/src/discovery-client/http.ts` hits `<indexer-url>/graphql`).
 - `/health` — returns 200 immediately after the process starts. Use for liveness checks.
 - `/ready` — returns 200 once indexing has reached realtime across all chains. Use for readiness checks and as the gate before swapping a load balancer onto a new deployment.
 

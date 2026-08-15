@@ -4,7 +4,7 @@ import { TaskPostingService } from '../../src/tasks/posting-service.js';
 import { Store } from '../../src/store/store.js';
 import { TransientError } from '../../src/types/index.js';
 import type { SignedTaskV1 } from '../../src/types/task-document.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import { getAddress } from 'viem';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';

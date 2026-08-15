@@ -1,0 +1,5 @@
+{
+  "note": "Arrays have integer-like member names and no core axes; accepting one would let `[]` seal to a stable digest that names nothing.",
+  "input": [],
+  "expect": { "ok": false, "code": "invalid-document", "path": "" }
+}

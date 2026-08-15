@@ -1,0 +1,79 @@
+{
+  "input": {
+    "op": "familyUri",
+    "chain": [
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-0/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/depth-chain-1/1.0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-1/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/depth-chain-2/1.0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-2/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/depth-chain-3/1.0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-3/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000003",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/depth-chain-4/1.0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000004"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-4/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000004",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/depth-chain-5/1.0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000005"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-5/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000005",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/depth-chain-6/1.0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000006"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-6/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000006",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/depth-chain-7/1.0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000007"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-7/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000007",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/depth-chain-8/1.0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000008"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/depth-chain-8/1.0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000008"
+      }
+    ]
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document"
+  }
+}

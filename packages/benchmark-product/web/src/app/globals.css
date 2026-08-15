@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --paper: #f7f4ed;
+  --paper-raised: #fffdf8;
+  --ink: #14120e;
+  --ink-800: #2a2621;
+  --ink-700: #403a33;
+  --ink-600: #5c554c;
+  --ink-500: #7c746a;
+  --ink-400: #a39b90;
+  --ink-300: #c6bfb4;
+  --ink-200: #e0d9cd;
+  --ink-100: #efeae0;
+  --ink-50: #f4f1e9;
+  --vermilion: #c7402a;
+  --vermilion-dark: #8c2916;
+  --vermilion-soft: #f6dfd9;
+  --indigo: #27406b;
+  --indigo-soft: #dce3ee;
+  --moss: #2e6144;
+  --moss-soft: #dde9e1;
+  --ochre: #8a6113;
+  --ochre-soft: #f2e6cc;
+  --font-display: "Newsreader Variable", "Newsreader", Georgia, "Times New Roman", serif;
+  --font-ui: "Public Sans Variable", "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --radius: 0.25rem;
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper-raised);
+  --card-foreground: var(--ink);
+  --popover: var(--paper-raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper-raised);
+  --secondary: var(--ink-100);
+  --secondary-foreground: var(--ink-800);
+  --muted: var(--ink-100);
+  --muted-foreground: var(--ink-600);
+  --accent: var(--vermilion-soft);
+  --accent-foreground: var(--vermilion-dark);
+  --destructive: var(--vermilion-dark);
+  --border: var(--ink-200);
+  --input: var(--ink-300);
+  --ring: var(--indigo);
+  --sidebar: var(--paper);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: var(--paper-raised);
+  --sidebar-accent: var(--paper-raised);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--ink-200);
+  --sidebar-ring: var(--indigo);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: 0.125rem;
+  --radius-md: 0.1875rem;
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.375rem;
+  --font-sans: var(--font-ui);
+  --font-serif: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; min-width: 0; }
+  html { background: var(--paper); scroll-behavior: smooth; }
+  body { @apply bg-background text-foreground; font: 400 15px/1.5 var(--font-ui); }
+  h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.015em; }
+  p, li, dd, td, th, strong { overflow-wrap: anywhere; }
+  code, pre, time, .font-mono { font-family: var(--font-mono); }
+  a { text-underline-offset: 0.18em; }
+  a:not([class]) { color: var(--indigo); text-decoration: underline; }
+  :focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
+  button:disabled { background-color: var(--secondary) !important; border-color: var(--input) !important; color: var(--secondary-foreground) !important; opacity: 1 !important; }
+  ::selection { background: var(--vermilion-soft); color: var(--foreground); }
+}
+
+.colophon-display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.025em; }
+.colophon-body { font-family: var(--font-display); font-size: 1.08rem; line-height: 1.62; }
+.colophon-eyebrow { font: 600 0.6875rem/1.4 var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; }
+.colophon-mark { filter: invert(32%) sepia(31%) saturate(2667%) hue-rotate(332deg) brightness(87%) contrast(87%); }
+.colophon-rule { border-color: var(--ink); border-top-width: 2px; }
+.evidence-dots { background-image: radial-gradient(currentColor 0.65px, transparent 0.65px); background-size: 5px 5px; }
+.evidence-hatch { background-image: repeating-linear-gradient(135deg, transparent 0 5px, currentColor 5px 6px); }
+.preview-banner { border-block: 1px solid var(--ochre); background: var(--ochre-soft); color: var(--foreground); }
+.page-frame { width: min(100%, 1120px); margin-inline: auto; padding-inline: clamp(1rem, 4vw, 2.5rem); }
+.reading-frame { width: min(100%, 720px); }
+
+.skip-link { position: fixed; inset-block-start: 0.5rem; inset-inline-start: 0.5rem; z-index: 100; transform: translateY(-200%); border: 2px solid var(--foreground); border-radius: 2px; background: var(--foreground); color: var(--background); padding: 0.75rem 1rem; }
+.skip-link:focus-visible { transform: translateY(0); }
+main#main-content:focus-visible { outline: 3px solid var(--foreground); outline-offset: -3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+@media print {
+  :root { color-scheme: light; --paper: #fff; --paper-raised: #fff; --ink: #000; }
+  nav, button, .skip-link, .preview-banner { display: none !important; }
+}

@@ -1,0 +1,15 @@
+{
+  "seed": "1",
+  "plane": "local",
+  "summary": "Rebuild the flaky corpus index after a tokenizer change",
+  "origin": "urn:jinn:agent:operator-local",
+  "capturedAt": "2026-07-20T11:02:00.000Z",
+  "outcome": "completed",
+  "excerpts": [
+    {
+      "label": "failure",
+      "text": "yarn rebuild\nFAIL: index tokenizer mismatch, refusing to mix tokenizations"
+    },
+    { "label": "fix", "text": "yarn rebuild --drop-index" }
+  ]
+}

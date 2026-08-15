@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "effort": "high" },
+    "submission": { "effort": "low" },
+    "keyClasses": { "effort": "floor" }
+  },
+  "expect": { "ok": false, "category": "invalid-document", "key": "effort" }
+}

@@ -28,27 +28,27 @@ describe('#1043 loop-heartbeat helper', () => {
   });
 
   it('namespaces the config key under the loop_heartbeat: prefix', () => {
-    expect(loopHeartbeatKey('creator')).toBe(`${LOOP_HEARTBEAT_PREFIX}creator`);
+    expect(loopHeartbeatKey('work')).toBe(`${LOOP_HEARTBEAT_PREFIX}work`);
   });
 
   it('round-trips a recorded tick as the wall-clock ms it wrote', () => {
     const before = Date.now();
-    recordLoopTick(store, 'engine-tick');
+    recordLoopTick(store, 'posting');
     const after = Date.now();
 
-    const tick = getLoopTick(store, 'engine-tick');
+    const tick = getLoopTick(store, 'posting');
     expect(tick).not.toBeNull();
     expect(tick).toBeGreaterThanOrEqual(before);
     expect(tick).toBeLessThanOrEqual(after);
   });
 
   it('returns null for a loop that has never ticked', () => {
-    expect(getLoopTick(store, 'peer-sync')).toBeNull();
+    expect(getLoopTick(store, 'harvest')).toBeNull();
   });
 
   it('returns null when the stored value is not a finite number', () => {
-    store.setConfigValue(loopHeartbeatKey('creator'), 'not-a-number');
-    expect(getLoopTick(store, 'creator')).toBeNull();
+    store.setConfigValue(loopHeartbeatKey('work'), 'not-a-number');
+    expect(getLoopTick(store, 'work')).toBeNull();
   });
 
   it('enumerates the ten canonical watchdog loops', () => {
@@ -56,14 +56,14 @@ describe('#1043 loop-heartbeat helper', () => {
       [
         'balance-topup',
         'checkpoint',
-        'creator',
-        'delivery-watcher',
-        'engine-tick',
-        'engine-watcher',
+        'evaluator',
+        'evidence-driver',
         'eviction-check',
         'harvest',
-        'peer-sync',
+        'posting',
+        'projector',
         'reward-claim',
+        'work',
       ].sort(),
     );
   });

@@ -1,0 +1,7 @@
+{
+  "input": {
+    "rule": { "threshold": { "measurement": "passed", "op": "between", "value": true } },
+    "measurements": { "passed": true }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

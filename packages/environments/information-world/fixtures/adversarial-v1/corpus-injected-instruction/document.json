@@ -1,0 +1,67 @@
+{
+  "kind": "https://spec.jinn.network/records/information-world/v1",
+  "requestKeyPolicy": {
+    "version": "irk1",
+    "headerSubset": [
+      "accept",
+      "content-type"
+    ],
+    "pathTrailingSlash": "preserve",
+    "plusInQuery": "literal",
+    "bodyCanonicalization": "json-jcs"
+  },
+  "corpus": {
+    "origins": [
+      "https://api.example.test"
+    ],
+    "entries": [
+      {
+        "requestKey": "irk1:2fdf00c169a62623471b55641e13c779bcd4907ea72d5b9bb9e85fd2f8e7ea55",
+        "request": {
+          "method": "GET",
+          "origin": "https://api.example.test",
+          "path": "/notice",
+          "query": [],
+          "headers": {
+            "accept": [
+              "application/json"
+            ]
+          },
+          "body": null
+        },
+        "response": {
+          "status": 200,
+          "headers": [
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body": {
+            "digest": "sha256:d564d6d91ff2aa7ec2553069ce20d23da332de5a3bf01699049306e9d23f4693",
+            "mediaType": "application/json",
+            "sizeBytes": 107
+          }
+        }
+      }
+    ]
+  },
+  "missPolicy": {
+    "status": 404,
+    "headers": [
+      [
+        "content-type",
+        "application/json"
+      ]
+    ],
+    "body": {
+      "inlineUtf8": "{\"error\":\"this request is not in the sealed corpus\"}",
+      "mediaType": "application/json"
+    },
+    "reason": "uncaptured-request"
+  },
+  "capture": {
+    "fidelity": "synthetic",
+    "provenanceClass": "declared"
+  }
+}

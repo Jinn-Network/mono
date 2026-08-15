@@ -1,0 +1,56 @@
+{
+  "schema": "demo1.p5-green-baseline-session-excerpt/1",
+  "attempt": 2,
+  "source": {
+    "kind": "authenticated-local-codex-execution-history",
+    "sessionId": "019ff739-66e5-7f33-b2aa-c3074508d880",
+    "basename": "rollout-2026-08-12T20-26-02-019ff739-66e5-7f33-b2aa-c3074508d880.jsonl",
+    "sha256": "d259012802dff212df817d1540aa04aff4b6b37038b6b11400178854f4fe724b",
+    "portability": "The normalized events below are preserved in this packet; the private source history is not a bundle dependency."
+  },
+  "events": [
+    {
+      "kind": "command-issued",
+      "observedAt": "2026-08-13T01:39:46.521Z",
+      "callId": "call_MEAms7LSTb2bBZkvGvXLEuuS",
+      "sourceEventSha256": "5ed7d6edde41a5d1e195839d3eadbca7181735d766ba68a6f6b94fb0a4a4f37e",
+      "output": "green-baseline-attempt-2.json",
+      "dockerPath": "/usr/local/bin/docker",
+      "image": "swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781",
+      "platform": "linux/amd64",
+      "configuredTimeoutSeconds": 1800
+    },
+    {
+      "kind": "late-process-observation",
+      "observedAt": "2026-08-13T02:08:56.735Z",
+      "callId": "call_mYXWUHLGNhhqEVv6oBEO4czi",
+      "sourceEventSha256": "d6ac844665ea502e56af8bf01ccd32bf4d67b8964c0c7a1260cb5067ea62c54f",
+      "pid": 99255,
+      "processElapsedSeconds": 1748,
+      "command": "docker pull --platform linux/amd64 swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781"
+    },
+    {
+      "kind": "terminal-result-observed",
+      "observedAt": "2026-08-13T02:09:51.667Z",
+      "callId": "call_CzWQMC2Uv8w3Pf8R6wKcCshj",
+      "sourceEventSha256": "9c34daea90ea38f2f059fac6ff239337e7a97872ea498817d01e53a48b9a1b4c",
+      "exitCode": 1,
+      "errorName": "EvaluationOperationalError",
+      "canonicalCode": "UNAVAILABLE",
+      "reason": "provider-unavailable",
+      "recoveryAdvice": "new-attempt-required",
+      "safeDetail": "oci grader unavailable: pinned grader image is unavailable"
+    },
+    {
+      "kind": "post-attempt-image-inspect",
+      "observedAt": "2026-08-13T02:09:59.781Z",
+      "callId": "call_mzePXsdkWu2VrR7bpnHURA7L",
+      "sourceEventSha256": "f7d6ddc550bdf05ae73f7cbadbd66aa582a07e21f8d98efbab189f2d7221d5c3",
+      "inspectObservedAt": "2026-08-13T02:09:59Z",
+      "exactDigestPresent": false,
+      "dockerInspectError": "No such image: swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781",
+      "availableKiB": 44297640
+    }
+  ],
+  "limitation": "The source history does not expose boundedExit.timedOut or a final monotonic elapsed measurement. These events prove the configured bound, late-running exact pull, terminal UNAVAILABLE result, and exact-image absence, but cannot independently distinguish runner timeout from another nonzero pull exit."
+}

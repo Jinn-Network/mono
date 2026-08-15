@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import { keccak256, toBytes, type Hex } from 'viem';
 import { signCanonical } from '../harnesses/engine/signing.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 import {
   scrubArtifactBytes,

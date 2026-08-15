@@ -1,0 +1,19 @@
+{
+  "signerSet": {
+    "threshold": 1,
+    "keys": [
+      "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz"
+    ]
+  },
+  "protocol": "https://spec.jinn.network/trust/policy/v1",
+  "purposes": {
+    "verifier-agent": {
+      "accepted": [
+        "urn:uuid:22222222-2222-4222-8222-222222222222"
+      ],
+      "requiredStrength": "strong"
+    }
+  },
+  "version": 1,
+  "refreshBy": "2026-08-28T00:00:00Z"
+}

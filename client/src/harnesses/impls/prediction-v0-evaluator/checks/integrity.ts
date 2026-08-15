@@ -1,5 +1,5 @@
 import { keccak256, recoverAddress } from 'viem';
-import { canonicalJson } from '../../../engine/canonical-json.js';
+import { canonicalJson } from '../../../../util/canonical-json.js';
 import type { Check } from '../types.js';
 import type { PredictionV0Task } from '../../../../types/prediction.js';
 import type { PredictionV0RestorationPayload } from '../../../../types/payloads/prediction-v0.js';

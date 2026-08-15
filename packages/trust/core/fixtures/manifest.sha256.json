@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "ceremony-v1/eoa-siwe.json",
+      "sha256": "69411989c855d15600c2fff5a05c086aec7fa0d9f58253f0e854e44e1afa8825"
+    },
+    {
+      "id": "ceremony-v1/recap.json",
+      "sha256": "5b19ad6bd8241416df2d605f22b7bbb7aa6ad55eff756bafc7ba450c9d7487e1"
+    },
+    {
+      "id": "policy-chain-v1/genesis.json",
+      "sha256": "fcbd424b56622188e2599a9913621333464c6daac7c6810049aa4064a45f02a9"
+    },
+    {
+      "id": "policy-chain-v1/v2.json",
+      "sha256": "1805889f14e3d9645d74c42606fc73b85659b3653f3c3abebbef7e61c7ed5591"
+    },
+    {
+      "id": "policy-chain-v1/v3.json",
+      "sha256": "ba618632f8e68f711ec3bdd7e4bea254e3876f6030fbc09ace101de3e73c7611"
+    },
+    {
+      "id": "sealing-v1/authorization.json",
+      "sha256": "d2c015f4a3eb8bdb1d31d65213cb911fc84de5ed74a945a28e28d3c9a309ddad"
+    },
+    {
+      "id": "sealing-v1/expected-digests.json",
+      "sha256": "670a7cc531bf4d8748f65adfe710ce761566b28f5ac821398e3d9df8e4d081f5"
+    },
+    {
+      "id": "sealing-v1/key-binding.json",
+      "sha256": "5318657ca372cab70c3990ac4b1ee20cd37d35840a665497c97cc057f5702d96"
+    },
+    {
+      "id": "sealing-v1/policy.json",
+      "sha256": "5889a3e6e4ad751ea70296218e5dbbfd4eae4443f9e4d32d1f0af8dc36b705e7"
+    },
+    {
+      "id": "sealing-v1/revocation.json",
+      "sha256": "1dcb8e1d3ac8e4df47efa341ce74b76c935524959b707aa2eb729fe209a33b78"
+    }
+  ],
+  "errata": []
+}

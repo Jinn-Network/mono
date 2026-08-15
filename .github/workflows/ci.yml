@@ -26,6 +26,10 @@ on:
   # on-demand without changing the PR-blocking surface.
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     working-directory: client
@@ -61,6 +65,12 @@ jobs:
       # call graph. Catches the Hono "matcher is already built" crash class
       # at code-review time. See jinn-mono-u34i.
       - run: yarn lint:no-late-mount
+      # No-error-leak lint: blocks raw error.message stringification in any
+      # client/src/api/ file that talks to an RPC client. Catches the
+      # credential-leak class where a viem HttpRequestError's message (which
+      # embeds the full request URL) reaches an unauthenticated response
+      # unmasked. See spec §14.2 item 2, issue #2402.
+      - run: yarn lint:no-error-leak
       # SKIP_HL_TESTS gates test/venues/hyperliquid/client.test.ts, which hits
       # the live Hyperliquid testnet. Without it, transient 429/503/ECONNREFUSED
       # from that endpoint red-gate unrelated PRs (it flaked 4 PRs on 2026-06-03).
@@ -71,6 +81,25 @@ jobs:
       - run: env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY yarn test
         env:
           SKIP_HL_TESTS: '1'
+      # The in-process `test/e2e/*.test.ts` composition tests. They are named
+      # *.test.ts but are tsx scripts, not vitest files, so
+      # vitest.config.ts's `test/e2e/**` exclude hides them from `yarn test`
+      # and nothing else ran them — they sat unexecuted behind a `yarn e2e:*`
+      # script no workflow invoked. Both are "Option B lightweight
+      # integration": mocked IPFS / HF fetcher / eval-runner, no Anvil, no
+      # Docker, no network, ~50ms each. They belong in the same job as the
+      # unit suite, right after it, on the workspace builds `yarn test`
+      # already produced. `summarize()` throws on any failed phase, so a
+      # regression exits non-zero and reddens the job.
+      #
+      # `yarn e2e:freeze-mode` was a third entry here until Wave-4 D1
+      # (DR-2026-08-05) deleted its engine-driven spec. Freeze coverage is not
+      # lost: `yarn e2e` still runs `runFreezeFenceForkE2E` (stable digest,
+      # mutation detected, rollback) and `runTrainVsFrozenTrajectoryE2E` as
+      # phases of `test/e2e/validate.ts`. Those need Anvil, so they stay in the
+      # e2e entry point rather than moving into this job.
+      - run: yarn e2e:checkpoint-flow
+      - run: yarn e2e:swe-rebench-v2
       - run: yarn build
 
   pack-smoke:
@@ -117,22 +146,30 @@ jobs:
           fi
           echo "✓ Tarball contents verified"
 
-  funding-sequence-e2e:
-    # Playwright E2E for the AwaitingFundingCard auto-continue sequence
-    # (jinn-mono-u34i). Catches wiring/UX regressions that unit tests can't
-    # see — specifically the Stage 1 → Stage 2 gate transition where the
-    # funding card's local dripStatus.targetReached must reset when the
-    # daemon's gate advances. Sequential /v1/bootstrap mocks reproduce the
-    # exact scenario that broke the 2026-05-18 canary.
+  dashboard-e2e:
+    # Playwright E2E for the operator dashboard SPA — every top-level
+    # test/dashboard/*.e2e.test.ts, driven against a real daemon serving the
+    # built bundle with the daemon API mocked at the page.route() boundary.
     #
-    # Scoped to just the funding-sequence test for now — the other dashboard
-    # E2Es (spa.e2e.test.ts, spa-config.e2e.test.ts, solvernet-flow.e2e.test.ts,
-    # HarnessSection.e2e.test.ts) have stale failures unrelated to u34i; fixing
-    # those is filed as a follow-up. When they're green, swap this run to
-    # `yarn e2e:dashboard` to gate all of them.
-    name: Funding Sequence E2E (Playwright)
+    # This job used to run ONLY funding-sequence, because the rest of the
+    # dashboard E2Es had stale failures and were quarantined behind a
+    # "fixing those is filed as a follow-up" comment with no owner and no
+    # expiry. Sitting outside CI for months is what let them rot in the first
+    # place. They are fixed and green now, so the whole surface is gated here.
+    #
+    # `e2e:dashboard-app` filters to top-level files by regex rather than
+    # naming them, so a NEW dashboard E2E is gated the moment it lands — an
+    # allowlist would re-create the quarantine one file at a time. The regex
+    # deliberately excludes test/dashboard/release-prep/, which is release-tier
+    # T1.4 and runs from `yarn release:tier-1:T1.4`, not from PR CI.
+    #
+    # solvernet-flow + join also run in hermetic-gate, where they serve a
+    # different purpose (the determinism verdict). The few seconds of overlap
+    # buy a dashboard job whose scope needs no maintenance.
+    name: Dashboard E2E (Playwright)
     needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -143,7 +180,7 @@ jobs:
       # Install only chromium — the playwright.config.ts targets chromium
       # exclusively, so this is the minimal browser surface.
       - run: npx playwright install --with-deps chromium
-      - run: yarn e2e:funding-sequence
+      - run: yarn e2e:dashboard-app
       # Upload traces on failure so a reviewer can step through the timeline.
       - if: failure()
         uses: actions/upload-artifact@v7
@@ -151,6 +188,29 @@ jobs:
           name: playwright-traces
           path: client/test-results/
           retention-days: 7
+
+  degraded-daemon-guard-e2e:
+    # Issue #2407 B1/R2/R3 — spawns the REAL built binary against a loopback
+    # RPC stub to prove: (B1) checkDaemonGuard reports blocked while a halted
+    # daemon runs its degraded recovery loops; (R2) a SIGTERM delivered
+    # during that window still removes the pidfile; (R3) JINN_NO_DAEMON=1
+    # acquires and cleans up the pidfile on its own exit path too. Plain
+    # node subprocess test, no browser — needs `yarn build` first (that's
+    # why it's `test/main/*.e2e.test.ts`, auto-excluded from the `check`
+    # job's `yarn test`, which runs before `yarn build`), so this job builds
+    # via `yarn e2e:degraded-daemon-guard` itself, same pattern as
+    # `funding-sequence-e2e` above.
+    name: Degraded Daemon Guard E2E
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn e2e:degraded-daemon-guard
 
   task-creator-marketplace-e2e:
     # Task Creator marketplace-leg e2e (WP6) — SOFT GATE, not PR-blocking.

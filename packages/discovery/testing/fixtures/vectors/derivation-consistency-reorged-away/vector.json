@@ -1,0 +1,53 @@
+{
+  "name": "derivation-consistency-reorged-away",
+  "kind": "derivation-consistency",
+  "description": "The substrate event the projection once derived from has since been reorganized out -- the projector's declared confirmation depth was insufficient (§6.2).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/delivery/v1",
+        "digest": "sha256:4f8e1f9116f5563145e6097a86a9bdddb3be613db0cffac51f2db5f5c0b89678"
+      },
+      "facts": {},
+      "locations": [],
+      "provenance": {
+        "source": {
+          "agent": "did:key:zProjector",
+          "name": "marketplace"
+        },
+        "entry": "sha256:1b7966b41358da87fbc3021e3de984a4561cf04bf7c98128abed0c2e8fc730c3",
+        "announcementId": "ann-derivation-consistency-reorged-away",
+        "derivation": {
+          "substrateRef": "sha256:86bc2c619e558c8a5fa9dbd374bd438114583fe11316daba65262b097f8d36d6"
+        }
+      }
+    },
+    "recordBytes": {
+      "note": "derivation-consistency-reorged-away fixture record bytes",
+      "kind": "delivery"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zProjector",
+        "name": "marketplace"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-derivation-consistency-reorged-away",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/delivery/v1",
+            "digest": "sha256:4f8e1f9116f5563145e6097a86a9bdddb3be613db0cffac51f2db5f5c0b89678"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "derivation": "reorged-away"
+  }
+}

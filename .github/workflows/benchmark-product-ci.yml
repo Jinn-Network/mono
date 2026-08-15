@@ -1,0 +1,357 @@
+name: Benchmark Product CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/benchmark-product/**"
+      - "packages/benchmarking/aggregate/**"
+      - "packages/benchmarking/interop/**"
+      - "packages/benchmarking/local/**"
+      - "packages/benchmarking/publication/**"
+      - "packages/benchmarking/records/**"
+      - "packages/benchmarking/run/**"
+      - "packages/discovery/client/**"
+      - "packages/discovery/protocol/**"
+      - "packages/discovery/publication/**"
+      - "packages/discovery/serve/**"
+      - "packages/discovery/transport-http/**"
+      - "packages/environments/record/**"
+      - "packages/evidence/attestation-issuer/**"
+      - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/protocol/**"
+      - "packages/evidence/repository/**"
+      - "packages/task-supply/admission/**"
+      - "packages/task-execution/backend/**"
+      - "packages/task-execution/backend-local/assembly/**"
+      - "packages/task-execution/backend-local/launchers/**"
+      - "packages/task-execution/backend-local/supervisor/**"
+      - "packages/task-execution/backend-local/workspace/**"
+      - "packages/task-execution/evaluation-harness/**"
+      - "packages/task-execution/evaluator-adapters/**"
+      - "packages/task-execution/oci-grader/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
+      - "packages/trust/core/**"
+      - ".github/scripts/benchmark-product-package-inventory.test.mjs"
+      - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      - ".github/scripts/benchmark-product-packed-types.test.mjs"
+      - ".github/workflows/benchmark-product-ci.yml"
+      - "spec/2026-08-13-colophon-self-serve.md"
+      - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
+      - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
+      - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
+      - "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md"
+      - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
+      - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
+      - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
+  push:
+    branches: [next]
+    paths:
+      - "packages/benchmark-product/**"
+      - "packages/benchmarking/aggregate/**"
+      - "packages/benchmarking/interop/**"
+      - "packages/benchmarking/local/**"
+      - "packages/benchmarking/publication/**"
+      - "packages/benchmarking/records/**"
+      - "packages/benchmarking/run/**"
+      - "packages/discovery/client/**"
+      - "packages/discovery/protocol/**"
+      - "packages/discovery/publication/**"
+      - "packages/discovery/serve/**"
+      - "packages/discovery/transport-http/**"
+      - "packages/environments/record/**"
+      - "packages/evidence/attestation-issuer/**"
+      - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-recorder/**"
+      - "packages/evidence/protocol/**"
+      - "packages/evidence/repository/**"
+      - "packages/task-supply/admission/**"
+      - "packages/task-execution/backend/**"
+      - "packages/task-execution/backend-local/assembly/**"
+      - "packages/task-execution/backend-local/launchers/**"
+      - "packages/task-execution/backend-local/supervisor/**"
+      - "packages/task-execution/backend-local/workspace/**"
+      - "packages/task-execution/evaluation-harness/**"
+      - "packages/task-execution/evaluator-adapters/**"
+      - "packages/task-execution/oci-grader/**"
+      - "packages/task-execution/profiles/**"
+      - "packages/task-execution/protocol/**"
+      - "packages/trust/core/**"
+      - ".github/scripts/benchmark-product-package-inventory.test.mjs"
+      - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      - ".github/scripts/benchmark-product-packed-types.test.mjs"
+      - ".github/workflows/benchmark-product-ci.yml"
+      - "spec/2026-08-13-colophon-self-serve.md"
+      - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
+      - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
+      - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
+      - "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md"
+      - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
+      - "docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md"
+      - "docs/superpowers/plans/2026-08-13-benchmark-publication-implementation-program.md"
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/benchmark-product-package-inventory.test.mjs
+      - name: Verify source boundaries
+        run: node --test .github/scripts/benchmark-product-source-boundaries.test.mjs
+
+  product:
+    needs: [architecture]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: inspect-python
+        name: Install the pinned optional Inspect runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify and install the supported Inspect wheel
+        run: |
+          python -m pip download --no-deps --only-binary=:all: --dest "$RUNNER_TEMP/inspect-wheel" inspect-ai==0.3.255
+          echo "958e773a8d0cc8873314e3f96d1143cbb4e0b9e4bacc2cbec6b4d5576ceecf2c  $RUNNER_TEMP/inspect-wheel/inspect_ai-0.3.255-py3-none-any.whl" | sha256sum -c -
+          python -m pip install "$RUNNER_TEMP/inspect-wheel/inspect_ai-0.3.255-py3-none-any.whl"
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      # Cross-tree portal dependencies, built from source in dependency order: each one's `dist/`
+      # is what the next one's type resolution reads. The full graph: BP-11's runtime closure
+      # (protocol, trust-core, environment-record, profiles, records, task-admission, interop),
+      # the public Record Discovery source/transport/publication stack,
+      # then BP-12's real local-venue stack (backend, supervisor, workspace, launchers -- all now
+      # real runtime dependencies, not the prior test-only `task-execution-launchers`
+      # devDependency) plus its evidence-* / attestation-issuer transitives and the evaluation
+      # leg (evaluation-harness, evaluator-adapters, OCI grader, backend-local, benchmarking-run,
+      # benchmarking-local), then BP-13's `benchmarking-aggregate` (Report production/
+      # verification -- depends only on records + trust-core, both already built earlier).
+      - name: Build portal dependencies from source
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+          (cd packages/discovery/client && yarn install --immutable && yarn build)
+          (cd packages/discovery/serve && yarn install --immutable && yarn build)
+          (cd packages/discovery/transport-http && yarn install --immutable && yarn build)
+          (cd packages/discovery/publication && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/publication && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/oci-grader && yarn install --immutable && yarn build)
+          # BP-32's synchronous ownership assertion is the narrow platform seam that lets a web
+          # response distinguish a rejected contender from a durably-started in-process driver.
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn vitest run src/backend.shutdown.test.ts && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
+      # The public family is ordered by its public dependencies: verify is standalone,
+      # core consumes verify, and cli consumes both. The private web is CLI build input,
+      # so its dependency tree must be installed after core and before the CLI packs it.
+      - name: Verify public bundle verifier
+        working-directory: packages/benchmark-product/verify
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn pack:smoke
+      - name: Verify Colophon core
+        working-directory: packages/benchmark-product/core
+        env:
+          JINN_INSPECT_PYTHON: ${{ steps.inspect-python.outputs.python-path }}
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          # The profile kit is intentionally product-local application acceptance coverage, not
+          # a shipped protocol claim. Run its manifest and the actual combined Harbor/source
+          # post-hoc case explicitly so future broad test filtering cannot silently omit it.
+          yarn vitest run src/conformance/publication-profile.test.ts src/runtime/harbor/harbor.test.ts
+          yarn build
+          yarn check:parity
+          yarn pack:smoke
+      - name: Prepare private Colophon web build input
+        working-directory: packages/benchmark-product/web
+        run: yarn install --immutable
+      - name: Verify Colophon CLI
+        working-directory: packages/benchmark-product/cli
+        env:
+          COLOPHON_SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+      - name: Verify the real OCI Inspect and fake-broker boundaries
+        working-directory: packages/benchmark-product/core
+        run: |
+          docker build --platform linux/amd64 --tag jinn-inspect-worker:0.3.255-ci src/runtime/inspect
+          mkdir -p "$RUNNER_TEMP/inspect-dataset-cache"
+          JINN_INSPECT_OCI_IMAGE="$(docker image inspect --format '{{.Id}}' jinn-inspect-worker:0.3.255-ci)" \
+          JINN_INSPECT_OCI_DATASET_CACHE="$RUNNER_TEMP/inspect-dataset-cache" \
+          JINN_DOCKER_PATH="$(command -v docker)" \
+          yarn vitest run \
+            src/runtime/inspect/broker.integration.test.ts \
+            src/runtime/inspect/oci.integration.test.ts
+      - name: Upload Benchmark Product runtime distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          # The CLI embeds Next's standalone runtime under `.next`. upload-artifact excludes
+          # hidden paths unless this is explicit, which would make the restored CLI tarball
+          # incomplete on every downstream qualification runner. Keep common secret-bearing
+          # hidden files excluded even though generated dist trees must not contain them.
+          include-hidden-files: true
+          path: |
+            packages/**/dist
+            !packages/**/node_modules/**
+            !packages/**/dist/**/.env*
+            !packages/**/dist/**/.git/**
+            !packages/**/dist/**/.npmrc
+            !packages/**/dist/**/.yarnrc*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Web is a server-side client of core's public built entry. The product
+  # job builds the complete portal graph in dependency order; this job restores
+  # those exact distributions before installing or compiling the web package.
+  web:
+    needs: [architecture, product]
+    runs-on: ubuntu-latest
+    # The web package consumes core through a Yarn portal. Preserve the portal path so Node
+    # resolves core's transitive portal dependencies from this isolated consumer install rather
+    # than from core's source directory (which intentionally has no node_modules in this job).
+    env:
+      NODE_OPTIONS: --preserve-symlinks
+    defaults:
+      run:
+        working-directory: packages/benchmark-product/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore the product runtime distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          path: packages
+      - name: Verify private Colophon web
+        run: |
+          yarn install --immutable
+          # Vite intentionally resolves portal packages to their real source paths. Give every
+          # source package the web consumer's one installed dependency tree so the isolated job
+          # needs no sibling installs and runtime registries/classes keep one module identity.
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync, symlinkSync } from "node:fs";
+          import { dirname, join, relative, resolve } from "node:path";
+
+          const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+          const consumerModules = resolve("node_modules");
+          for (const resolution of Object.values(manifest.resolutions)) {
+            if (typeof resolution !== "string" || !resolution.startsWith("portal:")) continue;
+            const packageDir = resolve(resolution.slice("portal:".length));
+            const packageModules = join(packageDir, "node_modules");
+            if (existsSync(packageModules)) {
+              throw new Error(`isolated web runner unexpectedly found ${packageModules}`);
+            }
+            symlinkSync(relative(dirname(packageModules), consumerModules), packageModules, "dir");
+          }
+          NODE
+          yarn lint
+          yarn typecheck
+          yarn test
+          BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn build
+          yarn playwright install --with-deps chromium
+          BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn test:browser
+
+  # Qualification is target-specific evidence. This repeats the same packed,
+  # local-registry visitor journey on a clean Apple-silicon runner; it does not
+  # qualify Docker/Inspect or paid provider-agent execution on macOS.
+  macos_arm64_qualification:
+    needs: [architecture, product]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require the declared macOS arm64 target
+        run: |
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+          test "$RUNNER_ARCH" = "ARM64"
+      - name: Restore the product runtime distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          path: packages
+      - name: Qualify the zero-Docker sample, viewer, verifier, and CLI tarballs
+        run: node .github/scripts/benchmark-product-packed-types.test.mjs
+
+  verify:
+    needs: [architecture, product, web, macos_arm64_qualification]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Benchmark Product CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          PRODUCT_RESULT: ${{ needs.product.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+          MACOS_ARM64_RESULT: ${{ needs.macos_arm64_qualification.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$PRODUCT_RESULT" \
+            "$WEB_RESULT" \
+            "$MACOS_ARM64_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore the product runtime distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          path: packages
+      # This is a local-registry packaging proof, not the future public-registry release proof.
+      - name: Cold-install and compile public Colophon packages through a local registry
+        run: node .github/scripts/benchmark-product-packed-types.test.mjs

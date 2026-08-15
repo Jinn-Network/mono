@@ -1,0 +1,15 @@
+{
+  "input": {
+    "block": {
+      "subSpecs": [
+        { "spec": { "uri": "https://example.org/specs/unit-tests" }, "weight": "0.5" },
+        { "spec": { "uri": "https://example.org/specs/lint" }, "weight": "0.5" }
+      ]
+    },
+    "subSpecDepths": {
+      "https://example.org/specs/unit-tests": 0,
+      "https://example.org/specs/lint": 0
+    }
+  },
+  "expect": { "ok": true }
+}

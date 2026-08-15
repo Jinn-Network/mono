@@ -1,0 +1,109 @@
+{
+  "name": "duplicate-announcement-id-across-entries",
+  "kind": "source-chain",
+  "description": "`ann-shared` is used by two different entries in the same source -- source-wide announcementId uniqueness fails (§5.1, §10.3 step 6). Distinct from entry.ts's per-entry uniqueness check (M1).",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": null
+    },
+    "firstAdoption": true,
+    "head": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "origin": "did:key:zAgentSourceOne/feed",
+      "sequence": "0000000000000002",
+      "entry": "sha256:66315aa499165ae92018c87cc681e49bb0b6dd7baff49aee706b730f8616fcfd",
+      "issuedAt": "2026-07-28T12:00:00.000Z",
+      "refreshBy": "2026-07-29T12:00:00.000Z"
+    },
+    "headSignature": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:66315aa499165ae92018c87cc681e49bb0b6dd7baff49aee706b730f8616fcfd\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000002\"}",
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "2bdd6c9113c2816f867e0b8cc8b8de31ebf9a9ae49b5b5398fa3e274e977cf5e:key-1"
+        }
+      ]
+    },
+    "entries": [
+      {
+        "entry": {
+          "protocol": "https://spec.jinn.network/record-discovery/v1",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000001",
+          "previous": null,
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-shared",
+              "action": "available",
+              "record": {
+                "kind": "https://spec.jinn.network/records/submission/v1",
+                "digest": "sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-shared\",\"record\":{\"digest\":\"sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773\",\"kind\":\"https://spec.jinn.network/records/submission/v1\"}}],\"previous\":null,\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"sequence\":\"0000000000000001\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "dc01e44dfd7942b2f38bb523ff36ff356229cc1c773f028830f0bcb564a98129:key-1"
+            }
+          ]
+        }
+      },
+      {
+        "entry": {
+          "protocol": "https://spec.jinn.network/record-discovery/v1",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000002",
+          "previous": "sha256:1bedaad313ea07170459d77324f6de66b8f6f854708aafb185743f40a7b4aa07",
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-shared",
+              "action": "available",
+              "record": {
+                "kind": "https://spec.jinn.network/records/submission/v1",
+                "digest": "sha256:77ef1951f02f9226505a221e159a2aaf6ca86d961e273ea34bf3f3da801c9b98"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-shared\",\"record\":{\"digest\":\"sha256:77ef1951f02f9226505a221e159a2aaf6ca86d961e273ea34bf3f3da801c9b98\",\"kind\":\"https://spec.jinn.network/records/submission/v1\"}}],\"previous\":\"sha256:1bedaad313ea07170459d77324f6de66b8f6f854708aafb185743f40a7b4aa07\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"sequence\":\"0000000000000002\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "15bbb2e2d701107f286c671d2d457460b0a683fe69b2039cf3f767191e1e30d3:key-1"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "broken-chain",
+    "at": "duplicate-announcement-id"
+  }
+}

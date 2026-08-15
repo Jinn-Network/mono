@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "pinned-projection/expected-digests.json",
+      "sha256": "cee8391e16f985c5c4d2f0c0067b0d20dd8eb4d80e39f91467cdf2779f2ff5cb"
+    },
+    {
+      "id": "pinned-projection/journal.json",
+      "sha256": "bc3c3e428d521fccdc436a5abed16f131955e5b4e55307b1f3a71b966ec2c88f"
+    },
+    {
+      "id": "pinned-projection/source.json",
+      "sha256": "95ce3035aa24b60c67264104e5aceae4174f7228d975e715dfdc545577d7b29c"
+    },
+    {
+      "id": "pinned-projection/withdrawals.json",
+      "sha256": "5ae20d8b22311ab27694c39539ac23c70aef89cecb61288af834ff992c9b3eee"
+    }
+  ],
+  "errata": []
+}

@@ -1,0 +1,2 @@
+{"sequence":1,"role":"user","content":"Work in [REDACTED_ABSOLUTE_PATH] and normalize the slug."}
+{"sequence":2,"role":"assistant","content":"Implemented the change and tested with [REDACTED_CREDENTIAL]."}

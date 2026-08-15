@@ -1,0 +1,10 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "name": "bad-version-benchmark",
+  "description": "Schema-invalid: version is not a SemVer 2.0.0 string.",
+  "version": "1",
+  "items": [
+    { "task": { "digest": { "sha256": "7afaa346b4bf92bf9dc21e9ae809887412a86beb766842e99df7fee6573a4781" } } }
+  ],
+  "reveal": { "policy": "immediate" }
+}

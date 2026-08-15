@@ -1,0 +1,52 @@
+{
+  "name": "@jinn-network/task-execution-supervisor",
+  "version": "0.1.0",
+  "description": "The Attempt Supervisor: attempt shim, journal, attempt record, reconciler, cancellation ladder, and deadline enforcement for the Jinn Task Execution Protocol local backend. Depends on @jinn-network/task-execution-protocol and @jinn-network/task-execution-backend only — the most dependency-free backend-local component.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/task-execution/backend-local/supervisor"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "native/jinn-attempt-shim.c",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "JINN_NATIVE_CUSTODY_BUILD_TESTING=1 yarn build && vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/task-execution-backend": "portal:../../backend",
+    "@jinn-network/task-execution-protocol": "portal:../../protocol"
+  }
+}

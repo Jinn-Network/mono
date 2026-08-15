@@ -3,7 +3,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import { ChevronRight, Loader2, X } from 'lucide-react';
 import { api } from '../api/client.js';
-import type { ActivityEventRow, ActivityEventsResponse } from '../api/types.js';
+import type { ActivityEventRow, ActivityEventsResponse } from '../../../../api/contract/index.js';
 import {
   LIFECYCLE_KINDS,
   eventKindBadgeVariant,
@@ -243,14 +243,18 @@ export function EventsPage({ pageSize = PAGE_SIZE }: EventsPageProps = {}): JSX.
                 </TableHeader>
                 <TableBody>
                   {events.map((row) => {
-                    const meta = eventKindMeta(row.kind);
+                    // Unknown-kind rendering rule (§8 artifact 6): pass the row's own
+                    // severity/title through so a kind this build doesn't recognize still
+                    // renders the daemon's intended framing instead of a bare kind string.
+                    const wire = { severity: row.severity, title: row.title };
+                    const meta = eventKindMeta(row.kind, wire);
                     return (
                       <TableRow key={row.id} data-testid="events-row">
                         <TableCell className="whitespace-nowrap text-muted-foreground">
                           {formatTimestamp(row.ts)}
                         </TableCell>
                         <TableCell>
-                          <Badge variant={eventKindBadgeVariant(row.kind, row.outcome)}>
+                          <Badge variant={eventKindBadgeVariant(row.kind, row.outcome, wire)}>
                             {meta.label}
                           </Badge>
                         </TableCell>
@@ -267,7 +271,7 @@ export function EventsPage({ pageSize = PAGE_SIZE }: EventsPageProps = {}): JSX.
                           </Tooltip>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={eventKindBadgeVariant(row.kind, row.outcome)}>
+                          <Badge variant={eventKindBadgeVariant(row.kind, row.outcome, wire)}>
                             {row.outcome ?? '-'}
                           </Badge>
                         </TableCell>

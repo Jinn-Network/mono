@@ -1,0 +1,137 @@
+{
+  "sourceDigest": "sha256:5da72d9db6f59fb4b0151afa1f3559358424d68c7274c60dae98361a141c5bf5",
+  "traceId": "8289ee9fb5a0f612e03210a16f45d039",
+  "timebase": "synthetic-ordinal",
+  "completeness": {
+    "decoded": "full"
+  },
+  "spans": [
+    {
+      "spanId": "049553b626857e6e",
+      "parentSpanId": null,
+      "name": "invoke_agent claude-code",
+      "kind": 1,
+      "startTimeUnixNano": "0",
+      "endTimeUnixNano": "4",
+      "attributes": [
+        {
+          "key": "gen_ai.agent.name",
+          "value": {
+            "stringValue": "claude-code"
+          }
+        },
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "invoke_agent"
+          }
+        },
+        {
+          "key": "gen_ai.provider.name",
+          "value": {
+            "stringValue": "anthropic"
+          }
+        },
+        {
+          "key": "jinn.trace.outcome",
+          "value": {
+            "stringValue": "success"
+          }
+        },
+        {
+          "key": "jinn.trace.source.ordinal",
+          "value": {
+            "intValue": "0"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 1
+      }
+    },
+    {
+      "spanId": "a424bbcf02f2d164",
+      "parentSpanId": "049553b626857e6e",
+      "name": "chat",
+      "kind": 3,
+      "startTimeUnixNano": "1",
+      "endTimeUnixNano": "2",
+      "attributes": [
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "chat"
+          }
+        },
+        {
+          "key": "gen_ai.provider.name",
+          "value": {
+            "stringValue": "anthropic"
+          }
+        },
+        {
+          "key": "jinn.trace.source.ordinal",
+          "value": {
+            "intValue": "1"
+          }
+        },
+        {
+          "key": "jinn.trace.turn.role",
+          "value": {
+            "stringValue": "assistant"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 1
+      }
+    },
+    {
+      "spanId": "29b8604f5f75fc41",
+      "parentSpanId": "a424bbcf02f2d164",
+      "name": "execute_tool Bash",
+      "kind": 1,
+      "startTimeUnixNano": "1",
+      "endTimeUnixNano": "2",
+      "attributes": [
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "execute_tool"
+          }
+        },
+        {
+          "key": "gen_ai.tool.call.id",
+          "value": {
+            "stringValue": "call_x"
+          }
+        },
+        {
+          "key": "gen_ai.tool.name",
+          "value": {
+            "stringValue": "Bash"
+          }
+        },
+        {
+          "key": "gen_ai.tool.type",
+          "value": {
+            "stringValue": "function"
+          }
+        },
+        {
+          "key": "jinn.trace.source.ordinal",
+          "value": {
+            "intValue": "1"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 1
+      }
+    }
+  ],
+  "recordDigest": "sha256:74b556e89020f29c00add7975f8f32b0e5e78d1669b68a58a0b86f93ea228155"
+}

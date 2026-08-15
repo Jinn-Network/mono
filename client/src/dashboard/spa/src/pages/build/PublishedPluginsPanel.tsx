@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
-import type { DiscoveryPluginPublicationsResponse, PluginPublicationDto } from '../../api/types.js';
+import type { DiscoveryPluginPublicationsResponse, PluginPublicationDto } from '../../../../../api/contract/index.js';
 import {
   Card,
   CardContent,

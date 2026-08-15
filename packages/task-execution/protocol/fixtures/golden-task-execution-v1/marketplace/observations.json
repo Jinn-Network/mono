@@ -1,0 +1,70 @@
+[
+  {
+    "specversion": "1.0",
+    "id": "evt-1",
+    "source": "urn:jinn:backend:marketplace",
+    "subject": "urn:uuid:39d04895-f99d-57b8-bba6-e266626f6fae",
+    "time": "2026-07-28T00:00:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000001",
+    "taskdigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
+    "type": "network.jinn.task-execution.attempt-engaged.v1",
+    "data": {
+      "attempt": "urn:uuid:39d04895-f99d-57b8-bba6-e266626f6fae",
+      "task": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
+      "submission": "urn:uuid:dddddddd-dddd-5ddd-8ddd-dddddddddddd",
+      "executor": "urn:jinn:agent:marketplace-operator-1",
+      "effectiveDeadline": "2026-07-29T00:00:00Z",
+      "source": "urn:jinn:backend:marketplace",
+      "dispatchContext": {
+        "uri": "https://example.test/dispatch-context/urn:uuid:39d04895-f99d-57b8-bba6-e266626f6fae.json",
+        "digest": {
+          "sha256": "efd72bca757210acff31d137c229fe5116cee68f7ba1fb5bb51e30422c9cb397"
+        }
+      }
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-2",
+    "source": "urn:jinn:backend:marketplace",
+    "subject": "urn:uuid:39d04895-f99d-57b8-bba6-e266626f6fae",
+    "time": "2026-07-28T00:01:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000002",
+    "taskdigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
+    "type": "network.jinn.task-execution.attempt-started.v1",
+    "data": {
+      "startedAt": "2026-07-28T00:01:00Z",
+      "executor": "urn:jinn:agent:marketplace-operator-1"
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-3",
+    "source": "urn:jinn:backend:marketplace",
+    "subject": "urn:uuid:39d04895-f99d-57b8-bba6-e266626f6fae",
+    "time": "2026-07-28T00:05:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000003",
+    "taskdigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
+    "type": "network.jinn.task-execution.delivery-recorded.v1",
+    "data": {
+      "digest": "sha256:5cc823fdd9b7c727b79427221bb609c5eec6370c82257a95bf2d12cf5bab268e"
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-4",
+    "source": "urn:jinn:backend:marketplace",
+    "subject": "urn:uuid:39d04895-f99d-57b8-bba6-e266626f6fae",
+    "time": "2026-07-28T00:05:30Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000004",
+    "taskdigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
+    "type": "network.jinn.task-execution.attempt-terminal.v1",
+    "data": {
+      "state": "delivered"
+    }
+  }
+]

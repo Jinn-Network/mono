@@ -1,0 +1,37 @@
+{
+  "note": "The other end of the range: a Task and a Submission that pin nothing at all. Every core axis null-fills, and the tuple still has a stable identity — 'unpinned' is a treatment, not the absence of one. This is the fixture that catches a deriver which returns early, returns `undefined`, or omits the core block when the effective requirements are empty. The profile declares `effort` and neither document sets it, so the declared-but-unset rule also applies here with an empty requirement map.",
+  "profile": {
+    "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL2V4YW1wbGUtZG9tYWluLzEuMCIsInJlcXVpcmVtZW50S2V5cyI6W3siY29tcGFyaXNvbkNsYXNzIjoiZmxvb3IiLCJrZXkiOiJlZmZvcnQifV19",
+    "requirementKeys": [{ "key": "effort", "comparisonClass": "floor" }]
+  },
+  "task": {
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+    "profile": {
+      "uri": "https://spec.jinn.network/task-profiles/example-domain/1.0",
+      "digest": { "sha256": "d960b18f0ee019aef283f608abc5ca1aae65874504bd64ec1ff91fedeb45457c" }
+    },
+    "instructions": "Answer the question.",
+    "outputs": [{ "name": "answer", "mediaType": "text/plain", "required": true }]
+  },
+  "submission": {
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+    "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c102",
+    "task": {
+      "digest": { "sha256": "c1a1d41710c318176b3637a0f777f8e64c628fac4337dfa5ccb94c979446de6c" }
+    },
+    "requester": "urn:jinn:agent:policy-kit-requester",
+    "idempotencyKey": "policy-c1-kit-unpinned-1",
+    "nonce": "0000000000000002",
+    "deadline": "2026-08-10T00:00:00Z"
+  },
+  "expect": {
+    "taskDigest": "sha256:c1a1d41710c318176b3637a0f777f8e64c628fac4337dfa5ccb94c979446de6c",
+    "submissionDigest": "sha256:8dc0562a77894be55b3c140ed909f1e878dce3fbd440e2f0a00645226580dba0",
+    "canonicalTuple": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":null,\"isolationPolicy\":null,\"loadout\":null,\"model\":null}",
+    "tupleDigest": "sha256:b2f937873c3af86625d381f2deadcaee88c6984b40ff8c38146b4e3919ad382e",
+    "absentTupleKeys": ["effort"],
+    "mustNotContain": ["effort"],
+    "runPinning": {}
+  }
+}

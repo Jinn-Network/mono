@@ -38,7 +38,7 @@ import {
 import {
   assertMarketplaceTaskFunding,
   assertMarketplaceTaskRequestFreshness,
-  marketplaceTaskBudgetWei,
+  listMarketplaceLaunchedSolverNets,
   resolveMarketplaceTaskSolverNet,
   runMarketplaceTaskSubmitPreflight,
 } from '../../tasks/submit-preflight.js';
@@ -46,17 +46,16 @@ import {
   readMarketplaceTaskSelection,
   writeMarketplaceTaskSelection,
 } from '../../tasks/submit-selection.js';
-import { createHttpDiscoveryAPI } from '../../discovery/http.js';
+import { createHttpDiscoveryClient } from '../../discovery-client/http.js';
+import type { DiscoveryClient } from '../../discovery-client/types.js';
 import { fetchFromIpfs } from '../../adapters/mech/ipfs.js';
 import { getJinnRouterAddress } from '../../contracts/addresses.js';
 import {
   getMechDeliveryRate,
   getTimeoutBounds,
 } from '../../adapters/mech/contracts.js';
-import { resolveMintedTaskDeliveryRate } from '../../solver-types/_swe-rebench-v2-escrow.js';
 import { runObserveAutopilotDelivery } from './tasks-observe-autopilot.js';
-import { runObserveIssueRelayDelivery } from './tasks-observe-issue-relay.js';
-import { runObserveApplicationDelivery } from './tasks-observe-application.js';
+import { runTasksLifecycle } from './tasks-lifecycle.js';
 
 function findNamedErrorCause(
   error: unknown,
@@ -90,15 +89,16 @@ function machinePreflightChecks(args: {
   signerContext: CliSignerContext;
 }) {
   const signer = async () => args.signerContext;
-  let launchedPromise: ReturnType<ReturnType<typeof createHttpDiscoveryAPI>['listLaunchedSolverNets']> | undefined;
+  // One-swap R3b (issue #2494) retired this function's own
+  // `createHttpDiscoveryClient(...).listLaunchedSolverNets(...)` leg. The read is
+  // unchanged, but `tasks/submit-preflight.ts` is now its single owner, so
+  // `jinn tasks submit` reaches the indexer through exactly one call site.
+  // The memo stays: `indexer` and `solverNet` both consume it within one run.
+  let launchedPromise:
+    | ReturnType<typeof listMarketplaceLaunchedSolverNets>
+    | undefined;
   const launched = async () => {
-    const discovery = args.config.discovery;
-    if (discovery?.mode !== 'http' || !discovery.url) {
-      throw new Error('HTTP discovery indexer must be configured for machine Task submission');
-    }
-    launchedPromise ??= createHttpDiscoveryAPI({
-      url: discovery.url,
-    }).listLaunchedSolverNets({ status: ['launched'] });
+    launchedPromise ??= listMarketplaceLaunchedSolverNets(args.config);
     return launchedPromise;
   };
   const primary = async () => {
@@ -185,14 +185,6 @@ function machinePreflightChecks(args: {
   };
 }
 
-function parsePositiveWei(value: string | undefined, label: string): bigint | undefined {
-  if (value === undefined) return undefined;
-  if (!/^[1-9][0-9]*$/.test(value)) {
-    throw new Error(`${label} must be a canonical positive wei integer`);
-  }
-  return BigInt(value);
-}
-
 async function runSubmit(ctx: CommandContext): Promise<void> {
   let parsed;
   try {
@@ -209,7 +201,6 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
         'manifest-cid': { type: 'string' },
         'max-claims': { type: 'string' },
         'required-verdicts': { type: 'string' },
-        'max-spend-wei': { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
       },
@@ -257,7 +248,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
   const legacyLooseFlags = [
     'id', 'description', 'solver-net', 'solver-type', 'spec-file',
-    'manifest-cid', 'max-claims', 'required-verdicts', 'max-spend-wei',
+    'manifest-cid', 'max-claims', 'required-verdicts',
   ] as const;
   if (requestFilePath && legacyLooseFlags.some((flag) => parsed.values[flag] !== undefined)) {
     emitEnvelope(
@@ -273,24 +264,6 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
   const dryRun = parsed.values['dry-run'] as boolean;
   const yes = parsed.values.yes as boolean;
-  let maxSpendWei: bigint | undefined;
-  try {
-    maxSpendWei = parsePositiveWei(
-      parsed.values['max-spend-wei'] as string | undefined,
-      '--max-spend-wei',
-    );
-  } catch (err) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: errorMessage(err),
-        exampleCli: 'jinn tasks submit --id my-task --description "..." --max-spend-wei 1 --dry-run',
-        details: { field: '--max-spend-wei', expected: 'canonical positive wei integer' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
   let machineRequest: TaskSubmitRequestV1 | undefined;
   let machineRequestFreshnessError: unknown;
   if (requestFilePath) {
@@ -480,27 +453,6 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
     );
     return;
   }
-  if (
-    maxSpendWei !== undefined
-    && (
-      requestedSolverType !== 'jinn-repo.v1'
-      || solverTypeFromNet !== 'jinn-repo.v1'
-      || parsed.values['spec-file'] === undefined
-      || parsed.values['max-claims'] !== '1'
-      || parsed.values['required-verdicts'] !== '1'
-    )
-  ) {
-    emitEnvelope(
-      {
-        code: 'invalid_invocation',
-        message: '--max-spend-wei is restricted to the exact jinn-repo.v1 Relay loose-flag contract',
-        exampleCli: 'jinn tasks submit --id relay --description "..." --solver-net jinn-repo --solver-type jinn-repo.v1 --spec-file relay.json --max-claims 1 --required-verdicts 1 --max-spend-wei 1 --dry-run',
-        details: { field: '--max-spend-wei', expected: 'one-shot jinn-repo.v1 loose-flag submission' },
-      },
-      { writer: ctx.writer, exit: ctx.exit },
-    );
-    return;
-  }
   let selectedMachineManifestCid: string | undefined;
   if (machineRequest) {
     try {
@@ -613,7 +565,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   if (dryRun) {
     let service: { safe_address?: string | null } | undefined;
     let machineSignerContext: CliSignerContext | undefined;
-    if (machineRequest || maxSpendWei !== undefined) {
+    if (machineRequest) {
       const built = await createCliReadOnlySignerContext({ argv: ctx.argv, env: ctx.env });
       if (!built.ok) {
         emitEnvelope(built.envelope, { writer: ctx.writer, exit: ctx.exit });
@@ -640,70 +592,6 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       return;
     }
     const creatorMultisig = getAddress(service.safe_address);
-    let relayProposedSpendWei: bigint | undefined;
-    const relayManifestCid = parsed.values['manifest-cid'] as string | undefined
-      ?? matchedJoined?.manifestCid;
-    if (maxSpendWei !== undefined) {
-      const relayService = pickPrimaryMechService(
-        machineSignerContext!.fleetState.services,
-      );
-      if (!relayService?.mech_address || !relayManifestCid) {
-        emitEnvelope(
-          {
-            code: 'bootstrap_incomplete',
-            message: 'Issue Relay spend preview requires an operational Mech and exact SolverNet manifest',
-            exampleCli: 'jinn bootstrap --human',
-            details: { field: 'fleet.services|solverNetManifestCid' },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
-      }
-      try {
-        const baseDeliveryRate = await getMechDeliveryRate(
-          machineSignerContext!.publicClient,
-          getAddress(relayService.mech_address),
-        );
-        const deliveryRate = resolveMintedTaskDeliveryRate(
-          baseDeliveryRate,
-          specOverlay?.eligibility,
-        );
-        relayProposedSpendWei = marketplaceTaskBudgetWei({
-          solutionMaxDeliveryRateWei: deliveryRate,
-          verdictMaxDeliveryRateWei: deliveryRate,
-          maxClaims: maxClaimsOverride ?? 1,
-        });
-      } catch (err) {
-        emitEnvelope(
-          {
-            code: 'transient_error',
-            message: `Issue Relay spend preview failed: ${errorMessage(err)}`,
-            hint: 'Retry after the exact RPC and Mech rate path recover.',
-            exampleCli: 'jinn tasks submit --id relay --description "..." --max-spend-wei <approved> --dry-run',
-            details: { field: 'proposedSpendWei' },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
-      }
-      if (relayProposedSpendWei > maxSpendWei) {
-        emitEnvelope(
-          {
-            code: 'funding_required',
-            message: `Issue Relay proposed spend ${relayProposedSpendWei} wei exceeds approved maximum ${maxSpendWei} wei`,
-            hint: 'Increase the Relay-approved maximum only after a fresh budget decision.',
-            exampleCli: 'jinn tasks submit --id relay --description "..." --max-spend-wei <approved> --dry-run',
-            details: {
-              field: '--max-spend-wei',
-              proposedSpendWei: relayProposedSpendWei.toString(),
-              maximumSpendWei: maxSpendWei.toString(),
-            },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
-      }
-    }
     if (machineRequest) {
       try {
         await runMarketplaceTaskSubmitPreflight(machinePreflightChecks({
@@ -738,12 +626,7 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
           txCount: 1,
           ...(selectedMachineManifestCid
             ? { solverNetManifestCid: selectedMachineManifestCid }
-            : relayManifestCid
-              ? { solverNetManifestCid: relayManifestCid }
             : {}),
-          ...(relayProposedSpendWei === undefined
-            ? {}
-            : { proposedSpendWei: relayProposedSpendWei.toString() }),
           ...(specOverlay ? { solverType: specOverlay.solverType, spec: specOverlay.spec } : {}),
         },
       ],
@@ -835,50 +718,6 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
       );
       return;
     }
-    let relayFundingPin:
-      | {
-          readonly creatorSafe: string;
-          readonly solverNetManifestCid: string;
-          readonly proposedSpendWei: bigint;
-        }
-      | undefined;
-    if (maxSpendWei !== undefined) {
-      const expectedCreatorSafe = ctx.env['JINN_RELAY_EXPECTED_CREATOR_SAFE'];
-      const expectedManifestCid =
-        ctx.env['JINN_RELAY_EXPECTED_SOLVERNET_MANIFEST_CID'];
-      const expectedSpend = ctx.env['JINN_RELAY_EXPECTED_SPEND_WEI'];
-      let proposedSpendWei: bigint | undefined;
-      try {
-        proposedSpendWei = parsePositiveWei(
-          expectedSpend,
-          'JINN_RELAY_EXPECTED_SPEND_WEI',
-        );
-      } catch {
-        proposedSpendWei = undefined;
-      }
-      if (
-        expectedCreatorSafe === undefined
-        || expectedManifestCid === undefined
-        || proposedSpendWei === undefined
-        || proposedSpendWei > maxSpendWei
-      ) {
-        emitEnvelope(
-          {
-            code: 'invalid_invocation',
-            message: 'Issue Relay submission requires fresh creator Safe, SolverNet manifest, and spend pins within --max-spend-wei',
-            exampleCli: 'Run the Relay-owned dry-run immediately before submission.',
-            details: { field: 'JINN_RELAY_EXPECTED_*' },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
-      }
-      relayFundingPin = {
-        creatorSafe: getAddress(expectedCreatorSafe),
-        solverNetManifestCid: expectedManifestCid,
-        proposedSpendWei,
-      };
-    }
     const dotIdx = taskKind.lastIndexOf('.');
     const contractId = dotIdx > 0 ? taskKind.slice(0, dotIdx) : taskKind;
     const contractVersion = dotIdx > 0 ? taskKind.slice(dotIdx + 1) : 'v0';
@@ -957,33 +796,6 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
           ? {
               beforeBroadcast: () =>
                 assertMarketplaceTaskRequestFreshness(machineRequest),
-            }
-          : {}),
-        ...(relayFundingPin
-          ? {
-              assertFunding: (facts: {
-                creatorSafe: string;
-                solverNetManifestCid: string;
-                proposedSpendWei: bigint;
-              }) => {
-                if (
-                  getAddress(facts.creatorSafe) !== relayFundingPin.creatorSafe
-                  || facts.solverNetManifestCid
-                    !== relayFundingPin.solverNetManifestCid
-                  || facts.proposedSpendWei
-                    !== relayFundingPin.proposedSpendWei
-                  || facts.proposedSpendWei > maxSpendWei!
-                ) {
-                  throw new Error(
-                    'Issue Relay funding facts changed after dry-run: ' +
-                    `expected Safe ${relayFundingPin.creatorSafe}, manifest ` +
-                    `${relayFundingPin.solverNetManifestCid}, spend ` +
-                    `${relayFundingPin.proposedSpendWei} wei; received Safe ` +
-                    `${facts.creatorSafe}, manifest ${facts.solverNetManifestCid}, ` +
-                    `spend ${facts.proposedSpendWei} wei`,
-                  );
-                }
-              },
             }
           : {}),
       },
@@ -1129,6 +941,271 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 }
 
+// ── tasks watch ───────────────────────────────────────────────────────────────
+
+/**
+ * NDJSON progress envelope emitted while `jinn tasks watch` waits. Mirrors the
+ * stable shape `jinn quickstart` emits (`QuickstartProgressEnvelope` in
+ * quickstart.ts) so an agent parses waiting the same way everywhere — the only
+ * difference is the phase, which is always `watch` here.
+ */
+export interface TasksWatchProgressEnvelope {
+  type: 'progress';
+  phase: 'watch';
+  step: string;
+  attempt?: number;
+  estimatedWaitMs?: number;
+}
+
+export interface TasksWatchDeps {
+  createDiscovery: (url: string) => Pick<DiscoveryClient, 'getAutopilotDeliveryCandidates'>;
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+}
+
+const DEFAULT_WATCH_DEPS: TasksWatchDeps = {
+  createDiscovery: (url: string) => createHttpDiscoveryClient({ url }),
+  sleep: (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+  now: () => Date.now(),
+};
+
+const DEFAULT_WATCH_TIMEOUT_SECONDS = 900;
+const WATCH_EXAMPLE = 'jinn tasks watch 42 --timeout 600';
+
+/**
+ * Poll discovery until the task's solution delivery is indexed.
+ *
+ * Terminal states: `delivered` (carries the envelope CID) and `timeout`. Both
+ * exit 0 — the `status` field carries the outcome. An indexer contradiction
+ * stops the poll and emits a transient_error envelope: re-polling cannot
+ * resolve inconsistent rows.
+ *
+ * Read-only: config-only, no keystore, no signer, no daemon.
+ */
+export async function runTasksWatch(
+  ctx: CommandContext,
+  deps: TasksWatchDeps = DEFAULT_WATCH_DEPS,
+): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: ctx.argv,
+      options: {
+        ...COMMON_FLAGS,
+        timeout: { type: 'string' as const },
+      },
+      allowPositionals: true,
+    });
+  } catch (err) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: err instanceof Error ? err.message : String(err),
+        exampleCli: WATCH_EXAMPLE,
+        details: { field: 'flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const taskId = parsed.positionals[0];
+  if (!taskId) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: 'A task id is required',
+        exampleCli: WATCH_EXAMPLE,
+        details: { field: '<id>', expected: 'on-chain task id (decimal string)' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const rawTimeout = parsed.values.timeout as string | undefined;
+  let timeoutSeconds = DEFAULT_WATCH_TIMEOUT_SECONDS;
+  if (rawTimeout !== undefined) {
+    const n = Number(rawTimeout);
+    if (!Number.isFinite(n) || n <= 0) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `--timeout must be a positive number of seconds, got '${rawTimeout}'`,
+          exampleCli: WATCH_EXAMPLE,
+          details: { field: '--timeout', expected: 'positive number (seconds)' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    timeoutSeconds = n;
+  }
+
+  const config = loadConfig(getConfigPathFromArgs(ctx.argv));
+  if (config.discovery?.mode !== 'http' || !config.discovery.url) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message:
+          'An HTTP discovery indexer is required to watch a task, but '
+          + `discovery.mode is '${config.discovery?.mode ?? 'unset'}'`
+          + (config.discovery?.mode === 'http' ? ' with no discovery.url' : '')
+          + '.',
+        hint:
+          'Set `discovery.mode: "http"` and `discovery.url: "<indexer url>"` in '
+          + '~/.jinn-client/config.json (or export JINN_DISCOVERY_MODE=http and '
+          + 'JINN_DISCOVERY_URL=<indexer url>). The on-chain floor cannot resolve '
+          + 'a task id to a delivery, so this verb does not fall back to it.',
+        exampleCli: WATCH_EXAMPLE,
+        details: {
+          field: 'discovery.mode',
+          expected: 'http',
+          actual: config.discovery?.mode ?? null,
+          configKeys: ['discovery.mode', 'discovery.url'],
+          envVars: ['JINN_DISCOVERY_MODE', 'JINN_DISCOVERY_URL'],
+        },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const human = Boolean(parsed.values.human);
+  const emitProgress = (envelope: TasksWatchProgressEnvelope): void => {
+    ctx.writer.write(
+      human
+        ? `[watch] ${envelope.step}${envelope.attempt ? ` (attempt ${envelope.attempt})` : ''}\n`
+        : JSON.stringify(envelope) + '\n',
+    );
+  };
+
+  const chainId = config.network === 'testnet' ? 84532 : 8453;
+  const pollIntervalMs = Math.max(250, config.pollIntervalMs);
+  const discovery = deps.createDiscovery(config.discovery.url);
+  const startedAt = deps.now();
+  const deadline = startedAt + timeoutSeconds * 1000;
+
+  let attempt = 0;
+  let lastReason: string | undefined;
+  for (;;) {
+    attempt += 1;
+    emitProgress({
+      type: 'progress',
+      phase: 'watch',
+      step: 'polling_discovery',
+      attempt,
+      estimatedWaitMs: Math.max(0, deadline - deps.now()),
+    });
+
+    let lookup;
+    try {
+      lookup = await discovery.getAutopilotDeliveryCandidates({
+        chainId,
+        taskId,
+        role: 'solution',
+      });
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: `Discovery lookup failed for task ${taskId}: ${errorMessage(err)}`,
+          hint: 'Retry when the discovery indexer is reachable.',
+          exampleCli: WATCH_EXAMPLE,
+          details: { taskId, chainId, attempt },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    if (lookup.status === 'ready') {
+      emitResult(
+        {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          verb: 'tasks watch',
+          taskId,
+          role: 'solution',
+          status: 'delivered',
+          envelopeCid: lookup.envelope.manifestCid,
+          publisherAgentId: lookup.envelope.publisherAgentId,
+          requestId: lookup.attempt.requestId,
+          operator: lookup.attempt.operator,
+          attempts: attempt,
+          waitedMs: deps.now() - startedAt,
+        },
+        (v) => {
+          const value = v as { taskId: string; envelopeCid: string };
+          return `Task ${value.taskId} delivered.\nEnvelope: ${value.envelopeCid}`;
+        },
+        {
+          json: Boolean(parsed.values.json),
+          human,
+          writer: ctx.writer,
+          stdoutIsTty: ctx.stdoutIsTty,
+          noColor: Boolean(ctx.env['NO_COLOR']),
+        },
+      );
+      return;
+    }
+
+    if (lookup.status === 'contradiction') {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: `The indexer holds inconsistent rows for task ${taskId}: ${lookup.reason}`,
+          hint: 'Re-polling cannot resolve a contradiction; inspect the indexer rows for this task.',
+          exampleCli: WATCH_EXAMPLE,
+          details: { taskId, reason: lookup.reason, attempt },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    lastReason = lookup.reason;
+    const remainingMs = deadline - deps.now();
+    if (remainingMs <= 0) {
+      emitResult(
+        {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          verb: 'tasks watch',
+          taskId,
+          role: 'solution',
+          status: 'timeout',
+          attempts: attempt,
+          waitedMs: deps.now() - startedAt,
+          lastReason,
+        },
+        (v) => {
+          const value = v as { taskId: string; lastReason?: string };
+          return `Task ${value.taskId} not delivered before the timeout (last state: ${value.lastReason}).`;
+        },
+        {
+          json: Boolean(parsed.values.json),
+          human,
+          writer: ctx.writer,
+          stdoutIsTty: ctx.stdoutIsTty,
+          noColor: Boolean(ctx.env['NO_COLOR']),
+        },
+      );
+      return;
+    }
+
+    const waitMs = Math.min(pollIntervalMs, remainingMs);
+    emitProgress({
+      type: 'progress',
+      phase: 'watch',
+      step: `awaiting_delivery:${lastReason}`,
+      attempt,
+      estimatedWaitMs: waitMs,
+    });
+    await deps.sleep(waitMs);
+  }
+}
+
 async function run(ctx: CommandContext): Promise<void> {
   const [subverb, ...rest] = ctx.argv;
   if (!subverb || subverb === '--help' || subverb === '-h') {
@@ -1141,11 +1218,11 @@ async function run(ctx: CommandContext): Promise<void> {
   if (subverb === 'observe-autopilot-delivery') {
     return runObserveAutopilotDelivery({ ...ctx, argv: rest });
   }
-  if (subverb === 'observe-issue-relay-delivery') {
-    return runObserveIssueRelayDelivery({ ...ctx, argv: rest });
+  if (subverb === 'watch') {
+    return runTasksWatch({ ...ctx, argv: rest });
   }
-  if (subverb === 'observe-application-delivery') {
-    return runObserveApplicationDelivery({ ...ctx, argv: rest });
+  if (subverb === 'close' || subverb === 'cancel' || subverb === 'release') {
+    return runTasksLifecycle({ ...ctx, argv: rest }, subverb);
   }
   if (subverb === 'list') {
     const config = loadConfig(getConfigPathFromArgs(rest));
@@ -1199,7 +1276,7 @@ async function run(ctx: CommandContext): Promise<void> {
       exampleCli: 'jinn tasks submit --id my-task --description "..." --solver-net prediction',
       details: {
         field: 'subverb',
-        expected: 'submit|observe-autopilot-delivery|observe-issue-relay-delivery|observe-application-delivery|list|show',
+        expected: 'submit|watch|observe-autopilot-delivery|list|show|close|cancel|release',
       },
     },
     { writer: ctx.writer, exit: ctx.exit },
@@ -1212,20 +1289,38 @@ const command: CommandModule = {
   helpText: `Usage:
   jinn tasks submit --id <id> --description <text> (--solver-net <name> | --solver-type <type>) [--spec-file <path>] [--dry-run] [--yes] [--human]
   jinn tasks submit --request-file <path> [--dry-run] --yes --json
+  jinn tasks watch <id> [--timeout <seconds>] [--json|--human]
   jinn tasks observe-autopilot-delivery --expectation-file <path> --json
-  jinn tasks observe-issue-relay-delivery --expectation-file <absolute-path> --json
-  jinn tasks observe-application-delivery --expectation-file <absolute-path> --json
   jinn tasks list
   jinn tasks show <id>
+  jinn tasks close --task-id <id>
+  jinn tasks cancel --attempt <urn:uuid> --reason <text>
+  jinn tasks release --task-id <id> --attempt-index <n>
+
+\`close\`, \`cancel\`, and \`release\` are the requester lifecycle exits (native mode).
+\`close\` reclaims a posted task's unused budget; \`cancel\` persists a durable
+cancel signal for one in-flight attempt; \`release\` returns a claimed-but-unworked
+attempt to the pool (reported \`unsupported\` on chain generations with no on-chain
+release). Each requires JINN_PASSWORD to open the venue custody.
+
+\`watch\` polls the discovery indexer until the task's solution delivery is
+indexed, emitting NDJSON progress envelopes (type/phase/step/attempt/
+estimatedWaitMs) so waiting is legible rather than silent. Terminal states are
+\`delivered\` (carrying envelopeCid) and \`timeout\`; both exit 0 and carry the
+outcome in \`status\`. Feed the envelopeCid to \`jinn evidence show\`.
+
+\`watch\` is read-only (config-only; no keystore, signer, or daemon) and needs
+\`discovery.mode: "http"\` with a \`discovery.url\` — env: JINN_DISCOVERY_MODE=http,
+JINN_DISCOVERY_URL=<indexer url>. It never falls back to the on-chain floor.
 
 Idempotent: re-posting the same (--id) from the same creator Safe returns the
 existing request id from the shared task-posting store without sending a new
 transaction.
 
-Issue Relay observation exits 0 when verified, 30 while pending, 50 on a
-contradiction, and 40 for an operational failure.
-
 Options:
+  --timeout <seconds> (watch) How long to poll before returning status
+                      'timeout'. Default 900. Poll interval follows
+                      pollIntervalMs from config.
   --max-claims <n>    Number of on-chain attempt slots for the task (default 1).
                       The default single-slot policy is brittle on a shared
                       network: one non-delivering claimer permanently locks the
@@ -1253,6 +1348,7 @@ Options:
 Examples:
   jinn tasks submit --id eth-up --description "ETH direction" --solver-net prediction --spec-file fixtures/prediction-v1-task.example.json --yes
   jinn tasks submit --id usdc-apy --description "Aave APY" --solver-type prediction.apy.v0 --spec-file fixtures/prediction-apy-v0-intent.example.json --yes
+  jinn tasks watch 42 --timeout 600 --json
 `,
   run,
 };

@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "maxAttemptDurationMs": 600000 },
+    "submission": { "maxAttemptDurationMs": 300000 },
+    "keyClasses": { "maxAttemptDurationMs": "ceiling" }
+  },
+  "expect": { "ok": true, "effective": { "maxAttemptDurationMs": 300000 } }
+}

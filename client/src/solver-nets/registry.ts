@@ -206,21 +206,6 @@ export class SolverNetRegistry {
     return this.nets.get(name);
   }
 
-  /**
-   * Remove every entry registered under `name` — both the bare key and any
-   * `name#N` collision-suffixed keys `register()` may have assigned. Used by
-   * the live join applier (#1037) to make a re-join idempotent: it clears the
-   * prior registration before re-registering, so a re-apply updates in place
-   * instead of inserting a phantom `name#2` duplicate. Boot never calls this,
-   * so first-registration behaviour is unchanged.
-   */
-  unregister(name: string): void {
-    for (const key of [...this.nets.keys()]) {
-      const net = this.nets.get(key);
-      if (net && net.name === name) this.nets.delete(key);
-    }
-  }
-
   private matchesTaskRole(net: LoadedSolverNet, taskRole?: SolverNetTaskRole): boolean {
     if (taskRole === undefined) return true;
     return net.roles.some((r) => taskRoleForOperatorRole(r) === taskRole);
@@ -270,9 +255,8 @@ export class SolverNetRegistry {
 /**
  * Register a single joined SolverNet into `registry`, reproducing exactly the
  * derivation + plugin-resolution the boot loop runs (default-plugin seeding,
- * harness defaulting, role mapping). Shared by `loadSolverNets` (boot) and the
- * live join applier (`daemon/join-applier.ts`, #1037) so the two paths cannot
- * drift.
+ * harness defaulting, role mapping). Called by `loadSolverNets` at boot; the
+ * live join applier that used to share it retired in Wave-4 D1.
  *
  * No-ops when the joined entry has no resolvable contract or no roles.
  */

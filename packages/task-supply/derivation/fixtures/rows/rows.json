@@ -1,0 +1,44 @@
+[
+  {
+    "instance_id": "acme__widget-1234",
+    "repo": "acme/widget",
+    "base_commit": "3333333333333333333333333333333333333333",
+    "problem_statement": "Widget.resize() raises on zero width.\n\nExpected: returns 0.\n",
+    "language": "python",
+    "created_at": "2026-04-12T09:15:00Z",
+    "patch": "--- a/widget.py\n+++ b/widget.py\n@@\n-    raise ValueError\n+    return 0\n",
+    "test_patch": "--- a/tests/test_widget.py\n+++ b/tests/test_widget.py\n@@\n+def test_zero():\n+    assert resize(0) == 0\n",
+    "FAIL_TO_PASS": ["tests/test_widget.py::test_zero"],
+    "PASS_TO_PASS": ["tests/test_widget.py::test_basic"],
+    "license": "Apache-2.0",
+    "timeout": 900
+  },
+  {
+    "instance_id": "acme__widget-1235",
+    "repo": "acme/widget",
+    "base_commit": "3333333333333333333333333333333333333333",
+    "problem_statement": "Widget.rotate() drops the alpha channel.\n",
+    "language": "python",
+    "created_at": "2026-04-13T10:30:00Z",
+    "patch": "--- a/widget.py\n+++ b/widget.py\n@@\n-    return rgb\n+    return rgba\n",
+    "test_patch": "--- a/tests/test_rotate.py\n+++ b/tests/test_rotate.py\n@@\n+def test_alpha():\n+    assert rotate(img).mode == \"RGBA\"\n",
+    "FAIL_TO_PASS": ["tests/test_rotate.py::test_alpha"],
+    "PASS_TO_PASS": [],
+    "license": "MIT",
+    "timeout": 1200
+  },
+  {
+    "instance_id": "acme__widget-1236",
+    "repo": "acme/widget",
+    "base_commit": "3333333333333333333333333333333333333333",
+    "problem_statement": "Widget.crop() is off by one.\n",
+    "language": "python",
+    "created_at": "2026-04-14T11:45:00Z",
+    "patch": "--- a/widget.py\n+++ b/widget.py\n@@\n-    end - 1\n+    end\n",
+    "test_patch": "--- a/tests/test_crop.py\n+++ b/tests/test_crop.py\n@@\n+def test_crop(): ...\n",
+    "FAIL_TO_PASS": ["tests/test_crop.py::test_crop"],
+    "PASS_TO_PASS": [],
+    "license": "GPL-3.0-only",
+    "timeout": 900
+  }
+]

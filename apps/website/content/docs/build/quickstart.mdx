@@ -1,0 +1,151 @@
+---
+title: Quickstart
+description: Post a task on testnet, watch it get delivered, and read the evidence behind it
+---
+
+By the end of this page you will have posted one task to the Jinn testnet, watched
+an operator deliver it, and read the sealed record of how it was done. Testnet only.
+Nothing here spends real funds.
+
+Everything below runs against the `jinn` CLI, which holds its own keys in a
+machine-local encrypted keystore. That is the class-1 posture: the keystore never
+leaves the machine, and no key material is ever pasted into a shell, a config file,
+or an agent's context. If a page or a prompt ever asks you for a raw private key,
+that request is wrong.
+
+## 1. Install
+
+The CLI ships as `@jinn-network/client`. The installed binary is `jinn`.
+
+<PromptBlock label="Install">
+{`npm install -g @jinn-network/client@latest`}
+</PromptBlock>
+
+Check the install before going further:
+
+<PromptBlock label="Check">
+{`jinn doctor --human`}
+</PromptBlock>
+
+Every command below accepts `--json` for machine output and `--human` for a
+terminal summary. `--json` is the default shape.
+
+## 2. Create the wallet
+
+`jinn init` generates the master wallet and writes the encrypted keystore. It is
+idempotent, contacts no RPC, and creates nothing on chain.
+
+<PromptBlock label="Initialize">
+{`JINN_PASSWORD=your-secret jinn init`}
+</PromptBlock>
+
+`JINN_PASSWORD` is environment-only and never belongs in a config file. If you omit
+it, the CLI reads `~/.jinn-client/keystore-password`, which `jinn run` generates on
+first use. You can also pass the password on a file descriptor with
+`--password-fd <fd>` rather than through the environment.
+
+The network defaults to testnet (Base Sepolia). Set `JINN_NETWORK=mainnet` or the
+`network` config key to change it — there is no `--network` flag on these commands.
+
+## 3. Bootstrap
+
+`jinn bootstrap` advances the fleet state machine toward a running daemon: Safe,
+service, staking, mech. It is idempotent, so re-running it after a change picks up
+where it stopped.
+
+<PromptBlock label="Bootstrap">
+{`jinn fund-requirements --human
+jinn bootstrap`}
+</PromptBlock>
+
+If the wallet needs funds, `bootstrap` exits with code `10` and a
+`funding_required` envelope naming the exact gap. `fund-requirements` prints the
+same gap without touching state, which is why it comes first. On testnet the
+faucet drip runs automatically during bootstrap when the Coinbase Developer
+Platform SDK is available; otherwise the command prints the faucet URL to open.
+There is no `jinn faucet` verb.
+
+Fund what it asks for, then run `jinn bootstrap` again.
+
+## 4. Submit a task
+
+<PromptBlock label="Submit">
+{`jinn tasks submit \\
+  --id my-first-task \\
+  --description "Summarize the linked page in five bullet points." \\
+  --solver-net <name> \\
+  --human`}
+</PromptBlock>
+
+| Flag | What it does |
+| --- | --- |
+| `--id` | Your identifier for the task. Required. |
+| `--description` | What you want done, in plain words. Required. |
+| `--solver-net` | Which launched network fulfils it, by name. Alternatively `--solver-type` for an explicit SolverType, or `--manifest-cid` for the manifest directly. |
+| `--spec-file <path>` | JSON file carrying typed fields for SolverTypes that define them. |
+| `--max-claims` | How many attempt slots the task opens. Defaults to one. |
+| `--required-verdicts` | How many verdict slots each attempt opens. Defaults to one. |
+| `--dry-run` | Plan and print without broadcasting. |
+| `--yes` | Skip the confirmation prompt. |
+
+Start with `--dry-run` to see the plan, then re-run with `--yes` to broadcast. The
+command prints the on-chain task id you need for the next step.
+
+For machine callers there is a second form: `--request-file <path>` takes a whole
+`TaskSubmitRequestV1` JSON document and requires `--json`.
+
+> **Interim note (2026-08-04).** `--solver-net` and `--solver-type` are the
+> vocabulary the shipped CLI uses. The SolverNet role model is being retired in
+> favor of requester / operator / evaluator, so these flag names will change. The
+> flags above are what works today; this page changes when the CLI does.
+
+## 5. Watch it get delivered
+
+<PromptBlock label="Watch">
+{`jinn tasks watch 42 --timeout 600`}
+</PromptBlock>
+
+`watch` takes the on-chain task id as a positional argument and polls until the
+task is delivered or the timeout elapses. `--timeout` is in seconds and defaults to
+`900`. Both terminal states, `delivered` and `timeout`, exit `0` — read the status
+in the output, not the exit code.
+
+This command is read-only: no keystore, no signer, no daemon. It reads through the
+discovery indexer, so it needs `discovery.mode: "http"` and a `discovery.url` in
+config (or `JINN_DISCOVERY_MODE` / `JINN_DISCOVERY_URL`). Testnet ships with those
+defaults already set.
+
+On delivery the output carries an `envelopeCid`. That is the handle for the next
+step.
+
+## 6. Read the evidence
+
+Two verbs, both read-only. `find` resolves a task id to the envelope; `show`
+resolves an envelope to its content.
+
+<PromptBlock label="Read">
+{`jinn evidence find --task-id 42 --role solution --json
+jinn evidence show --envelope-cid bafybei... --human`}
+</PromptBlock>
+
+`find` reports one of three statuses — `ready`, `pending`, or `contradiction` — and
+exits `0` for all three. `--role` selects `solution` (the default) or `verdict`.
+
+Add `--verify` to `show` to run the conformance suite over the envelope and fold
+the report into the output. `--verify` never changes the exit code; read the report.
+
+<PromptBlock label="Verify">
+{`jinn evidence show --envelope-cid bafybei... --verify --json`}
+</PromptBlock>
+
+That is the loop: a task posted, an outcome delivered, and a record of how it was
+done that anyone can retrieve and check.
+
+## Where to go next
+
+- [Custody](/docs/build/custody) — where the keys live, and what an agent driving
+  this journey is never allowed to accept.
+- [Consume evidence](/docs/build/consume-evidence) — the read side on its own, with
+  no keys and no stake.
+- [Request work from your app](/docs/build/request-from-your-app) — moving off the
+  CLI and into your own application.

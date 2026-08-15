@@ -1,0 +1,168 @@
+# The frozen `packages/plugin` owns `plugin-ci.yml`; this tree is `plugin-tree-*`
+# throughout (C3 plan, finding F-C3-1). `pull_request` carries no path filter, matching
+# evidence-ci.yml and benchmarking-ci.yml, so the aggregate check is always reported.
+name: Plugin Tree CI
+
+on:
+  pull_request:
+    paths:
+      - "plugin/**"
+      - ".github/scripts/plugin-tree-*.mjs"
+      - ".github/scripts/plugin-tree-*.test.mjs"
+      - ".github/workflows/plugin-tree-ci.yml"
+      - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
+      - "docs/superpowers/plans/2026-07-30-plugin-c3-product-tree.md"
+      - "packages/evidence/**"
+      - "packages/trust/core/**"
+      - "docs/superpowers/plans/2026-07-30-plugin-c4-capture.md"
+      - "plugin/runtime/fixtures/**"
+  push:
+    branches: [next]
+    paths:
+      - "plugin/**"
+      - ".github/scripts/plugin-tree-*.mjs"
+      - ".github/scripts/plugin-tree-*.test.mjs"
+      - ".github/workflows/plugin-tree-ci.yml"
+      - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
+      - "docs/superpowers/plans/2026-07-30-plugin-c3-product-tree.md"
+      - "packages/evidence/**"
+      - "packages/trust/core/**"
+      - "docs/superpowers/plans/2026-07-30-plugin-c4-capture.md"
+      - "plugin/runtime/fixtures/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_TREE_ROOT: plugin
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Install plugin runtime tooling for AST guards
+        working-directory: plugin/runtime
+        run: yarn install --immutable
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/plugin-tree-package-inventory.test.mjs
+      - name: Verify source boundaries, the frozen-trio refusal, and the custody canaries
+        run: node --test .github/scripts/plugin-tree-source-boundaries.test.mjs
+
+  runtime:
+    name: Plugin Runtime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      # C4-C7 add a "Build cross-tree portal dependencies from source" step here, one
+      # `(cd <package> && yarn install --immutable && yarn build)` line per portal
+      # dependency, matching benchmarking-ci.yml.
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          for pkg in trust/core discovery/protocol discovery/client discovery/serve \
+                     evidence/protocol evidence/derivation evidence/repository evidence/discovery \
+                     evidence/catalog-sqlite evidence/execution-recorder \
+                     evidence/local-runtime evidence/trace evidence/trace-decode evidence/retrieval; do
+            (cd "packages/$pkg" && yarn install --immutable && yarn build)
+          done
+      - name: Verify Plugin Runtime
+        working-directory: plugin/runtime
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Adversarial gate (C6)
+        working-directory: plugin/runtime
+        run: yarn test test/adversarial.test.ts
+      - name: Consumed stack kits
+        run: |
+          cd packages/evidence/derivation && yarn install --immutable && yarn test && cd -
+          cd packages/evidence/trace-decode && yarn install --immutable && yarn test && cd -
+          cd packages/evidence/trace && yarn install --immutable && yarn test && cd -
+      - name: Upload Plugin Runtime distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-runtime-dist
+          path: plugin/runtime/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  adapter:
+    name: Adapter (Hermes, Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check pytest==9.0.2
+
+      - name: Assert the adapter has no third-party imports
+        working-directory: plugin/adapter-hermes
+        run: python3 scripts/check_stdlib_only.py
+
+      - name: Test
+        working-directory: plugin/adapter-hermes
+        run: python3 -m pytest
+
+  verify:
+    needs: [architecture, runtime, adapter]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Plugin Tree CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          RUNTIME_RESULT: ${{ needs.runtime.result }}
+          ADAPTER_RESULT: ${{ needs.adapter.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$RUNTIME_RESULT" \
+            "$ADAPTER_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all package distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-*-dist
+          path: .plugin-tree-dist
+      - name: Place package distributions
+        run: |
+          mkdir -p plugin/runtime/dist
+          cp -R .plugin-tree-dist/plugin-runtime-dist/. plugin/runtime/dist/
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/plugin-tree-packed-types.test.mjs

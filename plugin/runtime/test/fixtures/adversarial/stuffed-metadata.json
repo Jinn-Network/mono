@@ -1,0 +1,14 @@
+{
+  "seed": "4",
+  "plane": "public",
+  "summary": "flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky",
+  "origin": "urn:jinn:agent:distractor",
+  "capturedAt": "2026-07-29T23:59:00.000Z",
+  "outcome": "completed",
+  "excerpts": [
+    {
+      "label": "note",
+      "text": "flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky flaky"
+    }
+  ]
+}

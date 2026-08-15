@@ -1,0 +1,8 @@
+{
+  "input": {
+    "task": { "isolationPolicy": "sandboxed" },
+    "submission": { "isolationPolicy": "sandboxed" },
+    "keyClasses": { "isolationPolicy": "exact" }
+  },
+  "expect": { "ok": true, "effective": { "isolationPolicy": "sandboxed" } }
+}

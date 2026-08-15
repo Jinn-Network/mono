@@ -1,0 +1,47 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "name": "committed-reveal-fixture",
+  "description": "A committed benchmark used by the reveal-consistency conformance fixtures.",
+  "version": "1.0.0",
+  "items": [
+    {
+      "task": {
+        "digest": {
+          "sha256": "50a6a9787f196bf3654d99f8ae1c9adb5891269259f4158860530300a252f462"
+        }
+      }
+    },
+    {
+      "task": {
+        "digest": {
+          "sha256": "b88662f1bd9b1839da3f5830f7e3e4c21c8d00de6f0ec00e766fd1fe4b023a9f"
+        }
+      }
+    },
+    {
+      "task": {
+        "digest": {
+          "sha256": "7d8f64441861789ce4d4076f693f6b8924cfbf88a2a7606f7ec0b4958d2f412e"
+        }
+      }
+    },
+    {
+      "task": {
+        "digest": {
+          "sha256": "10b04c8d2f473c1bdb0db65d14a08c6cf9fd31bd9dc685cb00ac80783c7dedb6"
+        }
+      }
+    },
+    {
+      "task": {
+        "digest": {
+          "sha256": "23ea40a429f1d2ed0bfc81d41ab34ee48f0a1384f71046d4062c06c445643a30"
+        }
+      }
+    }
+  ],
+  "reveal": {
+    "policy": "scheduled",
+    "notBefore": "2026-09-01T00:00:00Z"
+  }
+}

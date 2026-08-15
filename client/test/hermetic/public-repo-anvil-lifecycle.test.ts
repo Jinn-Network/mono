@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import {
   JINN_MONO_DIFFERENTIAL_PROOF_SOURCE,
   JINN_MONO_VITEST_JSON_PARSER_CONTRACT_FIXTURE,

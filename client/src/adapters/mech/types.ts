@@ -1,12 +1,9 @@
 import type { Address, WalletClient } from 'viem';
-import type { DiscoveryAPI } from '../../discovery/types.js';
+import type { VenueBroadcaster } from './safe.js';
 import type {
   AutopilotMutationResult,
   JinnRepoAutopilotSessionTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
-import type {
-  IssueRelayEvaluationContextResolver,
-} from '../../issue-relay/evaluation-context-resolver.js';
 import type {
   AutopilotEvaluationContextObservation,
 } from '../../harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
@@ -16,22 +13,6 @@ export interface EvictionRecoveryConfig {
   stakingProxyAddress: Address;
   distributorAddress: Address;
   masterWalletClient: WalletClient;
-}
-
-export interface JinnRepoEvaluationContextResolvers {
-  readonly autopilot?: {
-    resolve(input: {
-      task: JinnRepoAutopilotSessionTask;
-      solution: AutopilotMutationResult;
-      taskId: string;
-      attemptIndex: number;
-      requestId: string;
-      solutionEnvelopeCid: string;
-      solutionOperatorSafe: string;
-      evaluatorOperatorSafe: string;
-    }): Promise<AutopilotEvaluationContextObservation | undefined>;
-  };
-  readonly issueRelay?: IssueRelayEvaluationContextResolver;
 }
 
 export interface MechAdapterConfig {
@@ -63,11 +44,6 @@ export interface MechAdapterConfig {
    * the adapter still verifies claimability on-chain before yielding work.
    */
   taskDiscovery?: {
-    /**
-     * DiscoveryAPI instance for finding claimable tasks. When provided,
-     * replaces direct subgraph calls in discoverSubgraphRestorationTasks.
-     */
-    discoveryApi?: DiscoveryAPI;
     solverNetManifestCids?: string[];
     /**
      * Lower bound for the canonical on-chain TaskCreated scan. The subgraph is
@@ -85,21 +61,33 @@ export interface MechAdapterConfig {
   routerClaimDeliveryVariant: 'v1' | 'v2' | 'v3';
   evictionRecovery?: EvictionRecoveryConfig;
   /**
-   * Whether this operator holds the `evaluator` role in a joined SolverNet.
-   * Omitted ⇒ enabled (opt-out default): a bare construction site keeps the
-   * historical scan-everything behaviour. Production callers (main.ts,
-   * join-applier.ts) always pass an explicit boolean. Gates three surfaces:
-   * ingest of delivery-claimed logs into the pending-evaluation set, the boot
-   * rehydrate of that set, and the per-cycle scan of evaluation opportunities.
-   * Ref #547.
+   * The single Safe broadcaster this operator's Safe transactions route through (finding E16 /
+   * the C2 ruling: per-daemon state, not a process-global). May be supplied at construction when
+   * the host already has one (CLI verbs); the daemon path (main.ts) supplies it later via
+   * `MechAdapter.setBroadcaster` once the composition root has built one, since composition is
+   * assembled after this adapter today. Left undefined when no composition exists (mainnet:
+   * `TaskCoordinator`/`JinnRouterV3` are not deployed there yet) — Safe-writing calls then fail
+   * loudly with `executeSafeTransaction`'s "no venue broadcaster supplied" error, same as before
+   * this ruling, just per-call rather than via an unset process-global.
    */
-  evaluatorEnabled?: boolean;
+  broadcaster?: VenueBroadcaster;
   /**
    * Optional lifecycle read port for Autopilot evaluation admission. The
    * adapter never fabricates an adoption receipt: without an accepted,
    * correlation-exact observation the Solution remains pending.
    */
-  evaluationContextResolvers?: JinnRepoEvaluationContextResolvers;
+  autopilotEvaluationContextResolver?: {
+    resolve(input: {
+      task: JinnRepoAutopilotSessionTask;
+      solution: AutopilotMutationResult;
+      taskId: string;
+      attemptIndex: number;
+      requestId: string;
+      solutionEnvelopeCid: string;
+      solutionOperatorSafe: string;
+      evaluatorOperatorSafe: string;
+    }): Promise<AutopilotEvaluationContextObservation | undefined>;
+  };
 }
 
 export const MECH_MARKETPLACE_ABI = [

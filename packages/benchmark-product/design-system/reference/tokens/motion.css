@@ -1,0 +1,20 @@
+:root{
+--ease-standard:cubic-bezier(.2,0,0,1); /* @kind other */
+--ease-out:cubic-bezier(.16,1,.3,1); /* @kind other */
+--ease-in:cubic-bezier(.4,0,1,1); /* @kind other */
+--duration-instant:80ms; /* @kind other */
+--duration-fast:120ms; /* @kind other */
+--duration-base:180ms; /* @kind other */
+--duration-slow:260ms; /* @kind other */
+--duration-page:420ms; /* @kind other */
+--transition-ui:color var(--duration-fast) var(--ease-standard),background-color var(--duration-fast) var(--ease-standard),border-color var(--duration-fast) var(--ease-standard);
+/* live run states tick, they do not pulse or glow */
+--tick-interval:1000ms; /* @kind other */
+}
+@media (prefers-reduced-motion:reduce){:root{
+--duration-instant:0ms; /* @kind other */
+--duration-fast:0ms; /* @kind other */
+--duration-base:0ms; /* @kind other */
+--duration-slow:0ms; /* @kind other */
+--duration-page:0ms; /* @kind other */
+}}

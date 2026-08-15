@@ -7,7 +7,7 @@ import type { Task } from '../types/task.js';
 import type { PoolTask } from '../solver-types/_swe-rebench-v2-pool.js';
 import { loadConfig } from '../config.js';
 import { Store } from '../store/store.js';
-import { hashImplStateDir } from '../harnesses/freeze.js';
+import { hashImplStateDir, harnessHashOptions } from '../harnesses/freeze.js';
 import { LearnerHarness } from '../harnesses/impls/learner/harness.js';
 import { ClaudeCodeHarnessAdapter } from '../harnesses/impls/learner/adapters/claude-code.js';
 import { CodexCodeHarnessAdapter } from '../harnesses/impls/learner/adapters/codex-code.js';
@@ -240,8 +240,7 @@ export async function runScreenHeldOut(opts: ScreenRunOptions): Promise<ScreenRu
   }
 
   const emptyBaseDir = mkdtempSync(join(tmpdir(), 'jinn-screen-base-'));
-  const hashOpts = baseHarness.freezeStateHashIgnore?.length
-    ? { ignoreRelPaths: [...baseHarness.freezeStateHashIgnore] } : undefined;
+  const hashOpts = harnessHashOptions(baseHarness);
   const baseCodeDigest = `sha256:${await hashImplStateDir(emptyBaseDir, hashOpts)}`;
   rmSync(emptyBaseDir, { recursive: true, force: true });
 

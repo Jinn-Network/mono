@@ -1,0 +1,56 @@
+{
+  "description": "Workspace scenarios (design §7, frozen interface §14 item 7). Data-only in Milestone A (Task A3) — consumed by the real plain-dir/git-worktree provisioners and harvest in Milestone B (Tasks B1/B2).",
+  "scenarios": [
+    {
+      "name": "per-directory-retention",
+      "description": "meta/, logs/, out/, harness-state/ survive into the durable store; secrets/ and tmp/ are wiped immediately at terminal; work/ is GC'd under TTL and disk-floor knobs.",
+      "expected": {
+        "survivesToTerminalStore": ["meta", "logs", "out", "harness-state"],
+        "wipedAtTerminal": ["secrets", "tmp"],
+        "gcPolicy": { "work": "ttl-and-disk-floor" }
+      }
+    },
+    {
+      "name": "secrets-and-tmp-wiped-at-terminal",
+      "description": "Immediately on reaching a terminal state, secrets/ (0700) and tmp/ (TMPDIR) are wiped.",
+      "given": { "terminalStates": ["delivered", "failed", "rejected", "cancelled", "expired", "lost"] },
+      "expected": { "secretsDirWipedForEveryTerminalState": true, "tmpDirWipedForEveryTerminalState": true }
+    },
+    {
+      "name": "input-immutability-violation-detected",
+      "description": "input/ is read-only after setup; a mutation detected at harvest is an integrity violation recorded on the attempt record.",
+      "given": { "phase": "setup-complete", "mutationAt": "harvest", "mutatedPath": "input/task.json" },
+      "expected": { "integrityViolation": { "path": "input/task.json", "reason": "input-mutation-after-setup" } }
+    },
+    {
+      "name": "rejected-never-executed-guarantee",
+      "description": "A provisioning failure is terminal `rejected`, carrying the never-executed guarantee that makes resubmission safe — the line is exec-started in the journal.",
+      "given": { "failurePhase": "setup", "journalLine": "before-exec-started" },
+      "expected": { "terminalState": "rejected", "neverExecuted": true, "resubmissionSafe": true }
+    },
+    {
+      "name": "symlink-in-out-escaping-tree-rejected",
+      "description": "Every out/ entry is resolved with O_NOFOLLOW/realpath; a symlink whose target escapes out/ is rejected, not dereferenced — closing the out/creds -> ../secrets/token exfiltration path.",
+      "given": { "entry": "out/creds", "symlinkTarget": "../secrets/token" },
+      "expected": { "collected": false, "integrityViolation": { "path": "out/creds", "reason": "symlink-escapes-out" }, "dereferenced": false }
+    },
+    {
+      "name": "per-attempt-quota-breach",
+      "description": "A per-attempt cumulative disk quota is enforced DURING execution, not only at harvest.",
+      "given": { "quotaBytes": 1000000, "cumulativeWrittenBytes": 1500000, "phase": "execution" },
+      "expected": { "quotaBreachDetectedDuringExecution": true, "notOnlyAtHarvest": true }
+    },
+    {
+      "name": "spawn-time-env-discipline",
+      "description": "No secret-shaped ambient keys, and no setup-phase credentials in the harness env — the execution phase receives only the launcher's allowlisted environment.",
+      "given": { "ambientEnv": { "AWS_SECRET_ACCESS_KEY": "leaked-if-not-stripped", "PATH": "/usr/bin" }, "setupCredentials": { "registryToken": "should-never-cross-the-boundary" } },
+      "expected": { "harnessEnvContainsSecretShapedAmbientKeys": false, "harnessEnvContainsSetupCredentials": false }
+    },
+    {
+      "name": "no-secrets-in-meta-grep",
+      "description": "A journal/attempt-record grep proves no secrets/ byte-content ever lands in meta/ — the shim resolves secret forwards at exec and never writes them to meta/ (§6.1 step 4).",
+      "given": { "secretsDirContent": ["api-key: sk-do-not-leak-this-literal-string"], "metaDirFiles": ["shim.json", "heartbeat", "outcome.json", "journal.jsonl", "attempt-record.json"] },
+      "expected": { "secretByteContentFoundInMeta": false, "grepPattern": "the literal secret value must not appear as a substring of any meta/ file" }
+    }
+  ]
+}

@@ -12,35 +12,22 @@ import {
   AutopilotMutationResultSchema,
   AutopilotReviewResultSchema,
   AutopilotSessionCapsuleSchema,
-  IssueRelayAdoptionReceiptV1Schema,
-  IssueRelayEvaluationAnchorV1Schema,
-  IssueRelayEvaluationContextV1Schema,
-  IssueRelayFindingV1Schema,
-  IssueRelayPurposeSchema,
-  IssueRelayRoundV1Schema,
-  IssueRelayVerdictV1Schema,
   TaskSubmitRequestV1Schema,
   TaskSubmitResultV1Schema,
   parseAutopilotAdoptionReceiptComment,
-  parseIssueRelayAssuranceComment,
   type AcceptedSolutionAdoptionReceipt,
-  type AutopilotDeliveryContradictionReason,
   type AutopilotDeliveryCommandResultV1,
+  type AutopilotDeliveryContradictionReason,
   type AutopilotDeliveryExpectation,
   type AutopilotDeliveryObservation,
   type AutopilotDeliveryPendingReason,
   type AutopilotMutationEvidence,
   type AutopilotReviewCorrelation,
-  type IssueRelayAdoptionReceiptV1,
-  type IssueRelayEvaluationContextV1,
-  type IssueRelayRoundV1,
-  type IssueRelayVerdictV1,
   type TaskSubmitRequestV1,
   type TaskSubmitResultV1,
 } from '../src/autopilot.js';
 import {
   AutopilotDeliveryExpectationSchema as SolverNetDeliveryExpectationSchema,
-  IssueRelayRoundV1Schema as SolverNetIssueRelayRoundV1Schema,
   TaskSubmitRequestV1Schema as SolverNetTaskSubmitRequestV1Schema,
 } from '../src/solvernets/jinn-repo.js';
 
@@ -67,27 +54,6 @@ const decoderByManifestName = {
     AutopilotCorrelationSchema.safeParse(JSON.parse(text)).success,
   'AutopilotAdoptionReceiptComment': (text: string) =>
     parseAutopilotAdoptionReceiptComment(text.trimEnd()) !== null,
-  'IssueRelayRoundV1Schema': (text: string) =>
-    IssueRelayRoundV1Schema.safeParse(JSON.parse(text)).success,
-  'IssueRelayAdoptionReceiptV1Schema': (text: string) =>
-    IssueRelayAdoptionReceiptV1Schema.safeParse(JSON.parse(text)).success,
-  'IssueRelayAssuranceComment': (text: string) => {
-    try {
-      return parseIssueRelayAssuranceComment(text, {
-        generation:
-          'R_kgDOExample:101:sha256:dd2241a3f2e4865b572fc038b6d52fd91823f7c534c6672507c3a31a46d152b1',
-        round: 1,
-        snapshotDigest:
-          'sha256:dd2241a3f2e4865b572fc038b6d52fd91823f7c534c6672507c3a31a46d152b1',
-        taskId: '124',
-        attemptIndex: 0,
-        requestId: `0x${'9'.repeat(64)}`,
-        deliveryEnvelopeCid: `f01551220${'4'.repeat(64)}`,
-      })?.anchor !== undefined;
-    } catch {
-      return false;
-    }
-  },
   'TaskSubmitRequestV1Schema': (text: string) =>
     TaskSubmitRequestV1Schema.safeParse(JSON.parse(text)).success,
   'TaskSubmitResultV1Schema': (text: string) =>
@@ -110,13 +76,6 @@ describe('@jinn-network/sdk/autopilot public boundary', () => {
     expect(AutopilotDeliveryExpectationSchema).toBeDefined();
     expect(AutopilotDeliveryObservationSchema).toBeDefined();
     expect(AutopilotDeliveryCommandResultV1Schema).toBeDefined();
-    expect(IssueRelayRoundV1Schema).toBeDefined();
-    expect(IssueRelayAdoptionReceiptV1Schema).toBeDefined();
-    expect(IssueRelayEvaluationAnchorV1Schema).toBeDefined();
-    expect(IssueRelayEvaluationContextV1Schema).toBeDefined();
-    expect(IssueRelayFindingV1Schema).toBeDefined();
-    expect(IssueRelayPurposeSchema).toBeDefined();
-    expect(IssueRelayVerdictV1Schema).toBeDefined();
 
     expectTypeOf<TaskSubmitRequestV1>().not.toBeAny();
     expectTypeOf<TaskSubmitResultV1>().not.toBeAny();
@@ -128,17 +87,12 @@ describe('@jinn-network/sdk/autopilot public boundary', () => {
     expectTypeOf<AutopilotDeliveryContradictionReason>().not.toBeAny();
     expectTypeOf<AutopilotDeliveryObservation>().not.toBeAny();
     expectTypeOf<AutopilotDeliveryCommandResultV1>().not.toBeAny();
-    expectTypeOf<IssueRelayRoundV1>().not.toBeAny();
-    expectTypeOf<IssueRelayAdoptionReceiptV1>().not.toBeAny();
-    expectTypeOf<IssueRelayEvaluationContextV1>().not.toBeAny();
-    expectTypeOf<IssueRelayVerdictV1>().not.toBeAny();
   });
 
   it('keeps the SolverNet barrel on the identical schema objects', () => {
     expect(SolverNetTaskSubmitRequestV1Schema).toBe(TaskSubmitRequestV1Schema);
     expect(SolverNetDeliveryExpectationSchema)
       .toBe(AutopilotDeliveryExpectationSchema);
-    expect(SolverNetIssueRelayRoundV1Schema).toBe(IssueRelayRoundV1Schema);
   });
 });
 
@@ -303,18 +257,41 @@ describe('Autopilot delivery wire contracts', () => {
     }).success).toBe(false);
   });
 
-  it('wraps observations in a strict machine-command result', () => {
-    const observation = fixture('delivery-pending.json');
-    const value = {
+  // PUBLISHED EXTERNAL BOUNDARY. `Jinn-Network/autopilot` value-imports
+  // `AutopilotDeliveryCommandResultV1Schema` from `@jinn-network/sdk/autopilot`
+  // (`src/lifecycle/marketplace-delivery.ts:18`) and parses the verb's stdout
+  // with it (`:317`). Dropping the export breaks that consumer's compile on its
+  // next SDK bump, so this pin asserts PRESENCE from both barrels.
+  it('publishes the delivery command-result envelope from both barrels', async () => {
+    const autopilotModule: Record<string, unknown> =
+      await import('../src/autopilot.js');
+    const jinnRepoModule: Record<string, unknown> =
+      await import('../src/solvernets/jinn-repo.js');
+    expect(autopilotModule['AutopilotDeliveryCommandResultV1Schema'])
+      .toBeDefined();
+    expect(jinnRepoModule['AutopilotDeliveryCommandResultV1Schema'])
+      .toBe(autopilotModule['AutopilotDeliveryCommandResultV1Schema']);
+  });
+
+  it('parses the verb envelope the external consumer sends and rejects drift', () => {
+    const observation = fixture('verified-solution.json');
+    const envelope = {
       schemaVersion: 1,
-      generatedAt: '2026-07-24T12:00:00.000Z',
+      generatedAt: '2026-07-27T12:00:00.000Z',
       verb: 'tasks observe-autopilot-delivery',
       observation,
     };
-    expect(AutopilotDeliveryCommandResultV1Schema.parse(value)).toEqual(value);
+    expect(AutopilotDeliveryCommandResultV1Schema.parse(envelope))
+      .toEqual(envelope);
+    // The `verb` literal is the contract the consumer keys on; a renamed verb
+    // must fail loudly here rather than parse into a stale shape.
     expect(AutopilotDeliveryCommandResultV1Schema.safeParse({
-      ...value,
-      generatedAt: new Date(),
+      ...envelope,
+      verb: 'tasks observe-delivery',
+    }).success).toBe(false);
+    expect(AutopilotDeliveryCommandResultV1Schema.safeParse({
+      ...envelope,
+      unexpected: true,
     }).success).toBe(false);
   });
 });

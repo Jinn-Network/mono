@@ -83,7 +83,7 @@ LAYER_TARBALL="$(pack_local_package "$LAYER")"
 
 # Build and install the distributable wheel. Installing the plugin source tree
 # would miss packaging errors and would not represent the user-facing product.
-python3 -m pip wheel --no-deps --wheel-dir "$WORK/wheels" "$HERE/plugins/jinn"
+python3 -m pip wheel --no-deps --wheel-dir "$WORK/wheels" "$REPO_ROOT/plugin/frozen"
 WHEEL="$(find "$WORK/wheels" -maxdepth 1 -name 'jinn_plugin-*.whl' -print -quit)"
 test -n "$WHEEL"
 

@@ -1,0 +1,17 @@
+{
+  "protocol": "https://spec.jinn.network/trust/policy/v1",
+  "version": 3,
+  "purposes": {
+    "verifier-agent": {
+      "accepted": [
+        "urn:uuid:33333333-3333-4333-8333-333333333333"
+      ],
+      "requiredStrength": "strong"
+    }
+  },
+  "signerSet": {
+    "keys": ["did:key:z6MkKeyC", "did:key:z6MkKeyD"],
+    "threshold": 1
+  },
+  "refreshBy": "2026-08-30T00:00:00Z"
+}

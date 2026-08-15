@@ -1,0 +1,136 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "environment",
+      "digest": {
+        "sha256": "7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
+      }
+    },
+    {
+      "name": "state-artifact",
+      "digest": {
+        "sha256": "616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c"
+      }
+    }
+  ],
+  "predicateType": "https://spec.jinn.network/attestations/chain-environment-verification/v1",
+  "predicate": {
+    "protocol": "https://spec.jinn.network/chain-environment-verification/protocol/v1",
+    "scope": "component",
+    "outcome": "artifact-unavailable",
+    "window": {
+      "startedAt": "2026-07-31T09:00:00.000Z",
+      "endedAt": "2026-07-31T09:04:00.000Z"
+    },
+    "verifier": {
+      "id": "https://spec.jinn.network/chain-environment-verification/conformance-verifier",
+      "version": "0.1.0",
+      "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    "materials": [
+      {
+        "name": "materializer",
+        "digest": {
+          "sha256": "3ad113801e1a7b80b1062064ef8237ad672448d36fda050426059afab6770758"
+        }
+      },
+      {
+        "name": "probe-suite",
+        "digest": {
+          "sha256": "0b5a2df5ccb6c5e511944028089cb32709a405cddb44ff6e36b268cfa4420a6f"
+        }
+      },
+      {
+        "name": "comparator",
+        "digest": {
+          "sha256": "a827559dbc258e90dc1b0fcde5554b11ac584ddd0d8c90a76315b3b2fd6150a3"
+        }
+      }
+    ],
+    "environment": {
+      "closureClass": "closed-state",
+      "fidelityClass": "local",
+      "runtime": {
+        "family": "anvil",
+        "version": "1.3.7",
+        "imageManifestDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "platform": "linux/amd64",
+        "binaryDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "reportedVersion": "1.3.7",
+        "evmConfigurationDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "chainId": 1
+      },
+      "postFixtureCommitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "controls": {
+        "miningMode": "manual",
+        "orderingPolicy": "fifo",
+        "resetMechanism": "fresh-process"
+      },
+      "envelope": {
+        "rpcAllowlist": {
+          "read": [
+            "eth_call",
+            "eth_getBalance",
+            "eth_getBlockByNumber",
+            "eth_getTransactionReceipt"
+          ],
+          "stateChanging": [
+            "eth_sendRawTransaction",
+            "evm_mine",
+            "evm_increaseTime"
+          ]
+        },
+        "signerRoles": [
+          "agent"
+        ],
+        "permittedChainId": 1,
+        "maxima": {
+          "maxTransactions": "25",
+          "maxAggregateGas": "60000000",
+          "maxExecutionDurationMs": "600000"
+        },
+        "egressPolicyId": "jinn.egress.blackhole/1"
+      }
+    },
+    "isolation": {
+      "networkPolicy": {
+        "egress": "denied",
+        "dns": "absent",
+        "archiveRpc": "unreachable",
+        "forkBackend": "absent"
+      },
+      "closureEvidenceMode": "sealed-boundary",
+      "boundaryProbe": {
+        "probeId": "out-of-slice-read",
+        "readsEmptyOutsideSlice": false
+      },
+      "egressAttempts": [],
+      "forbiddenProbes": [],
+      "signerScope": {
+        "declaredRoles": [
+          "agent"
+        ],
+        "exposedAccounts": [],
+        "unexpectedAccounts": []
+      },
+      "resolutionLog": {
+        "name": "resolution-log",
+        "mediaType": "application/json",
+        "digest": {
+          "sha256": "58ffbb9029e6bd47d86d8473023e2716ba96304da8b8c8db8418d701c9ba3b9a"
+        }
+      }
+    },
+    "cost": {
+      "artifactBytes": 282,
+      "artifactCount": 3,
+      "wallSeconds": 0
+    },
+    "failure": {
+      "stage": "resolve",
+      "reason": "resource-unresolvable",
+      "detail": "state-artifact (sha256:616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c): artifact unavailable for sha256:616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "strategyId": "import.swe-rebench.v1",
+  "environmentRecordDigest": "sha256:f9f387b6f0aeeae984e2f4d0c1325c9a278350b3921566c2414bbbb611fae2ca",
+  "written": [
+    {
+      "candidateId": "acme__widget-1234",
+      "taskDigest": "sha256:09a3691084a1c71d3ab685cef843a2d2b9c8e8326740b1bfb9462da54376eca4",
+      "evaluationSpecDigest": "sha256:2d5703421176e392e7fd918439dc90f1de427c3dd83c785332afa9bfd90d23c7",
+      "receiptDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+    },
+    {
+      "candidateId": "acme__widget-1235",
+      "taskDigest": "sha256:e449237b49127daba416afa0626239530296eb551182f79f6aab06f0f5fbc2f2",
+      "evaluationSpecDigest": "sha256:751db975920fefb05c6acd68e2ec1574889df55549b7688796c31c1f7245b811",
+      "receiptDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+    }
+  ],
+  "refused": [],
+  "failed": []
+}

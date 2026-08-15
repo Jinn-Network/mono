@@ -28,6 +28,7 @@ import {
 } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import { PluginRegistryPublisher } from '../../erc8004/plugin-registry.js';
+import { createDirectSafeBroadcaster } from '../../adapters/mech/direct-safe-broadcaster.js';
 import { pinFileToIpfs as defaultPinFileToIpfs } from '../../adapters/mech/ipfs-pinfile.js';
 import { fetchFromIpfs as defaultFetchFromIpfs } from '../../adapters/mech/ipfs.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
@@ -35,6 +36,8 @@ import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork
 import { walletPrivateKeyAtIndex, decryptMnemonic } from '../../earning/wallet.js';
 import { FleetStateStore } from '../../earning/store.js';
 import { privateKeyToAccount } from 'viem/accounts';
+import { checkDaemonGuard, daemonGuardEnvelope, DaemonGuardBlockedError } from '../daemon-guard.js';
+import { EXIT_CODES } from '../../errors/envelope.js';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 import { endorseHandler, warnHandler, reviewHandler, respondHandler } from './solver-plugins-feedback.js';
@@ -42,8 +45,12 @@ import { blockHandler } from './solver-plugins-block.js';
 import { listFeedbackHandler, discoverHandler, statusHandler } from './solver-plugins-read.js';
 import { getAddress } from 'viem';
 import { ReputationRegistryClient } from '../../erc8004/reputation.js';
-import { createDiscoveryAPI } from '../../discovery/factory.js';
-import type { DiscoveryAPI } from '../../discovery/types.js';
+import { getIdentityRegistryAddress } from '../../erc8004/addresses.js';
+import type { PluginPublicationReader } from '../../plugin-registry/publication-reader.js';
+import {
+  createPluginPublicationReader,
+  createRpcPluginLogSource,
+} from '../../plugin-registry/publication-host.js';
 
 export function writeJson(ctx: CommandContext, value: unknown): void {
   ctx.writer.write(JSON.stringify(value) + '\n');
@@ -123,12 +130,56 @@ export interface SolverPluginsDeps extends BaseCommandDeps {
     revoke: PluginRegistryPublisher['revoke'];
   };
   reputationClientFactory: (args: ReputationClientFactoryArgs) => ReputationClientHandle;
-  discoveryApiFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => DiscoveryAPI;
+  /**
+   * Reads published plug-in records for the `discover` / `status` /
+   * `list-feedback` verbs. One-swap R3 (#2461): narrowed from the legacy
+   * `DiscoveryAPI` to the neutral `PluginPublicationReader` port so the read
+   * verbs no longer depend on `discovery/` (deleted in the D-wave). The
+   * production factory reads them on-chain from the IdentityRegistry.
+   */
+  pluginReaderFactory: (cfg: ReturnType<typeof defaultLoadConfig>) => PluginPublicationReader;
   ipfsFetch: typeof defaultFetchFromIpfs;
   readConfigFile: ConfigFileIo['readConfigFile'];
   writeConfigFile: ConfigFileIo['writeConfigFile'];
   resolveCliPassword: typeof defaultResolveCliPassword;
   now: () => number;
+}
+
+/**
+ * D0a P3 (#525/#562/#897): refuse a solver-plugins write when a live jinn
+ * daemon is detected for this earning directory -- see `../daemon-guard.js`.
+ * Throws `DaemonGuardBlockedError` (D0a round-1 review) rather than a plain
+ * `Error`, so each write handler's top-level catch (see
+ * `solver-plugins-publish.ts`, `solver-plugins-revoke.ts`,
+ * `solver-plugins-feedback.ts`) can special-case it via
+ * `writeDaemonGuardBlocked` and preserve the full envelope (pid, pidfile
+ * path, opt-out hint) instead of collapsing it into a generic `*_failed`
+ * message.
+ */
+function assertNoLiveDaemon(earningDir: string): void {
+  const guard = checkDaemonGuard({ earningDir });
+  if (guard.blocked) {
+    throw new DaemonGuardBlockedError(daemonGuardEnvelope(guard, 'jinn solver-plugins publish <source>'));
+  }
+}
+
+/**
+ * Re-emit a caught `DaemonGuardBlockedError`'s full envelope (D0a round-1 review) instead of
+ * losing its pid / pidfile path / opt-out hint to a generic `*_failed` message wrap. Callers
+ * check `err instanceof DaemonGuardBlockedError` before falling back to their own mapping.
+ */
+export function writeDaemonGuardBlocked(ctx: CommandContext, err: DaemonGuardBlockedError): void {
+  const { envelope } = err;
+  writeJson(ctx, {
+    error: {
+      code: envelope.code,
+      message: envelope.message,
+      ...(envelope.hint !== undefined ? { hint: envelope.hint } : {}),
+      ...(envelope.exampleCli !== undefined ? { exampleCli: envelope.exampleCli } : {}),
+      ...(envelope.details !== undefined ? { details: envelope.details } : {}),
+    },
+  });
+  ctx.exit(EXIT_CODES[envelope.code]);
 }
 
 export const PRODUCTION_DEPS: SolverPluginsDeps = {
@@ -155,6 +206,10 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
     const getWalletClient = async () => {
       if (!walClientPromise) {
         walClientPromise = (async () => {
+          // D0a P3 (#525/#562/#897): `publish`/`revoke` sign via
+          // `createDirectSafeBroadcaster` below with this same agent EOA a
+          // running daemon uses, with no cross-process lock against it.
+          assertNoLiveDaemon(args.earningDir);
           const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), args.password);
           const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
           const account = privateKeyToAccount(agentKey);
@@ -176,6 +231,11 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
             safeAddress: args.safeAddress,
             publicClient: pubClient,
             walletClient: walClient,
+            // Finding E16 / the C2 ruling: `jinn solver-plugins publish|revoke` is a standalone
+            // one-shot process with no composition root to borrow a broadcaster from, so it
+            // constructs its own — bound to the fleet identity Safe, signed by the same agent key
+            // `walClient` already resolved above.
+            broadcaster: createDirectSafeBroadcaster(pubClient, walClient, args.safeAddress),
           }),
         );
       }
@@ -222,15 +282,27 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
         const password = args.password;
         const store = new FleetStateStore(args.earningDir);
         writeClientPromise = (async () => {
+          // D0a P3 (#525/#562/#897): writes below sign via
+          // `createDirectSafeBroadcaster` (when routed through a Safe) with
+          // this same agent EOA a running daemon uses, with no cross-process
+          // lock against it.
+          assertNoLiveDaemon(args.earningDir);
           const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), password);
           const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
           const account = privateKeyToAccount(agentKey);
           const walClient = createJinnWalletClient(args.rpcUrl, args.network, account);
+          // Finding E16 / the C2 ruling: this write client is a standalone one-shot process's
+          // own client, with no composition root to borrow a broadcaster from — construct one
+          // bound to the target Safe (when routing through one) rather than hard-failing.
+          const broadcaster = args.safeAddress
+            ? createDirectSafeBroadcaster(pubClient, walClient, args.safeAddress)
+            : undefined;
           return new ReputationRegistryClient({
             reputationRegistryAddress: args.reputationRegistryAddress,
             publicClient: pubClient,
             walletClient: walClient,
             ...(args.safeAddress ? { safeAddress: args.safeAddress } : {}),
+            ...(broadcaster ? { broadcaster } : {}),
           });
         })();
       }
@@ -258,11 +330,16 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
       },
     };
   },
-  discoveryApiFactory: (cfg) => {
+  pluginReaderFactory: (cfg) => {
     const chainId = cfg.network === 'testnet' ? 84532 : 8453;
-    return createDiscoveryAPI(cfg.discovery ?? { mode: 'onchain' }, {
-      rpcUrl: cfg.rpcUrl,
-      chainId,
+    const network: JinnOnchainNetwork = cfg.network === 'testnet' ? 'base-sepolia' : 'base';
+    const identityRegistry = getIdentityRegistryAddress(chainId);
+    if (!identityRegistry) {
+      throw new Error(`No IdentityRegistry address known for chainId ${chainId}.`);
+    }
+    const publicClient = createJinnPublicClient(cfg.rpcUrl, network);
+    return createPluginPublicationReader({
+      logSource: createRpcPluginLogSource({ publicClient, identityRegistry, chainId }),
     });
   },
   ipfsFetch: defaultFetchFromIpfs,
@@ -311,8 +388,8 @@ endorse / warn / block / review / respond are OPERATOR-trust write verbs:
     reads the block list at startup — restart for it to take effect.
 
 list-feedback / discover / status are READ verbs (no password required):
-  • Use the configured DiscoveryAPI (defaults to the on-chain RPC floor on
-    mainnet; the privately-operated Ponder indexer on testnet).
+  • Read published plug-in records on-chain from the IdentityRegistry
+    (the neutral PluginPublicationReader over the configured RPC).
   • \`list-feedback\` reads ReputationRegistry rows for the cid's builder.
   • \`discover\` lists published plug-ins, optionally filtered by SolverType.
   • \`status\` summarises publication state + reputation summary +

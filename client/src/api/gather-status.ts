@@ -11,6 +11,7 @@ type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
 import { base, baseSepolia, sepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
+import { getLastConfigMigrationReport } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
 import { isOverSpendCap } from '../spend/spend-cap.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
@@ -37,6 +38,7 @@ import {
   resolveMasterDailyEstimateWei,
 } from './status-build.js';
 import { listStolasClaimTargets } from '../earning/stolas-claim.js';
+import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 import {
   gatherPortfolioV0Status,
   DEFAULT_ENGINE_WORKING_DIR_ROOT,
@@ -47,8 +49,9 @@ import {
   type PredictionV1Status,
 } from './prediction-v1-build.js';
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
-import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
+import type { VerdictTally } from '../types/verdict-tally-read-model.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
+import type { EvidenceIndexingSource } from '../types/evidence-indexing.js';
 import { buildInfo } from '../build-info.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
@@ -66,6 +69,8 @@ import type {
   HarnessReadinessSnapshot,
   JoinedHarnessSpec,
 } from '../harnesses/readiness-registry.js';
+import { phaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
+import { maskUrlsInMessage } from '../rpc/transport.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -155,6 +160,13 @@ export interface StatusGatherConfig {
    */
   stOlasDistributorAddress?: string;
   network: 'mainnet' | 'testnet';
+  /**
+   * The daemon's resolved product mode (#2380), computed once at boot by `main.ts` via
+   * `resolveConfiguredOperatorVerticalMode` — threaded through rather than re-derived here.
+   * Absent ⇒ `/v1/status` reports `'legacy'` (this gather function only ever runs on the legacy
+   * entry point; native mode has no `/v1/status` — see `native-phase-d-observability.ts`).
+   */
+  effectiveMode?: OperatorVerticalMode;
   pollIntervalMs: number;
   masterEthDailyEstimateWei?: string;
   rewardClaimIntervalMs: number;
@@ -203,13 +215,13 @@ export interface StatusGatherConfig {
    */
   latestVersion?: () => string | null;
   /**
-   * Resolved DiscoveryAPI, threaded by `server.ts`. When present, the async
-   * status path enriches each COMPLETE solve run's task-relative `outcome`
-   * from `getVerdictTallies` (spec/2026-05-22-run-outcome.md). Absent ⇒
-   * outcomes stay `null` (the SPA renders `—`). This is a DISPLAY signal:
-   * any discovery failure degrades silently to `null`, never a wrong `'fail'`.
+   * Optional getter for the live `EvidenceDriverLoop` instance (Task 12's
+   * composition root threads this through server.ts). When present,
+   * `/v1/status` carries an `evidenceIndexing` block: the driver's cached
+   * indexing-failure list and its cached count of announcements pending
+   * indexing. Returning `null`/absent ⇒ no `evidenceIndexing` block.
    */
-  discovery?: DiscoveryAPI;
+  evidenceDriver?: () => EvidenceIndexingSource | null;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -380,8 +392,19 @@ function predictionV1Unavailable(
   };
 }
 
+/**
+ * Sole choke point for turning a caught error into a string on the
+ * response/receipt path (spec §14.2 item 2, issue #2402). A failing RPC call
+ * (`client.getBlockNumber`, `readContract`, …) throws a viem
+ * `HttpRequestError` whose message embeds the full request URL — for an
+ * operator-configured paid primary that's a key-in-path secret. Masking here
+ * means every other call site in this file (and the balance-cache
+ * persistence path) inherits the redaction by construction instead of each
+ * needing its own `maskUrlsInMessage` call.
+ */
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const raw = error instanceof Error ? error.message : String(error); // lint:no-error-leak-allow — sole raw-message read; masked on the next line
+  return maskUrlsInMessage(raw);
 }
 
 export async function sumPendingStakingRewards(
@@ -436,7 +459,7 @@ export async function sumPendingStakingRewards(
       ? { sum: total.toString(), pendingByService, nextCheckpointAt }
       : { sum: total.toString(), pendingByService };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
+    return { error: errorMessage(e) };
   }
 }
 
@@ -494,7 +517,7 @@ async function gatherServiceBalances(
       cache.set(role, entry);
       return entry;
     } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = errorMessage(error);
       const keepTs =
         cached &&
         hasUsefulCacheValues(cached, isAgentRole) &&
@@ -566,6 +589,19 @@ async function gatherServiceBalances(
   return { byDisplay: out, errorsByDisplay };
 }
 
+/**
+ * Which read-plane source `Store.taskRunReadModel()` should sit behind for this
+ * boot (one-swap R1, umbrella #2461, DR-2026-08-05). `compositionMode: "native"`
+ * — set only by Wave 3's deploy PR, and validly reachable only after
+ * `assertNativeDeployment` passed at boot — reads the native aggregate tables;
+ * every other value (absent / `"legacy"`) keeps the byte-unchanged legacy
+ * `task_runs` read. Dark until the deploy flips the key, so on every legacy
+ * boot this returns `"legacy"` and the read plane is unchanged.
+ */
+function readPlaneMode(status: StatusGatherConfig | undefined): 'legacy' | 'native' {
+  return status?.config?.compositionMode === 'native' ? 'native' : 'legacy';
+}
+
 /** Collect status inputs without assembling the legacy mega-response. */
 export async function gatherGatheredStatusRaw(
   store: Store,
@@ -585,7 +621,7 @@ export async function gatherGatheredStatusRaw(
     outcome: row.outcome,
   }));
   const lastRewardClaimTickAt = store.getConfigValue('last_reward_claim_tick_at');
-  const taskRunReadModel = store.taskRunReadModel();
+  const taskRunReadModel = store.taskRunReadModel(readPlaneMode(status));
   const daily = resolveMasterDailyEstimateWei(
     status?.masterEthDailyEstimateWei,
     status?.pollIntervalMs ?? 5000,
@@ -610,10 +646,11 @@ export async function gatherGatheredStatusRaw(
     taskRuns = undefined;
   }
 
-  // Enrich task-relative outcomes from the network's verdict tallies
-  // (spec/2026-05-22-run-outcome.md). DISPLAY signal — degrade silently to
-  // null on any discovery failure; never surface a wrong 'fail'.
-  if (taskRuns && status?.discovery) {
+  // Enrich task-relative outcomes from the native projector's verdict
+  // tally read model (spec/2026-05-22-run-outcome.md). DISPLAY signal —
+  // degrade silently to null on any failure; never surface a wrong 'fail'.
+  // Wave-4 D4 dropped the legacy `DiscoveryAPI.getVerdictTallies` path.
+  if (taskRuns) {
     try {
       const solveTaskIds = [
         ...new Set(
@@ -622,15 +659,42 @@ export async function gatherGatheredStatusRaw(
             .map((r) => r.taskId as string),
         ),
       ];
-      const tallies: Map<string, VerdictTallyResult> = solveTaskIds.length
-        ? await status.discovery.getVerdictTallies({ taskIds: solveTaskIds })
-        : new Map();
+      const tallies: Map<string, VerdictTally> =
+        solveTaskIds.length === 0
+          ? new Map()
+          : store.verdictTallyReadModel().getVerdictTallies({ taskIds: solveTaskIds });
       applyOutcomes(taskRuns.recentTasks, tallies);
       applyOutcomes(taskRuns.inFlight, tallies);
     } catch {
       // Outcomes stay null → SPA renders '—'/'awaiting'.
     }
   }
+
+  // One-time shape-v2 config migration report (Task 3's `migrateConfigShapeV2`,
+  // read via `getLastConfigMigrationReport`). Present only on the boot where
+  // this operator's legacy config was auto-migrated this process start.
+  //
+  // Coordinator amendment 1 (F7 reversed — no claim-nothing migration):
+  // `capsUnset` is computed from the migrated `claimPolicy`'s cap fields
+  // being ABSENT (the schema makes them optional), not from a synthesized
+  // zero. It drives message copy only — the host's USD spend gates (spec
+  // §6.5) remain the operative bound either way.
+  const migrationReport = getLastConfigMigrationReport();
+  const configMigration =
+    migrationReport === undefined || !migrationReport.migrated
+      ? undefined
+      : {
+          shapeVersion: 2 as const,
+          wiringEntries: migrationReport.wiringEntries,
+          postingEntries: migrationReport.postingEntries,
+          ...(migrationReport.backupPath === undefined
+            ? {}
+            : { backupPath: migrationReport.backupPath }),
+          capsUnset:
+            status?.config?.claimPolicy === undefined ||
+            status.config.claimPolicy.spendCapWei === undefined ||
+            status.config.claimPolicy.aiUnitCap === undefined,
+        };
 
   let harnessRollup: ReturnType<typeof buildHarnessRollup> | undefined;
   try {
@@ -688,9 +752,11 @@ export async function gatherGatheredStatusRaw(
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
     version: buildInfo.implVersion,
+    effectiveMode: status?.effectiveMode,
     latestVersion,
     daemonRuntime: readDaemonRuntime(status?.earningDir),
     daemonStartedAt,
+    phaseDTransitionUsage: phaseDTransitionUsageDiagnostics(),
     passwordRotationAt: resolvePasswordRotationAt(status?.passwordRotation),
     dbPath: store.path,
     earningDir: status?.earningDir,
@@ -711,6 +777,7 @@ export async function gatherGatheredStatusRaw(
     claimedByService: store.getClaimedRewardsByService(),
     claimedStakingRewardsLast24hWei: store.getClaimedRewardsLast24hWei(),
     harnessRollup,
+    configMigration,
   };
 
   if (!status) {
@@ -792,7 +859,7 @@ export async function gatherGatheredStatusRaw(
   } catch (e) {
     raw.rpc = {
       ok: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: errorMessage(e),
     };
   }
 
@@ -808,7 +875,7 @@ export async function gatherGatheredStatusRaw(
     } catch (e) {
       raw.master = {
         address: fleet.master_address,
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       };
     }
   }
@@ -838,7 +905,7 @@ export async function gatherGatheredStatusRaw(
     } catch (e) {
       raw.l1Master = {
         address: fleet.master_address,
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       };
     }
   }
@@ -866,19 +933,46 @@ export async function gatherGatheredStatusRaw(
   return raw;
 }
 
-export async function gatherStatusForApi(
+/**
+ * The cheap, read-only-over-already-gathered-data tail that `gatherStatusForApi` appends onto
+ * `assembleStatusV1`'s output: loop-completion, impl-state cadence, evidence-indexing rollup,
+ * spend, and AI-units. None of this re-reads chain state — it's all derived from `raw`/`store`.
+ * Split out (issue #2408 review finding F3) so `server.ts`'s `/v1/status` handler can run it
+ * against a shared-TTL-cached `{ raw, assembled }` pair (`gathered-status-cache.ts`) without
+ * `gather-status.ts` importing that cache module itself (which would be circular — the cache
+ * module imports FROM here). `gatherStatusForApi` below is unchanged in behavior; it just calls
+ * this helper instead of inlining it, so every existing (uncached) caller keeps its exact prior
+ * fresh-every-call semantics.
+ */
+export async function enrichStatusV1Tail(
   store: Store,
   status: StatusGatherConfig | undefined,
+  raw: GatheredStatusRaw,
+  body: StatusV1Response,
 ): Promise<StatusV1Response> {
-  const raw = await gatherGatheredStatusRaw(store, status);
-  const body = assembleStatusV1(raw);
   // Loop-completion + impl-state commit cadence (#959). Both are read-only and
   // degrade to zeroes / an empty list — they never throw the status endpoint.
-  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel(), {
+  //
+  // The `as StatusV1Response[...]` casts below bridge a real TS-only friction, not a
+  // runtime one: the contract schemas use z.looseObject (§8 artifact 4's B1 fix — an
+  // additive-minor contract must not silently strip fields it doesn't know about), whose
+  // inferred type carries a `[x: string]: unknown` index signature that a plain
+  // `export interface` from these owning modules doesn't declare. The values are
+  // identical; only the two types' declared shape differs.
+  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel(readPlaneMode(status)), {
     cacheKey: store.db,
-  });
+  }) as StatusV1Response['loopCompletion'];
   if (status?.engine?.implStateDirRoot) {
-    body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot);
+    body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot) as StatusV1Response['implStateCadence'];
+  }
+  // Evidence indexing-failure rollup (Task 11). Best-effort: absent driver ⇒
+  // no evidenceIndexing block; never blocks the status endpoint.
+  const evidenceDriver = status?.evidenceDriver?.();
+  if (evidenceDriver) {
+    body.evidenceIndexing = {
+      failures: await evidenceDriver.failures(),
+      pending: evidenceDriver.pending(),
+    } as StatusV1Response['evidenceIndexing'];
   }
   const caps = status?.spendCaps;
   if (caps && Object.keys(caps).length > 0) {
@@ -989,4 +1083,13 @@ export async function gatherStatusForApi(
     };
   }
   return body;
+}
+
+export async function gatherStatusForApi(
+  store: Store,
+  status: StatusGatherConfig | undefined,
+): Promise<StatusV1Response> {
+  const raw = await gatherGatheredStatusRaw(store, status);
+  const body = assembleStatusV1(raw);
+  return enrichStatusV1Tail(store, status, raw, body);
 }

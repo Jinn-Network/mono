@@ -1,0 +1,162 @@
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+// Cross-tree portal dependencies (§7.8): nine production/sibling deps, packed and
+// file:-mapped so the consumer graph resolves end-to-end (mirrors
+// record-discovery-serve's own pack-smoke.mjs pattern).
+const crossTree = [
+  ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol")],
+  ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend")],
+  ["@jinn-network/task-execution-profiles", join(packageRoot, "..", "..", "task-execution", "profiles")],
+  ["@jinn-network/trust-core", join(packageRoot, "..", "..", "trust", "core")],
+  ["@jinn-network/trust-resolve", join(packageRoot, "..", "..", "trust", "resolve")],
+  ["@jinn-network/record-discovery-protocol", join(packageRoot, "..", "..", "discovery", "protocol")],
+  ["@jinn-network/record-discovery-serve", join(packageRoot, "..", "..", "discovery", "serve")],
+  ["@jinn-network/marketplace-binding", join(packageRoot, "..", "binding")],
+  ["@jinn-network/marketplace-projector", join(packageRoot, "..", "projector")],
+];
+const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-marketplace-venue-base-"));
+const archivesRoot = join(temporaryRoot, "archives");
+const venueBaseArchive = join(archivesRoot, "marketplace-venue-base.tgz");
+const consumer = join(temporaryRoot, "consumer");
+
+function run(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: "inherit", ...options });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited with ${code}`));
+    });
+  });
+}
+
+function output(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const stdout = [];
+    const stderr = [];
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], ...options });
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout).toString("utf8"));
+        return;
+      }
+      reject(new Error(`${command} exited with ${code}: ${Buffer.concat(stderr).toString("utf8")}`));
+    });
+  });
+}
+
+function assertArchiveShape(entries) {
+  for (const required of ["package/README.md", "package/dist/index.d.ts", "package/dist/index.js"]) {
+    if (!entries.includes(required)) {
+      throw new Error(`marketplace-venue-base archive is missing ${required}`);
+    }
+  }
+  const leakedTests = entries.filter(
+    (entry) => entry.startsWith("package/dist/") && /(?:^|\/)[^/]*\.(?:test|spec)\./u.test(entry),
+  );
+  if (leakedTests.length > 0) {
+    throw new Error(`marketplace-venue-base archive contains tests: ${leakedTests.join(", ")}`);
+  }
+}
+
+try {
+  await mkdir(archivesRoot, { recursive: true });
+  const crossTreeArchives = new Map();
+  for (const [name, root] of crossTree) {
+    const archive = join(archivesRoot, `${name.replace(/[@/]/g, "-")}.tgz`);
+    await run("yarn", ["pack", "--out", archive], { cwd: root });
+    crossTreeArchives.set(name, archive);
+  }
+  await run("yarn", ["pack", "--out", venueBaseArchive], { cwd: packageRoot });
+  assertArchiveShape(
+    (await output("tar", ["-tzf", venueBaseArchive])).split(/\r?\n/u).filter(Boolean),
+  );
+
+  await mkdir(consumer);
+  await writeFile(
+    join(consumer, "package.json"),
+    JSON.stringify({
+      private: true,
+      type: "module",
+      dependencies: {
+        "@jinn-network/marketplace-venue-base": `file:${venueBaseArchive}`,
+        ...Object.fromEntries(
+          [...crossTreeArchives].map(([name, archive]) => [name, `file:${archive}`]),
+        ),
+        "@types/node": "^22.0.0",
+        typescript: "5.9.3",
+        vitest: "4.1.8",
+      },
+    }),
+  );
+  // npm 10.9.x Arborist can crash with `edgesOut` while resolving this local
+  // tarball graph and Vitest's optional peers. The packed type/runtime checks
+  // below remain the oracle, so use the stable legacy peer resolver here.
+  await run("npm", [
+    "install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps",
+  ], { cwd: consumer });
+
+  const installedRoot = join(consumer, "node_modules", "@jinn-network", "marketplace-venue-base");
+
+  // Compile-time check: the packed public surface resolves for a NodeNext-strict consumer.
+  await writeFile(
+    join(consumer, "packed-types.ts"),
+    `import "@jinn-network/marketplace-venue-base";\n`,
+  );
+  await writeFile(
+    join(consumer, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        noEmit: true,
+        strict: true,
+        target: "ES2022",
+      },
+      include: ["packed-types.ts"],
+    }),
+  );
+  await run(
+    process.execPath,
+    [join(consumer, "node_modules", "typescript", "bin", "tsc"), "-p", "tsconfig.json"],
+    { cwd: consumer },
+  );
+
+  // Runtime check: the packed root import works, and the dependency boundary is exactly the four
+  // declared cross-tree production dependencies.
+  const smokeScript = join(consumer, "smoke.mjs");
+  await writeFile(
+    smokeScript,
+    `
+import { readFile, readdir } from "node:fs/promises";
+import "@jinn-network/marketplace-venue-base";
+
+const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
+const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
+const expected = ${JSON.stringify([
+      "@jinn-network/marketplace-binding",
+      "@jinn-network/marketplace-projector",
+      "@jinn-network/task-execution-backend",
+      "@jinn-network/task-execution-protocol",
+    ].sort())};
+if (jinnDependencies.join(",") !== expected.join(",")) {
+  throw new Error("unexpected Jinn dependency boundary: " + jinnDependencies.join(", "));
+}
+const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))});
+if (distFiles.some((name) => name.includes(".test."))) throw new Error("test output leaked into dist");
+await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
+console.log("Installed marketplace-venue-base root import, assets, and dependency boundary verified.");
+`,
+  );
+  await run(process.execPath, [smokeScript], { cwd: consumer });
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}

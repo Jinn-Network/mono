@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "golden-oci-mapping/artifact.content",
+      "sha256": "1cb7e940d783319fd4635b0977cf4a710aaba45557552dfaa382ada779d677ea"
+    },
+    {
+      "id": "golden-oci-mapping/artifact.manifest.json",
+      "sha256": "f8fecf26aa9f2dad518f1341a54c5c47905c64d05cc3dc51c041c535d2529e5d"
+    },
+    {
+      "id": "golden-oci-mapping/execution-evidence.content",
+      "sha256": "4acf65d289f83a4749034b05ed7c5a8bf1119a820fc4d7cfa8ffd5945c3c1771"
+    },
+    {
+      "id": "golden-oci-mapping/execution-evidence.manifest.json",
+      "sha256": "25ac78b817d4a1013a8caf0a5fed889cd56af41265fc8aad3bdaa508600137a5"
+    },
+    {
+      "id": "golden-oci-mapping/execution-verification.content",
+      "sha256": "454b20b5ce25d0435e2b28fe7df079bf009e8b09e87ba0c5c2606aa31c23f3ca"
+    },
+    {
+      "id": "golden-oci-mapping/execution-verification.manifest.json",
+      "sha256": "8ae57fd9ca520b8078721496b5b480aff638821d9bee2ed072cf9383bf5a0f62"
+    },
+    {
+      "id": "golden-oci-mapping/expected-digests.json",
+      "sha256": "77bf6468b6a89d6685ae45c40188e4cea9451a4ed3603643e2f0baba6957ad58"
+    },
+    {
+      "id": "golden-oci-mapping/result-evaluation.content",
+      "sha256": "13c3fbbd1c0cf26624ada78a75342e3d6b0f81fd2fa6982400e20293279405ae"
+    },
+    {
+      "id": "golden-oci-mapping/result-evaluation.manifest.json",
+      "sha256": "81195f10541d5379e9dd6652dd3f9ad6358e571b42147179393cf3b3634ee87c"
+    }
+  ],
+  "errata": []
+}

@@ -8,7 +8,8 @@
 import { getAddress, type Address } from 'viem';
 import type { CommandContext } from '../command.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
-import { writeJson } from './solver-plugins.js';
+import { writeJson, writeDaemonGuardBlocked } from './solver-plugins.js';
+import { DaemonGuardBlockedError } from '../daemon-guard.js';
 import type { RevocationPayload } from '../../erc8004/plugin-registry.js';
 
 export interface RevokeOptions {
@@ -102,6 +103,10 @@ export async function revokeHandler(
       safeAddress,
     });
   } catch (err) {
+    if (err instanceof DaemonGuardBlockedError) {
+      writeDaemonGuardBlocked(ctx, err);
+      return;
+    }
     writeJson(ctx, {
       error: {
         code: 'revoke_failed',

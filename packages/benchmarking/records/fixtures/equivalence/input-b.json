@@ -1,0 +1,25 @@
+{
+  "reveal": {
+    "policy": "immediate"
+  },
+  "items": [
+    {
+      "task": {
+        "digest": {
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      }
+    },
+    {
+      "task": {
+        "digest": {
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      }
+    }
+  ],
+  "version": "1.0.0",
+  "description": "Key-order equivalence fixture.",
+  "name": "equivalence-fixture",
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1"
+}

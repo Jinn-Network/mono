@@ -15,6 +15,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -36,6 +37,21 @@ const installedBundledWorkspaceRoot = join(
   'node_modules',
   '@jinn-network',
 );
+const bundledWorkspaceNames = JSON.parse(readFileSync(join(clientRoot, 'package.json'), 'utf8'))
+  .bundledDependencies
+  .filter((name) => name.startsWith('@jinn-network/'));
+const bundledWorkspaceResolutions = Object.fromEntries(bundledWorkspaceNames.map((name) => [
+  name,
+  `file:${join(installedBundledWorkspaceRoot, name.slice('@jinn-network/'.length))}`,
+]));
+// The candidate client and its bundled plugin both declare Zod 4. Yarn's node-modules linker
+// otherwise hoists the Zod 3 copy requested by zod-to-json-schema above the file-resolved plugin,
+// making Node load a version that violates the plugin's own manifest. Pin the consumer to the
+// package's declared runtime major while exercising these exact bundled workspaces.
+const yarnConsumerResolutions = {
+  ...bundledWorkspaceResolutions,
+  zod: 'npm:4.4.3',
+};
 const outputArgIndex = process.argv.indexOf('--output');
 const outputArg = outputArgIndex === -1 ? undefined : process.argv[outputArgIndex + 1];
 if (outputArgIndex !== -1 && (!outputArg || outputArg.startsWith('--'))) {
@@ -186,13 +202,11 @@ try {
       dependencies: {
         '@jinn-network/client': `file:${tarball}`,
       },
-      // Exercise Yarn's node-modules layout against the exact private
-      // workspaces in this candidate tarball. Their target npm versions may
-      // not exist yet while a coherent release is being prepared.
-      resolutions: {
-        '@jinn-network/core': `file:${join(installedBundledWorkspaceRoot, 'core')}`,
-        '@jinn-network/plugin': `file:${join(installedBundledWorkspaceRoot, 'plugin')}`,
-      },
+      // Exercise Yarn's node-modules layout against every exact private workspace bundled in
+      // this candidate tarball. A newly bundled workspace can itself depend on another private
+      // workspace; mapping only the first two historic roots would make Yarn reach the registry
+      // for that already-vendored runtime and hide a real packed-closure regression.
+      resolutions: yarnConsumerResolutions,
     }, null, 2)}\n`,
   );
   writeFileSync(

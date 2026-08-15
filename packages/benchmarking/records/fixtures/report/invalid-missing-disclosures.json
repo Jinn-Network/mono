@@ -1,0 +1,30 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "subjects": [
+    {
+      "digest": {
+        "sha256": "5e3c8f25e4401caab1df98783947fc8419cf93a77766b85e252e64f64f7e0634"
+      }
+    }
+  ],
+  "method": {
+    "id": "jinn.benchmarking.method/wilson",
+    "version": "1",
+    "parameters": {}
+  },
+  "preregistered": false,
+  "results": {
+    "armA": {
+      "n": 1,
+      "passRate": "1.0",
+      "wilsonInterval": {
+        "low": "0.21",
+        "high": "1.0"
+      }
+    }
+  },
+  "limitations": [
+    "single-replicate point estimate"
+  ],
+  "author": "urn:uuid:66666666-6666-5666-8666-666666666666"
+}

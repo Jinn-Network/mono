@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { gatherLauncherTasks } from '../../src/api/launcher-tasks.js';
 import type { JinnConfig } from '../../src/config.js';
-import type { TaskStatusSnapshot } from '../../src/discovery/types.js';
+import type { TaskStatusSnapshot } from '../../src/archive/types.js';
 
 describe('gatherLauncherTasks', () => {
   it('labels posted tasks by joinedSolverNets display name when no solverNet is recorded', async () => {

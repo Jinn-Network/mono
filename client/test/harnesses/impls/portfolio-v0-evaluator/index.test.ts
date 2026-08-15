@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalJson } from '../../../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../../../src/util/canonical-json.js';
 import { tmpdir } from 'node:os';
 import { PortfolioV0Evaluator } from '../../../../src/harnesses/impls/portfolio-v0-evaluator/index.js';
 import { SOLUTION_ENVELOPE_CID_CONTEXT_KEY } from '../../../../src/harnesses/impls/evaluation-context.js';

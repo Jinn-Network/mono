@@ -1,0 +1,17 @@
+[
+  {
+    "name": "trust-key-binding-shaped",
+    "payloadType": "application/vnd.jinn.trust.key-binding.v1+json",
+    "payloadUtf8": "{\"agent\":\"urn:uuid:11111111-1111-4111-8111-111111111111\",\"protocol\":\"https://spec.jinn.network/trust/key-binding/v1\"}"
+  },
+  {
+    "name": "in-toto-statement-shaped",
+    "payloadType": "application/vnd.in-toto+json",
+    "payloadUtf8": "{\"_type\":\"https://in-toto.io/Statement/v1\",\"predicateType\":\"https://spec.jinn.network/trust/authorization/v1\"}"
+  },
+  {
+    "name": "empty-object",
+    "payloadType": "application/vnd.jinn.trust.revocation.v1+json",
+    "payloadUtf8": "{}"
+  }
+]

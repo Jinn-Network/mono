@@ -5,8 +5,39 @@ import { emitEvent } from '../observability/emit-event.js';
 import type { Store } from '../store/store.js';
 import type { TaskPostRecord, TaskPostingPolicyType } from '../store/store.js';
 import { TransientError, type Task } from '../types/index.js';
-import type { TaskCandidate, TaskPostingPolicy } from './sources.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
+
+// `TaskPostingPolicy` and `TaskCandidate` were re-homed here from the deleted
+// `tasks/sources.ts` by Wave-4 D3. The creator loop's task-source stack
+// (`TaskSource`, `StaticConfiguredTaskSource`, `GeneratedTaskSource`,
+// `filterBindableTasks`) retired with the loop; this posting service is the one
+// surviving consumer of the candidate shape, reached only from
+// `jinn tasks submit` (`client/src/cli/commands/tasks.ts`). The whole module
+// retires with Task 19 of the cutover stage-3 plan.
+
+export type TaskPostingPolicy =
+  | { kind: 'once_per_safe' }
+  | { kind: 'once_per_bucket'; bucketKey: string }
+  | { kind: 'interval'; intervalMs: number; scopeKey?: string };
+
+export interface TaskCandidate {
+  task: Task;
+  sourceKey: string;
+  postingPolicy: TaskPostingPolicy;
+  /**
+   * IPFS CID of the signed Task document, if already uploaded by the caller
+   * (e.g. `jinn tasks submit --spec-file`). When present, the posting service
+   * uses it to register the Task on the ERC-8004 Identity Registry after a
+   * successful on-chain post (best-effort, Plan E).
+   */
+  taskCid?: string;
+  sourceMeta?: {
+    solverType?: string;
+    bucketKey?: string;
+    note?: string;
+    request?: unknown;
+  };
+}
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
 const POST_LOCK_STALE_AFTER_MS = 60_000;
@@ -39,11 +70,6 @@ export interface TaskPostResult {
 export interface PostTaskCandidateOptions {
   creatorSafeAddress?: string;
   beforeBroadcast?: () => void | Promise<void>;
-  assertFunding?: (facts: {
-    creatorSafe: string;
-    solverNetManifestCid: string;
-    proposedSpendWei: bigint;
-  }) => void | Promise<void>;
   recoveryOnly?: boolean;
 }
 
@@ -320,7 +346,6 @@ export class TaskPostingService {
         );
       }
       const posted = await this.adapter.postTask(task, {
-        assertFunding: opts.assertFunding,
         beforeBroadcast: async () => {
           await opts.beforeBroadcast?.();
           const intentAt = this.scheduler.now().toISOString();

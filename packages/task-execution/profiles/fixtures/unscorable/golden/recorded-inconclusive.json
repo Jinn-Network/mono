@@ -1,0 +1,4 @@
+{
+  "input": { "name": "coverage-window-open", "disposition": "recorded-inconclusive" },
+  "expect": { "name": "coverage-window-open", "disposition": "recorded-inconclusive" }
+}

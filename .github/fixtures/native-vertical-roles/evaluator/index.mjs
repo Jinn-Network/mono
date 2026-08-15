@@ -1,0 +1,22 @@
+import '@jinn-network/evidence-local-runtime';
+import '@jinn-network/evidence-protocol';
+import '@jinn-network/evidence-publication';
+import '@jinn-network/evidence-repository';
+import '@jinn-network/marketplace-binding';
+import '@jinn-network/marketplace-projector';
+import '@jinn-network/marketplace-venue-base';
+import '@jinn-network/record-discovery-client';
+import '@jinn-network/record-discovery-protocol';
+import '@jinn-network/record-discovery-serve';
+import '@jinn-network/record-discovery-transport-http';
+import '@jinn-network/task-execution-backend';
+import '@jinn-network/task-execution-backend-local';
+import '@jinn-network/task-execution-evaluation-harness';
+import '@jinn-network/task-execution-evaluator-adapters';
+import '@jinn-network/task-execution-profiles';
+import '@jinn-network/task-execution-protocol';
+import '@jinn-network/task-execution-workspace';
+import '@jinn-network/trust-core';
+import '@jinn-network/trust-resolve';
+
+export const role = 'evaluator';

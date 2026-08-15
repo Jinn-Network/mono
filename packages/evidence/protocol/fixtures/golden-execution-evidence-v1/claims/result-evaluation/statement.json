@@ -1,0 +1,65 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "execution/task/task.md",
+      "digest": {
+        "sha256": "1f42fd35cecf09d1bdf953fe4c7a1c8d25fd0bcf415a6b39aa7b61f1e982ef93"
+      }
+    },
+    {
+      "name": "execution/results/slug-normalization.patch",
+      "digest": {
+        "sha256": "c43b406505b8c53ff9bf0a1c57442080d99a14b9f278739cb426313cf3238b07"
+      }
+    }
+  ],
+  "predicateType": "https://spec.jinn.network/attestations/result-evaluation/v1",
+  "predicate": {
+    "evaluatedAt": "2026-07-23T16:00:00Z",
+    "evaluator": {
+      "id": "urn:uuid:55555555-5555-4555-8555-555555555555"
+    },
+    "evaluationMethod": {
+      "name": "claims/result-evaluation/evaluator-implementation.json",
+      "digest": {
+        "sha256": "b7c4d8b4fc4719780b91e6e69a1236beb2ef66773f5e35450adb346ea21bfc24"
+      }
+    },
+    "evaluationSpecification": {
+      "name": "claims/result-evaluation/evaluation-specification.md",
+      "digest": {
+        "sha256": "e1dccd97de6886b2e1961d396c044631c4d2f3b412cb3f4c7d715e9101fd6fe4"
+      }
+    },
+    "taskSubject": "execution/task/task.md",
+    "resultSubjects": [
+      "execution/results/slug-normalization.patch"
+    ],
+    "verdict": "pass",
+    "measurements": [
+      {
+        "name": "testsPassed",
+        "value": 4,
+        "unit": "count"
+      },
+      {
+        "name": "testsFailed",
+        "value": 0,
+        "unit": "count"
+      }
+    ],
+    "evidence": [
+      {
+        "name": "claims/result-evaluation/evaluation-report.json",
+        "digest": {
+          "sha256": "a13d0046865150ec121194084a45e23fb7ee8b22a1ffb6cb251dbfd223293fb8"
+        }
+      }
+    ],
+    "explanation": "The exact patch satisfies every criterion in the evaluation specification and all four focused tests pass.",
+    "limitations": [
+      "The evaluator did not assess the execution method or tool policy."
+    ]
+  }
+}

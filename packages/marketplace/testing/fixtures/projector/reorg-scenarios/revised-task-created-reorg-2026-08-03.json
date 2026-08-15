@@ -1,0 +1,53 @@
+{
+  "name": "revised-task-created-reorg-2026-08-03",
+  "description": "A safe revised-router TaskCreated availability is orphaned and corrected only by a signed append with reason reorged.",
+  "generation": "revised",
+  "logs": [
+    {
+      "event": "TaskCreated",
+      "chainId": 84532,
+      "address": "0x1111111111111111111111111111111111111111",
+      "blockNumber": "101",
+      "blockHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "transactionHash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "logIndex": 0,
+      "finalityTier": "safe",
+      "args": {
+        "creator": "0x3333333333333333333333333333333333333333",
+        "taskCidDigest": "0x7777777777777777777777777777777777777777777777777777777777777777",
+        "submissionDigest": "0xf74de6f7baa7f7ef40ea6dcec644ff9b7d9c1de6eefc392e3508806308c5f111",
+        "taskId": "43",
+        "maxTotal": "1",
+        "maxConcurrent": "1",
+        "submissionDeadline": "1785369600",
+        "closeAt": "1785456000",
+        "responseTimeout": "3600",
+        "minVerdicts": "1",
+        "requireDistinctEvaluator": true,
+        "solutionMaxDeliveryRate": "100",
+        "verdictMaxDeliveryRate": "20",
+        "solutionBudget": "1000",
+        "verdictBudget": "200"
+      },
+      "projection": {
+        "timestamp": "2026-07-29T12:01:00Z",
+        "submission": "urn:uuid:22222222-2222-4222-8222-222222222222",
+        "taskDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+        "effectiveDeadline": "2026-07-30T12:00:00Z",
+        "dispatchContext": {
+          "uri": "urn:jinn:marketplace:dispatch-context:43:0",
+          "digest": {
+            "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+          }
+        }
+      }
+    }
+  ],
+  "reorg": {
+    "blockHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "timestamp": "2026-07-29T12:05:00Z"
+  },
+  "expect": {
+    "correctionSha256": "sha256:a52f6cd9d3a9042d5f653ee58022104d733a66736fea4be2500062afbcda9cab"
+  }
+}

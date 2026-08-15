@@ -124,8 +124,7 @@ export type ImmutableMechanicalVerification =
 export interface ImmutableMechanicalVerifier {
   isReady?(): Promise<{ ready: boolean; reason?: string }>;
   verify(input: {
-    /** Autopilot supplies its full authority; profile-only callers need none. */
-    context?: AutopilotEvaluationContext;
+    context: AutopilotEvaluationContext;
     checkoutDir: string;
     changedFiles: string[];
     abort?: AbortSignal;

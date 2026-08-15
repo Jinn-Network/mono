@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jinn-plugin"
+version = "0.1.0"
+description = "Jinn for Hermes — evidence capture and federated retrieval over the Jinn plugin runtime."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.entry-points."hermes_agent.plugins"]
+jinn = "jinn_plugin"
+
+[tool.setuptools]
+package-dir = {"jinn_plugin" = "."}
+packages = ["jinn_plugin"]
+
+[tool.setuptools.package-data]
+jinn_plugin = ["plugin.yaml", "runtime-pin.json"]

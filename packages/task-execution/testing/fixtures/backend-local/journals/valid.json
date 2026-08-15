@@ -1,0 +1,54 @@
+{
+  "name": "valid",
+  "description": "A clean happy-path attempt: engaged, spawn-intended (with the serialized LaunchPlan), spawned (shim fingerprint), one progress event, then a delivered terminal.",
+  "events": [
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000101",
+      "seq": 1,
+      "type": "attempt-engaged",
+      "time": "2026-07-28T00:00:00.000Z",
+      "displayMessage": "Attempt engaged for submission",
+      "details": { "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f1", "taskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000101",
+      "seq": 2,
+      "type": "spawn-intended",
+      "time": "2026-07-28T00:00:00.100Z",
+      "displayMessage": "Spawn intent journaled before fork/exec",
+      "details": { "launchPlanDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "nonce": "nonce-101" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000101",
+      "seq": 3,
+      "type": "spawned",
+      "time": "2026-07-28T00:00:00.250Z",
+      "displayMessage": "Shim fingerprint recorded",
+      "details": { "nonce": "nonce-101", "pid": 4242, "startTime": 111111 }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000101",
+      "seq": 4,
+      "type": "progress",
+      "time": "2026-07-28T00:01:30.000Z",
+      "displayMessage": "Harness progress",
+      "details": { "fraction": 0.5 }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000101",
+      "seq": 5,
+      "type": "attempt-terminal",
+      "time": "2026-07-28T00:03:00.000Z",
+      "displayMessage": "Delivered",
+      "details": { "state": "delivered", "exitCode": 0, "nonce": "nonce-101" },
+      "failsAttempt": false
+    }
+  ],
+  "expected": {
+    "durableSeq": 6,
+    "intactEventCount": 5,
+    "terminalState": "delivered",
+    "note": "the happy path baseline every other golden journal fixture is a scripted variant of"
+  },
+  "conformance": { "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": true, "nonceMatches": true }, "expectedResult": { "classification": "matching", "action": "terminal-record-wins" } }
+}

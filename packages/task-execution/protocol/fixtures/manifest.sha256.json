@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "adversarial-v1/contradictory-terminals/observations.json",
+      "sha256": "491cfffa128bc08af94983637838bfe028a2ec090ae9d9304ae7b65af1b09ae9"
+    },
+    {
+      "id": "adversarial-v1/digest-mismatch/claimed-digest.json",
+      "sha256": "54a517c4fe8d3bc6e9a6968e660bb5ff81e9320472feff22965e507b202a5afe"
+    },
+    {
+      "id": "adversarial-v1/digest-mismatch/document.json",
+      "sha256": "7b1da34286ba2e4d5fa5f5c2df83f334b6411721d95793ce1c4f3e996fb6f115"
+    },
+    {
+      "id": "adversarial-v1/dispatch-context-grafting/NOTE.md",
+      "sha256": "43dfc71574719f1fe60dee11b47408816bfd8c6cdf9e75b7a600af14bf745124"
+    },
+    {
+      "id": "adversarial-v1/dispatch-context-grafting/grafted-dispatch-context.json",
+      "sha256": "1d291f9aeaac6a7ddbb17a96a86fa4555992e88c34d6f2f736eed45f8bd83a18"
+    },
+    {
+      "id": "adversarial-v1/expired-then-late-terminal/fold-options.json",
+      "sha256": "c78ca118263865edd21d1286f3d579cadf9a94fe16705254365db803ea670deb"
+    },
+    {
+      "id": "adversarial-v1/expired-then-late-terminal/log-with-terminal.json",
+      "sha256": "2af313765d21a237f7e15386acece74006804c9f3dfd5edd2c8fe9b9e46ecb7b"
+    },
+    {
+      "id": "adversarial-v1/expired-then-late-terminal/log-without-terminal.json",
+      "sha256": "6e03f754fdeb6b46538e848fc6db2907675a761eda950b76b390f5583e52ddb4"
+    },
+    {
+      "id": "adversarial-v1/extension-override/task.json",
+      "sha256": "583c1829a9ffce6c4294fc49b8f023d4a470c4c43b06f24fc3226f2bfacb97a7"
+    },
+    {
+      "id": "adversarial-v1/forged-cross-attempt-supersedes/delivery-a.json",
+      "sha256": "7b0185fc4331b5440828bb477cf06bae66eff49a7658d4fc8c3467ef7c9717df"
+    },
+    {
+      "id": "adversarial-v1/forged-cross-attempt-supersedes/delivery-b-forged-supersedes.json",
+      "sha256": "14f24a6a247521bbe819d4cd285f74b6a14a7f646c8d8241c140677a2287a817"
+    },
+    {
+      "id": "adversarial-v1/idempotency-scopes/submission-a.json",
+      "sha256": "157c69ab949d603bea3eb33c8ed53b526c006a763b98c6a390372be0a964fc12"
+    },
+    {
+      "id": "adversarial-v1/idempotency-scopes/submission-b-same-key-different-bytes.json",
+      "sha256": "d09b7ee63c0c22f00f001dbd70e7563181dd7c0827b7007907deedbdfc5b48e3"
+    },
+    {
+      "id": "adversarial-v1/idempotency-scopes/submission-c-different-requester-same-key.json",
+      "sha256": "b06c755fa75b1854f31ce88bccdf09d4f970668ff8c5dd1682fe45f29dfd7a16"
+    },
+    {
+      "id": "adversarial-v1/illegal-terminal-transition/observations.json",
+      "sha256": "83a3e78ba8d4e445e71e6d8c938cef944c33d3965920fae0b8a39774dbf62f59"
+    },
+    {
+      "id": "adversarial-v1/leaked-task-resubmission/confidential-task.json",
+      "sha256": "7d5462ac95f6ec0acc3473cc445836ac281b9380a2ffc8cf9b2c5e22ccc14fe7"
+    },
+    {
+      "id": "adversarial-v1/leaked-task-resubmission/unauthorized-submission.json",
+      "sha256": "19cf9157256dbef73bb70745112f2544d9024024deef7daccdea55a3b337c863"
+    },
+    {
+      "id": "adversarial-v1/lost-then-corrected/observations.json",
+      "sha256": "89bdb52c115a2c61186796c126c0cace3c7b599ab437f7e45ad21fb24542de47"
+    },
+    {
+      "id": "adversarial-v1/malformed-document/task.json",
+      "sha256": "a04d4b93625ca2a01ecfe4209b9c827e2cd1e490cbaba3776d825f4e5100e651"
+    },
+    {
+      "id": "adversarial-v1/manifest.json",
+      "sha256": "9d574ea842d3f6093dce92c5d124784a73110a971a0f25d98788d5a5e26ddd34"
+    },
+    {
+      "id": "adversarial-v1/oversized-content/oversized-observation.json",
+      "sha256": "3e2972cf8b0bdda345c34cf0aeb0869ec2202542b87c6d2227cb96a6ffde16f9"
+    },
+    {
+      "id": "adversarial-v1/oversized-content/resource-descriptor.json",
+      "sha256": "f3e9cc2964f2cae0a6024cdd153e36b4387742ce2c5d1128c9efbf7b01d69622"
+    },
+    {
+      "id": "adversarial-v1/replayed-and-out-of-order/observations.json",
+      "sha256": "75ecef2f51080d57fd42443f715f7a4debb3ffe03f79c300fd7a55e737a303ef"
+    },
+    {
+      "id": "adversarial-v1/sequence-boundary/observations.json",
+      "sha256": "ffbcad80bba21af74aa639e4a5056d2c53b4332860a56dd1d43c54c97bf2ca72"
+    },
+    {
+      "id": "golden-task-execution-v1/artifacts/patch.diff",
+      "sha256": "dc8231acfaa265ffcb0853fdb6716718e4e75c68f372e73ccea21e7a6f44a0de"
+    },
+    {
+      "id": "golden-task-execution-v1/conformance-report.json",
+      "sha256": "638ad3d22abdf000057e1b540a2723fa0b2d2bf22b65576ed207a8e233a278b4"
+    },
+    {
+      "id": "golden-task-execution-v1/equivalence/expected-digest.json",
+      "sha256": "17945b6a491c8d1bc060aabe33e95a2acf5bd9f80bdc76761c29b1b18407082d"
+    },
+    {
+      "id": "golden-task-execution-v1/equivalence/task-a.json",
+      "sha256": "fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607"
+    },
+    {
+      "id": "golden-task-execution-v1/equivalence/task-b.json",
+      "sha256": "fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607"
+    },
+    {
+      "id": "golden-task-execution-v1/local/delivery.json",
+      "sha256": "84a7367623136bbabda781b570080c704c129657bc250aedd7865dbc0c1180b5"
+    },
+    {
+      "id": "golden-task-execution-v1/local/observations.json",
+      "sha256": "017f8b0bfc3e4d4ef5153a577549da5267ef928ec11417f242ea1a2490dfb566"
+    },
+    {
+      "id": "golden-task-execution-v1/local/submission.json",
+      "sha256": "7b78f52210fc430449e0bfb2ccc65fb72e4f92aa6290d817dba4c71b2b4fc1b1"
+    },
+    {
+      "id": "golden-task-execution-v1/marketplace/delivery.json",
+      "sha256": "5cc823fdd9b7c727b79427221bb609c5eec6370c82257a95bf2d12cf5bab268e"
+    },
+    {
+      "id": "golden-task-execution-v1/marketplace/observations.json",
+      "sha256": "951712b20dd8d5bce338c1d00c933ef696b0ca1491e2456fd1121a71b1b6193b"
+    },
+    {
+      "id": "golden-task-execution-v1/marketplace/submission.json",
+      "sha256": "ecfd0277d9c614abaa934d6a60f14c1046876fc0333275951ee90c2397cb1b9d"
+    },
+    {
+      "id": "golden-task-execution-v1/task.json",
+      "sha256": "fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607"
+    }
+  ],
+  "errata": []
+}

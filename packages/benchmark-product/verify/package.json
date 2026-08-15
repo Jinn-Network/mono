@@ -1,0 +1,74 @@
+{
+  "name": "@colophon-claims/verify",
+  "version": "1.0.0",
+  "description": "Standalone public-bundle verifier for Colophon claims.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/benchmark-product/verify"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "colophon-verify": "./dist/bin.js"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "yarn build && node --test test/*.test.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@fontsource-variable/newsreader": "5.3.0",
+    "@fontsource-variable/public-sans": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@jinn-network/benchmarking-aggregate": "0.1.0",
+    "@jinn-network/benchmarking-interop": "0.1.0",
+    "@jinn-network/benchmarking-local": "0.1.0",
+    "@jinn-network/benchmarking-records": "0.1.0",
+    "@jinn-network/benchmarking-run": "0.1.0",
+    "@jinn-network/task-admission": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "zod": "4.4.3"
+  },
+  "resolutions": {
+    "@noble/hashes": "2.2.0",
+    "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
+    "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
+    "@jinn-network/benchmarking-local": "portal:../../benchmarking/local",
+    "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
+    "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
+    "@jinn-network/environment-record": "portal:../../environments/record",
+    "@jinn-network/task-admission": "portal:../../task-supply/admission",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

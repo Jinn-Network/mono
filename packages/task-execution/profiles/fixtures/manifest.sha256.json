@@ -1,0 +1,478 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "README.md",
+      "sha256": "39516445a2133cde0a363a8cfeb73bfb1ccc3359632b0b527a50dde94ba825a8"
+    },
+    {
+      "id": "admission-receipt/adversarial/reused.json",
+      "sha256": "63814a142480814a8f98fddcf0a03b0a3765d92c0f3864c51e224accb8d2a2ab"
+    },
+    {
+      "id": "admission-receipt/adversarial/unsigned.json",
+      "sha256": "e9962568c652b131cd3ed352b7f15ccc907762421eac2bb68c56efaf683c875c"
+    },
+    {
+      "id": "admission-receipt/adversarial/wrong-subject.json",
+      "sha256": "fd636df60980c85a2851ea96934dc43f22d4a9637c3f074ad7b86cf337df109e"
+    },
+    {
+      "id": "admission-receipt/golden/valid-signed.json",
+      "sha256": "f850ac8d075510f8a5003dab352795fa9fcaa4c9b8d286eae9eaa3a8f00b8a9d"
+    },
+    {
+      "id": "composite/adversarial/composite-depth-3.json",
+      "sha256": "3515f206c49bf7ec2af7ae4589e36c2792184264387a6ca696809b317c4a5dee"
+    },
+    {
+      "id": "composite/adversarial/composite-fanout-33.json",
+      "sha256": "50cf1c18c4fd0cdf2b8c3a6b5208bd4ad390f7b0216585ccdfd70ac9ab94db22"
+    },
+    {
+      "id": "composite/golden/within-bounds.json",
+      "sha256": "7992bfc22125532f099ce4755201852da1458bbb33697cb7d09f8fd0b9afc4a4"
+    },
+    {
+      "id": "equivalence/expected-digests.json",
+      "sha256": "f220e17372419673734c4a528b9a7c3772297801cf9599324975bf7e1515ebdc"
+    },
+    {
+      "id": "equivalence/key-order-sensitive.json",
+      "sha256": "2c8a95eb34694db869fc7aff8240399e1e37b2c1b09dda1dec319ddeb5303427"
+    },
+    {
+      "id": "evaluation-spec/adversarial/wrong-protocol.json",
+      "sha256": "6ba590c267c7189eb2938b4b583ae6eed5b2efb3ca8a34bddebc782566817b1b"
+    },
+    {
+      "id": "evaluation-spec/golden/deterministic-minimal.json",
+      "sha256": "198ebb9a677b36259a5e499d83cfef1cc4b55acab64a15af5551747373c85a39"
+    },
+    {
+      "id": "evaluation-spec/golden/deterministic-minimal.sha256",
+      "sha256": "33385a415392756bcf4388fe0e7f289dfb241ea98a79c6ebc2f4e975b0f0d28b"
+    },
+    {
+      "id": "evaluation-spec/golden/fractional-threshold.json",
+      "sha256": "21590a5615ce1cd33d878059f075f2ecd28edb1b2079a592278364970dcd5157"
+    },
+    {
+      "id": "evaluation-spec/golden/fractional-threshold.sha256",
+      "sha256": "289c73c12a1577bb056898eeca3a861b588aa0a5d89a66ec7e637927d347467f"
+    },
+    {
+      "id": "evaluation-spec/golden/state-predicate-minimal.json",
+      "sha256": "88c1d5c4e7f81cbc26d91364e6abfd0ec0de8120d3ce47cc09c5395d786c8b37"
+    },
+    {
+      "id": "evaluation-spec/golden/state-predicate-minimal.sha256",
+      "sha256": "49f621f1265d9b69fd6c678c6ddff2a4f0aadb925a1b027bf1e5a85f461eb298"
+    },
+    {
+      "id": "evaluation-task-derivation/adversarial/competitor-delivery.json",
+      "sha256": "b4682d54c3d3c278d771cdb0696238e46bc168ff16c365e9aea464bdcfec1f8b"
+    },
+    {
+      "id": "evaluation-task-derivation/adversarial/evaluator-modified-template.json",
+      "sha256": "d2b0d13302b8e35d8d9530c1de63defe6e2d9ecf2c039d8d91954493e5ea96e4"
+    },
+    {
+      "id": "evaluation-task-derivation/adversarial/superseded-delivery.json",
+      "sha256": "d7d307356e14b75524182cc49984f209095031b5d1b86930dfd8fd8db94c76a7"
+    },
+    {
+      "id": "evaluation-task-derivation/adversarial/wrong-spec-digest.json",
+      "sha256": "34086f899e92f4b9129d6a0ca43bb2caaf115e756e77439df138815d30081ea9"
+    },
+    {
+      "id": "evaluation-task-derivation/golden/derive-TD.json",
+      "sha256": "11a8352e4ba4b93b67fe89e55925172431dddbbc2e66b036e0db3aedbb1df0e9"
+    },
+    {
+      "id": "family-blocks/adversarial/composite-bare-extra-key.json",
+      "sha256": "137d123651d60b60edc1f8abda974c694524e28ca9e9b0d7f9ab4a54d0193f28"
+    },
+    {
+      "id": "family-blocks/adversarial/composite-fanout-33.json",
+      "sha256": "a6227a8e5df9ba7c5f0bf89eee97d2a1e9dc538c4deb18da5d8aebcfc1b5eeb5"
+    },
+    {
+      "id": "family-blocks/adversarial/composite-numeric-weight.json",
+      "sha256": "58e750b3a11b23a43594a8b6ece34c0d8056c16dabc403db7702d28db179d960"
+    },
+    {
+      "id": "family-blocks/adversarial/deterministic-process-bare-extra-key.json",
+      "sha256": "d99577e61b03080c1a5c06555d8dd1e101a7c01b5a645c287679238c4a39a0fc"
+    },
+    {
+      "id": "family-blocks/adversarial/human-review-bare-extra-key.json",
+      "sha256": "3f9e4ceb34887925119993cedae5f89f17cd1b167b35416fd6942861bffdcd27"
+    },
+    {
+      "id": "family-blocks/adversarial/judge-invented-digest.json",
+      "sha256": "32c29d3b437a7bfb69b6975f5d20b1f9c51da9759dd896589ba5abad8d15497e"
+    },
+    {
+      "id": "family-blocks/adversarial/model-graded-bare-extra-key.json",
+      "sha256": "31fc97b015915ac79727b90e52806949134f83ffec0a5ed647b7c6580740dec4"
+    },
+    {
+      "id": "family-blocks/adversarial/parser-with-code.json",
+      "sha256": "9cee1ee1734dc86c1789c809e60be57c8a248680847da072dc4763cdb9eb1d11"
+    },
+    {
+      "id": "family-blocks/golden/composite-namespaced-extra-key.json",
+      "sha256": "0c65b2d09ef1db7f73b298262c3ebe0dc41b5070562076dea6b5317cfa472418"
+    },
+    {
+      "id": "family-blocks/golden/composite.json",
+      "sha256": "6b361e645fc90ab9858d97cbfd7dadcaf2bd825cd564ade96763fc5128c3b4e2"
+    },
+    {
+      "id": "family-blocks/golden/deterministic-process-namespaced-extra-key.json",
+      "sha256": "1acc5d2ac6bcb92c3238c79345e0a1bcb2285d78f0590f8363124012f9ca9e11"
+    },
+    {
+      "id": "family-blocks/golden/deterministic-process.json",
+      "sha256": "1405640d3810a536e8657e099cb5973858a144834a906e3dbc16d1626aca9a44"
+    },
+    {
+      "id": "family-blocks/golden/human-review-namespaced-extra-key.json",
+      "sha256": "8dd17fa01ce067b3285d68f00e303f392d24819b7dd2786498c4520e5d24fa14"
+    },
+    {
+      "id": "family-blocks/golden/human-review.json",
+      "sha256": "6b85d7a73f07ac460b50ae05f6732897dfbae3f9e514f8c613656c3819bbdfec"
+    },
+    {
+      "id": "family-blocks/golden/model-graded-namespaced-extra-key.json",
+      "sha256": "877758449e97a29ce46142b51ba993f8092f1606c36ab4ec42296a956d047530"
+    },
+    {
+      "id": "family-blocks/golden/model-graded.json",
+      "sha256": "8e318b4d52945424ac1ad4a1bbba02d8403b496209478d6d3f25c53233176074"
+    },
+    {
+      "id": "measurements-coverage/adversarial/missing-required.json",
+      "sha256": "7d5539d4b428cf202ee38521fb528849a6ee0c7f0ae49faaf5ef7a81a5e9e6fb"
+    },
+    {
+      "id": "measurements-coverage/golden/full-coverage.json",
+      "sha256": "17681bd08dbac1f2e52ac61f7d145df51b9cd3f8e2dd41e732dcbf2bb183c25a"
+    },
+    {
+      "id": "migration/jinn-repo-to-repository-work/golden/live-issue.json",
+      "sha256": "0b3cb085a8a768f0feae7500a701db228b05f860045fe5b54ab56a0d12de5969"
+    },
+    {
+      "id": "migration/jinn-repo-to-repository-work/golden/merged-pr.json",
+      "sha256": "e9c6e3b5d569b0a2a28414518025a3c75e0896659107f8cd215a8b769f609ead"
+    },
+    {
+      "id": "requirement-merge/adversarial/addable-conflict.json",
+      "sha256": "893eef620e278444dfefd547e8a4aeaba67874c2631400e2d4306639f8922232"
+    },
+    {
+      "id": "requirement-merge/adversarial/ceiling-conflict.json",
+      "sha256": "845c36fd90b84b6fd6440b46391eb9fba54f160eeaa6a8001da1aab2d8884ddb"
+    },
+    {
+      "id": "requirement-merge/adversarial/constraint-rejected.json",
+      "sha256": "1280a7eba8c5e3004fa2e29c16b2fd06478e1457dce73d9d5fb5faa8edb9379c"
+    },
+    {
+      "id": "requirement-merge/adversarial/exact-conflict.json",
+      "sha256": "080944afc7e804e3b5d7fa3e0dde6064c7f5d51ba22abed1bf9623d22f34cdf7"
+    },
+    {
+      "id": "requirement-merge/adversarial/floor-conflict.json",
+      "sha256": "383a74ab1457decfaadc1eedfb596e7ab9473852d887a159864e7946b679e1bb"
+    },
+    {
+      "id": "requirement-merge/adversarial/pinning-inventory-reject.json",
+      "sha256": "3cd810bf5c76ebce5654ecf5d14d4c8b600a31ebe555ba6c15198b6932dd8c4f"
+    },
+    {
+      "id": "requirement-merge/golden/addable-new-key.json",
+      "sha256": "f097d03097b592e8743b34c0c25ef8171c3c37563f22758f5fdef99ad799b46b"
+    },
+    {
+      "id": "requirement-merge/golden/ceiling-tighter.json",
+      "sha256": "db722c069e7b5f62eaaaa60f34ca6b435c23aeabf194cc95fd0b79cf07b9aed2"
+    },
+    {
+      "id": "requirement-merge/golden/constraint-admitted.json",
+      "sha256": "bedf212119835dac35253d3b9250e05f6ae170e13ebd1e7471bcfec81904208c"
+    },
+    {
+      "id": "requirement-merge/golden/exact-match.json",
+      "sha256": "c9fa957ca5721c12b74e58044c627135a300292cda512368c234e6ac5a41b097"
+    },
+    {
+      "id": "requirement-merge/golden/floor-tighter.json",
+      "sha256": "b029899f0335709efe381af6856c54d65a006dff208be30e213c72143983614c"
+    },
+    {
+      "id": "resolution/adversarial/drift.json",
+      "sha256": "f1a8ae200a6151cc9c9edaa4d78a7fd32662bfd114b4d961e1c837ba550f16c8"
+    },
+    {
+      "id": "resolution/adversarial/unknown-digest.json",
+      "sha256": "4ef2a5ded0ec4685cf1ed7fd133e67dea36c5364a5e0e474c158d18bcfbe4440"
+    },
+    {
+      "id": "resolution/golden/resolves.json",
+      "sha256": "d3c5087ff325541ba4b257aad6243de1784288cc52f74aacc8e56ea66f8835e9"
+    },
+    {
+      "id": "result-evaluation/golden/evidence-statement.PROVENANCE.md",
+      "sha256": "3cc7c7eca98205675fa8474fd02996be029b60ff6bbb977200aad8c48f5d0e77"
+    },
+    {
+      "id": "result-evaluation/golden/evidence-statement.json",
+      "sha256": "7e41ef580944ec4b35f1fe20411d3f5416b334a064340b4856ba0af3c61c1fe8"
+    },
+    {
+      "id": "schema-hardening/adversarial/depth-bomb.json",
+      "sha256": "ed5233afa2d3948c93d57fdc6d0e557605b0671b84f0aea7352ded7ef6d9ffc5"
+    },
+    {
+      "id": "schema-hardening/adversarial/overlong-pattern.json",
+      "sha256": "4b019b813f39500e6d1889b5fd5cb7438d0ed547f1294f65253f8e972f3ea67b"
+    },
+    {
+      "id": "schema-hardening/adversarial/oversized.json",
+      "sha256": "0670bdf50b2090214f25d7f5fd0956d9a229f094382a3541908e2c2d5a743f0a"
+    },
+    {
+      "id": "schema-hardening/adversarial/redos-pattern.json",
+      "sha256": "0611db9b1167e2e0ac683e450ac0843485a89de5c02e0633f0c8d1dba0bef00e"
+    },
+    {
+      "id": "schema-hardening/adversarial/remote-ref.json",
+      "sha256": "d2c9e774f2890de1bdba3d0c6113abfed5e1cb3d00f013e322b85486fb0b6c53"
+    },
+    {
+      "id": "schema-hardening/golden/valid-conforms.json",
+      "sha256": "6b430d0d8da0ea993b14a581ae2a25ce2e7832305305db8b4174d295fc3e5237"
+    },
+    {
+      "id": "schema-hardening/golden/valid-rejects-nonconforming-payload.json",
+      "sha256": "71b736030838f8712b338108bc871a0efd89d903d6daeeebb3d5c77f47041ac7"
+    },
+    {
+      "id": "state-predicate-block/adversarial/bare-extra-key.json",
+      "sha256": "ec342a62df78877812ec70ee343ef1f887d726537088000cfd8cf6d4b31ae9b7"
+    },
+    {
+      "id": "state-predicate-block/adversarial/environment-record-inlined-content.json",
+      "sha256": "e18d57c84636b5e6b65e64bcac73e34e83404ee763af83a8d63989a84bc28ebd"
+    },
+    {
+      "id": "state-predicate-block/adversarial/environment-record-prefixed-digest.json",
+      "sha256": "0e4031c08084038f085b519e008b8d119885095a00543257f947338c5c83dbc7"
+    },
+    {
+      "id": "state-predicate-block/adversarial/predicate-bare-extra-key.json",
+      "sha256": "925181fcca468bb9dd0e41ad1d7db9d6a4e87a91f12ad17810bc595bd6780f5c"
+    },
+    {
+      "id": "state-predicate-block/adversarial/reserved-measurement-name.json",
+      "sha256": "06643de73ff53375cf8a341d497d4fa8ee0ea84315ab119d634c7e36f3ee61bc"
+    },
+    {
+      "id": "state-predicate-block/adversarial/safety-constraint-state-predicate.json",
+      "sha256": "d3b4a04fdad4055f2aca6939a1293d102db5e969ac1b0064597972068e98b508"
+    },
+    {
+      "id": "state-predicate-block/adversarial/source-consulted-as-success-predicate.json",
+      "sha256": "3d6f5ecd58af8f63ed8db78a8163f79fded8533edddfec3850b1dc3d6155231a"
+    },
+    {
+      "id": "state-predicate-block/adversarial/tolerance-without-within-comparator.json",
+      "sha256": "106b163530b208209befb3d78f271ee96568a0d436da3fe509631b0cb7f41d1b"
+    },
+    {
+      "id": "state-predicate-block/adversarial/unknown-predicate-kind.json",
+      "sha256": "edb6e4488bf9d2eb23f0849a60cbeeaa70bb0543fa94619563ce46b2be8a4ffc"
+    },
+    {
+      "id": "state-predicate-block/golden/measurements-and-tightenings.json",
+      "sha256": "c5d04b43bcea85d341d205267a8d5e2ba59c2773cfd8ffdc2326a288e32572d8"
+    },
+    {
+      "id": "state-predicate-block/golden/minimal.json",
+      "sha256": "e90d255c881c7f45294f8b89f8f9e4cbf327b98f5f1a9592f477e1f06fee0ab2"
+    },
+    {
+      "id": "state-predicate-block/golden/namespaced-extra-key.json",
+      "sha256": "ef74ac9841905eb55129c99a4966dab15e385820d8d7eba4d6c9a3aa76a7fa03"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/duplicate-state-read.json",
+      "sha256": "89b084f814eeffa4de7fc9216b0322383aab29cbd888815b73f21f76aebe18fe"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/environment-record-mismatch.json",
+      "sha256": "55c4f3a61255047e82930d5a1bcccfb7ab7d9e22a98fe2ee9ab0f4d066174a6e"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/replay-refused.json",
+      "sha256": "7b2c62046e21e11c0a4791d5b68ae90b7df1fec83cd21f39d956fecb292355d4"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/reported-value-post-replay-only.json",
+      "sha256": "acf7d35b517cb1ae9bdfbb866aa0d837c43ebfe265cea14bf7073783f9440ba1"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/source-read-unavailable.json",
+      "sha256": "f95fbeb85ce186aab749bb79dd3a3eaf0a4cda61df046b7276ce1c212ed8176e"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/declarative-call-ground-truth.json",
+      "sha256": "bd6ea0a86b633e02430beb71266dfde9df0c35f1121cca83775e88caf3170f45"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/do-nothing-satisfies-conjunction.json",
+      "sha256": "0299c6ade658ae9b4d6834f18524e79ef6209fb4b5cf6eec050dabbf3f61d82b"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/reported-value-baseline-ground-truth.json",
+      "sha256": "d8f977c8137913ce6f63f4198bf6c17532676e0baf000ec390deb190bc5c68d3"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/reported-value-post-replay-declared.json",
+      "sha256": "78539fdd1c87de65f8cbebcec70042010f1994c3ddde65954128b47d36124dad"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/safety-violated-unlimited-approval.json",
+      "sha256": "54272c33413e5bcaed8079f71935e1413d0bb809800f2139b2ef858b62bf0146"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/source-value-and-consulted.json",
+      "sha256": "68a219c86492dd884618feeb02ed2b25ecad5521c6416365982080d5f7aca1d4"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/success-conjunction-satisfied.json",
+      "sha256": "bf192b797a4c5895d2bbf1c509ec74253711689dc447eb5d45d956b976120d3c"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/time-bound-across-timewarp.json",
+      "sha256": "7d1e59d9fa9bc447eb35997080172e110a64bbd8fd2c21d8e6dde45404f96cbd"
+    },
+    {
+      "id": "sub-profile/adversarial/chain-depth-9.json",
+      "sha256": "2e15c5d8e88b2704e6df5abce92a384a4168887a3821686af1592b1f233b3b5a"
+    },
+    {
+      "id": "sub-profile/adversarial/closed-parent.json",
+      "sha256": "78af5e0d64c27a18793ab3d7473579b273346775fe14013a60fd77c4bb722cc7"
+    },
+    {
+      "id": "sub-profile/adversarial/widening-subprofile.json",
+      "sha256": "239e052884e17f17e99cc599e61677bffdbdf4cad02cec8a8742debed32ae8b6"
+    },
+    {
+      "id": "sub-profile/golden/family-chain.json",
+      "sha256": "892db1e1c8f7a79896ae897ffa8b92075a515805ec38e25198459c2141c550a6"
+    },
+    {
+      "id": "sub-profile/golden/valid-subprofile.json",
+      "sha256": "1d21e7001ab0b4f4edaf38fbfe501f886c5bdc1120814422a48c6bf109d58918"
+    },
+    {
+      "id": "swe-rebench-golden/golden/evaluation-spec.sealed.json",
+      "sha256": "5ccd5617bed73b69ccce34317356f18604039c2e2393b5b11509e52bf620d416"
+    },
+    {
+      "id": "swe-rebench-golden/golden/expected.json",
+      "sha256": "77c840fc627aa3ada8ff290fe3e329e5d8c8ab0ab32ea08dfb9aba9bcc95d1f9"
+    },
+    {
+      "id": "swe-rebench-golden/golden/row.json",
+      "sha256": "72c44c8a0e3a569794e3bac282bf522067f15b305ea84f065523f4c4975f774d"
+    },
+    {
+      "id": "swe-rebench-golden/golden/task.sealed.json",
+      "sha256": "3aa2d8778a8b173003f4f403b02c4293e71b3b317fd692fb19fd96b54b9aac82"
+    },
+    {
+      "id": "task-profile/adversarial/requirement-key-no-class.json",
+      "sha256": "7e45e1a3c2dd8c8b50b943017ae9d243a93d884be1c3c67603d7166b7816617d"
+    },
+    {
+      "id": "task-profile/adversarial/wrong-format-uri.json",
+      "sha256": "2e6e1b3bee9a428d017c105fb31c5718b1dd8c75bdc1dccf432eef5e605a1faa"
+    },
+    {
+      "id": "task-profile/golden/minimal-profile.json",
+      "sha256": "0f947b172f43e248b1b3eb2b4ca4cf117d047f9443b083d963c4e2d6750707e2"
+    },
+    {
+      "id": "task-profile/golden/minimal-profile.sha256",
+      "sha256": "42a08f8fe0d0b01c9bced139eda5a9cf537222b7f85730c04782e2ed94d42017"
+    },
+    {
+      "id": "unscorable/adversarial/unknown-disposition.json",
+      "sha256": "9f523456d4b979314cb1b027ceb2bfb8964126cb17a9616125d82d57300743a1"
+    },
+    {
+      "id": "unscorable/golden/recorded-inconclusive.json",
+      "sha256": "711625fd8dd5ccc14591fdb9c36bf7de476aa22d3de387a64471d5599698c78c"
+    },
+    {
+      "id": "unscorable/golden/retryable-infra.json",
+      "sha256": "b29d527eb03c633598abb28c3d0d34bc58fd163a2c2ae6be49b4e0c0e7a063a8"
+    },
+    {
+      "id": "verdict-consistency/adversarial/laundered-inconclusive.json",
+      "sha256": "f3687e2fa8071f264637e8b5da6d4674fd3f90bc410972740625d36e504221f6"
+    },
+    {
+      "id": "verdict-consistency/adversarial/undeclared-limitation.json",
+      "sha256": "ec497f50bb5ba7584bfb8bb17abc20b99218c6003d11e65335034b034eb60c0d"
+    },
+    {
+      "id": "verdict-consistency/golden/consistent-pass.json",
+      "sha256": "386795d4648a39daef609106dc8e41e336dbbad587ecec76ea0ec21beb46fba5"
+    },
+    {
+      "id": "verdict-rule/adversarial/malformed-decimal-string.json",
+      "sha256": "b862db22ddb718483b463061b09895a5da0ffdd5791eda5e85a068cec49ae641"
+    },
+    {
+      "id": "verdict-rule/adversarial/missing-measurement.json",
+      "sha256": "77ffcd51a8d3c5d8f56c4d7a448f9bb5066e2fb2b2d05a97d0c623ba9a306311"
+    },
+    {
+      "id": "verdict-rule/adversarial/unknown-op.json",
+      "sha256": "d8dfc5b227445bb852bd4e5f8454e7b9c12eb7331080b971d9cf06946b1dfb50"
+    },
+    {
+      "id": "verdict-rule/golden/all-combinator.json",
+      "sha256": "ac7404107779996cc177205c7111d53aa0a28d926ccd67df95f9d71648a0db52"
+    },
+    {
+      "id": "verdict-rule/golden/decimal-string-equality-canonical-scale.json",
+      "sha256": "d7ad495a6928dc278fc7719367c178bd4fea2b3ebbbb08138a37e8857e4d2dae"
+    },
+    {
+      "id": "verdict-rule/golden/fractional-decimal-string-threshold-fail.json",
+      "sha256": "ab4a9788f6cda075de6ff7453cf9bedeadb6eff06a4e8acac971cf3f7ad4122c"
+    },
+    {
+      "id": "verdict-rule/golden/fractional-decimal-string-threshold.json",
+      "sha256": "152578db85195b11f9ac04eb0986b5505df6ce121d2c24132aebda29f8a80193"
+    },
+    {
+      "id": "verdict-rule/golden/inconclusive-predicate.json",
+      "sha256": "5dd5b4439e3642b0cab9733c94a24ae7db31407aacb107d361fd1ee478cfd262"
+    },
+    {
+      "id": "verdict-rule/golden/threshold-pass.json",
+      "sha256": "2222677838d21824db5fdf1d9cc9af63ae30c731496336c2664dcbf53f52c23e"
+    }
+  ],
+  "errata": []
+}

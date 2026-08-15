@@ -1,0 +1,40 @@
+{
+  "name": "query-provenance-present-on-every-item",
+  "kind": "query",
+  "description": "§8 rule 1: a query service MUST NOT serve items lacking chain provenance -- every item here carries {source, entry, announcementId}.",
+  "input": {
+    "items": [
+      {
+        "record": {
+          "kind": "https://spec.jinn.network/records/submission/v1",
+          "digest": "sha256:46d4cb843396a04685b4d705d344b74fde18503eadd40ef42dca9e3bb0435eee"
+        },
+        "provenance": {
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "entry": "sha256:bf2bb131a2cc333fb18c2aa6947e9c0b5d916d4484138c6c6c09b027c9fa2491",
+          "announcementId": "q-ann-1"
+        }
+      },
+      {
+        "record": {
+          "kind": "https://spec.jinn.network/records/submission/v1",
+          "digest": "sha256:c015474e75d9b193e1f0c45fd5a2410a9e1220781859c804e6151d38ad31f37d"
+        },
+        "provenance": {
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "entry": "sha256:85bd88fba6e3de92c5b6263199e3b556378963802c640cf993777b7c9f7b4d67",
+          "announcementId": "q-ann-2"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "everyItemHasProvenance": true
+  }
+}

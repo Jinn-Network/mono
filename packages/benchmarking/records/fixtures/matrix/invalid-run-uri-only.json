@@ -1,0 +1,25 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "run": {
+    "uri": "https://example.test/runs/one"
+  },
+  "closeBoundary": {
+    "at": "2026-08-04T00:00:00Z"
+  },
+  "cells": [],
+  "exclusions": [],
+  "attrition": {
+    "perArm": {},
+    "asymmetryFlags": []
+  },
+  "completeness": {
+    "expected": 0,
+    "judged": 0,
+    "floor": "1",
+    "runOutcome": "complete"
+  },
+  "assembly": {
+    "procedure": "jinn.benchmarking.assembly",
+    "version": "1.0"
+  }
+}

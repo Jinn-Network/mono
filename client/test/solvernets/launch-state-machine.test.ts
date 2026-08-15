@@ -8,12 +8,14 @@
  *
  *   pinning → recording → broadcasting → confirming → spawning → launched
  *
+ * Wave-4 D3 retired the generator spawn: the 'spawning' phase is now a
+ * checkpoint that finalizes the record rather than a side-effect boundary.
+ *
  * Each phase persists progress to disk BEFORE attempting the side effect, so
  * that a daemon crash between persist and side-effect leaves the next start
  * with a recorded "I am at phase X" checkpoint. All side effects are
  * idempotent under retry (same content → same cid; setMetadata is event-only;
- * disk writes are atomic-rename; spawnGenerator must be a no-op for
- * already-spawned generators or it gets a defensive guard from the daemon).
+ * disk writes are atomic-rename).
  *
  * Tests use mock ipfs/publisher/subgraph and a tmpdir-backed real store.
  */
@@ -39,8 +41,8 @@ import {
   type MetadataPublisher,
   type SubgraphClient,
   type SetMetadataPublishResult,
-} from '../../src/solvernets/registry-client-erc8004.js';
-import type { SignerWithAgentEoa } from '../../src/solvernets/registry-client.js';
+  type SignerWithAgentEoa,
+} from '../../src/solvernets/launch-publisher.js';
 import type { SetMetadataEvent } from '../../src/solvernets/most-recent-wins.js';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
 
@@ -227,30 +229,6 @@ function makeMockSubgraph(): MockSubgraph {
   };
 }
 
-interface SpawnSpy {
-  spawned: LaunchedSolverNetRecord[];
-  failNext: { error: Error } | null;
-  spawnGenerator: (record: LaunchedSolverNetRecord) => Promise<void>;
-}
-
-function makeSpawnSpy(): SpawnSpy {
-  const spawned: LaunchedSolverNetRecord[] = [];
-  let failNext: { error: Error } | null = null;
-  return {
-    get spawned() { return spawned; },
-    get failNext() { return failNext; },
-    set failNext(v) { failNext = v; },
-    async spawnGenerator(record) {
-      if (failNext) {
-        const err = failNext.error;
-        failNext = null;
-        throw err;
-      }
-      spawned.push(record);
-    },
-  };
-}
-
 interface ConfirmSpy {
   confirms: Array<`0x${string}`>;
   pendingHashes: Set<`0x${string}`>;
@@ -290,7 +268,6 @@ let store: SolverNetStore;
 let ipfs: MockIpfs;
 let publisher: MockPublisher;
 let subgraph: MockSubgraph;
-let spawnSpy: SpawnSpy;
 let confirmSpy: ConfirmSpy;
 
 beforeEach(async () => {
@@ -299,7 +276,6 @@ beforeEach(async () => {
   ipfs = makeMockIpfs();
   publisher = makeMockPublisher();
   subgraph = makeMockSubgraph();
-  spawnSpy = makeSpawnSpy();
   confirmSpy = makeConfirmSpy();
 });
 
@@ -314,7 +290,6 @@ function makeDeps(overrides: Partial<LaunchActionDeps> = {}): LaunchActionDeps {
     ipfs,
     publisher,
     subgraph,
-    spawnGenerator: spawnSpy.spawnGenerator,
     awaitTxConfirmation: confirmSpy.awaitTxConfirmation,
     now: () => new Date('2026-05-06T00:00:00.000Z'),
     ...overrides,
@@ -347,8 +322,8 @@ describe('LaunchAction.launch — happy path', () => {
     // Side effects fired exactly once each.
     expect(ipfs.uploadCalls).toBe(1);
     expect(publisher.calls).toHaveLength(1);
-    expect(spawnSpy.spawned).toHaveLength(1);
-    expect(spawnSpy.spawned[0]?.solverNetId).toBe(record.solverNetId);
+    expect(record.status).toBe('launched');
+    expect(record.launchProgress).toBeUndefined();
 
     // Persisted record on disk equals returned record.
     const onDisk = await store.loadRecord(record.solverNetId);
@@ -397,16 +372,20 @@ describe('LaunchAction.launch — happy path', () => {
       await recordingObserver();
       return confirmSpy.awaitTxConfirmation(txHash);
     };
-    const spawnWithObserver = async (rec: LaunchedSolverNetRecord) => {
-      await recordingObserver();
-      await spawnSpy.spawnGenerator(rec);
+    // Wave-4 D3 retired the generator spawn, so the 'spawning' phase no longer
+    // has a side-effect callback to peek from. Observe the store instead: the
+    // checkpoint must still reach disk before the record finalizes.
+    const written: Array<{ phase: string | undefined; status: string }> = [];
+    const realWriteRecord = store.writeRecord.bind(store);
+    store.writeRecord = async (rec: LaunchedSolverNetRecord) => {
+      written.push({ phase: rec.launchProgress?.phase, status: rec.status });
+      return realWriteRecord(rec);
     };
 
     const action = new LaunchAction(makeDeps({
       ipfs: ipfsWithObserver,
       publisher: publisherWithObserver,
       awaitTxConfirmation: confirmWithObserver,
-      spawnGenerator: spawnWithObserver,
     }));
 
     await action.launch({ manifest, signer });
@@ -418,13 +397,23 @@ describe('LaunchAction.launch — happy path', () => {
     //   1. ipfs.upload (during 'pinning')   — no record on disk yet (skipped)
     //   2. publisher.setMetadata            — record on disk @ 'broadcasting'
     //   3. awaitTxConfirmation              — record on disk @ 'confirming', txHash set
-    //   4. spawnGenerator                   — record on disk @ 'spawning', confirmed
-    expect(observed).toHaveLength(3);
+    //
+    // The former fourth observation came from the retired generator spawn; the
+    // 'spawning' checkpoint is asserted against the store below instead.
+    expect(observed).toHaveLength(2);
     expect(observed[0]?.phase).toBe('broadcasting');
     expect(observed[0]?.status).toBe('launching');
     expect(observed[0]?.manifestCid).toBeTruthy();
     expect(observed[1]?.phase).toBe('confirming');
-    expect(observed[2]?.phase).toBe('spawning');
+
+    // The checkpoint sequence still reaches disk in order, and a 'spawning'
+    // checkpoint is still persisted before the terminal 'launched' write.
+    const phases = written.map((w) => w.phase);
+    expect(phases).toContain('broadcasting');
+    expect(phases).toContain('confirming');
+    expect(phases).toContain('spawning');
+    expect(written.at(-1)).toEqual({ phase: undefined, status: 'launched' });
+    expect(phases.indexOf('spawning')).toBeGreaterThan(phases.indexOf('confirming'));
   });
 });
 
@@ -446,7 +435,6 @@ describe('LaunchAction — idempotency under retry', () => {
     // already happened.
     expect(ipfs.uploadCalls).toBe(1);
     expect(publisher.calls).toHaveLength(1);
-    expect(spawnSpy.spawned).toHaveLength(1);
   });
 
   it('resume() on a launched record is a no-op', async () => {
@@ -459,7 +447,6 @@ describe('LaunchAction — idempotency under retry', () => {
     expect(resumed.status).toBe('launched');
     expect(ipfs.uploadCalls).toBe(1);
     expect(publisher.calls).toHaveLength(1);
-    expect(spawnSpy.spawned).toHaveLength(1);
   });
 });
 
@@ -511,7 +498,7 @@ describe('LaunchAction.resume — crash recovery from each phase', () => {
     expect(resumed.status).toBe('launched');
     expect(publisher.calls).toHaveLength(1);
     expect(publisher.calls[0]!.key).toBe(`solvernet-manifest:${cid}`);
-    expect(spawnSpy.spawned).toHaveLength(1);
+    expect(resumed.launchProgress).toBeUndefined();
     // Pinning must NOT re-run (the record already had a cid).
     expect(ipfs.uploadCalls).toBe(1); // the pre-launch pin only
   });
@@ -560,7 +547,7 @@ describe('LaunchAction.resume — crash recovery from each phase', () => {
     expect(publisher.calls).toHaveLength(0);
     // Confirmation succeeded.
     expect(confirmSpy.confirms).toContain(knownTxHash);
-    expect(spawnSpy.spawned).toHaveLength(1);
+    expect(resumed.launchProgress).toBeUndefined();
   });
 
   it('crash before confirming updates blockNumber → resume re-checks and proceeds', async () => {
@@ -592,7 +579,7 @@ describe('LaunchAction.resume — crash recovery from each phase', () => {
     expect(resumed.status).toBe('launched');
     expect(resumed.registry.metadataBlockNumber).toBeGreaterThan(0);
     expect(publisher.calls).toHaveLength(0);
-    expect(spawnSpy.spawned).toHaveLength(1);
+    expect(resumed.launchProgress).toBeUndefined();
   });
 
   it('crash before spawning finishes → resume calls spawnGenerator (idempotency is the spawner\'s problem)', async () => {
@@ -623,7 +610,7 @@ describe('LaunchAction.resume — crash recovery from each phase', () => {
 
     expect(resumed.status).toBe('launched');
     expect(resumed.launchProgress).toBeUndefined();
-    expect(spawnSpy.spawned).toHaveLength(1);
+    expect(resumed.launchProgress).toBeUndefined();
     expect(publisher.calls).toHaveLength(0);
   });
 });
@@ -649,7 +636,6 @@ describe('LaunchAction — error handling', () => {
     const resumed = await action.resume({ record: onDisk!, signer });
     expect(resumed.status).toBe('launched');
     expect(publisher.calls).toHaveLength(1);
-    expect(spawnSpy.spawned).toHaveLength(1);
   });
 
   it('mempool-dropped: txHash set, no receipt, subgraph has no event for cid → re-broadcast', async () => {
@@ -687,7 +673,7 @@ describe('LaunchAction — error handling', () => {
     // Final tx hash differs from the dropped one.
     expect(resumed.registry.metadataTxHash).not.toBe(droppedTxHash);
     expect(resumed.status).toBe('launched');
-    expect(spawnSpy.spawned).toHaveLength(1);
+    expect(resumed.launchProgress).toBeUndefined();
   });
 
   it('already-anchored: txHash set, no receipt, subgraph DOES have an event → treat as confirmed, no re-broadcast', async () => {
@@ -736,7 +722,7 @@ describe('LaunchAction — error handling', () => {
     expect(publisher.calls).toHaveLength(0);
     // Block number in registry comes from the subgraph event.
     expect(resumed.registry.metadataBlockNumber).toBe(1234);
-    expect(spawnSpy.spawned).toHaveLength(1);
+    expect(resumed.launchProgress).toBeUndefined();
   });
 
   it('after MAX_ATTEMPTS failures, status flips to failed (callable to retry by resetting status)', async () => {

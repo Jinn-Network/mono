@@ -1,0 +1,29 @@
+{
+  "name": "query-complete-honesty",
+  "kind": "query",
+  "description": "§8 rule 2: responses MUST distinguish complete results (`items: []`, `complete: true`) from degraded/truncated ones (`complete: false`, carrying `nextCursor`) -- the #2175 lesson made protocol.",
+  "input": {
+    "emptyResult": {
+      "items": [],
+      "complete": true,
+      "freshness": []
+    },
+    "truncatedResult": {
+      "items": [
+        {
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:dc186ba2cd9627a50a896827b5a99a37d28898fae195f717cc4100ccbc80b5ed"
+          }
+        }
+      ],
+      "nextCursor": "opaque-cursor-1",
+      "complete": false,
+      "freshness": []
+    }
+  },
+  "expect": {
+    "emptyMeansComplete": true,
+    "truncatedMeansIncomplete": true
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "kind": "https://spec.jinn.network/records/environment/v1",
+  "source": {
+    "repo": "example-org/example-lib",
+    "repoUrl": "https://github.com/example-org/example-lib",
+    "commit": "0000000000000000000000000000000000000001"
+  },
+  "image": {
+    "manifestDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "platform": "linux/amd64",
+    "reference": "registry.example.test/swe/example-lib@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "indexDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "workspace": "/testbed",
+  "invocations": {
+    "test": [
+      {
+        "bin": "python",
+        "args": [
+          "-m",
+          "pytest",
+          "-q",
+          "tests/test_core.py"
+        ],
+        "cwd": "/testbed"
+      }
+    ]
+  },
+  "parser": {
+    "id": "pytest-text",
+    "version": "1.0.0",
+    "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "uri": "https://example.test/parsers/pytest-text-1.0.0.tar.gz"
+  },
+  "build": {
+    "reproducibilityTier": 0,
+    "provider": {
+      "id": "swe-rebench",
+      "version": "2"
+    }
+  },
+  "rights": {
+    "sourceLicense": "Apache-2.0",
+    "basis": "upstream-permissive-filter"
+  },
+  "lineage": {
+    "upstream": {
+      "dataset": "example/upstream-dataset",
+      "revision": "0000000000000000000000000000000000000000",
+      "keys": [
+        "example-org__example-lib-4242"
+      ]
+    }
+  },
+  "network.jinn.note": "an extension key a future consumer added",
+  "https://example.test/ext/provenance": {
+    "collector": "example"
+  }
+}

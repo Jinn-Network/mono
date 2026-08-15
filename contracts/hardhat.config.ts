@@ -68,6 +68,17 @@ export default defineConfig({
       { version: "0.8.28", settings: optimizerSettings },
       { version: "0.8.30", settings: { ...optimizerSettings, evmVersion: "cancun" } },
     ],
+    // Size-biased settings for the revised router (prepare + spentOut accounting).
+    overrides: {
+      "src/staking/JinnRouterV4.sol": {
+        version: "0.8.30",
+        settings: {
+          optimizer: { enabled: true, runs: 200 },
+          viaIR: true,
+          evmVersion: "cancun",
+        },
+      },
+    },
   },
   paths: {
     sources: "./src",

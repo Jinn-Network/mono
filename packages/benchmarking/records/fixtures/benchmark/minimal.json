@@ -1,0 +1,1 @@
+{"description":"Minimal Benchmark record fixture (no optional fields).","items":[{"task":{"digest":{"sha256":"1724980aa084bbaa16a8a69b664b783799bc75f8abe13ffc65b76843564fbbff"}}}],"name":"minimal-benchmark","protocol":"https://spec.jinn.network/protocols/benchmarking/v1","reveal":{"policy":"immediate"},"version":"0.1.0"}

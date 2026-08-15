@@ -1,0 +1,156 @@
+name: Policy Optimization CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/policy-optimization/**"
+      - ".github/scripts/policy-optimization-*.test.mjs"
+      - ".github/workflows/policy-optimization-ci.yml"
+      - "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md"
+      - "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md"
+      - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
+  push:
+    branches: [next]
+    paths:
+      - "packages/policy-optimization/**"
+      - ".github/scripts/policy-optimization-*.test.mjs"
+      - ".github/workflows/policy-optimization-ci.yml"
+      - "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md"
+      - "docs/superpowers/specs/2026-08-05-policy-optimization-live-host-and-guided-journey-design.md"
+      - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/policy-optimization-package-inventory.test.mjs
+      - name: Verify source boundaries and the private-statistics sweep
+        run: node --test .github/scripts/policy-optimization-source-boundaries.test.mjs
+
+  product:
+    needs: [architecture]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      # Cross-tree portal dependencies, built from source in dependency order: each one's `dist/`
+      # is what the next one's type resolution reads.
+      - name: Build portal dependencies from source
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
+          (cd packages/policy/identity && yarn install --immutable && yarn build)
+          (cd packages/policy/outcomes && yarn install --immutable && yarn build)
+      # The private live host composes the local backend and evaluator stack. Tests additionally
+      # consume the TEP conformance kit's in-memory fake, so this whole tail must be built before
+      # the product can resolve its concrete host dependencies from their portal distributions.
+      - name: Build the local host and TEP conformance dependencies
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          (cd packages/task-execution/testing && yarn install --immutable && yarn build)
+      - name: Verify Policy Optimization
+        working-directory: packages/policy-optimization
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Policy Optimization distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-optimization-dist
+          path: packages/policy-optimization/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, product]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Policy Optimization CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          PRODUCT_RESULT: ${{ needs.product.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$PRODUCT_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore the product distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-optimization-dist
+          path: packages/policy-optimization/dist
+      # The packed consumer installs the whole graph from tarballs, and `npm pack --ignore-scripts`
+      # ships whatever `dist/` is on disk — so every portal dependency needs its build here too,
+      # not only the product's.
+      - name: Build portal dependencies from source
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
+          (cd packages/policy/identity && yarn install --immutable && yarn build)
+          (cd packages/policy/outcomes && yarn install --immutable && yarn build)
+      - name: Compile the packed public entrypoint consumer
+        run: node .github/scripts/policy-optimization-packed-types.test.mjs

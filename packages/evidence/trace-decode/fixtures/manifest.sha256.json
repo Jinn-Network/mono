@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "claude-code-stream-json/cases/duplicate-call-id/expected.json",
+      "sha256": "ebfb8c13c11ac11a2e4d7cc3783b104375f81782f01405a5d9107605966ec488"
+    },
+    {
+      "id": "claude-code-stream-json/cases/duplicate-call-id/input.jsonl",
+      "sha256": "4a8f6fed4b60d146aa0fc0b3a9bf3aa6142a2895bc7a988ae1ec85f1944e0a02"
+    },
+    {
+      "id": "claude-code-stream-json/cases/empty-stream/expected.json",
+      "sha256": "7fbfd1bfe7a8fbdeacf8effc6f582541621b900f530e915f9b206d62a4e9f33a"
+    },
+    {
+      "id": "claude-code-stream-json/cases/empty-stream/input.jsonl",
+      "sha256": "adb0b0b591f7f3c806148a1a9913e07ff0772cc96901c202a9acaa22e698d6ae"
+    },
+    {
+      "id": "claude-code-stream-json/cases/error-result/expected.json",
+      "sha256": "7e3c8fcea06e75667e689346652538273e44c29a0182fd9e91c07255c9dd4c59"
+    },
+    {
+      "id": "claude-code-stream-json/cases/error-result/input.jsonl",
+      "sha256": "50eb5d52ca2bc547d5f753ec1c76002011144ac4236ca931e98610c4be0ebb1f"
+    },
+    {
+      "id": "claude-code-stream-json/cases/injected-instruction/expected.json",
+      "sha256": "29a1bece606b7d075edd782b7508f1993be72edd0effad2dbd9d6dd92d497424"
+    },
+    {
+      "id": "claude-code-stream-json/cases/injected-instruction/input.jsonl",
+      "sha256": "5da72d9db6f59fb4b0151afa1f3559358424d68c7274c60dae98361a141c5bf5"
+    },
+    {
+      "id": "claude-code-stream-json/cases/minimal-chat/expected.json",
+      "sha256": "acee65668df794cf8703f8ee9b3c8eef80e0b89781db3ffca0abd850ec50fad2"
+    },
+    {
+      "id": "claude-code-stream-json/cases/minimal-chat/input.jsonl",
+      "sha256": "1cdd65add4ca42ae372660c7ade55f41988863ce9a80bf587cae642c36a90efd"
+    },
+    {
+      "id": "claude-code-stream-json/cases/not-this-format/expected.json",
+      "sha256": "21ad3968fa27f35a2c0277b0ab9083a264dfac6c0b677c40fc5350b28f73fc29"
+    },
+    {
+      "id": "claude-code-stream-json/cases/not-this-format/input.jsonl",
+      "sha256": "010eaf57e81e21e5e8aca3ce95c25d5e718ea85a5681161f947e5e864778a50f"
+    },
+    {
+      "id": "claude-code-stream-json/cases/parallel-tools/expected.json",
+      "sha256": "ac0b42d6e221f4fe4f8d9a541a677d1264e27a8be65eeefb7078a838102b0fbd"
+    },
+    {
+      "id": "claude-code-stream-json/cases/parallel-tools/input.jsonl",
+      "sha256": "bca6abd06ca17af6e2bcbbbf5223a3a3999e02cd6085e812d8de60889087d6aa"
+    },
+    {
+      "id": "claude-code-stream-json/cases/skipped-lines/expected.json",
+      "sha256": "4d457fb0071a19c56440a523417364f2da9aaad30ba194b998833639271902b6"
+    },
+    {
+      "id": "claude-code-stream-json/cases/skipped-lines/input.jsonl",
+      "sha256": "3f20016e14d77229722d5877b1c0a90515ce20718272bf1a6e43b5a30bc34181"
+    },
+    {
+      "id": "claude-code-stream-json/cases/tool-loop/expected.json",
+      "sha256": "d62cf2bb8903ad5b292b009aad54ebfc15a63d4759911671ae34fa3a2523c332"
+    },
+    {
+      "id": "claude-code-stream-json/cases/tool-loop/input.jsonl",
+      "sha256": "88286d246aa8e2befb7f9f606421853b6c3103aa9484267e4304f824db445fc6"
+    },
+    {
+      "id": "claude-code-stream-json/cases/unclosed-tool/expected.json",
+      "sha256": "7314c4789e7019800a453be9940c3d86d85440ea71482967cf7c41cf3e022519"
+    },
+    {
+      "id": "claude-code-stream-json/cases/unclosed-tool/input.jsonl",
+      "sha256": "da814028feb1f3c6e90adc43d2d62e156ae50bd72b7c08d848a58379738f6981"
+    },
+    {
+      "id": "claude-code-stream-json/manifest.json",
+      "sha256": "dfafab765cc2f283c3e73d860a22d67de3c3ba5cc521498ceedd8731c1165793"
+    }
+  ],
+  "errata": []
+}

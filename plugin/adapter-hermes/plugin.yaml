@@ -1,0 +1,10 @@
+name: jinn
+version: 0.1.0
+description: "Jinn — evidence capture and federated retrieval for this agent. Sessions are sealed locally as standard evidence records; relevant prior work is retrieved into context at the moment of work. Nothing leaves this machine."
+author: "Jinn Network"
+provides_hooks:
+  - on_session_start
+  - pre_llm_call
+  - post_tool_call
+  - post_llm_call
+  - on_session_end

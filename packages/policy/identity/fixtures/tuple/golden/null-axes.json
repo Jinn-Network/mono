@@ -1,0 +1,15 @@
+{
+  "note": "Substrate §4.1 step 2 — core axes are always PRESENT, `null` when the effective requirements do not constrain them. A tuple that pins only isolation is legal and has a stable identity. `expressAsRunPinning` emits no entry for a null axis (§4.1 expression rule), so `runPinning` here carries the single non-null axis only.",
+  "input": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": null,
+    "model": null,
+    "loadout": null,
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": {
+    "canonical": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":null,\"isolationPolicy\":\"unrestricted\",\"loadout\":null,\"model\":null}",
+    "digest": "sha256:7c4b975a93729964226e6615520c3ea7d2d3b38983e80e49f5a6745f486a8306",
+    "runPinning": { "isolationPolicy": "unrestricted" }
+  }
+}

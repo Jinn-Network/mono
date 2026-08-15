@@ -1,0 +1,28 @@
+{
+  "input": {
+    "op": "familyUri",
+    "chain": [
+      {
+        "uri": "https://spec.jinn.network/task-profiles/repository-work-autopilot-session/1.2",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/repository-work-strict/1.1",
+          "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/repository-work-strict/1.1",
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "extends": {
+          "uri": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+          "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+        }
+      },
+      {
+        "uri": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+        "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    ]
+  },
+  "expect": { "ok": true, "familyUri": "https://spec.jinn.network/task-profiles/repository-work" }
+}

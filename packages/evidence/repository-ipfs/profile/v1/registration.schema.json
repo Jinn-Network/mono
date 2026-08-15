@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.jinn.network/profiles/evidence-repository-ipfs-registration/v1/registration.schema.json",
+  "title": "Jinn Evidence Repository IPFS Registration v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "family",
+        "kind",
+        "profile",
+        "version"
+      ],
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "family": {
+          "enum": [
+            "execution-evidence",
+            "result-evaluation",
+            "execution-verification"
+          ]
+        },
+        "kind": {
+          "const": "record"
+        },
+        "profile": {
+          "const": "jinn.evidence-repository.ipfs-registration"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "kind",
+        "profile",
+        "version"
+      ],
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "kind": {
+          "const": "artifact"
+        },
+        "profile": {
+          "const": "jinn.evidence-repository.ipfs-registration"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    }
+  ]
+}

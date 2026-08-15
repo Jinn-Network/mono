@@ -1,0 +1,26 @@
+{
+  "name": "query-fabricated-provenance",
+  "kind": "query",
+  "description": "A malicious query service cites a source it never actually synced -- the consumer-side entry-fetch-and-verify check (§10.4 step 3) is what catches this, not the query response shape alone.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:56fe78450405743c3854cd9e90cb35134adf9c994eae5c1692742ae6fc7e5e4f"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zTrustedSource",
+          "name": "feed"
+        },
+        "entry": "sha256:52fcd68d5b6c06daea385ad2b6047c8ad8cf4e355bdfd278c39314940888293b",
+        "announcementId": "q-ann-3"
+      }
+    },
+    "querySourceActuallySynced": []
+  },
+  "expect": {
+    "consumerSideCheck": "unauthorized-provenance",
+    "caughtBy": "§10.4 step 3"
+  }
+}

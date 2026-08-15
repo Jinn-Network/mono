@@ -1,0 +1,279 @@
+name: Task Supply CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/task-supply/**"
+      - "packages/environments/**"
+      - ".github/scripts/task-supply-*.test.mjs"
+      - ".github/workflows/task-supply-ci.yml"
+      - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
+      - "docs/superpowers/plans/2026-07-31-chain-environment-program.md"
+  push:
+    branches: [next]
+    paths:
+      - "packages/task-supply/**"
+      - "packages/environments/**"
+      - ".github/scripts/task-supply-*.test.mjs"
+      - ".github/workflows/task-supply-ci.yml"
+      - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
+      - "docs/superpowers/plans/2026-07-31-chain-environment-program.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/task-supply-package-inventory.test.mjs
+      - name: Verify source boundaries and canaries
+        run: node --test .github/scripts/task-supply-source-boundaries.test.mjs
+      - name: Verify curation's projection-never-record contract
+        run: node --test .github/scripts/task-supply-curation-guards.test.mjs
+
+  curation:
+    needs: [architecture]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Verify Task Curation
+        working-directory: packages/task-supply/curation
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Curation distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-supply-curation-dist
+          path: packages/task-supply/curation/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  admission:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+      - name: Verify Task Admission
+        working-directory: packages/task-supply/admission
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Admission distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-supply-admission-dist
+          path: packages/task-supply/admission/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  derivation:
+    needs: [architecture, admission]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+      - name: Verify Task Derivation
+        working-directory: packages/task-supply/derivation
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Derivation distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-supply-derivation-dist
+          path: packages/task-supply/derivation/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  chain-scenarios:
+    needs: [architecture, admission, derivation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/environments/chain-record && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/task-supply/derivation && yarn install --immutable && yarn build)
+      - name: Verify Chain Scenarios
+        working-directory: packages/task-supply/chain-scenarios
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Chain Scenarios distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-supply-chain-scenarios-dist
+          path: packages/task-supply/chain-scenarios/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  posting:
+    needs: [architecture, derivation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/resolve && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/marketplace/binding && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/task-supply/derivation && yarn install --immutable && yarn build)
+      - name: Verify Task Posting
+        working-directory: packages/task-supply/posting
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Posting distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-supply-posting-dist
+          path: packages/task-supply/posting/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, admission, curation, derivation, chain-scenarios, posting]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Task Supply CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          ADMISSION_RESULT: ${{ needs.admission.result }}
+          CURATION_RESULT: ${{ needs.curation.result }}
+          DERIVATION_RESULT: ${{ needs.derivation.result }}
+          CHAIN_SCENARIOS_RESULT: ${{ needs.chain-scenarios.result }}
+          POSTING_RESULT: ${{ needs.posting.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$ADMISSION_RESULT" \
+            "$CURATION_RESULT" \
+            "$DERIVATION_RESULT" \
+            "$CHAIN_SCENARIOS_RESULT" \
+            "$POSTING_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all package distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: task-supply-*-dist
+          path: .task-supply-dist
+      - name: Place package distributions
+        run: |
+          mkdir -p packages/task-supply/admission/dist
+          cp -R .task-supply-dist/task-supply-admission-dist/. packages/task-supply/admission/dist/
+          mkdir -p packages/task-supply/curation/dist
+          cp -R .task-supply-dist/task-supply-curation-dist/. packages/task-supply/curation/dist/
+          mkdir -p packages/task-supply/derivation/dist
+          cp -R .task-supply-dist/task-supply-derivation-dist/. packages/task-supply/derivation/dist/
+          mkdir -p packages/task-supply/chain-scenarios/dist
+          cp -R .task-supply-dist/task-supply-chain-scenarios-dist/. packages/task-supply/chain-scenarios/dist/
+          mkdir -p packages/task-supply/posting/dist
+          cp -R .task-supply-dist/task-supply-posting-dist/. packages/task-supply/posting/dist/
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/resolve && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/environments/chain-record && yarn install --immutable && yarn build)
+          (cd packages/marketplace/binding && yarn install --immutable && yarn build)
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/task-supply-packed-types.test.mjs

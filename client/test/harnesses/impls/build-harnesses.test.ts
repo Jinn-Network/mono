@@ -73,13 +73,33 @@ describe('buildHarnesses — external impls + disabledNames', () => {
   });
 
   it('registers codex as an explicit peer without moving the default Claude Code harness', () => {
-    const impls = buildHarnesses({ ...ENV });
+    // C6: `learnerRouting` is forwarded to both LearnerHarness instances, so the
+    // codex peer claims the same explicit allowlist the claude-code default does.
+    // Before explicit routing (product design §10) this assertion passed on the
+    // retired wrap-every-SolverType default and proved nothing about forwarding.
+    const impls = buildHarnesses({
+      ...ENV,
+      learnerRouting: { solverTypes: ['swe-rebench-v2.v1'] },
+    });
     const learnerIndex = impls.findIndex((impl) => impl.name === CLAUDE_CODE_HARNESS);
     const codexIndex = impls.findIndex((impl) => impl.name === CODEX_HARNESS);
 
     expect(learnerIndex).toBeGreaterThanOrEqual(0);
     expect(codexIndex).toBeGreaterThan(learnerIndex);
     expect(impls[codexIndex]!.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
+    expect(impls[learnerIndex]!.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
+  });
+
+  it('leaves both learner instances claiming nothing when no routing is configured', () => {
+    // The retired default was "claim every non-evaluation SolverType". An
+    // unconfigured learner now claims nothing; `main.ts` supplies the allowlist
+    // derived from the operator's joined SolverNets.
+    const impls = buildHarnesses({ ...ENV });
+    for (const name of [CLAUDE_CODE_HARNESS, CODEX_HARNESS]) {
+      const impl = impls.find((candidate) => candidate.name === name);
+      expect(impl, `${name} should be registered`).toBeDefined();
+      expect(impl!.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(false);
+    }
   });
 
   it('accepts legacy learner names in disabledNames', () => {

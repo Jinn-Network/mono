@@ -1,0 +1,64 @@
+{
+  "fixtureVersion": 1,
+  "kind": "synthetic-normative-target",
+  "executionEvidenceProfile": {
+    "profile": "https://spec.jinn.network/profiles/execution-evidence/v1",
+    "status": "structurally-complete-local-fixture",
+    "record": "execution/ro-crate-metadata.json",
+    "sha256": "7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf",
+    "externalClaimLimitation": "The reserved profile URI must resolve to the published profile before external conformance claims are emitted."
+  },
+  "resultEvaluationEvidence": {
+    "status": "complete-and-signed",
+    "envelope": "claims/result-evaluation/result-evaluation.dsse.json",
+    "subjects": [
+      "execution/task/task.md",
+      "execution/results/slug-normalization.patch"
+    ]
+  },
+  "executionVerificationEvidence": {
+    "status": "complete-and-signed",
+    "envelope": "claims/execution-verification/execution-verification.dsse.json",
+    "subject": "execution/ro-crate-metadata.json"
+  },
+  "publicationCheck": {
+    "status": "conforming-structure-aware-derivative",
+    "rejected": false,
+    "sourceCommitment": "sha256:7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf",
+    "derivedMetadataDigestRecordedInsideDerivative": false
+  },
+  "coverage": [
+    "exact-task",
+    "exact-repository-snapshot",
+    "material-knowledge-input",
+    "content-bound-controlled-executor-components",
+    "opaque-hosted-model-descriptor",
+    "execution-identity-and-agent",
+    "observed-environment",
+    "native-trace",
+    "resource-observations",
+    "exact-result",
+    "capture-provenance",
+    "external-marketplace-references",
+    "append-only-result-evaluation",
+    "append-only-execution-verification",
+    "dsse-signatures",
+    "conforming-public-derivative"
+  ],
+  "claimsNotMade": [
+    "historical-execution",
+    "independent-reproducibility",
+    "provider-attested-model-identity",
+    "permission-to-publish-real-user-data",
+    "marketplace-settlement-validity"
+  ],
+  "publicDerivative": {
+    "status": "structurally-complete-local-fixture",
+    "record": "public/ro-crate-metadata.json",
+    "sha256": "d31b6017ef4e4a23d61d510a51a13c6fff39ca344e87436cdc4c3360b69de8ed",
+    "sameExecutionId": "urn:uuid:22222222-2222-4222-8222-222222222222",
+    "unavailableExactArtifact": "public/trace/trace.jsonl",
+    "publishedDerivative": "public/trace/trace.public.jsonl",
+    "transferredPrivateVerification": false
+  }
+}

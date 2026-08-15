@@ -1,0 +1,17 @@
+{
+  "note": "Substrate §5.1/§5.3 — `evidenceProvenance` is the frozen evidence input the proposer consumed, and it is required. Without it there is no way to check R5's held-out exclusion after the fact: a candidate whose evidence bundle is unrecorded may have been proposed while looking at the promotion Benchmark's own tasks, and nothing downstream can tell. Absent provenance is not a lesser manifest, it is an unadmittable one.",
+  "input": {
+    "formatToken": "network.jinn.policy.candidate/1.0",
+    "policy": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "model": { "provider": "anthropic", "id": "claude-haiku-4-5" },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "parents": [],
+    "proposer": "urn:jinn:agent:policy-c1-kit-reference-proposer",
+    "declaredChanges": { "summary": "Ablate one skill.", "touchedComponents": ["loadout"] }
+  },
+  "expect": { "ok": false, "code": "missing-provenance", "path": "evidenceProvenance" }
+}

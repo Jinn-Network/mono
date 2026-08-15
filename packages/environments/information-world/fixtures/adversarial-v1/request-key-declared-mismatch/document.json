@@ -1,0 +1,127 @@
+{
+  "kind": "https://spec.jinn.network/records/information-world/v1",
+  "requestKeyPolicy": {
+    "version": "irk1",
+    "headerSubset": [
+      "accept",
+      "content-type"
+    ],
+    "pathTrailingSlash": "preserve",
+    "plusInQuery": "literal",
+    "bodyCanonicalization": "json-jcs"
+  },
+  "corpus": {
+    "origins": [
+      "https://api.example.test",
+      "https://docs.example.test"
+    ],
+    "entries": [
+      {
+        "requestKey": "irk1:0000000000000000000000000000000000000000000000000000000000000000",
+        "request": {
+          "method": "GET",
+          "origin": "https://api.example.test",
+          "path": "/protocols",
+          "query": [],
+          "headers": {
+            "accept": [
+              "application/json"
+            ]
+          },
+          "body": null
+        },
+        "response": {
+          "status": 200,
+          "headers": [
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body": {
+            "digest": "sha256:4775bfcd3d930813f077dce01d00f830f083da3a5b6c3951f8a0b68c22b943ff",
+            "mediaType": "application/json",
+            "sizeBytes": 54
+          }
+        }
+      },
+      {
+        "requestKey": "irk1:722bbf3d6e4224bd65cce131cc4cc066c3dbde4b6e88beb584a954fb07fbec2f",
+        "request": {
+          "method": "GET",
+          "origin": "https://docs.example.test",
+          "path": "/guide",
+          "query": [],
+          "headers": {},
+          "body": null
+        },
+        "response": {
+          "status": 200,
+          "headers": [
+            [
+              "content-type",
+              "text/markdown"
+            ]
+          ],
+          "body": {
+            "digest": "sha256:158a551933b311c1d20918258e79300fa2a4820d119e07dedca7cb8bc9a3f1eb",
+            "mediaType": "text/markdown",
+            "sizeBytes": 58
+          }
+        }
+      },
+      {
+        "requestKey": "irk1:f954b39b191c018b422d31ff0dd1b1646127b0cef316207ffea62fc634d04150",
+        "request": {
+          "method": "GET",
+          "origin": "https://api.example.test",
+          "path": "/pools",
+          "query": [
+            [
+              "chain",
+              "base"
+            ]
+          ],
+          "headers": {
+            "accept": [
+              "application/json"
+            ]
+          },
+          "body": null
+        },
+        "response": {
+          "status": 200,
+          "headers": [
+            [
+              "content-type",
+              "application/json"
+            ]
+          ],
+          "body": {
+            "digest": "sha256:1ae291ff0bd911a370ae58284360b786856994754be99dd46143dafb11223dd7",
+            "mediaType": "application/json",
+            "sizeBytes": 90
+          }
+        }
+      }
+    ]
+  },
+  "missPolicy": {
+    "status": 404,
+    "headers": [
+      [
+        "content-type",
+        "application/json"
+      ]
+    ],
+    "body": {
+      "inlineUtf8": "{\"error\":\"this request is not in the sealed corpus\"}",
+      "mediaType": "application/json"
+    },
+    "reason": "uncaptured-request"
+  },
+  "capture": {
+    "fidelity": "synthetic",
+    "provenanceClass": "declared"
+  }
+}

@@ -1,0 +1,828 @@
+{
+  "methodId": "jinn.benchmarking.method/noninferiority-iut",
+  "methodVersion": "1",
+  "parameters": {
+    "baseline": "armA",
+    "candidate": "armB",
+    "seed": 123456789,
+    "resamples": 1000
+  },
+  "verdictRule": "unanimous",
+  "matrices": [
+    {
+      "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+      "run": {
+        "digest": {
+          "sha256": "c53f5227cce173f08860a1b60a002d746abf03a6c55cc96dfb2bd716241b259b"
+        }
+      },
+      "closeBoundary": {
+        "at": "2026-08-04T00:00:00Z"
+      },
+      "cells": [
+        {
+          "cellKey": "bfb6d95f46da573a35843c65be7014ba11551dc22c720b74e3407a6991cf7668/armA/1",
+          "taskDigest": "bfb6d95f46da573a35843c65be7014ba11551dc22c720b74e3407a6991cf7668",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:467e65fb991e3ae597ae1a6ddbc388bba9e79570a28b8653dc54180c102ff8fd"
+          ],
+          "validVerdicts": [
+            "sha256:467e65fb991e3ae597ae1a6ddbc388bba9e79570a28b8653dc54180c102ff8fd"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "bfb6d95f46da573a35843c65be7014ba11551dc22c720b74e3407a6991cf7668/armB/1",
+          "taskDigest": "bfb6d95f46da573a35843c65be7014ba11551dc22c720b74e3407a6991cf7668",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:a427f127f1472fd30c102a8434038f0451f467dc3b24e46ee5518fab53d2cddd"
+          ],
+          "validVerdicts": [
+            "sha256:a427f127f1472fd30c102a8434038f0451f467dc3b24e46ee5518fab53d2cddd"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "f488a7d98d2ff7b0d27d0189e0116b28e21a4a93c3beaf094e57b0a1dfa39eff/armA/1",
+          "taskDigest": "f488a7d98d2ff7b0d27d0189e0116b28e21a4a93c3beaf094e57b0a1dfa39eff",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:880e156957366d9de7d29949c1a10ffe90e5c9c25907416c3d4fb2b870ad9887"
+          ],
+          "validVerdicts": [
+            "sha256:880e156957366d9de7d29949c1a10ffe90e5c9c25907416c3d4fb2b870ad9887"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "f488a7d98d2ff7b0d27d0189e0116b28e21a4a93c3beaf094e57b0a1dfa39eff/armB/1",
+          "taskDigest": "f488a7d98d2ff7b0d27d0189e0116b28e21a4a93c3beaf094e57b0a1dfa39eff",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:9d3461e31c2bea542f02811dbafb4c485f2b91c501f087539193d141281b04bd"
+          ],
+          "validVerdicts": [
+            "sha256:9d3461e31c2bea542f02811dbafb4c485f2b91c501f087539193d141281b04bd"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "8a2846115efa484a1e4e86cfd90408767422686bcae99cdfbb5c4e2bd18c801c/armA/1",
+          "taskDigest": "8a2846115efa484a1e4e86cfd90408767422686bcae99cdfbb5c4e2bd18c801c",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:4c4be4d80871b016766a5ffda5c35a9c5e84d392991e5e809f95443b76eedf6d"
+          ],
+          "validVerdicts": [
+            "sha256:4c4be4d80871b016766a5ffda5c35a9c5e84d392991e5e809f95443b76eedf6d"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "8a2846115efa484a1e4e86cfd90408767422686bcae99cdfbb5c4e2bd18c801c/armB/1",
+          "taskDigest": "8a2846115efa484a1e4e86cfd90408767422686bcae99cdfbb5c4e2bd18c801c",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:da61f953ca159eca6d5ee71258a5a6e36a534df2ca0a137b783917093b1dd356"
+          ],
+          "validVerdicts": [
+            "sha256:da61f953ca159eca6d5ee71258a5a6e36a534df2ca0a137b783917093b1dd356"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "94a71f4fe8642ad61b9fd3f581f43cf5b129530c6872de9810e9d89302e27792/armA/1",
+          "taskDigest": "94a71f4fe8642ad61b9fd3f581f43cf5b129530c6872de9810e9d89302e27792",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:8f4d5f214f68c84b3d33a42637ee7086ff87b92aac2a3800d45b7070c6d54e28"
+          ],
+          "validVerdicts": [
+            "sha256:8f4d5f214f68c84b3d33a42637ee7086ff87b92aac2a3800d45b7070c6d54e28"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "94a71f4fe8642ad61b9fd3f581f43cf5b129530c6872de9810e9d89302e27792/armB/1",
+          "taskDigest": "94a71f4fe8642ad61b9fd3f581f43cf5b129530c6872de9810e9d89302e27792",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:33bf27a98d1370c17ea96e4762a99088ba02612d5f054019c50c1eda565f8efc"
+          ],
+          "validVerdicts": [
+            "sha256:33bf27a98d1370c17ea96e4762a99088ba02612d5f054019c50c1eda565f8efc"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "1f41c139a16b0e32dec0ed2884003ea41fd8b41e38be6197a4a22dc2c14a8a86/armA/1",
+          "taskDigest": "1f41c139a16b0e32dec0ed2884003ea41fd8b41e38be6197a4a22dc2c14a8a86",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:529e01e92ca8e0293283583f363f2b8e8983c0fdb79590d24b3bbf305eaa8c90"
+          ],
+          "validVerdicts": [
+            "sha256:529e01e92ca8e0293283583f363f2b8e8983c0fdb79590d24b3bbf305eaa8c90"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "1f41c139a16b0e32dec0ed2884003ea41fd8b41e38be6197a4a22dc2c14a8a86/armB/1",
+          "taskDigest": "1f41c139a16b0e32dec0ed2884003ea41fd8b41e38be6197a4a22dc2c14a8a86",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:3e932380f8b09d1cee3845d16adecf011a22ebf3f07f6be58f08ab19989e884e"
+          ],
+          "validVerdicts": [
+            "sha256:3e932380f8b09d1cee3845d16adecf011a22ebf3f07f6be58f08ab19989e884e"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "139a05cbbce45334834bbcdf91b75dae89768662913210ac37a174454be9f729/armA/1",
+          "taskDigest": "139a05cbbce45334834bbcdf91b75dae89768662913210ac37a174454be9f729",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:873fc267ad986e53397d370a7e1c5cc6c385d67d36210b1d30ec354fc1529c38"
+          ],
+          "validVerdicts": [
+            "sha256:873fc267ad986e53397d370a7e1c5cc6c385d67d36210b1d30ec354fc1529c38"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "139a05cbbce45334834bbcdf91b75dae89768662913210ac37a174454be9f729/armB/1",
+          "taskDigest": "139a05cbbce45334834bbcdf91b75dae89768662913210ac37a174454be9f729",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:af6af70091e067e61dc3fc51aaf7fd9d5bd2ba8d89de242d552c00ecc60913b5"
+          ],
+          "validVerdicts": [
+            "sha256:af6af70091e067e61dc3fc51aaf7fd9d5bd2ba8d89de242d552c00ecc60913b5"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "c7a3be8479e59b46aedd6fcbc6d4fb45abad4e59bb44a3ef4c458ec62af988b5/armA/1",
+          "taskDigest": "c7a3be8479e59b46aedd6fcbc6d4fb45abad4e59bb44a3ef4c458ec62af988b5",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:06efac23e35b8914d5bd7e339ee26e15f80260f8aff0acbcd2c292c5f819a77f"
+          ],
+          "validVerdicts": [
+            "sha256:06efac23e35b8914d5bd7e339ee26e15f80260f8aff0acbcd2c292c5f819a77f"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "c7a3be8479e59b46aedd6fcbc6d4fb45abad4e59bb44a3ef4c458ec62af988b5/armB/1",
+          "taskDigest": "c7a3be8479e59b46aedd6fcbc6d4fb45abad4e59bb44a3ef4c458ec62af988b5",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:acdc91886fe210295624f42c8b7b70c43485c0b0b98587ab225be789f3db83a4"
+          ],
+          "validVerdicts": [
+            "sha256:acdc91886fe210295624f42c8b7b70c43485c0b0b98587ab225be789f3db83a4"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "9df093e8a1f532f31f3380c8a9d2203956409a7f69aea07ac1479411ce8715aa/armA/1",
+          "taskDigest": "9df093e8a1f532f31f3380c8a9d2203956409a7f69aea07ac1479411ce8715aa",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:fb1b202ef82d60c9dc3444292a2357f7836f042017229ce36a286198c4b4e8ea"
+          ],
+          "validVerdicts": [
+            "sha256:fb1b202ef82d60c9dc3444292a2357f7836f042017229ce36a286198c4b4e8ea"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "9df093e8a1f532f31f3380c8a9d2203956409a7f69aea07ac1479411ce8715aa/armB/1",
+          "taskDigest": "9df093e8a1f532f31f3380c8a9d2203956409a7f69aea07ac1479411ce8715aa",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:ccfd24d9df1c5d17b4d2b3e359c2c265b32de99b622c8fa3c477e27f6de1ad8c"
+          ],
+          "validVerdicts": [
+            "sha256:ccfd24d9df1c5d17b4d2b3e359c2c265b32de99b622c8fa3c477e27f6de1ad8c"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "8448f8cb2906776aaf938be9db43006516834a5a7025c2c970d1341d3c69cc71/armA/1",
+          "taskDigest": "8448f8cb2906776aaf938be9db43006516834a5a7025c2c970d1341d3c69cc71",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:497e224f3fd2681b80f84031dcd4691492bd4dab68a5472354a1ce1609e620b8"
+          ],
+          "validVerdicts": [
+            "sha256:497e224f3fd2681b80f84031dcd4691492bd4dab68a5472354a1ce1609e620b8"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "8448f8cb2906776aaf938be9db43006516834a5a7025c2c970d1341d3c69cc71/armB/1",
+          "taskDigest": "8448f8cb2906776aaf938be9db43006516834a5a7025c2c970d1341d3c69cc71",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:badb5fa575793d656747a30ef26de65035e5c149dd9706e085513a44a46135e4"
+          ],
+          "validVerdicts": [
+            "sha256:badb5fa575793d656747a30ef26de65035e5c149dd9706e085513a44a46135e4"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "b71d154e98f6abe1b5576a2f35430892b201acc8e883bf5c5d4adc4a57c30956/armA/1",
+          "taskDigest": "b71d154e98f6abe1b5576a2f35430892b201acc8e883bf5c5d4adc4a57c30956",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:156e81f54a647f592824c0cf66bb37b49960e8645f19cd99500e99da1c79188a"
+          ],
+          "validVerdicts": [
+            "sha256:156e81f54a647f592824c0cf66bb37b49960e8645f19cd99500e99da1c79188a"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "2",
+            "unit": "USD",
+            "source": "reported"
+          }
+        },
+        {
+          "cellKey": "b71d154e98f6abe1b5576a2f35430892b201acc8e883bf5c5d4adc4a57c30956/armB/1",
+          "taskDigest": "b71d154e98f6abe1b5576a2f35430892b201acc8e883bf5c5d4adc4a57c30956",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:a91b47290b992ac0b536f638b115a30948e68c2817302e545b5640185b8da493"
+          ],
+          "validVerdicts": [
+            "sha256:a91b47290b992ac0b536f638b115a30948e68c2817302e545b5640185b8da493"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable",
+          "cost": {
+            "value": "1",
+            "unit": "USD",
+            "source": "reported"
+          }
+        }
+      ],
+      "exclusions": [],
+      "attrition": {
+        "perArm": {
+          "armA": {
+            "expected": 10,
+            "judged": 10,
+            "unjudged": 0,
+            "unscorable": 0,
+            "expired": 0,
+            "invalidated": 0,
+            "excluded": 0,
+            "replacements": 0
+          },
+          "armB": {
+            "expected": 10,
+            "judged": 10,
+            "unjudged": 0,
+            "unscorable": 0,
+            "expired": 0,
+            "invalidated": 0,
+            "excluded": 0,
+            "replacements": 0
+          }
+        },
+        "asymmetryFlags": []
+      },
+      "completeness": {
+        "expected": 20,
+        "judged": 20,
+        "floor": "0.5",
+        "runOutcome": "complete"
+      },
+      "assembly": {
+        "procedure": "jinn.benchmarking.assembly",
+        "version": "1.0"
+      }
+    }
+  ],
+  "verdictOutcomes": {
+    "sha256:467e65fb991e3ae597ae1a6ddbc388bba9e79570a28b8653dc54180c102ff8fd": {
+      "verdict": "pass"
+    },
+    "sha256:a427f127f1472fd30c102a8434038f0451f467dc3b24e46ee5518fab53d2cddd": {
+      "verdict": "pass"
+    },
+    "sha256:880e156957366d9de7d29949c1a10ffe90e5c9c25907416c3d4fb2b870ad9887": {
+      "verdict": "pass"
+    },
+    "sha256:9d3461e31c2bea542f02811dbafb4c485f2b91c501f087539193d141281b04bd": {
+      "verdict": "pass"
+    },
+    "sha256:4c4be4d80871b016766a5ffda5c35a9c5e84d392991e5e809f95443b76eedf6d": {
+      "verdict": "pass"
+    },
+    "sha256:da61f953ca159eca6d5ee71258a5a6e36a534df2ca0a137b783917093b1dd356": {
+      "verdict": "pass"
+    },
+    "sha256:8f4d5f214f68c84b3d33a42637ee7086ff87b92aac2a3800d45b7070c6d54e28": {
+      "verdict": "pass"
+    },
+    "sha256:33bf27a98d1370c17ea96e4762a99088ba02612d5f054019c50c1eda565f8efc": {
+      "verdict": "pass"
+    },
+    "sha256:529e01e92ca8e0293283583f363f2b8e8983c0fdb79590d24b3bbf305eaa8c90": {
+      "verdict": "pass"
+    },
+    "sha256:3e932380f8b09d1cee3845d16adecf011a22ebf3f07f6be58f08ab19989e884e": {
+      "verdict": "pass"
+    },
+    "sha256:873fc267ad986e53397d370a7e1c5cc6c385d67d36210b1d30ec354fc1529c38": {
+      "verdict": "pass"
+    },
+    "sha256:af6af70091e067e61dc3fc51aaf7fd9d5bd2ba8d89de242d552c00ecc60913b5": {
+      "verdict": "pass"
+    },
+    "sha256:06efac23e35b8914d5bd7e339ee26e15f80260f8aff0acbcd2c292c5f819a77f": {
+      "verdict": "pass"
+    },
+    "sha256:acdc91886fe210295624f42c8b7b70c43485c0b0b98587ab225be789f3db83a4": {
+      "verdict": "pass"
+    },
+    "sha256:fb1b202ef82d60c9dc3444292a2357f7836f042017229ce36a286198c4b4e8ea": {
+      "verdict": "pass"
+    },
+    "sha256:ccfd24d9df1c5d17b4d2b3e359c2c265b32de99b622c8fa3c477e27f6de1ad8c": {
+      "verdict": "pass"
+    },
+    "sha256:497e224f3fd2681b80f84031dcd4691492bd4dab68a5472354a1ce1609e620b8": {
+      "verdict": "pass"
+    },
+    "sha256:badb5fa575793d656747a30ef26de65035e5c149dd9706e085513a44a46135e4": {
+      "verdict": "pass"
+    },
+    "sha256:156e81f54a647f592824c0cf66bb37b49960e8645f19cd99500e99da1c79188a": {
+      "verdict": "pass"
+    },
+    "sha256:a91b47290b992ac0b536f638b115a30948e68c2817302e545b5640185b8da493": {
+      "verdict": "pass"
+    }
+  },
+  "expectedResults": {
+    "verdictRule": "unanimous",
+    "baseline": "armA",
+    "candidate": "armB",
+    "verdict": "PASS",
+    "pairing": {
+      "taskDigests": [
+        "139a05cbbce45334834bbcdf91b75dae89768662913210ac37a174454be9f729",
+        "1f41c139a16b0e32dec0ed2884003ea41fd8b41e38be6197a4a22dc2c14a8a86",
+        "8448f8cb2906776aaf938be9db43006516834a5a7025c2c970d1341d3c69cc71",
+        "8a2846115efa484a1e4e86cfd90408767422686bcae99cdfbb5c4e2bd18c801c",
+        "94a71f4fe8642ad61b9fd3f581f43cf5b129530c6872de9810e9d89302e27792",
+        "9df093e8a1f532f31f3380c8a9d2203956409a7f69aea07ac1479411ce8715aa",
+        "b71d154e98f6abe1b5576a2f35430892b201acc8e883bf5c5d4adc4a57c30956",
+        "bfb6d95f46da573a35843c65be7014ba11551dc22c720b74e3407a6991cf7668",
+        "c7a3be8479e59b46aedd6fcbc6d4fb45abad4e59bb44a3ef4c458ec62af988b5",
+        "f488a7d98d2ff7b0d27d0189e0116b28e21a4a93c3beaf094e57b0a1dfa39eff"
+      ]
+    },
+    "quality": {
+      "verdict": "pass",
+      "lowerBound": "0.0000",
+      "relativeRegression": "0.0000",
+      "reasons": []
+    },
+    "cost": {
+      "verdict": "lower",
+      "pValue": "0.0030",
+      "n": 10,
+      "excluded": {
+        "count": 0,
+        "cellKeys": []
+      }
+    },
+    "excluded": {
+      "count": 0,
+      "cellKeys": []
+    },
+    "conflicted": {
+      "count": 0,
+      "cellKeys": []
+    },
+    "bootstrap": {
+      "procedure": "xorshift32-v1",
+      "seed": 123456789,
+      "resamples": 1000,
+      "basis": "task-provenance-source-family",
+      "count": 10,
+      "unit": "source-cluster",
+      "draws": 10000,
+      "clusters": [
+        {
+          "key": [
+            "source",
+            "fixture-source/139a05cbbce45334834bbcdf91b75dae89768662913210ac37a174454be9f729"
+          ],
+          "members": [
+            "139a05cbbce45334834bbcdf91b75dae89768662913210ac37a174454be9f729"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/1f41c139a16b0e32dec0ed2884003ea41fd8b41e38be6197a4a22dc2c14a8a86"
+          ],
+          "members": [
+            "1f41c139a16b0e32dec0ed2884003ea41fd8b41e38be6197a4a22dc2c14a8a86"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/8448f8cb2906776aaf938be9db43006516834a5a7025c2c970d1341d3c69cc71"
+          ],
+          "members": [
+            "8448f8cb2906776aaf938be9db43006516834a5a7025c2c970d1341d3c69cc71"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/8a2846115efa484a1e4e86cfd90408767422686bcae99cdfbb5c4e2bd18c801c"
+          ],
+          "members": [
+            "8a2846115efa484a1e4e86cfd90408767422686bcae99cdfbb5c4e2bd18c801c"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/94a71f4fe8642ad61b9fd3f581f43cf5b129530c6872de9810e9d89302e27792"
+          ],
+          "members": [
+            "94a71f4fe8642ad61b9fd3f581f43cf5b129530c6872de9810e9d89302e27792"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/9df093e8a1f532f31f3380c8a9d2203956409a7f69aea07ac1479411ce8715aa"
+          ],
+          "members": [
+            "9df093e8a1f532f31f3380c8a9d2203956409a7f69aea07ac1479411ce8715aa"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/b71d154e98f6abe1b5576a2f35430892b201acc8e883bf5c5d4adc4a57c30956"
+          ],
+          "members": [
+            "b71d154e98f6abe1b5576a2f35430892b201acc8e883bf5c5d4adc4a57c30956"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/bfb6d95f46da573a35843c65be7014ba11551dc22c720b74e3407a6991cf7668"
+          ],
+          "members": [
+            "bfb6d95f46da573a35843c65be7014ba11551dc22c720b74e3407a6991cf7668"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/c7a3be8479e59b46aedd6fcbc6d4fb45abad4e59bb44a3ef4c458ec62af988b5"
+          ],
+          "members": [
+            "c7a3be8479e59b46aedd6fcbc6d4fb45abad4e59bb44a3ef4c458ec62af988b5"
+          ]
+        },
+        {
+          "key": [
+            "source",
+            "fixture-source/f488a7d98d2ff7b0d27d0189e0116b28e21a4a93c3beaf094e57b0a1dfa39eff"
+          ],
+          "members": [
+            "f488a7d98d2ff7b0d27d0189e0116b28e21a4a93c3beaf094e57b0a1dfa39eff"
+          ]
+        }
+      ]
+    }
+  }
+}

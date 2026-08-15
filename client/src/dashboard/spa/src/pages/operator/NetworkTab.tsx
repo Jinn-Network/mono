@@ -15,7 +15,8 @@ import { Badge } from '../../components/ui/badge.js';
 import { Input } from '../../components/ui/input.js';
 import { Label } from '../../components/ui/label.js';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
-import type { RpcSlotHealth } from '../../api/types.js';
+import type { RpcSlotHealth } from '../../../../../api/contract/index.js';
+import { ArchiveCard } from './ArchiveCard.js';
 
 /**
  * /operator/network — RPC fallback chain + chain config (§2.11).
@@ -65,6 +66,7 @@ export function NetworkTab({
         onRestartPending={onRestartPending}
       />
       <TaskPostsCard />
+      <ArchiveCard />
     </div>
   );
 }

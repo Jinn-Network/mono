@@ -38,8 +38,52 @@ growth/.local/
 
 packages/*/node_modules/
 packages/*/dist/
+# `yarn e2e:campaign` scratch build (packages/policy-optimization)
+packages/*/.e2e-build/
 packages/*/.yarn/cache/
 packages/*/.yarn/install-state.gz
+packages/evidence/*/dist/
+packages/evidence/*/.yarn/cache/
+packages/evidence/*/.yarn/install-state.gz
+packages/task-execution/*/dist/
+packages/task-execution/*/.yarn/cache/
+packages/task-execution/*/.yarn/install-state.gz
+packages/task-execution/backend-local/*/dist/
+packages/task-execution/backend-local/*/.yarn/cache/
+packages/task-execution/backend-local/*/.yarn/install-state.gz
+packages/trust/*/dist/
+packages/trust/*/.yarn/cache/
+packages/trust/*/.yarn/install-state.gz
+packages/discovery/*/dist/
+packages/discovery/*/.yarn/cache/
+packages/discovery/*/.yarn/install-state.gz
+packages/discovery/facts/*/dist/
+packages/discovery/facts/*/.yarn/cache/
+packages/discovery/facts/*/.yarn/install-state.gz
+packages/discovery/sources/*/dist/
+packages/discovery/sources/*/.yarn/cache/
+packages/discovery/sources/*/.yarn/install-state.gz
+packages/benchmarking/*/dist/
+packages/benchmarking/*/.yarn/cache/
+packages/benchmarking/*/.yarn/install-state.gz
+packages/environments/*/dist/
+packages/environments/*/.yarn/cache/
+packages/environments/*/.yarn/install-state.gz
+packages/marketplace/*/dist/
+packages/marketplace/*/.yarn/cache/
+packages/marketplace/*/.yarn/install-state.gz
+packages/policy/*/dist/
+packages/policy/*/.yarn/cache/
+packages/policy/*/.yarn/install-state.gz
+packages/task-supply/*/node_modules/
+packages/task-supply/*/dist/
+packages/task-supply/*/.yarn/cache/
+packages/task-supply/*/.yarn/install-state.gz
+plugin/*/dist/
+plugin/*/.yarn/cache/
+plugin/*/.yarn/install-state.gz
+plugin/*/.pnp.cjs
+plugin/*/.pnp.loader.mjs
 examples/external-restorer-impls/*/node_modules/
 examples/external-restorer-impls/*/dist/
 examples/external-restorer-impls/*/.yarn/cache/
@@ -49,3 +93,14 @@ examples/external-restorer-impls/*/.yarn/install-state.gz
 # yarn PnP local install artefacts (per-machine; never committed)
 packages/*/.pnp.cjs
 packages/*/.pnp.loader.mjs
+
+# observation-reader-gate-boundary.test.mjs's synthetic-violation fixture directory; a killed
+# test run can leave this behind, and an uncommitted leftover here fails the NEXT
+# generate-architecture.mjs --check step with a misleading drift error (issue #2409, F8).
+.github/scripts/.tmp-observation-reader-guard-*
+
+# Python bytecode caches. The learner plugin ships `.py` hooks (client/plugins/learner/
+# hooks/lib/); running them locally materialises `__pycache__/` next to the source, and a
+# stray `.pyc` was committed once already (PR #2655 fix round). Never tracked.
+__pycache__/
+*.pyc

@@ -1,0 +1,475 @@
+import { cpSync, existsSync, lstatSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { basename, join, resolve } from "node:path";
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Locator, type Page, type Response } from "@playwright/test";
+import {
+  DynamicResponseBodyAudit,
+  isExactChromiumAbort,
+} from "../src/test/dynamic-response-audit";
+import { PINNED_PERMISSIONS_POLICY as PERMISSIONS_POLICY } from "./chromium-policy";
+import { readRuntimeConfig } from "./runtime-config";
+
+const COMPLETE_DRAFT_ID = "bp50-browser";
+const CANCELLED_DRAFT_ID = "bp52-browser-cancelled";
+const runtime = readRuntimeConfig();
+const WORKSPACE = runtime.workspaceDir;
+const ORIGIN = "http://127.0.0.1:3017";
+const responseBodyAudits = new WeakMap<Page, DynamicResponseBodyAudit<Response>>();
+
+async function settleDynamicResponseBodies(page: Page): Promise<void> {
+  await responseBodyAudits.get(page)?.settleBeforeNextBrowserOperation();
+}
+
+async function auditedGoto(page: Page, url: string): Promise<void> {
+  await settleDynamicResponseBodies(page);
+  await page.goto(url);
+}
+
+async function tabTo(page: Page, target: Locator): Promise<void> {
+  await expect(target).toBeVisible();
+  for (let index = 0; index < 100; index += 1) {
+    if (await target.evaluate((node) => node === document.activeElement)) return;
+    await page.keyboard.press("Tab");
+  }
+  throw new Error(`keyboard traversal did not reach ${await target.evaluate((node) => node.outerHTML)}`);
+}
+
+async function typeByKeyboard(page: Page, target: Locator, value: string): Promise<void> {
+  await tabTo(page, target);
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type(value);
+  await expect(target).toHaveValue(value);
+}
+
+async function activateByKeyboard(page: Page, target: Locator): Promise<void> {
+  await tabTo(page, target);
+  // Do not navigate or dispatch another action until Chromium has yielded the exact bytes from
+  // every prior auditable response. Place this immediately before Enter: target discovery and
+  // keyboard traversal may overlap the tail of the response that made the target interactive.
+  await settleDynamicResponseBodies(page);
+  await page.keyboard.press("Enter");
+}
+
+function actionForm(page: Page, buttonName: string): Locator {
+  return page.locator("form").filter({ has: page.getByRole("button", { name: buttonName, exact: true }) });
+}
+
+async function submitAction(page: Page, buttonName: string, expectedText?: RegExp | string): Promise<Locator> {
+  const form = actionForm(page, buttonName);
+  const formIndex = await form.evaluate((node) => Array.from(document.forms).indexOf(node as HTMLFormElement));
+  await activateByKeyboard(page, form.getByRole("button", { name: buttonName, exact: true }));
+  // Publication deliberately relabels its button after the server refresh. Retain the form's
+  // document position so the assertion follows the same action boundary after that relabel.
+  const result = page.locator("form").nth(formIndex).locator("[aria-live]");
+  if (expectedText !== undefined) await expect(result).toContainText(expectedText);
+  await expect(result).toBeFocused();
+  const indicator = await result.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth, boxShadow: style.boxShadow };
+  });
+  const visibleOutline = indicator.outlineStyle !== "none" && indicator.outlineWidth !== "0px";
+  const visibleRing = indicator.boxShadow !== "none";
+  expect(visibleOutline || visibleRing, `${buttonName} result focus has no computed visible indicator: ${JSON.stringify(indicator)}`).toBe(true);
+  return result;
+}
+
+async function audit(page: Page, label: string): Promise<void> {
+  // Next may stream the document head after an action-driven server-component refresh; audit the
+  // settled document rather than the transient head replacement frame. No rule, impact, or node is
+  // waived: any axe violation fails with its complete diagnostic.
+  await expect(page).toHaveTitle(/Colophon/u);
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations, `${label}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([]);
+}
+
+async function expectContained(page: Page, width: number): Promise<void> {
+  const dimensions = await page.evaluate(() => ({
+    body: document.body.scrollWidth,
+    document: document.documentElement.scrollWidth,
+    viewport: document.documentElement.clientWidth,
+  }));
+  expect(dimensions.viewport).toBe(width);
+  expect(dimensions.body).toBeLessThanOrEqual(width);
+  expect(dimensions.document).toBeLessThanOrEqual(width);
+}
+
+async function auditState(page: Page, label: string): Promise<void> {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expectContained(page, 1440);
+  await audit(page, `${label} desktop`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectContained(page, 390);
+  await audit(page, `${label} 390px`);
+  await page.setViewportSize({ width: 1440, height: 900 });
+}
+
+function walkFiles(root: string): string[] {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name);
+    return entry.isDirectory() ? walkFiles(path) : [path];
+  });
+}
+
+function expectBuffersAbsent(bytes: Buffer, secrets: readonly Buffer[], label: string): void {
+  for (const secret of secrets) expect(bytes.includes(secret), `${label} contains confidential bytes`).toBe(false);
+}
+
+function expectStringsAbsent(value: string, secrets: readonly Buffer[], label: string): void {
+  for (const secret of secrets) {
+    const text = secret.toString("utf8");
+    expect(value, `${label} contains confidential text`).not.toContain(text);
+    expect(value, `${label} contains URL-encoded confidential text`).not.toContain(encodeURIComponent(text));
+  }
+}
+
+test("the local home runs the zero-key sample to a verified report and verifies its copied bundle", async ({ page }) => {
+  await auditedGoto(page, "/");
+  await activateByKeyboard(page, page.getByRole("button", { name: "Run to verified report", exact: true }));
+  await expect(page.getByRole("heading", { level: 1, name: "Results and report" })).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByRole("heading", { level: 2, name: "Published public bundle" })).toBeVisible();
+  await expect(page.getByText("claim-consistency", { exact: true }).first()).toBeVisible();
+  await auditState(page, "one-action sample result");
+
+  const guidedDraft = readdirSync(join(WORKSPACE, "artifacts"))
+    .filter((entry) => entry.startsWith("local-"))
+    .find((entry) => existsSync(join(WORKSPACE, "artifacts", entry, "public-bundles")));
+  expect(guidedDraft).toBeDefined();
+  const bundleRoot = join(WORKSPACE, "artifacts", guidedDraft!, "public-bundles");
+  const identities = readdirSync(bundleRoot);
+  expect(identities).toHaveLength(1);
+  const bundle = join(bundleRoot, identities[0]!);
+
+  await auditedGoto(page, "/");
+  await typeByKeyboard(page, page.getByLabel("Bundle directory on this machine"), bundle);
+  await submitAction(page, "Run all six checks", /6 of 6 checks passed/u);
+  await expect(page.getByText("claim-consistency", { exact: false })).toBeVisible();
+  await auditState(page, "reader-only bundle verification");
+});
+
+test("the guided own-work journey imports tasks, selects two agents, and enforces the provider boundary", async ({ page }) => {
+  await auditedGoto(page, "/");
+  await activateByKeyboard(page, page.getByRole("link", { name: "Start my comparison", exact: true }));
+  await expect(page.getByRole("heading", { level: 1, name: "Name the comparison" })).toBeVisible();
+  await typeByKeyboard(page, page.getByLabel("Name", { exact: true }), "Claude Code and Codex on my tasks");
+  await activateByKeyboard(page, page.getByRole("button", { name: "Choose tasks", exact: true }));
+  await expect(page.getByRole("heading", { level: 1, name: "Draft" })).toBeVisible();
+  await auditState(page, "guided own-work task choice");
+
+  const draftUrl = new URL(page.url());
+  const draftId = draftUrl.pathname.split("/").filter(Boolean).at(-1);
+  expect(draftId).toMatch(/^local-[a-f0-9-]+$/u);
+  const importForm = actionForm(page, "Import this SWE-bench file");
+  await importForm.getByLabel("SWE-bench rows JSON file").setInputFiles(
+    resolve(process.cwd(), "../../benchmarking/interop/fixtures/swebench/rows.multi-repo.json"),
+  );
+  await submitAction(page, "Import this SWE-bench file", /taskSha256s/u);
+  await expect(page.getByText(/Claude Code claude-low/u).first()).toBeVisible();
+  await expect(page.getByText(/Codex codex-low/u).first()).toBeVisible();
+
+  for (const selected of [
+    { agentId: "claude-low", armId: "claude" },
+    { agentId: "codex-low", armId: "codex" },
+  ] as const) {
+    const addAgent = actionForm(page, "Add selected agent as an Arm");
+    await addAgent.getByLabel("Configured agent").selectOption(selected.agentId);
+    await typeByKeyboard(page, addAgent.getByLabel("Arm ID"), selected.armId);
+    await submitAction(page, "Add selected agent as an Arm", new RegExp(selected.armId, "u"));
+  }
+  await expect(page.getByText("Ready for a local preflight", { exact: false })).toHaveCount(2);
+  await auditState(page, "guided own-work configured agents");
+
+  const refused = await submitAction(page, "Quote", /invalid-invocation/u);
+  await expect(refused).toContainText("provider network and possible-charge boundary");
+  const quoteForm = actionForm(page, "Quote");
+  await tabTo(page, quoteForm.getByRole("checkbox"));
+  await page.keyboard.press("Space");
+  await expect(quoteForm.getByRole("checkbox")).toBeChecked();
+  await submitAction(page, "Quote", /solveCells/u);
+
+  const lockForm = actionForm(page, "Lock run");
+  await tabTo(page, lockForm.getByRole("checkbox"));
+  await page.keyboard.press("Space");
+  await expect(lockForm.getByRole("checkbox")).toBeChecked();
+  await submitAction(page, "Lock run", /locked/u);
+  await expect(page.getByRole("button", { name: "Quote", exact: true })).toBeDisabled();
+  await auditState(page, "guided own-work locked method");
+});
+
+test("keyboard-only real lifecycle is accessible, private, responsive, and securely published", async ({ page }) => {
+  const consoleMessages: string[] = [];
+  const consoleFailures: string[] = [];
+  const requestUrls: string[] = [];
+  const externalRequests: string[] = [];
+  const responseBodyAudit = new DynamicResponseBodyAudit<Response>();
+  responseBodyAudits.set(page, responseBodyAudit);
+  page.on("console", (message) => {
+    const rendered = `${message.type()}: ${message.text()}`;
+    consoleMessages.push(rendered);
+    if (message.type() === "error" || message.type() === "warning") consoleFailures.push(rendered);
+  });
+  page.on("request", (request) => {
+    requestUrls.push(request.url());
+    const url = new URL(request.url());
+    if (url.protocol !== "data:" && url.origin !== ORIGIN) externalRequests.push(request.url());
+  });
+  page.on("response", (response) => {
+    const type = response.headers()["content-type"] ?? "";
+    if (!response.url().startsWith(ORIGIN) || (!type.includes("text/html") && !type.includes("text/x-component"))) return;
+    responseBodyAudit.capture(response);
+  });
+
+  await auditedGoto(page, "/");
+  await expect(page.getByRole("heading", { level: 1, name: "What do you want to check?" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Run the sample" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Verify a bundle" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Use my work" })).toBeVisible();
+  await auditState(page, "local three-choice route");
+
+  await auditedGoto(page, "/workspace/new");
+  await expect(page.getByRole("heading", { level: 1, name: "New draft" })).toBeVisible();
+  await auditState(page, "new draft route");
+
+  await auditedGoto(page, "/workspace");
+  const skipLink = page.getByRole("link", { name: "Skip to main content" });
+  await page.keyboard.press("Tab");
+  await expect(skipLink).toBeFocused();
+  await expect(skipLink).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("main#main-content")).toBeFocused();
+  await auditState(page, "uninitialized workspace");
+
+  const initialize = page.getByRole("button", { name: "Initialize workspace", exact: true });
+  if (await initialize.count() > 0) await activateByKeyboard(page, initialize);
+  await expect(page.getByText("Configured on this server")).toBeVisible();
+  await auditState(page, "initialized workspace");
+  await activateByKeyboard(page, page.getByRole("link", { name: "New draft" }));
+  await expect(page.getByRole("heading", { level: 1, name: "New draft" })).toBeVisible();
+
+  await typeByKeyboard(page, page.getByLabel("Name", { exact: true }), "Hostile <script>alert(1)</script> benchmark");
+  await typeByKeyboard(page, page.getByLabel("Draft ID"), COMPLETE_DRAFT_ID);
+  await typeByKeyboard(page, page.getByLabel("Description"), "</script><img src=x onerror=alert(1)> valid operator text");
+  await submitAction(page, "Create draft", /bp50-browser/u);
+  await activateByKeyboard(page, page.getByRole("link", { name: "Workspace" }));
+  await expect(page.getByText("Hostile <script>alert(1)</script> benchmark")).toBeVisible();
+  const completeDraft = page.getByRole("listitem").filter({ hasText: "Hostile <script>alert(1)</script> benchmark" });
+  await activateByKeyboard(page, completeDraft.getByRole("link", { name: "Open", exact: true }));
+  await expect(page.getByRole("heading", { level: 1, name: "Draft" })).toBeVisible();
+  await auditState(page, "draft setup");
+
+  const importForm = actionForm(page, "Import rows");
+  await typeByKeyboard(page, importForm.getByLabel("SWE-bench rows JSON"), JSON.stringify({ unexpected: "<svg/onload=alert(1)>" }));
+  const invalid = await submitAction(page, "Import rows", /validation|invalid-invocation/u);
+  await expect(invalid.getByRole("alert")).toBeVisible();
+  await auditState(page, "invalid action result");
+
+  await submitAction(page, "Attach sample", /sample/u);
+  await activateByKeyboard(page, page.getByText("Advanced: raw Arm pinning", { exact: true }));
+  const addArm = actionForm(page, "Add raw-pinned arm");
+  await typeByKeyboard(page, addArm.getByLabel("Arm ID"), "baseline");
+  await typeByKeyboard(page, addArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "prediction-v1-baseline", version: "1.0.0" } }));
+  await submitAction(page, "Add raw-pinned arm", /baseline/u);
+  await typeByKeyboard(page, addArm.getByLabel("Arm ID"), "sample");
+  await typeByKeyboard(page, addArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }));
+  await submitAction(page, "Add raw-pinned arm", /sample/u);
+
+  const lock = page.getByRole("button", { name: "Lock run", exact: true });
+  await expect(lock).toBeDisabled();
+  await submitAction(page, "Quote", /solveCells/u);
+  await expect(lock).toBeEnabled();
+  await auditState(page, "quoted draft");
+  await submitAction(page, "Lock run", /locked/u);
+  await expect(page.getByRole("button", { name: "Quote", exact: true })).toBeDisabled();
+  await auditState(page, "locked draft");
+
+  await activateByKeyboard(page, page.getByRole("link", { name: "Run monitor" }));
+  await expect(page.getByRole("heading", { level: 1, name: "Durable run monitor" })).toBeVisible();
+  await auditState(page, "locked run monitor");
+  await submitAction(page, "Launch", /scheduled/u);
+  const lifecycle = page.getByRole("heading", { level: 2, name: "Lifecycle" }).locator("../..");
+  await expect(lifecycle).toContainText("running", { timeout: 30_000 });
+  await expect(page.getByText("active", { exact: true })).toBeVisible();
+  await auditState(page, "active run monitor");
+  const delivered = page.getByRole("heading", { level: 2, name: "Delivered" }).locator("../..");
+  await expect(delivered).toContainText("6", { timeout: 180_000 });
+  // Delivery is the solve-side terminal, not the evaluation-side durability barrier. Collect
+  // must wait until every evaluation verdict is journaled too; otherwise it would race the last
+  // evaluation append and verification could honestly re-derive different Matrix bytes.
+  const judged = page.getByRole("heading", { level: 2, name: "Judged / failed" }).locator("../..");
+  await expect(judged).toContainText("6 / 0", { timeout: 180_000 });
+  await submitAction(page, "Collect", /closed/u);
+  await expect(page.getByRole("button", { name: "Collect", exact: true })).toBeDisabled();
+  await expect(lifecycle).toContainText("closed");
+  await auditState(page, "closed run monitor");
+
+  await activateByKeyboard(page, page.getByRole("link", { name: "Results" }));
+  await expect(page.getByRole("heading", { level: 1, name: "Results and report" })).toBeVisible();
+  await auditState(page, "sealed results");
+  await submitAction(page, "Seal report", /Report and claim package sealed/u);
+  await expect(page.getByRole("heading", { level: 2, name: "Sealed report" })).toBeVisible();
+  await auditState(page, "reported results");
+  await submitAction(page, "Verify records", /Verification passed/u);
+  await auditState(page, "verified results");
+  await submitAction(page, "Publish public bundle", /fixed draft-owned public bundle/u);
+  await expect(page.getByRole("heading", { level: 2, name: "Published public bundle" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Verify published bundle", exact: true })).toBeVisible();
+  await expect(page.getByText("claim-consistency", { exact: true }).first()).toBeVisible();
+  await auditState(page, "published results");
+
+  // BP-52 cross-packet proof: the optimized browser must drive the real venue's
+  // requested -> draining -> cancelled boundary and publish that terminal result.
+  await auditedGoto(page, "/workspace/new");
+  await typeByKeyboard(page, page.getByLabel("Name", { exact: true }), "Cancelled browser benchmark");
+  await typeByKeyboard(page, page.getByLabel("Draft ID"), CANCELLED_DRAFT_ID);
+  await typeByKeyboard(page, page.getByLabel("Description"), "Real venue cancellation acceptance");
+  await submitAction(page, "Create draft", /bp52-browser-cancelled/u);
+  await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}`);
+  await submitAction(page, "Attach sample", /sample/u);
+  await activateByKeyboard(page, page.getByText("Advanced: raw Arm pinning", { exact: true }));
+  const cancelledArm = actionForm(page, "Add raw-pinned arm");
+  await typeByKeyboard(page, cancelledArm.getByLabel("Arm ID"), "baseline");
+  await typeByKeyboard(page, cancelledArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "prediction-v1-baseline", version: "1.0.0" } }));
+  await submitAction(page, "Add raw-pinned arm", /baseline/u);
+  await typeByKeyboard(page, cancelledArm.getByLabel("Arm ID"), "sample");
+  await typeByKeyboard(page, cancelledArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }));
+  await submitAction(page, "Add raw-pinned arm", /sample/u);
+  await submitAction(page, "Quote", /solveCells/u);
+  await submitAction(page, "Lock run", /locked/u);
+  await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}/run`);
+  await submitAction(page, "Launch", /scheduled/u);
+  const cancelledLifecycle = page.getByRole("heading", { level: 2, name: "Lifecycle" }).locator("../..");
+  await expect(cancelledLifecycle).toContainText("running", { timeout: 30_000 });
+  await expect(page.getByText("active", { exact: true })).toBeVisible();
+  await expect(page.locator("table tbody tr td:nth-child(4)").filter({ hasText: /^1$/u }).first()).toBeVisible({ timeout: 30_000 });
+  await submitAction(page, "Request / finalize cancel", /requested|cancelled/u);
+  await expect(page.getByText("Cancellation requested; driver is draining.")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Driver generation" }).locator("../..")).not.toContainText("active", { timeout: 60_000 });
+  await submitAction(page, "Request / finalize cancel", /cancelled/u);
+  await expect(cancelledLifecycle).toContainText("closed");
+  await expect(page.getByText("Cancellation finalized; run is cancelled.")).toBeVisible();
+  await auditState(page, "cancelled run monitor");
+  await auditedGoto(page, `/workspace/${CANCELLED_DRAFT_ID}/results`);
+  await expect(page.getByRole("heading", { level: 3, name: "Run outcome" }).locator("../..")).toContainText("cancelled");
+  await expect(page.getByRole("heading", { level: 3, name: "Expected" }).locator("../..")).toContainText("6");
+  const cancelledCells = page.locator('[aria-label="Scrollable sealed cells table"]');
+  await expect(cancelledCells.getByRole("row")).toHaveCount(7);
+  await expect(cancelledCells.getByRole("row", { name: /baseline/u })).toHaveCount(3);
+  await expect(cancelledCells.getByRole("row", { name: /sample/u })).toHaveCount(3);
+  await submitAction(page, "Seal report", /Report and claim package sealed/u);
+  await submitAction(page, "Verify records", /Verification passed/u);
+  await submitAction(page, "Publish public bundle", /fixed draft-owned public bundle/u);
+  await expect(page.getByRole("heading", { level: 2, name: "Published public bundle" })).toBeVisible();
+  await expect(page.getByText("claim-consistency", { exact: true }).first()).toBeVisible();
+  await auditState(page, "cancelled published results");
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const reducedDuration = await page.getByRole("button", { name: "Verify published bundle" }).evaluate((node) => getComputedStyle(node).transitionDuration);
+  expect(reducedDuration).toMatch(/0\.00001s|1e-05s|0\.01ms/u);
+
+  // A 640 CSS-pixel viewport represents a 1280px-wide layout at 200% browser zoom.
+  await page.setViewportSize({ width: 640, height: 720 });
+  await expectContained(page, 640);
+
+  const inputNames = await page.locator("input, textarea").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("name")));
+  expect(inputNames).not.toContain("workspace");
+  expect(inputNames).not.toContain("workspaceDir");
+  expect(inputNames).not.toContain("path");
+
+  const privateKeyPaths = walkFiles(WORKSPACE).filter((path) => path.endsWith(".pem"));
+  expect(privateKeyPaths.some((path) => basename(path) === "report-signing-key.pem")).toBe(true);
+  expect(privateKeyPaths.some((path) => basename(path) === "verdict-signing-key.pem")).toBe(true);
+  const privateKeys = privateKeyPaths.map((path) => readFileSync(path));
+  for (const key of privateKeys) expect(key.toString("utf8")).toContain("PRIVATE KEY");
+  const secrets = [
+    Buffer.from(runtime.buildSecret),
+    Buffer.from(runtime.runtimeSecret),
+    Buffer.from(runtime.credentialSecret),
+    Buffer.from(WORKSPACE),
+    ...privateKeys,
+  ];
+
+  expect(externalRequests).toEqual([]);
+  expect(consoleFailures).toEqual([]);
+  for (const [index, message] of consoleMessages.entries()) expectStringsAbsent(message, secrets, `console message ${index}`);
+  for (const [index, url] of requestUrls.entries()) expectStringsAbsent(url, secrets, `request URL ${index}`);
+
+  await responseBodyAudit.settleBeforeNextBrowserOperation();
+  expect(responseBodyAudit.captures.some(({ response }) => response.request().method() === "POST")).toBe(true);
+  expect(responseBodyAudit.captures.some(({ response }) => (response.headers()["content-type"] ?? "").includes("text/html"))).toBe(true);
+  expect(responseBodyAudit.captures.some(({ response }) => (response.headers()["content-type"] ?? "").includes("text/x-component"))).toBe(true);
+  for (const captured of responseBodyAudit.captures) {
+    const { response } = captured;
+    const headers = response.headers();
+    expect(headers["cache-control"]).toContain("no-store");
+    expect(headers["content-security-policy"]).toContain("default-src 'self'");
+    expect(headers["content-security-policy"]).toContain("base-uri 'none'");
+    expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+    expect(headers["x-frame-options"]).toBe("DENY");
+    expect(headers["referrer-policy"]).toBe("no-referrer");
+    expect(headers["permissions-policy"]).toBe(PERMISSIONS_POLICY);
+    const body = await captured.body;
+    if (body.kind === "aborted") {
+      expect(
+        isExactChromiumAbort(body.detail),
+        `${response.request().method()} ${response.url()} did not complete: ${body.detail}`,
+      ).toBe(true);
+      continue;
+    }
+    expect(body.kind, body.kind === "error" ? body.detail : undefined).toBe("complete");
+    if (body.kind === "complete") expectBuffersAbsent(body.bytes, secrets, `${response.request().method()} ${response.url()}`);
+  }
+  expectStringsAbsent(await page.content(), secrets, "rendered HTML");
+
+  const staticFiles = walkFiles(resolve(process.cwd(), ".next", "static"));
+  expect(staticFiles.some((path) => path.endsWith(".js"))).toBe(true);
+  for (const path of staticFiles) expectBuffersAbsent(readFileSync(path), secrets, `static chunk ${path}`);
+
+  const bundleRoot = resolve(WORKSPACE, "artifacts", COMPLETE_DRAFT_ID, "public-bundles");
+  const identities = readdirSync(bundleRoot);
+  expect(identities).toHaveLength(1);
+  expect(identities[0]).toMatch(/^[a-f0-9]{64}$/u);
+  const sourceBundle = join(bundleRoot, identities[0]!);
+  cpSync(sourceBundle, runtime.copiedBundleDir, { recursive: true, errorOnExist: true, force: false });
+  const cancelledBundleRoot = resolve(WORKSPACE, "artifacts", CANCELLED_DRAFT_ID, "public-bundles");
+  const cancelledIdentities = readdirSync(cancelledBundleRoot);
+  expect(cancelledIdentities).toHaveLength(1);
+  expect(cancelledIdentities[0]).toMatch(/^[a-f0-9]{64}$/u);
+  const cancelledCopy = join(runtime.runRoot, "copied-cancelled-public-bundle");
+  cpSync(join(cancelledBundleRoot, cancelledIdentities[0]!), cancelledCopy, { recursive: true, errorOnExist: true, force: false });
+  expect(existsSync(join(cancelledCopy, "verification", "cancel-requested.json"))).toBe(true);
+  for (const [label, copy] of [["complete", runtime.copiedBundleDir], ["cancelled", cancelledCopy]] as const) {
+    const copiedFiles = walkFiles(copy);
+    expect(copiedFiles.some((path) => path.endsWith("bundle.json"))).toBe(true);
+    for (const path of copiedFiles) {
+      const stat = lstatSync(path);
+      expect(stat.isSymbolicLink(), path).toBe(false);
+      expect(stat.nlink, path).toBe(1);
+      expectBuffersAbsent(readFileSync(path), secrets, `${label} copied bundle ${path}`);
+    }
+  }
+
+  rmSync(WORKSPACE, { recursive: true, force: false });
+  expect(existsSync(WORKSPACE)).toBe(false);
+  const cliPath = resolve(process.cwd(), "../core/dist/cli/bin.js");
+  for (const [label, copy, identity] of [
+    ["complete", runtime.copiedBundleDir, identities[0]],
+    ["cancelled", cancelledCopy, cancelledIdentities[0]],
+  ] as const) {
+    const verification = spawnSync(
+      process.execPath,
+      [cliPath, "bundle", "verify", "--bundle", copy, "--json"],
+      { cwd: runtime.runRoot, encoding: "utf8", env: { PATH: process.env.PATH ?? "" }, timeout: 30_000, killSignal: "SIGKILL" },
+    );
+    expect(verification.status, verification.stderr).toBe(0);
+    expect(JSON.parse(verification.stdout)).toMatchObject({
+      ok: true,
+      result: {
+        identity,
+        checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+      },
+    });
+    expectStringsAbsent(`${verification.stdout}\n${verification.stderr}`, secrets, `${label} standalone verifier receipt`);
+  }
+});

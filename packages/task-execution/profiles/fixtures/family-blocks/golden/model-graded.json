@@ -1,0 +1,27 @@
+{
+  "input": {
+    "family": "model-graded",
+    "block": {
+      "rubric": { "uri": "https://example.org/rubrics/code-review-quality" },
+      "judgeModel": {
+        "provider": "anthropic",
+        "modelId": "claude-opus-4-8",
+        "advertisedVersion": "2026-05-01",
+        "parameters": { "temperature": "0.2" }
+      },
+      "judgeOutputSchema": { "uri": "https://example.org/schemas/judge-output.json" },
+      "structuralGates": { "requireRationale": true }
+    }
+  },
+  "expect": {
+    "rubric": { "uri": "https://example.org/rubrics/code-review-quality" },
+    "judgeModel": {
+      "provider": "anthropic",
+      "modelId": "claude-opus-4-8",
+      "advertisedVersion": "2026-05-01",
+      "parameters": { "temperature": "0.2" }
+    },
+    "judgeOutputSchema": { "uri": "https://example.org/schemas/judge-output.json" },
+    "structuralGates": { "requireRationale": true }
+  }
+}

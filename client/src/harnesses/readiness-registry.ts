@@ -94,39 +94,6 @@ export class HarnessReadinessRegistry {
     return this.opts.harnessesByName;
   }
 
-  /**
-   * Hot-apply a single joined SolverNet entry (#1037). Mutates the live
-   * `joinedHarnessesByCid` map and re-runs the refresh so the snapshot's
-   * `manifestCids` and `isReadyForClaim(cid)` reflect the new entry without a
-   * daemon restart. The harness's own `ready` is whatever the next refresh
-   * computes — when the harness is already installed (e.g. Codex) it is ready
-   * immediately; when not installed the readiness gate correctly reports
-   * not-ready.
-   */
-  async setJoined(manifestCid: string, spec: JoinedHarnessSpec): Promise<void> {
-    this.opts.joinedHarnessesByCid[manifestCid] = spec;
-    await this.refreshNow();
-  }
-
-  isReadyForClaim(manifestCid: string): ReadyStatus {
-    const joined = this.opts.joinedHarnessesByCid[manifestCid];
-    if (!joined) {
-      return {
-        ready: false,
-        reason: `manifestCid ${manifestCid} not in joinedSolverNets`,
-      };
-    }
-    const entry = this.snapshot.harnesses.find((h) => h.harnessName === joined.harnessName);
-    if (!entry) {
-      return { ready: false, reason: 'readiness snapshot not yet populated' };
-    }
-    return {
-      ready: entry.ready,
-      reason: entry.reason,
-      nextStep: entry.nextStep,
-    };
-  }
-
   async refreshNow(): Promise<void> {
     if (this.refreshInFlight) return;
     this.refreshInFlight = true;

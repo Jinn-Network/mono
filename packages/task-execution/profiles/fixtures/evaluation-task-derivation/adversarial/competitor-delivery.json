@@ -1,0 +1,41 @@
+{
+  "input": {
+    "baseline": {
+      "subjectTask": {
+        "name": "execution/task/task.md",
+        "digest": "sha256:37bbbbed5fd87cbc8c1b2084b1c48b52170cfe0d9d0ac70f0ebe26ef3d835c9b"
+      },
+      "subjectDelivery": {
+        "name": "execution/delivery/delivery.md",
+        "digest": "sha256:d656dfa307eab2fefbe0f6f41c341434b917489c0f01fa955a0f849d90a758eb"
+      },
+      "subjectResults": [
+        {
+          "name": "execution/results/a-result.patch",
+          "digest": "sha256:84db80aea1c9efdf9780191c37db919c78aef24a63eba74ef9c8cbc2a8186c89"
+        }
+      ],
+      "evaluationSpecDigest": "sha256:2e47289bc38fc584af29a86da0eaa1795f53a7fe925b4b029a6abde544cf06f5"
+    },
+    "mutated": {
+      "subjectTask": {
+        "name": "execution/task/task.md",
+        "digest": "sha256:37bbbbed5fd87cbc8c1b2084b1c48b52170cfe0d9d0ac70f0ebe26ef3d835c9b"
+      },
+      "subjectDelivery": {
+        "name": "execution/delivery/delivery.md",
+        "digest": "sha256:4d562d6984fdbc7accc4518db5a3f46e1d4a283928b43671dcd25f424a5d97af"
+      },
+      "subjectResults": [
+        {
+          "name": "execution/results/c-result.patch",
+          "digest": "sha256:0e47770eae5006217441de254ee735a2c5e02dc97b8b8ff0bfd84dd36e6138de"
+        }
+      ],
+      "evaluationSpecDigest": "sha256:2e47289bc38fc584af29a86da0eaa1795f53a7fe925b4b029a6abde544cf06f5"
+    }
+  },
+  "expect": {
+    "digestsDiffer": true
+  }
+}

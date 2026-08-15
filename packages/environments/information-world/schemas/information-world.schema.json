@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "https://spec.jinn.network/records/information-world/v1"
+    },
+    "requestKeyPolicy": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "irk1"
+        },
+        "headerSubset": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9!#$%&'*+.^_`|~-]+$",
+            "not": {
+              "enum": [
+                "authorization",
+                "cookie",
+                "proxy-authorization"
+              ]
+            }
+          }
+        },
+        "pathTrailingSlash": {
+          "type": "string",
+          "enum": [
+            "preserve",
+            "strip"
+          ]
+        },
+        "plusInQuery": {
+          "type": "string",
+          "enum": [
+            "literal",
+            "space"
+          ]
+        },
+        "bodyCanonicalization": {
+          "type": "string",
+          "enum": [
+            "opaque-bytes",
+            "json-jcs",
+            "utf8-trim"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "headerSubset",
+        "pathTrailingSlash",
+        "plusInQuery",
+        "bodyCanonicalization"
+      ],
+      "additionalProperties": false
+    },
+    "corpus": {
+      "type": "object",
+      "properties": {
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "requestKey": {
+                "type": "string",
+                "pattern": "^irk1:[0-9a-f]{64}$"
+              },
+              "request": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "origin": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^\\/.*"
+                  },
+                  "query": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "type": "string"
+                            }
+                          ],
+                          "items": false
+                        },
+                        {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ],
+                          "items": false
+                        }
+                      ]
+                    }
+                  },
+                  "headers": {
+                    "type": "object",
+                    "propertyNames": {
+                      "pattern": "^[a-z0-9!#$%&'*+.^_`|~-]+$"
+                    },
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "body": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "method",
+                  "origin",
+                  "path",
+                  "query",
+                  "headers",
+                  "body"
+                ],
+                "additionalProperties": false
+              },
+              "response": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 599
+                  },
+                  "headers": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9!#$%&'*+.^_`|~-]+$"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "items": false
+                    }
+                  },
+                  "body": {
+                    "type": "object",
+                    "properties": {
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      "mediaType": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "uri": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "digest"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "status",
+                  "headers",
+                  "body"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "requestKey",
+              "request",
+              "response"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "origins",
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "missPolicy": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599,
+          "not": {
+            "minimum": 300,
+            "maximum": 399
+          }
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9!#$%&'*+.^_`|~-]+$"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "items": false
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "inlineUtf8": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "inlineUtf8",
+            "mediaType"
+          ],
+          "additionalProperties": false
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "status",
+        "headers",
+        "body",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "capture": {
+      "type": "object",
+      "properties": {
+        "fidelity": {
+          "type": "string",
+          "enum": [
+            "synthetic",
+            "captured-snapshot"
+          ]
+        },
+        "provenanceClass": {
+          "type": "string",
+          "const": "declared"
+        },
+        "capturedAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        },
+        "capturer": {
+          "type": "object",
+          "properties": {
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "mediaType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sizeBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": false
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "minLength": 1
+              },
+              "capturedAt": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "origin",
+              "capturedAt"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "fidelity",
+        "provenanceClass"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "fidelity": {
+                "const": "synthetic"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "capturedAt"
+                  ]
+                },
+                {
+                  "required": [
+                    "capturer"
+                  ]
+                },
+                {
+                  "required": [
+                    "sources"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "fidelity": {
+                "const": "captured-snapshot"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "capturedAt",
+              "capturer",
+              "sources"
+            ],
+            "properties": {
+              "sources": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "supersedes": {
+      "type": "object",
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "digest"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "kind",
+    "requestKeyPolicy",
+    "corpus",
+    "missPolicy",
+    "capture"
+  ],
+  "additionalProperties": {},
+  "$id": "https://spec.jinn.network/schemas/information-world/v1",
+  "title": "Jinn information world 1.0",
+  "description": "A sealed corpus of digest-pinned captured responses, the canonical request key that maps a request to an entry, the fail-closed miss response an uncaptured request receives, and the capture provenance and fidelity class the author declares. The fidelity class is a declaration: this schema makes no claim that any source returned these bytes.",
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "kind",
+          "requestKeyPolicy",
+          "corpus",
+          "missPolicy",
+          "capture",
+          "supersedes"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:(?:\\/\\/[^\\s\\/?#][^\\s]*|(?!\\/\\/)[^\\s]+))$"
+      }
+    ]
+  },
+  "$comment": "This schema describes application/vnd.jinn.information-world.v1+json records. Structural validation plus the expressible credential, header-token, fixed-tuple, non-redirect miss, capture-provenance, and top-level namespacing rules are carried here. The UTF-8 byte limit of the inline miss body (4096 bytes), request-key rederivation from canonical request parts, strictly ascending and unique policy headers/origins/entries, entry-header membership in the policy, entry-origin membership in corpus.origins, and exact canonical encoding remain sealing-time relational checks in InformationWorldRecordSchema."
+}

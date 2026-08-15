@@ -1,0 +1,51 @@
+[
+  {
+    "specversion": "1.0",
+    "id": "evt-started",
+    "source": "urn:jinn:backend:adversarial",
+    "subject": "urn:uuid:f0000002-0000-5000-8000-000000000002",
+    "time": "2026-07-28T00:00:05Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000001",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.attempt-started.v1",
+    "data": {
+      "startedAt": "2026-07-28T00:00:05Z"
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-engaged",
+    "source": "urn:jinn:backend:adversarial",
+    "subject": "urn:uuid:f0000002-0000-5000-8000-000000000002",
+    "time": "2026-07-28T00:00:00Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000002",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.attempt-engaged.v1",
+    "data": {
+      "attempt": "urn:uuid:f0000002-0000-5000-8000-000000000002",
+      "task": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+      "submission": "urn:uuid:f0000003-0000-5000-8000-000000000003",
+      "effectiveDeadline": "2026-07-29T00:00:00Z",
+      "source": "urn:jinn:backend:adversarial",
+      "dispatchContext": {
+        "uri": "https://example.test/dispatch-context.json"
+      }
+    }
+  },
+  {
+    "specversion": "1.0",
+    "id": "evt-started",
+    "source": "urn:jinn:backend:adversarial",
+    "subject": "urn:uuid:f0000002-0000-5000-8000-000000000002",
+    "time": "2026-07-28T00:00:05Z",
+    "datacontenttype": "application/json",
+    "sequence": "0000000000000001",
+    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "type": "network.jinn.task-execution.attempt-started.v1",
+    "data": {
+      "startedAt": "2026-07-28T00:00:05Z"
+    }
+  }
+]

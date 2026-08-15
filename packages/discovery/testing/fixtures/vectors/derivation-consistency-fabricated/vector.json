@@ -1,0 +1,53 @@
+{
+  "name": "derivation-consistency-fabricated",
+  "kind": "derivation-consistency",
+  "description": "The projection's derivation annotation cites a substrate event that never happened -- the substrate, not the projector, is truth (§6.2, §14).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/delivery/v1",
+        "digest": "sha256:3ef5460a63dd0fcd3a478bad6b1151b440c8b2912e504ff6d8db1f85e2d73278"
+      },
+      "facts": {},
+      "locations": [],
+      "provenance": {
+        "source": {
+          "agent": "did:key:zProjector",
+          "name": "marketplace"
+        },
+        "entry": "sha256:a3c976340daafcb5edf827a0268727e7707bf1038c7a691e3690238ed7bb5914",
+        "announcementId": "ann-derivation-consistency-fabricated",
+        "derivation": {
+          "substrateRef": "sha256:dcb04877671c29db36c45cf3ea8876f66bab3427d8d096156d0b0c1c1d293c65"
+        }
+      }
+    },
+    "recordBytes": {
+      "note": "derivation-consistency-fabricated fixture record bytes",
+      "kind": "delivery"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zProjector",
+        "name": "marketplace"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-derivation-consistency-fabricated",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/delivery/v1",
+            "digest": "sha256:3ef5460a63dd0fcd3a478bad6b1151b440c8b2912e504ff6d8db1f85e2d73278"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "derivation": "fabricated"
+  }
+}

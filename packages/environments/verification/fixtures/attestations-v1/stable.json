@@ -1,0 +1,84 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "environment",
+      "digest": {
+        "sha256": "e6c56ffeba79945fe6812520665cf8d29575cca44947062ca0cc7d3e83c68b91"
+      }
+    },
+    {
+      "name": "image",
+      "digest": {
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    }
+  ],
+  "predicateType": "https://spec.jinn.network/attestations/environment-verification/v1",
+  "predicate": {
+    "protocol": "https://spec.jinn.network/environment-verification/protocol/v1",
+    "result": "stable",
+    "window": {
+      "startedAt": "2026-07-31T09:00:00.000Z",
+      "endedAt": "2026-07-31T09:25:00.000Z"
+    },
+    "runs": {
+      "count": 5,
+      "outcomeSetDigest": "sha256:b33a361413a945d964708213f21ee374354f0356430c100e0f36e30c09d7c9be",
+      "perRun": [
+        {
+          "outcomeSetDigest": "sha256:b33a361413a945d964708213f21ee374354f0356430c100e0f36e30c09d7c9be",
+          "wallSeconds": 100
+        },
+        {
+          "outcomeSetDigest": "sha256:b33a361413a945d964708213f21ee374354f0356430c100e0f36e30c09d7c9be",
+          "wallSeconds": 101
+        },
+        {
+          "outcomeSetDigest": "sha256:b33a361413a945d964708213f21ee374354f0356430c100e0f36e30c09d7c9be",
+          "wallSeconds": 102
+        },
+        {
+          "outcomeSetDigest": "sha256:b33a361413a945d964708213f21ee374354f0356430c100e0f36e30c09d7c9be",
+          "wallSeconds": 103
+        },
+        {
+          "outcomeSetDigest": "sha256:b33a361413a945d964708213f21ee374354f0356430c100e0f36e30c09d7c9be",
+          "wallSeconds": 104
+        }
+      ]
+    },
+    "baseline": {
+      "passing": 1,
+      "failing": 1,
+      "skipped": 1,
+      "outcomes": {
+        "name": "outcomes",
+        "mediaType": "application/json",
+        "digest": {
+          "sha256": "b33a361413a945d964708213f21ee374354f0356430c100e0f36e30c09d7c9be"
+        }
+      }
+    },
+    "controls": {
+      "network": "none",
+      "seeds": {
+        "PYTHONHASHSEED": "0"
+      },
+      "order": "default",
+      "parallelism": 1,
+      "locale": "C.UTF-8",
+      "tz": "UTC"
+    },
+    "runtime": {
+      "minSeconds": 100,
+      "maxSeconds": 104,
+      "timeoutSeconds": 1800
+    },
+    "verifier": {
+      "id": "https://spec.jinn.network/environment-verification/conformance-verifier",
+      "version": "0.1.0",
+      "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+    }
+  }
+}

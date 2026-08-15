@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "autopilot-issue-1697/README.md",
+      "sha256": "904c442e738d12e7a40fffbde02fb3ce83f209155433c1a7596b0a3886ebde84"
+    },
+    {
+      "id": "autopilot-issue-1697/artifacts/executor.observed.json",
+      "sha256": "1d26a65faf9b941d23ca5e267aed1044ae8a2f0013cd18fff3e44c7588d1b2d7"
+    },
+    {
+      "id": "autopilot-issue-1697/artifacts/repository-input.observed.json",
+      "sha256": "2a4c378738a7684c84d8804b66edfac7bfbe1327859ae32c79648f13e107cbcb"
+    },
+    {
+      "id": "autopilot-issue-1697/artifacts/result.patch",
+      "sha256": "8ee8ef8ca507ca4c83d0b693404ec7ed36fd0f67df9551d8172dcca125d718f3"
+    },
+    {
+      "id": "autopilot-issue-1697/artifacts/scrub-receipt.json",
+      "sha256": "db34ca1cd12fff495a32e033a9bbf5bdc4b4069077931e98dc59f2943630a1d9"
+    },
+    {
+      "id": "autopilot-issue-1697/artifacts/task.public.md",
+      "sha256": "da4c3b0e697ec22c44b204b87b65f5db46a654de06f4ffcd0bd1511a631e43e3"
+    },
+    {
+      "id": "autopilot-issue-1697/artifacts/trace.public.json",
+      "sha256": "8960a023ee136ca0c90e4eebc223e5cb9ac2b4486c75d8961496713504790ec1"
+    },
+    {
+      "id": "autopilot-issue-1697/candidate-execution-graph.json",
+      "sha256": "40a3166c675be6acf758552b74db0ba2ef2c1f2cb337372ebebd268904f45e55"
+    },
+    {
+      "id": "autopilot-issue-1697/conformance-report.json",
+      "sha256": "0d2684e82b6a98adcd0a3c1750f39b455c9aef383bb5ff005a2f337a445872e3"
+    },
+    {
+      "id": "autopilot-issue-1697/source-observations.json",
+      "sha256": "95836e56fdec5cfca550a7b8592bff96a790267759e6516ce2d696a245c3429c"
+    },
+    {
+      "id": "golden-execution-evidence-v1/README.md",
+      "sha256": "2ad090fd2779806e8048655e51e0786f51d62a348a53e0f81db55ea4db084e64"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/execution-verification/execution-verification.dsse.json",
+      "sha256": "d683da3800f0860a8881c9affe8d9a569264254c3359995d38d18ec1962b64b1"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/execution-verification/public-key.pem",
+      "sha256": "4d741dbfb4845615773251bcfe130b7ce3e63d9626a5979a51bf3b6631ab78eb"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/execution-verification/statement.json",
+      "sha256": "db97bb6a24f3190cf0a357b861c998d6c193d27d35a51413c3d44b4e3e94884d"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/execution-verification/verification-policy.md",
+      "sha256": "e4e3edda0138ad852221568c3996239438119098d7c41c70ebad287119647e48"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/execution-verification/verifier-implementation.json",
+      "sha256": "79243a25b4f0f2986facdcf27265d6dc3bd67b0402cbd244b4274fd3f17f7bfd"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/execution-verification/verifier.mjs",
+      "sha256": "1935c1001b4cfdccbc8a4701bc9ad47496ce540d516f386dab0499a8feef7a23"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/result-evaluation/evaluation-report.json",
+      "sha256": "a13d0046865150ec121194084a45e23fb7ee8b22a1ffb6cb251dbfd223293fb8"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/result-evaluation/evaluation-specification.md",
+      "sha256": "e1dccd97de6886b2e1961d396c044631c4d2f3b412cb3f4c7d715e9101fd6fe4"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/result-evaluation/evaluator-implementation.json",
+      "sha256": "b7c4d8b4fc4719780b91e6e69a1236beb2ef66773f5e35450adb346ea21bfc24"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/result-evaluation/evaluator.mjs",
+      "sha256": "3a8a0807de3a0b506774e15a5c20f28d5eceec01dd063700b43007c09736dfb1"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/result-evaluation/public-key.pem",
+      "sha256": "16684c7972473fe267e361290c08ea09d6989d29bee17e962535e9790148d2ce"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/result-evaluation/result-evaluation.dsse.json",
+      "sha256": "80ae658a7015a0e5df07d99f9cf4f75c60d07e631cdbc3c48f5bc85575914382"
+    },
+    {
+      "id": "golden-execution-evidence-v1/claims/result-evaluation/statement.json",
+      "sha256": "7e41ef580944ec4b35f1fe20411d3f5416b334a064340b4856ba0af3c61c1fe8"
+    },
+    {
+      "id": "golden-execution-evidence-v1/conformance-report.json",
+      "sha256": "f2f3ee486a1944c5c52f4117e5719afaa5f05b3fa28100ebf51fb2b16c742024"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/evidence/in-run-tests.json",
+      "sha256": "3ceef13187cc78434fcfd57b74aefdd005bdb143f9a628dbe7dcf2b115627602"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/external/marketplace-reference.json",
+      "sha256": "ace9082d640415c4c33a4c3b292bf3bb637b14959b7e5006ae417240f3797bbf"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/inputs/knowledge.md",
+      "sha256": "36a4911c74dbe04c7dfad94248e9eeae38d4237b27086cebb0f1459f0182a086"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/inputs/repository-tree.json",
+      "sha256": "0c6d3f024ae4e4a87bda04b2b06a55b99cba73f9eb5a70f38f1857e549379b1d"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/inputs/repository/src/slug.ts",
+      "sha256": "a47e413df6cdc33ce9634783b047dc702b4a78177debe476ee2b0698eba7b5ff"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/inputs/repository/test/slug.test.ts",
+      "sha256": "2ddfeb6b357adaa5a86a59c7d78ca1d26d721c52e47f12e7e5a689f61860fc92"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/results/slug-normalization.patch",
+      "sha256": "c43b406505b8c53ff9bf0a1c57442080d99a14b9f278739cb426313cf3238b07"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/ro-crate-metadata.json",
+      "sha256": "7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/runtime/hosted-model.json",
+      "sha256": "dcaf7b063b278a45fe08b78873ce21dc9e337455e153fdbc43c2ceb8a125d848"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/runtime/runner.mjs",
+      "sha256": "4f24efa2d21d2e457487aef2f152b574c977f0750d4e8a5ca623d659cc60425a"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/runtime/runtime-lock.json",
+      "sha256": "1717bb740edf41b607300c5358e148f4b42f12d8fcccca8903649385e0345018"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/runtime/runtime-specification.json",
+      "sha256": "b1563a6db13e9214ca716653fc9862fa7fffc4e03c6a3b7ffde11b6922ba981a"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/runtime/system-prompt.md",
+      "sha256": "db220054da8a9524f82f6505a04320f66300f21fd169f74a991b8b8bac319451"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/runtime/tool-policy.json",
+      "sha256": "11bf01bd97086d09e8c55d1c4d8954ad97922e97c4ee60b0b916143939bf80a1"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/runtime/workflow.json",
+      "sha256": "e1e0d8e2424598ef24ebf5b3c6f0e4ff03f3b94d0eb6c68eab4edd00b338f74c"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/task/task.md",
+      "sha256": "1f42fd35cecf09d1bdf953fe4c7a1c8d25fd0bcf415a6b39aa7b61f1e982ef93"
+    },
+    {
+      "id": "golden-execution-evidence-v1/execution/trace/trace.jsonl",
+      "sha256": "49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a"
+    },
+    {
+      "id": "golden-execution-evidence-v1/public/results/slug-normalization.patch",
+      "sha256": "c43b406505b8c53ff9bf0a1c57442080d99a14b9f278739cb426313cf3238b07"
+    },
+    {
+      "id": "golden-execution-evidence-v1/public/ro-crate-metadata.json",
+      "sha256": "d31b6017ef4e4a23d61d510a51a13c6fff39ca344e87436cdc4c3360b69de8ed"
+    },
+    {
+      "id": "golden-execution-evidence-v1/public/scrub/public-execution-policy.json",
+      "sha256": "40140317cf686ffff29d64eef1b2287eb4560ed09c44c7fa24d21f6eef0f71f7"
+    },
+    {
+      "id": "golden-execution-evidence-v1/public/scrub/scrub-receipt.json",
+      "sha256": "efaa01cac74d7ddc0a9a607ac84347630e914a5506a32fc963cf61ed6100d010"
+    },
+    {
+      "id": "golden-execution-evidence-v1/public/task/task.md",
+      "sha256": "1f42fd35cecf09d1bdf953fe4c7a1c8d25fd0bcf415a6b39aa7b61f1e982ef93"
+    },
+    {
+      "id": "golden-execution-evidence-v1/public/trace/trace.public.jsonl",
+      "sha256": "e261de0ff9ccfc2a2c074d26a1fe0683405c3829c7127b4d0eb3d235e9491e76"
+    },
+    {
+      "id": "golden-execution-evidence-v1/ro-crate-metadata.json",
+      "sha256": "c723f3280d7c5d46a703eb1fd0c78c1b83562b35b3bf6ac0a40ba54ff97d30d0"
+    },
+    {
+      "id": "task-execution-identifiers-v1/task-execution-identifiers.json",
+      "sha256": "624da4155807fe1f81488c086700e30ebeeaf676a54f5195ad985bcab09973aa"
+    }
+  ],
+  "errata": []
+}

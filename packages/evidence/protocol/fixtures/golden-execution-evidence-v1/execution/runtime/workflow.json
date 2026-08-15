@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "jinn.fixture.workflow.v1",
+  "name": "single-pass-code-change",
+  "stages": [
+    {
+      "name": "inspect",
+      "allowedTools": [
+        "read-file"
+      ]
+    },
+    {
+      "name": "implement",
+      "allowedTools": [
+        "apply-patch"
+      ]
+    },
+    {
+      "name": "verify",
+      "allowedTools": [
+        "run-tests"
+      ]
+    }
+  ]
+}

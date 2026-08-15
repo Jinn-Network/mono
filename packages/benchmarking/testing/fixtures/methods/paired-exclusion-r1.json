@@ -1,0 +1,45 @@
+{
+  "methodId": "jinn.benchmarking.method/paired-mcnemar",
+  "methodVersion": "1",
+  "parameters": { "baseline": "armA", "candidate": "armB" },
+  "verdictRule": "unanimous",
+  "runReplicates": 1,
+  "clusterKeys": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "source-judged",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "source-missing",
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc": "source-conflicted"
+  },
+  "matrices": [{
+    "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+    "run": { "digest": { "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" } },
+    "closeBoundary": { "at": "2026-08-04T00:00:00Z" },
+    "cells": [
+      { "cellKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/armA/1", "taskDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "armId": "armA", "replicate": 1, "dispatches": 1, "verdicts": ["sha256:1111111111111111111111111111111111111111111111111111111111111111"], "validVerdicts": ["sha256:1111111111111111111111111111111111111111111111111111111111111111"], "outcome": "judged", "integrityTier": "re-derivable", "verification": { "harness": "match", "model": "match", "loadout": "match", "isolation": "match", "checksFailed": [] } },
+      { "cellKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/armB/1", "taskDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "armId": "armB", "replicate": 1, "dispatches": 1, "verdicts": ["sha256:2222222222222222222222222222222222222222222222222222222222222222"], "validVerdicts": ["sha256:2222222222222222222222222222222222222222222222222222222222222222"], "outcome": "judged", "integrityTier": "re-derivable", "verification": { "harness": "match", "model": "match", "loadout": "match", "isolation": "match", "checksFailed": [] } },
+      { "cellKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/armA/1", "taskDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "armId": "armA", "replicate": 1, "dispatches": 1, "verdicts": [], "validVerdicts": [], "outcome": "unjudged", "integrityTier": "re-derivable", "verification": { "harness": "match", "model": "match", "loadout": "match", "isolation": "match", "checksFailed": [] } },
+      { "cellKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/armB/1", "taskDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "armId": "armB", "replicate": 1, "dispatches": 1, "verdicts": ["sha256:3333333333333333333333333333333333333333333333333333333333333333"], "validVerdicts": ["sha256:3333333333333333333333333333333333333333333333333333333333333333"], "outcome": "judged", "integrityTier": "re-derivable", "verification": { "harness": "match", "model": "match", "loadout": "match", "isolation": "match", "checksFailed": [] } },
+      { "cellKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/armA/1", "taskDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "armId": "armA", "replicate": 1, "dispatches": 1, "verdicts": ["sha256:4444444444444444444444444444444444444444444444444444444444444444", "sha256:5555555555555555555555555555555555555555555555555555555555555555"], "validVerdicts": ["sha256:4444444444444444444444444444444444444444444444444444444444444444", "sha256:5555555555555555555555555555555555555555555555555555555555555555"], "outcome": "judged", "integrityTier": "re-derivable", "verification": { "harness": "match", "model": "match", "loadout": "match", "isolation": "match", "checksFailed": [] } },
+      { "cellKey": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/armB/1", "taskDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "armId": "armB", "replicate": 1, "dispatches": 1, "verdicts": ["sha256:6666666666666666666666666666666666666666666666666666666666666666"], "validVerdicts": ["sha256:6666666666666666666666666666666666666666666666666666666666666666"], "outcome": "judged", "integrityTier": "re-derivable", "verification": { "harness": "match", "model": "match", "loadout": "match", "isolation": "match", "checksFailed": [] } }
+    ],
+    "exclusions": [],
+    "attrition": { "perArm": {}, "asymmetryFlags": [] },
+    "completeness": { "expected": 0, "judged": 0, "floor": "1", "runOutcome": "partial" },
+    "assembly": { "procedure": "jinn.benchmarking.assembly", "version": "1.0" }
+  }],
+  "verdictOutcomes": {
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111": { "verdict": "fail" },
+    "sha256:2222222222222222222222222222222222222222222222222222222222222222": { "verdict": "pass" },
+    "sha256:3333333333333333333333333333333333333333333333333333333333333333": { "verdict": "pass" },
+    "sha256:4444444444444444444444444444444444444444444444444444444444444444": { "verdict": "pass" },
+    "sha256:5555555555555555555555555555555555555555555555555555555555555555": { "verdict": "fail" },
+    "sha256:6666666666666666666666666666666666666666666666666666666666666666": { "verdict": "pass" }
+  },
+  "expectedResults": {
+    "verdictRule": "unanimous", "baseline": "armA", "candidate": "armB",
+    "pairs": 1, "improved": 1, "regressed": 0, "concordantPass": 0, "concordantFail": 0,
+    "pairing": { "taskDigests": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] },
+    "excluded": { "count": 4, "cellKeys": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/armA/1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/armB/1", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/armA/1", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/armB/1"] },
+    "pValue": "1.0000", "clustering": { "basis": "task-provenance-source", "clusters": 1 }, "clusteredPValue": "0.3173", "designEffect": "1.0000",
+    "conflicted": { "count": 1, "cellKeys": ["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/armA/1"] }
+  }
+}

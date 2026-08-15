@@ -1,0 +1,32 @@
+{
+  "instance_id": "swe-rebench-2024-00042",
+  "repo": "psf/requests",
+  "base_commit": "d8bdd423ab2df9f87b7975cdb32b31f3002a20c0",
+  "problem_statement": "Fix the connection pool leak when retries are exhausted.",
+  "language": "python",
+  "image": {
+    "uri": "https://example.org/images/swe-rebench-runner:2024-00042",
+    "digest": {
+      "sha256": "e8d6cfe4f52e87a1292f3897bf0bea28e4bde32703e6792bb9b1bc60d3024817"
+    }
+  },
+  "testMaterial": [
+    {
+      "uri": "https://example.org/tests/swe-rebench-2024-00042/test_pool.py"
+    }
+  ],
+  "parser": {
+    "id": "jinn.parser.pytest-json-report",
+    "version": "1.0.0",
+    "digest": "sha256:d2136b44c86f551b2494d616a8ee7afd58e6f90681f1beb84441113154a13897"
+  },
+  "transitions": {
+    "failToPass": [
+      "test_pool.py::test_retry_releases_connection"
+    ],
+    "passToPass": [
+      "test_pool.py::test_basic_get"
+    ]
+  },
+  "timeout": 1800
+}

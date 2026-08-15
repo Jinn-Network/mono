@@ -1,0 +1,335 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  IN_TOTO_STATEMENT_TYPE,
+  RESULT_EVALUATION_PREDICATE_TYPE,
+  buildVerdictEnvelope,
+} from "@jinn-network/task-execution-profiles";
+import {
+  TASK_EXECUTION_PROTOCOL_URI,
+  documentDigest,
+  sealDelivery,
+} from "@jinn-network/task-execution-protocol";
+import { buildNativeEvaluatorVerdictVerification } from "../../src/evaluator/native-verdict-verification.js";
+import { createBaseSepoliaEvaluatorReads } from "../../src/daemon/native-base-sepolia-infrastructure.js";
+
+const exact = (name: string, bytes: Uint8Array) => ({ name, bytes, digest: documentDigest(bytes) });
+const text = (value: string) => new TextEncoder().encode(value);
+const ATTEMPT = "urn:uuid:00000000-0000-4000-8000-000000000030" as const;
+const EVALUATOR = "https://agents.example/evaluator";
+
+/**
+ * Re-spells an envelope in the exact defect-#34 encoding: structurally identical, but emitted by
+ * plain `JSON.stringify` in `payloadType, payload, signatures` insertion order rather than the
+ * sole producer's code-unit-sorted compact JCS bytes. Every signature stays valid -- only the
+ * envelope's own byte encoding differs, which is the whole point.
+ */
+function nonCanonicalSpelling(envelopeBytes: Uint8Array): Uint8Array {
+  const envelope = JSON.parse(new TextDecoder().decode(envelopeBytes)) as {
+    payloadType: string;
+    payload: string;
+    signatures: unknown[];
+  };
+  return text(JSON.stringify({
+    payloadType: envelope.payloadType,
+    payload: envelope.payload,
+    signatures: envelope.signatures,
+  }));
+}
+
+function fixture(options: {
+  readonly respellVerdict?: (bytes: Uint8Array) => Uint8Array;
+  readonly verdict?: "pass" | "fail" | "inconclusive";
+  readonly evaluatedAt?: string;
+} = {}) {
+  const task = exact("task", text("exact-task"));
+  const result = exact("prediction", text("exact-result"));
+  const solutionEvidence = exact("solution-evidence", text("solution-evidence"));
+  const solutionDeliveryBytes = sealDelivery({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    attempt: "urn:uuid:00000000-0000-4000-8000-000000000031",
+    task: task.digest,
+    outputs: [{ name: result.name, digest: { sha256: result.digest.slice(7) } }],
+    evidenceRecords: [{ family: "execution-evidence", digest: solutionEvidence.digest }],
+    outcome: "fulfilled",
+    createdAt: "2026-08-02T10:00:00Z",
+  });
+  const subject = {
+    task,
+    submission: exact("submission", text("exact-submission")),
+    requesterEnvelope: exact("requester-envelope", text("requester-envelope")),
+    admissionReceipt: exact("admission-receipt", text("admission-receipt")),
+    delivery: exact("delivery", solutionDeliveryBytes),
+    deliveryEnvelope: exact("delivery-envelope", text("solution-delivery-envelope")),
+    evidenceRecords: [solutionEvidence],
+    results: [result],
+    evaluationSpec: exact("evaluation-spec", text("evaluation-spec")),
+  };
+  const canonicalVerdictBytes = buildVerdictEnvelope({
+    _type: IN_TOTO_STATEMENT_TYPE,
+    subject: [
+      { name: "task", digest: { sha256: task.digest.slice(7) } },
+      { name: result.name, digest: { sha256: result.digest.slice(7) } },
+    ],
+    predicateType: RESULT_EVALUATION_PREDICATE_TYPE,
+    predicate: {
+      evaluatedAt: options.evaluatedAt ?? "2026-08-02T11:00:00Z",
+      evaluator: { id: EVALUATOR },
+      taskSubject: task.digest,
+      resultSubjects: [result.digest],
+      verdict: options.verdict ?? "pass",
+    },
+  }, [{ keyid: "did:key:evaluator", sig: "c2ln" }]);
+  // The Delivery below binds whatever bytes come out of here, so a re-spelled verdict stays
+  // digest-consistent with its own Delivery -- the ONLY thing that differs is the encoding.
+  const verdictBytes = options.respellVerdict?.(canonicalVerdictBytes) ?? canonicalVerdictBytes;
+  const evaluationEvidence = exact("evaluation-evidence", text("evaluation-evidence"));
+  const derivedTaskBytes = text("exact-derived-task");
+  const derivedTaskDigest = documentDigest(derivedTaskBytes);
+  const evaluationDeliveryBytes = sealDelivery({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    attempt: ATTEMPT,
+    task: derivedTaskDigest,
+    outputs: [{ name: "verdict", digest: { sha256: documentDigest(verdictBytes).slice(7) } }],
+    evidenceRecords: [{ family: "execution-evidence", digest: evaluationEvidence.digest }],
+    outcome: "fulfilled",
+    createdAt: "2026-08-02T11:05:00Z",
+  });
+  const evaluationDelivery = exact("evaluation-delivery", evaluationDeliveryBytes);
+  const artifacts = [
+    { role: "verdict", evaluationId: `sha256:${"1".repeat(64)}`, createdAt: "2026-08-02T11:05:00Z", ...exact("verdict", verdictBytes) },
+    { role: "evaluation-delivery", evaluationId: `sha256:${"1".repeat(64)}`, createdAt: "2026-08-02T11:05:00Z", ...evaluationDelivery },
+    { role: "evaluation-delivery-envelope", evaluationId: `sha256:${"1".repeat(64)}`, createdAt: "2026-08-02T11:05:00Z", ...exact("evaluation-delivery-envelope", text("evaluation-delivery-envelope")) },
+    { role: "evaluation-evidence", evaluationId: `sha256:${"1".repeat(64)}`, createdAt: "2026-08-02T11:05:00Z", ...evaluationEvidence },
+  ];
+  return {
+    evaluation: {
+      evaluatorAgent: EVALUATOR,
+      evaluationAttemptUri: ATTEMPT,
+    },
+    evaluationAuthority: {
+      requester: { signerKey: "did:key:requester", sealingTime: "2026-08-02T09:00:00Z" },
+      admission: { signerKey: "did:key:admission", effectiveTime: "2026-08-02T09:30:00Z" },
+      executor: {
+        signerKey: "did:key:executor",
+        agent: "https://agents.example/solver",
+        declarationKey: "did:key:solver-declaration",
+        effectiveTime: "2026-08-02T10:00:00Z",
+        address: `0x${"1".repeat(40)}`,
+      },
+      evaluator: {
+        signerKey: "did:key:evaluator",
+        agent: EVALUATOR,
+        declarationKey: "did:key:evaluator-declaration",
+        address: `0x${"2".repeat(40)}`,
+      },
+      verificationDigest: `sha256:${"3".repeat(64)}`,
+    },
+    subject,
+    derived: {
+      taskBytes: derivedTaskBytes,
+      taskDigest: derivedTaskDigest,
+      submissionBytes: text("evaluation-submission"),
+      submissionDigest: documentDigest(text("evaluation-submission")),
+      submissionUri: "urn:uuid:00000000-0000-4000-8000-000000000032",
+      attemptUri: ATTEMPT,
+      dispatchContextDigest: `sha256:${"4".repeat(64)}`,
+      dispatchContextBytes: text("dispatch"),
+    },
+    artifacts,
+  } as never;
+}
+
+function dependencies(input: { evaluationAuthorityOk?: boolean; gateOk?: boolean } = {}) {
+  const gate = vi.fn(async () => input.gateOk === false
+    ? { decisionGrade: false, failures: [{ check: "settlement-join", detail: "revoked" }] }
+    : { decisionGrade: true, failures: [] });
+  return {
+    gate,
+    value: {
+      gate: { gate },
+      solutionDeliveryAuthority: { verify: async () => ({ ok: true as const }) },
+      evaluationDeliveryAuthority: {
+        verify: async () => input.evaluationAuthorityOk === false
+          ? { ok: false as const, reason: "revoked" }
+          : { ok: true as const },
+      },
+      preSettlementClaimTime: async () => "2026-08-02T11:10:00Z",
+      blockTime: async () => "2026-08-02T11:15:00Z",
+    },
+  };
+}
+
+describe("buildNativeEvaluatorVerdictVerification", () => {
+  it("authenticates both Delivery envelopes, exact evidence/output graph, and every named gate input", async () => {
+    const deps = dependencies();
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(fixture()))
+      .resolves.toEqual({ ok: true, verdictCode: 1 });
+    expect(deps.gate).toHaveBeenCalledWith(expect.objectContaining({
+      settlement: expect.objectContaining({
+        subjectSubmissionBytes: expect.any(Uint8Array),
+        evaluationSpecBytes: expect.any(Uint8Array),
+        evaluationTaskBytes: expect.any(Uint8Array),
+      }),
+      requesterAuthentication: expect.objectContaining({ signerKey: "did:key:requester" }),
+      admissionReceipt: expect.objectContaining({ signerKey: "did:key:admission" }),
+      verdict: expect.objectContaining({
+        signerKey: "did:key:evaluator",
+        settlementDeclarationKey: "did:key:evaluator-declaration",
+        onChainVerdictCode: 1,
+      }),
+    }));
+  });
+
+  // Defect-#41 class: the harness's ratified verdict vocabulary is exactly `pass|fail|inconclusive`
+  // (`ResultEvaluationStatementShape`), and the named gate reads this same field with
+  // `decisionGradeVerdictCode` to derive its `verdict-correspondence` expectation. Reading it here
+  // with a second, wider-but-different vocabulary that had no `inconclusive` case meant the honest
+  // outcome for every prediction verdict this gate's task family can currently produce was refused
+  // as `evaluation-record-graph-invalid` before any gate call -- so `recordVerdict` never ran and
+  // settlement died `verdict-settlement-identity-missing`. Every ratified verdict must verify and
+  // carry its code into the gate as `onChainVerdictCode`.
+  it.each([
+    ["pass", 1],
+    ["fail", 2],
+    ["inconclusive", 4],
+  ] as const)("verifies a ratified %s verdict and carries code %i into the gate", async (verdict, code) => {
+    const deps = dependencies();
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(fixture({ verdict })))
+      .resolves.toEqual({ ok: true, verdictCode: code });
+    expect(deps.gate).toHaveBeenCalledWith(expect.objectContaining({
+      verdict: expect.objectContaining({ onChainVerdictCode: code }),
+    }));
+  });
+
+  it("rejects a noncanonical evaluation Delivery before authority or named checks", async () => {
+    const input = fixture() as ReturnType<typeof fixture>;
+    const row = input.artifacts.find(({ role }: { role: string }) => role === "evaluation-delivery")!;
+    const pretty = text(JSON.stringify(JSON.parse(new TextDecoder().decode(row.bytes)), null, 2));
+    row.bytes = pretty;
+    row.digest = documentDigest(pretty);
+    const deps = dependencies();
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(input))
+      .resolves.toEqual({ ok: false, reason: "evaluation-record-graph-invalid" });
+    expect(deps.gate).not.toHaveBeenCalled();
+  });
+
+  // Defect-#34 class: the verdict envelope's authority-bearing consumer is the STRICT
+  // `parseExactDsseEnvelope` (cross-operator, via `verifyNativeDsse`). Reading it here with the
+  // loose parser meant this operator's own pre-settlement path derived a verdict code from an
+  // encoding the strict verifier would refuse -- so the refusal surfaced only later, as an
+  // opaque `named-verdict-gate:settlement-join` signature failure, exactly the misleading symptom
+  // that cost defect #34 a live round of debugging. Refuse at the graph step, before any gate call.
+  it("rejects a validly-signed verdict envelope in a non-canonical encoding before any gate call", async () => {
+    const deps = dependencies();
+    const input = fixture({ respellVerdict: nonCanonicalSpelling });
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(input))
+      .resolves.toEqual({ ok: false, reason: "evaluation-record-graph-invalid" });
+    expect(deps.gate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on revoked evaluation Delivery authority", async () => {
+    const deps = dependencies({ evaluationAuthorityOk: false });
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(fixture()))
+      .resolves.toEqual({ ok: false, reason: "evaluation-delivery-authority:revoked" });
+    expect(deps.gate).not.toHaveBeenCalled();
+  });
+
+  it("propagates named gate failures instead of publishing a decision-grade flag", async () => {
+    const deps = dependencies({ gateOk: false });
+    await expect(buildNativeEvaluatorVerdictVerification(deps.value).verify(fixture()))
+      .resolves.toEqual({ ok: false, reason: "named-verdict-gate:settlement-join" });
+  });
+});
+
+/**
+ * Defect #44, live round 27. This is the seam the defect lived in: not the named check (its rule
+ * is correct and pinned in `packages/marketplace/binding`), but which time this path hands it as
+ * `claimBlockTime`. Pre-settlement the on-chain claim does not exist yet, so the value is a
+ * stand-in; it was read off Base Sepolia's FINALIZED head, which trails wall clock by two epochs,
+ * while `evaluatedAt` is the harness's wall-clock grade instant. Round 27's honest `inconclusive`
+ * grade at 02:51:55.896Z was therefore measured against 02:26:44Z and refused
+ * `named-verdict-gate:verdict-effective-time` -- a refusal no live grade could ever avoid.
+ *
+ * Both halves are wired here against the REAL reader, because the defect was a composition, not a
+ * rule: pre-settlement must bound the grade going forward, post-settlement must keep using the
+ * settlement transaction's own block, which is where the strict ordering is enforceable.
+ */
+describe("claim-time wiring across the settlement boundary", () => {
+  const LIVE_HEAD = "2026-08-13T02:56:36.000Z";
+  const LIVE_FINALIZED_HEAD = "2026-08-13T02:30:02.000Z";
+  const ROUND_27_EVALUATED_AT = "2026-08-13T02:51:55.896Z";
+  const SETTLEMENT_BLOCK_TIME = "2026-08-13T03:02:14.000Z";
+
+  function chainReads() {
+    return createBaseSepoliaEvaluatorReads({
+      config: {
+        safeAddress: `0x${"1".repeat(40)}`,
+        chain: {
+          chainId: 84532,
+          generation: "today",
+          contracts: {
+            taskCoordinator: `0x${"a1".repeat(20)}`,
+            jinnRouter: `0x${"a2".repeat(20)}`,
+            mechMarketplace: `0x${"a3".repeat(20)}`,
+            activityChecker: `0x${"a4".repeat(20)}`,
+          },
+        },
+      },
+      publicClient: {
+        // The live heads round 27 measured together, plus the settlement block a `blockNumber`
+        // read resolves. `finalized` is served 26 minutes behind `latest` exactly as Base Sepolia
+        // serves it, so reading the wrong head here is visible rather than absorbed.
+        async getBlock(request: { readonly blockTag?: string } = {}) {
+          const iso = request.blockTag === "latest"
+            ? LIVE_HEAD
+            : request.blockTag === "finalized" ? LIVE_FINALIZED_HEAD : SETTLEMENT_BLOCK_TIME;
+          return {
+            number: 45_410_754n,
+            hash: `0x${"ab".repeat(32)}`,
+            timestamp: BigInt(Date.parse(iso) / 1_000),
+          };
+        },
+      } as never,
+      records: {
+        async byDigest() { throw new Error("unused"); },
+        async byLocation() { throw new Error("unused"); },
+        async byRawCid() { throw new Error("unused"); },
+      },
+    });
+  }
+
+  it("hands the gate a bound the live round-27 grade sits inside, pre-settlement", async () => {
+    const reads = chainReads();
+    const deps = dependencies();
+    const verification = buildNativeEvaluatorVerdictVerification({
+      ...deps.value,
+      preSettlementClaimTime: reads.preSettlementClaimTime,
+      blockTime: reads.blockTime,
+    });
+
+    await expect(verification.verify(fixture({ evaluatedAt: ROUND_27_EVALUATED_AT })))
+      .resolves.toEqual({ ok: true, verdictCode: 1 });
+    const claimBlockTime = deps.gate.mock.calls[0]![0].verdict.claimBlockTime as string;
+    expect(Date.parse(claimBlockTime)).toBeGreaterThanOrEqual(Date.parse(ROUND_27_EVALUATED_AT));
+  });
+
+  it("keeps measuring a settled verdict against the settlement block's own time", async () => {
+    const reads = chainReads();
+    const deps = dependencies();
+    const verification = buildNativeEvaluatorVerdictVerification({
+      ...deps.value,
+      preSettlementClaimTime: reads.preSettlementClaimTime,
+      blockTime: reads.blockTime,
+    });
+
+    await expect(verification.verify({
+      ...fixture({ evaluatedAt: ROUND_27_EVALUATED_AT }),
+      canonical: {
+        transaction: { blockNumber: 45_410_900n },
+        verdictCode: 1,
+        evaluator: `0x${"2".repeat(40)}`,
+      },
+    } as never)).resolves.toEqual({ ok: true, verdictCode: 1 });
+    expect(deps.gate.mock.calls[0]![0].verdict.claimBlockTime).toBe(SETTLEMENT_BLOCK_TIME);
+  });
+});

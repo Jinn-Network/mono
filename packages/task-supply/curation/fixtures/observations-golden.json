@@ -1,0 +1,231 @@
+[
+  {
+    "taskDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T01:00:00Z",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333001",
+      "announcementId": "ann-golden-001",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444001",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002011"
+    }
+  },
+  {
+    "taskDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "verdict": "fail",
+    "observedAt": "2026-07-31T02:00:00Z",
+    "attribution": "urn:jinn:agent:solver-b",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333002",
+      "announcementId": "ann-golden-002",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444002",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002012"
+    }
+  },
+  {
+    "taskDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T03:00:00Z",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333003",
+      "announcementId": "ann-golden-003",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444003",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002012"
+    }
+  },
+  {
+    "taskDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "verdict": "inconclusive",
+    "observedAt": "2026-07-31T04:00:00Z",
+    "attribution": "urn:jinn:agent:solver-b",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333004",
+      "announcementId": "ann-golden-004",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444004",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002013"
+    }
+  },
+  {
+    "taskDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "verdict": "pass",
+    "observedAt": "2026-07-30T22:00:00-07:00",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333005",
+      "announcementId": "ann-golden-005",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444005",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002014"
+    }
+  },
+  {
+    "taskDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T05:00:00Z",
+    "attribution": "urn:jinn:agent:bench-harness",
+    "benchmarkRun": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333006",
+      "announcementId": "ann-golden-006",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444006",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002015"
+    }
+  },
+  {
+    "taskDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T06:00:00Z",
+    "attribution": "urn:jinn:agent:bench-harness",
+    "benchmarkRun": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333007",
+      "announcementId": "ann-golden-007",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444007",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002016"
+    }
+  },
+  {
+    "taskDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "verdict": "fail",
+    "observedAt": "2026-07-31T07:00:00Z",
+    "attribution": "urn:jinn:agent:bench-harness",
+    "benchmarkRun": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333008",
+      "announcementId": "ann-golden-008",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444008",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002017"
+    }
+  },
+  {
+    "taskDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "verdict": "fail",
+    "observedAt": "2026-07-31T08:00:00Z",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333009",
+      "announcementId": "ann-golden-009",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444009",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002021"
+    }
+  },
+  {
+    "taskDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "verdict": "fail",
+    "observedAt": "2026-07-31T09:00:00Z",
+    "attribution": "urn:jinn:agent:solver-b",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333010",
+      "announcementId": "ann-golden-010",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444010",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002022"
+    }
+  },
+  {
+    "taskDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T10:00:00Z",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333011",
+      "announcementId": "ann-golden-011",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444011",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002023"
+    }
+  },
+  {
+    "taskDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "verdict": "inconclusive",
+    "observedAt": "2026-07-31T11:00:00Z",
+    "attribution": "urn:jinn:agent:solver-b",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333012",
+      "announcementId": "ann-golden-012",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444012",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002024"
+    }
+  },
+  {
+    "taskDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T12:00:00Z",
+    "attribution": "urn:jinn:agent:bench-harness",
+    "benchmarkRun": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333013",
+      "announcementId": "ann-golden-013",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444013",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002025"
+    }
+  },
+  {
+    "taskDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "verdict": "fail",
+    "observedAt": "2026-07-31T13:00:00Z",
+    "attribution": "urn:jinn:agent:bench-harness",
+    "benchmarkRun": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333014",
+      "announcementId": "ann-golden-014",
+      "record": "sha256:4444444444444444444444444444444444444444444444444444444444444014",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000002026"
+    }
+  }
+]

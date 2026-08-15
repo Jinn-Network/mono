@@ -1,0 +1,55 @@
+{
+  "description": "Result interpretation (design §8.2): the exit code and termination signal are AUTHORITATIVE for fail/not-fail; the envelope may only refine WITHIN the not-failed class, never override to delivered. Data-only in Milestone A (Task A3) — consumed by the real interpretResult() a launcher's result.ts implements in Milestone B (Task B3).",
+  "scenarios": [
+    {
+      "name": "success-envelope-out-of-range-exit-is-failed",
+      "validExitCodes": [0],
+      "exitCode": 1,
+      "termSignal": null,
+      "envelope": { "subtype": "success" },
+      "expected": { "outcome": "failed", "note": "the exit record cannot be overridden to delivered by a printed envelope, even a success envelope" }
+    },
+    {
+      "name": "limit-exhaustion-is-partial-resumable",
+      "validExitCodes": [0],
+      "exitCode": 0,
+      "termSignal": null,
+      "envelope": { "subtype": "error_max_turns" },
+      "expected": { "outcome": "delivered", "outcomeShade": "partial", "recoveryAdvice": "resume-with-session" }
+    },
+    {
+      "name": "within-range-exit-no-envelope-is-fulfilled",
+      "validExitCodes": [0],
+      "exitCode": 0,
+      "termSignal": null,
+      "envelope": null,
+      "expected": { "outcome": "delivered", "outcomeShade": "fulfilled", "note": "the envelope is preferred evidence for the outcome shade, never required, never authoritative over the exit record" }
+    },
+    {
+      "name": "death-by-signal-is-failed",
+      "validExitCodes": [0],
+      "exitCode": null,
+      "termSignal": "SIGSEGV",
+      "envelope": { "subtype": "success" },
+      "expected": { "outcome": "failed", "note": "death by signal is failed regardless of envelope — a harness that segfaults after printing success is failed, not delivered" }
+    },
+    {
+      "name": "structured-output-alongside-envelope-never-instead",
+      "validExitCodes": [0],
+      "exitCode": 0,
+      "termSignal": null,
+      "envelope": { "subtype": "success" },
+      "structuredOutput": { "schemaValidated": true, "artifact": "out/result.json" },
+      "expected": { "outcome": "delivered", "outcomeShade": "fulfilled", "structuredOutputCollected": "alongside-envelope-as-first-class-artifact" }
+    },
+    {
+      "name": "fulfilled-with-empty-out-is-still-delivered",
+      "validExitCodes": [0],
+      "exitCode": 0,
+      "termSignal": null,
+      "envelope": null,
+      "outDirEntries": [],
+      "expected": { "outcome": "delivered", "outcomeShade": "fulfilled", "outputsManifest": [], "note": "presence of outputs is never the verdict (§7.4) — an honest empty result and a lying one are distinguished by the exit record, not output count" }
+    }
+  ]
+}

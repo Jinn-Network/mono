@@ -11,11 +11,15 @@ import { getJinnRouterAddress } from '../contracts/addresses.js';
 import { FleetStateStore } from '../earning/store.js';
 import { isOperationalServiceStep, type FleetState, type ServiceState } from '../earning/types.js';
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from '../earning/wallet.js';
+import { base as baseChain, baseSepolia } from 'viem/chains';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
-import { MechAdapter } from '../adapters/mech/adapter.js';
+import { MechRequesterAdapter } from '../adapters/mech/requester-adapter.js';
+import { createClients } from '../adapters/mech/safe.js';
+import { createDirectSafeBroadcaster } from '../adapters/mech/direct-safe-broadcaster.js';
 import { Store } from '../store/store.js';
 import type { BuildEnvelopeInput } from '../errors/envelope.js';
 import { resolveCliPassword } from './password.js';
+import { checkDaemonGuard, daemonGuardEnvelope } from './daemon-guard.js';
 
 export type NetworkChain = 'base' | 'base-sepolia';
 
@@ -34,7 +38,13 @@ export interface CliExecutionContext extends CliSignerContext {
   jinnStore: Store;
   /** First complete service with Safe + mech (daemon / creator semantics). */
   primaryService: ServiceState;
-  adapter: MechAdapter;
+  /**
+   * Requester-only execution adapter — the CLI's `jinn tasks submit` posting
+   * path. Carved off the full `MechAdapter` (one-swap R4) so the legacy mech
+   * adapter can retire in Phase D without breaking the CLI; `TaskPostingService`
+   * only ever calls `postTask` / `recoverTaskPost`.
+   */
+  adapter: MechRequesterAdapter;
 }
 
 function mergeArgvForConfig(argv?: string[]): string | undefined {
@@ -53,6 +63,7 @@ export type CreateCliExecutionContextOptions = {
 async function buildCliSignerContext(
   opts: CreateCliExecutionContextOptions,
   readOnlyFleet = false,
+  willBroadcast = true,
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
   const env = opts.env ?? process.env;
   const pw = resolveCliPassword(opts.argv, env);
@@ -70,6 +81,39 @@ async function buildCliSignerContext(
   }
 
   const config = loadConfig(mergeArgvForConfig(opts.argv));
+
+  // D0a P3 (#525/#562/#897): every context built from this shared function
+  // hands the caller live signer key material (`masterWallet`, and
+  // `mnemonic` for deriving per-agent signers) that downstream code signs
+  // Safe / EOA writes with — with no cross-process lock against a
+  // concurrently running `jinn run` daemon signing from the same keys. Guard
+  // once, here, rather than per verb: `createCliExecutionContext` used to
+  // check this itself (after decrypting the mnemonic and loading fleet
+  // state), which left `createCliSignerContext` callers (`jinn claim-rewards`)
+  // unguarded — see the finding this comment replaces.
+  //
+  // D0a round-2 correction: the guard only makes sense when the caller will actually SIGN with
+  // that key material. `createCliReadOnlySignerContext` (its one production caller is `jinn tasks
+  // submit --dry-run`'s machine-request preflight) never signs or broadcasts — it only reads
+  // fleet state to preview a plan — so guarding it was a pure false positive that fired in the
+  // ordinary case of "operator's daemon is running, operator previews a submission" and had no
+  // real safe escape (`JINN_ALLOW_CLI_BROADCAST_WITH_DAEMON=1`'s "you have verified it is safe to
+  // run concurrently" is meaningless for something that broadcasts nothing). `willBroadcast`
+  // lets a read-only, non-signing caller opt out explicitly instead of inheriting the guard by
+  // accident.
+  if (willBroadcast) {
+    const daemonGuard = checkDaemonGuard({ earningDir: config.earningDir, env });
+    if (daemonGuard.blocked) {
+      return {
+        ok: false,
+        envelope: daemonGuardEnvelope(
+          daemonGuard,
+          'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
+        ),
+      };
+    }
+  }
+
   const networkChain: NetworkChain = config.network === 'testnet' ? 'base-sepolia' : 'base';
   const chainConfig = getChainConfig(networkChain, {
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
@@ -150,11 +194,15 @@ export async function createCliSignerContext(
   return buildCliSignerContext(opts);
 }
 
-/** Password + signers + existing fleet JSON, with no fleet-file creation or migration. */
+/**
+ * Password + signers + existing fleet JSON, with no fleet-file creation or migration. Read-only —
+ * never signs or broadcasts (`willBroadcast: false`), so it is not subject to the live-daemon
+ * guard; see the D0a round-2 note on `buildCliSignerContext`.
+ */
 export async function createCliReadOnlySignerContext(
   opts: CreateCliExecutionContextOptions = {},
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
-  return buildCliSignerContext(opts, true);
+  return buildCliSignerContext(opts, true, false);
 }
 
 export async function createCliExecutionContext(
@@ -179,28 +227,46 @@ export async function createCliExecutionContext(
     };
   }
 
+  // D0a P3 (#525/#562/#897): the daemon guard for this verb's signing runs
+  // in `buildCliSignerContext` (above, via `base`) — it covers the
+  // `createDirectSafeBroadcaster` write below too, since that broadcaster
+  // signs with the same agent EOA derived from `base.ctx.mnemonic`.
   const jinnStore = new Store(config.dbPath);
   const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
   const marketplaceAddress = chainConfig.mechMarketplace as `0x${string}`;
   const routerAddress = (chainConfig.jinnRouter ??
     getJinnRouterAddress(chainConfig.chainId)) as `0x${string}`;
 
-  const adapter = new MechAdapter(
-    {
-      rpcUrl: config.rpcUrl,
-      mechMarketplaceAddress: marketplaceAddress,
-      routerAddress,
-      mechContractAddress: primaryService.mech_address as `0x${string}`,
-      safeAddress: primaryService.safe_address as `0x${string}`,
-      agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
-      ipfsRegistryUrl: config.ipfsRegistryUrl,
-      ipfsGatewayUrl: config.ipfsGatewayUrl,
-      pollIntervalMs: config.pollIntervalMs,
-      chainId: config.network === 'testnet' ? 84532 : 8453,
-      routerClaimDeliveryVariant: chainConfig.routerClaimDeliveryVersion,
-    },
-    jinnStore,
+  // Finding E16 / the C2 ruling: `jinn tasks submit` is a standalone one-shot process with no
+  // composition root to borrow a broadcaster from, so it constructs its own — bound to this
+  // service's own Safe, signed by this service's own agent EOA (the same signer this adapter's
+  // Safe writes used before the venue-base cutover).
+  const broadcasterChain = config.network === 'testnet' ? baseSepolia : baseChain;
+  const broadcasterClients = createClients(
+    config.rpcUrl,
+    agentEoaPrivateKey as `0x${string}`,
+    broadcasterChain,
   );
+  const broadcaster = createDirectSafeBroadcaster(
+    broadcasterClients.publicClient,
+    broadcasterClients.walletClient,
+    primaryService.safe_address as `0x${string}`,
+  );
+
+  const adapter = new MechRequesterAdapter({
+    rpcUrl: config.rpcUrl,
+    mechMarketplaceAddress: marketplaceAddress,
+    routerAddress,
+    mechContractAddress: primaryService.mech_address as `0x${string}`,
+    safeAddress: primaryService.safe_address as `0x${string}`,
+    agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    ipfsGatewayUrl: config.ipfsGatewayUrl,
+    pollIntervalMs: config.pollIntervalMs,
+    chainId: config.network === 'testnet' ? 84532 : 8453,
+    routerClaimDeliveryVariant: chainConfig.routerClaimDeliveryVersion,
+    broadcaster,
+  });
 
   try {
     await adapter.initialize();

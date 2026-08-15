@@ -1,0 +1,47 @@
+{
+  "name": "seq-resumption",
+  "description": "A torn tail followed by a real restart: the supervisor resumes journaling after recovery and must derive the next `seq` from max(intact seq)+1 — never an in-memory counter, which would have been lost across the crash — and never from the torn record's claimed seq, which cannot be trusted.",
+  "events": [
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000107",
+      "seq": 1,
+      "type": "attempt-engaged",
+      "time": "2026-07-28T00:00:00.000Z",
+      "details": { "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f7", "taskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000107",
+      "seq": 2,
+      "type": "spawn-intended",
+      "time": "2026-07-28T00:00:00.100Z",
+      "details": { "launchPlanDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "nonce": "nonce-107" }
+    },
+    {
+      "torn": true,
+      "rawPartialBytes": "{\"attemptId\":\"urn:uuid:00000000-0000-0000-0000-000000000107\",\"seq\":3,\"type\":\"spa",
+      "reason": "crash mid-write of the 'spawned' record — the supervisor process (and its in-memory seq counter) dies here"
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000107",
+      "seq": 3,
+      "type": "spawned",
+      "time": "2026-07-28T00:05:00.000Z",
+      "displayMessage": "Re-appended after restart, correctly resuming at seq 3 (not 4 — the in-memory counter that would have produced 4 was lost with the crashed process)",
+      "details": { "nonce": "nonce-107b", "pid": 5000, "startTime": 555555, "resumedAfterRestart": true }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000107",
+      "seq": 4,
+      "type": "attempt-terminal",
+      "time": "2026-07-28T00:06:00.000Z",
+      "details": { "state": "delivered", "exitCode": 0, "nonce": "nonce-107b" },
+      "failsAttempt": false
+    }
+  ],
+  "expected": {
+    "durableSeqBeforeResumption": 3,
+    "durableSeqAfterFinal": 5,
+    "note": "the re-appended record correctly reuses seq 3 (max(intact seq=2)+1), demonstrating the torn record at the old claimed seq 3 is discarded wholesale and never blocks reuse of that seq number"
+  },
+  "conformance": { "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": true, "nonceMatches": true }, "expectedResult": { "classification": "matching", "action": "terminal-record-wins" } }
+}

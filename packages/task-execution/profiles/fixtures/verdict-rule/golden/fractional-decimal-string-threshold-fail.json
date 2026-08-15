@@ -1,0 +1,7 @@
+{
+  "input": {
+    "rule": { "threshold": { "measurement": "score", "op": "gte", "value": "0.5" } },
+    "measurements": { "score": 0.4 }
+  },
+  "expect": { "verdict": "fail" }
+}

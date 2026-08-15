@@ -1,5 +1,15 @@
 # Marketplace External Consumer Boundary
 
+> **Amended 2026-07-30** by the
+> [marketplace-surfaces design](./2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md):
+> the boundary is re-derived as a key-custody law. What this document preserves: schemas +
+> the `jinn` CLI remain the default external on-ramp; the CLI remains the only key-loading
+> surface offered to external consumers; `@jinn-network/sdk` never gains tx code; the
+> packed acceptance discipline (§7) extends to the work client. What is superseded: the
+> implied prohibition on tx-capable published libraries (§2.2's "no programmatic
+> transaction client" as a package-shape rule) — published packages are consumable under
+> the custody law, with the threat model on the record there (its §3).
+
 - **Date:** 2026-07-24
 - **Status:** design approved; written review pending
 - **Shape:** `design`

@@ -1,0 +1,92 @@
+{
+  "fixtureVersion": 1,
+  "protocol": "https://spec.jinn.network/profiles/execution-evidence/v1",
+  "sourceExecutionId": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2",
+  "overall": "nonconforming-source-backed-candidate",
+  "profiles": {
+    "executionEvidence": "fail",
+    "resultEvaluationEvidence": "not-emitted",
+    "executionVerificationEvidence": "not-emitted"
+  },
+  "checks": [
+    {
+      "requirement": "Task artifact",
+      "status": "pass-with-import-limitation",
+      "evidence": "The issue title and body observed during execution were reconstructed into a content-bound private artifact; a scrubbed public derivative is included.",
+      "limitation": "The original HTTP response bytes were not retained as a standalone Task artifact."
+    },
+    {
+      "requirement": "Runtime Specification",
+      "status": "fail",
+      "evidence": "Harness name/version, model service name, workflow name, tools, and child stages are observed.",
+      "limitation": "Producer-controlled workflow, skill, prompt, and effective child configuration bytes are not bound to immutable artifacts. The opaque hosted model has a service label but no more precise deployment identity or provider attestation."
+    },
+    {
+      "requirement": "Execution identity, times, lifecycle, Agent, and duration",
+      "status": "pass",
+      "evidence": "The source session UUID, first attachment time, final response time, observed harness Agent, completed lifecycle, and 604534 ms duration are preserved."
+    },
+    {
+      "requirement": "All materially consumed inputs",
+      "status": "fail",
+      "evidence": "The repository, branch, target base, and changed file preimage Git blob are known.",
+      "limitation": "The original base commit and repository tree digest were never captured; individual child prompts and complete child traces were not packaged."
+    },
+    {
+      "requirement": "Result artifact",
+      "status": "pass",
+      "evidence": "The final patch bytes are present in the source transcript and included with SHA-256 8ee8ef8ca507ca4c83d0b693404ec7ed36fd0f67df9551d8172dcca125d718f3."
+    },
+    {
+      "requirement": "Native trace",
+      "status": "pass-private-only",
+      "evidence": "The exact 549916-byte native transcript is committed by SHA-256 and linked to the Execution.",
+      "limitation": "The native bytes remain local-private. The included public trace is a lossy derived projection."
+    },
+    {
+      "requirement": "Capture and derivation provenance",
+      "status": "pass-for-fixture",
+      "evidence": "Source commitments, public artifact mappings, scrub-check counts, transformation time, implementation commit, and limitations are recorded."
+    },
+    {
+      "requirement": "Result Evaluation of the final Task/Result pair",
+      "status": "not-available",
+      "evidence": "The initial patch received an independent approval and the final patch passed YAML parsing.",
+      "limitation": "The review predates the final follow-up patch and no warm- or cold-cache behavioral run was observed. The defensible current verdict is inconclusive, but no evaluator emitted a signed claim."
+    },
+    {
+      "requirement": "Execution Verification",
+      "status": "not-available",
+      "evidence": "The source supports a later narrow verification of stage order, result lineage, branch push, and PR creation.",
+      "limitation": "No verifier emitted a signed claim and no cryptographic runtime attestation binds the transcript to the claimed executor."
+    },
+    {
+      "requirement": "Public representation safety",
+      "status": "blocked-by-scrub-check",
+      "evidence": "The current scrubber found 559 findings requiring 411 redactions in the raw source. After projection, a second check found five A2 high-entropy findings in public technical identifiers, including a branch name, pinned nightly version, Git blob identifier, and structural field name.",
+      "limitation": "The exact Result patch must not be corrupted merely to pass the scrubber. Publication requires an allowlist or detector correction and remains a separate policy decision."
+    }
+  ],
+  "protocolFindings": [
+    {
+      "kind": "capture-requirement",
+      "finding": "A historical transcript alone is insufficient for full v1 conformance. Capture-time producers must seal the base repository tree, Task bytes, Executor Agent identity, Runtime Specification, result manifest, and native trace."
+    },
+    {
+      "kind": "hosted-runtime-boundary",
+      "finding": "Hosted model services cannot normally be content-addressed by the producer. The protocol therefore requires precise provider and deployment identification plus any available attestation, while reserving independently reproducible status for executions whose dependencies are recoverable or faithfully substitutable."
+    },
+    {
+      "kind": "evaluation-scope",
+      "finding": "A review of an earlier patch must not be treated as an evaluation of later result bytes. Result subjects make this distinction enforceable."
+    },
+    {
+      "kind": "scrub-boundary",
+      "finding": "A safe task-relevant projection can be much smaller than a field-for-field scrub, but it must be labeled as a lossy derived trace and cannot replace the private native trace commitment."
+    },
+    {
+      "kind": "scrub-false-positive",
+      "finding": "The current entropy detector rejects public technical identifiers in this fixture, including an exact pinned version inside the Result patch. A publish path must distinguish content identifiers and structured technical names from credentials without rewriting Result bytes."
+    }
+  ]
+}

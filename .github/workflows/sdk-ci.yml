@@ -13,6 +13,10 @@ on:
       - '.github/workflows/sdk-ci.yml'
       - '.github/workflows/sdk-npm-publish.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     working-directory: packages/sdk

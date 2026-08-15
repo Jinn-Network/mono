@@ -1,0 +1,84 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "ro-crate-metadata.json",
+      "digest": {
+        "sha256": "7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf"
+      }
+    }
+  ],
+  "predicateType": "https://spec.jinn.network/attestations/execution-verification/v1",
+  "predicate": {
+    "verifiedAt": "2026-07-23T16:05:00Z",
+    "verifier": {
+      "id": "urn:uuid:66666666-6666-4666-8666-666666666666"
+    },
+    "verificationMethod": {
+      "name": "claims/execution-verification/verifier-implementation.json",
+      "digest": {
+        "sha256": "79243a25b4f0f2986facdcf27265d6dc3bd67b0402cbd244b4274fd3f17f7bfd"
+      }
+    },
+    "verificationPolicy": {
+      "name": "claims/execution-verification/verification-policy.md",
+      "digest": {
+        "sha256": "e4e3edda0138ad852221568c3996239438119098d7c41c70ebad287119647e48"
+      }
+    },
+    "executionId": "urn:uuid:22222222-2222-4222-8222-222222222222",
+    "verdict": "verified",
+    "checks": [
+      {
+        "name": "trace-sequence",
+        "status": "pass",
+        "explanation": "The native trace has a complete ordered sequence from execution start through completion.",
+        "evidence": [
+          {
+            "name": "execution/trace/trace.jsonl",
+            "digest": {
+              "sha256": "49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a"
+            }
+          }
+        ]
+      },
+      {
+        "name": "allowed-tools",
+        "status": "pass",
+        "explanation": "Every tool observed in the native trace appears in the captured tool policy.",
+        "evidence": [
+          {
+            "name": "execution/runtime/tool-policy.json",
+            "digest": {
+              "sha256": "11bf01bd97086d09e8c55d1c4d8954ad97922e97c4ee60b0b916143939bf80a1"
+            }
+          },
+          {
+            "name": "execution/trace/trace.jsonl",
+            "digest": {
+              "sha256": "49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a"
+            }
+          }
+        ]
+      },
+      {
+        "name": "controlled-component-binding",
+        "status": "pass",
+        "explanation": "Every controlled component named by the Runtime Specification is a content-bound payload in the sealed execution metadata.",
+        "evidence": [
+          {
+            "name": "execution/runtime/runtime-specification.json",
+            "digest": {
+              "sha256": "b1563a6db13e9214ca716653fc9862fa7fffc4e03c6a3b7ffde11b6922ba981a"
+            }
+          }
+        ]
+      }
+    ],
+    "explanation": "The sealed execution record satisfies the selected trace, tool, and controlled-component policy.",
+    "limitations": [
+      "No provider attestation or hardware-backed runtime attestation was available.",
+      "Verification does not assert that the Result satisfies the Task."
+    ]
+  }
+}

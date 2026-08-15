@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "producer-contract-v1/README.md",
+      "sha256": "909f9850b61240c11a03159dc825028c7c61746204aec35efd27abeb004e7e92"
+    },
+    {
+      "id": "producer-contract-v1/abandoned.json",
+      "sha256": "5709555cf9a47916a94f6f78d7c4bf03c85d9277e97e2dfbb395362313b81c88"
+    },
+    {
+      "id": "producer-contract-v1/completed.json",
+      "sha256": "bbf0b97912f962893286f9327bc57777732da4109aefd0fb8b377ff3f657ea01"
+    },
+    {
+      "id": "producer-contract-v1/failed.json",
+      "sha256": "24e6bd366deb8615cd2b3573d89f16c520d2ecb30b23d4c2936e503435d9aaf4"
+    },
+    {
+      "id": "producer-contract-v1/result.txt",
+      "sha256": "ccaa8c827989d0748102c5482c782eab9cf335b79de0b0b35cbf2c99be9782fd"
+    },
+    {
+      "id": "producer-contract-v1/runner.mjs",
+      "sha256": "3d15502b22e80a2944f9a82768005a8b01a54f5a204f300d797f45dd9f1ae75d"
+    },
+    {
+      "id": "producer-contract-v1/runtime.json",
+      "sha256": "dc29d5930386817582122b1662c5daaa1c0ea8235ebca22e869e9e20b9483477"
+    },
+    {
+      "id": "producer-contract-v1/task.md",
+      "sha256": "e45052641fe323b2d3af30b66faedfa5639fbaefc5f98bcf30c6d39181ba24ae"
+    },
+    {
+      "id": "producer-contract-v1/trace.jsonl",
+      "sha256": "5caabae431fd2b3d56a6faf789eb8f0c0de610f2308a964601bed1f6c0764e33"
+    }
+  ],
+  "errata": []
+}

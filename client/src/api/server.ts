@@ -4,14 +4,17 @@
  * Uses Hono for routing.
  *
  * Routes:
- *   GET  /v1/status  (daemon health, fleet hints, RPC — best-effort)
+ *   GET  /health      (always 200, unauthenticated — liveness)
+ *   GET  /ready        (200 ready/degraded, 503 bootstrapping, unauthenticated — readiness)
+ *   GET  /metrics      (Prometheus text exposition, unauthenticated)
+ *   GET  /v1/status    (daemon health, fleet hints, RPC — token-gated, spec §14.5)
  *   GET  /artifacts/search?tags=a,b&outcome=SUCCESS&limit=50
  *   GET  /artifacts/:id/content
  *   POST /artifacts  { id, taskId, requestId, title, content, tags, outcome }
  */
 
 import { Hono } from 'hono';
-import type { Context } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
@@ -24,13 +27,16 @@ import {
   verifyRequestWithErc8128,
   InMemoryNonceStore,
 } from '../auth/erc8128.js';
-import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
+import { enrichStatusV1Tail, type StatusGatherConfig } from './gather-status.js';
+import { getCachedGatheredStatus, invalidateGatheredStatusCache } from './gathered-status-cache.js';
+import { maskUrlsInMessage } from '../rpc/transport.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
 import type { ArtifactSource } from '../types/envelope.js';
 import { addEventsRoutes } from './events-endpoint.js';
 import { addActivityEventsRoutes } from './activity-events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
+import { addNotificationsRoutes } from './notifications-endpoint.js';
 import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
 import {
   registerSolverNetsEndpoints,
@@ -38,8 +44,9 @@ import {
 } from './solvernets-endpoints.js';
 import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
-import { addAdminRoutes } from './admin-endpoint.js';
+import { addAdminRoutes, type AdminEndpointConfig } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
+import { addClaimPolicyRoutes, type ClaimPolicyRoutesConfig } from './claim-policy-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
 import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
 import { addHarnessAuthStatusRoutes } from './harness-auth-status-endpoint.js';
@@ -54,9 +61,12 @@ import {
 import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
 import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 import { addDiscoveryRoutes } from './discovery-endpoint.js';
-import type { DiscoveryAPI } from '../discovery/types.js';
+import type { ArchiveReads } from '../archive/reads.js';
+import type { PluginPublicationReader } from '../plugin-registry/publication-reader.js';
 import { addDebugReportRoutes, type DebugReportRoutesConfig } from './debug-report-endpoint.js';
 import { addRewardsRoutes } from './rewards-endpoint.js';
+import { addHealthRoutes, type HealthRoutesConfig } from './health-endpoint.js';
+import { addMetricsRoutes, type MetricsRoutesConfig } from './metrics-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -72,8 +82,11 @@ export interface ApiServerConfig {
    * Bearer token required on cost-mutating routes (`POST /artifacts`,
    * `POST /v1/artifacts/acquire`). Generated at daemon startup (or read
    * from `DAEMON_API_TOKEN`) and threaded into the MCP subprocess via
-   * the same env var. Read-only routes (`GET /v1/status`, search,
-   * artifact content) stay public.
+   * the same env var. `GET /artifacts/search` and `GET /artifacts/:id/content`
+   * stay public. `GET /v1/status` is operator-class and token-gated as of
+   * spec §14.5 — it no longer falls under this bearer's "read-only stays
+   * public" carve-out (`GET /health` + `GET /ready` + `GET /metrics` are the
+   * unauthenticated-safe liveness/readiness/metrics surface now).
    */
   apiToken: string;
   requireAuth?: boolean;
@@ -96,6 +109,8 @@ export interface ApiServerConfig {
   bootstrap?: BootstrapEndpointConfig;
   /** Optional panel-driven setup actions such as testnet faucet funding. */
   setup?: SetupRoutesConfig;
+  /** When set, mounts the §2.15 Claim policy & wiring endpoints (GET/PUT). */
+  claimPolicy?: ClaimPolicyRoutesConfig;
   /**
    * Launcher mode routes (`/v1/launcher/*`). Mounted only when supplied so
    * tests and bootstrap-only API instances don't pay the deps wiring cost.
@@ -117,13 +132,20 @@ export interface ApiServerConfig {
   /** When set, POST /v1/setup/agent-binding/retry is mounted so the SPA can
    *  retry the ERC-1271 bind step for unbound services. */
   agentBinding?: AgentBindingRoutesConfig;
-  /** When set, /auth/handshake is mounted and SPA-only routes are gated by the token. */
+  /**
+   * When set, `/auth/handshake` is mounted and operator-class routes are
+   * gated on the SPA's cookie/header session token EXCLUSIVELY (the bearer
+   * `apiToken` does not admit here — the two credential planes never merge,
+   * see the gate comment in `startApiServer`). When absent, the gate falls
+   * back to the bearer `apiToken` — the only construction paths without
+   * `ui` are `daemon.ts`'s self-start branch and test/embedded callers, on
+   * which the bearer is the sole available credential. The gate itself is
+   * unconditional (§14.3): the SPA-only route families and `/v1/events` /
+   * `/v1/activity-events` are token-gated on every construction path.
+   */
   ui?: { token: string; handshakeKey: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
-  admin?: {
-    onRestartRequested: (opts: { forceRespawn?: boolean }) => void;
-    onStopRequested: () => void;
-  };
+  admin?: AdminEndpointConfig;
   /**
    * When set, mounts `GET /api/harness/status` under the UI token gate.
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
@@ -160,22 +182,21 @@ export interface ApiServerConfig {
   /** Operator review API for pending captures. */
   captures?: CapturesRoutesDeps;
   /**
-   * Discovery API. Mounts GET /v1/discovery/* routes that proxy DiscoveryAPI
-   * methods (listPluginPublications, listBuilderArtifacts, getPluginScores)
-   * so the SPA's /build route can fetch them without direct GraphQL or RPC
-   * access.
-   *
-   * Accepts either a direct instance or a holder ref (same pattern as
-   * solverNetsLauncher / harnessReadinessRegistry). main.ts uses the holder
-   * shape because the daemon's DiscoveryAPI is constructed post-bootstrap;
-   * routes register eagerly at server start so Hono's matcher includes them
-   * before the first request. Without this, every /v1/discovery/* request
-   * gets a 404 forever, and the /build page renders "Discovery unavailable"
-   * permanently (jinn-mono-u34i field repro).
+   * Plugin-publication reader backing the /build page's plug-in routes
+   * (`plugin-publications` / `builder-artifacts` / `plugin-scores`). Direct
+   * instance or holder ref (eager-register / late-populate). Required for
+   * those routes after Wave-4 D4 — there is no DiscoveryAPI fallback.
    */
-  discovery?:
-    | DiscoveryAPI
-    | { holder: { current: DiscoveryAPI | undefined } };
+  pluginReader?:
+    | PluginPublicationReader
+    | { holder: { current: PluginPublicationReader | undefined } };
+  /**
+   * Archive/projector reads backing `GET /v1/discovery/task-post-counts`
+   * (and launcher `getTaskStatuses`). Direct instance or holder ref.
+   */
+  archiveReads?:
+    | ArchiveReads
+    | { holder: { current: ArchiveReads | undefined } };
   /**
    * One-click operator debug report (issue #420). When set, mounts
    * `GET /v1/debug-report/manifest` + `POST /v1/debug-report` under the UI
@@ -183,6 +204,25 @@ export interface ApiServerConfig {
    * download reflects env overrides + defaults, not just the on-disk file.
    */
   debugReport?: DebugReportRoutesConfig;
+  /**
+   * Shared daemon-readiness getter for `GET /ready` and `GET /metrics` (spec §5/§6.1,
+   * issue #2404). Injected as a plain function — `client/src/api/` must never import
+   * `client/src/daemon/` directly (architecture boundary,
+   * `test/architecture/api-daemon-boundary.test.ts`, #1584); main.ts / daemon.ts's
+   * self-start branch pass `getDaemonReadiness` from `daemon/loop-heartbeat.ts`'s shared
+   * holder straight through. Absent (bare/test servers) defaults to always-`ready`,
+   * matching that module's own default for every caller that never touches the holder.
+   */
+  getDaemonReadiness?: HealthRoutesConfig['getDaemonReadiness'];
+  /**
+   * Per-loop heartbeat + admission snapshot for `GET /metrics`'
+   * `jinn_loop_last_tick_seconds` / `jinn_loop_admitted` series (spec §5/§6.2). Precomputed
+   * by the caller (`LOOP_REGISTRY` × `getLoopAdmission` × `getLoopTick`, all owned by
+   * `daemon/loop-heartbeat.ts`) for the same api→daemon boundary reason as
+   * `getDaemonReadiness` above. Absent on bare/test servers — those two metric families
+   * are simply omitted, never fabricated.
+   */
+  getLoopSnapshot?: MetricsRoutesConfig['getLoopSnapshot'];
 }
 
 export interface ApiServer {
@@ -374,14 +414,27 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   const { store } = config;
   const app = new Hono();
 
+  // The shared gather/assemble cache (issue #2408 review finding F3) is a process-wide
+  // singleton. A real daemon calls startApiServer exactly once per process, so this is a no-op
+  // there; a test harness that starts several independent servers (different Store/status
+  // fixtures) in the same process must not silently inherit a previous instance's cached read.
+  invalidateGatheredStatusCache();
+
   // The /v1/status handler reads from this holder, not the closure-captured
   // `config.status`, so the daemon can swap the running-mode config in after
   // the server is already up. See `setStatusConfig` on the returned object.
   let liveStatus: StatusGatherConfig | undefined = config.status;
 
-  app.use(cors());
+  // Global CORS EXCEPT `/api/stop-hook` (§14.1): that route now requires the
+  // `DAEMON_API_TOKEN` bearer (see the gate below), but a bearer credential
+  // isn't ambiently attached to cross-origin fetches the way a cookie is —
+  // scoping CORS away from it is defense-in-depth, not the auth boundary.
+  app.use(async (c, next) => {
+    if (c.req.path === '/api/stop-hook') return next();
+    return cors()(c, next);
+  });
 
-  // ── Bearer-token gate for cost-mutating routes ─────────────────────────────
+  // ── Bearer-token check for cost-mutating / operator-class routes ────────────
   //
   // `POST /artifacts` and `POST /v1/artifacts/acquire` both have side effects
   // (artifact insert; outbound fetch of an arbitrary `access.endpoint` plus a
@@ -389,29 +442,66 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // could fabricate `access.endpoint` URLs and drive the daemon's fetcher. The
   // bearer token is generated at daemon startup (or read from
   // `DAEMON_API_TOKEN`) and forwarded to the MCP subprocess via the same env
-  // var. Read-only routes (`GET /v1/status`, `GET /artifacts/search`,
-  // `GET /artifacts/:id/content`) stay public — they are intentionally
-  // network-reachable. The ERC-8128 middleware (gated by `requireAuth=true`,
-  // never set in prod) layers on top of this.
+  // var. `GET /artifacts/search` and `GET /artifacts/:id/content` stay
+  // public — they are intentionally network-reachable. `GET /v1/status` is
+  // NOT in that set as of spec §14.5 (issue #2404) — it is operator-class
+  // and token-gated like every other read route; `GET /health` / `GET /ready`
+  // / `GET /metrics` are the unauthenticated-safe surface now (§6.1–§6.2).
+  // The ERC-8128 middleware (gated by `requireAuth=true`, never set in prod)
+  // layers on top of this.
   const expectedAuth = `Bearer ${config.apiToken}`;
   const expectedBuf = Buffer.from(expectedAuth);
-  const requireBearer = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
+  const bearerValid = (c: Context): boolean => {
     const provided = c.req.header('Authorization') ?? '';
     const providedBuf = Buffer.from(provided);
-    let ok = false;
-    if (providedBuf.length === expectedBuf.length) {
-      try {
-        ok = timingSafeEqual(providedBuf, expectedBuf);
-      } catch {
-        ok = false;
-      }
+    if (providedBuf.length !== expectedBuf.length) return false;
+    try {
+      return timingSafeEqual(providedBuf, expectedBuf);
+    } catch {
+      return false;
     }
-    if (!ok) {
+  };
+  const requireBearer = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
+    if (!bearerValid(c)) {
       return c.json({ error: 'unauthorized', reason: 'bearer_required' }, 401);
     }
     await next();
     return;
   };
+
+  // ── Unconditional operator-class auth gate (§4.3 / §14.3) ───────────────
+  //
+  // Every route on this listener is `operator`-class (token-gated,
+  // regardless of bind address) except a fixed allowlist: `/`, `/assets/*`,
+  // `/auth/handshake`, `/artifacts*` (the bearer regime — scoped by §4.2's
+  // disposition table to artifacts + stop-hook ONLY, never the general
+  // operator-class routes below), and `GET /health` / `GET /ready` /
+  // `GET /metrics` — the shallow, unauthenticated-safe liveness/readiness/
+  // metrics surface (spec §6.1–§6.2). `GET /v1/status` LOST its exemption
+  // here (§14.5, issue #2404) now that `/health` + `/ready` exist as the
+  // unauthenticated-safe alternative — it is gated below like every other
+  // operator-class route.
+  //
+  // This block runs UNCONDITIONALLY — independent of whether `config.ui`
+  // was supplied — so a construction path that skips `ui` (`daemon.ts`'s
+  // self-start branch when `config.apiServer` is absent, or a bare
+  // `startApiServer({ apiToken })` test/embedded call) does not leave the
+  // SPA-only route families (nor `/v1/events` / `/v1/activity-events`,
+  // which used to be mounted OUTSIDE this block entirely) unauthenticated.
+  //
+  // The two credential planes do NOT merge: when `config.ui` is configured
+  // (every production boot via main.ts), ONLY the ui-token grants access —
+  // the bearer `apiToken` sits in every spawned solver agent's own process
+  // env (learner adapters' spawnOpts.env, Hermes' bootstrap .env file), so
+  // admitting it here would let any agent reach change-password, admin
+  // restart/stop, claim-policy/wiring writes, captures approve (publishes),
+  // network config, faucet drip (real tx), join/leave, debug-report,
+  // rewards, etc. — routes §4.2's disposition table classes `Control`,
+  // never `bearer`-gated. The bearer only ever buys the no-`ui`
+  // self-start/test path, where it's the sole available credential.
+  const requireOperatorToken: MiddlewareHandler = config.ui
+    ? requireUiToken(config.ui.token)
+    : requireBearer;
 
   // SPA index at /
   app.get('/', (c) => c.html(readSpaIndex()));
@@ -431,47 +521,87 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     return new Response(new Uint8Array(data), { headers: { 'content-type': mime } });
   });
 
+  // Single shared resolver for the enriched `StatusGatherConfig` (issue #2424 review round 2,
+  // findings B1/B2). Before this, `/v1/status`'s handler built its OWN enriched wrapper
+  // (`{ ...liveStatus, discovery, harnessReadiness }`) inline, while `/v1/rewards` and
+  // `/v1/notifications` were wired with the bare `() => liveStatus` — no `discovery`, no
+  // `harnessReadiness`. Once the three shared the gather/assemble cache (F3), that divergence
+  // became load-bearing: whichever caller populated the unkeyed cache slot first decided the
+  // shape for the whole TTL window, so `/v1/status` could transiently serve
+  // `DEFAULT_HARNESS_ROLLUP` + null task outcomes (B1) — and, independent of caching,
+  // `/v1/notifications`'s OWN `harness_not_ready` derivation always read the un-enriched
+  // rollup, making that blocking kind unreachable in production regardless of the cache (B2).
+  // One resolver, called by all three, closes both: the cache slot is now always filled with
+  // the same (enriched) shape, and every consumer of `assembled.harness` sees the real rollup.
+  // `harnessReadiness` / `discovery` still dereference their holders lazily on each call, so
+  // post-bootstrap timing (registry/API constructed after `startApiServer` returns) is
+  // unchanged.
+  const resolveStatusGatherConfig = (): StatusGatherConfig | undefined => {
+    // Thread the live HarnessReadinessRegistry through to gather-status so the response
+    // carries a `harness` rollup. main.ts uses the holder shape (registry is constructed
+    // post-bootstrap); dereferencing once per request keeps server.ts decoupled from that
+    // timing. When the holder is empty (pre-bootstrap) the getter returns null and the
+    // assembler defaults to ready.
+    const reg = config.harnessReadinessRegistry;
+    const getRegistry = (): HarnessReadinessRegistry | null =>
+      reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
+    return liveStatus
+      ? {
+          ...liveStatus,
+          harnessReadiness: () => {
+            const live = getRegistry();
+            if (!live) return null;
+            return {
+              snapshot: live.getSnapshot(),
+              joinedHarnessesByCid: live.getJoinedHarnessesByCid(),
+            };
+          },
+        }
+      : undefined;
+  };
+
+  // GET /health + GET /ready — always ungated (spec §6.1). Mounted here,
+  // before the operator-class gate below, alongside `/`/`/assets/*`.
+  addHealthRoutes(app, {
+    earningDir: config.bootstrap?.earningDir,
+    getDaemonReadiness: config.getDaemonReadiness,
+  });
+
+  // GET /metrics — always ungated (spec §6.2).
+  addMetricsRoutes(app, store, {
+    getDaemonReadiness: config.getDaemonReadiness,
+    getLoopSnapshot: config.getLoopSnapshot,
+  });
+
+  // `/v1/status` is operator-class as of spec §14.5 (issue #2404) — the
+  // gate must be registered BEFORE the route handler below (Hono composes
+  // middleware + handlers for a matching path in registration order; see
+  // the "Operator-class gate" comment further down, which mounts the
+  // `/v1/events` family the same way, before `addEventsRoutes` runs).
+  app.use('/v1/status', requireOperatorToken);
+
   app.get('/v1/status', async (c) => {
     try {
-      // Thread the live HarnessReadinessRegistry through to gather-status so
-      // the response carries a `harness` rollup. main.ts uses the holder shape
-      // (registry is constructed post-bootstrap); dereferencing once per
-      // request keeps server.ts decoupled from that timing. When the holder
-      // is empty (pre-bootstrap) the getter returns null and the assembler
-      // defaults to ready.
-      const reg = config.harnessReadinessRegistry;
-      const getRegistry = (): HarnessReadinessRegistry | null =>
-        reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
-      // Resolve the live DiscoveryAPI (holder pattern, same as the registry
-      // above) so /v1/status can enrich task-relative outcomes (#502). When
-      // the holder is empty (pre-bootstrap) this is undefined and gather-status
-      // leaves outcomes null.
-      const disc = config.discovery;
-      const liveDiscovery: DiscoveryAPI | undefined =
-        disc && 'holder' in disc ? disc.holder.current : disc;
-      const statusConfig: StatusGatherConfig | undefined = liveStatus
-        ? {
-            ...liveStatus,
-            discovery: liveDiscovery,
-            harnessReadiness: () => {
-              const live = getRegistry();
-              if (!live) return null;
-              return {
-                snapshot: live.getSnapshot(),
-                joinedHarnessesByCid: live.getJoinedHarnessesByCid(),
-              };
-            },
-          }
-        : undefined;
-      const body = await gatherStatusForApi(store, statusConfig);
+      const statusConfig = resolveStatusGatherConfig();
+      // Shares the ~3s TTL cache with /v1/rewards and /v1/notifications (issue #2408 review
+      // finding F3) — `enrichStatusV1Tail` is the cheap, no-RPC tail (loop-completion,
+      // evidence-indexing, spend, AI-units) that still runs fresh every request against the
+      // (possibly cached) `{ raw, assembled }` pair.
+      const { raw, assembled } = await getCachedGatheredStatus(store, statusConfig);
+      const body = await enrichStatusV1Tail(store, statusConfig, raw, assembled);
       return c.json(body);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // Mask any RPC URL embedded in the message and drop the filesystem
+      // path — this is the unauthenticated /v1/status endpoint (spec §14.2
+      // item 2, issue #2402). gather-status.ts already masks the errors it
+      // catches internally; this is defense-in-depth for anything that
+      // throws before reaching that layer.
+      const message = maskUrlsInMessage(err instanceof Error ? err.message : String(err));
       return c.json(
         {
           error: 'status_gather_failed',
           message,
-          daemon: { shutdownState: store.getShutdownState(), dbPath: store.path },
+          daemon: { shutdownState: store.getShutdownState() },
         },
         500,
       );
@@ -480,37 +610,50 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.ui) {
     addHandshakeRoutes(app, config.ui);
-    // Gate SPA-only routes (do NOT gate /v1/status or /artifacts/*).
-    app.use('/v1/events', requireUiToken(config.ui.token));
-    app.use('/v1/events/*', requireUiToken(config.ui.token));
-    app.use('/v1/activity-events', requireUiToken(config.ui.token));
-    app.use('/v1/activity-events/*', requireUiToken(config.ui.token));
-    app.use('/v1/bootstrap', requireUiToken(config.ui.token));
-    app.use('/v1/rewards', requireUiToken(config.ui.token));
-    app.use('/v1/solvernets', requireUiToken(config.ui.token));
-    app.use('/v1/solvernets/*', requireUiToken(config.ui.token));
-    app.use('/v1/auth/*', requireUiToken(config.ui.token));
-    app.use('/v1/setup/*', requireUiToken(config.ui.token));
-    app.use('/v1/operator', requireUiToken(config.ui.token));
-    app.use('/v1/operator/*', requireUiToken(config.ui.token));
-    app.use('/v1/launcher', requireUiToken(config.ui.token));
-    app.use('/v1/launcher/*', requireUiToken(config.ui.token));
-    app.use('/v1/discovery', requireUiToken(config.ui.token));
-    app.use('/v1/discovery/*', requireUiToken(config.ui.token));
-    app.use('/api/admin/*', requireUiToken(config.ui.token));
-    app.use('/api/harness/*', requireUiToken(config.ui.token));
-    app.use('/api/hermes/*', requireUiToken(config.ui.token));
-    app.use('/api/codex/*', requireUiToken(config.ui.token));
-    app.use('/api/captures/*', requireUiToken(config.ui.token));
-    app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
-    app.use('/v1/debug-report', requireUiToken(config.ui.token));
-    app.use('/v1/debug-report/*', requireUiToken(config.ui.token));
   }
+
+  // Operator-class gate — unconditional, see `requireOperatorToken` above.
+  // `/v1/events` and `/v1/activity-events` are included here even though
+  // their routes are mounted unconditionally below (`addEventsRoutes` /
+  // `addActivityEventsRoutes` run regardless of `config.ui`) — this is the
+  // exact gap §14.3 closes.
+  app.use('/v1/events', requireOperatorToken);
+  app.use('/v1/events/*', requireOperatorToken);
+  app.use('/v1/activity-events', requireOperatorToken);
+  app.use('/v1/activity-events/*', requireOperatorToken);
+  app.use('/v1/bootstrap', requireOperatorToken);
+  app.use('/v1/rewards', requireOperatorToken);
+  app.use('/v1/notifications', requireOperatorToken);
+  app.use('/v1/solvernets', requireOperatorToken);
+  app.use('/v1/solvernets/*', requireOperatorToken);
+  app.use('/v1/auth/*', requireOperatorToken);
+  app.use('/v1/setup/*', requireOperatorToken);
+  app.use('/v1/operator', requireOperatorToken);
+  app.use('/v1/operator/*', requireOperatorToken);
+  app.use('/v1/launcher', requireOperatorToken);
+  app.use('/v1/launcher/*', requireOperatorToken);
+  app.use('/v1/discovery', requireOperatorToken);
+  app.use('/v1/discovery/*', requireOperatorToken);
+  app.use('/api/admin/*', requireOperatorToken);
+  app.use('/api/harness/*', requireOperatorToken);
+  app.use('/api/hermes/*', requireOperatorToken);
+  app.use('/api/codex/*', requireOperatorToken);
+  app.use('/api/captures/*', requireOperatorToken);
+  app.use('/v1/harnesses/*', requireOperatorToken);
+  app.use('/v1/debug-report', requireOperatorToken);
+  app.use('/v1/debug-report/*', requireOperatorToken);
 
   addEventsRoutes(app);
   addActivityEventsRoutes(app, { store });
 
   if (config.stopHook) {
+    // §14.1: the stop-hook route is an "Application (external tool)" route,
+    // not an `operator`-class one — it's driven by harness subprocesses that
+    // only ever carry the bearer `DAEMON_API_TOKEN` (see
+    // `client/src/runner/claude.ts`, the learner adapters, and Hermes'
+    // bootstrap env), never a UI session. Bearer-only, not
+    // `requireOperatorToken` (which would also accept the ui-token).
+    app.use('/api/stop-hook', requireBearer);
     addStopHookRoutes(app, config.stopHook);
   }
 
@@ -525,23 +668,51 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   if (config.ui) {
     addRewardsRoutes(app, {
       store,
-      getStatus: () => liveStatus,
+      // Same enriched resolver /v1/status uses (issue #2424 review round 2, finding B1) — the
+      // bare `() => liveStatus` this used to pass shared the gather cache slot with an
+      // unenriched shape, which could transiently starve /v1/status of its harness/discovery
+      // enrichment. Rewards itself gains the enrichment too (harmless: rewards doesn't
+      // currently read `discovery`/`harnessReadiness`, but a future field addition no longer
+      // has to remember to wire it separately).
+      getStatus: resolveStatusGatherConfig,
     });
   }
 
-  if (config.discovery) {
-    const disc = config.discovery;
-    if ('holder' in disc) {
-      // Lazy holder shape — register routes eagerly; handler returns 503
-      // subsystem_not_ready until main.ts populates holder.current after
-      // bootstrap. Same pattern as harnessReadinessRegistry.
-      addDiscoveryRoutes(app, {
-        getDiscovery: () => disc.holder.current ?? null,
-      });
-    } else {
-      const discoveryInstance = disc;
-      addDiscoveryRoutes(app, { discovery: () => discoveryInstance });
-    }
+  // §6.5 / issue #2408 — mounted unconditionally (like `/v1/status`, not gated on
+  // `config.ui`) so the self-start/bearer-only path (tests, embedded callers) still gets
+  // the endpoint. `getBootstrapExtras` reuses `/v1/bootstrap`'s own `configReader` purely
+  // for its already-computed `rpcSlotHealth` + `joinedSolverNets` — never its assembled JSON.
+  addNotificationsRoutes(app, {
+    store,
+    // Same enriched resolver /v1/status uses (issue #2424 review round 2, finding B2) — reading
+    // the bare, un-enriched `liveStatus` meant `assembled.harness` was always the
+    // default-ready rollup here, making `harness_not_ready` unreachable in production
+    // regardless of the shared cache. This is the fix.
+    getStatus: resolveStatusGatherConfig,
+    getBootstrapExtras: () => config.bootstrap?.configReader?.(),
+  });
+
+  if (config.pluginReader || config.archiveReads) {
+    const pr = config.pluginReader;
+    const pluginReader: () => PluginPublicationReader | null =
+      pr === undefined
+        ? () => null
+        : 'holder' in pr
+          ? () => pr.holder.current ?? null
+          : () => pr;
+
+    const ar = config.archiveReads;
+    const archiveReads: (() => ArchiveReads | null) | undefined =
+      ar === undefined
+        ? undefined
+        : 'holder' in ar
+          ? () => ar.holder.current ?? null
+          : () => ar;
+
+    addDiscoveryRoutes(app, {
+      pluginReader,
+      ...(archiveReads ? { archiveReads } : {}),
+    });
   }
 
   if (config.solverNets) {
@@ -560,8 +731,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     app.use('/v1/solvernets/drafts/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
     app.use('/v1/solvernets/launched', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
     app.use('/v1/solvernets/launched/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/registry', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/registry/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
     // Build a Proxy whose property reads dereference the holder. Route
     // handlers in solvernets-endpoints.ts read deps.store, deps.launch,
     // etc. eagerly inside each handler, so per-request dereference is
@@ -627,6 +796,9 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     // gated behind the UI token so external callers can't fingerprint the host
     // or rotate keys.
     addSetupRoutes(app, config.setup);
+    if (config.claimPolicy) {
+      addClaimPolicyRoutes(app, config.claimPolicy);
+    }
   }
 
   // Launcher mode routes — gated by the UI token via the `app.use` block
@@ -830,7 +1002,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
               ok: false,
               reason: 'hash_mismatch',
               sha256,
-              error: err.message,
+              error: maskUrlsInMessage(err.message),
               sha256Expected: err.sha256Expected,
               sha256Actual: err.sha256Actual,
               source: err.source,
@@ -842,11 +1014,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         }
         if (err instanceof AcquireError) {
           return c.json(
-            { ok: false, reason: 'origin_null', sha256, error: err.message, retryable: true },
+            { ok: false, reason: 'origin_null', sha256, error: maskUrlsInMessage(err.message), retryable: true },
             502,
           );
         }
-        const message = err instanceof Error ? err.message : String(err);
+        const message = maskUrlsInMessage(err instanceof Error ? err.message : String(err));
         return c.json(
           { ok: false, reason: 'origin_null', sha256, error: message, retryable: true },
           500,
@@ -922,6 +1094,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         app,
         setStatusConfig: (status) => {
           liveStatus = status;
+          // Invalidate the shared gather/assemble cache (issue #2408 review finding F3) so the
+          // very next /v1/status (or /v1/rewards, /v1/notifications) read reflects the swapped
+          // config immediately, rather than serving up to the cache's TTL of pre-swap data.
+          invalidateGatheredStatusCache();
         },
       });
     });

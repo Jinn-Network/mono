@@ -18,12 +18,33 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod/v3';
+import { NativeOperatorConfigSchema } from './daemon/native-product-config.js';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
 import { isOpenRouterModelId } from './harnesses/provider-ref.js';
 import { parseRpcUrls } from './rpc/transport.js';
 import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
+import {
+  CONFIG_SHAPE_VERSION,
+  ClaimPolicyConfigSchema,
+  ExecutionWiringConfigEntrySchema,
+  PostingConfigEntrySchema,
+} from './config/shape-v2.js';
+import {
+  NativeAgentIriSchema,
+  NativeCompositionModeSchema,
+  NativeEvaluatorConfigSchema,
+  NativeFinalityConfigSchema,
+  NativeIdentityStoresConfigSchema,
+  NativeIpfsConfigSchema,
+  NativePublicBaseUrlSchema,
+  NativeRecordSourcesSchema,
+  NativeTrustPolicyGenesisDigestSchema,
+  NativeTrustRootsPathSchema,
+} from './config/native-sections.js';
+import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
+import { recordPhaseDTransitionUse } from './compatibility/phase-d-transition-usage.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -85,11 +106,18 @@ export const JinnConfigSchema = z.object({
 
   /**
    * How often the daemon attempts stOLAS ExternalStakingDistributor.claim for each staked
-   * fleet service (ms). Default 0 so operators claim OLAS manually from the app.
-   * Set JINN_REWARD_CLAIM_INTERVAL_MS=600000 for managed/headless auto-claim.
+   * fleet service (ms). Default 600000 (10 min) — on by default in standard staking mode.
+   * This overturns the manual-claim-from-the-app rationale this field previously carried:
+   * OPERATOR-APP-SPEC.md's 2026-08-04 amendment (§2.7) corrects the spec's claim that
+   * rewards need no manual step — a manual claim action shipped and stays (POST
+   * /api/admin/claim-rewards / jinn claim-rewards, for an operator who wants to force a
+   * claim or has opted out of the loop), but the loop's off-by-default premise (that the
+   * app was the only claim path, so defaulting off just meant "claim from the app instead")
+   * left with the SPA — off-by-default was silently costing operators money. Set
+   * JINN_REWARD_CLAIM_INTERVAL_MS=0 to opt back out and claim manually only.
    * Env: JINN_REWARD_CLAIM_INTERVAL_MS
    */
-  rewardClaimIntervalMs: z.number().int().min(0).default(0),
+  rewardClaimIntervalMs: z.number().int().min(0).default(600_000),
 
   /**
    * How often the daemon checks agent EOA and Safe balances and tops them up from the master
@@ -127,6 +155,30 @@ export const JinnConfigSchema = z.object({
    * Env: JINN_API_BIND_HOST.
    */
   apiBindHost: z.string().optional(),
+
+  /**
+   * The public record-discovery archive plane (headless design §6; one-swap M6, corrected by
+   * #2519). Off by default. When `enabled`, the native daemon serves EVERY signed source it owns
+   * — requester, solver, and evaluator when configured — on a SEPARATE listener carrying no other
+   * route, never on the operator API.
+   *
+   * One listener for all three, deliberately: every announcement's record locations are stamped
+   * against the single `publicBaseUrl`, so a peer resolves requester, solver and evaluator bytes
+   * from one origin. That is why this block carries no per-role port — see
+   * `daemon/native-fleet-serving-plane.ts`. `publicBaseUrl` must therefore address THIS listener.
+   * Serving from a
+   * residential connection discloses this machine's IP address to every consumer; the
+   * operator app says so where the opt-in lives, and the daemon logs it on bind. The default
+   * host is loopback so an accidental enable stays local; widen it deliberately.
+   * Env: JINN_PUBLIC_ARCHIVE (enable), JINN_PUBLIC_ARCHIVE_BIND_HOST, JINN_PUBLIC_ARCHIVE_PORT.
+   */
+  publicArchive: z
+    .object({
+      enabled: z.boolean().default(false),
+      host: z.string().default('127.0.0.1'),
+      port: z.number().int().positive().default(7332),
+    })
+    .default({}),
 
   /** Path to claude CLI binary */
   claudePath: z.string().default('claude'),
@@ -377,7 +429,31 @@ export const JinnConfigSchema = z.object({
    */
   harness: z
     .object({
-      mode: z.enum(['train', 'frozen']).default('train'),
+      mode: z.enum(['train', 'frozen', 'candidate']).default('train'),
+      /**
+       * Explicit `supports()` routing for the learner harnesses (policy
+       * optimization product design §10). `solverTypes` names what this
+       * operator's learner claims; absent or empty means it claims nothing.
+       * `legacyDefaultRouting` restores the deprecated wrap-every-SolverType
+       * posture (equivalently: `JINN_LEARNER_DEFAULT_ROUTING=1`).
+       */
+      routing: z
+        .object({
+          solverTypes: z.array(z.string()).optional(),
+          legacyDefaultRouting: z.boolean().optional(),
+        })
+        .optional(),
+      /**
+       * Candidate-mode settings. `proposerAgentIri` attributes the sealed
+       * candidate manifest to this operator; without it the run emits a
+       * candidate tree but refuses to seal an unattributable proposal.
+       */
+      candidate: z
+        .object({
+          workspaceRoot: z.string().optional(),
+          proposerAgentIri: z.string().optional(),
+        })
+        .optional(),
     })
     .default({ mode: 'train' }),
 
@@ -404,7 +480,10 @@ export const JinnConfigSchema = z.object({
    *
    * Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
    *
-   * Populated by `POST /v1/operator/join/:cid` when an operator joins a
+   * Legacy key. Its claim gate retired in Wave-4 D1 (DR-2026-08-05); the key
+   * itself stays parseable until stage 5 (composition program contract 4) and
+   * is still read by status, launcher, spend-cap and `jinn eval` surfaces.
+   * Historically populated by the retired `POST /v1/operator/join/:cid` when an operator joined a
    * launched SolverNet from the registry catalog. Keys are `manifestCid`
    * (CIDv0 / CIDv1) — the only stable identifier that maps back to a
    * launched-instance authority across launchers.
@@ -449,6 +528,91 @@ export const JinnConfigSchema = z.object({
       }),
     )
     .optional(),
+
+  /**
+   * Config shape v2 (stage-1 cutover, `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md`
+   * Task 1). Additive keys written *beside* `joinedSolverNets` by the boot
+   * migration (Task 3) — legacy keys survive until stage 5. All three are
+   * optional so an unmigrated config file still parses.
+   */
+  configShapeVersion: z.literal(CONFIG_SHAPE_VERSION).optional(),
+  claimPolicy: ClaimPolicyConfigSchema.optional(),
+  executionWiring: z.array(ExecutionWiringConfigEntrySchema).optional(),
+  posting: z.array(PostingConfigEntrySchema).optional(),
+
+  /**
+   * Dark shape-v2 native sections (one-swap M1, umbrella #2461,
+   * DR-2026-08-05). The config surface the swap's native machinery reads,
+   * landed ahead of the machinery itself and consumed by nothing today.
+   *
+   * All optional and absent-tolerant, matching the stage-1 keys above: an
+   * operator who runs none of the native loops carries none of these keys.
+   * Each section is `.strict()` in `config/native-sections.ts` so a typo
+   * inside a configured section refuses instead of being silently dropped;
+   * the root deliberately stays non-strict.
+   *
+   * These carry no network, chainId, or contract coupling — native mode on
+   * mainnet is an explicit boot refusal (`assertNativeDeployment`, DR
+   * decision 8), never something a config file can express as a fallback.
+   * Enablement semantics (including `evaluator.enabled`) belong to M2's mode
+   * selection: on the pre-swap daemon these keys are inert, so a stray
+   * `enabled: true` annotates nothing and refuses nothing.
+   *
+   * No env overrides — a dark surface has nothing to override. Env vars are
+   * added by the milestone that gives a key runtime meaning.
+   */
+  evaluator: NativeEvaluatorConfigSchema.optional(),
+  identityStores: NativeIdentityStoresConfigSchema.optional(),
+  trustRootsPath: NativeTrustRootsPathSchema.optional(),
+  trustPolicyGenesisDigest: NativeTrustPolicyGenesisDigestSchema.optional(),
+  finality: NativeFinalityConfigSchema.optional(),
+
+  /**
+   * One-swap M2 (umbrella #2461, DR-2026-08-05) — the four keys the native machinery needs that
+   * M1's dark surface did not carry, plus the flip switch itself.
+   *
+   * `compositionMode` selects which composition the ONE fleet daemon assembles. **Absent means
+   * legacy**, and so does an explicit `'legacy'`; M2 lands the native assembly dark and Wave 3's
+   * deploy PR is the change that sets this key. Native mode is additionally gated at boot by
+   * `assertNativeDeployment` (testnet + the pinned `BASE_SEPOLIA_TODAY` deployment only) — native
+   * on mainnet is a loud refusal, never a silent legacy fallback (DR decision 8).
+   *
+   * The other three are the values `RoleIdentitySet.open`, the native record transport, and the
+   * native solution publisher need and cannot infer: `agentIri` (M1 finding 4 — an identity-store
+   * path alone cannot open a role set), `ipfs.apiUrl`, and `publicBaseUrl`. All optional; native
+   * mode refuses at boot when one is missing, rather than the loader refusing a legacy operator
+   * who will never run native.
+   *
+   * No env overrides: the flip is a config-file decision, deliberately not something an env var
+   * on a restarted container can do silently.
+   */
+  compositionMode: NativeCompositionModeSchema.optional(),
+  agentIri: NativeAgentIriSchema.optional(),
+  ipfs: NativeIpfsConfigSchema.optional(),
+  publicBaseUrl: NativePublicBaseUrlSchema.optional(),
+
+  /**
+   * One-swap M5e (umbrella #2461) — the DISTINCT admission Agent IRI the requester WRITE path
+   * needs. The requester seals an admission receipt with a signer whose custody
+   * (`identityStores.admission`) is separate from the requester's own (design: admission is a
+   * distinct authority from the requester it admits for). Absent on a legacy boot and unread there;
+   * the native requester write path is simply unavailable (posting stays fail-closed) when this or
+   * `identityStores.admission` is missing, rather than the loader refusing an operator who will
+   * never post. Must differ from `agentIri` — the runtime refuses an admission Agent equal to the
+   * requester Agent at assembly.
+   *
+   * No env override: like the other native keys, admission custody is a config-file decision.
+   */
+  admissionAgent: NativeAgentIriSchema.optional(),
+
+  /**
+   * One-swap M3 (umbrella #2461) — the signed public record sources the native discovery consumer
+   * pulls from. Absent on a legacy boot and unread there; native mode refuses at boot when it is
+   * missing or carries no `requester` source, for the same reason M2's four keys do.
+   *
+   * See `NativeRecordSourcesSchema` for why this is `recordSources` and not the landed `sources`.
+   */
+  recordSources: NativeRecordSourcesSchema.optional(),
 
   /**
    * Set true once the operator clicks "Enter dashboard" at the end of the
@@ -522,6 +686,10 @@ export const JinnConfigSchema = z.object({
    */
   operator: z
     .object({
+      /** Explicit product boundary. Native never silently falls back to legacy. */
+      verticalMode: z.enum(['legacy', 'native-v1']).optional(),
+      /** Stable native deployment configuration. Private keys and tokens are env-only. */
+      native: NativeOperatorConfigSchema.optional(),
       publicEndpoint: z.string().url().optional(),
       defaultPriceUsdc: z
         .string()
@@ -939,6 +1107,13 @@ export function backfillJoinedProviders(merged: Record<string, unknown>): number
   return backfilled;
 }
 
+let lastConfigMigrationReport: ConfigMigrationReport | undefined;
+
+/** The shape-v2 auto-migration report from the most recent `loadConfig` call, if it migrated. Task 4 reads it. */
+export function getLastConfigMigrationReport(): ConfigMigrationReport | undefined {
+  return lastConfigMigrationReport;
+}
+
 /**
  * Load config with resolution: env > config file > defaults.
  *
@@ -1001,6 +1176,28 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
+  {
+    // Public archive plane: env wins over the config file (regression guard — `apiBindHost`
+    // once shipped inert by reading only its env var and ignoring the config field).
+    const current = (merged.publicArchive ?? {}) as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...current };
+    let touched = false;
+    if (env['JINN_PUBLIC_ARCHIVE'] !== undefined) {
+      const raw = env['JINN_PUBLIC_ARCHIVE'].trim().toLowerCase();
+      next.enabled = raw === '' ? true : !(raw === '0' || raw === 'false' || raw === 'no');
+      touched = true;
+    }
+    if (env['JINN_PUBLIC_ARCHIVE_BIND_HOST']) {
+      next.host = env['JINN_PUBLIC_ARCHIVE_BIND_HOST'];
+      next.enabled = true;
+      touched = true;
+    }
+    if (env['JINN_PUBLIC_ARCHIVE_PORT']) {
+      next.port = Number.parseInt(env['JINN_PUBLIC_ARCHIVE_PORT'], 10);
+      touched = true;
+    }
+    if (touched) merged.publicArchive = next;
+  }
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
   if (env['JINN_HERMES_PATH'])       merged.hermesPath = env['JINN_HERMES_PATH'];
@@ -1027,12 +1224,10 @@ export function loadConfig(configPath?: string): JinnConfig {
       : undefined;
     // A URL only makes sense in http mode — when the operator points
     // JINN_DISCOVERY_URL at a host but doesn't say JINN_DISCOVERY_MODE,
-    // default mode to 'http' so the URL is actually consulted (and isn't
-    // silently dropped by the on-chain default in createDiscoveryAPI).
-    // `fallbackToOnchain` is NOT defaulted on here (since the 2026-05-23
-    // substrate incident): silent fall-through hides indexer outages and
-    // storms shared RPC. Operators opt in via JINN_DISCOVERY_FALLBACK=1 or
-    // the config file when they want it.
+    // default mode to 'http' so the URL is actually consulted by
+    // createHttpCorpusDiscovery and discovery-client. `fallbackToOnchain`
+    // remains parseable after Wave-4 D4 but is not consulted (`with-fallback`
+    // retired with `client/src/discovery/`).
     const inferredHttp = !!env['JINN_DISCOVERY_URL'] && !env['JINN_DISCOVERY_MODE'] && !prevDiscovery['mode'];
     const mode = env['JINN_DISCOVERY_MODE'] ?? (inferredHttp ? 'http' : undefined);
     const resolvedFallback = fallbackToOnchain;
@@ -1366,6 +1561,28 @@ export function loadConfig(configPath?: string): JinnConfig {
   // join via the SPA; a load-time-only backfill keeps existing files loading.
   backfillJoinedProviders(merged);
 
+  // Auto-migrate joined SolverNets / launched records into the stage-1
+  // shape-v2 keys (`claimPolicy`, `executionWiring`, `posting`). Additive,
+  // atomic, idempotent (stage-1 contract 4) — safe to call on every boot. A
+  // read-only mount degrades to a warning, matching
+  // `persistLegacySolverNetsMigration` above. See
+  // docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md Task 3.
+  try {
+    const report = migrateConfigShapeV2({ configPath: filePath });
+    if (report.migrated) {
+      const migratedRaw = existsSync(filePath)
+        ? (JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>)
+        : {};
+      merged['configShapeVersion'] = CONFIG_SHAPE_VERSION;
+      merged['claimPolicy'] = migratedRaw['claimPolicy'];
+      merged['executionWiring'] = migratedRaw['executionWiring'];
+      merged['posting'] = migratedRaw['posting'];
+      lastConfigMigrationReport = report;
+    }
+  } catch (error) {
+    console.warn(`[config] shape-v2 migration skipped: ${String(error)}`);
+  }
+
   // 3. Validate
   const result = JinnConfigSchema.safeParse(merged);
   if (!result.success) {
@@ -1393,6 +1610,14 @@ export function loadConfig(configPath?: string): JinnConfig {
   // this keeps the two L1/L2 defaults symmetric. Both chains ship ≥5 free
   // providers per issue #911.
   const parsed = result.data;
+  const usesLegacyWiring = (parsed.executionWiring ?? []).some((entry) => (
+    entry.harness.length > 0
+    || entry.model.length > 0
+    || entry.plugins.length > 0
+    || entry.credentialRef.length > 0
+    || entry.legacyManifestDigest !== undefined
+  ));
+  if (usesLegacyWiring) recordPhaseDTransitionUse('legacy-wiring-config-field');
   const defaultRpcUrls: readonly string[] = parsed.network === 'testnet'
     ? DEFAULT_TESTNET_RPC_URLS
     : DEFAULT_MAINNET_RPC_URLS;
@@ -1501,6 +1726,9 @@ const TRACKED_ENV_VARS = [
   'JINN_BALANCE_TOPUP_INTERVAL_MS',
   'JINN_API_PORT',
   'JINN_API_BIND_HOST',
+  'JINN_PUBLIC_ARCHIVE',
+  'JINN_PUBLIC_ARCHIVE_BIND_HOST',
+  'JINN_PUBLIC_ARCHIVE_PORT',
   'JINN_CLAUDE_PATH',
   'JINN_CLAUDE_MODEL',
   'JINN_HERMES_PATH',

@@ -24,6 +24,10 @@
     "drizzle-orm": "0.45.2",
     "pg": "^8.22.0"
   },
+  "resolutions": {
+    "@jinn-network/task-execution-protocol": "portal:../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../trust/core"
+  },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",
     "@types/node": "^25.9.5",
