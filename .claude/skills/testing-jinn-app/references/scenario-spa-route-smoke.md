@@ -14,18 +14,18 @@ Load every SPA route against a mocked daemon API. For each route, assert:
 
 ## Implementation location
 
-`client/test/dashboard/release-prep/spa-route-smoke.e2e.test.ts`
+`operator/test/dashboard/release-prep/spa-route-smoke.e2e.test.ts`
 
 ## Inputs
 
-- Routes list: extracted from `client/src/dashboard/spa/src/App.tsx` (the React Router config). The test imports the route table from a single source of truth.
-- Mocked daemon API: reuses the existing `mockDaemonApi(page)` helper from single-op tests (e.g. `client/test/dashboard/spa-config.e2e.test.ts`).
+- Routes list: extracted from `operator/src/dashboard/spa/src/App.tsx` (the React Router config). The test imports the route table from a single source of truth.
+- Mocked daemon API: reuses the existing `mockDaemonApi(page)` helper from single-op tests (e.g. `operator/test/dashboard/spa-config.e2e.test.ts`).
 
 ## Setup
 
 ```typescript
 import { test, expect, type Page } from '@playwright/test';
-// `mockDaemonApi` is currently private inside `client/test/dashboard/spa-config.e2e.test.ts`.
+// `mockDaemonApi` is currently private inside `operator/test/dashboard/spa-config.e2e.test.ts`.
 // Plan C/D should extract it to a shared module before this test can import.
 import { mockDaemonApi } from '../helpers/mock-daemon-api';
 import { ROUTES } from '../../../src/dashboard/spa/src/routes';   // exported list of route paths
@@ -97,4 +97,4 @@ These belong in T2.x (cross-op) and Tier 3 (real testnet) scenarios.
 ## Dependencies
 
 - The SPA must export a `ROUTES` constant from a single module so this test parameterizes correctly. If `ROUTES` doesn't exist yet, Plan C/D's implementation should add it (small refactor — extract route table from App.tsx).
-- `mockDaemonApi` helper — currently a private function inside `client/test/dashboard/spa-config.e2e.test.ts:~130` (single-arg, hardcoded port 7332). Plan C/D should extract it to a shared module (e.g. `client/test/dashboard/helpers/mock-daemon-api.ts`) before the multi-op tests can import it.
+- `mockDaemonApi` helper — currently a private function inside `operator/test/dashboard/spa-config.e2e.test.ts:~130` (single-arg, hardcoded port 7332). Plan C/D should extract it to a shared module (e.g. `operator/test/dashboard/helpers/mock-daemon-api.ts`) before the multi-op tests can import it.

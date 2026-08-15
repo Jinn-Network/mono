@@ -7,7 +7,7 @@ Manual smoke for the daemon-resident harvest loop: local benchmark-repo clone �
 Before operator trial, run the chained integration test (real `git` fixture; mock Docker eval + IPFS):
 
 ```bash
-cd client && yarn task-creator:harvest-e2e
+cd operator && yarn task-creator:harvest-e2e
 ```
 
 This exercises: `runHarvestTick` → empirical F2P/P2P → `validatePoolInstances` admission → `uploadToIpfs` backfill → `loadMintedPoolTasks` → `RoutingTaskRowFetcher` → synthetic-claim + escrow eligibility inputs.
@@ -18,12 +18,12 @@ It does **not** pull eval images or hit a live IPFS gateway.
 
 After the orchestration test, run the live harvest verifier against a local clone
 whose fix commit is aligned with a scorable benchmark instance (see
-`client/scripts/harvest-e2e-live-verify.ts`):
+`operator/scripts/harvest-e2e-live-verify.ts`):
 
 ```bash
 # Example: probabl-ai/skore echo seeded from pool patches at
 # ~/.jinn-client/harvest-repos/skore-e2e
-cd client && yarn task-creator:harvest-e2e-live
+cd operator && yarn task-creator:harvest-e2e-live
 ```
 
 Requires upstream `scripts/eval.py` to emit `passed_actual` / `failed_actual` on
@@ -41,7 +41,7 @@ same-repo validated-pool instance (`findSourceInstanceForRepo`). Unit tests
 mock `EvalRunner`; this script does not.
 
 ```bash
-cd client && yarn task-creator:session-echo-live
+cd operator && yarn task-creator:session-echo-live
 ```
 
 Default mode `borrow-mismatch` seeds a session whose `acceptedDiff` is the gold
@@ -150,7 +150,7 @@ export JINN_HARVEST_SOURCES=commits,sessions
 ## Run
 
 ```bash
-cd client && yarn build && node dist/bin/jinn.js run
+cd operator && yarn build && node dist/bin/jinn.js run
 ```
 
 ## Expected log lines

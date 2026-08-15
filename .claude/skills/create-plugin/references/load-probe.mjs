@@ -7,8 +7,8 @@
  * actually load" gate — it exercises exactly what the daemon does at boot:
  * `loadSolverPlugins([{ source: 'file:<path>' }])` → `forSolverType(<target>)`.
  *
- * Prerequisite: the client must be BUILT (`cd client && yarn build`) so the
- * compiled loader exists at `client/dist/plugins/index.js`. The script
+ * Prerequisite: the client must be BUILT (`cd operator && yarn build`) so the
+ * compiled loader exists at `operator/dist/plugins/index.js`. The script
  * resolves the built loader relative to the repo root, not from npm.
  *
  * Usage:
@@ -50,7 +50,7 @@ const loaderPath = join(repoRoot, 'client', 'dist', 'plugins', 'index.js');
 
 if (!existsSync(loaderPath)) {
   fail(
-    `built loader not found at ${loaderPath} — run \`cd client && yarn build\` first`,
+    `built loader not found at ${loaderPath} — run \`cd operator && yarn build\` first`,
   );
 }
 

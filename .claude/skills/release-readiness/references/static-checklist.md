@@ -4,7 +4,7 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 
 ## C1 — operator-app-principle
 
-**Triggers when:** diff touches `client/src/dashboard/` or operator-facing copy.
+**Triggers when:** diff touches `operator/src/dashboard/` or operator-facing copy.
 
 **Where:** judgmental subagent.
 
@@ -14,7 +14,7 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 
 ## C2 — bootstrap-phase change
 
-**Triggers when:** diff touches `client/src/earning/bootstrap.ts` or phase definitions.
+**Triggers when:** diff touches `operator/src/earning/bootstrap.ts` or phase definitions.
 
 **Where:** main (grep).
 
@@ -26,11 +26,11 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 
 **Where:** judgmental subagent.
 
-**Subagent looks for:** any new file in `client/src/harnesses/impls/` that lacks an `isReady()` implementation; or changes to `client/src/api/server.ts` `/v1/harnesses/*` routes.
+**Subagent looks for:** any new file in `operator/src/harnesses/impls/` that lacks an `isReady()` implementation; or changes to `operator/src/api/server.ts` `/v1/harnesses/*` routes.
 
 ## C4 — eval admission / verdict recheck
 
-**Triggers when:** diff touches eval admission or substrate hashing (`client/src/solver-types/_swe-rebench-v2-differential-admission.ts`, `client/src/solver-types/_swe-rebench-v2-substrate.ts`).
+**Triggers when:** diff touches eval admission or substrate hashing (`operator/src/solver-types/_swe-rebench-v2-differential-admission.ts`, `operator/src/solver-types/_swe-rebench-v2-substrate.ts`).
 
 **Where:** judgmental subagent.
 
@@ -70,7 +70,7 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 
 ## C9 — publish-guard check-run contract
 
-**Triggers when:** diff touches `.github/workflows/npm-publish.yml` publish guard, `.github/workflows/hermetic-gate.yml`, `.github/workflows/environment-suite.yml`, or `client/scripts/release/post-check-run-verdict.mjs`.
+**Triggers when:** diff touches `.github/workflows/npm-publish.yml` publish guard, `.github/workflows/hermetic-gate.yml`, `.github/workflows/environment-suite.yml`, or `operator/scripts/release/post-check-run-verdict.mjs`.
 
 **Where:** main (grep).
 
@@ -80,7 +80,7 @@ Mechanical checks that fire deterministically against the diff. Each item is eit
 
 - The publish guard queries exactly the two contexts `hermetic-gate` **and** `environment-suite` (no other names), bound to the release SHA, and requires both `success`. It must NOT re-run any test or parse a marker.
 - The `environment-suite` requirement may be waived ONLY via the transitional repo variable `JINN_ENVIRONMENT_SUITE_WAIVED == 'true'`, and the waiver must be logged loudly. `hermetic-gate` is likewise waivable ONLY via the transitional repo variable `JINN_HERMETIC_GATE_WAIVED == 'true'` (in place until the Anvil snapshot fixture lands); both waivers default unset and, when unset, both check-runs are hard-required.
-- The two workflows post their verdicts through the single shared poster `client/scripts/release/post-check-run-verdict.mjs` with the locked verdict-JSON shape (`{ context, headSha, conclusion, scenarios[], summary }`) and the exact context names above.
+- The two workflows post their verdicts through the single shared poster `operator/scripts/release/post-check-run-verdict.mjs` with the locked verdict-JSON shape (`{ context, headSha, conclusion, scenarios[], summary }`) and the exact context names above.
 
 Any drift — a third context name, a re-introduced marker parse, a re-run step, a waiver that isn't gated on the repo variable, or a poster bypass — is a finding.
 
@@ -106,8 +106,8 @@ This is the recursion that keeps the system honest. Every release sweeps the ski
 
 ## C12 — release-gate-scenario soundness
 
-**Triggers when:** the diff adds or changes release-gate code under `client/test/release/**`
-or `client/scripts/release/**` (Tier 1/2/3 scenarios, orchestrators, helpers).
+**Triggers when:** the diff adds or changes release-gate code under `operator/test/release/**`
+or `operator/scripts/release/**` (Tier 1/2/3 scenarios, orchestrators, helpers).
 
 **Where:** main (grep/AST) — semi-mechanical cross-reference.
 
@@ -119,7 +119,7 @@ had both in its diff and did not catch them: the C1-C12 checks target the *produ
 against canon, not the soundness of the *gate infrastructure* itself.
 
 **Check:** for each new/changed gate scenario, cross-reference every external interface
-it calls — `fetch()` URLs against the actual route table in `client/src/api/server.ts`;
+it calls — `fetch()` URLs against the actual route table in `operator/src/api/server.ts`;
 contract calls against deployed ABIs; CLI invocations against real commands. Any
 reference to an interface that does not exist is a finding.
 

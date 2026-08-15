@@ -2,12 +2,12 @@
 
 How an operator running the native evaluator role host points `evaluator.deploymentModule`
 at a real, digest-pinned production module. Target audience: you are filling in the
-`evaluator` block of `native-config.json` (`client/src/daemon/native-product-config.ts:88-93`)
+`evaluator` block of `native-config.json` (`operator/src/daemon/native-product-config.ts:88-93`)
 for a `role: "evaluator"` deployment.
 
 ## What ships
 
-`client/deployments/evaluator/` holds two committed, digest-pinnable artifacts:
+`operator/deployments/evaluator/` holds two committed, digest-pinnable artifacts:
 
 - `prediction-market-deployment.mjs` — the production ES module. It exports
   `evaluationHarnessDeployment` with exactly one registration
@@ -27,7 +27,7 @@ therefore their digests) are exactly what is in git. You do not need to run `yar
 to compute or verify either digest, though the file must of course be present on disk at
 the path you give `deploymentModule` (true for a repo checkout, and true for the
 npm-published package since `deployments/` ships unconditionally — see
-`client/package.json`'s `files` array).
+`operator/package.json`'s `files` array).
 
 ## Config wiring
 
@@ -41,7 +41,7 @@ npm-published package since `deployments/` ships unconditionally — see
 ```
 
 `deploymentModule` must be an absolute path or a `file:` URL
-(`client/src/daemon/native-evaluator-composition.ts:164-174`). Resolve the absolute path to
+(`operator/src/daemon/native-evaluator-composition.ts:164-174`). Resolve the absolute path to
 your installed copy:
 
 - **Repo checkout / contributor dev**: `<repo>/client/deployments/evaluator/prediction-market-deployment.mjs`.
@@ -57,13 +57,13 @@ composition layer uses to verify them). A plain `shasum`/`sha256sum` one-liner i
 sufficient and is exactly what CI pins against:
 
 ```bash
-printf 'sha256:%s\n' "$(shasum -a 256 client/deployments/evaluator/prediction-market-deployment.mjs | cut -d' ' -f1)"
-printf 'sha256:%s\n' "$(shasum -a 256 client/deployments/evaluator/prediction-market-evaluation-method.v1.json | cut -d' ' -f1)"
+printf 'sha256:%s\n' "$(shasum -a 256 operator/deployments/evaluator/prediction-market-deployment.mjs | cut -d' ' -f1)"
+printf 'sha256:%s\n' "$(shasum -a 256 operator/deployments/evaluator/prediction-market-evaluation-method.v1.json | cut -d' ' -f1)"
 ```
 
 The same values are available programmatically (and are what
-`client/test/native-evaluator/prediction-deployment.test.ts` asserts against) via
-`client/src/native-evaluator/deployment-paths.ts`:
+`operator/test/native-evaluator/prediction-deployment.test.ts` asserts against) via
+`operator/src/native-evaluator/deployment-paths.ts`:
 
 ```ts
 import {
@@ -121,25 +121,25 @@ both processes: the spawned child imports the *exact same absolute path* as the 
 }
 ```
 
-Create it with `writePredictionEvaluatorSidecar` (`client/src/native-evaluator/deployment-paths.ts`)
+Create it with `writePredictionEvaluatorSidecar` (`operator/src/native-evaluator/deployment-paths.ts`)
 or by hand at
-`client/deployments/evaluator/prediction-market-deployment.local.json` (published-package
+`operator/deployments/evaluator/prediction-market-deployment.local.json` (published-package
 path: alongside the resolved `deploymentModule` path above).
 
 **It is never git-committed, and never published.** These are two separate mechanisms,
 not one:
 
-- `client/.gitignore` excludes it from git commits. This governs `git status`/`git add`
+- `operator/.gitignore` excludes it from git commits. This governs `git status`/`git add`
   only — it says nothing about what `npm pack`/`npm publish` ship.
-- `client/package.json`'s `files` array includes `/deployments/` unconditionally (needed
+- `operator/package.json`'s `files` array includes `/deployments/` unconditionally (needed
   for the two committed artifacts above), and this package **also ships a
-  `client/.npmignore`** — whose mere presence makes npm ignore `.gitignore` entirely for
+  `operator/.npmignore`** — whose mere presence makes npm ignore `.gitignore` entirely for
   packing decisions. Excluding the sidecar from the tarball therefore needs its own,
   separate mechanism: a negated pattern in that same `files` array,
   `"!/deployments/evaluator/*.local.json"`. This is the only thing that actually keeps a
   sidecar written at this path out of a published tarball (verified with
   `npm pack --dry-run`, and pinned by
-  `client/test/native-evaluator/prediction-deployment.test.ts`'s "npm packaging" describe
+  `operator/test/native-evaluator/prediction-deployment.test.ts`'s "npm packaging" describe
   block — write a real sidecar, pack, assert it's absent from the file list). Without
   that negation, a contributor's own `agent` IRI (and, depending on how the sidecar path
   resolves, a local filesystem path) would ship to every downstream installer, and every
@@ -203,7 +203,7 @@ launcher's small fixed allowlist (see above), which never forwards `HOME`. If th
 process ever runs with an overridden `HOME` — a containerized deployment, a systemd unit
 with `Environment=HOME=...`, or (concretely, reproduced while building this) **this
 repo's own test suite**, which isolates `HOME` per test file
-(`client/test/_support/isolate-home.ts`) — the child's `os.homedir()` falls back to the
+(`operator/test/_support/isolate-home.ts`) — the child's `os.homedir()` falls back to the
 OS user database and silently resolves to somewhere else. Parent and child would then be
 reading the identity from two *different* files, with no error at all if both happen to
 exist. Only a location derived from this module's own `import.meta.url` is structurally

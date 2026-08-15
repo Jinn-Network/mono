@@ -446,7 +446,7 @@ cleanup_facts() {
 trap cleanup_facts EXIT
 (cd "$RUN_DIR" && shasum -a 256 -c preregistration.json.sha256)
 (cd "$RUN_DIR" && shasum -a 256 -c cell-evidence.sha256)
-yarn --cwd client attribution:export-facts \
+yarn --cwd operator attribution:export-facts \
   --prereg "$PREREG" \
   --evidence-manifest "$CELL_EVIDENCE" \
   --completed-at "$FACTS_COMPLETED_AT" > "$FACTS_TMP"
@@ -549,11 +549,11 @@ verify() {
 }
 trap cleanup EXIT
 verify
-yarn --cwd client attribution:analyze \
+yarn --cwd operator attribution:analyze \
   --prereg "$PREREG" --facts "$FACTS" \
   --evidence-manifest "$CELL_EVIDENCE" --format json > "$TMP_JSON"
 verify
-yarn --cwd client attribution:analyze \
+yarn --cwd operator attribution:analyze \
   --prereg "$PREREG" --facts "$FACTS" \
   --evidence-manifest "$CELL_EVIDENCE" --format markdown > "$TMP_MD"
 ln "$TMP_JSON" "$READOUT_JSON"
@@ -633,11 +633,11 @@ test ! -e "$REPEAT_JSON"
 test ! -e "$REPEAT_MD"
 trap 'rm -f "$REPEAT_JSON" "$REPEAT_MD"' EXIT
 verify
-yarn --cwd client attribution:analyze \
+yarn --cwd operator attribution:analyze \
   --prereg "$PREREG" --facts "$FACTS" \
   --evidence-manifest "$CELL_EVIDENCE" --format json > "$REPEAT_JSON"
 verify
-yarn --cwd client attribution:analyze \
+yarn --cwd operator attribution:analyze \
   --prereg "$PREREG" --facts "$FACTS" \
   --evidence-manifest "$CELL_EVIDENCE" --format markdown > "$REPEAT_MD"
 cmp -s "$READOUT_JSON" "$REPEAT_JSON"
@@ -786,7 +786,7 @@ verify() {
 }
 test ! -e "$ERROR_LOG"
 verify
-if yarn --cwd client attribution:analyze \
+if yarn --cwd operator attribution:analyze \
   --prereg "$PREREG" --facts "$FACTS" \
   --evidence-manifest "$CELL_EVIDENCE" --format json \
   > /dev/null 2> "$ERROR_LOG"; then
@@ -879,7 +879,7 @@ cleanup_recovery() {
 trap cleanup_recovery EXIT
 (cd "$RUN_DIR" && shasum -a 256 -c preregistration.json.sha256)
 (cd "$RUN_DIR" && shasum -a 256 -c cell-evidence.sha256)
-yarn --cwd client attribution:export-facts \
+yarn --cwd operator attribution:export-facts \
   --prereg "$PREREG" \
   --evidence-manifest "$CELL_EVIDENCE" \
   --completed-at "$FACTS_COMPLETED_AT" > "$RECOVERED_TMP"
@@ -901,7 +901,7 @@ trap - EXIT
 (cd "$RUN_DIR" && shasum -a 256 -c cell-evidence.sha256)
 shasum -a 256 -c "$RECOVERED_DIGEST"
 verify
-yarn --cwd client attribution:analyze \
+yarn --cwd operator attribution:analyze \
   --prereg "$PREREG" --facts "$RECOVERED_FACTS" \
   --evidence-manifest "$CELL_EVIDENCE" --format json
 ```

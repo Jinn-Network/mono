@@ -16,7 +16,7 @@ sufficient — the range has to be deliberately re-offered.
 `options.startBlock ?? finalized.blockNumber`, and nothing in this repository ever sets
 `startBlock`. A wiped `log_cursors` row therefore jumps to the **current finalized head** and skips
 the range a second time, silently. There is a regression test pinning exactly this
-(`client/test/daemon/projector-replay.test.ts`, "DELETING the cursor row skips the range").
+(`operator/test/daemon/projector-replay.test.ts`, "DELETING the cursor row skips the range").
 
 ## What the rewind itself writes
 
@@ -122,7 +122,7 @@ publish because it can finally see the events — which is the point of the proc
    **Confirm RPC health too, immediately before `--apply`.** The requester's role gate reads the
    coordinator twice per `SolutionDeliveryClaimed`, and the announce leg's counterparty resolver
    reads the same anchor. Since #2647 a failed read is no longer mistaken for absence:
-   `buildReadTodayDeliveryFacts` (`client/src/daemon/composition-root.ts`) reports `'unavailable'`
+   `buildReadTodayDeliveryFacts` (`operator/src/daemon/composition-root.ts`) reports `'unavailable'`
    distinctly from `undefined`, and the role now settles *before* that read, so a mid-tick blip on
    the OBSERVE side is a replayable drop rather than a false `rejected`/`invalid-reference`
    terminal. The pre-flight is still mandatory, for the leg that has no such affordance: the
@@ -140,7 +140,7 @@ publish because it can finally see the events — which is the point of the proc
    Both signatures carry their **output** types on purpose. `cast call` prints raw returndata when
    the return signature is omitted, and `getAttempt` returns a struct — without the tuple you get an
    undecoded blob and have to count 32-byte words to find the field you came for. The tuple is
-   `AttemptRecord` as declared in `client/src/daemon/composition-root.ts`'s `GET_ATTEMPT_VIEW_ABI`:
+   `AttemptRecord` as declared in `operator/src/daemon/composition-root.ts`'s `GET_ATTEMPT_VIEW_ABI`:
    `(taskId, attemptIndex, operator, requestId, solutionCidDigest, solutionWeight, verdictCount,
    status)`.
 
@@ -173,7 +173,7 @@ publish because it can finally see the events — which is the point of the proc
    Nothing is written.
 
    ```bash
-   cd client
+   cd operator
    yarn projector-replay \
      --state ~/.jinn-client/venue/venue.db \
      --rpc https://base-sepolia.publicnode.com \

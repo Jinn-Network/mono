@@ -12,21 +12,21 @@ This is the gate that should have caught the #310 silent breakage (donation-cons
 
 ## Implementation location
 
-`client/test/release/tier-2/T2.1-cross-op-donation.ts`
+`operator/test/release/tier-2/T2.1-cross-op-donation.ts`
 
 ## Real API surface
 
-There is **no `/v1/corpus/*` REST surface** — corpus production is a side effect of task execution, not a REST call. T2.1 drives the surface operators actually use, proven by `client/test/e2e/corpus-x402.ts`:
+There is **no `/v1/corpus/*` REST surface** — corpus production is a side effect of task execution, not a REST call. T2.1 drives the surface operators actually use, proven by `operator/test/e2e/corpus-x402.ts`:
 
-- `GET /v1/artifacts/:sha256/content` — x402-gated artifact serving (`client/src/x402/handler.ts`). Keyed by sha256, dynamic per-row price, real 402 → verify → settle → 200 + `PAYMENT-RESPONSE` header.
-- The `Corpus` library (`client/src/corpus/index.ts`) — envelope discovery via the injected `DiscoveryAPI` (Ponder HTTP primary + on-chain `MetadataSet`-log floor via `withFallback`).
-- `acquireArtifactWithPayment` (`client/src/x402/acquire.ts`) — the buyer-side x402 dance.
+- `GET /v1/artifacts/:sha256/content` — x402-gated artifact serving (`operator/src/x402/handler.ts`). Keyed by sha256, dynamic per-row price, real 402 → verify → settle → 200 + `PAYMENT-RESPONSE` header.
+- The `Corpus` library (`operator/src/corpus/index.ts`) — envelope discovery via the injected `DiscoveryAPI` (Ponder HTTP primary + on-chain `MetadataSet`-log floor via `withFallback`).
+- `acquireArtifactWithPayment` (`operator/src/x402/acquire.ts`) — the buyer-side x402 dance.
 
 Note the production daemon does **not** wire x402 onto its own `ApiServer` (`DaemonConfig.x402` is never set in `main.ts`), so the x402-gated serving route only exists on an `ApiServer` started with an explicit `x402` config. T2.1 hosts the producer's `ApiServer` + served-artifact store inside the substrate workspace, exactly as `corpus-x402.ts` does.
 
 ## Setup
 
-- substrate workspace + Anvil fork of Base Sepolia + op-a/op-b daemons via `setupTier2Scenario({ scenarioId: 'T2.1', portBase: 7750 })` (`client/test/release/tier-2/tier-2-helpers.ts`)
+- substrate workspace + Anvil fork of Base Sepolia + op-a/op-b daemons via `setupTier2Scenario({ scenarioId: 'T2.1', portBase: 7750 })` (`operator/test/release/tier-2/tier-2-helpers.ts`)
 - producer (op-a) and consumer (op-b) are deterministic test keys funded on the fork via anvil cheatcodes — `anvil_setBalance` for producer gas, USDC storage-slot manipulation for consumer USDC
 - the producer's served-artifact store is seeded directly (`saveServedArtifact` + a hand-built `SignedEnvelope`) rather than by driving a full task execution — the latter adds Anvil task-lifecycle flakiness for no extra coverage of the donation handshake
 
@@ -74,10 +74,10 @@ Note the production daemon does **not** wire x402 onto its own `ApiServer` (`Dae
 
 ## Dependencies
 
-- Substrate workspace via `substrate-copy` (`client/scripts/release/substrate-copy.ts`) — needs the gold operator homes under `~/jinn-dev/operators/`
+- Substrate workspace via `substrate-copy` (`operator/scripts/release/substrate-copy.ts`) — needs the gold operator homes under `~/jinn-dev/operators/`
 - `BASE_SEPOLIA_RPC_URL` set to a Base Sepolia RPC endpoint (the scenario forks it; absent → clean `skip`)
 - Built `dist/bin/jinn.js` (the daemons are spawned subprocesses)
-- The x402-gated serving route, `Corpus` library, and `acquireArtifactWithPayment` — all proven by `client/test/e2e/corpus-x402.ts`
+- The x402-gated serving route, `Corpus` library, and `acquireArtifactWithPayment` — all proven by `operator/test/e2e/corpus-x402.ts`
 
 ## What this scenario does NOT catch
 

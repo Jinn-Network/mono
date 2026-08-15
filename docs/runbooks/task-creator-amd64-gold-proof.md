@@ -4,10 +4,10 @@ Before any rung-1 mint posts to the network, prove one minted instance grades th
 
 ## CI (preferred)
 
-On every `client/**` PR, GitHub Actions runs the proof on `ubuntu-latest` (native linux/amd64):
+On every `operator/**` PR, GitHub Actions runs the proof on `ubuntu-latest` (native linux/amd64):
 
 ```bash
-cd client
+cd operator
 yarn task-creator:amd64-gold-proof
 ```
 
@@ -18,7 +18,7 @@ Workflow: `.github/workflows/ci.yml` → `task-creator-amd64-gold-proof` job.
 The gate proves grading semantics, not HuggingFace uptime. By default the
 script makes **zero HF network calls**: the known instance's pool task + full
 datasets-server row load from the committed fixture at
-`client/test/release/tier-2/fixtures/known-instance-hf.json`. A missing or
+`operator/test/release/tier-2/fixtures/known-instance-hf.json`. A missing or
 malformed fixture fails loud (naming the record command below) — it never
 silently falls back to a live fetch.
 
@@ -36,13 +36,13 @@ silently falls back to a live fetch.
 - Native **linux/amd64** (not Apple Silicon / QEMU emulation)
 - Docker (linux/amd64)
 - Python 3
-- `yarn build` in `client/`
+- `yarn build` in `operator/`
 - `jinn harnesses enable swe-rebench-v2-evaluator` (the script auto-enables if missing)
 
 ### Steps
 
 ```bash
-cd client
+cd operator
 yarn build
 yarn task-creator:amd64-gold-proof
 ```

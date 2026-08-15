@@ -106,7 +106,7 @@ is not re-reading it.
 - [ ] After a claim settles, the "jinn earned" HeroStat updates without a reload.
 - [ ] The value is still correct after a reload (no regression).
 
-**Files/components.** `client/src/dashboard/spa/` — HeroStats, and the
+**Files/components.** `operator/src/dashboard/spa/` — HeroStats, and the
 claim-status query that feeds it.
 
 **Base / stacking.** None — independent of all in-flight work.

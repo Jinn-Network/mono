@@ -115,7 +115,7 @@ and re-validate.)
 ## Step 5 — Load-verify (AC#4)
 
 This is the "did it actually load" gate — it runs the **real daemon loader**.
-Prereq: the client is built (`cd client && yarn build`); if not, build it.
+Prereq: the client is built (`cd operator && yarn build`); if not, build it.
 
 ```
 node .claude/skills/create-plugin/references/load-probe.mjs <abs-targetRoot> <target>
@@ -192,6 +192,6 @@ Tell them where the plug-in's effect shows up:
 | Adding `jinn.solverType` or `jinn.schemas` to the manifest | Remove them — the SolverNet contract owns those; validator rejects them |
 | Probing a runtime plug-in with the SolverType as `<target>` | Runtime plugins resolve under `jinn.runtime`, not a SolverType |
 | Publishing or joining without confirmation | Both write irreversible / on-chain / config state — gate behind an explicit yes |
-| Running load-probe before `yarn build` | The probe imports `client/dist/plugins/index.js`; build first |
+| Running load-probe before `yarn build` | The probe imports `operator/dist/plugins/index.js`; build first |
 | Asking more than four interview questions | Infer pattern + SolverType from the person's language; default `swe-rebench-v2.v1` |
 | Framing an RL plug-in as "the policy" | A plug-in is a tool/skill contribution; the harness is the policy (Step 0) |

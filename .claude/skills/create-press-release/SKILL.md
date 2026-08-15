@@ -38,7 +38,7 @@ Read in this order: `PRINCIPLES.md`, `BRAND.md`, `mono/CLAUDE.md` §External Com
 
 Before intake, determine whether the milestone is **already achieved**.
 
-- Run the milestone's check script (e.g. `client/scripts/check-milestone-N.ts`) or query the indexer for the gate condition. State the result: HIT or NOT HIT, with the number.
+- Run the milestone's check script (e.g. `operator/scripts/check-milestone-N.ts`) or query the indexer for the gate condition. State the result: HIT or NOT HIT, with the number.
 - **If achieved:** proceed normally — a standard announcement, written against live receipts.
 - **If NOT achieved:** stop and confirm with the user that this is a **proactive, Amazon-style "working-backwards" release** — *"what we will announce when the milestone is hit."* Do not draft a not-yet-true announcement without that explicit confirmation.
 
@@ -62,8 +62,8 @@ Ask the user three things in a single `AskUserQuestion` block:
 
 Dispatch an `Explore` agent with breadth `very thorough` to map the relevant evidence surfaces. Cover:
 
-- **Contracts.** Find canonical addresses for all contracts involved in the milestone. Check `client/deployments/*.json`, `client/src/earning/contracts.ts`, recent `spec/*.md`. Cite address + the deployment-JSON path it came from. Never paraphrase addresses.
-- **Dashboard surfaces.** Walk `client/src/dashboard/spa/src/pages/` and `client/src/dashboard/spa/src/api/`. Identify the route + card + `data-testid` that renders each user-visible number the release will cite.
+- **Contracts.** Find canonical addresses for all contracts involved in the milestone. Check `operator/deployments/*.json`, `operator/src/earning/contracts.ts`, recent `spec/*.md`. Cite address + the deployment-JSON path it came from. Never paraphrase addresses.
+- **Dashboard surfaces.** Walk `operator/src/dashboard/spa/src/pages/` and `operator/src/dashboard/spa/src/api/`. Identify the route + card + `data-testid` that renders each user-visible number the release will cite.
 - **Indexer + API.** The public Ponder indexer at `https://jinn-indexer-production.up.railway.app` exposes both REST (`/explorer/network`, `/explorer/operators`, `/explorer/operator/:addr`) and GraphQL (`/graphql`). The local daemon exposes `/v1/status`. Both are evidence sources.
 - **Recent commits.** `git log --oneline -30` plus targeted greps for the milestone's vocabulary. Cite SHAs.
 - **Ponder schema.** `packages/indexer/ponder.schema.ts` is the authoritative shape of indexer entities. Use it to find the right table for the milestone (e.g. `rewardDistribution` for tJINN claims, `attempt` for solver activity, `verdict` for evaluator activity).

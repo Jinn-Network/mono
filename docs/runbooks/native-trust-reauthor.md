@@ -11,7 +11,7 @@ It was written for one specific widening — the three `*-discovery` roles gaini
 A role's scope list is signed *inside* the KeyBinding envelope, and it is checked in two places at
 boot: `RoleIdentitySet.open` compares the resolved binding's `scope` against the requirements table
 and refuses on any missing entry (`native role "<role>" binding lacks required <scope> scope` —
-pinned by `client/test/daemon/role-identities.test.ts`), and `verifyRoleBinding` then runs trust-core
+pinned by `operator/test/daemon/role-identities.test.ts`), and `verifyRoleBinding` then runs trust-core
 §7.5 once per required family. Neither reads the requirements table from the catalog, so an old
 catalog and new code disagree, and the daemon fails closed.
 
@@ -70,6 +70,6 @@ After the re-run, before restarting the fleet:
 
 1. The daemon boots — `RoleIdentitySet.open` is the check that was failing.
 2. Cross-operator discovery resolves. The pinned regression for this is
-   `client/test/daemon/trust-authoring-round-trip.test.ts` ("cross-operator discovery key resolution
+   `operator/test/daemon/trust-authoring-round-trip.test.ts` ("cross-operator discovery key resolution
    over a real catalog"), which drives `createTrustAdapter(...).keys.resolve` over a two-operator
    authored catalog and asserts the discovery keys come back rather than an empty array.

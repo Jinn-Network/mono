@@ -1,31 +1,31 @@
 # Multi-op Playwright template
 
-For automated regression coverage of two-operator flows. Tests live under `client/test/dashboard/multi-op/`. Pattern below mirrors the existing single-op `client/test/dashboard/spa-config.e2e.test.ts` but with two daemons + two Playwright pages.
+For automated regression coverage of two-operator flows. Tests live under `operator/test/dashboard/multi-op/`. Pattern below mirrors the existing single-op `operator/test/dashboard/spa-config.e2e.test.ts` but with two daemons + two Playwright pages.
 
 > **Prerequisites — not yet on the Plan B branch.**
 > - **Plan A's `substrate-copy.ts`.** The templates below import `copyWorkspace`
->   from `client/scripts/release/substrate-copy.ts`. That file is a Plan A
+>   from `operator/scripts/release/substrate-copy.ts`. That file is a Plan A
 >   artifact and does not exist on this branch.
 > - **A shared, port-aware `mockDaemonApi`.** The templates call
 >   `mockDaemonApi(page, { port })` — a two-arg form. The current
 >   `mockDaemonApi` is a private single-arg function inside
->   `client/test/dashboard/spa-config.e2e.test.ts` with the port hardcoded to
+>   `operator/test/dashboard/spa-config.e2e.test.ts` with the port hardcoded to
 >   7332. It must first be extracted to a shared module (e.g.
->   `client/test/dashboard/helpers/mock-daemon-api.ts`) and extended to accept
+>   `operator/test/dashboard/helpers/mock-daemon-api.ts`) and extended to accept
 >   a `port` argument. **Plan C does this extraction.** Until both land, the
 >   mocked variant of these templates will not compile.
 
 ## Template
 
 ```typescript
-// client/test/dashboard/multi-op/<scenario>.e2e.test.ts
+// operator/test/dashboard/multi-op/<scenario>.e2e.test.ts
 import { test, expect, type Page } from '@playwright/test';
 import { spawnMultiOpDaemons, type MultiOpHandle } from '../../helpers/multi-op-daemon';
 import { copyWorkspace } from '../../../scripts/release/substrate-copy';
 // `mockDaemonApi` is currently a private function inside
-// `client/test/dashboard/spa-config.e2e.test.ts` (see line ~130). Before
+// `operator/test/dashboard/spa-config.e2e.test.ts` (see line ~130). Before
 // landing multi-op tests, Plan C/D needs to extract it to a shared module —
-// e.g. `client/test/dashboard/helpers/mock-daemon-api.ts` — and accept a
+// e.g. `operator/test/dashboard/helpers/mock-daemon-api.ts` — and accept a
 // `port` argument (the single-op version is hardcoded to 7332).
 import { mockDaemonApi } from '../helpers/mock-daemon-api';
 
@@ -108,7 +108,7 @@ No `mockDaemonApi` call. Pages talk to the real daemons started by `spawnMultiOp
 
 ## Helper conventions
 
-For tests that recur, lift the daemon spawn into a fixture file under `client/test/dashboard/multi-op/fixtures/`. Example:
+For tests that recur, lift the daemon spawn into a fixture file under `operator/test/dashboard/multi-op/fixtures/`. Example:
 
 ```typescript
 // fixtures/two-substrate-ops.ts
@@ -155,15 +155,15 @@ export const test = base.extend<{ daemons: MultiOpHandle; opAUrl: string; opBUrl
 
 Single multi-op file:
 ```bash
-cd client && yarn build && yarn playwright test --config=playwright.config.ts test/dashboard/multi-op/<scenario>.e2e.test.ts
+cd operator && yarn build && yarn playwright test --config=playwright.config.ts test/dashboard/multi-op/<scenario>.e2e.test.ts
 ```
 
 All multi-op:
 ```bash
-cd client && yarn build && yarn playwright test --config=playwright.config.ts test/dashboard/multi-op/
+cd operator && yarn build && yarn playwright test --config=playwright.config.ts test/dashboard/multi-op/
 ```
 
 Sequential (avoid RPC saturation):
 ```bash
-cd client && yarn playwright test --config=playwright.config.ts --workers=1 test/dashboard/multi-op/
+cd operator && yarn playwright test --config=playwright.config.ts --workers=1 test/dashboard/multi-op/
 ```

@@ -151,7 +151,7 @@ If you hit it:
 The regression suite pins one fully-stated fixture tree so a second
 implementation can check itself against this one without running it. Tree,
 contents, and per-file hashes are in
-`client/test/harnesses/hash-profile.test.ts`; the tree hashes under
+`operator/test/harnesses/hash-profile.test.ts`; the tree hashes under
 `learner-public.v1` to:
 
 ```
@@ -166,7 +166,7 @@ are cross-operator distribution and are not in this change. This note covers the
 local identity scheme only.
 
 Named so it is not discovered later: the checkpoint publish path
-(`client/src/cli/commands/checkpoint.ts`) still hashes through an injected
+(`operator/src/cli/commands/checkpoint.ts`) still hashes through an injected
 one-argument `hashImplStateDir(dirPath)` dependency and therefore does **not**
 use the profile. That path is a stub today — it pins empty bytes to IPFS — and
 #2119 owns making it real, at which point `harness.checkpoint.v2`'s required

@@ -3,7 +3,7 @@
 Automates the "human scraping each host" method the #2380 gap analysis called out, and produces
 the durable receipt that backs the Phase D manifest's zero-use claim
 (`architecture/transitions/phase-d-native-operator.v1.json`). See that manifest, the issue
-(#2380), and `client/src/monitoring/phase-d-observation-window.ts` for the underlying model.
+(#2380), and `operator/src/monitoring/phase-d-observation-window.ts` for the underlying model.
 
 ## What it proves, and what it does not
 
@@ -88,7 +88,7 @@ Two source kinds:
   unauthenticated endpoint (not recommended off localhost).
 - `file-snapshot` — a native instance's durable status snapshot
   (`<stateDir>/phase-d-status-snapshot.v1.json`, written by
-  `client/src/daemon/native-phase-d-observability.ts`'s periodic loop — native has no
+  `operator/src/daemon/native-phase-d-observability.ts`'s periodic loop — native has no
   `/v1/status`). The path must be reachable from wherever the collector runs (a shared/mounted
   volume, or run the collector on the host itself).
 
@@ -151,7 +151,7 @@ duplicates and never trusts a merge whose entries disagree about `observationWin
 ## Running it
 
 ```bash
-cd client
+cd operator
 yarn phase-d-observe -- --fleet ./phase-d-fleet.json --receipt ./phase-d-observation-receipt.json
 ```
 
@@ -239,7 +239,7 @@ window is dated, not traffic-triggered, so more-than-daily collection buys nothi
 
 ```
 cron schedule: 0 9 * * *
-start command: cd client && yarn phase-d-observe -- --fleet /etc/jinn/phase-d-fleet.json --receipt /var/jinn/phase-d-observation-receipt.json
+start command: cd operator && yarn phase-d-observe -- --fleet /etc/jinn/phase-d-fleet.json --receipt /var/jinn/phase-d-observation-receipt.json
 ```
 
 Set the `*_STATUS_TOKEN` environment variables named by the fleet manifest's `tokenEnv` fields as

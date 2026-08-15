@@ -2,7 +2,7 @@
 
 A reference Railway deployment for a hosted `@jinn-network/client` operator daemon running the **codex** harness against Base Sepolia testnet. This is the recipe currently running service 62 in production; documented here so future operators have a starting point and so the recipe survives operator turnover.
 
-Operators who want to run locally should use `jinn run` directly (see `client/README.md`) — this directory is only for headless, hosted deployments.
+Operators who want to run locally should use `jinn run` directly (see `operator/README.md`) — this directory is only for headless, hosted deployments.
 
 ## Shape: thin overlay on the container-native base
 

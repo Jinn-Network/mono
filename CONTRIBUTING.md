@@ -15,7 +15,7 @@ yarn test
 ```
 
 Per-package developer guides:
-- [`client/CONTRIBUTING.md`](client/CONTRIBUTING.md) — Jinn client (TypeScript daemon).
+- [`operator/CONTRIBUTING.md`](operator/CONTRIBUTING.md) — Jinn client (TypeScript daemon).
 - [`contracts/`](contracts/) — Solidity smart contracts (Hardhat).
 
 ## Licence and sign-off
