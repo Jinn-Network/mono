@@ -16,6 +16,8 @@ export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js"
 export type { GuiCapability } from "./cli/parity-map.js";
 export * from "./human-review/contracts.js";
 export * from "./human-review/application.js";
+export * from "./human-review/verification.js";
+export * from "./human-review/verification-workspace.js";
 
 // Typed errors (spec §4.3): callers branch on `code`, never on `message`.
 export { BenchmarkProductError, PRODUCT_ERROR_CODES, toErrorEnvelope } from "./errors.js";

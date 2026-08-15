@@ -8,9 +8,10 @@ import {
   parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentLabelResolution,
   canonicalJsonBytes,
+  compareCodeUnitStrings,
   recordDigest,
 } from "@jinn-network/task-execution-profiles";
-import { parseExactDsseEnvelope } from "@jinn-network/trust-core";
+import { dssePreAuthEncoding, parseExactDsseEnvelope, sealDsseEnvelope } from "@jinn-network/trust-core";
 import {
   BinaryJudgmentAdmissionManifestSchema,
   HUMAN_REVIEW_REVEAL_RECEIPT_MEDIA_TYPE,
@@ -19,6 +20,7 @@ import {
   HumanReviewOperatorAssertionSchema,
   HumanReviewRevealReceiptSchema,
   HumanReviewRosterSchema,
+  HumanReviewReplacementLedgerSchema,
   HumanReviewPacketSchema,
   HumanReviewVisibilityReceiptSchema,
   HUMAN_REVIEW_PACKET_PROTOCOL,
@@ -26,6 +28,11 @@ import {
   HUMAN_REVIEW_OMITTED_FIELDS,
   sealHumanReviewDocument,
 } from "../human-review/contracts.js";
+import {
+  buildBinaryJudgmentAdmissionClosureWorkspacePorts,
+  verifyBinaryJudgmentAdmissionClosureInWorkspace,
+} from "../human-review/verification-workspace.js";
+import { verifyBinaryJudgmentAdmissionClosure, type AdmissionSha256 } from "../human-review/verification.js";
 import { readDraftDocument } from "./drafts.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -188,6 +195,90 @@ function tamperExactEnvelopePayload(
   );
 }
 
+function overlayRecord(overrides: Map<string, Uint8Array>, bytes: Uint8Array): AdmissionSha256 {
+  const digest = recordDigest(bytes);
+  overrides.set(digest, bytes);
+  return digest;
+}
+
+function closurePortsWithOverrides(
+  context: ReturnType<typeof setup>,
+  overrides: Map<string, Uint8Array>,
+) {
+  const ports = buildBinaryJudgmentAdmissionClosureWorkspacePorts(context.workspaceDir);
+  return {
+    ...ports,
+    resolveExactRecord: (digest: AdmissionSha256) => overrides.get(digest) ?? ports.resolveExactRecord(digest),
+  };
+}
+
+function rewriteSingleAcceptedResolution(
+  context: ReturnType<typeof setup>,
+  manifestSha256: string,
+  overrides: Map<string, Uint8Array>,
+  mutate: (resolution: ReturnType<typeof parseBinaryJudgmentLabelResolution>) => unknown,
+): AdmissionSha256 {
+  const manifest = BinaryJudgmentAdmissionManifestSchema.parse(JSON.parse(new TextDecoder().decode(
+    getSealedBytes(context.workspaceDir, manifestSha256.slice("sha256:".length)),
+  )));
+  const oldResolutionSha256 = manifest.labelResolutionSha256s[0]!;
+  const oldResolution = parseBinaryJudgmentLabelResolution(getSealedBytes(
+    context.workspaceDir,
+    oldResolutionSha256.slice("sha256:".length),
+  ));
+  const newResolutionSha256 = overlayRecord(overrides, canonicalJsonBytes(mutate(oldResolution)));
+  const oldContextSha256 = manifest.analysisContextSha256s[0]!;
+  const oldContext = parseBinaryJudgmentAnalysisContext(getSealedBytes(
+    context.workspaceDir,
+    oldContextSha256.slice("sha256:".length),
+  ));
+  const newContextSha256 = overlayRecord(overrides, canonicalJsonBytes({
+    ...oldContext,
+    labelResolutionSha256: newResolutionSha256,
+  }));
+  return overlayRecord(overrides, canonicalJsonBytes({
+    ...manifest,
+    labelResolutionSha256s: [newResolutionSha256],
+    analysisContextSha256s: [newContextSha256],
+  }));
+}
+
+function rewriteLedger(
+  context: ReturnType<typeof setup>,
+  manifestSha256: string,
+  overrides: Map<string, Uint8Array>,
+  mutate: (ledger: ReturnType<typeof HumanReviewReplacementLedgerSchema.parse>) => unknown,
+): AdmissionSha256 {
+  const manifest = BinaryJudgmentAdmissionManifestSchema.parse(JSON.parse(new TextDecoder().decode(
+    getSealedBytes(context.workspaceDir, manifestSha256.slice("sha256:".length)),
+  )));
+  const ledger = HumanReviewReplacementLedgerSchema.parse(JSON.parse(new TextDecoder().decode(
+    getSealedBytes(context.workspaceDir, manifest.replacementLedgerSha256.slice("sha256:".length)),
+  )));
+  const replacementLedgerSha256 = overlayRecord(overrides, canonicalJsonBytes(mutate(ledger)));
+  return overlayRecord(overrides, canonicalJsonBytes({ ...manifest, replacementLedgerSha256 }));
+}
+
+function rewriteAuthorityPayload(
+  context: ReturnType<typeof setup>,
+  envelopeBytes: Uint8Array,
+  mutate: (payload: Record<string, unknown>) => void,
+): Uint8Array {
+  const envelope = parseExactDsseEnvelope(envelopeBytes);
+  const payload = JSON.parse(new TextDecoder().decode(envelope.payloadBytes)) as Record<string, unknown>;
+  mutate(payload);
+  const payloadBytes = canonicalJsonBytes(payload);
+  const key = loadOrCreateReportSigningKey(context.workspaceDir);
+  return sealDsseEnvelope({
+    payloadType: envelope.payloadType,
+    payloadBytes,
+    signatures: [{
+      keyid: key.keyId,
+      signature: key.sign(dssePreAuthEncoding(envelope.payloadType, payloadBytes)),
+    }],
+  });
+}
+
 describe("binary human truth admission", () => {
   it("derives publication-grade resolution and the exact F0 analysis-context join", async () => {
     const context = setup();
@@ -201,6 +292,19 @@ describe("binary human truth admission", () => {
     if (!result.ok) return;
     expect(result.result.publicationGrade).toBe(true);
     expect(result.result.exclusions).toEqual([]);
+    const verifiedClosure = verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    });
+    expect(verifiedClosure).toMatchObject({
+      publicationGrade: true,
+      classes: ["factual"],
+      strata: ["core"],
+      accepted: [{ itemSha256: reviewed.packets.itemSha256, truthLabel: "WRONG" }],
+      excluded: [],
+    });
+    expect(verifiedClosure.reachableSha256s).toContain(result.result.admissionManifestSha256);
     const summary = result.result.resolutions[0]!;
     const resolution = parseBinaryJudgmentLabelResolution(
       getSealedBytes(context.workspaceDir, summary.labelResolutionSha256.slice("sha256:".length)),
@@ -259,6 +363,9 @@ describe("binary human truth admission", () => {
       itemSha256: reviewed.packets.itemSha256,
       truthFrozenAt: "2026-08-15T09:10:00.000Z",
       judgeExecutionState: "not-started",
+      attestedBy: "operator",
+      attestorKeyId: revealEnvelope.signatures[0]!.keyid,
+      attestorRole: "truth-reveal-attestor",
     });
     expect(verifyReportEnvelopeSignatures(
       getSealedBytes(context.workspaceDir, resolution.revealReceiptSha256.slice("sha256:".length)),
@@ -302,6 +409,82 @@ describe("binary human truth admission", () => {
       candidateClass: "factual",
       stratum: "core",
     });
+  });
+
+  it("portable closure replay rejects reviewer signatures and signed authority role/order changes", async () => {
+    const context = setup();
+    const reviewed = await reviewedItem(context, 0, ["CORRECT", "CORRECT"]);
+    const result = admitHumanTruth(context, {
+      draftId: "review-run",
+      truthAdmission: "two-human-unanimous",
+      candidates: [publicationCandidate(reviewed, 0, 1)],
+    });
+    if (!result.ok) throw new Error(result.error.detail);
+    const resolution = parseBinaryJudgmentLabelResolution(getSealedBytes(
+      context.workspaceDir,
+      result.result.resolutions[0]!.labelResolutionSha256.slice("sha256:".length),
+    ));
+    if (resolution.truthAdmission !== "two-human-unanimous") throw new Error("wrong admission kind");
+
+    const badReviewerOverrides = new Map<string, Uint8Array>();
+    const badVerdictSha256 = overlayRecord(
+      badReviewerOverrides,
+      tamperExactEnvelopeSignature(getSealedBytes(
+        context.workspaceDir,
+        resolution.reviewVerdictSha256s[0].slice("sha256:".length),
+      )),
+    );
+    const badReviewerManifest = rewriteSingleAcceptedResolution(
+      context,
+      result.result.admissionManifestSha256,
+      badReviewerOverrides,
+      (value) => ({
+        ...value,
+        reviewVerdictSha256s: [badVerdictSha256, resolution.reviewVerdictSha256s[1]].sort(compareCodeUnitStrings),
+      }),
+    );
+    expect(() => verifyBinaryJudgmentAdmissionClosure({
+      admissionManifestSha256: badReviewerManifest,
+      expectedDraftId: "review-run",
+    }, closurePortsWithOverrides(context, badReviewerOverrides))).toThrow(/reviewer signature/u);
+
+    const badRosterOverrides = new Map<string, Uint8Array>();
+    const badRosterSha256 = overlayRecord(badRosterOverrides, tamperExactEnvelopeSignature(getSealedBytes(
+      context.workspaceDir,
+      resolution.reviewerRosterSha256.slice("sha256:".length),
+    )));
+    const badRosterManifest = rewriteSingleAcceptedResolution(
+      context,
+      result.result.admissionManifestSha256,
+      badRosterOverrides,
+      (value) => ({ ...value, reviewerRosterSha256: badRosterSha256 }),
+    );
+    expect(() => verifyBinaryJudgmentAdmissionClosure({
+      admissionManifestSha256: badRosterManifest,
+      expectedDraftId: "review-run",
+    }, closurePortsWithOverrides(context, badRosterOverrides))).toThrow(/authority signature/u);
+
+    for (const mutate of [
+      (payload: Record<string, unknown>) => { payload.attestorRole = "roster-attestor"; },
+      (payload: Record<string, unknown>) => { payload.truthFrozenAt = "2026-08-15T08:00:00.000Z"; },
+    ]) {
+      const overrides = new Map<string, Uint8Array>();
+      const revealSha256 = overlayRecord(overrides, rewriteAuthorityPayload(
+        context,
+        getSealedBytes(context.workspaceDir, resolution.revealReceiptSha256.slice("sha256:".length)),
+        mutate,
+      ));
+      const manifestSha256 = rewriteSingleAcceptedResolution(
+        context,
+        result.result.admissionManifestSha256,
+        overrides,
+        (value) => ({ ...value, revealReceiptSha256: revealSha256 }),
+      );
+      expect(() => verifyBinaryJudgmentAdmissionClosure({
+        admissionManifestSha256: manifestSha256,
+        expectedDraftId: "review-run",
+      }, closurePortsWithOverrides(context, overrides))).toThrow();
+    }
   });
 
   it("refuses swapped or missing evidence and freezes no truth after run lock", async () => {
@@ -555,6 +738,56 @@ describe("binary human truth admission", () => {
         ],
       },
     });
+    if (!result.ok) throw new Error(result.error.detail);
+    expect(verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    }).excluded.map((entry) => entry.reason)).toEqual(["review-incomplete", "review-indeterminate"]);
+
+    const forgedManifestOverrides = new Map<string, Uint8Array>();
+    const manifest = BinaryJudgmentAdmissionManifestSchema.parse(JSON.parse(new TextDecoder().decode(
+      getSealedBytes(context.workspaceDir, result.result.admissionManifestSha256.slice("sha256:".length)),
+    )));
+    const forgedManifestSha256 = overlayRecord(forgedManifestOverrides, canonicalJsonBytes({
+      ...manifest,
+      admittedAt: "2026-08-15T09:11:00.000Z",
+    }));
+    expect(() => verifyBinaryJudgmentAdmissionClosure({
+      admissionManifestSha256: forgedManifestSha256,
+      expectedDraftId: "review-run",
+    }, closurePortsWithOverrides(context, forgedManifestOverrides))).toThrow(/ledger draft\/time/u);
+
+    const ledgerMutations: Array<(ledger: ReturnType<typeof HumanReviewReplacementLedgerSchema.parse>) => unknown> = [
+      (ledger) => ({ ...ledger, entries: [...ledger.entries].reverse() }),
+      (ledger) => ({ ...ledger, entries: ledger.entries.map((entry, index) => index === 0 ? { ...entry, reason: "review-disagreement" } : entry) }),
+      (ledger) => ({
+        ...ledger,
+        entries: ledger.entries.map((entry, index) => index === 1 ? {
+          ...entry,
+          replacementItemSha256: ledger.entries[0]!.replacementItemSha256,
+          replacementPoolPosition: ledger.entries[0]!.replacementPoolPosition,
+        } : entry),
+      }),
+      (ledger) => {
+        const value = JSON.parse(JSON.stringify(ledger)) as { entries: Array<Record<string, unknown>> };
+        delete value.entries[0]!.reviewerRosterSha256;
+        return value;
+      },
+    ];
+    for (const mutate of ledgerMutations) {
+      const overrides = new Map<string, Uint8Array>();
+      const admissionManifestSha256 = rewriteLedger(
+        context,
+        result.result.admissionManifestSha256,
+        overrides,
+        mutate,
+      );
+      expect(() => verifyBinaryJudgmentAdmissionClosure({
+        admissionManifestSha256,
+        expectedDraftId: "review-run",
+      }, closurePortsWithOverrides(context, overrides))).toThrow();
+    }
 
     const wrongSlice = publicationCandidate(incompleteReserve, 1, 2, {
       replacesItemSha256: incomplete.packets.itemSha256,
@@ -615,6 +848,11 @@ describe("binary human truth admission", () => {
     });
     expect("reviewVerdictSha256s" in resolution).toBe(false);
     if (resolution.truthAdmission !== "operator-only") throw new Error("wrong admission kind");
+    expect(verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: context.workspaceDir,
+      admissionManifestSha256: result.result.admissionManifestSha256 as AdmissionSha256,
+      expectedDraftId: "review-run",
+    })).toMatchObject({ publicationGrade: false, accepted: [{ truthAdmission: "operator-only" }], excluded: [] });
     const assertionBytes = getSealedBytes(
       context.workspaceDir,
       resolution.operatorAssertionSha256.slice("sha256:".length),
@@ -627,6 +865,8 @@ describe("binary human truth admission", () => {
       truthLabel: "CORRECT",
       assertedBy: "operator",
       assertedAt: "2026-08-15T09:00:00.000Z",
+      attestorKeyId: assertionEnvelope.signatures[0]!.keyid,
+      attestorRole: "operator-truth-attestor",
       limitation: "operator-only-not-publication-grade",
     });
     const reportKey = loadOrCreateReportSigningKey(context.workspaceDir);
@@ -642,5 +882,17 @@ describe("binary human truth admission", () => {
       tamperExactEnvelopePayload(assertionBytes, (payload) => { payload.truthLabel = "WRONG"; }),
       reportKey,
     ).validSignerKeyids).toEqual([]);
+    const assertionOverrides = new Map<string, Uint8Array>();
+    const badAssertionSha256 = overlayRecord(assertionOverrides, tamperExactEnvelopeSignature(assertionBytes));
+    const badAssertionManifestSha256 = rewriteSingleAcceptedResolution(
+      context,
+      result.result.admissionManifestSha256,
+      assertionOverrides,
+      (value) => ({ ...value, operatorAssertionSha256: badAssertionSha256 }),
+    );
+    expect(() => verifyBinaryJudgmentAdmissionClosure({
+      admissionManifestSha256: badAssertionManifestSha256,
+      expectedDraftId: "review-run",
+    }, closurePortsWithOverrides(context, assertionOverrides))).toThrow(/authority signature/u);
   });
 });

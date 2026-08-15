@@ -62,6 +62,11 @@ const SortedUniqueDigestListSchema = z.array(DigestSchema).superRefine((values, 
     }
   }
 });
+const SortedUniqueDigestPairSchema = z.tuple([DigestSchema, DigestSchema]).superRefine((values, ctx) => {
+  if (compareCodeUnitStrings(values[0], values[1]) >= 0) {
+    ctx.addIssue({ code: "custom", message: "digest references must be sorted and unique" });
+  }
+});
 
 export const HUMAN_REVIEW_OMITTED_FIELDS = [
   "instrumentIdentity",
@@ -138,6 +143,9 @@ export const HumanReviewRevealReceiptSchema = z.strictObject({
   itemSha256: DigestSchema,
   truthFrozenAt: TimestampSchema,
   judgeExecutionState: z.literal("not-started"),
+  attestedBy: IdentitySchema,
+  attestorKeyId: IdentitySchema,
+  attestorRole: z.literal("truth-reveal-attestor"),
 });
 export type HumanReviewRevealReceipt = z.infer<typeof HumanReviewRevealReceiptSchema>;
 
@@ -149,6 +157,10 @@ export const HumanReviewReplacementLedgerEntrySchema = z.strictObject({
   excludedPoolPosition: z.number().int().positive(),
   replacementPoolPosition: z.number().int().positive(),
   reason: z.enum(["review-disagreement", "review-indeterminate", "review-incomplete"]),
+  reviewVerdictSha256s: SortedUniqueDigestPairSchema,
+  visibilityReceiptSha256s: SortedUniqueDigestPairSchema,
+  reviewerRosterSha256: DigestSchema,
+  revealReceiptSha256: DigestSchema,
 });
 
 export const HumanReviewReplacementLedgerSchema = z.strictObject({
@@ -165,6 +177,8 @@ export const HumanReviewOperatorAssertionSchema = z.strictObject({
   truthLabel: BinaryJudgmentTruthLabelSchema,
   assertedBy: IdentitySchema,
   assertedAt: TimestampSchema,
+  attestorKeyId: IdentitySchema,
+  attestorRole: z.literal("operator-truth-attestor"),
   limitation: z.literal("operator-only-not-publication-grade"),
 });
 export type HumanReviewOperatorAssertion = z.infer<typeof HumanReviewOperatorAssertionSchema>;

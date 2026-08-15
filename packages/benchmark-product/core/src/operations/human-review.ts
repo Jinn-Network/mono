@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { verify as verifySignature } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { z } from "zod";
 import {
@@ -10,7 +9,6 @@ import {
   BinaryJudgmentPayloadSchema,
   BinaryJudgmentStratumSchema,
   BinaryJudgmentTruthLabelSchema,
-  VERDICT_DSSE_PAYLOAD_TYPE,
   canonicalJsonBytes,
   compareCodeUnitStrings,
   parseBinaryJudgmentPayload,
@@ -20,10 +18,11 @@ import {
 } from "@jinn-network/task-execution-profiles";
 import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import { dssePreAuthEncoding, parseExactDsseEnvelope, sealDsseEnvelope } from "@jinn-network/trust-core";
-import { refuse, refuseWithIssues } from "../errors.js";
+import { BenchmarkProductError, refuse, refuseWithIssues } from "../errors.js";
 import {
   BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED,
   HUMAN_REVIEW_FORM,
+  HUMAN_REVIEW_FORM_SEALED,
   binaryJudgmentItemBytes,
 } from "../human-review/application.js";
 import {
@@ -54,11 +53,14 @@ import {
   sealHumanReviewDocument,
 } from "../human-review/contracts.js";
 import {
+  BinaryJudgmentAdmissionClosureError,
+  verifyBinaryJudgmentAdmissionClosure,
+  verifyBinaryJudgmentReviewerResult,
+} from "../human-review/verification.js";
+import { buildBinaryJudgmentAdmissionClosureWorkspacePorts } from "../human-review/verification-workspace.js";
+import {
   createVerdictDsseSigner,
   loadOrCreateEvaluatorSigningKeys,
-  readEvaluatorPublicKeyRecords,
-  readOrderedVerdictMeasurements,
-  readVerdictEnvelope,
   sealVerdictStatement,
 } from "../venue/signing.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
@@ -273,6 +275,7 @@ export function createHumanReviewPackets(
       putSealedBytes(clocked.workspaceDir, itemBytes);
       const humanReviewEvaluationSpecSha256 = BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest;
       putSealedBytes(clocked.workspaceDir, BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.bytes);
+      putSealedBytes(clocked.workspaceDir, HUMAN_REVIEW_FORM_SEALED.bytes);
 
       const packets = [...input.evaluatorIds].sort(compareCodeUnitStrings).map((reviewerId) => {
         const packet = sealHumanReviewDocument(HumanReviewPacketSchema, {
@@ -427,165 +430,6 @@ export async function signHumanReviewResponse(
   });
 }
 
-interface VerifiedReview {
-  readonly evaluatorId: string;
-  readonly keyId: string;
-  readonly label: "CORRECT" | "WRONG" | "indeterminate";
-  readonly complete: boolean;
-  readonly completedAt: string;
-  readonly packetSha256: `sha256:${string}`;
-  readonly visibilityReceiptSha256: `sha256:${string}`;
-}
-
-function verifyReviewEnvelope(
-  workspaceDir: string,
-  verdictSha256: string,
-  candidate: z.infer<typeof CandidateSchema>,
-): VerifiedReview {
-  const envelopeBytes = getSealedBytes(workspaceDir, bare(verdictSha256));
-  const envelope = parseExactDsseEnvelope(envelopeBytes);
-  if (envelope.payloadType !== VERDICT_DSSE_PAYLOAD_TYPE || envelope.signatures.length !== 1) {
-    refuse("validation", "reviewVerdictSha256s", "review verdict must be one compact Result Evaluation envelope with one signature");
-  }
-  let statement: Record<string, unknown>;
-  try {
-    statement = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(envelope.payloadBytes)) as Record<string, unknown>;
-  } catch {
-    refuse("validation", "reviewVerdictSha256s", "review verdict payload is not UTF-8 JSON");
-  }
-  if (!bytesEqual(canonicalJsonBytes(statement), envelope.payloadBytes)) {
-    refuse("validation", "reviewVerdictSha256s", "review verdict payload is not exact canonical JSON");
-  }
-  const view = readVerdictEnvelope(envelopeBytes);
-  const keys = readEvaluatorPublicKeyRecords(workspaceDir);
-  const key = keys.get(view.evaluatorId);
-  const signature = envelope.signatures[0]!;
-  if (key === undefined || signature.keyid !== key.keyId) {
-    refuse("validation", "reviewVerdictSha256s", "review verdict signer is not a configured evaluator key");
-  }
-  const valid = verifySignature(
-    null,
-    Buffer.from(dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes)),
-    key.publicKey,
-    Buffer.from(signature.sig, "base64"),
-  );
-  if (!valid) refuse("validation", "reviewVerdictSha256s", "review verdict signature is invalid");
-  if (view.evaluationSpecificationSha256 !== bare(candidate.humanReviewEvaluationSpecSha256)) {
-    refuse("validation", "humanReviewEvaluationSpecSha256", "review verdict names a different human-review EvaluationSpec");
-  }
-  const ordered = readOrderedVerdictMeasurements(envelopeBytes);
-  const expectedNames = [
-    "truthLabel",
-    "reviewComplete",
-    "reviewPacketSha256",
-    "visibilityReceiptSha256",
-    "responseSha256",
-  ];
-  if (ordered.length !== expectedNames.length || ordered.some((entry, index) => entry.name !== expectedNames[index])) {
-    refuse("validation", "reviewVerdictSha256s", "review verdict measurements do not match the registered human-review shape");
-  }
-  const [labelValue, completeValue, packetValue, visibilityValue, responseValue] = ordered.map((entry) => entry.value);
-  const label = z.union([BinaryJudgmentTruthLabelSchema, z.literal("indeterminate")]).safeParse(labelValue);
-  if (!label.success || typeof completeValue !== "boolean" || typeof packetValue !== "string" || typeof visibilityValue !== "string" || typeof responseValue !== "string") {
-    refuse("validation", "reviewVerdictSha256s", "review verdict measurement values are invalid");
-  }
-  const packet = parseCanonicalHumanReviewBytes(
-    HumanReviewPacketSchema,
-    getSealedBytes(workspaceDir, bare(packetValue)),
-    "human review packet",
-  );
-  const visibility = parseCanonicalHumanReviewBytes(
-    HumanReviewVisibilityReceiptSchema,
-    getSealedBytes(workspaceDir, bare(visibilityValue)),
-    "visibility receipt",
-  );
-  const response = parseCanonicalHumanReviewBytes(
-    HumanReviewResponseSchema,
-    getSealedBytes(workspaceDir, bare(responseValue)),
-    "human review response",
-  );
-  const packetItemSha256 = recordDigest(canonicalJsonBytes(packet.item));
-  const subjects = statement.subject;
-  const predicate = statement.predicate;
-  if (!Array.isArray(subjects) || subjects.length !== 2 || typeof predicate !== "object" || predicate === null || Array.isArray(predicate)) {
-    refuse("validation", "reviewVerdictSha256s", "review Result Evaluation subjects/predicate are malformed");
-  }
-  const subjectView = subjects as Array<{ name?: unknown; digest?: { sha256?: unknown }; mediaType?: unknown }>;
-  const predicateView = predicate as {
-    taskSubject?: unknown;
-    resultSubjects?: unknown;
-    evaluator?: { id?: unknown };
-    verdict?: unknown;
-    evaluatedAt?: unknown;
-    evidence?: unknown;
-  };
-  const evidence = predicateView.evidence;
-  const expectedVerdict = !completeValue || label.data === "indeterminate"
-    ? "inconclusive"
-    : label.data === "CORRECT" ? "pass" : "fail";
-  const exactEvidence = [
-    ["human-review-packet", bare(packetValue), HUMAN_REVIEW_PACKET_MEDIA_TYPE],
-    ["visibility-receipt", bare(visibilityValue), HUMAN_REVIEW_VISIBILITY_RECEIPT_MEDIA_TYPE],
-    ["human-review-response", bare(responseValue), HUMAN_REVIEW_RESPONSE_MEDIA_TYPE],
-  ] as const;
-  const evidenceMatches = Array.isArray(evidence)
-    && evidence.length === exactEvidence.length
-    && evidence.every((raw, index) => {
-      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
-      const entry = raw as { name?: unknown; digest?: { sha256?: unknown }; mediaType?: unknown };
-      const expected = exactEvidence[index]!;
-      return entry.name === expected[0]
-        && entry.digest?.sha256 === expected[1]
-        && entry.mediaType === expected[2]
-        && Object.keys(entry).every((key) => ["name", "digest", "mediaType"].includes(key));
-    });
-  if (
-    packetItemSha256 !== packet.itemSha256
-    || packet.itemSha256 !== candidate.itemSha256
-    || packet.item.itemId !== candidate.itemId
-    || packet.evaluationSpecSha256 !== candidate.humanReviewEvaluationSpecSha256
-    || packet.reviewerId !== view.evaluatorId
-    || visibility.packetSha256 !== packetValue
-    || visibility.itemSha256 !== candidate.itemSha256
-    || visibility.reviewerId !== view.evaluatorId
-    || response.packetSha256 !== packetValue
-    || response.visibilityReceiptSha256 !== visibilityValue
-    || response.itemSha256 !== candidate.itemSha256
-    || response.evaluatorId !== view.evaluatorId
-    || response.label !== label.data
-    || response.complete !== completeValue
-    || response.completedAt !== view.evaluatedAt
-    || Date.parse(response.completedAt) < Date.parse(visibility.issuedAt)
-    || subjectView[0]?.name !== "binary-judgment-item"
-    || subjectView[0]?.digest?.sha256 !== bare(candidate.itemSha256)
-    || Object.keys(subjectView[0] ?? {}).some((key) => !["name", "digest"].includes(key))
-    || subjectView[1]?.name !== "human-review-response"
-    || subjectView[1]?.digest?.sha256 !== bare(responseValue)
-    || subjectView[1]?.mediaType !== HUMAN_REVIEW_RESPONSE_MEDIA_TYPE
-    || Object.keys(subjectView[1] ?? {}).some((key) => !["name", "digest", "mediaType"].includes(key))
-    || predicateView.taskSubject !== "binary-judgment-item"
-    || !Array.isArray(predicateView.resultSubjects)
-    || predicateView.resultSubjects.length !== 1
-    || predicateView.resultSubjects[0] !== "human-review-response"
-    || predicateView.evaluator?.id !== view.evaluatorId
-    || predicateView.verdict !== expectedVerdict
-    || predicateView.evaluatedAt !== response.completedAt
-    || !evidenceMatches
-    || view.evidence?.length !== 3
-  ) {
-    refuse("validation", "reviewVerdictSha256s", "review packet, response, visibility, item, or signer joins do not match");
-  }
-  return {
-    evaluatorId: view.evaluatorId,
-    keyId: key.keyId,
-    label: label.data,
-    complete: completeValue,
-    completedAt: response.completedAt,
-    packetSha256: prefixed(packetValue),
-    visibilityReceiptSha256: prefixed(visibilityValue),
-  };
-}
-
 export function admitHumanTruth(
   context: OperationContext,
   input: AdmitHumanTruthInput,
@@ -619,6 +463,7 @@ export function admitHumanTruth(
         itemDigests.add(candidate.itemSha256);
       }
       const authoritySigner = loadOrCreateReportSigningKey(clocked.workspaceDir);
+      const verificationPorts = buildBinaryJudgmentAdmissionClosureWorkspacePorts(clocked.workspaceDir);
 
       const evaluated = [...parsed.candidates]
         .sort((left, right) => left.poolPosition - right.poolPosition)
@@ -645,7 +490,21 @@ export function admitHumanTruth(
             refuse("validation", "candidates", "publication-grade admission requires exactly two review verdicts and two roster declarations");
           }
           const verdictDigests = sortedPair(candidate.reviewVerdictSha256s);
-          const reviews = verdictDigests.map((digest) => verifyReviewEnvelope(clocked.workspaceDir, digest, candidate));
+          let reviews: ReturnType<typeof verifyBinaryJudgmentReviewerResult>[];
+          try {
+            reviews = verdictDigests.map((digest) => verifyBinaryJudgmentReviewerResult({
+              verdictSha256: digest,
+              expectedItemSha256: prefixed(candidate.itemSha256),
+            }, verificationPorts));
+          } catch (cause) {
+            if (cause instanceof BinaryJudgmentAdmissionClosureError && cause.cause instanceof BenchmarkProductError && cause.cause.code === "not-found") {
+              throw cause.cause;
+            }
+            refuse("validation", "reviewVerdictSha256s", cause instanceof Error ? cause.message : "review evidence verification failed");
+          }
+          if (reviews.some((review) => review.itemId !== candidate.itemId)) {
+            refuse("validation", "itemId", "review packets do not bind the candidate itemId");
+          }
           if (reviews.some((review) => Date.parse(review.completedAt) > Date.parse(at))) {
             refuse("validation", "reviewVerdictSha256s", "truth reveal cannot precede either completed review");
           }
@@ -686,6 +545,9 @@ export function admitHumanTruth(
             itemSha256: candidate.itemSha256,
             truthFrozenAt: at,
             judgeExecutionState: "not-started",
+            attestedBy: clocked.principal,
+            attestorKeyId: authoritySigner.keyId,
+            attestorRole: "truth-reveal-attestor",
           }, "reveal receipt");
           const revealReceiptSha256 = sealRoleEvidence(
             clocked.workspaceDir,
@@ -712,7 +574,17 @@ export function admitHumanTruth(
                 reviewerRosterSha256,
                 revealReceiptSha256,
               } as const
-            : { candidate, exclusionReason } as const;
+            : {
+                candidate,
+                exclusionReason,
+                reviewVerdictSha256s: verdictDigests,
+                visibilityReceiptSha256s: sortedPair([
+                  reviews[0]!.visibilityReceiptSha256,
+                  reviews[1]!.visibilityReceiptSha256,
+                ]),
+                reviewerRosterSha256,
+                revealReceiptSha256,
+              } as const;
         });
 
       const excluded = evaluated.filter((entry): entry is typeof entry & { exclusionReason: "review-disagreement" | "review-indeterminate" | "review-incomplete" } => "exclusionReason" in entry);
@@ -738,6 +610,10 @@ export function admitHumanTruth(
           excludedPoolPosition: entry.candidate.poolPosition,
           replacementPoolPosition: replacement.poolPosition,
           reason: entry.exclusionReason,
+          reviewVerdictSha256s: entry.reviewVerdictSha256s,
+          visibilityReceiptSha256s: entry.visibilityReceiptSha256s,
+          reviewerRosterSha256: entry.reviewerRosterSha256,
+          revealReceiptSha256: entry.revealReceiptSha256,
         };
       });
       for (const replacement of accepted.filter((entry) => entry.candidate.replacesItemSha256 !== undefined)) {
@@ -762,6 +638,8 @@ export function admitHumanTruth(
             truthLabel: entry.truth,
             assertedBy: clocked.principal,
             assertedAt: at,
+            attestorKeyId: authoritySigner.keyId,
+            attestorRole: "operator-truth-attestor",
             limitation: "operator-only-not-publication-grade",
           }, "operator truth assertion");
           const operatorAssertionSha256 = sealRoleEvidence(
@@ -834,6 +712,18 @@ export function admitHumanTruth(
         admittedAt: at,
       }, "admission manifest");
       putSealedBytes(clocked.workspaceDir, manifest.bytes);
+      try {
+        verifyBinaryJudgmentAdmissionClosure({
+          admissionManifestSha256: manifest.digest,
+          expectedDraftId: parsed.draftId,
+        }, verificationPorts);
+      } catch (cause) {
+        refuse(
+          "execution",
+          "admissionManifest",
+          `internally produced admission closure failed replay: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      }
       return {
         admissionManifestSha256: manifest.digest,
         replacementLedgerSha256: ledger.digest,

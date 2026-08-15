@@ -155,6 +155,15 @@ stratum mismatches, wrong-draft evidence, invalid replacement accounting, and no
 Only admitted replacements become Tasks; excluded and unselected reserve rows are accounted but
 not dispatched. No model, Inspect, Harbor, network, or licensed-data backend is reimplemented.
 
+Consumers must authenticate an admission through
+`verifyBinaryJudgmentAdmissionClosureInWorkspace({ workspaceDir, admissionManifestSha256, expectedDraftId })`.
+It replays the exact manifest, resolutions, analysis contexts, item bytes, exclusion/replacement
+ledger, reviewer Result Evaluations, and role-separated authority evidence before returning
+derived publication status, classes, strata, accepted/excluded items, and the complete reachable
+digest inventory. Portable readers can call `verifyBinaryJudgmentAdmissionClosure` with their own
+exact-record resolver and reviewer/authority trust ports; neither API accepts caller-authored
+candidate truth.
+
 ## Authority and lifecycle behavior
 
 The **nine gated operations** are `lock`, `launch`, `cancel`, `report`,
