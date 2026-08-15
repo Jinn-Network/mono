@@ -38,6 +38,14 @@ import {
 import { readOrderedVerdictMeasurements, readVerdictEnvelope } from "../venue/signing.js";
 
 export type AdmissionSha256 = `sha256:${string}`;
+export const BINARY_JUDGMENT_ADMISSION_RECORD_ROLES = [
+  "admission-manifest", "replacement-ledger", "source-item", "label-resolution",
+  "analysis-context", "human-review-evaluation-spec", "human-review-form",
+  "human-review-packet", "human-review-response", "human-review-verdict",
+  "reviewer-roster", "review-visibility-receipt", "review-reveal-receipt",
+  "operator-assertion",
+] as const;
+export type BinaryJudgmentAdmissionRecordRole = (typeof BINARY_JUDGMENT_ADMISSION_RECORD_ROLES)[number];
 export type AdmissionAuthorityRole =
   | "roster-attestor"
   | "truth-reveal-attestor"
@@ -96,6 +104,11 @@ export interface VerifiedBinaryJudgmentAdmissionClosure {
   readonly excluded: readonly VerifiedBinaryJudgmentAdmissionExclusion[];
   /** Complete, sorted digest inventory reachable from the manifest closure. */
   readonly reachableSha256s: readonly AdmissionSha256[];
+  /** Same closure with semantic roles assigned by the exact traversal that authenticated it. */
+  readonly reachableRecords: readonly {
+    readonly sha256: AdmissionSha256;
+    readonly roles: readonly BinaryJudgmentAdmissionRecordRole[];
+  }[];
 }
 
 export class BinaryJudgmentAdmissionClosureError extends Error {
@@ -144,9 +157,15 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 interface VerificationState {
   readonly ports: BinaryJudgmentAdmissionClosurePorts;
   readonly reachable: Set<AdmissionSha256>;
+  readonly roles: Map<AdmissionSha256, Set<BinaryJudgmentAdmissionRecordRole>>;
 }
 
-function resolve(state: VerificationState, digest: string, path: string): Uint8Array {
+function resolve(
+  state: VerificationState,
+  digest: string,
+  path: string,
+  role: BinaryJudgmentAdmissionRecordRole,
+): Uint8Array {
   if (!/^sha256:[0-9a-f]{64}$/u.test(digest)) fail(path, "record digest is not canonical sha256");
   const exactDigest = digest as AdmissionSha256;
   let bytes: Uint8Array;
@@ -157,6 +176,9 @@ function resolve(state: VerificationState, digest: string, path: string): Uint8A
   }
   if (recordDigest(bytes) !== digest) fail(path, `resolved bytes do not hash to ${digest}`);
   state.reachable.add(exactDigest);
+  const roles = state.roles.get(exactDigest) ?? new Set<BinaryJudgmentAdmissionRecordRole>();
+  roles.add(role);
+  state.roles.set(exactDigest, roles);
   return bytes;
 }
 
@@ -165,8 +187,9 @@ function parseProfileRecord<T>(
   digest: string,
   path: string,
   parse: (bytes: Uint8Array) => T,
+  role: BinaryJudgmentAdmissionRecordRole,
 ): { readonly value: T; readonly bytes: Uint8Array } {
-  const bytes = resolve(state, digest, path);
+  const bytes = resolve(state, digest, path, role);
   let value: T;
   try {
     value = parse(bytes);
@@ -182,11 +205,12 @@ function verifyFrozenHumanReviewSpec(state: VerificationState, path: string): vo
     state,
     BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
     `${path}.evaluationSpecification`,
+    "human-review-evaluation-spec",
   );
   if (!bytesEqual(specBytes, BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.bytes)) {
     fail(path, "frozen human-review EvaluationSpec bytes do not match the registered contract");
   }
-  const formBytes = resolve(state, HUMAN_REVIEW_FORM_SEALED.digest, `${path}.reviewForm`);
+  const formBytes = resolve(state, HUMAN_REVIEW_FORM_SEALED.digest, `${path}.reviewForm`, "human-review-form");
   if (!bytesEqual(formBytes, HUMAN_REVIEW_FORM_SEALED.bytes)) {
     fail(path, "frozen human-review form bytes do not match the registered contract");
   }
@@ -209,7 +233,7 @@ function verifyReview(
   expectedItemSha256: string,
   path: string,
 ): VerifiedBinaryJudgmentReviewerResult {
-  const envelopeBytes = resolve(state, verdictSha256, path);
+  const envelopeBytes = resolve(state, verdictSha256, path, "human-review-verdict");
   let envelope: ReturnType<typeof parseExactDsseEnvelope>;
   try {
     envelope = parseExactDsseEnvelope(envelopeBytes);
@@ -255,11 +279,11 @@ function verifyReview(
   const packetSha256 = prefixed(packetRaw);
   const visibilityReceiptSha256 = prefixed(visibilityRaw);
   const responseSha256 = prefixed(responseRaw);
-  const packet = exactCanonical(HumanReviewPacketSchema, resolve(state, packetSha256, `${path}.packet`), `${path}.packet`);
-  const visibility = exactCanonical(HumanReviewVisibilityReceiptSchema, resolve(state, visibilityReceiptSha256, `${path}.visibility`), `${path}.visibility`);
-  const response = exactCanonical(HumanReviewResponseSchema, resolve(state, responseSha256, `${path}.response`), `${path}.response`);
-  const itemBytes = resolve(state, expectedItemSha256, `${path}.item`);
-  const item = parseProfileRecord(state, expectedItemSha256, `${path}.item`, parseBinaryJudgmentPayload).value;
+  const packet = exactCanonical(HumanReviewPacketSchema, resolve(state, packetSha256, `${path}.packet`, "human-review-packet"), `${path}.packet`);
+  const visibility = exactCanonical(HumanReviewVisibilityReceiptSchema, resolve(state, visibilityReceiptSha256, `${path}.visibility`, "review-visibility-receipt"), `${path}.visibility`);
+  const response = exactCanonical(HumanReviewResponseSchema, resolve(state, responseSha256, `${path}.response`, "human-review-response"), `${path}.response`);
+  const itemBytes = resolve(state, expectedItemSha256, `${path}.item`, "source-item");
+  const item = parseProfileRecord(state, expectedItemSha256, `${path}.item`, parseBinaryJudgmentPayload, "source-item").value;
   if (!bytesEqual(itemBytes, canonicalJsonBytes(packet.item)) || packet.item.itemId !== item.itemId) {
     fail(path, "packet embedded item does not equal the exact referenced item record");
   }
@@ -354,7 +378,12 @@ function authorityPayload<T>(
   schema: z.ZodType<T>,
   path: string,
 ): { readonly value: T; readonly keyId: string } {
-  const envelopeBytes = resolve(state, digest, path);
+  const evidenceRole: BinaryJudgmentAdmissionRecordRole = role === "roster-attestor"
+    ? "reviewer-roster"
+    : role === "truth-reveal-attestor"
+      ? "review-reveal-receipt"
+      : "operator-assertion";
+  const envelopeBytes = resolve(state, digest, path, evidenceRole);
   let envelope: ReturnType<typeof parseExactDsseEnvelope>;
   try {
     envelope = parseExactDsseEnvelope(envelopeBytes);
@@ -434,7 +463,7 @@ export function verifyBinaryJudgmentReviewerResult(
   ports: BinaryJudgmentAdmissionClosurePorts,
 ): VerifiedBinaryJudgmentReviewerResult {
   return verifyReview(
-    { ports, reachable: new Set<AdmissionSha256>() },
+    { ports, reachable: new Set<AdmissionSha256>(), roles: new Map() },
     input.verdictSha256,
     input.expectedItemSha256,
     "reviewVerdictSha256",
@@ -449,27 +478,27 @@ export function verifyBinaryJudgmentAdmissionClosure(
   input: VerifyBinaryJudgmentAdmissionClosureInput,
   ports: BinaryJudgmentAdmissionClosurePorts,
 ): VerifiedBinaryJudgmentAdmissionClosure {
-  const state: VerificationState = { ports, reachable: new Set<AdmissionSha256>() };
+  const state: VerificationState = { ports, reachable: new Set<AdmissionSha256>(), roles: new Map() };
   const manifest = exactCanonical(
     BinaryJudgmentAdmissionManifestSchema,
-    resolve(state, input.admissionManifestSha256, "admissionManifestSha256"),
+    resolve(state, input.admissionManifestSha256, "admissionManifestSha256", "admission-manifest"),
     "admissionManifest",
   );
   if (manifest.draftId !== input.expectedDraftId) fail("admissionManifest.draftId", "manifest belongs to a different draft");
   const ledger = exactCanonical(
     HumanReviewReplacementLedgerSchema,
-    resolve(state, manifest.replacementLedgerSha256, "admissionManifest.replacementLedgerSha256"),
+    resolve(state, manifest.replacementLedgerSha256, "admissionManifest.replacementLedgerSha256", "replacement-ledger"),
     "replacementLedger",
   );
   if (ledger.draftId !== input.expectedDraftId || ledger.sealedAt !== manifest.admittedAt) fail("replacementLedger", "ledger draft/time does not bind the manifest");
 
   const resolutions = manifest.labelResolutionSha256s.map((digest, index) => ({
     digest,
-    ...parseProfileRecord(state, digest, `admissionManifest.labelResolutionSha256s.${index}`, parseBinaryJudgmentLabelResolution),
+    ...parseProfileRecord(state, digest, `admissionManifest.labelResolutionSha256s.${index}`, parseBinaryJudgmentLabelResolution, "label-resolution"),
   }));
   const contexts = manifest.analysisContextSha256s.map((digest, index) => ({
     digest,
-    ...parseProfileRecord(state, digest, `admissionManifest.analysisContextSha256s.${index}`, parseBinaryJudgmentAnalysisContext),
+    ...parseProfileRecord(state, digest, `admissionManifest.analysisContextSha256s.${index}`, parseBinaryJudgmentAnalysisContext, "analysis-context"),
   }));
   if (resolutions.length !== contexts.length) fail("admissionManifest", "resolution and analysis-context coverage differs");
   const contextByResolution = new Map(contexts.map((entry) => [entry.value.labelResolutionSha256, entry]));
@@ -485,7 +514,7 @@ export function verifyBinaryJudgmentAdmissionClosure(
     if (resolution.truthAdmission !== manifest.truthAdmission || resolution.resolvedAt !== manifest.admittedAt) fail(path, "resolution admission kind/time differs from manifest");
     if (resolution.humanReviewEvaluationSpecSha256 !== BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest) fail(path, "resolution names a different human-review EvaluationSpec");
     verifyFrozenHumanReviewSpec(state, path);
-    const item = parseProfileRecord(state, resolution.itemSha256, `${path}.itemSha256`, parseBinaryJudgmentPayload).value;
+    const item = parseProfileRecord(state, resolution.itemSha256, `${path}.itemSha256`, parseBinaryJudgmentPayload, "source-item").value;
     if (item.itemId !== resolution.itemId) fail(path, "resolution itemId differs from exact item record");
     const contextEntry = contextByResolution.get(entry.digest);
     if (contextEntry === undefined) fail(path, "resolution has no analysis context");
@@ -578,5 +607,11 @@ export function verifyBinaryJudgmentAdmissionClosure(
     accepted,
     excluded,
     reachableSha256s: [...state.reachable].sort(compareCodeUnitStrings),
+    reachableRecords: [...state.roles]
+      .sort(([left], [right]) => compareCodeUnitStrings(left, right))
+      .map(([sha256, roles]) => ({
+        sha256,
+        roles: BINARY_JUDGMENT_ADMISSION_RECORD_ROLES.filter((role) => roles.has(role)),
+      })),
   };
 }

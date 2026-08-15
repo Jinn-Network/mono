@@ -55,6 +55,7 @@ export {
   BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
   BINARY_INSTRUMENT_MEASUREMENTS,
   BINARY_INSTRUMENT_PARAMETER_SCHEMA,
+  validateBinaryInstrumentQualificationProjection,
   validateBinaryInstrumentParameters,
 } from "./binary-instrument-method.js";
 export type { BinaryInstrumentParameters } from "./binary-instrument-method.js";

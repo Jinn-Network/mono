@@ -21,6 +21,8 @@ export const BUNDLE_FORMAT = "benchmark-product-public-bundle/2" as const;
  * closure is the exact BenchmarkAccounting and Matrix v2 byte strings.
  */
 export const BUNDLE_V3_FORMAT = "benchmark-product-public-bundle/3" as const;
+/** Binary-instrument qualification bundle. V2 and the unrelated accounting-only v3 stay frozen. */
+export const BUNDLE_V4_FORMAT = "benchmark-product-public-bundle/4" as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -32,7 +34,7 @@ export const BundleManifestFileSchema = z.object({
 });
 
 export const BundleManifestSchema = z.object({
-  format: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_V3_FORMAT)]),
+  format: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_V3_FORMAT), z.literal(BUNDLE_V4_FORMAT)]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
 
@@ -56,7 +58,7 @@ export interface VerifyBundleSnapshotDeps {
 
 export interface BuildBundleManifestOptions {
   /** Defaults to v2 so every existing materializer keeps byte-identical behavior. */
-  readonly format?: typeof BUNDLE_FORMAT | typeof BUNDLE_V3_FORMAT;
+  readonly format?: typeof BUNDLE_FORMAT | typeof BUNDLE_V3_FORMAT | typeof BUNDLE_V4_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

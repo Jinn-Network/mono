@@ -30,7 +30,9 @@
  */
 
 import { z } from "zod";
-import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
+import { Buffer } from "node:buffer";
+import { validateBinaryInstrumentQualificationProjection } from "@jinn-network/benchmarking-aggregate";
+import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION } from "@jinn-network/benchmarking-records";
 import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import {
@@ -43,6 +45,11 @@ import { claimPackageArtifactPath } from "../workspace/layout.js";
 import type { VenueHonesty } from "../operations/run-results.js";
 
 export const CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/1";
+export const BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/2";
+export const BINARY_QUALIFICATION_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
+export const BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@2 <bundle-dir>" as const;
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
 
@@ -133,8 +140,11 @@ const AssuranceBlockSchema = z.object({
   disclosure: z.string().min(1),
 });
 
-export const ClaimPackageSchema = z.object({
-  claimSchema: z.literal(CLAIM_PACKAGE_SCHEMA_ID),
+const ClaimPackageWireSchema = z.object({
+  claimSchema: z.union([
+    z.literal(CLAIM_PACKAGE_SCHEMA_ID),
+    z.literal(BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID),
+  ]),
   scope: z.object({
     draftId: z.string().min(1),
     benchmarkSha256: Sha256HexSchema,
@@ -183,15 +193,93 @@ export const ClaimPackageSchema = z.object({
   /** P4b Task 5: present only for a paired-delta@1 Report, sibling to `headline`. See
    * `ComparisonSchema`'s own comment. */
   comparison: ComparisonSchema.optional(),
+  /** binary-instrument@1's complete per-subject F6 result. This is copied exactly; it is not a
+   * headline, comparison, threshold, selection, or ranking projection. */
+  qualification: z.unknown().optional(),
 }).superRefine((claim, ctx) => {
-  if (claim.headline === undefined && claim.comparison === undefined) {
+  if (claim.claimSchema === CLAIM_PACKAGE_SCHEMA_ID) {
+    if (claim.headline === undefined && claim.comparison === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "claim package must carry either headline (wilson@1) or comparison (paired-delta@1)",
+        path: ["headline"],
+      });
+    }
+    return;
+  }
+  if (
+    claim.method.id !== BENCHMARKING_METHOD_IDS.binaryInstrument
+    || claim.method.version !== BENCHMARKING_METHOD_VERSION
+    || claim.qualification === undefined
+    || claim.headline !== undefined
+    || claim.comparison !== undefined
+  ) {
     ctx.addIssue({
       code: "custom",
-      message: "claim package must carry either headline (wilson@1) or comparison (paired-delta@1)",
-      path: ["headline"],
+      message: "binary claim package must carry only the exact binary-instrument qualification projection",
+      path: ["qualification"],
     });
   }
+  if (claim.qualification === undefined) return;
+  const qualificationValidation = validateBinaryInstrumentQualificationProjection(claim.qualification);
+  if (!qualificationValidation.ok) {
+    ctx.addIssue({
+      code: "custom",
+      message: `binary qualification is outside the exact F6 schema: ${qualificationValidation.issues.join("; ")}`,
+      path: ["qualification"],
+    });
+    return;
+  }
+  const reportResults = claim.results as { readonly perSubject?: readonly { readonly results?: unknown }[] } | undefined;
+  const subject = reportResults?.perSubject;
+  let exactResult = false;
+  const exactWrapper = (
+    typeof reportResults === "object"
+    && reportResults !== null
+    && Object.keys(reportResults).join("\0") === "perSubject"
+    && subject?.length === 1
+    && typeof subject[0] === "object"
+    && subject[0] !== null
+    && Object.keys(subject[0]).sort().join("\0") === "results\0subjectSha256"
+    && (subject[0] as { readonly subjectSha256?: unknown }).subjectSha256 === claim.records.matrixSha256
+  );
+  if (exactWrapper) {
+    try {
+      exactResult = Buffer.from(canonicalJsonBytes(subject![0]!.results as never)).equals(
+        Buffer.from(canonicalJsonBytes(claim.qualification as never)),
+      );
+    } catch {
+      exactResult = false;
+    }
+  }
+  if (!exactResult) {
+    ctx.addIssue({ code: "custom", message: "qualification must exactly equal the Report's one F6 per-subject result", path: ["qualification"] });
+  }
+  if (
+    claim.verification.command !== BINARY_QUALIFICATION_VERIFICATION_COMMAND
+    || claim.verification.compatibleCommand !== BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND
+  ) {
+    ctx.addIssue({ code: "custom", message: "binary claim package must pin verifier 2.0.0/@2", path: ["verification"] });
+  }
+  if (
+    claim.verification.checks.length !== READER_VERIFICATION_CHECKS.length
+    || claim.verification.checks.some((check, index) => check !== READER_VERIFICATION_CHECKS[index])
+  ) {
+    ctx.addIssue({ code: "custom", message: "binary claim package must retain the six frozen verification checks in order", path: ["verification", "checks"] });
+  }
 });
+
+/** claim-package/1 predates `qualification`; its original non-strict object grammar accepted and
+ * stripped that unknown key. Remove it before the additive v1/v2 wire schema sees the document so
+ * v1 retains that exact behavior while claim-package/2 validates and preserves the field. */
+export const ClaimPackageSchema = z.preprocess((input) => {
+  if (typeof input === "object" && input !== null && !Array.isArray(input)
+    && (input as { readonly claimSchema?: unknown }).claimSchema === CLAIM_PACKAGE_SCHEMA_ID) {
+    const { qualification: _legacyUnknown, ...legacy } = input as Record<string, unknown>;
+    return legacy;
+  }
+  return input;
+}, ClaimPackageWireSchema);
 
 export type ClaimPackage = z.infer<typeof ClaimPackageSchema>;
 
@@ -235,6 +323,7 @@ type Comparison = z.infer<typeof ComparisonSchema>;
 interface MethodProjection {
   readonly headline?: Record<string, unknown>;
   readonly comparison?: Comparison;
+  readonly qualification?: unknown;
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
 
@@ -320,6 +409,17 @@ function comparisonProjection(subjectResults: unknown): MethodProjection {
   };
 }
 
+function binaryQualificationProjection(subjectResults: unknown): MethodProjection {
+  const shape = subjectResults as { readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown } } | undefined;
+  if (typeof shape?.conflicted?.count !== "number" || !Array.isArray(shape.conflicted.cellKeys)) {
+    throw new Error("claim package: Report results do not carry binary-instrument@1's conflicted shape");
+  }
+  return {
+    qualification: subjectResults,
+    conflicted: { count: shape.conflicted.count, cellKeys: shape.conflicted.cellKeys as readonly string[] },
+  };
+}
+
 /** Dispatches on the produced Report's method (P4b Task 5) — the claim package's headline/
  * comparison projection is no longer a mandatory wilson@1 gate. Any method this product has not
  * wired a projection for throws rather than silently building an incomplete claim. */
@@ -330,6 +430,11 @@ function methodProjection(reportRecord: ReportRecord): MethodProjection {
       return wilsonProjection(subjectResults);
     case BENCHMARKING_METHOD_IDS.pairedDelta:
       return comparisonProjection(subjectResults);
+    case BENCHMARKING_METHOD_IDS.binaryInstrument:
+      if (reportRecord.method.version !== BENCHMARKING_METHOD_VERSION) {
+        throw new Error(`claim package: binary-instrument version "${reportRecord.method.version}" is not supported`);
+      }
+      return binaryQualificationProjection(subjectResults);
     default:
       throw new Error(`claim package: method "${reportRecord.method.id}" has no claim-package projection`);
   }
@@ -399,7 +504,9 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   const taskCount = new Set(input.matrixRecord.cells.map((cell) => cell.taskDigest)).size;
 
   return {
-    claimSchema: CLAIM_PACKAGE_SCHEMA_ID,
+    claimSchema: projection.qualification === undefined
+      ? CLAIM_PACKAGE_SCHEMA_ID
+      : BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
     scope: {
       draftId: input.draftId,
       benchmarkSha256: input.benchmarkSha256,
@@ -423,6 +530,7 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     },
     results: reportRecord.results,
     ...(projection.headline !== undefined ? { headline: projection.headline as ClaimPackage["headline"] } : {}),
+    ...(projection.qualification !== undefined ? { qualification: projection.qualification } : {}),
     completeness: input.matrixRecord.completeness,
     attrition: input.matrixRecord.attrition,
     conflicted: { count: projection.conflicted.count, cellKeys: [...projection.conflicted.cellKeys] },
@@ -439,8 +547,12 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     limitations: [...(reportRecord.limitations ?? [])],
     venueHonesty: input.venueHonesty,
     verification: {
-      command: PUBLIC_BUNDLE_VERIFICATION_COMMAND,
-      compatibleCommand: PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND,
+      command: projection.qualification === undefined
+        ? PUBLIC_BUNDLE_VERIFICATION_COMMAND
+        : BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+      compatibleCommand: projection.qualification === undefined
+        ? PUBLIC_BUNDLE_COMPATIBLE_VERIFICATION_COMMAND
+        : BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
       checks: [...CLAIM_VERIFICATION_CHECKS],
       trustRoot: SELF_RUN_TRUST_ROOT,
     },

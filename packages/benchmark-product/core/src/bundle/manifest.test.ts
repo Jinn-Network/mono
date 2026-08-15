@@ -6,6 +6,7 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { BenchmarkProductError } from "../errors.js";
 import {
   BUNDLE_FORMAT,
+  BUNDLE_V4_FORMAT,
   buildBundleManifest,
   verifyBundleManifest,
 } from "./manifest.js";
@@ -42,6 +43,19 @@ describe("portable bundle manifest", () => {
     expect(built.manifest.files.every((file) => file.path !== "bundle.json")).toBe(true);
     expect(built.bytes).toEqual(canonicalJsonBytes(built.manifest));
     expect(built.identity).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  test("keeps v2 as the byte-stable default and emits v4 only when explicitly selected", () => {
+    writeFixture();
+    const paths = ["benchmark.json", `records/${"a".repeat(64)}.bin`];
+    const legacy = buildBundleManifest(bundleDir, paths);
+    const explicitLegacy = buildBundleManifest(bundleDir, paths, { format: BUNDLE_FORMAT });
+    const binary = buildBundleManifest(bundleDir, paths, { format: BUNDLE_V4_FORMAT });
+
+    expect(legacy.bytes).toEqual(explicitLegacy.bytes);
+    expect(binary.manifest.format).toBe(BUNDLE_V4_FORMAT);
+    expect(binary.manifest.files).toEqual(legacy.manifest.files);
+    expect(binary.bytes).not.toEqual(legacy.bytes);
   });
 
   test.each(["", ".", "../escape", "/absolute", "records/../escape", "bundle.json"])(

@@ -19,7 +19,15 @@ import type { VenueHonesty } from "../operations/run-results.js";
 import { LOCAL_VENUE_LIMITS, unverifiableAxisCounts } from "../operations/run-results.js";
 import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
-import { buildClaimPackage, type BuildClaimPackageInput, CLAIM_PACKAGE_SCHEMA_ID, ClaimPackageSchema } from "./claim.js";
+import {
+  BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+  BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+  buildClaimPackage,
+  type BuildClaimPackageInput,
+  CLAIM_PACKAGE_SCHEMA_ID,
+  ClaimPackageSchema,
+} from "./claim.js";
 
 const MATCH_ALL = { harness: "match", model: "match", loadout: "match", isolation: "match", checksFailed: [] } as const;
 const AUTHOR = "urn:uuid:33333333-3333-5333-8333-333333333333";
@@ -661,6 +669,26 @@ function buildPairedFixture(): PairedFixture {
 }
 
 describe("buildClaimPackage — paired-delta@1 comparison shape (P4b Task 5)", () => {
+  it("retains the frozen paired-delta claim byte digest", () => {
+    const fixture = buildPairedFixture();
+    const claim = buildClaimPackage({
+      draftId: "paired-1",
+      benchmarkSha256: "b".repeat(64),
+      runRecord: fixture.runRecord,
+      runSha256: fixture.runSha256,
+      matrixRecord: fixture.matrixRecord,
+      matrixSha256: fixture.matrixSha256,
+      reportRecord: fixture.reportRecord,
+      reportSha256: fixture.reportSha256,
+      reportEnvelopeSha256: fixture.reportEnvelopeSha256,
+      venueHonesty: venueHonestyFor(fixture.matrixRecord),
+      verificationCommandVerb: "verify",
+      assurance: PAIRED_FIXTURE_ASSURANCE,
+    });
+    expect(sha256Hex(canonicalJsonBytes(ClaimPackageSchema.parse(claim))))
+      .toBe("2aedf08367a245f90b1270b66eff59e339cdcb5e653fde9fbbbb8958e86f61f2");
+  });
+
   it("builds a claim carrying `comparison`, not `headline`, extracted verbatim from the paired Report", () => {
     const fixture = buildPairedFixture();
     const claim = buildClaimPackage({
@@ -814,5 +842,85 @@ describe("assertClaimConsistency (P4b Task 5): round-trips both shapes", () => {
         assurancePreset: PAIRED_FIXTURE_ASSURANCE.preset,
       }),
     ).not.toThrow();
+  });
+});
+
+function binaryZeroRate() {
+  return { numerator: 0, denominator: 0, estimate: null, wilsonInterval: null, withheldReason: "zero-denominator" };
+}
+
+function binaryZeroProjection() {
+  return {
+    item: { expected: 0, complete: 0, excluded: 0, unstable: 0 },
+    call: { expected: 0, evaluated: 0, parseInvalid: 0 },
+    confusion: { correctAccepted: 0, correctRejected: 0, wrongAccepted: 0, wrongRejected: 0 },
+    agreement: binaryZeroRate(), falseAccept: binaryZeroRate(), falseReject: binaryZeroRate(),
+    instability: binaryZeroRate(), parserInvalid: binaryZeroRate(),
+  };
+}
+
+function binaryQualificationFixture() {
+  return {
+    configuration: {
+      verdictRule: "sole", k: 1, reduction: "strict-majority", measurementProfile: "binary-instrument@1",
+      candidateClasses: ["factuality"], strata: ["core", "stress"], parserInvalidPolicy: "reject",
+      truthAdmission: "two-human-unanimous", intervalAlpha: "0.05",
+    },
+    arms: Object.fromEntries(["arm-a", "arm-b", "arm-c", "arm-d"].map((armId, index) => [armId, {
+      instrumentSha256: `sha256:${String(index + 1).repeat(64)}`,
+      ...binaryZeroProjection(),
+      byCandidateClass: { factuality: binaryZeroProjection() },
+      byStratum: { core: binaryZeroProjection(), stress: binaryZeroProjection() },
+    }])),
+    itemDecisions: [],
+    excluded: { count: 0, items: [] },
+    conflicted: { count: 0, cellKeys: [] },
+  };
+}
+
+describe("claim-package/2 exact binary qualification gate", () => {
+  it("round-trips an exact F6 projection and rejects drift, conclusions, and another method version", async () => {
+    const base = buildClaimPackage(await wilsonGoldenInput());
+    const qualification = binaryQualificationFixture();
+    const claim = {
+      ...base,
+      claimSchema: BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+      method: { ...base.method, id: BENCHMARKING_METHOD_IDS.binaryInstrument, version: BENCHMARKING_METHOD_VERSION },
+      results: { perSubject: [{ subjectSha256: base.records.matrixSha256, results: qualification }] },
+      headline: undefined,
+      comparison: undefined,
+      qualification,
+      conflicted: qualification.conflicted,
+      verification: {
+        ...base.verification,
+        command: BINARY_QUALIFICATION_VERIFICATION_COMMAND,
+        compatibleCommand: BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
+      },
+    };
+    expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+
+    const ranked = structuredClone(claim) as any;
+    ranked.qualification.ranking = ["arm-a"];
+    ranked.results.perSubject[0].results.ranking = ["arm-a"];
+    expect(ClaimPackageSchema.safeParse(ranked).success).toBe(false);
+
+    const drifted = structuredClone(claim) as any;
+    drifted.qualification.configuration.intervalAlpha = "0.01";
+    expect(ClaimPackageSchema.safeParse(drifted).success).toBe(false);
+
+    const futureVersion = structuredClone(claim) as any;
+    futureVersion.method.version = "2";
+    expect(ClaimPackageSchema.safeParse(futureVersion).success).toBe(false);
+
+    const reorderedChecks = structuredClone(claim) as any;
+    reorderedChecks.verification.checks.reverse();
+    expect(ClaimPackageSchema.safeParse(reorderedChecks).success).toBe(false);
+  });
+
+  it("preserves the frozen claim-package/1 grammar that accepts both legacy projections", async () => {
+    const legacy = buildClaimPackage(await wilsonGoldenInput());
+    expect(ClaimPackageSchema.safeParse({ ...legacy, comparison: EXPECTED_COMPARISON }).success).toBe(true);
+    const parsed = ClaimPackageSchema.parse({ ...legacy, qualification: { formerly: "an unknown v1 field" } });
+    expect("qualification" in parsed).toBe(false);
   });
 });

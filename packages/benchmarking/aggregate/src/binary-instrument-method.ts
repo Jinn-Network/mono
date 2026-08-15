@@ -1350,6 +1350,237 @@ interface RateProjection {
   readonly withheldReason?: "zero-denominator";
 }
 
+function exactKeys(value: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort(compareCodeUnitStrings);
+  const wanted = [...expected].sort(compareCodeUnitStrings);
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function sortedUniqueStrings(value: unknown, expectedLength?: number): value is readonly string[] {
+  if (!Array.isArray(value) || (expectedLength !== undefined && value.length !== expectedLength)) return false;
+  return value.every((entry, index) =>
+    typeof entry === "string"
+    && entry.length > 0
+    && (index === 0 || compareCodeUnitStrings(value[index - 1] as string, entry) < 0));
+}
+
+function contextIssues(
+  value: unknown,
+  path: string,
+  candidateClasses: readonly string[],
+  issues: string[],
+): void {
+  if (!isObject(value) || !exactKeys(value, [
+    "analysisContextSha256",
+    "truthLabel",
+    "candidateClass",
+    "stratum",
+    "labelResolutionSha256",
+  ])) {
+    issues.push(`${path} has an unsupported field set`);
+    return;
+  }
+  if (!SHA256_URI.test(String(value["analysisContextSha256"]))) issues.push(`${path}.analysisContextSha256 is invalid`);
+  if (!SHA256_URI.test(String(value["labelResolutionSha256"]))) issues.push(`${path}.labelResolutionSha256 is invalid`);
+  if (value["truthLabel"] !== "CORRECT" && value["truthLabel"] !== "WRONG") issues.push(`${path}.truthLabel is invalid`);
+  if (typeof value["candidateClass"] !== "string" || !candidateClasses.includes(value["candidateClass"])) issues.push(`${path}.candidateClass is invalid`);
+  if (value["stratum"] !== "core" && value["stratum"] !== "stress") issues.push(`${path}.stratum is invalid`);
+}
+
+function sameWireContext(left: unknown, right: unknown): boolean {
+  return isObject(left) && isObject(right)
+    && left["analysisContextSha256"] === right["analysisContextSha256"]
+    && left["truthLabel"] === right["truthLabel"]
+    && left["candidateClass"] === right["candidateClass"]
+    && left["stratum"] === right["stratum"]
+    && left["labelResolutionSha256"] === right["labelResolutionSha256"];
+}
+
+function projectionIssues(value: unknown, path: string, k: number, issues: string[]): void {
+  if (!isObject(value)) { issues.push(`${path} must be an object`); return; }
+  const exact = (expected: readonly string[]) => {
+    if (!exactKeys(value, expected)) {
+      issues.push(`${path} has an unsupported field set`);
+    }
+  };
+  exact(["item", "call", "confusion", "agreement", "falseAccept", "falseReject", "instability", "parserInvalid"]);
+  for (const [name, fields] of [
+    ["item", ["expected", "complete", "excluded", "unstable"]],
+    ["call", ["expected", "evaluated", "parseInvalid"]],
+    ["confusion", ["correctAccepted", "correctRejected", "wrongAccepted", "wrongRejected"]],
+  ] as const) {
+    const child = value[name];
+    if (!isObject(child)) { issues.push(`${path}.${name} must be an object`); continue; }
+    if (!exactKeys(child, fields)) issues.push(`${path}.${name} has an unsupported field set`);
+    if (fields.some((field) => !Number.isSafeInteger(child[field]) || (child[field] as number) < 0)) issues.push(`${path}.${name} counts must be non-negative safe integers`);
+  }
+  for (const name of ["agreement", "falseAccept", "falseReject", "instability", "parserInvalid"] as const) {
+    const rate = value[name];
+    if (!isObject(rate)) { issues.push(`${path}.${name} must be a rate object`); continue; }
+    const zero = rate["denominator"] === 0;
+    const expected = zero
+      ? ["numerator", "denominator", "estimate", "wilsonInterval", "withheldReason"]
+      : ["numerator", "denominator", "estimate", "wilsonInterval"];
+    if (!exactKeys(rate, expected)) issues.push(`${path}.${name} has an unsupported field set`);
+    if (!Number.isSafeInteger(rate["numerator"]) || !Number.isSafeInteger(rate["denominator"]) || (rate["numerator"] as number) < 0 || (rate["denominator"] as number) < 0 || (rate["numerator"] as number) > (rate["denominator"] as number)) issues.push(`${path}.${name} has invalid counts`);
+    if (zero) {
+      if (rate["estimate"] !== null || rate["wilsonInterval"] !== null || rate["withheldReason"] !== "zero-denominator") issues.push(`${path}.${name} zero denominator must be withheld`);
+    } else if (Number.isSafeInteger(rate["numerator"]) && Number.isSafeInteger(rate["denominator"])) {
+      const canonical = rateProjection(rate["numerator"] as number, rate["denominator"] as number);
+      if (
+        rate["estimate"] !== canonical.estimate
+        || !isObject(rate["wilsonInterval"])
+        || !exactKeys(rate["wilsonInterval"], ["low", "high"])
+        || rate["wilsonInterval"]["low"] !== canonical.wilsonInterval?.low
+        || rate["wilsonInterval"]["high"] !== canonical.wilsonInterval?.high
+      ) issues.push(`${path}.${name} must carry the canonical estimate and Wilson interval for its counts`);
+    }
+  }
+  const item = value["item"];
+  const call = value["call"];
+  const confusion = value["confusion"];
+  if (isObject(item) && isObject(call) && isObject(confusion)) {
+    if (item["expected"] !== (item["complete"] as number) + (item["excluded"] as number)) issues.push(`${path}.item counts are inconsistent`);
+    if ((item["unstable"] as number) > (item["complete"] as number)) issues.push(`${path}.item.unstable exceeds complete items`);
+    if (call["expected"] !== (item["expected"] as number) * k) issues.push(`${path}.call.expected is inconsistent with item.expected and k`);
+    if ((call["evaluated"] as number) > (call["expected"] as number) || (call["parseInvalid"] as number) > (call["evaluated"] as number)) issues.push(`${path}.call counts are inconsistent`);
+    const complete = (confusion["correctAccepted"] as number) + (confusion["correctRejected"] as number)
+      + (confusion["wrongAccepted"] as number) + (confusion["wrongRejected"] as number);
+    if (complete !== item["complete"]) issues.push(`${path}.confusion does not partition complete items`);
+    const expectedRates = {
+      agreement: [(confusion["correctAccepted"] as number) + (confusion["wrongRejected"] as number), item["complete"] as number],
+      falseAccept: [confusion["wrongAccepted"] as number, (confusion["wrongAccepted"] as number) + (confusion["wrongRejected"] as number)],
+      falseReject: [confusion["correctRejected"] as number, (confusion["correctAccepted"] as number) + (confusion["correctRejected"] as number)],
+      instability: [item["unstable"] as number, item["complete"] as number],
+      parserInvalid: [call["parseInvalid"] as number, call["evaluated"] as number],
+    } as const;
+    for (const [name, [numerator, denominator]] of Object.entries(expectedRates)) {
+      const rate = value[name];
+      if (isObject(rate) && (rate["numerator"] !== numerator || rate["denominator"] !== denominator)) issues.push(`${path}.${name} counts are inconsistent with the projection`);
+    }
+  }
+}
+
+/** Closed validator for the F6 public projection. It intentionally rejects unknown fields so
+ * publication cannot smuggle a winner, loser, ranking, threshold, or preferred-arm conclusion. */
+export function validateBinaryInstrumentQualificationProjection(value: unknown):
+  { readonly ok: true } | { readonly ok: false; readonly issues: readonly string[] } {
+  const issues: string[] = [];
+  if (!isObject(value)) return { ok: false, issues: ["qualification must be an object"] };
+  const rootKeys = Object.keys(value).sort(compareCodeUnitStrings);
+  const expectedRoot = ["configuration", "arms", "itemDecisions", "excluded", "conflicted"].sort(compareCodeUnitStrings);
+  if (rootKeys.length !== expectedRoot.length || rootKeys.some((key, index) => key !== expectedRoot[index])) issues.push("qualification has an unsupported field set");
+  const configuration = value["configuration"];
+  const configurationKeys = ["verdictRule", "k", "reduction", "measurementProfile", "candidateClasses", "strata", "parserInvalidPolicy", "truthAdmission", "intervalAlpha"];
+  if (!isObject(configuration) || Object.keys(configuration).sort(compareCodeUnitStrings).join("\0") !== configurationKeys.sort(compareCodeUnitStrings).join("\0")) {
+    issues.push("qualification.configuration has an unsupported field set");
+  } else if (!validateBinaryInstrumentParameters(configuration).ok) {
+    issues.push("qualification.configuration is not the registered binary-instrument parameter set");
+  }
+  const candidateClasses = isObject(configuration) && Array.isArray(configuration["candidateClasses"])
+    ? configuration["candidateClasses"].filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const k = isObject(configuration) && Number.isSafeInteger(configuration["k"])
+    ? configuration["k"] as number
+    : 0;
+  const arms = value["arms"];
+  if (!isObject(arms) || Object.keys(arms).length !== 4) issues.push("qualification.arms must contain exactly four arms");
+  else for (const [armId, raw] of Object.entries(arms)) {
+    if (!CANDIDATE_CLASS.test(armId) || !isObject(raw)) { issues.push(`qualification.arms.${armId} is invalid`); continue; }
+    const expected = ["instrumentSha256", "item", "call", "confusion", "agreement", "falseAccept", "falseReject", "instability", "parserInvalid", "byCandidateClass", "byStratum"].sort(compareCodeUnitStrings);
+    if (Object.keys(raw).sort(compareCodeUnitStrings).join("\0") !== expected.join("\0") || typeof raw["instrumentSha256"] !== "string" || !SHA256_URI.test(raw["instrumentSha256"] as string)) issues.push(`qualification.arms.${armId} has an unsupported field set`);
+    projectionIssues(Object.fromEntries(
+      ["item", "call", "confusion", "agreement", "falseAccept", "falseReject", "instability", "parserInvalid"]
+        .map((key) => [key, raw[key]]),
+    ), `qualification.arms.${armId}`, k, issues);
+    for (const sliceName of ["byCandidateClass", "byStratum"] as const) {
+      const slices = raw[sliceName];
+      if (!isObject(slices)) { issues.push(`qualification.arms.${armId}.${sliceName} must be an object`); continue; }
+      const expectedSlices = sliceName === "byCandidateClass" ? candidateClasses : ["core", "stress"];
+      if (!exactKeys(slices, expectedSlices)) issues.push(`qualification.arms.${armId}.${sliceName} must exactly match the registered slice vocabulary`);
+      for (const [name, slice] of Object.entries(slices)) projectionIssues(slice, `qualification.arms.${armId}.${sliceName}.${name}`, k, issues);
+    }
+  }
+  const armEntries = isObject(arms) ? Object.entries(arms) : [];
+  const armIds = armEntries.map(([armId]) => armId);
+  const instrumentByArm = new Map(armEntries.flatMap(([armId, arm]) =>
+    isObject(arm) && typeof arm["instrumentSha256"] === "string" ? [[armId, arm["instrumentSha256"]] as const] : []));
+  if (armIds.some((armId, index) => index > 0 && compareCodeUnitStrings(armIds[index - 1]!, armId) >= 0)) issues.push("qualification.arms must be code-unit sorted and unique");
+  if (new Set(instrumentByArm.values()).size !== 4) issues.push("qualification.arms must bind four distinct instruments");
+  const decisions = value["itemDecisions"];
+  if (!Array.isArray(decisions)) issues.push("qualification.itemDecisions must be an array");
+  else for (const [index, raw] of decisions.entries()) {
+    if (!isObject(raw) || Object.keys(raw).sort(compareCodeUnitStrings).join("\0") !== ["taskDigest", "armId", "instrumentSha256", "context", "cellKeys", "accepted", "rejected", "decision", "unstable"].sort(compareCodeUnitStrings).join("\0")) { issues.push(`qualification.itemDecisions.${index} has an unsupported field set`); continue; }
+    const accepted = raw["accepted"];
+    const rejected = raw["rejected"];
+    if (typeof raw["taskDigest"] !== "string" || !SHA256.test(raw["taskDigest"] as string)
+      || typeof raw["armId"] !== "string" || !armIds.includes(raw["armId"])
+      || raw["instrumentSha256"] !== instrumentByArm.get(raw["armId"] as string)
+      || !sortedUniqueStrings(raw["cellKeys"], k)
+      || !Number.isSafeInteger(accepted) || (accepted as number) < 0
+      || !Number.isSafeInteger(rejected) || (rejected as number) < 0
+      || (accepted as number) + (rejected as number) !== k
+      || (raw["decision"] !== "ACCEPT" && raw["decision"] !== "REJECT")
+      || raw["decision"] !== ((accepted as number) > (rejected as number) ? "ACCEPT" : "REJECT")
+      || typeof raw["unstable"] !== "boolean"
+      || raw["unstable"] !== ((accepted as number) !== 0 && (rejected as number) !== 0)) issues.push(`qualification.itemDecisions.${index} is invalid`);
+    contextIssues(raw["context"], `qualification.itemDecisions.${index}.context`, candidateClasses, issues);
+  }
+  const excluded = value["excluded"];
+  if (!isObject(excluded) || !exactKeys(excluded, ["count", "items"]) || !Number.isSafeInteger(excluded["count"]) || (excluded["count"] as number) < 0 || !Array.isArray(excluded["items"]) || excluded["count"] !== excluded["items"].length) issues.push("qualification.excluded is invalid");
+  else for (const [index, raw] of excluded["items"].entries()) {
+    if (!isObject(raw) || !exactKeys(raw, ["taskDigest", "armId", "instrumentSha256", "context", "cellKeys", "reasons"])) { issues.push(`qualification.excluded.items.${index} is invalid`); continue; }
+    if (typeof raw["taskDigest"] !== "string" || !SHA256.test(raw["taskDigest"] as string)
+      || typeof raw["armId"] !== "string" || !armIds.includes(raw["armId"])
+      || raw["instrumentSha256"] !== instrumentByArm.get(raw["armId"] as string)
+      || !sortedUniqueStrings(raw["cellKeys"], k)
+      || !Array.isArray(raw["reasons"]) || raw["reasons"].length === 0) issues.push(`qualification.excluded.items.${index} is invalid`);
+    contextIssues(raw["context"], `qualification.excluded.items.${index}.context`, candidateClasses, issues);
+    const parentCellKeys = Array.isArray(raw["cellKeys"]) ? raw["cellKeys"].filter((entry): entry is string => typeof entry === "string") : [];
+    if (Array.isArray(raw["reasons"])) for (const [reasonIndex, reason] of raw["reasons"].entries()) {
+      const reasonPath = `qualification.excluded.items.${index}.reasons.${reasonIndex}`;
+      if (!isObject(reason) || !exactKeys(reason, ["reason", "cellKeys"])
+        || !["cell-not-judged", "conflicted-evaluations", "inconclusive-evaluation", "missing-evaluation"].includes(reason["reason"] as string)
+        || !sortedUniqueStrings(reason["cellKeys"]) || reason["cellKeys"].length === 0
+        || reason["cellKeys"].some((cellKey) => !parentCellKeys.includes(cellKey))) issues.push(`${reasonPath} is invalid`);
+      const previousReason = raw["reasons"][reasonIndex - 1];
+      if (reasonIndex > 0 && isObject(previousReason) && isObject(reason)
+        && compareCodeUnitStrings(String(previousReason["reason"]), String(reason["reason"])) >= 0) issues.push(`${reasonPath} must be sorted and unique`);
+    }
+  }
+  const conflicted = value["conflicted"];
+  if (!isObject(conflicted) || !exactKeys(conflicted, ["count", "cellKeys"]) || !Number.isSafeInteger(conflicted["count"]) || (conflicted["count"] as number) < 0 || !sortedUniqueStrings(conflicted["cellKeys"]) || conflicted["count"] !== conflicted["cellKeys"].length) issues.push("qualification.conflicted is invalid");
+  const groups = [
+    ...(Array.isArray(decisions) ? decisions : []),
+    ...(isObject(excluded) && Array.isArray(excluded["items"]) ? excluded["items"] : []),
+  ].filter(isObject);
+  const decisionGroupKeys = (Array.isArray(decisions) ? decisions : []).filter(isObject).map((entry) => `${String(entry["taskDigest"])}\u001f${String(entry["armId"])}`);
+  const excludedGroupKeys = (isObject(excluded) && Array.isArray(excluded["items"]) ? excluded["items"] : []).filter(isObject).map((entry) => `${String(entry["taskDigest"])}\u001f${String(entry["armId"])}`);
+  if (decisionGroupKeys.some((key, index) => index > 0 && compareCodeUnitStrings(decisionGroupKeys[index - 1]!, key) >= 0)) issues.push("qualification.itemDecisions must be code-unit sorted and unique");
+  if (excludedGroupKeys.some((key, index) => index > 0 && compareCodeUnitStrings(excludedGroupKeys[index - 1]!, key) >= 0)) issues.push("qualification.excluded.items must be code-unit sorted and unique");
+  if (new Set([...decisionGroupKeys, ...excludedGroupKeys]).size !== decisionGroupKeys.length + excludedGroupKeys.length) issues.push("qualification item groups must be unique across complete and excluded items");
+  const groupsByTask = new Map<string, Record<string, unknown>[]>();
+  for (const group of groups) {
+    const task = String(group["taskDigest"]);
+    groupsByTask.set(task, [...(groupsByTask.get(task) ?? []), group]);
+  }
+  for (const [task, taskGroups] of groupsByTask) {
+    taskGroups.sort((left, right) => compareCodeUnitStrings(String(left["armId"]), String(right["armId"])));
+    if (taskGroups.length !== armIds.length || taskGroups.some((group, index) => group["armId"] !== armIds[index])) issues.push(`qualification task ${task} must carry exactly one group for every arm`);
+    const firstContext = taskGroups[0]?.["context"];
+    if (taskGroups.some((group) => !sameWireContext(firstContext, group["context"]))) issues.push(`qualification task ${task} carries inconsistent contexts`);
+  }
+  const allGroupCellKeys = groups.flatMap((entry) => Array.isArray(entry["cellKeys"])
+    ? entry["cellKeys"].filter((cellKey): cellKey is string => typeof cellKey === "string")
+    : []);
+  if (new Set(allGroupCellKeys).size !== allGroupCellKeys.length) issues.push("qualification cell keys must be unique across item groups");
+  if (isObject(conflicted) && Array.isArray(conflicted["cellKeys"])) {
+    const allCellKeys = new Set(allGroupCellKeys);
+    if (conflicted["cellKeys"].some((cellKey) => !allCellKeys.has(cellKey as string))) issues.push("qualification.conflicted contains an unknown cell key");
+  }
+  return issues.length === 0 ? { ok: true } : { ok: false, issues };
+}
+
 function fixed4(value: number): string {
   return value.toFixed(4);
 }
