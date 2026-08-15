@@ -96,12 +96,14 @@ import type { LocalVenue } from "../../venue/venue.js";
 import { materializePublicBundle, type MaterializedBundle } from "../materialize.js";
 
 export type SyntheticV4TruthAdmission = "operator-only" | "two-human-unanimous";
+export type SyntheticV4Scenario = "minimal" | "qualification-144";
 
 export interface SyntheticV4BundleFixture {
   readonly workspaceDir: string;
   readonly draftId: string;
   readonly truthAdmission: SyntheticV4TruthAdmission;
   readonly publicationGrade: boolean;
+  readonly scenario: SyntheticV4Scenario;
   readonly benchmarkSha256: string;
   readonly admissionManifestSha256: string;
   readonly taskSha256s: readonly string[];
@@ -146,8 +148,24 @@ function prefixed(hex: string): `sha256:${string}` {
   return `sha256:${hex}`;
 }
 
-function fixtureItems() {
-  return [
+interface SyntheticFixtureItem {
+  readonly itemId: string;
+  readonly question: string;
+  readonly referenceAnswer: string;
+  readonly candidateAnswer: string;
+  readonly provenance: readonly [{ readonly digest: { readonly sha256: string } }];
+  readonly truthLabel: "CORRECT" | "WRONG";
+  readonly stratum: "core" | "stress";
+  readonly reviewLabels?: readonly ["CORRECT" | "WRONG", "CORRECT" | "WRONG"];
+  readonly replacesItemId?: string;
+}
+
+const DISPUTED_ITEM_ID = "urn:uuid:40000000-0000-4000-8000-000000000000";
+const qualificationItemId = (index: number): string =>
+  `urn:uuid:40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+
+function fixtureItems(scenario: SyntheticV4Scenario): readonly SyntheticFixtureItem[] {
+  const minimal = [
     {
       itemId: "urn:uuid:40000000-0000-4000-8000-000000000001",
       question: "Does the synthetic core statement match its reference?",
@@ -166,7 +184,71 @@ function fixtureItems() {
       truthLabel: "WRONG" as const,
       stratum: "stress" as const,
     },
+  ] as const satisfies readonly SyntheticFixtureItem[];
+  if (scenario === "minimal") return minimal;
+
+  const truthLabels = [
+    "CORRECT", "WRONG", "CORRECT", "WRONG", "CORRECT", "WRONG",
+    "CORRECT", "WRONG", "CORRECT", "WRONG", "CORRECT", "WRONG",
   ] as const;
+  const disputed: SyntheticFixtureItem = {
+    itemId: DISPUTED_ITEM_ID,
+    question: "Does the disputed synthetic reserve-control statement match its reference?",
+    referenceAnswer: "The disputed synthetic reserve-control statement is correct.",
+    candidateAnswer: "The disputed synthetic reserve-control statement is correct.",
+    provenance: [{ digest: { sha256: "a".repeat(64) } }],
+    truthLabel: "CORRECT",
+    stratum: "core",
+    reviewLabels: ["CORRECT", "WRONG"],
+  };
+  const admitted = truthLabels.map((truthLabel, index): SyntheticFixtureItem => ({
+    itemId: qualificationItemId(index),
+    question: `Does synthetic qualification item T${index} match its reference?`,
+    referenceAnswer: `Synthetic qualification reference T${index}.`,
+    candidateAnswer: truthLabel === "CORRECT"
+      ? `Synthetic qualification reference T${index}.`
+      : `Deliberately different synthetic qualification answer T${index}.`,
+    provenance: [{ digest: { sha256: "a".repeat(64) } }],
+    truthLabel,
+    stratum: index < 6 ? "core" : "stress",
+    reviewLabels: [truthLabel, truthLabel],
+    ...(index === 0 ? { replacesItemId: DISPUTED_ITEM_ID } : {}),
+  }));
+  return [disputed, ...admitted];
+}
+
+type SyntheticCellOutcome = "A" | "R" | "I" | "X";
+
+const qualificationOutcomes = [
+  ["AAA", "RRR", "AAA", "AAA"],
+  ["RRR", "AAA", "RRR", "RRR"],
+  ["AAA", "AAR", "AAA", "AAA"],
+  ["RRR", "RRR", "IRR", "RRR"],
+  ["AAA", "AAA", "AAA", "RRR"],
+  ["RRR", "RRR", "RRR", "AAA"],
+  ["AAA", "AAA", "AAA", "AAR"],
+  ["RRR", "RRR", "RRR", "RRR"],
+  ["AAA", "AAA", "AAA", "AAA"],
+  ["RRR", "RRR", "RRR", "RRR"],
+  ["AAA", "AAA", "AAA", "AAA"],
+  ["RRR", "RRR", "RRR", "RRX"],
+] as const;
+const qualificationArms = ["alpha", "beta", "delta", "gamma"] as const;
+
+function syntheticCellOutcome(
+  scenario: SyntheticV4Scenario,
+  itemId: string,
+  armId: string,
+  replicate: number,
+): SyntheticCellOutcome {
+  if (scenario === "minimal") return "A";
+  const itemIndex = Array.from({ length: 12 }, (_, index) => qualificationItemId(index)).indexOf(itemId);
+  const armIndex = qualificationArms.indexOf(armId as typeof qualificationArms[number]);
+  const token = qualificationOutcomes[itemIndex]?.[armIndex]?.[replicate - 1];
+  if (token !== "A" && token !== "R" && token !== "I" && token !== "X") {
+    throw new Error(`synthetic qualification fixture has no outcome for ${itemId}/${armId}/${replicate}`);
+  }
+  return token;
 }
 
 function instrument(armId: string) {
@@ -195,7 +277,7 @@ function instrument(armId: string) {
     promptTemplateSha256: binaryJudgmentPromptTemplateDigest(messages as never),
     promptSource: descriptor,
     license: {
-      uri: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      uri: "https://fixtures.example.test/licenses/apache-2.0.txt",
       digest: { sha256: sha256Hex(encoder.encode("Apache-2.0 fixture metadata only")) },
     },
     attribution: {
@@ -251,7 +333,11 @@ function makeCapabilities(instrumentSha256s: readonly string[]) {
  * or crosses the network. The production driver still owns Submission, Delivery, journal,
  * Matrix, Report, signature, and claim construction.
  */
-function syntheticInspectVenue(workspaceDir: string, instrumentSha256s: readonly string[]): LocalVenue {
+function syntheticInspectVenue(
+  workspaceDir: string,
+  instrumentSha256s: readonly string[],
+  scenario: SyntheticV4Scenario,
+): LocalVenue {
   const [{ key }] = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: INSPECT_EMBEDDED_EVALUATOR_ID }]);
   const artifacts = new Map<string, Uint8Array>();
   const attempts = new Map<string, {
@@ -288,7 +374,8 @@ function syntheticInspectVenue(workspaceDir: string, instrumentSha256s: readonly
       const task = parseJson(taskBytes);
       const instrumentBytes = getSealedBytes(workspaceDir, instrumentSha256.slice("sha256:".length));
       const parsedInstrument = parseBinaryJudgmentInstrument(instrumentBytes);
-      const responseBytes = encoder.encode("ACCEPT");
+      const outcome = syntheticCellOutcome(scenario, String(task.payload.itemId), armId, replicate);
+      const responseBytes = encoder.encode(outcome === "A" ? "ACCEPT" : outcome === "I" ? "MAYBE" : "REJECT");
       const responseSha256 = recordDigest(responseBytes);
       const observationBytes = sealBinaryJudgmentObservation({
         protocol: "https://spec.jinn.network/binary-judgment/judge-observation/v1",
@@ -416,6 +503,9 @@ function syntheticInspectVenue(workspaceDir: string, instrumentSha256s: readonly
       const labelBytes = getSealedBytes(workspaceDir, analysis.labelResolutionSha256.slice("sha256:".length));
       const label = parseBinaryJudgmentLabelResolution(labelBytes);
       const instrumentHex = observation.instrumentSha256.slice("sha256:".length);
+      if (syntheticCellOutcome(scenario, String(task.payload.itemId), observation.armId, observation.replicate) === "X") {
+        return { kind: "could-not-grade", detail: "synthetic fixture requested one unscorable evaluation" };
+      }
       const response = parseBinaryJudgmentResponse(responseBytes);
       const agreement = (response.decision === "ACCEPT" && analysis.truthLabel === "CORRECT")
         || (response.decision === "REJECT" && analysis.truthLabel === "WRONG");
@@ -485,11 +575,12 @@ function syntheticInspectVenue(workspaceDir: string, instrumentSha256s: readonly
 async function admitItems(
   context: OperationContext,
   truthAdmission: SyntheticV4TruthAdmission,
+  scenario: SyntheticV4Scenario,
 ) {
-  const items = fixtureItems();
+  const items = fixtureItems(scenario);
   if (truthAdmission === "operator-only") {
     const candidates = items.map((item, index) => {
-      const { truthLabel, stratum, ...payload } = item;
+      const { truthLabel, stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...payload } = item;
       const itemSha256 = recordDigest(canonicalJsonBytes(payload));
       putSealedBytes(context.workspaceDir, canonicalJsonBytes(payload));
       return {
@@ -515,8 +606,9 @@ async function admitItems(
     { evaluatorId: reviewers[1], personId: "synthetic-person-b", role: "domain-reviewer", conflicts: [] },
   ] as const;
   const candidates = [];
+  const itemSha256ById = new Map<string, string>();
   for (const [index, item] of items.entries()) {
-    const { truthLabel, stratum, ...payload } = item;
+    const { truthLabel, stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...payload } = item;
     const packets = requireOk(createHumanReviewPackets(context, {
       draftId: DRAFT_ID,
       item: payload,
@@ -530,10 +622,17 @@ async function admitItems(
         activeEvaluatorId: packet.reviewerId,
         packetSha256: packet.packetSha256,
         visibilityReceiptSha256: packet.visibilityReceiptSha256,
-        label: truthLabel,
+        label: item.reviewLabels?.[reviewerIndex] ?? truthLabel,
         complete: true,
         completedAt: context.clock(),
       }), `human verdict ${index}/${reviewerIndex}`));
+    }
+    itemSha256ById.set(item.itemId, packets.itemSha256);
+    const replacesItemSha256 = item.replacesItemId === undefined
+      ? undefined
+      : itemSha256ById.get(item.replacesItemId);
+    if (item.replacesItemId !== undefined && replacesItemSha256 === undefined) {
+      throw new Error(`synthetic reserve ${item.itemId} precedes disputed item ${item.replacesItemId}`);
     }
     candidates.push({
       itemSha256: packets.itemSha256,
@@ -544,6 +643,7 @@ async function admitItems(
       poolPosition: index + 1,
       reviewVerdictSha256s: [verdicts[0]!.verdictSha256, verdicts[1]!.verdictSha256] as [string, string],
       reviewers: reviewerRoster,
+      ...(replacesItemSha256 === undefined ? {} : { replacesItemSha256 }),
     });
   }
   return requireOk(admitHumanTruth(context, {
@@ -560,9 +660,11 @@ async function admitItems(
 export async function createSyntheticV4BundleFixture(input: {
   readonly workspaceDir: string;
   readonly truthAdmission: SyntheticV4TruthAdmission;
+  readonly scenario?: SyntheticV4Scenario;
   /** Test-only seam: corrupt the exact intake bytes before the real import operation parses them. */
   readonly mutateIntake?: (intake: SyntheticV4IntakeBytes) => SyntheticV4IntakeBytes;
 }): Promise<SyntheticV4BundleFixture> {
+  const scenario = input.scenario ?? "minimal";
   let tick = Date.parse("2026-08-15T11:00:00.000Z");
   const context: OperationContext = {
     workspaceDir: input.workspaceDir,
@@ -575,10 +677,10 @@ export async function createSyntheticV4BundleFixture(input: {
   };
   requireOk(initWorkspace(context), "workspace init");
   requireOk(createDraft(context, { draftId: DRAFT_ID, name: "Synthetic binary publication" }), "draft create");
-  const admission = await admitItems(context, input.truthAdmission);
-  const items = fixtureItems();
+  const admission = await admitItems(context, input.truthAdmission, scenario);
+  const items = fixtureItems(scenario);
   const exactIntake: SyntheticV4IntakeBytes = {
-    itemBankJsonl: renderCanonicalJsonl(items.map(({ truthLabel: _truthLabel, stratum: _stratum, ...item }) => ({
+    itemBankJsonl: renderCanonicalJsonl(items.map(({ truthLabel: _truthLabel, stratum: _stratum, reviewLabels: _reviewLabels, replacesItemId: _replacesItemId, ...item }) => ({
       protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL,
       item,
     }))),
@@ -590,7 +692,7 @@ export async function createSyntheticV4BundleFixture(input: {
         digest: { sha256: "a".repeat(64) },
       },
       license: {
-        uri: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+        uri: "https://fixtures.example.test/licenses/apache-2.0.txt",
         digest: { sha256: "b".repeat(64) },
       },
       attribution: {
@@ -598,13 +700,15 @@ export async function createSyntheticV4BundleFixture(input: {
         digest: { sha256: "c".repeat(64) },
       },
     }]),
-    admissionIndexJsonl: renderCanonicalJsonl(admission.resolutions.map((resolution) => ({
-      protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
-      admissionManifestSha256: admission.admissionManifestSha256,
-      itemSha256: resolution.itemSha256,
-      labelResolutionSha256: resolution.labelResolutionSha256,
-      analysisContextSha256: resolution.analysisContextSha256,
-    }))),
+    admissionIndexJsonl: renderCanonicalJsonl([...admission.resolutions]
+      .sort((left, right) => left.itemSha256 < right.itemSha256 ? -1 : left.itemSha256 > right.itemSha256 ? 1 : 0)
+      .map((resolution) => ({
+        protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
+        admissionManifestSha256: admission.admissionManifestSha256,
+        itemSha256: resolution.itemSha256,
+        labelResolutionSha256: resolution.labelResolutionSha256,
+        analysisContextSha256: resolution.analysisContextSha256,
+      }))),
   };
   const intake = input.mutateIntake?.(exactIntake) ?? exactIntake;
   const imported = requireOk(importBinaryItemBank(context, {
@@ -685,7 +789,7 @@ export async function createSyntheticV4BundleFixture(input: {
   }), "draft binary profile");
 
   const instrumentSha256s = instruments.map((entry) => entry.digest);
-  const createVenue = () => syntheticInspectVenue(input.workspaceDir, instrumentSha256s);
+  const createVenue = () => syntheticInspectVenue(input.workspaceDir, instrumentSha256s, scenario);
   requireOk(await runQuote(context, { draftId: DRAFT_ID }, { createVenue }), "quote");
   requireOk(runLock(context, { draftId: DRAFT_ID }), "lock");
   requireOk(await runLaunch(context, { draftId: DRAFT_ID }, { createVenue }), "launch");
@@ -704,6 +808,7 @@ export async function createSyntheticV4BundleFixture(input: {
     draftId: DRAFT_ID,
     truthAdmission: input.truthAdmission,
     publicationGrade: imported.publicationGrade,
+    scenario,
     benchmarkSha256: imported.benchmarkSha256,
     admissionManifestSha256: imported.admissionManifestSha256,
     taskSha256s: imported.taskSha256s,

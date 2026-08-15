@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -20,6 +20,7 @@ const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 const readerRoot = join(temporaryRoot, 'reader');
 const oneShotRoot = join(temporaryRoot, 'one-shot');
+const runT1ColdLifecycle = process.argv.includes('--t1-cold-lifecycle');
 
 const PUBLIC_PACKAGES = [
   ['verify', '@colophon-claims/verify'],
@@ -209,6 +210,82 @@ function declaredFirstPartyClosure(records, roots) {
   }
   return [...closure].sort();
 }
+function declaredPackageClosure(records, roots) {
+  const closure = new Set();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (closure.has(name)) continue;
+    closure.add(name);
+    const manifest = records.get(name)?.manifest;
+    if (manifest === undefined) throw new Error(`no local-registry manifest exists for dependency ${name}`);
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) queue.push(dependency);
+  }
+  return [...closure].sort();
+}
+async function addT1ThirdPartyClosure(records) {
+  const candidates = new Map();
+  const walked = new Set();
+  function resolveInstalledDependency(directory, name) {
+    let cursor = directory;
+    for (;;) {
+      const candidate = join(cursor, 'node_modules', ...name.split('/'));
+      if (existsSync(join(candidate, 'package.json'))) return candidate;
+      const parent = dirname(cursor);
+      if (parent === cursor) return undefined;
+      cursor = parent;
+    }
+  }
+  function walkInstalledRuntime(directory) {
+    const manifestPath = join(directory, 'package.json');
+    if (!existsSync(manifestPath)) return;
+    const identity = realpathSync(manifestPath);
+    if (walked.has(identity)) return;
+    walked.add(identity);
+    const manifest = manifestFor(directory);
+    if (typeof manifest.name !== 'string' || typeof manifest.version !== 'string') return;
+    if (!isFirstParty(manifest.name)) {
+      const versions = candidates.get(manifest.name) ?? new Map();
+      versions.set(manifest.version, directory);
+      candidates.set(manifest.name, versions);
+    }
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+      const installed = resolveInstalledDependency(directory, dependency);
+      if (installed !== undefined) walkInstalledRuntime(installed);
+    }
+  }
+  walkInstalledRuntime(join(familyRoot, 'verify'));
+
+  const queue = declaredFirstPartyClosure(records, ['@colophon-claims/verify'])
+    .flatMap((name) => Object.keys(records.get(name).manifest.dependencies ?? {}).filter((dependency) => !isFirstParty(dependency)));
+  const seenVersions = new Set();
+  while (queue.length > 0) {
+    const name = queue.shift();
+    const installedVersions = candidates.get(name);
+    if (installedVersions === undefined || installedVersions.size === 0) {
+      throw new Error(`focused T1 registry cannot resolve installed third-party runtime dependency ${name}`);
+    }
+    for (const [version, directory] of installedVersions) {
+      const versionKey = `${name}@${version}`;
+      if (seenVersions.has(versionKey)) continue;
+      seenVersions.add(versionKey);
+      const manifest = manifestFor(directory);
+      const archive = await packOne(directory, versionKey);
+      const variant = {
+        manifest,
+        archive,
+        tarballPath: `/tarballs/${name}/${archive.split('/').at(-1)}`,
+        integrity: `sha512-${createHash('sha512').update(readFileSync(archive)).digest('base64')}`,
+      };
+      const existing = records.get(name);
+      if (existing === undefined) records.set(name, { ...variant, versions: [variant] });
+      else existing.versions = [...(existing.versions ?? [existing]), variant];
+      for (const dependency of Object.keys(manifest.dependencies ?? {}).filter((entry) => !isFirstParty(entry))) {
+        queue.push(dependency);
+      }
+    }
+  }
+}
 function lockPackageName(location, record) {
   if (typeof record?.name === 'string') return record.name;
   const marker = 'node_modules/';
@@ -240,12 +317,17 @@ async function startRegistry(records) {
     const record = records.get(pathname.slice(1));
     if (record !== undefined) {
       requests.add(`metadata:${record.manifest.name}`);
-      const metadata = { name: record.manifest.name, 'dist-tags': { latest: record.manifest.version }, versions: {
-        [record.manifest.version]: { ...record.manifest, dist: { tarball: `${baseUrl}${record.tarballPath}`, integrity: record.integrity } },
-      } };
+      const versions = record.versions ?? [record];
+      const metadata = { name: record.manifest.name, 'dist-tags': { latest: record.manifest.version }, versions: Object.fromEntries(
+        versions.map((candidate) => [candidate.manifest.version, {
+          ...candidate.manifest,
+          dist: { tarball: `${baseUrl}${candidate.tarballPath}`, integrity: candidate.integrity },
+        }]),
+      ) };
       response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify(metadata)); return;
     }
-    const tarball = [...records.values()].find((candidate) => candidate.tarballPath === pathname);
+    const tarball = [...records.values()].flatMap((candidate) => candidate.versions ?? [candidate])
+      .find((candidate) => candidate.tarballPath === pathname);
     if (tarball !== undefined) {
       requests.add(`tarball:${tarball.manifest.name}`);
       response.writeHead(200, { 'content-type': 'application/octet-stream' });
@@ -265,28 +347,48 @@ try {
   await mkdir(archivesRoot);
   const archives = new Map();
   const records = new Map();
-  for (const [directory, name] of PUBLIC_PACKAGES) archives.set(name, await packOne(join(familyRoot, directory), name));
+  const packedPublicPackages = runT1ColdLifecycle ? [PUBLIC_PACKAGES[0]] : PUBLIC_PACKAGES;
+  for (const [directory, name] of packedPublicPackages) archives.set(name, await packOne(join(familyRoot, directory), name));
   for (const [name, directory] of CROSS_TREE_PACKAGES) archives.set(name, await packOne(directory, name));
-  const cliArchive = archives.get('@colophon-claims/cli');
-  const cliFiles = await archiveFiles(cliArchive);
-  const webRoot = 'package/dist/local-web/packages/benchmark-product/web';
-  for (const expected of [
-    `${webRoot}/.next/BUILD_ID`,
-    `${webRoot}/local-server.mjs`,
-    `${webRoot}/server.js`,
-    'package/dist/build-metadata.json',
-  ]) {
-    if (!cliFiles.includes(expected)) throw new Error(`packed CLI is missing private web build output: ${expected}`);
+  if (!runT1ColdLifecycle) {
+    const cliArchive = archives.get('@colophon-claims/cli');
+    const cliFiles = await archiveFiles(cliArchive);
+    const webRoot = 'package/dist/local-web/packages/benchmark-product/web';
+    for (const expected of [
+      `${webRoot}/.next/BUILD_ID`,
+      `${webRoot}/local-server.mjs`,
+      `${webRoot}/server.js`,
+      'package/dist/build-metadata.json',
+    ]) {
+      if (!cliFiles.includes(expected)) throw new Error(`packed CLI is missing private web build output: ${expected}`);
+    }
   }
-  for (const [directory, name] of PUBLIC_PACKAGES) records.set(name, { manifest: manifestFor(join(familyRoot, directory)), archive: archives.get(name), tarballPath: `/tarballs/${name}/${archives.get(name).split('/').at(-1)}`, integrity: `sha512-${createHash('sha512').update(readFileSync(archives.get(name))).digest('base64')}` });
+  for (const [directory, name] of packedPublicPackages) records.set(name, { manifest: manifestFor(join(familyRoot, directory)), archive: archives.get(name), tarballPath: `/tarballs/${name}/${archives.get(name).split('/').at(-1)}`, integrity: `sha512-${createHash('sha512').update(readFileSync(archives.get(name))).digest('base64')}` });
   for (const [name, directory] of CROSS_TREE_PACKAGES) records.set(name, { manifest: manifestFor(directory), archive: archives.get(name), tarballPath: `/tarballs/${name}/${archives.get(name).split('/').at(-1)}`, integrity: `sha512-${createHash('sha512').update(readFileSync(archives.get(name))).digest('base64')}` });
+  if (runT1ColdLifecycle) await addT1ThirdPartyClosure(records);
   const registry = await startRegistry(records);
   try {
+    if (runT1ColdLifecycle) {
+      await run('yarn', [
+        'test',
+        'src/conformance/binary-qualification-cold-lifecycle.external.test.ts',
+        '--reporter=verbose',
+      ], {
+        cwd: join(familyRoot, 'core'),
+        env: { ...process.env, COLOPHON_T1_REGISTRY_URL: registry.baseUrl },
+      });
+      for (const name of declaredPackageClosure(records, ['@colophon-claims/verify'])) {
+        if (!registry.requests.has(`metadata:${name}`) || !registry.requests.has(`tarball:${name}`)) {
+          throw new Error(`focused T1 cold install did not fetch ${name} metadata and tarball through loopback: ${JSON.stringify([...registry.requests].sort())}`);
+        }
+      }
+      console.log('Materialized the 144-cell qualification, deleted its builder workspace, and replayed it with a cold-installed @colophon-claims/verify@2 binary.');
+    } else {
     // Prove the reader's *installed closure*, not just its direct manifest, stays
     // independent of the Colophon runner and task-execution runtime packages.
     await mkdir(readerRoot);
     await writeFile(join(readerRoot, 'package.json'), JSON.stringify({ private: true, dependencies: {
-      '@colophon-claims/verify': '1',
+      '@colophon-claims/verify': '2',
     } }, null, 2));
     await writeFile(join(readerRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
     await run('npm', [
@@ -321,7 +423,7 @@ try {
 
     await mkdir(consumerRoot);
     await writeFile(join(consumerRoot, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies: {
-      '@colophon-claims/core': '1', '@colophon-claims/cli': '1', '@colophon-claims/verify': '1',
+      '@colophon-claims/core': '1', '@colophon-claims/cli': '1', '@colophon-claims/verify': '2',
       '@types/node': '^22.0.0', typescript: '^5.9.3',
     } }, null, 2));
     await writeFile(join(consumerRoot, '.npmrc'), `@colophon-claims:registry=${registry.baseUrl}\n@jinn-network:registry=${registry.baseUrl}\n`);
@@ -407,7 +509,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     }
     const reader = JSON.parse(await run(
       npx,
-      ['--yes', '@colophon-claims/verify@1', demo.result.output.bundle, '--json'],
+      ['--yes', '@colophon-claims/verify@2', demo.result.output.bundle, '--json'],
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'reader-one-shot-npm-cache') } },
     ));
     if (reader.ok !== true || reader.checks?.length !== 6 || reader.identity !== demo.result.digests.bundleIdentity) {
@@ -416,7 +518,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     await appendFile(join(demo.result.output.bundle, 'README.md'), '\ntampered after publication\n');
     const tamperedReader = await runExpectingExit(
       npx,
-      ['--yes', '@colophon-claims/verify@1', demo.result.output.bundle, '--json'],
+      ['--yes', '@colophon-claims/verify@2', demo.result.output.bundle, '--json'],
       1,
       { cwd: oneShotRoot, env: { ...process.env, npm_config_cache: join(temporaryRoot, 'reader-one-shot-npm-cache') } },
     );
@@ -428,6 +530,7 @@ export const publicEntrypoints = [PRODUCT_BRANDING, verifyPublicBundle, verifyBu
     console.log(isQualifiedRuntime
       ? `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages, ran the retained sample, served its verified loopback viewer, and reverified it with the reader package.`
       : `Cold-installed ${PUBLIC_PACKAGES.length} public Colophon packages and proved the public @1 selectors; darwin/arm64 and linux/x64 CI complete sample execution, viewer, and reader reverification.`);
+    }
   } finally { await registry.close(); }
 } finally {
   if (process.env.COLOPHON_KEEP_PACKED_TEMP === '1') {
