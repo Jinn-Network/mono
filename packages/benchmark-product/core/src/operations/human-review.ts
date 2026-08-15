@@ -463,6 +463,14 @@ export function admitHumanTruth(
         itemDigests.add(candidate.itemSha256);
       }
       const authoritySigner = loadOrCreateReportSigningKey(clocked.workspaceDir);
+      // The closure verifier treats the frozen EvaluationSpec like every other reachable CAS
+      // record. Admission must therefore be self-contained even when callers import already
+      // signed review evidence without first using the packet-creation convenience operation.
+      putSealedBytes(
+        clocked.workspaceDir,
+        BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.bytes,
+      );
+      putSealedBytes(clocked.workspaceDir, HUMAN_REVIEW_FORM_SEALED.bytes);
       const verificationPorts = buildBinaryJudgmentAdmissionClosureWorkspacePorts(clocked.workspaceDir);
 
       const evaluated = [...parsed.candidates]

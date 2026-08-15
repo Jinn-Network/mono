@@ -42,7 +42,7 @@ import { runQuote } from "../operations/run-quote.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { specDigest, writeRunState } from "./state.js";
 import { draftPath } from "../workspace/layout.js";
-import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sealedRecordPath } from "../workspace/sealed-store.js";
 import type { DraftDocument } from "../domain/draft.js";
 import {
   SUPPORTED_INSPECT_EVALS_VERSION,
@@ -199,6 +199,7 @@ function instrument(instrumentId: string) {
 interface Fixture {
   readonly draft: DraftDocument;
   readonly benchmarkSha256: string;
+  readonly admissionManifestSha256: `sha256:${string}`;
   readonly selectionManifestSha256: string;
   readonly taskSha256s: readonly string[];
 }
@@ -378,6 +379,7 @@ function setUpFixture(): Fixture {
   return {
     draft,
     benchmarkSha256,
+    admissionManifestSha256: admittedOutcome.result.admissionManifestSha256 as `sha256:${string}`,
     selectionManifestSha256,
     taskSha256s: admitted.map((entry) => bare(entry.taskSha256)),
   };
@@ -434,6 +436,19 @@ describe("binary-instrument@1 lock-time composition", () => {
     expect(preview.previewBenchmarkRecord.items).toHaveLength(1);
     expect((preview.previewBenchmarkRecord as unknown as Record<string, unknown>)[BINARY_ITEM_BANK_INTAKE_EXTENSION])
       .toEqual((JSON.parse(new TextDecoder().decode(getSealedBytes(workspaceDir, fixture.benchmarkSha256))) as Record<string, unknown>)[BINARY_ITEM_BANK_INTAKE_EXTENSION]);
+  });
+
+  test("refuses lock-time composition when the authenticated admission closure is unavailable", () => {
+    const fixture = setUpFixture();
+    rmSync(sealedRecordPath(workspaceDir, bare(fixture.admissionManifestSha256)));
+    const benchmark = JSON.parse(new TextDecoder().decode(
+      getSealedBytes(workspaceDir, fixture.benchmarkSha256),
+    ));
+    expect(() => compileBinaryInstrumentProfile({
+      workspaceDir,
+      draft: fixture.draft,
+      benchmark,
+    })).toThrow(/admission closure is not authenticated/u);
   });
 
   test("rejects every caller-supplied derived parameter, even when its value happens to match", () => {

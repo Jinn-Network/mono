@@ -33,13 +33,9 @@ import {
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
   BinaryJudgmentPayloadSchema,
-  parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentInstrument,
-  parseBinaryJudgmentLabelResolution,
   parseEvaluationSpec,
-  sealBinaryJudgmentAnalysisContext,
   sealBinaryJudgmentInstrument,
-  sealBinaryJudgmentLabelResolution,
   sealEvaluationSpec,
 } from "@jinn-network/task-execution-profiles";
 import {
@@ -50,10 +46,7 @@ import {
   type TaskSpecification,
 } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
-import {
-  BinaryJudgmentAdmissionManifestSchema,
-  parseCanonicalHumanReviewBytes,
-} from "../human-review/contracts.js";
+import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
 import { resolveAssurance, type DraftDocument, type DraftSpec } from "../domain/draft.js";
 import { refuse } from "../errors.js";
 import {
@@ -307,81 +300,32 @@ function deriveAdmissionProfile(input: {
   readonly benchmark: BenchmarkRecord;
 }): Pick<BinaryInstrumentParameters, "candidateClasses" | "strata" | "truthAdmission"> {
   const extension = parseBinaryItemBankIntakeExtension(input.benchmark);
-  // RECONCILIATION(F2/G6): once the independently hardened admission verifier lands, call its
-  // workspace wrapper here with extension.admissionManifestSha256 and derive only from the
-  // authenticated closure it returns. The digest remains the F1 Benchmark extension's sole
-  // locator; do not add draft metadata or a second authority path. The structural replay below
-  // deliberately remains isolated at this seam so that replacement is mechanical.
-  const manifestBytes = getSealedBytes(input.workspaceDir, bare(extension.admissionManifestSha256));
-  const manifest = parseCanonicalHumanReviewBytes(
-    BinaryJudgmentAdmissionManifestSchema,
-    manifestBytes,
-    "binary admission manifest",
-  );
-  if (
-    recordDigest(manifestBytes) !== extension.admissionManifestSha256
-    || manifest.draftId !== input.draft.draftId
-    || manifest.replacementLedgerSha256 !== extension.replacementLedgerSha256
-  ) {
+  let verified: ReturnType<typeof verifyBinaryJudgmentAdmissionClosureInWorkspace>;
+  try {
+    verified = verifyBinaryJudgmentAdmissionClosureInWorkspace({
+      workspaceDir: input.workspaceDir,
+      admissionManifestSha256: extension.admissionManifestSha256,
+      expectedDraftId: input.draft.draftId,
+    });
+  } catch (cause) {
+    refuse(
+      "record-integrity",
+      "binary.admissionManifest",
+      `binary admission closure is not authenticated: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+  if (verified.manifest.replacementLedgerSha256 !== extension.replacementLedgerSha256) {
     refuse("conflict", "binary.admissionManifest", "Benchmark intake and admission manifest digest joins do not match this draft");
   }
 
-  const candidateClasses = new Set<string>();
-  const strata = new Set<string>();
-  const labels = new Set<string>();
-  const contextsByItem = new Map<string, { digest: `sha256:${string}`; itemId: string }>();
-  const manifestContexts = new Set<string>(manifest.analysisContextSha256s);
-  for (const contextDigestValue of manifest.analysisContextSha256s) {
-    const contextDigest = contextDigestValue as `sha256:${string}`;
-    const contextBytes = getSealedBytes(input.workspaceDir, bare(contextDigest));
-    const context = parseBinaryJudgmentAnalysisContext(contextBytes);
-    requireCanonicalReseal({
-      bytes: contextBytes,
-      expectedDigest: contextDigest,
-      sealed: sealBinaryJudgmentAnalysisContext(context),
-      path: "binary.analysisContext",
-    });
-    const labelBytes = getSealedBytes(input.workspaceDir, bare(context.labelResolutionSha256));
-    const label = parseBinaryJudgmentLabelResolution(labelBytes) as unknown as {
-      readonly itemSha256: string;
-      readonly itemId: string;
-      readonly truthLabel: string;
-      readonly candidateClass: string;
-      readonly stratum: string;
-      readonly truthAdmission: string;
-    };
-    requireCanonicalReseal({
-      bytes: labelBytes,
-      expectedDigest: context.labelResolutionSha256,
-      sealed: sealBinaryJudgmentLabelResolution(label as never),
-      path: "binary.labelResolution",
-    });
-    if (
-      label.itemSha256 !== context.itemSha256
-      || label.itemId !== context.itemId
-      || label.truthLabel !== context.truthLabel
-      || label.candidateClass !== context.candidateClass
-      || label.stratum !== context.stratum
-      || label.truthAdmission !== manifest.truthAdmission
-      || contextsByItem.has(context.itemSha256)
-    ) {
-      refuse("conflict", "binary.analysisContext", "analysis context and admitted label resolution joins disagree");
-    }
-    candidateClasses.add(context.candidateClass);
-    strata.add(context.stratum);
-    labels.add(context.labelResolutionSha256);
-    contextsByItem.set(context.itemSha256, { digest: contextDigest, itemId: context.itemId });
-  }
-  if (
-    labels.size !== manifest.labelResolutionSha256s.length
-    || manifest.labelResolutionSha256s.some((digest) => !labels.has(digest))
-  ) {
-    refuse("conflict", "binary.admissionManifest", "admission manifest label and analysis-context inventories disagree");
-  }
-  const derivedStrata = [...strata].sort(compareCodeUnitStrings);
-  if (!sameJson(derivedStrata, ["core", "stress"])) {
+  if (!sameJson(verified.strata, ["core", "stress"])) {
     refuse("conflict", "binary.admissionManifest", "admitted analysis contexts must exactly cover the registered core and stress strata");
   }
+  const contextsByItem = new Map(verified.accepted.map((entry) => [
+    entry.itemSha256,
+    { digest: entry.analysisContextSha256, itemId: entry.itemId },
+  ] as const));
+  const manifestContexts = new Set(verified.accepted.map((entry) => entry.analysisContextSha256));
   validateTaskClosure({
     workspaceDir: input.workspaceDir,
     benchmark: input.benchmark,
@@ -389,9 +333,9 @@ function deriveAdmissionProfile(input: {
     manifestContexts,
   });
   return {
-    candidateClasses: [...candidateClasses].sort(compareCodeUnitStrings),
+    candidateClasses: verified.classes,
     strata: ["core", "stress"],
-    truthAdmission: manifest.truthAdmission,
+    truthAdmission: verified.manifest.truthAdmission,
   };
 }
 
