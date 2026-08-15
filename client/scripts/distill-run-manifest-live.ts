@@ -15,19 +15,17 @@ import {
   runJinnLayerCli,
   capture,
   createBoundedIpfsJsonFetcher,
+  createEvidenceFetcher,
   DEFAULT_IPFS_GATEWAY_URL,
+  publishManifestBatch,
   type AttemptRef,
   type BridgeEvidence,
   type CapturedTask,
+  type ManifestBatchPublishDeps,
+  type ManifestBatchSetResult,
 } from '@jinn-network/jinn-layer';
 import { buildLayer2ScrubPipeline } from '@jinn-network/core/scrub';
 import { hashLeaf, merkleProof, verifyMerkleProof } from '@jinn-network/core';
-import {
-  publishManifestBatch,
-  type ManifestBatchPublishDeps,
-  type ManifestBatchSetResult,
-} from '../../packages/layer/src/publish.js';
-import { createEvidenceFetcher } from '../../packages/layer/src/bridge-fetch-evidence.js';
 
 const DEFAULT_TESTNET_DISCOVERY_URL =
   'https://jinn-indexer-production.up.railway.app';
