@@ -162,7 +162,10 @@ describeMaybe('hermetic indexer round-trip (spec §6 Home 1 / #341)', () => {
       process.env['JINN_INDEXER_SNAPSHOT_CHAIN_ID'] = String(SNAPSHOT_CHAIN_ID);
       process.env['JINN_INDEXER_SNAPSHOT_START_BLOCK'] = String(startBlock);
 
-      indexer = await spawnPonderIndexer({ rpcUrl, chainId: SNAPSHOT_CHAIN_ID, readyTimeoutMs: 60_000 });
+      // Ponder dev cold-compiles the complete indexer on hosted Linux runners.
+      // Keep this below the enclosing 240s test timeout while allowing the cold
+      // path enough headroom before the 90s indexed-data poll below.
+      indexer = await spawnPonderIndexer({ rpcUrl, chainId: SNAPSHOT_CHAIN_ID, readyTimeoutMs: 120_000 });
 
       // ── Poll Ponder's GraphQL until the task is indexed ────────────────────
       const query = `query { tasks(limit: 100) { items { id taskCidDigest manifestDigest chainId } } }`;

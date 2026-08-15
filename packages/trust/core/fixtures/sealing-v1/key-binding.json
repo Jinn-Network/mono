@@ -1,0 +1,28 @@
+{
+  "voucher": {
+    "did": "did:pkh:eip155:8453:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+    "kind": "account",
+    "contractAccount": false
+  },
+  "scope": [
+    "deliveries",
+    "verdicts",
+    "bindings"
+  ],
+  "agent": "urn:uuid:11111111-1111-4111-8111-111111111111",
+  "protocol": "https://spec.jinn.network/trust/key-binding/v1",
+  "key": {
+    "didKey": "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz",
+    "algorithm": "secp256k1",
+    "publicKey": "0x04abcdef0123456789",
+    "keyid": "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz"
+  },
+  "relationship": "controls",
+  "ceremony": {
+    "digest": "sha256:a753ed23b48baeb8195e5921235fb9eb3f65a7f9de948114fcef7b6e6fe6af06",
+    "type": "eoa"
+  },
+  "validFrom": "2026-07-28T00:00:00Z",
+  "strength": "strong",
+  "anchors": []
+}

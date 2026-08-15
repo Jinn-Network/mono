@@ -1,0 +1,61 @@
+{
+  "name": "@jinn-network/evidence-repository-oci",
+  "version": "0.1.0",
+  "description": "Deterministic OCI binding for the Jinn Evidence Repository contract.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/evidence/repository-oci"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./profiles/*": "./profiles/*",
+    "./schemas/*": "./profiles/evidence-repository-oci/v1/schemas/*",
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "profiles/",
+    "fixtures/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "generate:profile": "yarn build && node scripts/generate-profile.mjs",
+    "check:profile": "yarn build && node scripts/check-profile.mjs",
+    "test:registry": "vitest run src/oras-registry.integration.test.ts",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/evidence-repository": "0.1.0",
+    "canonicalize": "3.0.0"
+  },
+  "devDependencies": {
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@types/node": "^22.0.0",
+    "ajv": "^8.17.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-protocol": "portal:../protocol",
+    "@jinn-network/evidence-repository": "portal:../repository"
+  }
+}

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### BREAKING: learner `codeDigest` migrates to the `learner-public.v1` profile (issue #2118)
+
+- **Every `codeDigest` the learner harness produces changes value.** The freeze
+  fence, the delivery envelope, the daemon status panel, and the commit→digest
+  revert helper now hash `implStateDir` under one named profile instead of three
+  different ad hoc exclusion sets. `learner-public.v1` excludes `.git/`,
+  `operator-requests/`, `secrets/`, and `transcripts/`; every other top-level
+  path is classified against the ratified table and anything unclassified — plus
+  any symlink or special file — fails closed rather than being silently skipped.
+- **Pre-migration on-chain digests remain valid history and are permanently
+  non-joining.** Nothing is rewritten; no procedure converts a digest across the
+  boundary.
+- **Operator action: none in the ordinary case** — automatic on upgrade. The one
+  exception is an impl-state directory carrying an unclassified top-level path,
+  which now raises a `HashProfileViolationError` naming the path.
+- Full note, including the version boundary and the remedy:
+  [`docs/runbooks/learner-public-v1-digest-migration.md`](../docs/runbooks/learner-public-v1-digest-migration.md).
+
 ### Embedded agent surface hidden by default (issue #326)
 
 - **The embedded Claude agent chat surface no longer renders in the operator

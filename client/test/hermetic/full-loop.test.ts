@@ -2,12 +2,11 @@
  * Hermetic gate — the full daemon loop on the snapshot.
  *
  * Spec: docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md
- * §3.1 ("bootstrap → claim → execute → deliver → settle → activity-counter →
- * indexer round-trip") and §6 Home 1 ("Loop plumbing (claim→…→activity-counter)
- * | [consolidate] one hermetic loop, deterministic harness").
+ * §3.1 ("bootstrap → claim → execute → deliver → settle") and §6 Home 1
+ * ("Loop plumbing" — one consolidated hermetic loop with a deterministic harness).
  *
- * This is the headline §3.1 capability: the REAL production Daemon (MechAdapter,
- * Store, harness engine) running the whole settlement loop against the committed
+ * This is the headline §3.1 solution capability: the REAL production Daemon
+ * (MechAdapter and Store) running the solution loop against the committed
  * Anvil snapshot — deterministic, no live RPC. It is the hermetic sibling of the
  * live-fork `daemon-harness-cycle.ts` e2e, sourced from `spawnAnvilFromState`.
  *
@@ -15,8 +14,13 @@
  * task stack on the loaded state → start the production Daemon with the
  * DETERMINISTIC prediction-v1-baseline harness (no API key) + a mock IPFS server
  * → post a prediction.v1 task → daemon discovers + claims it → harness executes
- * → daemon delivers on-chain → assert the operator's on-chain ACTIVITY COUNTER
- * incremented (the load-bearing proof the settlement loop closed).
+ * → daemon delivers on-chain → assert the V3 router records the exact
+ * SolutionDeliveryClaimed event (the load-bearing proof this solution leg closed).
+ *
+ * Wave-4 D2 retired the legacy evaluator that used to extend this rig through
+ * verdict settlement and activity credit. Issue #2666 owns restoring that
+ * separate proof through the native evaluator; this solution-only rig must not
+ * claim that verdict-owned coverage in the meantime.
  *
  * Deterministic: the prediction-v1-baseline harness needs no key and no network;
  * the V3 stack + bootstrap run on the loaded snapshot state; only the daemon +
@@ -38,9 +42,8 @@ import {
   postPredictionV1Task,
   waitForDaemonClaim,
   waitForDelivery,
-  readActivityCount,
+  waitForSolutionSettlement,
   selectorToHarnessName,
-  startMockPolymarketGammaServer,
   ANVIL_PRIVATE_KEYS,
   type HarnessSelector,
 } from '../e2e/_daemon-harness-helpers.js';
@@ -71,27 +74,12 @@ const PROVENANCE = {
   baseCommit: '1'.repeat(40),
 };
 
-describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
+describeMaybe('hermetic daemon solution loop (spec §3.1 / §6 Home 1)', () => {
   it(
-    'bootstrap → claim → execute → deliver → settle → activity-counter increment, on the snapshot',
+    'bootstrap → claim → execute → deliver → solution settlement, on the snapshot',
     async () => {
       const fixture = await setupAnvilFixtureFromState(SNAPSHOT_STATE);
       const mockIpfs = await startMockIpfsServer();
-      // Deterministic, offline Polymarket Gamma mirror keyed to the task-4
-      // fixture identifiers (see postPredictionV1Task). The restoration leg
-      // (prediction-v1-baseline) needs no market lookup, but once the daemon
-      // delivers it can create a self-evaluation job whose evaluator resolves
-      // the market via getResolution. Without this mirror that call reaches the
-      // LIVE gamma-api.polymarket.com and 422s (the slug is a fixture, not a
-      // real market) — a live-network dependency the hermetic gate forbids, and
-      // the extra failing tick perturbs the loop enough to lose the
-      // waitForDelivery scan-floor race. Pointing the evaluator here keeps the
-      // whole gate offline and deterministic regardless of runner timing.
-      const mockGamma = await startMockPolymarketGammaServer({
-        marketId: 'jinn-daemon-harness-e2e-task4',
-        conditionId: '0xcondition-daemon-harness-e2e-task4',
-        slug: 'jinn-daemon-harness-e2e-task4',
-      });
       let running: Awaited<ReturnType<typeof startDaemon>> | undefined;
       try {
         // Fresh staked operator on the loaded state (bootstrap correctness itself
@@ -112,6 +100,10 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
         // the daemon can claim with its own mech.
         const v3Env = await deployMinimalV3Stack(fixture, operator, DEPLOYER_PRIV_KEY);
 
+        // The dump-state fixture retains its tip but not arbitrary predecessor blocks. Mine a
+        // local finality buffer so the compatibility projector never requests pre-snapshot data.
+        await fixture.anvil.mineBlocks(130);
+
         running = await startDaemon(
           fixture,
           operator,
@@ -119,11 +111,10 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
           mockIpfs.baseUrl, // ipfsGatewayUrl (task fetch)
           v3Env,
           mockIpfs.baseUrl, // ipfsRegistryUrl (envelope upload)
-          { polymarketGammaBaseUrl: mockGamma.baseUrl }, // offline market resolution
+          {
+            enableComposition: true,
+          },
         );
-
-        // Baseline the activity counter before posting.
-        const activityBefore = await readActivityCount(fixture, operator, v3Env);
 
         const posted = await postPredictionV1Task(
           fixture,
@@ -143,11 +134,12 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
         // on-chain (proves execute → deliver → settle).
         const delivered = await waitForDelivery(fixture, claim, v3Env, mockIpfs);
         expect(delivered.deliveryTxHash, 'no on-chain delivery tx').toMatch(/^0x[0-9a-fA-F]+$/);
+        const settlement = await waitForSolutionSettlement(fixture, claim, operator, v3Env);
+        expect(settlement.txHash, 'no on-chain solution-settlement tx').toMatch(/^0x[0-9a-fA-F]+$/);
+        expect(settlement.requestId.toLowerCase()).toBe(claim.requestId.toLowerCase());
+        expect(settlement.operator.toLowerCase()).toBe(operator.safeAddress.toLowerCase());
         // The envelope must name the deterministic harness we ran.
         expect(delivered.solverHarnessName).toBe(selectorToHarnessName(HARNESS));
-        const taskCreatedBlock = await fixture.publicClient.getBlock({
-          blockNumber: posted.createdAtBlock,
-        });
         const claimReceipt = await fixture.publicClient.getTransactionReceipt({
           hash: claim.txHash,
         });
@@ -155,39 +147,20 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
           claimReceipt.blockNumber,
           'fixture must separate TaskCreated from TaskAttemptCreated',
         ).not.toBe(posted.createdAtBlock);
-        expect(delivered.envelope.executor.generatorModel).toEqual({
-          id: 'unknown',
-          source: 'config',
-        });
-        expect(delivered.envelope.distributionClass).toBe('unknown');
+        // The legacy-to-TEP bridge is explicit about the provenance it cannot reconstruct: it
+        // carries the real marketplace request id while leaving creation anchors as documented
+        // placeholders. The native exact-document path owns full Task provenance.
         expect(delivered.envelope.task).toMatchObject({
-          onchainCreationTx: posted.creationTxHash,
-          onchainCreationBlock: Number(posted.createdAtBlock),
-          createdAt: Number(taskCreatedBlock.timestamp),
-          instanceId: PROVENANCE.instanceId,
-          repo: PROVENANCE.repo,
-          baseCommit: PROVENANCE.baseCommit,
+          requestId: claim.requestId,
+          onchainCreationTx: '0x',
+          onchainCreationBlock: 0,
         });
+        expect(delivered.envelope.payload).toMatchObject({ probabilityYes: '0.75' });
 
-        // LOAD-BEARING: the settle tx must have incremented the operator's
-        // on-chain activity counter (recordSolutionDelivery → activity checker).
-        // Poll briefly — the claimSolutionDelivery tx may land just after Deliver.
-        let activityAfter = activityBefore;
-        const deadline = Date.now() + 60_000;
-        while (Date.now() < deadline && activityAfter <= activityBefore) {
-          activityAfter = await readActivityCount(fixture, operator, v3Env);
-          if (activityAfter > activityBefore) break;
-          await new Promise<void>((r) => setTimeout(r, 1000));
-        }
-        expect(
-          activityAfter,
-          `activity counter did not increment (before=${activityBefore} after=${activityAfter}) — the settlement loop did not close`,
-        ).toBeGreaterThan(activityBefore);
       } finally {
         // Daemon must stop before Anvil tears down (loops throw on disconnect).
         if (running) { try { await running.stop(); } catch { /* best-effort */ } }
         try { await mockIpfs.close(); } catch { /* best-effort */ }
-        try { await mockGamma.close(); } catch { /* best-effort */ }
         try { await fixture.teardown(); } catch { /* best-effort */ }
       }
     },

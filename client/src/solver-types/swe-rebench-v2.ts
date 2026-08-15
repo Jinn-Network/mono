@@ -16,13 +16,12 @@ import { randomUUID } from 'node:crypto';
 import { getSolverNetContract } from '@jinn-network/sdk/solvernets';
 import { SweRebenchV2LanguageSchema, SweRebenchV2TaskSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import type { Task } from '../types/task.js';
-import type { TaskGenerator } from '../tasks/sources.js';
 import type { TaskClaimPolicy, TaskV1 } from '../types/task-document.js';
 import { signTaskV1 } from '../tasks/signing.js';
 import type { LaunchedSolverNetRecord } from '../solvernets/store.js';
 import { uploadToIpfs, fetchFromIpfs } from '../adapters/mech/ipfs.js';
 import { recoverVettedPoolFromNetwork, isTerminalRecoveryOutcome } from './_swe-rebench-v2-pool-recovery.js';
-import type { SolverTypeDefinition } from './solver-type.js';
+import type { SolverTypeDefinition, TaskGenerator } from './solver-type.js';
 import {
   selectNextPostingCandidates,
   summarizePoolState,
@@ -123,8 +122,6 @@ export interface SweRebenchV2GeneratorStaticConfig {
   agentEoa?: `0x${string}`;
   safeAddress?: `0x${string}`;
   agentPrivateKey?: `0x${string}`;
-  /** Optional DiscoveryAPI for network-truth success reconciliation (#669). */
-  discoveryApi?: import('../discovery/types.js').DiscoveryAPI;
 }
 
 export interface MakeSweRebenchV2GeneratorForLaunchedRecordOpts {
@@ -164,7 +161,6 @@ interface InternalSweRebenchV2GeneratorConfig extends SweRebenchV2AutoConfig {
   ipfsRegistryUrl?: string;
   /** IPFS gateway for the fresh-volume pool-recovery fetch (#957). */
   ipfsGatewayUrl?: string;
-  discoveryApi?: import('../discovery/types.js').DiscoveryAPI;
   creator?: {
     agentEoa?: `0x${string}`;
     safeAddress?: `0x${string}`;
@@ -535,33 +531,19 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
     }
     lastPollAt = new Date(now).toISOString();
 
-    // #957: fresh-volume vetted-pool recovery. A freshly-deployed operator has
-    // an empty disk (no validated-pool.json), so admissionMode='required' is
-    // fail-closed and the generator posts 0 tasks. Before settling into
-    // admission-required-no-data, try to recover the pool from the network: read
-    // a recent task's vettedPoolRef via the indexer and re-fetch the published
-    // artifact. Guarded on (1) recovery not yet settled, (2) required admission,
-    // (3) manifestCid known, (4) discoveryApi present. Recovery never throws — on
-    // any failure the existing fail-closed path proceeds unchanged.
-    //
-    // #957 review: TRANSIENT failures (no-task on a fresh SolverNet whose first
-    // task isn't posted yet, indexer/IPFS blips) are RETRIED on later ticks —
-    // throttled to one attempt per POOL_RECOVERY_MIN_INTERVAL_MS and capped at
-    // POOL_RECOVERY_MAX_ATTEMPTS. We latch (`poolRecoverySettled`) only on a
-    // TERMINAL outcome, or once the cap is exhausted.
+    // #957: fresh-volume vetted-pool recovery. Wave-4 D4 retired the
+    // DiscoveryAPI recent-task lookup, so production recovery always
+    // returns `no-task` and falls through to the admission gate.
     if (
       !poolRecoverySettled &&
       genConfig.admissionMode === 'required' &&
       config.solverNetManifestCid &&
-      config.discoveryApi &&
       now - lastPoolRecoveryAttemptAt >= POOL_RECOVERY_MIN_INTERVAL_MS
     ) {
       const localPoolPresent = await stat(join(config.stateDir, 'validated-pool.json'))
         .then(() => true)
         .catch(() => false);
       if (localPoolPresent) {
-        // Local pool already on disk (validated locally or recovered earlier) —
-        // terminal, nothing to recover.
         poolRecoverySettled = true;
       } else {
         lastPoolRecoveryAttemptAt = now;
@@ -569,7 +551,6 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
         const recovery = await recoverVettedPoolFromNetwork({
           stateDir: config.stateDir,
           manifestCid: config.solverNetManifestCid,
-          discoveryApi: config.discoveryApi,
           ipfsGatewayUrl:
             config.ipfsGatewayUrl ??
             process.env['JINN_IPFS_GATEWAY_URL'] ??
@@ -748,77 +729,10 @@ function makeSweRebenchV2Generator(config: InternalSweRebenchV2GeneratorConfig):
       counters.set(task.instance_id, await stateStore.getCounters(task.instance_id));
     }
 
-    // Reconcile each instance's `successful` against network truth (#669):
-    // take max(local, network). On indexer outage the tick aborts — silently
-    // falling through to local-only counters is exactly the bug being fixed.
-    // The discoveryApi/manifestCid pair is optional so test paths can skip.
-    if (config.discoveryApi && config.solverNetManifestCid) {
-      try {
-        const networkSuccesses = await config.discoveryApi.getInstanceSuccessCounts({
-          manifestCid: config.solverNetManifestCid,
-        });
-        for (const task of eligiblePool) {
-          const local = counters.get(task.instance_id);
-          if (!local) continue;
-          const networkSuccess = networkSuccesses.get(task.instance_id) ?? 0;
-          if (networkSuccess > local.successful) {
-            counters.set(task.instance_id, { ...local, successful: networkSuccess });
-          }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        lastError = {
-          message: `network-truth reconciliation failed: ${message}`,
-          at: new Date().toISOString(),
-        };
-        console.warn(`[swe-rebench-v2-gen] ${lastError.message} — skipping this tick`);
-        lastPollSummary = {
-          poolSize: eligiblePool.length,
-          posted: 0,
-          unposted: 0,
-          live: 0,
-          repostable: 0,
-          saturated: 0,
-        };
-        return null;
-      }
-    }
-
-    // Reconcile claim-budget exhaustion against network truth (#802): a posting
-    // is exhausted when its on-chain consumed slots reach maxClaims. Keyed by
-    // taskId; the classifier joins via each instance's last_task_id. On a
-    // genuine indexer outage (throw) the tick aborts — silently continuing with
-    // no claim snapshot would mask real exhaustion (exhausted postings classify
-    // `live`), suppress legitimate reposts, and under-serve N. A *successful*
-    // empty map (e.g. onchain-floor mode) is NOT an outage and is allowed
-    // through: it makes every posting inert (post-once), which is the safe
-    // degradation, not a storm.
-    let claimCounts: Map<string, InstanceClaimSnapshot> | undefined;
-    if (config.discoveryApi && config.solverNetManifestCid) {
-      try {
-        // getInstanceClaimCounts is keyed by taskId; its values are a structural
-        // superset of InstanceClaimSnapshot, so the map is used directly.
-        claimCounts = await config.discoveryApi.getInstanceClaimCounts({
-          manifestCid: config.solverNetManifestCid,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        lastError = {
-          message: `claim-budget reconciliation failed: ${message}`,
-          at: new Date().toISOString(),
-        };
-        console.warn(`[swe-rebench-v2-gen] ${lastError.message} — skipping this tick`);
-        lastPollSummary = {
-          poolSize: eligiblePool.length,
-          posted: 0,
-          unposted: 0,
-          live: 0,
-          repostable: 0,
-          saturated: 0,
-        };
-        return null;
-      }
-    }
+    // Wave-4 D4 retired DiscoveryAPI.getInstanceSuccessCounts /
+    // getInstanceClaimCounts. Local counters are the remaining source;
+    // claimCounts stays unset (post-once degradation).
+    const claimCounts: Map<string, InstanceClaimSnapshot> | undefined = undefined;
 
     const candidates = selectNextPostingCandidates({
       pool: eligiblePool,
@@ -1013,7 +927,6 @@ export function makeSweRebenchV2GeneratorForLaunchedRecord(
     solverNetManifestCid: recordRef.current.manifestCid,
     ipfsRegistryUrl: staticConfig.ipfsRegistryUrl,
     ipfsGatewayUrl: staticConfig.ipfsGatewayUrl,
-    discoveryApi: staticConfig.discoveryApi,
     creator: {
       agentEoa: staticConfig.agentEoa,
       safeAddress: staticConfig.safeAddress,

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type {
   Harness,
   HarnessContext,
+  HarnessMode,
   ReadyStatus,
   RuntimePlugin,
   Solution,
@@ -13,11 +14,23 @@ import type { Task } from '../../../types/task.js';
 import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { syntheticClaimBlocked } from '../../../solver-types/_swe-rebench-v2-synthetic-claim.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, canonicalHarnessName } from '../../names.js';
+import { LEARNER_PUBLIC_V1 } from '../../hash-profile.js';
+import { harnessHashOptions } from '../../freeze.js';
 import type {
   HarnessAdapter,
   TaskSessionInputs,
   LearnerHarnessConfig,
 } from './types.js';
+import {
+  CANDIDATE_DIR_ENV,
+  emitCandidate,
+  inlineMutationEnabled,
+  INLINE_MUTATION_ENV,
+  provisionCandidateWorkspace,
+  type LearnerCandidateConfig,
+  type ProvisionedCandidate,
+} from './candidate.js';
+import { routingSupports, type LearnerRoutingConfig } from './routing.js';
 import { resolvePluginRoot } from './plugin-path.js';
 import { digestDirectory } from '../../../plugins/digest.js';
 import { findSolverPluginManifest } from '../../../plugins/manifest.js';
@@ -29,33 +42,45 @@ import { probeCodexDoctor } from '../../../api/codex-doctor-endpoint.js';
  * `Harness` shell. Bridges the engine's dispatch contract
  * (`await impl.run(ctx)`) into the harness adapter + markdown plugin.
  *
- * `supports()` returns true for any non-evaluation SolverType. The registry
- * keeps this Harness as the default, so explicit specialists can still claim
- * their SolverTypes without being wrapped.
+ * `supports()` routes explicitly: an allowlist from config (derived from the
+ * operator's joined SolverNets when unconfigured), with the legacy
+ * wrap-everything posture available only behind the deprecated
+ * JINN_LEARNER_DEFAULT_ROUTING flag. See routing.ts.
  */
 export class LearnerHarness implements Harness {
   readonly name: string;
   readonly version: string;
   /**
-   * Exclude `.git` from the freeze codeDigest. `implStateDir` is git-backed
+   * The learner's impl-state is digested under the `learner-public.v1` profile
+   * (#2118). The profile excludes `.git/` for the reason this harness has always
+   * excluded it — `implStateDir` is git-backed
    * (`plugins/learner/hooks/session-start` runs `git init`), so hashing `.git`
-   * would make a commit's codeDigest irreproducible from its tree — breaking
-   * the commit→codeDigest mapping the per-codeDigest revert selection relies on
-   * (#764). With `.git` ignored, `git archive <sha>` + re-hash reproduces the
-   * indexed codeDigest exactly.
+   * would make a commit's codeDigest irreproducible from its tree, breaking the
+   * commit→codeDigest mapping the per-codeDigest revert selection relies on
+   * (#764) — and additionally excludes the three roots the learner deliberately
+   * fills with operator-private material (`secrets/`, `transcripts/`,
+   * `operator-requests/`). One scheme now covers the freeze fence, the delivery
+   * `codeDigest`, and the daemon status surface.
+   *
+   * See docs/runbooks/learner-public-v1-digest-migration.md for the recorded
+   * digest break.
    */
-  readonly freezeStateHashIgnore = ['.git'] as const;
+  readonly freezeStateHashProfile = LEARNER_PUBLIC_V1;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
   private readonly claudePath: string;
   private readonly codexPath: string | undefined;
   private readonly codexDoctorTimeoutMs: number | undefined;
   private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
+  private readonly routing: LearnerRoutingConfig | undefined;
+  private readonly candidateConfig: LearnerCandidateConfig;
   /** Memoized #1035 attribution descriptors (built lazily on first request). */
   private attributionPluginsCache: RuntimePlugin[] | undefined;
 
   constructor(config: LearnerHarnessConfig) {
     this.adapter = config.adapter;
+    this.routing = config.routing;
+    this.candidateConfig = config.candidate ?? {};
     this.name = config.name ?? CLAUDE_CODE_HARNESS;
     this.version = config.version ?? '0.1.0-shim';
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
@@ -241,30 +266,24 @@ export class LearnerHarness implements Harness {
     return { ready: true };
   }
 
+  /**
+   * Routing is explicit: this harness claims the SolverTypes its configuration
+   * names, and nothing else.
+   *
+   * The former posture — return `true` for every non-evaluation SolverType, with
+   * a two-item blocklist bolted on — was self-documented architectural debt. It
+   * is retired here because it collides with controlled arms: a campaign cannot
+   * compare policies on a route the learner claims regardless of what anyone
+   * configured, and an unconfigured learner quietly wrapping the whole network
+   * is not a policy anybody pinned (product design §10).
+   *
+   * The old behaviour survives behind `JINN_LEARNER_DEFAULT_ROUTING` so existing
+   * deployments keep working while they migrate to an explicit allowlist. See
+   * `routing.ts` for the two-item blocklist that holds in *both* modes and for
+   * the conditions under which it can finally be deleted.
+   */
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    if (spec.role === 'evaluation') return false;
-    // These SolverTypes have first-party restoration Harnesses that return
-    // typed solutionPayload objects. The learner emits phase artifacts for its
-    // own pipeline; letting it claim these specialist tasks can run Claude but
-    // fail packaging when the phase artifacts are absent.
-    //
-    // Architectural debt: this blocklist is the symptom — the learner can't
-    // currently handle prediction.v1 / prediction.apy.v0 generically because
-    // jinn-prediction-plugin lacks a submission-shape skill the way
-    // swe-rebench-v2-runtime has plan/SKILL.md. Once that plugin gets a
-    // submission skill and the harvest's prediction.v1 special-path
-    // (harvest.ts ~520) is migrated to the generic .execute/solution-payload.json
-    // path, this whole branch can be deleted.
-    //
-    // Related: jinn-mono-kzlj (deferred — Prediction frozen per
-    // DR-2026-05-11-a). kzlj is scoped to prediction.v1; the prediction.apy.v0
-    // path needs the same migration when the apy SolverNet's freeze lifts
-    // (file a sibling bead when that happens). Reopen kzlj + file the apy
-    // analogue when the freezes lift.
-    if (spec.solverType === 'prediction.v1' || spec.solverType === 'prediction.apy.v0') {
-      return false;
-    }
-    return true;
+    return routingSupports(this.routing, spec, this.name);
   }
 
   /**
@@ -289,8 +308,93 @@ export class LearnerHarness implements Harness {
     return { ok: true };
   }
 
+  /**
+   * Candidate mode's write target: a copy of the ACTIVE state the plugin's
+   * Improve and Consolidate phases mutate instead of the live directory. The
+   * active directory itself stays byte-identical, enforced by the freeze-fence
+   * (which takes its non-train branch for candidate mode).
+   */
+  private async provisionCandidate(ctx: HarnessContext): Promise<ProvisionedCandidate> {
+    const workspaceRoot = this.candidateConfig.workspaceRoot
+      ?? join(ctx.implStateDir, '..', 'candidates');
+    return await provisionCandidateWorkspace({
+      activeDir: ctx.implStateDir,
+      workspaceRoot,
+      runId: ctx.requestId ?? ctx.task.id,
+      hashOpts: harnessHashOptions(this) ?? {},
+    });
+  }
+
+  /** Seal the proposal. Never throws — a failed emission must not fail the solve. */
+  private async emitCandidateManifest(
+    ctx: HarnessContext,
+    provisioned: ProvisionedCandidate,
+  ): Promise<void> {
+    try {
+      const emission = await emitCandidate({
+        provisioned,
+        workingDir: ctx.workingDir,
+        axes: {
+          harness: this.name,
+          model: ctx.solverNet?.model ?? null,
+          // Every launcher supports exactly one isolation policy, so this axis
+          // is `vacuous` in the substrate's §4.3 sense — agreement on it asserts
+          // nothing. It is still pinned, so the tuple is honest about what ran.
+          isolationPolicy: 'unrestricted',
+        },
+        config: this.candidateConfig,
+        hashOpts: harnessHashOptions(this) ?? {},
+      });
+      if (emission.error) {
+        console.warn(
+          `[learner:${this.name}] candidate ${emission.runId}: tree emitted, manifest refused — ${emission.error}`,
+        );
+      } else {
+        console.log(
+          `[learner:${this.name}] candidate ${emission.runId}: ${emission.manifestDigest} ` +
+            `(parent tree ${emission.parentTreeDigest.slice(0, 12)} → candidate tree ${emission.candidateTreeDigest.slice(0, 12)})`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[learner:${this.name}] candidate emission failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * The mode the PLUGIN is told to run in, which is the daemon's mode except
+   * when an operator has opted out of deprecated inline self-mutation
+   * (`JINN_LEARNER_INLINE_MUTATION=0`). Train mode then runs the plugin under
+   * frozen semantics: Orient through Debrief, no Improve, no Consolidate, no
+   * write to `implStateDir`.
+   *
+   * Scope, stated rather than implied: this suppresses the *instruction*, not
+   * the *capability*. The daemon-wide freeze-fence still branches on the
+   * daemon's mode, which is `train`, so a plugin that ignored the steer and
+   * wrote anyway would not be caught here. The flag is a deprecation off-ramp
+   * for operators who want the learner to stop adapting in place; operators who
+   * need the write actually prevented run `frozen` or `candidate` mode, where
+   * the fence enforces it. Doing this at the harness rather than the engine is
+   * deliberate too — the flag is learner-specific, and forcing the engine's
+   * global mode would silently freeze every other harness in the registry.
+   */
+  private pluginMode(ctx: HarnessContext): HarnessMode {
+    if (ctx.mode === 'train' && !inlineMutationEnabled()) return 'frozen';
+    return ctx.mode;
+  }
+
   async run(ctx: HarnessContext): Promise<Solution> {
     const window = ctx.task.window ?? { startTs: 0, endTs: 0 };
+    const candidate = ctx.mode === 'candidate' ? await this.provisionCandidate(ctx) : undefined;
+    const mode = this.pluginMode(ctx);
+    if (mode !== ctx.mode) {
+      console.warn(
+        `[learner:${this.name}] ${INLINE_MUTATION_ENV} is disabled — running train-mode task ` +
+          `${ctx.task.id} under frozen semantics (no Improve, no Memory consolidation). ` +
+          'Inline self-mutation is deprecated; candidate mode is the supported replacement.',
+      );
+    }
     const inputs: TaskSessionInputs = {
       taskId: ctx.task.id,
       requestId: ctx.requestId,
@@ -307,16 +411,25 @@ export class LearnerHarness implements Harness {
       windowEndTs: window.endTs,
       msUntilEndTs: ctx.msUntilEndTs(),
       abort: ctx.abort,
-      mode: ctx.mode,
+      mode,
+      ...(candidate ? { adapterEnv: { [CANDIDATE_DIR_ENV]: candidate.treeDir } } : {}),
     };
 
     await this.adapter.runTask(inputs, this.pluginRoot);
 
+    // Seal the proposal before harvesting. `declaredChanges` is read from the
+    // phase artifacts the plugin just wrote, so everything the manifest needs
+    // already exists — and sealing here means a harvest failure costs the
+    // delivery, not the candidate.
+    if (candidate) await this.emitCandidateManifest(ctx, candidate);
+
     // Frozen mode skips the learning phases (improve, memory-consolidation), so
     // harvest must not require their artifacts — solve-only requires none. Train
-    // mode (undefined → 'full') is unchanged, so the daemon's normal restoration
-    // runs are unaffected.
-    const phaseRange = ctx.mode === 'frozen' ? 'solve-only' : undefined;
+    // and candidate mode (undefined → 'full') both run them; candidate mode only
+    // changes WHERE they write, not whether they run. Keyed on the PLUGIN's mode
+    // so an inline-mutation opt-out does not then fail harvest for the very
+    // artifacts it just told the plugin not to produce.
+    const phaseRange = mode === 'frozen' ? 'solve-only' : undefined;
     const solution = await harvestOutput(ctx.workingDir, phaseRange, ctx.task);
     return {
       ...solution,

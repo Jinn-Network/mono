@@ -21,7 +21,7 @@ import type { Harness, RuntimePlugin } from '../src/harnesses/types.js';
 import type { HarnessCheckpointManifest } from '@jinn-network/sdk/checkpoint';
 import { loadConfig } from '../src/config.js';
 import { Store } from '../src/store/store.js';
-import { hashImplStateDir } from '../src/harnesses/freeze.js';
+import { hashImplStateDir, harnessHashOptions } from '../src/harnesses/freeze.js';
 import {
   loadHeldOutSlate,
   type LoadedHeldOutSlate,
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   const dbPath = join(mkdtempSync(join(tmpdir(), 'jinn-probe-db-')), 'probe.db');
   const store = new Store(dbPath);
 
-  const hashOpts = harness.freezeStateHashIgnore?.length ? { ignoreRelPaths: [...harness.freezeStateHashIgnore] } : undefined;
+  const hashOpts = harnessHashOptions(harness);
   const codeDigest = `sha256:${await hashImplStateDir(implStateDir, hashOpts)}`;
   console.log(`baseline implStateDir codeDigest: ${codeDigest}`);
   const manifest = synthesizeManifest(implStateDir, codeDigest, implName);

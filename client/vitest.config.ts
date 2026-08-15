@@ -33,8 +33,9 @@ const exclude = [
   // Heavy Tier 1 release scenarios need external prerequisites — T1.1 forks
   // real Base mainnet RPC (~1min) and T1.2 needs a built `dist/bin/jinn.js`.
   // They break a clean-checkout `yarn test`, so they are excluded from the
-  // default suite and run ONLY via `yarn release:tier-1[:T1.x]`. Only the
-  // pure-unit scenario-types test in that dir stays in the default run.
+  // default suite and run via `yarn release:tier-1[:T1.x]`, which is invoked
+  // on a schedule by .github/workflows/release-tier-1.yml. Only the pure-unit
+  // scenario-types test in that dir stays in the default run.
   'test/release/tier-1/T1.1-bootstrap-fresh-anvil.test.ts',
   'test/release/tier-1/T1.2-harness-readiness-contract.test.ts',
   // Snapshot/subprocess-heavy hermetic-gate tests: each spawns Anvil
@@ -50,7 +51,12 @@ const exclude = [
   'test/hermetic/full-loop.test.ts',
   'test/hermetic/indexer-roundtrip.test.ts',
   // G0b's on-chain public-repository lifecycle compiles contracts and spawns
-  // local Anvil. It runs only through task-creator:public-repo-anvil-e2e.
+  // local Anvil, so it is excluded from the default unit run for the same
+  // reason as the files above. It is NOT unrun: `vitest.hermetic.config.ts`
+  // includes all of `test/hermetic/**`, so hermetic-gate.yml's
+  // `yarn test:hermetic` executes it on every PR (that gate installs and
+  // compiles contracts/ first, which this file's `yarn compile` step needs).
+  // `task-creator:public-repo-anvil-e2e` is the single-file local shortcut.
   'test/hermetic/public-repo-anvil-lifecycle.test.ts',
 ];
 
@@ -68,6 +74,11 @@ export default defineConfig({
     // test regression and block canary publishes.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Point `~` at a temp directory before any test module loads. `loadConfig()` with no
+    // argument reads AND (since the shape-v2 migration) writes `~/.jinn-client/config.json`,
+    // so without this the suite mutates the operator's real config. See
+    // test/_support/isolate-home.ts.
+    setupFiles: [fileURLToPath(new URL('./test/_support/isolate-home.ts', import.meta.url))],
     exclude,
     alias,
     projects: [

@@ -1,5 +1,20 @@
 # @jinn-network/indexer
 
+## Tier map (DR-2026-07-30 logical split, #2296 step 1)
+
+This package hosts two roles pending the physical split (#2296 step 2,
+gated on the operator-daemon cutover's discovery-serving stage):
+
+- **Projector role** (`src/` handlers, enrichment): aspirationally tier 3;
+  being replaced by the stack projector (`packages/marketplace/projector`
+  is projector #1). Post-split this process's role is hosted archive +
+  query plane.
+- **Explorer SPA** (`explorer/`, `src/api/explorer.ts`): tier 4 product;
+  physically separates at step 2.
+
+The legacy `@jinn-network/sdk` edge is severed and guarded
+(`.github/scripts/indexer-boundaries.test.mjs`).
+
 Ponder indexer for the Jinn protocol. Indexes four entities (Task, Attempt,
 SolverNetManifest, Envelope) from JinnRouter and IdentityRegistry events on
 Base Sepolia and Base mainnet.
@@ -8,7 +23,7 @@ Base Sepolia and Base mainnet.
 
 This package is a normal Ponder app. It runs as its own service — Node process, Postgres backend, GraphQL endpoint on port 42069. Deploy it like any other web service. The canonical patterns (Postgres + `DATABASE_SCHEMA` + views for zero-downtime rolling deploys) are described in `deploy/README.md` and come straight from Ponder's [Self-hosting docs](https://ponder.sh/docs/production/self-hosting). We do not ship custom subsystems on top.
 
-The daemon (`@jinn-network/client`) consumes this service via the GraphQL adapter at `client/src/discovery/http.ts`. The daemon does not bundle or embed this package; it talks to it over HTTP like any other backend.
+The daemon (`@jinn-network/client`) consumes this service via the GraphQL adapter at `client/src/discovery-client/http.ts`. The daemon does not bundle or embed this package; it talks to it over HTTP like any other backend.
 
 Schema definitions, event handlers, and Ponder runtime live here. The wire contract (the GraphQL queries the daemon issues) lives in the daemon's source tree. Both sides depend on the same schema shape; when the schema changes, both sides update.
 
@@ -119,12 +134,12 @@ Native HyperSync transport support may arrive in a later Ponder release.
 The GraphQL endpoint exposes 6 on-chain-derivable fields per SolverNet
 (`manifestCid`, `solverNetId`, `launcherAgentId`, `status`, `statusUpdatedAt`,
 `anchorBlock`) derived entirely from on-chain index data. The canonical
-`SolverNetManifestSummary` in `client/src/solvernets/registry-client.ts` has
+`SolverNetManifestSummary` in `client/src/discovery-client/types.ts` has
 14 fields; the remaining 8 (`name`, `network`, `launcherSafeAddress`,
 `contractId`, `contractVersion`, `solutionPriceWei`, `verdictPriceWei`,
 `openRoles`) live in the IPFS manifest body and are not stored in the indexer.
 
-The daemon's `HttpDiscoveryAPI` (at `client/src/discovery/http.ts`) fills
+The daemon's `createHttpDiscoveryClient` (at `client/src/discovery-client/http.ts`) fills
 these 8 fields with sentinel values and leaves enrichment to the caller. This
 matches how `solvernets/registry-client-erc8004.ts:listLaunched` already works
 post-`280n.3`: it fetches the IPFS manifest for each summary row.
@@ -193,7 +208,7 @@ decode with the V2→V1 fallback (and garbage-payload tolerance), most-recent-wi
 upsert ordering — including the `(block, transactionIndex, logIndex)` tiebreak
 and idempotent re-sync — the `SolutionDeliveryClaimed` missing-row guard, and
 Task/Attempt folding (cross-checked against the GraphQL field names
-`client/src/discovery/http.ts` queries).
+`client/src/discovery-client/http.ts` queries).
 
 Ponder 0.16.x has no first-class unit-test util for indexing functions, and the
 `ponder:registry` / `ponder:schema` modules are virtual modules the Ponder
@@ -206,7 +221,6 @@ pure functions against `test/helpers/in-memory-db.ts` — a stub that mirrors th
 handlers use. The two-operator end-to-end (a real Ponder service indexing a live
 testnet contract) is tracked separately.
 
-The daemon-side GraphQL **client** surface (the queries `HttpDiscoveryAPI`
-issues against this service) is covered by `client/test/discovery/http.test.ts`
-in the `@jinn-network/client` package — that suite mocks `fetch` and asserts
-the query/response shape; it does not run these handlers.
+The daemon-side GraphQL **client** surface (the queries `createHttpDiscoveryClient`
+issues against this service) is covered by `client/src/discovery-client/http.ts`
+in the `@jinn-network/client` package.

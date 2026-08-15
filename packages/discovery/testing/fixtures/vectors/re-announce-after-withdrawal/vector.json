@@ -1,0 +1,143 @@
+{
+  "name": "re-announce-after-withdrawal",
+  "kind": "source-chain",
+  "description": "`ann-1` is withdrawn (superseded) under `ann-2`, then the same underlying record re-announced fresh under a new id `ann-3` -- accepted (§5.1: withdrawal never invalidates history, re-announcement under a new id is ordinary).",
+  "input": {
+    "seed": {
+      "now": "2026-07-28T12:00:00.000Z",
+      "keys": [
+        {
+          "agent": "did:key:zAgentSourceOne",
+          "keyid": "key-1",
+          "validFrom": "2026-01-01T00:00:00.000Z",
+          "validTo": null,
+          "scope": "jinn:discovery-announcements"
+        }
+      ],
+      "hwm": null
+    },
+    "firstAdoption": true,
+    "head": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "origin": "did:key:zAgentSourceOne/feed",
+      "sequence": "0000000000000003",
+      "entry": "sha256:c50b1416d95bef2e5b22597d5a423eb0d0376f27417808f9e9882fbefd4b0c57",
+      "issuedAt": "2026-07-28T12:00:00.000Z",
+      "refreshBy": "2026-07-29T12:00:00.000Z"
+    },
+    "headSignature": {
+      "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
+      "payload": "{\"entry\":\"sha256:c50b1416d95bef2e5b22597d5a423eb0d0376f27417808f9e9882fbefd4b0c57\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000003\"}",
+      "signatures": [
+        {
+          "keyid": "key-1",
+          "sig": "1929cf93a66b991a1b8cf2e9dc0904d1ac8bb519d1aab36f115810bc5ed8c495:key-1"
+        }
+      ]
+    },
+    "entries": [
+      {
+        "entry": {
+          "protocol": "https://spec.jinn.network/record-discovery/v1",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000001",
+          "previous": null,
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-1",
+              "action": "available",
+              "record": {
+                "kind": "https://spec.jinn.network/records/submission/v1",
+                "digest": "sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-1\",\"record\":{\"digest\":\"sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773\",\"kind\":\"https://spec.jinn.network/records/submission/v1\"}}],\"previous\":null,\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"sequence\":\"0000000000000001\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "735ac73988105324115302b7f2810a9aa61bbe76616f623cfe37fffb529f3102:key-1"
+            }
+          ]
+        }
+      },
+      {
+        "entry": {
+          "protocol": "https://spec.jinn.network/record-discovery/v1",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000002",
+          "previous": "sha256:cabc9380a6f78d7b00c35cca00f9efb4721106faf86a8a94ec27420eece1db0c",
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-2",
+              "action": "withdrawn",
+              "retracts": "ann-1",
+              "reason": "superseded"
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"withdrawn\",\"announcementId\":\"ann-2\",\"reason\":\"superseded\",\"retracts\":\"ann-1\"}],\"previous\":\"sha256:cabc9380a6f78d7b00c35cca00f9efb4721106faf86a8a94ec27420eece1db0c\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"sequence\":\"0000000000000002\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "d224a5130dd1db0bff8cdb5a96eb155c4f826a7f192a8f96af6bc07081e38146:key-1"
+            }
+          ]
+        }
+      },
+      {
+        "entry": {
+          "protocol": "https://spec.jinn.network/record-discovery/v1",
+          "source": {
+            "agent": "did:key:zAgentSourceOne",
+            "name": "feed"
+          },
+          "sequence": "0000000000000003",
+          "previous": "sha256:ba2ccecde1143a8fff4e9db238c68c7b55db6ffb7bf226a53eb447633e7eea59",
+          "timestamp": "2026-07-28T12:00:00.000Z",
+          "announcements": [
+            {
+              "announcementId": "ann-3",
+              "action": "available",
+              "record": {
+                "kind": "https://spec.jinn.network/records/submission/v1",
+                "digest": "sha256:2491e4f619329ba72cf6e357da6dfa153fc34a993bdbd094d385f2cd48370450"
+              }
+            }
+          ]
+        },
+        "signature": {
+          "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
+          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-3\",\"record\":{\"digest\":\"sha256:2491e4f619329ba72cf6e357da6dfa153fc34a993bdbd094d385f2cd48370450\",\"kind\":\"https://spec.jinn.network/records/submission/v1\"}}],\"previous\":\"sha256:ba2ccecde1143a8fff4e9db238c68c7b55db6ffb7bf226a53eb447633e7eea59\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"sequence\":\"0000000000000003\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "signatures": [
+            {
+              "keyid": "key-1",
+              "sig": "3e9a55049f1ad44e7b53886bfef14f50d04cf0f36c90d08219c17926b64eaea5:key-1"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "expect": {
+    "status": "ok",
+    "advanced": {
+      "sequence": "0000000000000003",
+      "entry": "sha256:c50b1416d95bef2e5b22597d5a423eb0d0376f27417808f9e9882fbefd4b0c57",
+      "issuedAt": "2026-07-28T12:00:00.000Z"
+    }
+  }
+}

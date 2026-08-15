@@ -1,0 +1,181 @@
+{
+  "sourceDigest": "sha256:bca6abd06ca17af6e2bcbbbf5223a3a3999e02cd6085e812d8de60889087d6aa",
+  "traceId": "8f62e6eb67c927875883c89cc4354fe1",
+  "timebase": "synthetic-ordinal",
+  "completeness": {
+    "decoded": "full"
+  },
+  "spans": [
+    {
+      "spanId": "4a98944b48a60e48",
+      "parentSpanId": null,
+      "name": "invoke_agent claude-code",
+      "kind": 1,
+      "startTimeUnixNano": "0",
+      "endTimeUnixNano": "4",
+      "attributes": [
+        {
+          "key": "gen_ai.agent.name",
+          "value": {
+            "stringValue": "claude-code"
+          }
+        },
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "invoke_agent"
+          }
+        },
+        {
+          "key": "gen_ai.provider.name",
+          "value": {
+            "stringValue": "anthropic"
+          }
+        },
+        {
+          "key": "jinn.trace.outcome",
+          "value": {
+            "stringValue": "success"
+          }
+        },
+        {
+          "key": "jinn.trace.source.ordinal",
+          "value": {
+            "intValue": "0"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 1
+      }
+    },
+    {
+      "spanId": "08a35544c54835f6",
+      "parentSpanId": "4a98944b48a60e48",
+      "name": "chat",
+      "kind": 3,
+      "startTimeUnixNano": "0",
+      "endTimeUnixNano": "2",
+      "attributes": [
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "chat"
+          }
+        },
+        {
+          "key": "gen_ai.provider.name",
+          "value": {
+            "stringValue": "anthropic"
+          }
+        },
+        {
+          "key": "jinn.trace.source.ordinal",
+          "value": {
+            "intValue": "0"
+          }
+        },
+        {
+          "key": "jinn.trace.turn.role",
+          "value": {
+            "stringValue": "assistant"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 1
+      }
+    },
+    {
+      "spanId": "53ea1e1026cac5e0",
+      "parentSpanId": "08a35544c54835f6",
+      "name": "execute_tool Read",
+      "kind": 1,
+      "startTimeUnixNano": "0",
+      "endTimeUnixNano": "2",
+      "attributes": [
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "execute_tool"
+          }
+        },
+        {
+          "key": "gen_ai.tool.call.id",
+          "value": {
+            "stringValue": "call_a"
+          }
+        },
+        {
+          "key": "gen_ai.tool.name",
+          "value": {
+            "stringValue": "Read"
+          }
+        },
+        {
+          "key": "gen_ai.tool.type",
+          "value": {
+            "stringValue": "function"
+          }
+        },
+        {
+          "key": "jinn.trace.source.ordinal",
+          "value": {
+            "intValue": "0"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 2
+      }
+    },
+    {
+      "spanId": "13dad70577c9e29a",
+      "parentSpanId": "08a35544c54835f6",
+      "name": "execute_tool Grep",
+      "kind": 1,
+      "startTimeUnixNano": "0",
+      "endTimeUnixNano": "1",
+      "attributes": [
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "execute_tool"
+          }
+        },
+        {
+          "key": "gen_ai.tool.call.id",
+          "value": {
+            "stringValue": "call_b"
+          }
+        },
+        {
+          "key": "gen_ai.tool.name",
+          "value": {
+            "stringValue": "Grep"
+          }
+        },
+        {
+          "key": "gen_ai.tool.type",
+          "value": {
+            "stringValue": "function"
+          }
+        },
+        {
+          "key": "jinn.trace.source.ordinal",
+          "value": {
+            "intValue": "0"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 1
+      }
+    }
+  ],
+  "recordDigest": "sha256:520bb37ada61a4e685a1d279361468056048b81d0228037d179097584857c267"
+}

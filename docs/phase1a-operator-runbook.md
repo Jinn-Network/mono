@@ -257,7 +257,7 @@ npx jinn run
 
 The client will:
 1. Bootstrap through all 11 steps (including mech deployment via the factory)
-2. Start the daemon with three loops: creator, solver, delivery-watcher
+2. Start the daemon's long-running loops (which ones depends on vertical mode and config — see [`client/ARCHITECTURE.md`](../client/ARCHITECTURE.md) §6)
 3. Post desired states through the JinnRouter
 4. Watch for requests, run Claude for restoration, deliver results
 5. Claim deliveries, create evaluation jobs

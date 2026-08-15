@@ -32,25 +32,17 @@ import {
   type LaunchActionDeps,
 } from '../../src/solvernets/launch-state-machine.js';
 import { manifestHash } from '../../src/solvernets/manifest.js';
-import {
-  LifecycleTransition,
-  type LifecycleTransitionDeps,
-} from '../../src/solvernets/lifecycle-transitions.js';
 import type {
   PendingGeneratorSpawn,
-  SolverNetCatalogCache,
 } from '../../src/solvernets/daemon-init.js';
 import type {
   IpfsClient,
   MetadataPublisher,
   SetMetadataPublishResult,
   SubgraphClient,
-} from '../../src/solvernets/registry-client-erc8004.js';
-import type {
   SignerWithAgentEoa,
-  SolverNetManifestSummary,
-  SolverNetRegistryClient,
-} from '../../src/solvernets/registry-client.js';
+} from '../../src/solvernets/launch-publisher.js';
+import type { SolverNetManifestSummary } from '../../src/discovery-client/types.js';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
 import type { PredictionV1GeneratorRuntimeConfig } from '../../src/solver-types/prediction-v1-auto.js';
 
@@ -62,9 +54,6 @@ interface BuildArgs {
   // Optional Task 14 deps. When omitted, only the Task 13 (drafts) endpoints
   // are exercised.
   launch?: SolverNetsEndpointsDeps['launch'];
-  // Optional Task 15 deps for the registry catalog endpoints.
-  catalog?: SolverNetsEndpointsDeps['catalog'];
-  registry?: SolverNetsEndpointsDeps['registry'];
 }
 
 function buildTestApp(args: BuildArgs): { app: Hono; token: string } {
@@ -74,13 +63,9 @@ function buildTestApp(args: BuildArgs): { app: Hono; token: string } {
     app.use('/v1/solvernets/drafts/*', requireUiToken(UI_TOKEN));
     app.use('/v1/solvernets/launched', requireUiToken(UI_TOKEN));
     app.use('/v1/solvernets/launched/*', requireUiToken(UI_TOKEN));
-    app.use('/v1/solvernets/registry', requireUiToken(UI_TOKEN));
-    app.use('/v1/solvernets/registry/*', requireUiToken(UI_TOKEN));
   }
   const deps: SolverNetsEndpointsDeps = { store: args.store };
   if (args.launch !== undefined) deps.launch = args.launch;
-  if (args.catalog !== undefined) deps.catalog = args.catalog;
-  if (args.registry !== undefined) deps.registry = args.registry;
   registerSolverNetsEndpoints(app, deps);
   return { app, token: UI_TOKEN };
 }
@@ -535,52 +520,6 @@ function makeNoopSubgraph(): SubgraphClient {
   };
 }
 
-interface MockRegistry extends SolverNetRegistryClient {
-  publishLifecycleCalls: Array<{
-    manifestCid: string;
-    target: 'launched' | 'paused' | 'retired';
-  }>;
-}
-
-function makeMockRegistry(): MockRegistry {
-  const publishLifecycleCalls: Array<{
-    manifestCid: string;
-    target: 'launched' | 'paused' | 'retired';
-  }> = [];
-  let nextBlock = 200;
-  return {
-    async publishManifest() {
-      throw new Error('publishManifest not used in API tests (LaunchAction handles it)');
-    },
-    async publishLifecycleTransition(args) {
-      publishLifecycleCalls.push({ manifestCid: args.manifestCid, target: args.target });
-      return {
-        metadataTxHash: `0x${'bb'.repeat(31)}${publishLifecycleCalls.length
-          .toString(16)
-          .padStart(2, '0')}` as `0x${string}`,
-        metadataBlockNumber: nextBlock++,
-      };
-    },
-    async listLaunched() {
-      return [];
-    },
-    async getManifest() {
-      throw new Error('not used');
-    },
-    async getManifestFromCache() {
-      // Default test registry behaves as a cold cache — Task 14 lifecycle
-      // and launch tests don't exercise the summary-enrichment path.
-      return null;
-    },
-    async getLifecycleStatus() {
-      throw new Error('not used');
-    },
-    get publishLifecycleCalls() {
-      return publishLifecycleCalls;
-    },
-  };
-}
-
 interface ConfirmHelper {
   awaitTxConfirmation: (txHash: `0x${string}`) => Promise<{ blockNumber: number }>;
   confirms: Array<`0x${string}`>;
@@ -599,8 +538,9 @@ function makeConfirmHelper(): ConfirmHelper {
 }
 
 /**
- * Build a complete launch dep bundle around real `LaunchAction` and
- * `LifecycleTransition` instances backed by the test mocks. Mirrors the
+ * Build a complete launch dep bundle around a real `LaunchAction` instance
+ * backed by the test mocks. The lifecycle-transition producer retired with
+ * Wave-4 D3, so no `LifecycleTransition` is wired here. Mirrors the
  * production wiring in `daemon-init.ts` minus the in-memory pendingGenerators
  * — we manage those directly so tests can assert on configRef mutation.
  */
@@ -617,13 +557,11 @@ function makeLaunchDeps(args: {
   ipfs: MockIpfs;
   publisher: MetadataPublisher;
   subgraph: SubgraphClient;
-  registry: MockRegistry;
   signer: SignerWithAgentEoa;
 } {
   const ipfs = makeMockIpfs();
   const publisher = args.publisher ?? makeMockPublisher();
   const subgraph = makeNoopSubgraph();
-  const registry = makeMockRegistry();
   const confirm = makeConfirmHelper();
 
   const pk = generatePrivateKey();
@@ -645,22 +583,9 @@ function makeLaunchDeps(args: {
   };
   const launchAction = new LaunchAction(launchDeps);
 
-  const lifecycleDeps: LifecycleTransitionDeps = {
-    store: args.store,
-    registry,
-    signer,
-    subgraph,
-    awaitTxConfirmation: confirm.awaitTxConfirmation,
-    startGenerator: args.startGenerator ?? (async () => undefined),
-    stopGenerator: args.stopGenerator ?? (async () => undefined),
-    now: () => new Date('2026-05-06T01:00:00.000Z'),
-  };
-  const lifecycleTransition = new LifecycleTransition(lifecycleDeps);
-
   return {
     launch: {
       launchAction,
-      lifecycleTransition,
       pendingGenerators: args.pendingGenerators,
       signer,
       network: 'base-sepolia',
@@ -674,7 +599,6 @@ function makeLaunchDeps(args: {
     ipfs,
     publisher,
     subgraph,
-    registry,
     signer,
   };
 }
@@ -821,219 +745,6 @@ describe('POST /v1/solvernets/drafts/:id/launch (Task 14)', () => {
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe('launch_unavailable');
-  });
-});
-
-describe('PATCH /v1/solvernets/launched/:id/lifecycle (Task 14)', () => {
-  async function seedLaunchedRecord(
-    app: Hono,
-  ): Promise<LaunchedSolverNetRecord> {
-    const draftId = await seedLaunchableDraft(app);
-    const launchRes = await app.request(`/v1/solvernets/drafts/${draftId}/launch`, {
-      method: 'POST',
-      headers: authHeaders(),
-    });
-    const launchBody = (await launchRes.json()) as { solverNetId: string };
-    const launched = await waitFor(async () => {
-      const r = await store.loadRecord(launchBody.solverNetId);
-      return r?.status === 'launched' ? r : null;
-    });
-    return launched;
-  }
-
-  it('pause: launched → paused, stopGenerator called, status persisted', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const stops: LaunchedSolverNetRecord[] = [];
-    const launchBundle = makeLaunchDeps({
-      store,
-      pendingGenerators,
-      stopGenerator: async (r) => {
-        stops.push(r);
-      },
-    });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'paused' }),
-      },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as LaunchedSolverNetRecord;
-    expect(body.status).toBe('paused');
-    expect(stops).toHaveLength(1);
-
-    const onDisk = await store.loadRecord(launched.solverNetId);
-    expect(onDisk?.status).toBe('paused');
-  });
-
-  it('resume: paused → launched, startGenerator called', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const starts: LaunchedSolverNetRecord[] = [];
-    const launchBundle = makeLaunchDeps({
-      store,
-      pendingGenerators,
-      startGenerator: async (r) => {
-        starts.push(r);
-      },
-    });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    // First pause.
-    await app.request(`/v1/solvernets/launched/${launched.solverNetId}/lifecycle`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ target: 'paused' }),
-    });
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'launched' }),
-      },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as LaunchedSolverNetRecord;
-    expect(body.status).toBe('launched');
-    expect(starts).toHaveLength(1);
-  });
-
-  it('retire: launched → retired, stopGenerator called, terminal', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const stops: LaunchedSolverNetRecord[] = [];
-    const launchBundle = makeLaunchDeps({
-      store,
-      pendingGenerators,
-      stopGenerator: async (r) => {
-        stops.push(r);
-      },
-    });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'retired' }),
-      },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as LaunchedSolverNetRecord;
-    expect(body.status).toBe('retired');
-    expect(stops).toHaveLength(1);
-  });
-
-  it('refuses to transition a retired record (terminal)', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    // Retire first.
-    await app.request(`/v1/solvernets/launched/${launched.solverNetId}/lifecycle`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ target: 'retired' }),
-    });
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'paused' }),
-      },
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('lifecycle_terminal');
-  });
-
-  it('idempotent no-op when target equals current status', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const stops: LaunchedSolverNetRecord[] = [];
-    const launchBundle = makeLaunchDeps({
-      store,
-      pendingGenerators,
-      stopGenerator: async (r) => {
-        stops.push(r);
-      },
-    });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    // Pause.
-    await app.request(`/v1/solvernets/launched/${launched.solverNetId}/lifecycle`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ target: 'paused' }),
-    });
-    expect(stops).toHaveLength(1);
-
-    // Pause again — should be a no-op.
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'paused' }),
-      },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as LaunchedSolverNetRecord;
-    expect(body.status).toBe('paused');
-    // No additional stopGenerator call.
-    expect(stops).toHaveLength(1);
-  });
-
-  it('rejects unknown record id with 404', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const res = await app.request(
-      '/v1/solvernets/launched/missing-id/lifecycle',
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'paused' }),
-      },
-    );
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('record_not_found');
-  });
-
-  it('rejects body with invalid target value', async () => {
-    const pendingGenerators = { current: [] as PendingGeneratorSpawn[] };
-    const launchBundle = makeLaunchDeps({ store, pendingGenerators });
-    const { app } = buildTestApp({ store, launch: launchBundle.launch });
-
-    const launched = await seedLaunchedRecord(app);
-
-    const res = await app.request(
-      `/v1/solvernets/launched/${launched.solverNetId}/lifecycle`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ target: 'banana' }),
-      },
-    );
-    expect(res.status).toBe(400);
   });
 });
 
@@ -1552,11 +1263,9 @@ describe('GET /v1/solvernets/launched/:id (Task 14)', () => {
       manifestCid: record.manifestCid,
     });
     manifest.name = 'Single Net';
-    const registry = makeMockRegistryGet({
-      manifests: new Map([[record.manifestCid, manifest]]),
-    });
-    const { app } = buildTestApp({ store, registry });
-    await store.writeRecord(record);
+    const manifestPath = await store.writeManifestCache(record.manifestCid, manifest);
+    const { app } = buildTestApp({ store });
+    await store.writeRecord({ ...record, manifestPath });
 
     const res = await app.request(`/v1/solvernets/launched/${record.solverNetId}`, {
       method: 'GET',
@@ -1576,8 +1285,7 @@ describe('GET /v1/solvernets/launched/:id (Task 14)', () => {
 
   it('omits `summary` on the single-record response when the cache misses', async () => {
     const record = makeOwnedRecord({ solverNetId: 'rec-cold', status: 'launched' });
-    const registry = makeMockRegistryGet({});
-    const { app } = buildTestApp({ store, registry });
+    const { app } = buildTestApp({ store });
     await store.writeRecord(record);
 
     const res = await app.request(`/v1/solvernets/launched/${record.solverNetId}`, {
@@ -1626,92 +1334,7 @@ function makeOwnedRecord(args: {
   };
 }
 
-/**
- * Mockable `SolverNetCatalogCache` for Task 15 tests. Exposes the same surface
- * as the real cache from `daemon-init.ts`; refresh() is a noop unless the test
- * supplies a `refreshHandler`.
- */
-type MockCatalogError = { message: string; at: Date; code?: 'rpc_rate_limited' };
 
-interface MockCatalog extends SolverNetCatalogCache {
-  refreshCalls: number;
-  setSnapshot: (snapshot: SolverNetManifestSummary[]) => void;
-  setError: (err: MockCatalogError | null) => void;
-  setLastRefreshedAt: (at: Date | null) => void;
-}
-
-function makeMockCatalog(initial: {
-  snapshot?: SolverNetManifestSummary[];
-  lastRefreshedAt?: Date | null;
-  lastError?: MockCatalogError | null;
-  refreshHandler?: () => Promise<void>;
-} = {}): MockCatalog {
-  let snapshot: SolverNetManifestSummary[] = initial.snapshot ?? [];
-  let lastRefreshedAt: Date | null = initial.lastRefreshedAt ?? null;
-  let lastError: MockCatalogError | null = initial.lastError ?? null;
-  let refreshCalls = 0;
-  const refreshHandler = initial.refreshHandler;
-
-  return {
-    getCatalog: () => snapshot,
-    async refresh() {
-      refreshCalls += 1;
-      if (refreshHandler) await refreshHandler();
-    },
-    stop() {},
-    lastRefreshedAt: () => lastRefreshedAt,
-    lastError: () => lastError,
-    get refreshCalls() {
-      return refreshCalls;
-    },
-    setSnapshot(next) {
-      snapshot = next;
-    },
-    setError(next) {
-      lastError = next;
-    },
-    setLastRefreshedAt(next) {
-      lastRefreshedAt = next;
-    },
-  };
-}
-
-/**
- * Build a deterministic `SolverNetManifestSummary` for catalog tests.
- */
-function makeSummary(args: {
-  solverNetId: string;
-  manifestCid?: string;
-  status: 'launched' | 'paused' | 'retired';
-  name?: string;
-}): SolverNetManifestSummary {
-  return {
-    manifestCid: args.manifestCid ?? `bafy-${args.solverNetId}`,
-    solverNetId: args.solverNetId,
-    name: args.name ?? args.solverNetId,
-    network: 'base-sepolia',
-    launcherAgentId: '5474',
-    launcherSafeAddress: '0x1111111111111111111111111111111111111111',
-    status: args.status,
-    statusUpdatedAt: '2026-05-06T00:00:00.000Z',
-    contractId: 'prediction',
-    contractVersion: 'v1',
-    solutionPriceWei: '1000000000000000',
-    verdictPriceWei: '500000000000000',
-    openRoles: ['solver', 'evaluator'],
-    anchorBlock: 200,
-  };
-}
-
-/**
- * Build a deterministic `SolverNetManifestV1`. Used when stubbing
- * `registry.getManifest` for /registry/:cid tests; only the shape needs to be
- * close enough — we are not exercising the manifest schema validator here.
- *
- * Cast through `unknown` because we only build the subset of fields the
- * endpoint forwards as its response — schema completeness is the registry
- * client's job.
- */
 function makeManifest(args: {
   solverNetId: string;
   manifestCid?: string;
@@ -1763,64 +1386,6 @@ function makeManifest(args: {
       alg: 'eip-191',
       signer: '0x2222222222222222222222222222222222222222',
       value: `0x${'cc'.repeat(65)}`,
-    },
-  };
-}
-
-/**
- * Mockable `SolverNetRegistryClient` for Task 15. Only `getManifest` and
- * `getLifecycleStatus` are populated — the catalog endpoints lean on
- * `deps.catalog` for list/refresh, not the registry directly.
- */
-interface MockRegistryGet extends SolverNetRegistryClient {
-  getManifestCalls: string[];
-}
-
-function makeMockRegistryGet(args: {
-  manifests?: Map<string, SolverNetManifestV1>;
-  lifecycleStatuses?: Map<
-    string,
-    { status: 'launched' | 'paused' | 'retired'; statusUpdatedAt: string; sourceBlock: number }
-  >;
-  getManifestError?: Error;
-  getLifecycleError?: Error;
-} = {}): MockRegistryGet {
-  const manifests = args.manifests ?? new Map();
-  const lifecycle = args.lifecycleStatuses ?? new Map();
-  const getManifestCalls: string[] = [];
-  return {
-    async publishManifest() {
-      throw new Error('not used');
-    },
-    async publishLifecycleTransition() {
-      throw new Error('not used');
-    },
-    async listLaunched() {
-      return [];
-    },
-    async getManifest(arg) {
-      getManifestCalls.push(arg.manifestCid);
-      if (args.getManifestError) throw args.getManifestError;
-      const found = manifests.get(arg.manifestCid);
-      if (!found) {
-        throw new Error(`manifest not found: ${arg.manifestCid}`);
-      }
-      return found;
-    },
-    async getManifestFromCache(arg) {
-      // Cache-only lookup. Mirrors the Map-backed cache shape from the
-      // production client: returns the cached body when present, else
-      // null — never throws.
-      return manifests.get(arg.manifestCid) ?? null;
-    },
-    async getLifecycleStatus(arg) {
-      if (args.getLifecycleError) throw args.getLifecycleError;
-      const found = lifecycle.get(arg.manifestCid);
-      if (!found) throw new Error(`no lifecycle for ${arg.manifestCid}`);
-      return found;
-    },
-    get getManifestCalls() {
-      return getManifestCalls;
     },
   };
 }
@@ -1936,15 +1501,11 @@ describe('GET /v1/solvernets/launched (Task 15)', () => {
     });
     manifestA.name = 'Net A';
     manifestB.name = 'Net B';
-    const registry = makeMockRegistryGet({
-      manifests: new Map([
-        [a.manifestCid, manifestA],
-        [b.manifestCid, manifestB],
-      ]),
-    });
-    const { app } = buildTestApp({ store, registry });
-    await store.writeRecord(a);
-    await store.writeRecord(b);
+    const pathA = await store.writeManifestCache(a.manifestCid, manifestA);
+    const pathB = await store.writeManifestCache(b.manifestCid, manifestB);
+    const { app } = buildTestApp({ store });
+    await store.writeRecord({ ...a, manifestPath: pathA });
+    await store.writeRecord({ ...b, manifestPath: pathB });
 
     const res = await app.request('/v1/solvernets/launched', {
       method: 'GET',
@@ -1974,8 +1535,7 @@ describe('GET /v1/solvernets/launched (Task 15)', () => {
   it('omits `summary` when the cache misses (other-launcher / pre-cache rows)', async () => {
     const a = makeOwnedRecord({ solverNetId: 'a', status: 'launched' });
     // Empty cache → getManifestFromCache returns null for every cid.
-    const registry = makeMockRegistryGet({});
-    const { app } = buildTestApp({ store, registry });
+    const { app } = buildTestApp({ store });
     await store.writeRecord(a);
 
     const res = await app.request('/v1/solvernets/launched', {
@@ -2020,11 +1580,9 @@ describe('GET /v1/solvernets/launched (Task 15)', () => {
       manifestCid: hit.manifestCid,
     });
     manifestHit.name = 'Cached SolverNet';
-    const registry = makeMockRegistryGet({
-      manifests: new Map([[hit.manifestCid, manifestHit]]),
-    });
-    const { app } = buildTestApp({ store, registry });
-    await store.writeRecord(hit);
+    const hitPath = await store.writeManifestCache(hit.manifestCid, manifestHit);
+    const { app } = buildTestApp({ store });
+    await store.writeRecord({ ...hit, manifestPath: hitPath });
     await store.writeRecord(miss);
 
     const res = await app.request('/v1/solvernets/launched', {
@@ -2038,480 +1596,5 @@ describe('GET /v1/solvernets/launched (Task 15)', () => {
     const byId = new Map(body.records.map((r) => [r.solverNetId, r]));
     expect(byId.get('hit')?.summary?.name).toBe('Cached SolverNet');
     expect(byId.get('miss')?.summary).toBeUndefined();
-  });
-});
-
-describe('GET /v1/solvernets/registry (Task 15)', () => {
-  it('returns 503 when catalog dep is not configured', async () => {
-    const { app } = buildTestApp({ store });
-    const res = await app.request('/v1/solvernets/registry', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('registry_unavailable');
-  });
-
-  it('returns the cached summaries with default filter (launched + paused, no retired)', async () => {
-    const refreshedAt = new Date('2026-05-06T01:00:00.000Z');
-    const catalog = makeMockCatalog({
-      snapshot: [
-        makeSummary({ solverNetId: 'a', status: 'launched' }),
-        makeSummary({ solverNetId: 'b', status: 'paused' }),
-        makeSummary({ solverNetId: 'c', status: 'retired' }),
-      ],
-      lastRefreshedAt: refreshedAt,
-    });
-    const { app } = buildTestApp({ store, catalog });
-
-    const res = await app.request('/v1/solvernets/registry', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      summaries: SolverNetManifestSummary[];
-      lastRefreshedAt: string | null;
-      lastError: { message: string; at: string } | null;
-    };
-    expect(body.summaries.map((s) => s.solverNetId)).toEqual(['a', 'b']);
-    expect(body.lastRefreshedAt).toBe(refreshedAt.toISOString());
-    expect(body.lastError).toBeNull();
-  });
-
-  it('surfaces lastError when the cache observed a refresh failure', async () => {
-    const errAt = new Date('2026-05-06T01:00:00.000Z');
-    const catalog = makeMockCatalog({
-      snapshot: [],
-      lastError: { message: 'subgraph timed out', at: errAt },
-    });
-    const { app } = buildTestApp({ store, catalog });
-
-    const res = await app.request('/v1/solvernets/registry', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      summaries: SolverNetManifestSummary[];
-      lastRefreshedAt: string | null;
-      lastError: { message: string; at: string } | null;
-    };
-    expect(body.summaries).toEqual([]);
-    expect(body.lastRefreshedAt).toBeNull();
-    expect(body.lastError).toEqual({
-      message: 'subgraph timed out',
-      at: errAt.toISOString(),
-    });
-  });
-
-  it('passes the rpc_rate_limited code through in the lastError payload', async () => {
-    // jinn-mono #325: the typed throttle signal must survive the daemon→SPA
-    // hop so the operator UI can render an actionable message.
-    const errAt = new Date('2026-05-06T01:00:00.000Z');
-    const catalog = makeMockCatalog({
-      snapshot: [],
-      lastError: {
-        message: 'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
-        at: errAt,
-        code: 'rpc_rate_limited',
-      },
-    });
-    const { app } = buildTestApp({ store, catalog });
-
-    const res = await app.request('/v1/solvernets/registry', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      lastError: { message: string; at: string; code?: string } | null;
-    };
-    expect(body.lastError?.code).toBe('rpc_rate_limited');
-  });
-
-  it('forces a refresh when ?refresh=1 is supplied', async () => {
-    const catalog = makeMockCatalog({
-      snapshot: [makeSummary({ solverNetId: 'a', status: 'launched' })],
-    });
-    const { app } = buildTestApp({ store, catalog });
-
-    expect(catalog.refreshCalls).toBe(0);
-    const res = await app.request('/v1/solvernets/registry?refresh=1', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(200);
-    expect(catalog.refreshCalls).toBe(1);
-  });
-
-  it('does not refresh when ?refresh is missing', async () => {
-    const catalog = makeMockCatalog({
-      snapshot: [makeSummary({ solverNetId: 'a', status: 'launched' })],
-    });
-    const { app } = buildTestApp({ store, catalog });
-
-    await app.request('/v1/solvernets/registry', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(catalog.refreshCalls).toBe(0);
-  });
-
-  it('filters by ?status=retired (might be empty)', async () => {
-    const catalog = makeMockCatalog({
-      snapshot: [
-        makeSummary({ solverNetId: 'a', status: 'launched' }),
-        makeSummary({ solverNetId: 'b', status: 'retired' }),
-      ],
-    });
-    const { app } = buildTestApp({ store, catalog });
-
-    const res = await app.request('/v1/solvernets/registry?status=retired', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { summaries: SolverNetManifestSummary[] };
-    expect(body.summaries.map((s) => s.solverNetId)).toEqual(['b']);
-  });
-
-  it('filters by ?status=launched (default-equivalent for that single status)', async () => {
-    const catalog = makeMockCatalog({
-      snapshot: [
-        makeSummary({ solverNetId: 'a', status: 'launched' }),
-        makeSummary({ solverNetId: 'b', status: 'paused' }),
-        makeSummary({ solverNetId: 'c', status: 'retired' }),
-      ],
-    });
-    const { app } = buildTestApp({ store, catalog });
-
-    const res = await app.request('/v1/solvernets/registry?status=launched', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { summaries: SolverNetManifestSummary[] };
-    expect(body.summaries.map((s) => s.solverNetId)).toEqual(['a']);
-  });
-
-  it('rejects unknown status filter values with 400', async () => {
-    const catalog = makeMockCatalog({});
-    const { app } = buildTestApp({ store, catalog });
-    const res = await app.request('/v1/solvernets/registry?status=banana', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('invalid_query');
-  });
-
-  it('requires auth', async () => {
-    const catalog = makeMockCatalog({});
-    const { app } = buildTestApp({ store, catalog });
-    const res = await app.request('/v1/solvernets/registry', {
-      method: 'GET',
-      headers: {},
-    });
-    expect(res.status).toBe(401);
-  });
-});
-
-describe('GET /v1/solvernets/registry/:cid (Task 15)', () => {
-  it('returns 503 when registry dep is not configured and no owned cache matches', async () => {
-    // CID is valid-shape so it passes the malformed-cid 400 guard and falls
-    // through to the no-registry / no-owned-cache 503 path. The malformed-cid
-    // 400 path is covered by a separate test below.
-    const { app } = buildTestApp({ store });
-    const res = await app.request(
-      '/v1/solvernets/registry/bafynoownedrecord1234567890',
-      {
-        method: 'GET',
-        headers: authHeaders(),
-      },
-    );
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('registry_unavailable');
-  });
-
-  it('rejects trivially-malformed cid with 400 even when no registry is configured', async () => {
-    // Regression guard (#114): the owned-cache short-circuit and the
-    // no-registry 503 guard must not run before CID shape validation,
-    // otherwise garbage cids return 503 instead of 400 in no-registry mode.
-    const { app } = buildTestApp({ store });
-    const res = await app.request('/v1/solvernets/registry/not-a-cid', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('invalid_cid');
-  });
-
-  it('returns an owned cached manifest without requiring the registry client', async () => {
-    const cid = 'bafyownedmanifestcache1234567890';
-    const manifest = makeManifest({
-      solverNetId: 'owned-local',
-      manifestCid: cid,
-    });
-    const manifestPath = await store.writeManifestCache(cid, manifest);
-    await store.writeRecord({
-      ...makeOwnedRecord({ solverNetId: 'owned-local', status: 'launched' }),
-      manifestCid: cid,
-      manifestHash: manifestHash(manifest),
-      manifestPath,
-    });
-
-    const registry = makeMockRegistryGet({
-      getManifestError: new Error('registry should not be touched'),
-    });
-    const { app } = buildTestApp({ store, registry });
-
-    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      manifest: SolverNetManifestV1;
-      lifecycle: { status: string; sourceBlock: number };
-    };
-    expect(body.manifest.name).toBe('owned-local');
-    expect(body.manifest.solutionPriceWei).toBe('1000000000000000');
-    expect(body.lifecycle).toEqual({
-      status: 'launched',
-      statusUpdatedAt: '2026-05-06T00:00:00.000Z',
-      sourceBlock: 100,
-    });
-    expect(registry.getManifestCalls).toEqual([]);
-  });
-
-  it('ignores an owned cached manifest whose canonical hash does not match the record', async () => {
-    const cid = 'bafyownedhashmismatch1234567890';
-    const manifest = makeManifest({
-      solverNetId: 'owned-hash-mismatch',
-      manifestCid: cid,
-    });
-    const manifestPath = await store.writeManifestCache(cid, manifest);
-    await store.writeRecord({
-      ...makeOwnedRecord({ solverNetId: 'owned-hash-mismatch', status: 'launched' }),
-      manifestCid: cid,
-      manifestHash: `0x${'11'.repeat(32)}`,
-      manifestPath,
-    });
-
-    const { app } = buildTestApp({ store });
-
-    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('registry_unavailable');
-  });
-
-  it.each(['launching', 'failed'] as const)(
-    'serves an owned cached %s manifest before the lifecycle is anchored (issue #114)',
-    async (status) => {
-      const cid = `bafyowned${status}prebroadcast1234567890`;
-      const solverNetId = `owned-${status}-prebroadcast`;
-      const manifest = makeManifest({ solverNetId, manifestCid: cid });
-      const manifestPath = await store.writeManifestCache(cid, manifest);
-      await store.writeRecord({
-        ...makeOwnedRecord({ solverNetId, status }),
-        manifestCid: cid,
-        manifestHash: manifestHash(manifest),
-        manifestPath,
-        registry: {},
-        launchProgress: {
-          phase: 'broadcasting',
-          attemptCount: status === 'failed' ? 3 : 0,
-          ...(status === 'failed'
-            ? { txError: { message: 'setMetadata failed', at: '2026-05-06T00:00:00.000Z' } }
-            : {}),
-        },
-      });
-
-      const { app } = buildTestApp({ store });
-
-      const res = await app.request(`/v1/solvernets/registry/${cid}`, {
-        method: 'GET',
-        headers: authHeaders(),
-      });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        manifest: SolverNetManifestV1;
-        lifecycle: { status: string; statusUpdatedAt: string; sourceBlock: number };
-      };
-      expect(body.manifest.solverNetId).toBe(solverNetId);
-      // No on-chain anchor yet — synthesise a `launched` lifecycle so the SPA
-      // can render real manifest fields. The record-level `status` (carried
-      // separately in the record query) still shows the `launching`/`failed` pill.
-      expect(body.lifecycle.status).toBe('launched');
-      expect(body.lifecycle.sourceBlock).toBe(0);
-      expect(typeof body.lifecycle.statusUpdatedAt).toBe('string');
-    },
-  );
-
-  it('happy path: returns the manifest + lifecycle status', async () => {
-    const cid = 'bafyabcdef1234567890';
-    const manifest = makeManifest({ solverNetId: 'happy', manifestCid: cid });
-    const registry = makeMockRegistryGet({
-      manifests: new Map([[cid, manifest]]),
-      lifecycleStatuses: new Map([
-        [
-          cid,
-          { status: 'launched', statusUpdatedAt: '2026-05-06T01:00:00.000Z', sourceBlock: 12 },
-        ],
-      ]),
-    });
-    const { app } = buildTestApp({ store, registry });
-
-    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      manifest: SolverNetManifestV1;
-      lifecycle: {
-        status: 'launched' | 'paused' | 'retired';
-        statusUpdatedAt: string;
-        sourceBlock: number;
-      };
-    };
-    expect(body.manifest.solverNetId).toBe('happy');
-    expect(body.lifecycle.status).toBe('launched');
-    expect(body.lifecycle.statusUpdatedAt).toBe('2026-05-06T01:00:00.000Z');
-    expect(body.lifecycle.sourceBlock).toBe(12);
-    expect(registry.getManifestCalls).toEqual([cid]);
-  });
-
-  it('returns 404 when the registry getManifest throws (hash mismatch / missing)', async () => {
-    const cid = 'bafytamperedmanifest';
-    const registry = makeMockRegistryGet({
-      getManifestError: new Error('manifest hash mismatch for cid'),
-    });
-    const { app } = buildTestApp({ store, registry });
-
-    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: string; message: string };
-    expect(body.error).toBe('manifest_not_found');
-    expect(body.message).toMatch(/hash mismatch/);
-  });
-
-  it('returns 404 when the lifecycle lookup throws (no events on chain)', async () => {
-    const cid = 'bafyhasmanifestnolifecycle';
-    const manifest = makeManifest({ solverNetId: 'orphan', manifestCid: cid });
-    const registry = makeMockRegistryGet({
-      manifests: new Map([[cid, manifest]]),
-      // Default lifecycle map is empty → getLifecycleStatus throws.
-    });
-    const { app } = buildTestApp({ store, registry });
-
-    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('manifest_not_found');
-  });
-
-  it('falls back to owned cached manifest when the registry client throws (issue #114)', async () => {
-    const cid = 'bafyownedregistrythrows1234567890';
-    const manifest = makeManifest({
-      solverNetId: 'owned-registry-throws',
-      manifestCid: cid,
-    });
-    const manifestPath = await store.writeManifestCache(cid, manifest);
-    await store.writeRecord({
-      ...makeOwnedRecord({ solverNetId: 'owned-registry-throws', status: 'launching' }),
-      manifestCid: cid,
-      manifestHash: manifestHash(manifest),
-      manifestPath,
-      registry: {},
-    });
-
-    // Registry IS wired but every call throws — simulates Anvil/local dev
-    // where the Ponder indexer is unreachable but the operator owns the
-    // record + has the manifest in the local cache.
-    const registry = makeMockRegistryGet({
-      getManifestError: new Error('subgraph unreachable'),
-    });
-    const { app } = buildTestApp({ store, registry });
-
-    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      manifest: SolverNetManifestV1;
-      lifecycle: { status: string; sourceBlock: number };
-    };
-    expect(body.manifest.solverNetId).toBe('owned-registry-throws');
-    expect(body.lifecycle.status).toBe('launched');
-    expect(body.lifecycle.sourceBlock).toBe(0);
-  });
-
-  it('rejects trivially-malformed cid with 400', async () => {
-    const registry = makeMockRegistryGet({});
-    const { app } = buildTestApp({ store, registry });
-
-    // CID must start with `Qm` (CIDv0) or `bafy` (CIDv1 base32).
-    const res = await app.request('/v1/solvernets/registry/not-a-cid', {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('invalid_cid');
-  });
-
-  it('accepts CIDv0 (Qm-prefixed) cids', async () => {
-    const cid = 'QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG';
-    const manifest = makeManifest({ solverNetId: 'cidv0', manifestCid: cid });
-    const registry = makeMockRegistryGet({
-      manifests: new Map([[cid, manifest]]),
-      lifecycleStatuses: new Map([
-        [cid, { status: 'paused', statusUpdatedAt: '2026-05-06T02:00:00.000Z', sourceBlock: 99 }],
-      ]),
-    });
-    const { app } = buildTestApp({ store, registry });
-
-    const res = await app.request(`/v1/solvernets/registry/${cid}`, {
-      method: 'GET',
-      headers: authHeaders(),
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      manifest: SolverNetManifestV1;
-      lifecycle: { status: string };
-    };
-    expect(body.manifest.solverNetId).toBe('cidv0');
-    expect(body.lifecycle.status).toBe('paused');
-  });
-
-  it('requires auth', async () => {
-    const registry = makeMockRegistryGet({});
-    const { app } = buildTestApp({ store, registry });
-    const res = await app.request('/v1/solvernets/registry/bafyanything', {
-      method: 'GET',
-      headers: {},
-    });
-    expect(res.status).toBe(401);
   });
 });

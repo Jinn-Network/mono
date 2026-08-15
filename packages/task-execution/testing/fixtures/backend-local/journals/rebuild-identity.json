@@ -1,0 +1,36 @@
+{
+  "name": "rebuild-identity",
+  "description": "Proves the journal-is-source-of-truth / TEP-observations-are-its-projection rule (design §6.2, TEP §10.1): projecting this journal twice (a fresh boot vs. a rebuild after restart) must re-emit BYTE-IDENTICAL (source, id) observation pairs — the id is deterministically derived from the journal event, never randomly minted at emission time.",
+  "events": [
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000108",
+      "seq": 1,
+      "type": "attempt-engaged",
+      "time": "2026-07-28T00:00:00.000Z",
+      "details": { "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f8", "taskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source": "urn:jinn:backend-local:test-root" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000108",
+      "seq": 2,
+      "type": "attempt-started",
+      "time": "2026-07-28T00:00:00.200Z",
+      "details": { "source": "urn:jinn:backend-local:test-root" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000108",
+      "seq": 3,
+      "type": "attempt-terminal",
+      "time": "2026-07-28T00:02:00.000Z",
+      "details": { "state": "delivered", "exitCode": 0, "source": "urn:jinn:backend-local:test-root" },
+      "failsAttempt": false
+    }
+  ],
+  "expectedObservationIdentity": [
+    { "sourceEventSeq": 1, "expectedId": "urn:jinn:backend-local:test-root/urn:uuid:00000000-0000-0000-0000-000000000108/1" },
+    { "sourceEventSeq": 2, "expectedId": "urn:jinn:backend-local:test-root/urn:uuid:00000000-0000-0000-0000-000000000108/2" },
+    { "sourceEventSeq": 3, "expectedId": "urn:jinn:backend-local:test-root/urn:uuid:00000000-0000-0000-0000-000000000108/3" }
+  ],
+  "expected": {
+    "note": "the deterministic id-derivation rule this fixture pins is `${source}/${attemptId}/${seq}` — a rebuild that projects this journal a second time (e.g. after a crash-then-recover) must compute the SAME three ids, never new random ones; a real supervisor's derivation function is A5's decision, but whatever it is, it MUST be a pure function of (source, attemptId, seq)"
+  }
+}

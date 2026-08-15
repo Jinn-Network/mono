@@ -1,0 +1,66 @@
+{
+  "note": "The other side of the inference leg: the prefix table resolves `llama-3` to `meta`, which is not the provider the Task constrained, so the merge refuses. Included next to the golden case because a deriver that implements inference by 'if the Submission names an id, accept it' passes the golden fixture and admits every model on earth here — the table must actually be consulted, and its answer must actually be compared.",
+  "profile": {
+    "profile": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3JlcG9zaXRvcnktd29yay8xLjAiLCJyZXF1aXJlbWVudEtleXMiOlt7ImNvbXBhcmlzb25DbGFzcyI6ImZsb29yIiwia2V5IjoiZWZmb3J0In0seyJjb21wYXJpc29uQ2xhc3MiOiJjZWlsaW5nIiwia2V5IjoibWF4VG9rZW5zIn0seyJjb21wYXJpc29uQ2xhc3MiOiJleGFjdCIsImtleSI6InJldmlld0RlcHRoIn1dfQ==",
+    "requirementKeys": [
+      {
+        "key": "effort",
+        "comparisonClass": "floor"
+      },
+      {
+        "key": "maxTokens",
+        "comparisonClass": "ceiling"
+      },
+      {
+        "key": "reviewDepth",
+        "comparisonClass": "exact"
+      }
+    ]
+  },
+  "task": {
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+    "profile": {
+      "uri": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      "digest": {
+        "sha256": "6876e4c92448b323c749af98cfefd5588a371981598ac21104ef7c70e9cfa5a2"
+      }
+    },
+    "instructions": "Fix the failing test.",
+    "outputs": [
+      {
+        "name": "patch",
+        "mediaType": "text/x-diff",
+        "required": true
+      }
+    ],
+    "requirements": {
+      "model": {
+        "provider": "anthropic"
+      }
+    }
+  },
+  "submission": {
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+    "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c109",
+    "task": {
+      "digest": {
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "requester": "urn:jinn:agent:policy-kit-requester",
+    "idempotencyKey": "policy-c1-kit-provider-inference-miss",
+    "nonce": "0000000000000009",
+    "deadline": "2026-08-10T00:00:00Z",
+    "requirements": {
+      "model": {
+        "id": "llama-3"
+      }
+    }
+  },
+  "expect": {
+    "ok": false,
+    "code": "requirement-conflict",
+    "path": "requirements.model"
+  }
+}

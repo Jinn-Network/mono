@@ -1,0 +1,62 @@
+{
+  "name": "@jinn-network/marketplace-binding",
+  "version": "0.1.0",
+  "description": "The chain-venue Task Execution Protocol binding over the deployed OLAS-native Base substrate (TaskCoordinator + JinnRouterV3 + OLAS Mech Marketplace), behind a two-contract-generation seam.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/marketplace/binding"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "fixtures/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "@jinn-network/trust-resolve": "0.1.0",
+    "@noble/hashes": "^2.2.0",
+    "viem": "^2.0.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve"
+  }
+}

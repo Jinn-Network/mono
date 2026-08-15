@@ -5,7 +5,7 @@
  * concrete `TaskRunPersistence` engine class. `TaskRunPersistence` structurally
  * satisfies it; `Store.taskRunReadModel()` is the factory that hands one to the
  * composition seam (`api/gather-status.ts`). This keeps `api/` free of any
- * `harnesses/engine/persistence` import.
+ * `store/task-run-persistence` import.
  */
 import type { PersistedTaskRun, TaskRunState } from './task-run.js';
 

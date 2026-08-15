@@ -1,0 +1,11 @@
+{
+  "input": {
+    "spec": {
+      "verdictRule": { "threshold": { "measurement": "passed", "op": "eq", "value": true } },
+      "unscorable": []
+    },
+    "delivered": { "verdict": "inconclusive" },
+    "measurements": { "passed": false }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

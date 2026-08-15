@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: MIT
+
+// Cross-process broadcast serialization (design §6.1 "cross-process lock"). Two independent
+// nonce stacks against one Safe and one EOA is the #525/#562/#897 failure class; the
+// single-broadcaster rule excludes it inside one process, and this lease excludes it across
+// processes sharing one state file.
+import { randomUUID } from "node:crypto";
+import type { Address } from "viem";
+import { BROADCAST_DEFAULTS } from "./classify.js";
+import type { VenueStateDatabase } from "../state/database.js";
+
+export interface BroadcastLock {
+  withSender<T>(chainId: number, sender: Address, fn: () => Promise<T>): Promise<T>;
+}
+
+export interface BroadcastLockOptions {
+  readonly leaseMs?: number;
+  readonly holderId?: string;
+  readonly now?: () => number;
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+export function createBroadcastLock(
+  state: VenueStateDatabase,
+  options: BroadcastLockOptions = {},
+): BroadcastLock {
+  const leaseMs = options.leaseMs ?? BROADCAST_DEFAULTS.lockLeaseMs;
+  const holderId = options.holderId ?? randomUUID();
+  const now = options.now ?? (() => Date.now());
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // In-process queue: SQLite gives us cross-process exclusion, this gives us fair ordering and
+  // avoids every loop in one daemon spinning on the same row.
+  const queues = new Map<string, Promise<unknown>>();
+
+  const acquire = state.db.prepare(
+    "INSERT INTO broadcast_locks (chain_id, sender, holder, acquired_at_ms, expires_at_ms)"
+    + " VALUES (@chainId, @sender, @holder, @acquiredAtMs, @expiresAtMs)"
+    + " ON CONFLICT (chain_id, sender) DO UPDATE SET"
+    + "   holder = excluded.holder, acquired_at_ms = excluded.acquired_at_ms,"
+    + "   expires_at_ms = excluded.expires_at_ms"
+    + " WHERE broadcast_locks.expires_at_ms <= @acquiredAtMs",
+  );
+  const release = state.db.prepare(
+    "DELETE FROM broadcast_locks WHERE chain_id = ? AND sender = ? AND holder = ?",
+  );
+  // Renewal is scoped to (chain_id, sender, holder): a holder whose row was
+  // already stolen (different `holder` now on the row) simply renews zero
+  // rows -- a silent no-op, never a steal-back.
+  const renew = state.db.prepare(
+    "UPDATE broadcast_locks SET expires_at_ms = @expiresAtMs"
+    + " WHERE chain_id = @chainId AND sender = @sender AND holder = @holder",
+  );
+
+  async function acquireLease(chainId: number, sender: Address): Promise<void> {
+    for (;;) {
+      const at = now();
+      const result = acquire.run({
+        chainId,
+        sender: sender.toLowerCase(),
+        holder: holderId,
+        acquiredAtMs: at,
+        expiresAtMs: at + leaseMs,
+      });
+      if (result.changes > 0) return;
+      await sleep(25);
+    }
+  }
+
+  // Renew from a timer while the critical section is open (D0a round-1
+  // review): a fixed lease acquired once silently lapses mutual exclusion
+  // for any critical section that outlives `leaseMs` (P2's multi-attempt
+  // `executeSafeTxBatch` retry/backoff can plausibly exceed it). Renew at
+  // half the lease window so there is always a full half-lease of slack
+  // before the row would actually go stale.
+  //
+  // D0a round-2 minor: a renewal that matches ZERO rows means another holder has already
+  // legitimately stolen this lease (this holder's event loop was blocked, or its host was
+  // suspended, past `leaseMs`) -- fencing-token territory. Report it via `onLost` instead of
+  // silently continuing as if exclusion still held; `withSender` races `fn()` against this signal
+  // so the call surfaces a loud failure rather than a false "success" run without exclusion.
+  function startRenewal(chainId: number, sender: Address, onLost: () => void): () => void {
+    const renewIntervalMs = Math.max(1, Math.floor(leaseMs / 2));
+    const timer = setInterval(() => {
+      let result;
+      try {
+        result = renew.run({
+          chainId,
+          sender: sender.toLowerCase(),
+          holder: holderId,
+          expiresAtMs: now() + leaseMs,
+        });
+      } catch {
+        // The lease row lives in a database whose lifetime this holder does not own. A renewal
+        // that lands after the connection closes -- teardown, or a host that closed the db under
+        // a still-running critical section -- throws from inside an unref'd timer callback,
+        // where there is no caller to catch it: it surfaces as an unhandled exception and takes
+        // the process (or, under vitest, the whole test file) down.
+        //
+        // Stop renewing rather than reporting `onLost`. A renewal that cannot execute cannot
+        // maintain exclusion either way, but `onLost` rejects the `leaseLost` promise that
+        // `withSender` races against `fn()` -- and once that race has settled the rejection is
+        // itself unhandled, trading one crash for another. The lease lapses on its own after
+        // `leaseMs`, and an operation still holding it surfaces its own failure on its next
+        // database access.
+        clearInterval(timer);
+        return;
+      }
+      if (result.changes === 0) onLost();
+    }, renewIntervalMs);
+    // Never keep the process alive solely to renew a lease.
+    if (typeof timer === "object" && "unref" in timer) timer.unref();
+    return () => clearInterval(timer);
+  }
+
+  return {
+    async withSender<T>(chainId: number, sender: Address, fn: () => Promise<T>): Promise<T> {
+      const key = `${chainId}:${sender.toLowerCase()}`;
+      const prior = queues.get(key) ?? Promise.resolve();
+      let releaseQueue!: () => void;
+      const gate = new Promise<void>((resolve) => { releaseQueue = resolve; });
+      queues.set(key, gate);
+      await prior.catch(() => undefined);
+      try {
+        await acquireLease(chainId, sender);
+        let lost = false;
+        let rejectOnLost!: (err: Error) => void;
+        const leaseLost = new Promise<never>((_resolve, reject) => { rejectOnLost = reject; });
+        const stopRenewal = startRenewal(chainId, sender, () => {
+          if (lost) return;
+          lost = true;
+          rejectOnLost(new Error(
+            `BroadcastLock: lease for "${chainId}:${sender.toLowerCase()}" was lost to another `
+            + "holder mid-critical-section (a renewal matched zero rows) -- aborting rather than "
+            + "continuing without exclusion.",
+          ));
+        });
+        try {
+          const fnResult = fn();
+          // Attaching a handler marks `fnResult` as handled for Node's unhandled-rejection
+          // detection even when `leaseLost` wins the race below and `fnResult` later rejects
+          // unobserved otherwise.
+          fnResult.catch(() => undefined);
+          return await Promise.race([fnResult, leaseLost]);
+        } finally {
+          stopRenewal();
+          release.run(chainId, sender.toLowerCase(), holderId);
+        }
+      } finally {
+        releaseQueue();
+        if (queues.get(key) === gate) queues.delete(key);
+      }
+    },
+  };
+}

@@ -1,0 +1,1372 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "https://spec.jinn.network/records/chain-environment/v1"
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "family": {
+          "type": "string",
+          "enum": [
+            "anvil"
+          ]
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "manifestDigest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "platform": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+\\/[a-z0-9]+(\\/[a-z0-9]+)?$"
+            },
+            "reference": {
+              "type": "string",
+              "minLength": 1
+            },
+            "indexDigest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "manifestDigest",
+            "platform"
+          ],
+          "additionalProperties": false
+        },
+        "binary": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name",
+            "digest"
+          ],
+          "additionalProperties": false
+        },
+        "evm": {
+          "type": "object",
+          "properties": {
+            "hardfork": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sandboxChainId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "nonDefaultSettings": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "hardfork",
+            "sandboxChainId",
+            "nonDefaultSettings"
+          ],
+          "additionalProperties": false
+        },
+        "launch": {
+          "type": "object",
+          "properties": {
+            "options": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                ]
+              }
+            },
+            "commandEvidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "options"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "family",
+        "version",
+        "image",
+        "binary",
+        "evm",
+        "launch"
+      ],
+      "additionalProperties": false
+    },
+    "sourceAnchor": {
+      "type": "object",
+      "properties": {
+        "caip2ChainId": {
+          "type": "string",
+          "pattern": "^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$"
+        },
+        "nativeChainId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "genesisHash": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "blockNumber": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "blockHash": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "stateRoot": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "timestamp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "finalityPolicy": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "finalized",
+                "safe",
+                "latest"
+              ]
+            },
+            {
+              "type": "string",
+              "pattern": "^confirmations:[1-9][0-9]*$"
+            }
+          ]
+        },
+        "headerProof": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "mediaType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "downloadLocation": {
+              "type": "string",
+              "minLength": 1
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "caip2ChainId",
+        "nativeChainId",
+        "genesisHash",
+        "blockNumber",
+        "blockHash",
+        "stateRoot",
+        "timestamp",
+        "finalityPolicy"
+      ],
+      "additionalProperties": false
+    },
+    "stateMaterialization": {
+      "type": "object",
+      "properties": {
+        "closureClass": {
+          "type": "string",
+          "enum": [
+            "closed-state",
+            "archive-dependent"
+          ]
+        },
+        "fidelityClass": {
+          "type": "string",
+          "enum": [
+            "local",
+            "anchored-subset",
+            "full-state"
+          ]
+        },
+        "constructionMethod": {
+          "type": "string",
+          "enum": [
+            "archive-extraction",
+            "local-construction",
+            "full-state-export"
+          ]
+        },
+        "materializer": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "id",
+            "version",
+            "digest"
+          ],
+          "additionalProperties": false
+        },
+        "stateArtifact": {
+          "type": "object",
+          "properties": {
+            "descriptor": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uri": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "digest": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "mediaType": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "downloadLocation": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "annotations": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            },
+            "format": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "id",
+                "version"
+              ],
+              "additionalProperties": false
+            },
+            "entryCounts": {
+              "type": "object",
+              "properties": {
+                "accounts": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "storageSlots": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "codeEntries": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "accounts",
+                "storageSlots",
+                "codeEntries"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "descriptor",
+            "format",
+            "entryCounts"
+          ],
+          "additionalProperties": false
+        },
+        "sourceProofManifest": {
+          "type": "object",
+          "properties": {
+            "proofFormat": {
+              "type": "string",
+              "const": "eip-1186"
+            },
+            "proofs": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uri": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "digest": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "mediaType": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "downloadLocation": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "annotations": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            },
+            "coverage": {
+              "type": "object",
+              "properties": {
+                "accounts": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "storageSlots": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "codeEntries": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "accounts",
+                "storageSlots",
+                "codeEntries"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "proofFormat",
+            "proofs",
+            "coverage"
+          ],
+          "additionalProperties": false
+        },
+        "fixtureCoverage": {
+          "type": "object",
+          "properties": {
+            "manifest": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uri": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "digest": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "mediaType": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "downloadLocation": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "annotations": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            },
+            "declared": {
+              "type": "object",
+              "properties": {
+                "accounts": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "storageSlots": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "codeEntries": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "accounts",
+                "storageSlots",
+                "codeEntries"
+              ],
+              "additionalProperties": false
+            },
+            "mutatedProofCoveredAccounts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "manifest",
+            "declared",
+            "mutatedProofCoveredAccounts"
+          ],
+          "additionalProperties": false
+        },
+        "archive": {
+          "type": "object",
+          "properties": {
+            "requiredCapabilities": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "providerLocators": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "requiredCapabilities"
+          ],
+          "additionalProperties": false
+        },
+        "mutatesSourceProtocolState": {
+          "type": "boolean"
+        },
+        "initialStateCommitment": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "closureClass",
+        "fidelityClass",
+        "constructionMethod",
+        "materializer",
+        "initialStateCommitment"
+      ],
+      "additionalProperties": false
+    },
+    "fixtures": {
+      "type": "object",
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "funded-accounts",
+                  "address-book",
+                  "deployment-transcript",
+                  "state-mutation",
+                  "token-metadata"
+                ]
+              },
+              "module": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uri": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "digest": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "downloadLocation": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "annotations": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "module"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "address": {
+                "type": "string",
+                "pattern": "^0x[0-9a-f]{40}$"
+              },
+              "nativeBalanceWei": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
+              }
+            },
+            "required": [
+              "role",
+              "address",
+              "nativeBalanceWei"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "modules",
+        "accounts"
+      ],
+      "additionalProperties": false
+    },
+    "determinismControls": {
+      "type": "object",
+      "properties": {
+        "miningMode": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "auto"
+          ]
+        },
+        "orderingPolicy": {
+          "type": "string",
+          "enum": [
+            "fifo",
+            "fees"
+          ]
+        },
+        "mempoolPolicy": {
+          "type": "string",
+          "enum": [
+            "none",
+            "queued"
+          ]
+        },
+        "initialBlockNumber": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "initialTimestamp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "blockTimeProgression": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "fixed-increment",
+                "none"
+              ]
+            },
+            "secondsPerBlock": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "baseFeePolicy": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "fixed",
+                "disabled"
+              ]
+            },
+            "weiPerGas": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "gasPricePolicy": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "fixed",
+                "zero"
+              ]
+            },
+            "weiPerGas": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "blockGasLimit": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "perTransactionGasCeiling": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$"
+        },
+        "coinbase": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{40}$"
+        },
+        "prevrandao": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "replacementPolicy": {
+          "type": "string",
+          "enum": [
+            "reject",
+            "replace-by-fee"
+          ]
+        },
+        "noncePolicy": {
+          "type": "string",
+          "enum": [
+            "strict",
+            "permissive"
+          ]
+        },
+        "timeoutClock": {
+          "type": "string",
+          "enum": [
+            "wall-clock",
+            "chain-time"
+          ]
+        },
+        "timeWarp": {
+          "type": "object",
+          "properties": {
+            "maxSecondsPerOperation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxAggregateSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxBlocksPerOperation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "maxSecondsPerOperation",
+            "maxAggregateSeconds",
+            "maxBlocksPerOperation"
+          ],
+          "additionalProperties": false
+        },
+        "resetMechanism": {
+          "type": "string",
+          "enum": [
+            "fresh-process",
+            "snapshot-revert"
+          ]
+        }
+      },
+      "required": [
+        "miningMode",
+        "orderingPolicy",
+        "mempoolPolicy",
+        "initialBlockNumber",
+        "initialTimestamp",
+        "blockTimeProgression",
+        "baseFeePolicy",
+        "gasPricePolicy",
+        "blockGasLimit",
+        "perTransactionGasCeiling",
+        "coinbase",
+        "prevrandao",
+        "replacementPolicy",
+        "noncePolicy",
+        "timeoutClock",
+        "timeWarp",
+        "resetMechanism"
+      ],
+      "additionalProperties": false
+    },
+    "capabilityEnvelope": {
+      "type": "object",
+      "properties": {
+        "toolInterfaces": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uri": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "digest": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "downloadLocation": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "annotations": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "schema"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "rpc": {
+          "type": "object",
+          "properties": {
+            "readMethods": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "stateChangingMethods": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "readMethods",
+            "stateChangingMethods"
+          ],
+          "additionalProperties": false
+        },
+        "signerRoles": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "accounts": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^0x[0-9a-f]{40}$"
+                }
+              }
+            },
+            "required": [
+              "role",
+              "accounts"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "permittedChainId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxTransactions": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxAggregateNativeValueWei": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "tokenSpendPolicies": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-f]{40}$"
+                  },
+                  "maxSpendUnits": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  }
+                },
+                "required": [
+                  "token",
+                  "maxSpendUnits"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "maxGasPerTransaction": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "maxAggregateGas": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "maxExecutionDurationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxBlockAdvance": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxChainSecondsAdvance": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "maxTransactions",
+            "maxAggregateNativeValueWei",
+            "tokenSpendPolicies",
+            "maxGasPerTransaction",
+            "maxAggregateGas",
+            "maxExecutionDurationMs",
+            "maxBlockAdvance",
+            "maxChainSecondsAdvance"
+          ],
+          "additionalProperties": false
+        },
+        "egressPolicyId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "toolInterfaces",
+        "rpc",
+        "signerRoles",
+        "permittedChainId",
+        "limits",
+        "egressPolicyId"
+      ],
+      "additionalProperties": false
+    },
+    "verificationContract": {
+      "type": "object",
+      "properties": {
+        "probeSuite": {
+          "type": "object",
+          "properties": {
+            "descriptor": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uri": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "digest": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "mediaType": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "downloadLocation": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "annotations": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            },
+            "format": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "id",
+                "version"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "descriptor",
+            "format"
+          ],
+          "additionalProperties": false
+        },
+        "observationSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "mediaType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "downloadLocation": {
+              "type": "string",
+              "minLength": 1
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": {}
+        },
+        "baselineObservationDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "comparator": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "id",
+            "version",
+            "digest"
+          ],
+          "additionalProperties": false
+        },
+        "closureCheckRequired": {
+          "type": "boolean"
+        },
+        "resetRequirements": {
+          "type": "object",
+          "properties": {
+            "freshInstancePerRun": {
+              "type": "boolean",
+              "const": true
+            },
+            "minimumRuns": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "freshInstancePerRun",
+            "minimumRuns"
+          ],
+          "additionalProperties": false
+        },
+        "fixtureProbeCoverage": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "fixtureId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "probeIds": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "fixtureId",
+              "probeIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "policyId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "probeSuite",
+        "observationSchema",
+        "baselineObservationDigest",
+        "comparator",
+        "closureCheckRequired",
+        "resetRequirements",
+        "fixtureProbeCoverage",
+        "policyId"
+      ],
+      "additionalProperties": false
+    },
+    "supersedes": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "downloadLocation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "annotations": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "kind",
+    "runtime",
+    "stateMaterialization",
+    "fixtures",
+    "determinismControls",
+    "capabilityEnvelope",
+    "verificationContract"
+  ],
+  "additionalProperties": {},
+  "$id": "https://spec.jinn.network/schemas/chain-environment/v1",
+  "title": "Jinn chain environment record",
+  "description": "A sealed description of one sandboxed chain world: a pinned simulator runtime, an optional source anchor, a state materialization with its closure and fidelity classes, ordered digest-pinned fixtures, the determinism controls, the agent-facing capability envelope, and the verification contract. The document states what the world is; it makes no claim that the world boots or reproduces, and it does not assert correspondence to a public chain beyond the fidelity class it declares. Those claims live in separately published attestations and are bounded there.",
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "kind",
+          "runtime",
+          "sourceAnchor",
+          "stateMaterialization",
+          "fixtures",
+          "determinismControls",
+          "capabilityEnvelope",
+          "verificationContract",
+          "supersedes"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+      }
+    ]
+  },
+  "$comment": "Structural validation only. These checks are cross-field and are enforced at runtime, not here: sourceAnchor is present exactly when fidelityClass is not `local`; stateMaterialization.initialStateCommitment MUST differ from sourceAnchor.stateRoot; for a non-local artifact, sourceProofManifest.coverage plus fixtureCoverage.declared must equal stateArtifact.entryCounts in every category, or the record is source-coverage-incomplete; mutatesSourceProtocolState must be true when fixtures mutate proof-covered accounts; capabilityEnvelope.permittedChainId must equal runtime.evm.sandboxChainId; every signer account must be a declared fixture account, and no fixture account may be a well-known development-mnemonic address; verificationContract.fixtureProbeCoverage must name every fixture module and no others; a closed-state record requires the blackhole egress policy, closureCheckRequired, a state artifact, no archive declaration, and a fresh-process reset; runtime.image.reference must end with @<manifestDigest> and indexDigest must differ from it; and the record's bytes must be the exact RFC 8785 canonical encoding of the document."
+}

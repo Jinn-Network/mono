@@ -1,0 +1,34 @@
+{
+  "method": "network.jinn.evaluation-method.prediction-market",
+  "version": "1.0.0",
+  "registrationId": "prediction-market",
+  "adapter": {
+    "package": "@jinn-network/task-execution-evaluator-adapters",
+    "export": "createPredictionEvaluatorAdapter",
+    "parser": "network.jinn.parser.prediction-market"
+  },
+  "resolutionSnapshotSource": "context — read from the evaluation Attempt's injected EvaluationContext (resolutionSnapshot, market, window, consensusProbabilityYes); the adapter makes no network calls and fetches no live market data itself",
+  "verdict": {
+    "fail": "any integrity check other than market.resolution reports FAIL",
+    "inconclusive": "the market had not resolved when the evaluation ran (limitation: market-unresolved)",
+    "pass": "every integrity check passes and the market resolved with an outcome"
+  },
+  "measurements": [
+    "integrity",
+    "resolved",
+    "outcomeYes",
+    "solverBrier",
+    "consensusBrier",
+    "brierSpread"
+  ],
+  "scoring": {
+    "basis": "brier-loss.v1",
+    "rule": "brier = (probability - target)^2 with target 1 for YES and 0 for NO; spread = solverBrier - consensusBrier"
+  },
+  "evidence": "the adapter currently returns no claimEvidence entries; the deployment's evidenceWriter is a real, durable content-addressed filesystem repository, so a future adapter revision that attaches claim evidence is served without a deployment change",
+  "reference": [
+    "packages/task-execution/evaluator-adapters/src/prediction/adapter.ts",
+    "packages/task-execution/evaluator-adapters/src/prediction/parse.ts",
+    "packages/task-execution/evaluator-adapters/src/registrations.ts#createPredictionEvaluatorRegistration"
+  ]
+}

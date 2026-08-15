@@ -1,0 +1,49 @@
+{
+  "name": "item-unauthorized-provenance",
+  "kind": "item",
+  "description": "A query service cites a REAL entry that genuinely announces this item -- but the consumer never verified that entry onto the source's verified chain (§10.4 step 3). The case a malicious aggregator citing a trusted source it never synced is caught by.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:e093496b46e7ba47267c3ccac0dce59a0fcfc4e034340c51a3f0733a8ed149c3"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:201fc778885c73d6083e6277e8af197c39e6e04f712bf212ec50fc24bc98c583",
+        "announcementId": "ann-7"
+      }
+    },
+    "fetchedBytes": {
+      "note": "item-unauthorized-provenance fixture record bytes",
+      "kind": "submission"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-7",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:e093496b46e7ba47267c3ccac0dce59a0fcfc4e034340c51a3f0733a8ed149c3"
+          }
+        }
+      ]
+    },
+    "chainVerified": false
+  },
+  "expect": {
+    "status": "unauthorized-provenance"
+  }
+}

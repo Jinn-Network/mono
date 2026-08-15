@@ -15,7 +15,6 @@ import {
   runContractIntegration,
   runAnvilTaskFirstFullLoop,
   runFreezeFenceForkE2E,
-  runLocalTaskFirstLifecycle,
   runPhase,
   runPredictionV1Smoke,
   runTrainVsFrozenTrajectoryE2E,
@@ -33,14 +32,6 @@ async function main(): Promise<void> {
 
   results.push(await runPhase('Prediction v1 schema smoke', async () => {
     await runPredictionV1Smoke();
-  }));
-
-  results.push(await runPhase('Client Task-first lifecycle', async () => {
-    const result = await runLocalTaskFirstLifecycle();
-    process.stdout.write(
-      `taskId=${result.postedTaskId} requestIds=${result.request.requestId},${result.secondRequest.requestId} ` +
-      `verdictRequest=${result.verdictRequest.requestId} verdict=${result.verdict} score=${result.score}\n`,
-    );
   }));
 
   if (process.env['JINN_E2E_SKIP_FORK'] === '1') {
@@ -61,12 +52,12 @@ async function main(): Promise<void> {
         `verdict=${result.verdict} score=${result.score} submitted=${result.submittedCount}\n`,
       );
     }));
-    results.push(await runPhase('Base Sepolia fork SolverNet creation + launch + lifecycle', async () => {
+    results.push(await runPhase('Base Sepolia fork SolverNet creation + launch', async () => {
       const result = await runBaseSepoliaForkSolverNetCreationLoop();
       process.stdout.write(
         `manifestCid=${result.manifestCid} taskId=${result.taskId} ` +
         `verdict=${result.verdict} score=${result.score} submitted=${result.submittedCount} ` +
-        `lifecycle=${result.lifecycleSequence.join('->')} setMetadataCalls=${result.setMetadataCalls} ` +
+        `setMetadataCalls=${result.setMetadataCalls} ` +
         `filter=${result.filterAssertions.join(',')}\n`,
       );
     }));

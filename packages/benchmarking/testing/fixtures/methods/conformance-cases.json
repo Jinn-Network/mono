@@ -1,0 +1,30 @@
+{
+  "comparability": {
+    "marginalCrossVersion": "reject",
+    "pairedSharedTaskDigests": "permit-only-when-declared-and-observed"
+  },
+  "conflicts": [
+    "jinn.benchmarking.method/wilson",
+    "jinn.benchmarking.method/avg-at-k",
+    "jinn.benchmarking.method/pass-at-k",
+    "jinn.benchmarking.method/paired-mcnemar",
+    "jinn.benchmarking.method/noninferiority-iut",
+    "jinn.benchmarking.method/paired-delta",
+    "jinn.benchmarking.method/clean-subset"
+  ],
+  "pairedExclusions": true,
+  "pinnedClustering": "task-provenance-source"
+  ,
+  "replicateBoundary": {
+    "pairedMcnemar": {
+      "r1": "compute-exact",
+      "rGreaterThan1": "typed-incompatible-input"
+    }
+  },
+  "exactByteInputs": [
+    "verdict",
+    "run",
+    "task",
+    "anchored-benchmark-announcement"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "input": {
+    "schema": { "$ref": "https://evil.example/schema.json" }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

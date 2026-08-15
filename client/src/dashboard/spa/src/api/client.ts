@@ -1,4 +1,5 @@
 import type {
+  StatusV1Response,
   BootstrapState,
   ClaudeAuthState,
   StructuredEvent,
@@ -38,8 +39,11 @@ import type {
   DebugReportManifest,
   RewardsResponse,
   ClaimRewardsResponse,
-} from './types.js';
-import type { ProviderRef } from '../../../../harnesses/provider-ref.js';
+  ClaimPolicyConfig,
+  ClaimPolicyResponse,
+  ExecutionWiringConfigEntry,
+  NotificationsV1Response,
+} from '../../../../api/contract/index.js';
 
 interface JsonErrorPayload {
   error?: string;
@@ -84,9 +88,10 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getStatus: () => jfetch<unknown>('/v1/status'),
+  getStatus: () => jfetch<StatusV1Response>('/v1/status'),
   getRewards: () => jfetch<RewardsResponse>('/v1/rewards'),
   getBootstrap: () => jfetch<BootstrapState>('/v1/bootstrap'),
+  getNotifications: () => jfetch<NotificationsV1Response>('/v1/notifications'),
   getRecentEvents: (kinds?: string[], limit = 100) => {
     const q = new URLSearchParams();
     if (kinds && kinds.length > 0) q.set('kinds', kinds.join(','));
@@ -292,6 +297,18 @@ export const api = {
     ),
 
   /**
+   * Composed readiness snapshot across every harness this daemon build
+   * registers (`GET /v1/harnesses/readiness`). The onboarding readiness step
+   * reads this rather than probing one harness at a time — it asks no
+   * question, so it has no selected harness to probe. A pre-flip call returns
+   * 503 (`subsystem_not_ready`), which callers treat as "checking".
+   */
+  harnessReadinessSnapshot: () =>
+    jfetch<{ lastRefreshedAt: string; harnesses: HarnessReadinessEntry[] }>(
+      '/v1/harnesses/readiness',
+    ),
+
+  /**
    * Per-harness auth-source status (#564) — auth source path, masked last-4
    * key suffix, credential mtime, and a loaded/missing/unknown badge. The
    * endpoint NEVER returns full key bytes.
@@ -422,11 +439,29 @@ export const api = {
       ),
   },
 
-  // ---- Operator participation flow (Task 21) ----
-  // Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12. Writes a
-  // manifest-keyed entry to `config.joinedSolverNets[<cid>]`; restart-required
-  // — the daemon does not hot-reload SolverNet config.
+  // ---- Operator surfaces ----
+  // The join/leave lifecycle retired in Wave-4 D1 (DR-2026-08-05) with the
+  // `joinedSolverNets` claim gate; what remains here is read plus the
+  // non-membership operator mutations. `listJoined` is the surviving READ —
+  // OPERATOR-APP-SPEC §2.4 keeps Memberships as a read-only legacy view until
+  // cutover stage 5.
   operator: {
+    listJoined: () =>
+      jfetch<{
+        joinedSolverNets: Record<
+          string,
+          {
+            manifestCid: string;
+            name?: string;
+            contract?: { id: string; version: string };
+            roles: Array<'solver' | 'evaluator'>;
+            harness?: string;
+            model?: string;
+            plugins?: string[];
+            disabledDefaultPlugins?: string[];
+          }
+        >;
+      }>('/v1/operator/joined'),
     listArtifacts: (opts: { source?: OperatorArtifactSource; artifactType?: string; limit?: number } = {}) => {
       const q = new URLSearchParams();
       if (opts.source) q.set('source', opts.source);
@@ -446,66 +481,24 @@ export const api = {
           body: JSON.stringify(pricing),
         },
       ),
-    join: (
-      manifestCid: string,
-      body: {
-        name?: string;
-        contract?: { id: string; version: string };
-        roles: Array<'solver' | 'evaluator'>;
-        harness?: string;
-        model?: string;
-        provider?: ProviderRef;
-        plugins?: string[];
-        disabledDefaultPlugins?: string[];
-      },
-    ) =>
-      jfetch<{
-        ok: boolean;
-        restartRequired: boolean;
-        manifestCid: string;
-        config: {
-          manifestCid: string;
-          name?: string;
-          contract?: { id: string; version: string };
-          roles: Array<'solver' | 'evaluator'>;
-          harness?: string;
-          model?: string;
-          provider?: ProviderRef;
-          plugins?: string[];
-          disabledDefaultPlugins?: string[];
-        };
-      }>(`/v1/operator/join/${encodeURIComponent(manifestCid)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-    leave: (manifestCid: string) =>
-      jfetch<{ ok: boolean; restartRequired: boolean; manifestCid: string }>(
-        `/v1/operator/join/${encodeURIComponent(manifestCid)}`,
-        { method: 'DELETE' },
-      ),
-    listJoined: () =>
-      jfetch<{
-        joinedSolverNets: Record<
-          string,
-          {
-            manifestCid: string;
-            name?: string;
-            contract?: { id: string; version: string };
-            roles: Array<'solver' | 'evaluator'>;
-            harness?: string;
-            model?: string;
-            provider?: ProviderRef;
-            plugins?: string[];
-            disabledDefaultPlugins?: string[];
-          }
-        >;
-      }>('/v1/operator/joined'),
     completeOnboarding: () =>
       jfetch<{ ok: boolean; onboardingComplete: boolean }>(
         '/v1/operator/onboarding-complete',
         { method: 'POST' },
       ),
+    getClaimPolicy: () => jfetch<ClaimPolicyResponse>('/v1/operator/claim-policy'),
+    setClaimPolicy: (body: { claimPolicy: ClaimPolicyConfig }) =>
+      jfetch<{ restartRequired: boolean }>('/v1/operator/claim-policy', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    setExecutionWiring: (body: { executionWiring: ExecutionWiringConfigEntry[] }) =>
+      jfetch<{ restartRequired: boolean }>('/v1/operator/execution-wiring', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
   },
   captures: {
     listPending: () => jfetch<CapturesListResponse>('/api/captures/pending'),

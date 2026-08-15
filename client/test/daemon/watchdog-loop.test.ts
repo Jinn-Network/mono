@@ -60,14 +60,14 @@ describe('#1043 WatchdogLoop', () => {
   it('fires onStale exactly once for a stale loop and never for a healthy sibling', () => {
     const onStale = vi.fn();
     // healthy ticked just now; stale ticked long ago.
-    recordLoopTick(store, 'creator');
-    store.setConfigValue('loop_heartbeat:engine-tick', String(now));
-    store.setConfigValue('loop_heartbeat:creator', String(now - INTERVAL * 100));
+    recordLoopTick(store, 'checkpoint');
+    store.setConfigValue('loop_heartbeat:work', String(now));
+    store.setConfigValue('loop_heartbeat:checkpoint', String(now - INTERVAL * 100));
 
     const wd = check(
       [
-        { name: 'creator', intervalMs: INTERVAL },
-        { name: 'engine-tick', intervalMs: INTERVAL },
+        { name: 'checkpoint', intervalMs: INTERVAL },
+        { name: 'work', intervalMs: INTERVAL },
       ],
       { autoRestart: true, onStale },
     );
@@ -76,24 +76,24 @@ describe('#1043 WatchdogLoop', () => {
     wd.check(); // still stale — must NOT fire again this episode
 
     expect(onStale).toHaveBeenCalledTimes(1);
-    expect(onStale).toHaveBeenCalledWith('creator');
+    expect(onStale).toHaveBeenCalledWith('checkpoint');
   });
 
   it('re-arms onStale after the loop recovers and goes stale again', () => {
     const onStale = vi.fn();
-    store.setConfigValue('loop_heartbeat:creator', String(now - INTERVAL * 100));
-    const wd = check([{ name: 'creator', intervalMs: INTERVAL }], { autoRestart: true, onStale });
+    store.setConfigValue('loop_heartbeat:checkpoint', String(now - INTERVAL * 100));
+    const wd = check([{ name: 'checkpoint', intervalMs: INTERVAL }], { autoRestart: true, onStale });
 
     wd.check();
     expect(onStale).toHaveBeenCalledTimes(1);
 
     // Heartbeat advances → loop healthy again → episode cleared.
-    store.setConfigValue('loop_heartbeat:creator', String(now));
+    store.setConfigValue('loop_heartbeat:checkpoint', String(now));
     wd.check();
     expect(onStale).toHaveBeenCalledTimes(1);
 
     // Goes stale a second time → new episode → fires again.
-    store.setConfigValue('loop_heartbeat:creator', String(now - INTERVAL * 100));
+    store.setConfigValue('loop_heartbeat:checkpoint', String(now - INTERVAL * 100));
     wd.check();
     expect(onStale).toHaveBeenCalledTimes(2);
   });
@@ -101,9 +101,9 @@ describe('#1043 WatchdogLoop', () => {
   it('detects + emits a structured event but does NOT call onStale when autoRestart is OFF', () => {
     const onStale = vi.fn();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    store.setConfigValue('loop_heartbeat:creator', String(now - INTERVAL * 100));
+    store.setConfigValue('loop_heartbeat:checkpoint', String(now - INTERVAL * 100));
 
-    const wd = check([{ name: 'creator', intervalMs: INTERVAL }], { autoRestart: false, onStale });
+    const wd = check([{ name: 'checkpoint', intervalMs: INTERVAL }], { autoRestart: false, onStale });
     wd.check();
 
     expect(onStale).not.toHaveBeenCalled();
@@ -111,28 +111,28 @@ describe('#1043 WatchdogLoop', () => {
     const events = getEventBuffer().snapshot({ limit: 10 });
     const stale = events.find((e) => e.errorCode === 'loop_watchdog_stale');
     expect(stale).toBeDefined();
-    expect(stale?.details?.['loopName']).toBe('creator');
+    expect(stale?.details?.['loopName']).toBe('checkpoint');
   });
 
   it('calls onStale when autoRestart is ON', () => {
     const onStale = vi.fn();
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    store.setConfigValue('loop_heartbeat:creator', String(now - INTERVAL * 100));
+    store.setConfigValue('loop_heartbeat:checkpoint', String(now - INTERVAL * 100));
 
-    const wd = check([{ name: 'creator', intervalMs: INTERVAL }], { autoRestart: true, onStale });
+    const wd = check([{ name: 'checkpoint', intervalMs: INTERVAL }], { autoRestart: true, onStale });
     wd.check();
 
     expect(onStale).toHaveBeenCalledTimes(1);
-    expect(onStale).toHaveBeenCalledWith('creator');
+    expect(onStale).toHaveBeenCalledWith('checkpoint');
   });
 
   it('the production default onStale exits the process with WATCHDOG_EXIT_CODE', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
-    store.setConfigValue('loop_heartbeat:creator', String(now - INTERVAL * 100));
+    store.setConfigValue('loop_heartbeat:checkpoint', String(now - INTERVAL * 100));
 
     // No onStale provided → defaults to the prod process-exit handler.
-    const wd = check([{ name: 'creator', intervalMs: INTERVAL }], { autoRestart: true });
+    const wd = check([{ name: 'checkpoint', intervalMs: INTERVAL }], { autoRestart: true });
     wd.check();
 
     expect(exit).toHaveBeenCalledWith(WATCHDOG_EXIT_CODE);
@@ -142,10 +142,10 @@ describe('#1043 WatchdogLoop', () => {
   it('is inert while isActive() is false (shutdown drain)', () => {
     const onStale = vi.fn();
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    store.setConfigValue('loop_heartbeat:creator', String(now - INTERVAL * 100));
+    store.setConfigValue('loop_heartbeat:checkpoint', String(now - INTERVAL * 100));
 
     const wd = check(
-      [{ name: 'creator', intervalMs: INTERVAL }],
+      [{ name: 'checkpoint', intervalMs: INTERVAL }],
       { autoRestart: true, onStale, isActive: () => false },
     );
     // run() gates check() on isActive(); calling run for one cycle proves the gate.
@@ -157,8 +157,8 @@ describe('#1043 WatchdogLoop', () => {
   it('skips loops that have never ticked (null heartbeat)', () => {
     const onStale = vi.fn();
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    // creator never ticked → no heartbeat row at all.
-    const wd = check([{ name: 'creator', intervalMs: INTERVAL }], { autoRestart: true, onStale });
+    // checkpoint never ticked → no heartbeat row at all.
+    const wd = check([{ name: 'checkpoint', intervalMs: INTERVAL }], { autoRestart: true, onStale });
     wd.check();
     expect(onStale).not.toHaveBeenCalled();
   });
@@ -168,17 +168,17 @@ describe('#1043 WatchdogLoop', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const FLOOR = 5 * 60_000;
     // 7 intervals stale (> 6 * interval) but well under the 5-min floor.
-    store.setConfigValue('loop_heartbeat:engine-watcher', String(now - INTERVAL * 7));
+    store.setConfigValue('loop_heartbeat:projector', String(now - INTERVAL * 7));
 
     const wd = check(
-      [{ name: 'engine-watcher', intervalMs: INTERVAL, floorMs: FLOOR }],
+      [{ name: 'projector', intervalMs: INTERVAL, floorMs: FLOOR }],
       { autoRestart: true, onStale },
     );
     wd.check();
     expect(onStale).not.toHaveBeenCalled();
 
     // Past the floor → stale.
-    store.setConfigValue('loop_heartbeat:engine-watcher', String(now - FLOOR - 1));
+    store.setConfigValue('loop_heartbeat:projector', String(now - FLOOR - 1));
     wd.check();
     expect(onStale).toHaveBeenCalledTimes(1);
   });

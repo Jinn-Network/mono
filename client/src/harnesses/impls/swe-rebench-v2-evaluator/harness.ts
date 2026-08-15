@@ -84,7 +84,7 @@ import {
   type TaskEnvironmentSpecV1,
   type TrustedParserIdentityV1,
 } from '../../../task-creator/environment/contracts.js';
-import { canonicalJson } from '../../engine/canonical-json.js';
+import { canonicalJson } from '../../../util/canonical-json.js';
 import {
   hashDifferentialAdmissionReceiptV2,
   targetRecipeCommandForTestPath,

@@ -19,7 +19,7 @@ import type {
   PostedTaskRecord,
   FetchPostedTasksOptions,
 } from '../../src/api/launcher-tasks.js';
-import type { TaskStatusSnapshot } from '../../src/discovery/types.js';
+import type { TaskStatusSnapshot } from '../../src/archive/types.js';
 import { withTempStore } from '@test/store.js';
 
 const UI_TOKEN = 'ui-token-test';

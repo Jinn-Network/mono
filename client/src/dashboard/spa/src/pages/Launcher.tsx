@@ -5,7 +5,7 @@ import type {
   LaunchedSolverNetRecord,
   LaunchedStatus,
   TaskPostCountsDto,
-} from '../api/types.js';
+} from '../../../../api/contract/index.js';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
 import { Badge } from '../components/ui/badge.js';
 import { Button } from '../components/ui/button.js';

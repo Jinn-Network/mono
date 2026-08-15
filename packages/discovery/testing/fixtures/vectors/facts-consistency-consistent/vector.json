@@ -1,0 +1,62 @@
+{
+  "name": "facts-consistency-consistent",
+  "kind": "facts-consistency",
+  "description": "The announced facts card matches the value recomputed from the record's own bytes exactly -- the baseline `consistent` outcome.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:aa8209024da3f7df8e837c26c02f5a2e42c7029415d05ea56e0dcb791d06f742"
+      },
+      "facts": {
+        "taskDigest": "sha256:9b0cd2c1ab68127362238b4a60a136739d582f705c1a38fba4745f620756f30c"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:bcee5a3389080ffef026828daea9c38a4d48bc64637c36cd358ca3e42a1b9728",
+        "announcementId": "ann-3"
+      }
+    },
+    "profile": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "kind": "https://spec.jinn.network/records/submission/v1",
+      "profile": "https://spec.jinn.network/facts/submission/v1",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:9b0cd2c1ab68127362238b4a60a136739d582f705c1a38fba4745f620756f30c"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-3",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:aa8209024da3f7df8e837c26c02f5a2e42c7029415d05ea56e0dcb791d06f742"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "facts": "consistent"
+  }
+}

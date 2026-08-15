@@ -6,7 +6,7 @@ import { emitTrajectory } from '../../src/trajectory/emit.js';
 import { ScrubPipeline } from '../../src/trajectory/scrub/pipeline.js';
 import type { ScrubStage } from '../../src/trajectory/scrub/types.js';
 import { uploadToIpfs } from '../../src/adapters/mech/ipfs.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import { JinnTrajectoryV1Schema } from '../../src/trajectory/schema.js';
 
 vi.mock('../../src/adapters/mech/ipfs.js', () => ({

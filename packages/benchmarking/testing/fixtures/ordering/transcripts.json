@@ -1,0 +1,1 @@
+{"anchoredPositive":{"earliestCellPostAt":"2026-08-03T09:00:01Z","runAnnouncedAt":"2026-08-03T09:00:00Z","violatesOrder":false},"anchoredViolation":{"earliestCellPostAt":"2026-08-03T09:00:01Z","runAnnouncedAt":"2026-08-03T09:00:02Z","violatesOrder":true},"localAppendOrder":{"decisionGrade":false,"label":"append-order-only","runAppendedBeforeCells":true}}

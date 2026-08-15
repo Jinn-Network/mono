@@ -53,7 +53,8 @@ import {
   type TaskV3Env,
 } from '../e2e/_daemon-harness-helpers.js';
 import { claimDelivery } from '../../src/adapters/mech/contracts.js';
-import { executeSafeTransaction } from '../../src/adapters/mech/safe.js';
+import { executeSafeTransaction, type VenueBroadcaster } from '../../src/adapters/mech/safe.js';
+import { createDirectSafeBroadcaster } from '../../src/adapters/mech/direct-safe-broadcaster.js';
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const SNAPSHOT_DIR = resolve(TEST_DIR, '..', '_support', 'fixtures', 'anvil-base-v3-state');
@@ -94,6 +95,10 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
   let publicClient: PublicClient;
   let agentWallet: WalletClient;
   let creatorWallet: WalletClient;
+  // Finding E16 / the C2 ruling: this hermetic gate is a standalone process with no composition
+  // root to borrow a broadcaster from, so it constructs its own — bound to the operator's Safe,
+  // signed by `agentWallet` (the same signer it already builds below).
+  let broadcaster: VenueBroadcaster;
   let routerAbi: Abi;
   let mechAbi: Abi;
   let mechRate: bigint;
@@ -114,6 +119,7 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
     creatorWallet = createWalletClient({ account: creator, chain: base, transport: http(fixture.anvil.rpcUrl) });
     const agent = privateKeyToAccount(operator.agentPrivateKey);
     agentWallet = createWalletClient({ account: agent, chain: base, transport: http(fixture.anvil.rpcUrl) });
+    broadcaster = createDirectSafeBroadcaster(publicClient, agentWallet, operator.safeAddress);
 
     mechRate = (await publicClient.readContract({ address: v3.mockMechAddress, abi: mechAbi, functionName: 'maxDeliveryRate' })) as bigint;
     responseTimeout = (await publicClient.readContract({ address: v3.mockMarketplaceAddress, abi: marketplaceAbi, functionName: 'minResponseTimeout' })) as bigint;
@@ -148,7 +154,7 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
     const claimData = encodeFunctionData({ abi: routerAbi, functionName: 'claimTask', args: [taskId, v3.mockMechAddress] });
     const claimTxHash = await executeSafeTransaction(publicClient, agentWallet, {
       safeAddress: operator.safeAddress, to: v3.routerAddress, value: 0n, data: claimData,
-    });
+    }, broadcaster);
     const claimReceipt = await publicClient.waitForTransactionReceipt({ hash: claimTxHash });
     return String(decodeFirst(claimReceipt, routerAbi, 'TaskAttemptCreated')['requestId']) as Hex;
   }
@@ -158,7 +164,7 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
     const data = encodeFunctionData({ abi: mechAbi, functionName: 'deliverToMarketplace', args: [[requestId], [SOLUTION_DIGEST]] });
     const hash = await executeSafeTransaction(publicClient, agentWallet, {
       safeAddress: operator.safeAddress, to: v3.mockMechAddress, value: 0n, data,
-    });
+    }, broadcaster);
     await publicClient.waitForTransactionReceipt({ hash });
   }
 
@@ -197,7 +203,7 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
       };
 
       try {
-        const tx = await claimDelivery(publicClient, agentWallet, operator.safeAddress, v3.routerAddress, requestId, opts);
+        const tx = await claimDelivery(publicClient, agentWallet, broadcaster, operator.safeAddress, v3.routerAddress, requestId, opts);
         expect(tx, 'claimDelivery did not settle after the delivery landed').toMatch(/^0x[0-9a-fA-F]+$/);
         expect(tx, 'claimDelivery returned the idempotent 0x without actually settling').not.toBe('0x');
       } finally {
@@ -218,7 +224,7 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
       await deliverViaSafe(requestId);
 
       // First call settles via the real adapter → a real tx hash, claimed flips.
-      const settleTx = await claimDelivery(publicClient, agentWallet, operator.safeAddress, v3.routerAddress, requestId, opts);
+      const settleTx = await claimDelivery(publicClient, agentWallet, broadcaster, operator.safeAddress, v3.routerAddress, requestId, opts);
       expect(settleTx).toMatch(/^0x[0-9a-fA-F]+$/);
       expect(settleTx).not.toBe('0x');
       const claimed = await publicClient.readContract({
@@ -227,7 +233,7 @@ describeMaybe('hermetic production claimDelivery adapter (spec §5 / efficacy re
       expect(Boolean(claimed)).toBe(true);
 
       // Second call must be idempotent — the adapter returns '0x', does not throw.
-      const replay = await claimDelivery(publicClient, agentWallet, operator.safeAddress, v3.routerAddress, requestId, opts);
+      const replay = await claimDelivery(publicClient, agentWallet, broadcaster, operator.safeAddress, v3.routerAddress, requestId, opts);
       expect(replay).toBe('0x');
     },
     120_000,

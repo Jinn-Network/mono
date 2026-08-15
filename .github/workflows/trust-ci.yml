@@ -1,0 +1,271 @@
+name: Trust CI
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - "packages/trust/**"
+      - ".github/scripts/trust-*.test.mjs"
+      - ".github/workflows/trust-ci.yml"
+      - "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md"
+  push:
+    branches: [next]
+    paths:
+      - "packages/trust/**"
+      - ".github/scripts/trust-*.test.mjs"
+      - ".github/workflows/trust-ci.yml"
+      - "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md"
+
+permissions:
+  contents: read
+
+env:
+  TRUST_ROOT: packages/trust
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/trust-package-inventory.test.mjs
+      - name: Verify source boundaries and canaries
+        run: node --test .github/scripts/trust-source-boundaries.test.mjs
+
+  foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Verify Trust Core
+        working-directory: packages/trust/core
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Trust Core distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: trust-core-dist
+          path: packages/trust/core/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  resolve:
+    name: Trust Resolve
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Trust Core distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: trust-core-dist
+          path: packages/trust/core/dist
+      - name: Install same-tree portal dependency toolchain (trust-core)
+        working-directory: packages/trust/core
+        run: yarn install --immutable
+      - name: Verify Trust Resolve
+        working-directory: packages/trust/resolve
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Trust Resolve distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: trust-resolve-dist
+          path: packages/trust/resolve/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  authoring:
+    name: Trust Authoring
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Trust Core distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: trust-core-dist
+          path: packages/trust/core/dist
+      - name: Install same-tree portal dependency toolchain (trust-core)
+        working-directory: packages/trust/core
+        run: yarn install --immutable
+      - name: Verify Trust Authoring
+        working-directory: packages/trust/authoring
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Trust Authoring distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: trust-authoring-dist
+          path: packages/trust/authoring/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  testing:
+    name: Trust Testing
+    needs: [foundation, resolve]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Trust Core distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: trust-core-dist
+          path: packages/trust/core/dist
+      - name: Install same-tree portal dependency toolchain (trust-core)
+        working-directory: packages/trust/core
+        run: yarn install --immutable
+      - name: Restore Trust Resolve distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: trust-resolve-dist
+          path: packages/trust/resolve/dist
+      - name: Install same-tree portal dependency toolchain (trust-resolve)
+        working-directory: packages/trust/resolve
+        run: yarn install --immutable
+      - name: Build cross-tree portal dependency from source (evidence-protocol, §7.8)
+        working-directory: packages/evidence/protocol
+        run: |
+          corepack yarn install --immutable
+          corepack yarn build
+      - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8, Task T17)
+        working-directory: packages/task-execution/protocol
+        run: |
+          corepack yarn install --immutable
+          corepack yarn build
+      - name: Build cross-tree portal dependency from source (record-discovery-protocol, §7.8)
+        run: |
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+      - name: Build cross-tree portal dependency from source (task-execution-profiles, §7.8)
+        run: |
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+      - name: Verify complete Trust Testing package
+        working-directory: packages/trust/testing
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Trust Testing distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: trust-testing-dist
+          path: packages/trust/testing/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, foundation, authoring, resolve, testing]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Trust CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          FOUNDATION_RESULT: ${{ needs.foundation.result }}
+          AUTHORING_RESULT: ${{ needs.authoring.result }}
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
+          TESTING_RESULT: ${{ needs.testing.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$FOUNDATION_RESULT" \
+            "$AUTHORING_RESULT" \
+            "$RESOLVE_RESULT" \
+            "$TESTING_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all package distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: trust-*-dist
+          path: .trust-dist
+      - name: Place package distributions
+        run: |
+          for package in authoring core resolve testing; do
+            mkdir -p "packages/trust/${package}/dist"
+            cp -R ".trust-dist/trust-${package}-dist/." "packages/trust/${package}/dist/"
+          done
+      - name: Build cross-tree portal dependency from source (evidence-protocol, §7.8)
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+      - name: Build cross-tree portal dependency from source (task-execution-protocol, §7.8, Task T17)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+      - name: Build cross-tree portal dependency from source (record-discovery-protocol, §7.8)
+        run: |
+          (cd packages/discovery/protocol && yarn install --immutable && yarn build)
+      - name: Build cross-tree portal dependency from source (task-execution-profiles, §7.8)
+        run: |
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+      - name: Compile packed public entrypoint consumers
+        run: node .github/scripts/trust-packed-types.test.mjs

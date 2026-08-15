@@ -1,0 +1,455 @@
+{
+  "clusterKeys": {
+    "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054": "source-0",
+    "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773": "source-1",
+    "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91": "source-0"
+  },
+  "matrix": {
+    "assembly": {
+      "procedure": "jinn.benchmarking.assembly",
+      "version": "1.0"
+    },
+    "attrition": {
+      "asymmetryFlags": [
+        "nonjudged-arm-imbalance"
+      ],
+      "perArm": {
+        "armA": {
+          "excluded": 0,
+          "expected": 6,
+          "expired": 1,
+          "invalidated": 1,
+          "judged": 3,
+          "replacements": 1,
+          "unjudged": 1,
+          "unscorable": 0
+        },
+        "armB": {
+          "excluded": 1,
+          "expected": 6,
+          "expired": 0,
+          "invalidated": 0,
+          "judged": 4,
+          "replacements": 0,
+          "unjudged": 0,
+          "unscorable": 1
+        }
+      }
+    },
+    "cells": [
+      {
+        "accounted": 1,
+        "armId": "armA",
+        "attempt": "urn:uuid:00000109-0000-5000-8000-000000000000",
+        "cellKey": "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054/armA/1",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "1.25"
+        },
+        "delivery": "sha256:95a3b140a7b4b3e4c7a5876a5789196fdff47676e09ecdbc32ed23717601d234",
+        "dispatches": 1,
+        "integrityTier": "attested-only",
+        "latencyMs": 1008,
+        "outcome": "judged",
+        "replicate": 1,
+        "solver": "urn:uuid:00000308-0000-5000-8000-000000000000",
+        "submission": "sha256:0f2cfeef45713a0c19347a2c0fb0cfd47ea085a72f48d0508041dffd54199a33",
+        "taskDigest": "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054",
+        "validVerdicts": [
+          "sha256:96704ab98132344f848c7def3901e9d8c7c752cdb7877465fa8cf209911e652a"
+        ],
+        "verdicts": [
+          "sha256:96704ab98132344f848c7def3901e9d8c7c752cdb7877465fa8cf209911e652a"
+        ],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armA",
+        "attempt": "urn:uuid:00000110-0000-5000-8000-000000000000",
+        "cellKey": "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054/armA/2",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "1.25"
+        },
+        "delivery": "sha256:4847570a63d8fd67d0aa23bf201eefc4c0a3c16bff3e17e13ca634b44a6ad9f3",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "latencyMs": 1009,
+        "outcome": "judged",
+        "replicate": 2,
+        "solver": "urn:uuid:00000309-0000-5000-8000-000000000000",
+        "submission": "sha256:5dd3f683095779d30aa6da93f74af04f7ef78bdeb8d68ece8512e7b0b4e69ab5",
+        "taskDigest": "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054",
+        "validVerdicts": [
+          "sha256:95812eed1e899135b0dc6ee949281a2bc89aa4f947e5d46a9a448696e0d8a4a6"
+        ],
+        "verdicts": [
+          "sha256:95812eed1e899135b0dc6ee949281a2bc89aa4f947e5d46a9a448696e0d8a4a6"
+        ],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armB",
+        "attempt": "urn:uuid:00000111-0000-5000-8000-000000000000",
+        "cellKey": "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054/armB/1",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "0.75"
+        },
+        "delivery": "sha256:47c1643969bbe1a3886f205d47bfc2de3b8f1f6ff4eb41e1e9b561f90f588861",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "latencyMs": 1010,
+        "outcome": "judged",
+        "replicate": 1,
+        "solver": "urn:uuid:00000310-0000-5000-8000-000000000000",
+        "submission": "sha256:c584878ee1ef8fbc96096b63e374f70ac6729670ad273dc83098e2154a30c84f",
+        "taskDigest": "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054",
+        "validVerdicts": [
+          "sha256:ac6288728b08da888286f498bcc2416b97dbdec9bc488ff66956429a2c132046"
+        ],
+        "verdicts": [
+          "sha256:ac6288728b08da888286f498bcc2416b97dbdec9bc488ff66956429a2c132046"
+        ],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armB",
+        "attempt": "urn:uuid:00000112-0000-5000-8000-000000000000",
+        "cellKey": "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054/armB/2",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "0.75"
+        },
+        "delivery": "sha256:b82e331abe6d1d8e86889882ace75d28b4cd8f59e03b3aadaa3d4c75dcb9d938",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "latencyMs": 1011,
+        "outcome": "judged",
+        "replicate": 2,
+        "solver": "urn:uuid:00000311-0000-5000-8000-000000000000",
+        "submission": "sha256:0f35a24454142e1f75747999d1127ada2ea28d93b19deb35285e3396eca3f8df",
+        "taskDigest": "421117140573171685a8c1b704d2120585b3931262bb0a086bf3c5edf8210054",
+        "validVerdicts": [
+          "sha256:46cf9cc27da5847f137f0af3a0d50159d4baf63445fab9ca0e6f64e106c77f77"
+        ],
+        "verdicts": [
+          "sha256:46cf9cc27da5847f137f0af3a0d50159d4baf63445fab9ca0e6f64e106c77f77"
+        ],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 2,
+        "armId": "armA",
+        "cellKey": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773/armA/1",
+        "dispatches": 2,
+        "integrityTier": "attested-only",
+        "outcome": "expired",
+        "replicate": 1,
+        "submission": "sha256:46a16e2860dbd3e9bf65c45f0a928c3f2af758335741dab42f340fdc58d64b12",
+        "taskDigest": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773",
+        "validVerdicts": [],
+        "verdicts": [],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armA",
+        "attempt": "urn:uuid:00000106-0000-5000-8000-000000000000",
+        "cellKey": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773/armA/2",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "1.25"
+        },
+        "delivery": "sha256:48cd9fd1c03fc2000188cc0892d2bc30d83e1617dc77e398fc337c8e1711ceff",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "latencyMs": 1005,
+        "outcome": "invalidated",
+        "replicate": 2,
+        "solver": "urn:uuid:00000305-0000-5000-8000-000000000000",
+        "submission": "sha256:d94977c86af3ac2787a3d5471fe3b4152fcfb09ff11023d1e9fdff01420c8f39",
+        "taskDigest": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773",
+        "validVerdicts": [],
+        "verdicts": [],
+        "verification": {
+          "checksFailed": [
+            "pinning-observation"
+          ],
+          "harness": "mismatch",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "mismatch"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armB",
+        "cellKey": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773/armB/1",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "outcome": "excluded",
+        "replicate": 1,
+        "submission": "sha256:e7ffa6d7ccfb06bd1a8b500009feb6e96ca67ec16a26e780c03c7cd7bd690c5b",
+        "taskDigest": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773",
+        "validVerdicts": [],
+        "verdicts": [],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armB",
+        "attempt": "urn:uuid:00000108-0000-5000-8000-000000000000",
+        "cellKey": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773/armB/2",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "0.75"
+        },
+        "delivery": "sha256:ab82878ea08ca5ae1c155da765f97e601ce5fdbf076257c003476341bd8235ef",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "latencyMs": 1007,
+        "outcome": "judged",
+        "replicate": 2,
+        "solver": "urn:uuid:00000307-0000-5000-8000-000000000000",
+        "submission": "sha256:32249f6574f2106e74293e9b4cc50b1cac9020bf059b37eb9c547b86b4e085c4",
+        "taskDigest": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773",
+        "validVerdicts": [
+          "sha256:c4e883156748e46e34a523c545cac380386b668b35c314a2e99e66478de0daae"
+        ],
+        "verdicts": [
+          "sha256:c4e883156748e46e34a523c545cac380386b668b35c314a2e99e66478de0daae"
+        ],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armA",
+        "attempt": "urn:uuid:00000101-0000-5000-8000-000000000000",
+        "cellKey": "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91/armA/1",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "1.25"
+        },
+        "delivery": "sha256:618be8a2ff8ab5f9ed17b3ddf0a26f982ac70e49b62dcfd5eaf018f9f293a14d",
+        "dispatches": 1,
+        "integrityTier": "attested-only",
+        "latencyMs": 1000,
+        "outcome": "judged",
+        "replicate": 1,
+        "solver": "urn:uuid:00000300-0000-5000-8000-000000000000",
+        "submission": "sha256:13d2694ebf32f5f41dd9e93f31b6214aa7b75b34fe3e04a6e7a030e16145beba",
+        "taskDigest": "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91",
+        "validVerdicts": [
+          "sha256:9a4b7050570591c094cb2edef836d1b4ee2482ceb66a30307a8872efb837c720"
+        ],
+        "verdicts": [
+          "sha256:9a4b7050570591c094cb2edef836d1b4ee2482ceb66a30307a8872efb837c720"
+        ],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armA",
+        "attempt": "urn:uuid:00000102-0000-5000-8000-000000000000",
+        "cellKey": "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91/armA/2",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "1.25"
+        },
+        "delivery": "sha256:fd50180de9e50e36584430bcec20fc9ccef997f6580f53c6f60c981fec1f26cf",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "latencyMs": 1001,
+        "outcome": "unjudged",
+        "replicate": 2,
+        "solver": "urn:uuid:00000301-0000-5000-8000-000000000000",
+        "submission": "sha256:0f7ad0819221bf6116b56a5d3732a5ca67b7196530bf2ba8bf65e47216fc5151",
+        "taskDigest": "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91",
+        "validVerdicts": [],
+        "verdicts": [],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armB",
+        "attempt": "urn:uuid:00000103-0000-5000-8000-000000000000",
+        "cellKey": "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91/armB/1",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "0.75"
+        },
+        "delivery": "sha256:b88bd0caefd22183d4f6a5d84b9e4cee795bbbbf1dd806ae36c8bfcf0ffb3f33",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "latencyMs": 1002,
+        "outcome": "judged",
+        "replicate": 1,
+        "solver": "urn:uuid:00000302-0000-5000-8000-000000000000",
+        "submission": "sha256:489ec4fb3a2308395a79af22b42fa152cdfa94b5b151d1986efb7eac91cbaf3e",
+        "taskDigest": "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91",
+        "validVerdicts": [
+          "sha256:312528b8f88cff33af2807de86f2f65a9e6dbba9faa9ed926e981794d7ee78c7",
+          "sha256:e27926196f427c628da63fc4ac25bda73f31bebb3500164a4996f1c4779445bf"
+        ],
+        "verdicts": [
+          "sha256:312528b8f88cff33af2807de86f2f65a9e6dbba9faa9ed926e981794d7ee78c7",
+          "sha256:e27926196f427c628da63fc4ac25bda73f31bebb3500164a4996f1c4779445bf"
+        ],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      },
+      {
+        "accounted": 1,
+        "armId": "armB",
+        "attempt": "urn:uuid:00000104-0000-5000-8000-000000000000",
+        "cellKey": "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91/armB/2",
+        "cost": {
+          "source": "reported",
+          "unit": "USD",
+          "value": "0.75"
+        },
+        "delivery": "sha256:cbeebb3b639be2b5ebbd4c3535a1152a4ef4e09315716fc0454bd027a215cc17",
+        "dispatches": 1,
+        "integrityTier": "re-derivable",
+        "latencyMs": 1003,
+        "outcome": "unscorable",
+        "replicate": 2,
+        "solver": "urn:uuid:00000303-0000-5000-8000-000000000000",
+        "submission": "sha256:1d61d4f3e0757a47c8af4a309cb9064e48293d51ca28cc4c67512310b990b40c",
+        "taskDigest": "d42df69433efba6b5fc689bd07c7c4923e02c9a9dda45455ae58f14c09d77e91",
+        "validVerdicts": [],
+        "verdicts": [],
+        "verification": {
+          "checksFailed": [],
+          "harness": "match",
+          "isolation": "match",
+          "loadout": "match",
+          "model": "match"
+        }
+      }
+    ],
+    "closeBoundary": {
+      "at": "2026-08-04T00:00:00Z"
+    },
+    "completeness": {
+      "expected": 12,
+      "floor": "0.5",
+      "judged": 7,
+      "runOutcome": "complete"
+    },
+    "exclusions": [
+      {
+        "cellKey": "92238dc5f957219b4dc780d07f2b2ec302a0e6c9463ef3bc818c2e488b2d0773/armB/1",
+        "reason": "participant-exclusion"
+      }
+    ],
+    "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+    "run": {
+      "digest": {
+        "sha256": "df632b99d25b6ef6f1d16a09a80a4956de2e136387431f190cfaf89fd9834d07"
+      }
+    }
+  },
+  "parameters": {
+    "baseline": "armA",
+    "candidate": "armB"
+  },
+  "verdictOutcomes": {
+    "sha256:312528b8f88cff33af2807de86f2f65a9e6dbba9faa9ed926e981794d7ee78c7": {
+      "verdict": "pass"
+    },
+    "sha256:46cf9cc27da5847f137f0af3a0d50159d4baf63445fab9ca0e6f64e106c77f77": {
+      "verdict": "pass"
+    },
+    "sha256:95812eed1e899135b0dc6ee949281a2bc89aa4f947e5d46a9a448696e0d8a4a6": {
+      "verdict": "fail"
+    },
+    "sha256:96704ab98132344f848c7def3901e9d8c7c752cdb7877465fa8cf209911e652a": {
+      "verdict": "pass"
+    },
+    "sha256:9a4b7050570591c094cb2edef836d1b4ee2482ceb66a30307a8872efb837c720": {
+      "verdict": "fail"
+    },
+    "sha256:ac6288728b08da888286f498bcc2416b97dbdec9bc488ff66956429a2c132046": {
+      "verdict": "pass"
+    },
+    "sha256:c4e883156748e46e34a523c545cac380386b668b35c314a2e99e66478de0daae": {
+      "verdict": "pass"
+    },
+    "sha256:e27926196f427c628da63fc4ac25bda73f31bebb3500164a4996f1c4779445bf": {
+      "verdict": "fail"
+    }
+  }
+}

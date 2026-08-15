@@ -1,0 +1,69 @@
+{
+  "name": "@jinn-network/benchmarking-marketplace",
+  "version": "0.1.0",
+  "description": "Marketplace venue adapters for benchmarking run assembly ports (anchored close boundary, projector-derived input scope, settled cost). Sole benchmarking package that imports marketplace binding and projector.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/benchmarking/marketplace"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "fixtures/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/benchmarking-records": "0.1.0",
+    "@jinn-network/benchmarking-run": "0.1.0",
+    "@jinn-network/marketplace-binding": "0.1.0",
+    "@jinn-network/marketplace-projector": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0"
+  },
+  "resolutions": {
+    "@jinn-network/benchmarking-records": "portal:../records",
+    "@jinn-network/benchmarking-run": "portal:../run",
+    "@jinn-network/benchmarking-testing": "portal:../testing",
+    "@jinn-network/marketplace-binding": "portal:../../marketplace/binding",
+    "@jinn-network/marketplace-projector": "portal:../../marketplace/projector",
+    "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
+    "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",
+    "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve"
+  },
+  "devDependencies": {
+    "@jinn-network/benchmarking-testing": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "viem": "^2.0.0",
+    "vitest": "^4.1.8"
+  }
+}

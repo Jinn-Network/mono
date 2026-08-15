@@ -1,0 +1,2 @@
+{"type":"session-open","v":1,"sessionId":"s-minimal","startedAt":"2026-07-30T09:00:00Z","atUnixNano":"1785488400000000000","host":{"name":"Hermes","version":"0.9.1"},"model":{"provider":"anthropic","name":"claude-opus-4.6"}}
+{"type":"session-close","atUnixNano":"1785488401000000000","endedAt":"2026-07-30T09:00:01Z","outcome":"abandoned","summary":"(no summary)"}

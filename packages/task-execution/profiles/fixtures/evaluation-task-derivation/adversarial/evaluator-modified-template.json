@@ -1,0 +1,8 @@
+{
+  "input": {
+    "note": "instructions is template-fixed (design \u00a79.1); this fixture documents the property that mutating it while holding subjectTask/subjectDelivery/subjectResults/evaluationSpec constant must change the sealed digest. The evaluation-task-1.0.test.ts test builds the baseline from golden/derive-TD.json and a tampered copy with mutated `instructions`, then asserts their digests differ (deriveEvaluationTask has no instructions parameter to inject through, since it is fixed by the template)."
+  },
+  "expect": {
+    "digestsDiffer": true
+  }
+}

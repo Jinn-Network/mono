@@ -1,0 +1,361 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "https://spec.jinn.network/records/crypto-environment/v1"
+    },
+    "chainWorld": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^https:\\/\\/spec\\.jinn\\.network\\/records\\/[a-z0-9]+(?:-[a-z0-9]+)*\\/v[1-9]\\d*$"
+        },
+        "record": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "mediaType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "downloadLocation": {
+              "type": "string",
+              "minLength": 1
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "kind",
+        "record"
+      ],
+      "additionalProperties": false
+    },
+    "informationWorlds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^https:\\/\\/spec\\.jinn\\.network\\/records\\/[a-z0-9]+(?:-[a-z0-9]+)*\\/v[1-9]\\d*$"
+          },
+          "record": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uri": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1
+              },
+              "downloadLocation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "record"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "serviceRuntimes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "family": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+          },
+          "image": {
+            "type": "object",
+            "properties": {
+              "manifestDigest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "platform": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+\\/[a-z0-9]+(\\/[a-z0-9]+)?$"
+              }
+            },
+            "required": [
+              "manifestDigest",
+              "platform"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "family",
+          "version",
+          "image"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "composition": {
+      "type": "object",
+      "properties": {
+        "originRouting": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "pattern": "^https?:\\/\\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::[0-9]{1,5})?$"
+              },
+              "worldId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "precedence": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "origin",
+              "worldId",
+              "precedence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "missPolicy": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "declared-response"
+            },
+            "status": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            "body": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uri": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "digest": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                },
+                "mediaType": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "downloadLocation": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "annotations": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "mode",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "endpointAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^https?:\\/\\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::[0-9]{1,5})?$"
+          }
+        },
+        "requestBudget": {
+          "type": "object",
+          "properties": {
+            "maxRequests": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "maxResponseBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "maxRequests",
+            "maxResponseBytes"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "originRouting",
+        "missPolicy",
+        "endpointAllowlist",
+        "requestBudget"
+      ],
+      "additionalProperties": false
+    },
+    "supersedes": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "downloadLocation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "annotations": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "kind",
+    "chainWorld",
+    "informationWorlds",
+    "serviceRuntimes",
+    "composition"
+  ],
+  "additionalProperties": {},
+  "$id": "https://spec.jinn.network/schemas/crypto-environment/v1",
+  "title": "Jinn crypto environment record",
+  "description": "A sealed composite of worlds: one chain world, zero or more information worlds, pinned service runtimes, and the composition block binding origin routing, precedence, the miss policy, the reachable-endpoint allowlist, and the request budget. A task references this record; components are sealed and attested independently.",
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "kind",
+          "chainWorld",
+          "informationWorlds",
+          "serviceRuntimes",
+          "composition",
+          "supersedes"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+      }
+    ]
+  },
+  "$comment": "Structural validation only. These checks are cross-field and are enforced at runtime, not here: chainWorld.kind must be the chain-environment kind and no information world may claim it; information-world ids and service-runtime ids must be unique; every route must name a declared world and an origin on the endpointAllowlist; two worlds may share an origin only at distinct precedence, and one world routes an origin once; a composite with no information worlds routes nothing and carries a zero requestBudget, while a composed one requires a positive requestBudget; and the record's bytes must be the exact RFC 8785 canonical encoding of the document."
+}

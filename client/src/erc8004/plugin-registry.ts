@@ -28,7 +28,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from 'viem';
-import { executeSafeTransaction } from '../adapters/mech/safe.js';
+import { executeSafeTransaction, type VenueBroadcaster } from '../adapters/mech/safe.js';
 import { waitForTransactionReceiptWithRetry } from '../tx-retry.js';
 import {
   IDENTITY_REGISTRY_SET_METADATA_ABI,
@@ -174,6 +174,12 @@ export interface PluginRegistryPublisherConfig {
   safeAddress: Address;
   publicClient: PublicClient;
   walletClient: WalletClient;
+  /**
+   * The Safe broadcaster this publisher's writes route through (finding E16 / the C2 ruling: no
+   * process-global — each CLI verb constructs its own, bound to `safeAddress`, e.g. via
+   * `createDirectSafeBroadcaster`).
+   */
+  broadcaster: VenueBroadcaster;
 }
 
 export interface PublishPluginArgs {
@@ -201,6 +207,7 @@ export class PluginRegistryPublisher {
   private readonly safeAddress: Address;
   private readonly publicClient: PublicClient;
   private readonly walletClient: WalletClient;
+  private readonly broadcaster: VenueBroadcaster;
 
   constructor(config: PluginRegistryPublisherConfig) {
     this.identityRegistryAddress = config.identityRegistryAddress;
@@ -208,6 +215,7 @@ export class PluginRegistryPublisher {
     this.safeAddress = config.safeAddress;
     this.publicClient = config.publicClient;
     this.walletClient = config.walletClient;
+    this.broadcaster = config.broadcaster;
   }
 
   get agentId(): bigint {
@@ -244,7 +252,7 @@ export class PluginRegistryPublisher {
       to: this.identityRegistryAddress,
       value: 0n,
       data: calldata,
-    });
+    }, this.broadcaster);
 
     await waitForTransactionReceiptWithRetry(this.publicClient, txHash);
     return txHash;

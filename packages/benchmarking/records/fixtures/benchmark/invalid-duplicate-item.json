@@ -1,0 +1,11 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "name": "duplicate-item-benchmark",
+  "description": "Schema-valid but fails benchmark-item-distinctness: two items share a Task digest.",
+  "version": "1.0.0",
+  "items": [
+    { "task": { "digest": { "sha256": "7afaa346b4bf92bf9dc21e9ae809887412a86beb766842e99df7fee6573a4781" } } },
+    { "task": { "digest": { "sha256": "7afaa346b4bf92bf9dc21e9ae809887412a86beb766842e99df7fee6573a4781" } } }
+  ],
+  "reveal": { "policy": "immediate" }
+}

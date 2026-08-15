@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "https://spec.jinn.network/records/environment/v1"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[^\\s/]+\\/[^\\s/]+$"
+        },
+        "repoUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      },
+      "required": [
+        "repo",
+        "repoUrl",
+        "commit"
+      ],
+      "additionalProperties": false
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "manifestDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "platform": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+\\/[a-z0-9]+(\\/[a-z0-9]+)?$"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1
+        },
+        "indexDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "manifestDigest",
+        "platform"
+      ],
+      "additionalProperties": false
+    },
+    "workspace": {
+      "type": "string",
+      "pattern": "^\\/[^\\s]*$"
+    },
+    "invocations": {
+      "type": "object",
+      "properties": {
+        "install": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "bin": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^;&|<>$`\\\\\"'\\n\\r(){}*?~!#]+$",
+                "not": {
+                  "pattern": "(^|[/\\s])([sS][hH]|[bB][aA][sS][hH]|[zZ][sS][hH]|[dD][aA][sS][hH]|[aA][sS][hH]|[kK][sS][hH]|[cC][sS][hH]|[tT][cC][sS][hH]|[fF][iI][sS][hH]|[cC][mM][dD]|[pP][oO][wW][eE][rR][sS][hH][eE][lL][lL]|[pP][wW][sS][hH]|[eE][nN][vV])(\\.[Ee][Xx][Ee])?(\\s|$)"
+                }
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^;&|<>$`\\\\\"'\\n\\r(){}*?~!#]+$"
+                }
+              },
+              "cwd": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^;&|<>$`\\\\\"'\\n\\r(){}*?~!#]+$"
+              },
+              "env": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^;&|<>$`\\\\\"'\\n\\r(){}*?~!#]+$"
+                }
+              }
+            },
+            "required": [
+              "bin",
+              "args"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "test": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "bin": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^;&|<>$`\\\\\"'\\n\\r(){}*?~!#]+$",
+                "not": {
+                  "pattern": "(^|[/\\s])([sS][hH]|[bB][aA][sS][hH]|[zZ][sS][hH]|[dD][aA][sS][hH]|[aA][sS][hH]|[kK][sS][hH]|[cC][sS][hH]|[tT][cC][sS][hH]|[fF][iI][sS][hH]|[cC][mM][dD]|[pP][oO][wW][eE][rR][sS][hH][eE][lL][lL]|[pP][wW][sS][hH]|[eE][nN][vV])(\\.[Ee][Xx][Ee])?(\\s|$)"
+                }
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^;&|<>$`\\\\\"'\\n\\r(){}*?~!#]+$"
+                }
+              },
+              "cwd": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^;&|<>$`\\\\\"'\\n\\r(){}*?~!#]+$"
+              },
+              "env": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^;&|<>$`\\\\\"'\\n\\r(){}*?~!#]+$"
+                }
+              }
+            },
+            "required": [
+              "bin",
+              "args"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "test"
+      ],
+      "additionalProperties": false
+    },
+    "parser": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "build": {
+      "type": "object",
+      "properties": {
+        "reproducibilityTier": {
+          "anyOf": [
+            {
+              "type": "number",
+              "const": 0
+            },
+            {
+              "type": "number",
+              "const": 1
+            },
+            {
+              "type": "number",
+              "const": 2
+            }
+          ]
+        },
+        "recipe": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "mediaType": {
+              "type": "string",
+              "minLength": 1
+            },
+            "downloadLocation": {
+              "type": "string",
+              "minLength": 1
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": {}
+        },
+        "dependencyPinning": {
+          "type": "object",
+          "properties": {
+            "mechanism": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "mechanism"
+          ],
+          "additionalProperties": {}
+        },
+        "provider": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id",
+            "version"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "reproducibilityTier"
+      ],
+      "additionalProperties": false
+    },
+    "rights": {
+      "type": "object",
+      "properties": {
+        "sourceLicense": {
+          "type": "string",
+          "minLength": 1
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "sourceLicense"
+      ],
+      "additionalProperties": false
+    },
+    "lineage": {
+      "type": "object",
+      "properties": {
+        "upstream": {
+          "type": "object",
+          "properties": {
+            "dataset": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "keys": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": [
+            "dataset",
+            "revision",
+            "keys"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "upstream"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "kind",
+    "source",
+    "image",
+    "workspace",
+    "invocations",
+    "parser",
+    "build",
+    "rights"
+  ],
+  "additionalProperties": {},
+  "$id": "https://spec.jinn.network/schemas/environment/v1",
+  "title": "Jinn environment record",
+  "description": "A sealed description of one execution environment: one (source, image, platform, invocations, parser) binding. The document asserts what the environment is, never that it works — behavior claims live in separately published verification attestations.",
+  "propertyNames": {
+    "anyOf": [
+      {
+        "enum": [
+          "kind",
+          "source",
+          "image",
+          "workspace",
+          "invocations",
+          "parser",
+          "build",
+          "rights",
+          "lineage"
+        ]
+      },
+      {
+        "pattern": "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$"
+      }
+    ]
+  },
+  "$comment": "Structural validation only. Four checks are runtime-only and are not expressible here: (shell-freedom IS expressed, as bin/args/cwd/env patterns.) image.reference must end with @<manifestDigest>; image.indexDigest, when present, must differ from image.manifestDigest; build.recipe and build.dependencyPinning are required at reproducibilityTier >= 1; and the record's bytes must be the exact RFC 8785 canonical encoding of the document."
+}

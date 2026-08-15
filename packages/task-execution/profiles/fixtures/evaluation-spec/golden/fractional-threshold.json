@@ -1,0 +1,27 @@
+{
+  "protocol": "https://spec.jinn.network/profiles/evaluation-spec/v1",
+  "semanticsVersion": "4",
+  "family": "deterministic-process",
+  "grader": { "uri": "https://example.org/graders/deterministic-process-runner" },
+  "familyBlock": {
+    "image": { "uri": "https://example.org/images/swe-rebench-runner" },
+    "platform": "linux/amd64",
+    "workspace": { "root": "/workspace" },
+    "testMaterial": [
+      { "uri": "https://example.org/tests/patch.diff", "accessClass": "public" }
+    ],
+    "parser": {
+      "id": "jinn.parser.pytest-json-report",
+      "version": "1.0.0",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "transitions": { "failToPass": ["test_a"], "passToPass": ["test_b"] },
+    "timeout": 1800
+  },
+  "measurements": [
+    { "name": "score", "type": "number", "direction": "higher-better", "required": true }
+  ],
+  "verdictRule": { "threshold": { "measurement": "score", "op": "gte", "value": "0.5" } },
+  "unscorable": [],
+  "evidenceConventions": { "requiredRefs": [] }
+}

@@ -1,0 +1,67 @@
+{
+  "name": "@jinn-network/marketplace-projector",
+  "version": "0.1.0",
+  "description": "The one chain-reading machine for the marketplace binding: decodes TaskCoordinator/JinnRouterV3/Mech Marketplace events into Task Execution Protocol observations and signed discovery announcements.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/marketplace/projector"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/marketplace-binding": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/record-discovery-serve": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@noble/hashes": "^2.2.0",
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "@jinn-network/record-discovery-testing": "0.1.0",
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "@jinn-network/trust-resolve": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/marketplace-binding": "portal:../binding",
+    "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
+    "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",
+    "@jinn-network/record-discovery-testing": "portal:../../discovery/testing",
+    "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve"
+  }
+}

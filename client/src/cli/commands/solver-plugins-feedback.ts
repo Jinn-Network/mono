@@ -2,14 +2,14 @@
  * `jinn solver-plugins {endorse, warn, review, respond}` — write verbs that
  * route ERC-8004 `ReputationRegistry` feedback writes against the agentId of
  * the builder who published the plug-in. The builder's agentId is resolved
- * from `DiscoveryAPI.listPluginPublications`; the on-chain body anchors the
+ * from the `PluginPublicationReader`; the on-chain body anchors the
  * feedback to a specific plug-in via `manifestRef = "plugin:<cid>"` and
  * `manifestHash = keccak256(manifestRef)`.
  *
  * The pipeline mirrors `publishHandler`'s shape:
  *   1. resolveCliPassword (env > keystore-password file > prompt-fd)
  *   2. loadConfig
- *   3. discoveryApiFactory(config).listPluginPublications → builderAgentId
+ *   3. pluginReaderFactory(config).listPluginPublications → builderAgentId
  *   4. bootstrapper.ensureStage1(password) — lazy Stage 1 ensure
  *   5. reputationClientFactory(...).giveFeedback(...) / .respondToFeedback(...)
  *
@@ -22,10 +22,11 @@
 
 import { getAddress, keccak256, toBytes, type Address, type Hex } from 'viem';
 import type { CommandContext } from '../command.js';
-import { writeJson } from './solver-plugins.js';
+import { writeJson, writeDaemonGuardBlocked } from './solver-plugins.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
 import { getReputationRegistryAddress } from '../../erc8004/addresses.js';
-import { DiscoveryUnavailableError } from '../../discovery/types.js';
+import { PluginPublicationUnavailableError } from '../../plugin-registry/publication-reader.js';
+import { DaemonGuardBlockedError } from '../daemon-guard.js';
 
 // ── Shared option shapes ────────────────────────────────────────────────────
 
@@ -114,12 +115,12 @@ export async function preparePipeline(
   // after Stage 1.
   let builderAgentIdStr: string | undefined;
   try {
-    const api = deps.discoveryApiFactory(config);
+    const api = deps.pluginReaderFactory(config);
     const rows = await api.listPluginPublications({});
     const row = rows.find((r) => r.cid === pluginCid);
     builderAgentIdStr = row?.builderAgentId;
   } catch (err) {
-    if (err instanceof DiscoveryUnavailableError) {
+    if (err instanceof PluginPublicationUnavailableError) {
       writeJson(ctx, {
         error: {
           code: 'discovery_unavailable',
@@ -191,6 +192,10 @@ export async function preparePipeline(
 }
 
 function emitWriteError(ctx: CommandContext, err: unknown): void {
+  if (err instanceof DaemonGuardBlockedError) {
+    writeDaemonGuardBlocked(ctx, err);
+    return;
+  }
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.includes('Self-feedback not allowed')) {
     writeJson(ctx, {

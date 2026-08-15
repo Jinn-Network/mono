@@ -1,0 +1,69 @@
+{
+  "name": "substrate-fact-in-author-source",
+  "kind": "facts-consistency",
+  "description": "`escrowTerms` is a substrate-classed field (projection-only, §5.4 rule 2), but this item comes from an *author* source, which may only assert record facts -- rejected.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:fe0328e46eb952f9bed5960f7ef531137d969b51372daab1b10786c04a2a1b22"
+      },
+      "facts": {
+        "taskDigest": "sha256:b576bb210b2a1313eed1948f4216cb6440c2f5e61cf084da49c5e8ad3bfa437f",
+        "escrowTerms": "net-30"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:985cab56e4e17ec2834ed92b9252831c9432492c66eeafe9af6718feb663f2ae",
+        "announcementId": "ann-5"
+      }
+    },
+    "sourceClass": "author",
+    "profile": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "kind": "https://spec.jinn.network/records/submission/v1",
+      "profile": "https://spec.jinn.network/facts/submission/v1",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        },
+        {
+          "name": "escrowTerms",
+          "class": "substrate"
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:b576bb210b2a1313eed1948f4216cb6440c2f5e61cf084da49c5e8ad3bfa437f"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-5",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:fe0328e46eb952f9bed5960f7ef531137d969b51372daab1b10786c04a2a1b22"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "facts": "inconsistent",
+    "reason": "substrate-fact-from-author-source"
+  }
+}

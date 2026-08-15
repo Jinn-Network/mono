@@ -1,0 +1,15 @@
+{
+  "note": "I-JSON strings are Unicode scalar sequences. An unpaired surrogate is not a scalar value; ES2019 well-formed `JSON.stringify` escapes it as \\udXXX so the bytes round-trip through JavaScript but NOT through a strict UTF-8 encoder in another language. Fail closed rather than mint an identity only one runtime can reproduce.",
+  "input": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": null,
+    "model": null,
+    "loadout": {
+      "kind": "jinn.skill.v1",
+      "name": "lone-\ud800",
+      "digest": "sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7"
+    },
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": { "ok": false, "code": "invalid-document", "path": "loadout.name" }
+}

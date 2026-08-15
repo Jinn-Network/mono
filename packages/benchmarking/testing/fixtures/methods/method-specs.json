@@ -1,0 +1,321 @@
+[
+  {
+    "clusteringRule": "none",
+    "computeAvailability": "available",
+    "deterministic": true,
+    "exclusionRule": "judged-only; conflicted dropped-with-report",
+    "id": "jinn.benchmarking.method/wilson",
+    "outputShape": "per-arm pass rate + Wilson interval + conflicted cells",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "verdictRule": {
+          "enum": [
+            "sole",
+            "unanimous",
+            "any-pass",
+            "majority"
+          ]
+        }
+      },
+      "required": [
+        "verdictRule"
+      ],
+      "type": "object"
+    },
+    "referenceSet": "v1-reference",
+    "requiredInputs": [
+      "matrix.cells",
+      "referenced-verdicts"
+    ],
+    "version": "1"
+  },
+  {
+    "clusteringRule": "none",
+    "computeAvailability": "available",
+    "deterministic": true,
+    "exclusionRule": "judged-only; preserve arm identity",
+    "id": "jinn.benchmarking.method/avg-at-k",
+    "outputShape": "per-arm per-task repetition rate + arm mean + conflicted cells",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "verdictRule": {
+          "enum": [
+            "sole",
+            "unanimous",
+            "any-pass",
+            "majority"
+          ]
+        }
+      },
+      "required": [
+        "verdictRule"
+      ],
+      "type": "object"
+    },
+    "referenceSet": "v1-reference",
+    "requiredInputs": [
+      "matrix.cells",
+      "referenced-verdicts"
+    ],
+    "version": "1"
+  },
+  {
+    "clusteringRule": "none",
+    "computeAvailability": "available",
+    "deterministic": true,
+    "exclusionRule": "judged-only; preserve arm identity",
+    "id": "jinn.benchmarking.method/pass-at-k",
+    "outputShape": "per-arm per-task unbiased pass@k + arm mean + conflicted cells",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "k": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "verdictRule": {
+          "enum": [
+            "sole",
+            "unanimous",
+            "any-pass",
+            "majority"
+          ]
+        }
+      },
+      "required": [
+        "verdictRule",
+        "k"
+      ],
+      "type": "object"
+    },
+    "referenceSet": "v1-reference",
+    "requiredInputs": [
+      "matrix.cells",
+      "referenced-verdicts"
+    ],
+    "version": "1"
+  },
+  {
+    "clusteringRule": "task-provenance-source",
+    "computeAvailability": "available",
+    "deterministic": true,
+    "exclusionRule": "pair shared task digests judged in both arms; report full remainder",
+    "id": "jinn.benchmarking.method/paired-mcnemar",
+    "outputShape": "paired exact McNemar + provenance-cluster correction + excluded cells",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline": {
+          "type": "string"
+        },
+        "candidate": {
+          "type": "string"
+        },
+        "verdictRule": {
+          "enum": [
+            "sole",
+            "unanimous",
+            "any-pass",
+            "majority"
+          ]
+        }
+      },
+      "required": [
+        "verdictRule",
+        "baseline",
+        "candidate"
+      ],
+      "type": "object"
+    },
+    "referenceSet": "v1-reference",
+    "requiredInputs": [
+      "matrix.cells",
+      "referenced-verdicts",
+      "task-provenance-source"
+    ],
+    "version": "1"
+  },
+  {
+    "clusteringRule": "task-provenance-source",
+    "computeAvailability": "available",
+    "deterministic": true,
+    "exclusionRule": "paired both-arm judged cells; cost only both-solve pairs; report remainder",
+    "id": "jinn.benchmarking.method/noninferiority-iut",
+    "outputShape": "BCa quality lower bound AND one-sided paired-cost Wilcoxon + exclusions + conflicted cells",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline": {
+          "type": "string"
+        },
+        "candidate": {
+          "type": "string"
+        },
+        "resamples": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "seed": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "verdictRule": {
+          "enum": [
+            "sole",
+            "unanimous",
+            "any-pass",
+            "majority"
+          ]
+        }
+      },
+      "required": [
+        "verdictRule",
+        "baseline",
+        "candidate",
+        "seed",
+        "resamples"
+      ],
+      "type": "object"
+    },
+    "referenceSet": "v1-reference",
+    "requiredInputs": [
+      "matrix.cells",
+      "matrix.cost",
+      "referenced-verdicts",
+      "exact-task-bytes",
+      "task-provenance-source-family"
+    ],
+    "resamplingProcedure": "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration",
+    "version": "1"
+  },
+  {
+    "clusteringRule": "task-provenance-source",
+    "computeAvailability": "available",
+    "deterministic": true,
+    "exclusionRule": "pair Task digests judged in both arms; per-Task rates average all judged replicates; report full remainder",
+    "id": "jinn.benchmarking.method/paired-delta",
+    "outputShape": "paired mean rate difference + two-sided clustered BCa interval + exclusions + conflicted cells",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "alpha": {
+          "enum": [
+            "0.10",
+            "0.05",
+            "0.01"
+          ]
+        },
+        "baseline": {
+          "type": "string"
+        },
+        "candidate": {
+          "type": "string"
+        },
+        "resamples": {
+          "maximum": 100000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "seed": {
+          "maximum": 4294967295,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "verdictRule": {
+          "enum": [
+            "sole",
+            "unanimous",
+            "any-pass",
+            "majority"
+          ]
+        }
+      },
+      "required": [
+        "verdictRule",
+        "baseline",
+        "candidate",
+        "seed",
+        "resamples",
+        "alpha"
+      ],
+      "type": "object"
+    },
+    "referenceSet": "v1-reference",
+    "requiredInputs": [
+      "matrix.cells",
+      "referenced-verdicts",
+      "task-provenance-source"
+    ],
+    "resamplingProcedure": "xorshift32-v1; sample whole source clusters with replacement; one uint32 draw per cluster position; cluster jackknife acceleration; two passes at alpha/2 and 1-alpha/2 over one seed",
+    "version": "1"
+  },
+  {
+    "clusteringRule": "delegate-defined",
+    "computeAvailability": "available",
+    "deterministic": true,
+    "exclusionRule": "predicate exclusions reported before delegate exclusions",
+    "id": "jinn.benchmarking.method/clean-subset",
+    "outputShape": "named contamination subset + delegated results + conflicted cells",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "enum": [
+            "self-declared",
+            "announcement-anchored"
+          ]
+        },
+        "cutoff": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "delegate": {
+          "type": "object"
+        },
+        "verdictRule": {
+          "enum": [
+            "sole",
+            "unanimous",
+            "any-pass",
+            "majority"
+          ]
+        }
+      },
+      "required": [
+        "verdictRule",
+        "basis",
+        "cutoff",
+        "delegate"
+      ],
+      "type": "object"
+    },
+    "referenceSet": "v1-reference",
+    "requiredInputs": [
+      "matrix.cells",
+      "referenced-verdicts",
+      "exact-task-bytes-or-anchored-benchmark-announcement"
+    ],
+    "version": "1"
+  },
+  {
+    "clusteringRule": "unavailable",
+    "computeAvailability": "unavailable",
+    "deterministic": true,
+    "exclusionRule": "unavailable",
+    "id": "jinn.benchmarking.method/bradley-terry",
+    "outputShape": "unavailable until genuine pairwise judgment input is frozen",
+    "parameterSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "referenceSet": "registered-non-reference",
+    "requiredInputs": [
+      "pairwise-judgment-records (not frozen in v1)"
+    ],
+    "version": "1"
+  }
+]

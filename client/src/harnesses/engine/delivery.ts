@@ -13,6 +13,7 @@
 import type { Hex, PublicClient, WalletClient, Address } from 'viem';
 import type { EvictionRecoveryConfig } from '../../adapters/mech/types.js';
 import type { VerdictCode } from '../../adapters/mech/verdict-code.js';
+import type { VenueBroadcaster } from '../../adapters/mech/safe.js';
 import {
   cidToDigestHex,
 } from '../../adapters/mech/ipfs.js';
@@ -34,6 +35,14 @@ export interface DeliveryDeps {
   /** Router delivery settlement encoding — matches chain config. */
   claimDeliveryVariant: 'v1' | 'v2' | 'v3';
   evictionRecovery?: EvictionRecoveryConfig;
+  /**
+   * The Safe broadcaster this delivery path routes through (finding E16 / the C2 ruling:
+   * per-daemon state, not a process-global). Production wiring (main.ts) sets this once the
+   * composition root has built one — see main.ts's "Stage-1 cutover composition root" section.
+   * Undefined when no composition exists (mainnet today) — Safe writes then fail loudly via
+   * `executeSafeTransaction`'s "no venue broadcaster supplied" error.
+   */
+  broadcaster?: VenueBroadcaster;
 }
 
 /**
@@ -181,6 +190,7 @@ export async function deliverToMarketplace(
   const deliveryTxHash = await callDeliverToMarketplace(
     deps.publicClient,
     deps.walletClient,
+    deps.broadcaster,
     deps.safeAddress,
     deps.mechContractAddress,
     [requestId],
@@ -203,6 +213,7 @@ export async function claimRouterDelivery(
   const claimTxHash = await claimDelivery(
     deps.publicClient,
     deps.walletClient,
+    deps.broadcaster,
     deps.safeAddress,
     deps.routerAddress,
     requestId,

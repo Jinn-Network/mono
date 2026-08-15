@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "adversarial-v1/README.md",
+      "sha256": "b8aa398d553497c1d223bad6287219524c701949de49e74b398791c6fef85ce5"
+    },
+    {
+      "id": "authorization-v1/README.md",
+      "sha256": "fec14d899224aec73e666ed6d55272061a3c0b305613cf1dd21a12f3d8bc0518"
+    },
+    {
+      "id": "authorization-v1/example.json",
+      "sha256": "03ddacedb1111f091cfc5ee4ede230ca9fd34cbd248be338e87b9f401e05e1de"
+    },
+    {
+      "id": "binding-v1/README.md",
+      "sha256": "d3bfc38aa989204852a50cf5b7b2d59d0c50d2bd32d899948175cc784d047cb9"
+    },
+    {
+      "id": "binding-v1/example.json",
+      "sha256": "9d7405e6934dc342e09facb71985c759003fe06e12835d6afb446bbebda69858"
+    },
+    {
+      "id": "ceremony-v1/README.md",
+      "sha256": "7ab88585b59da27948c34dd6617fa86e86a271a9e49d853e61448cfa670b8e7b"
+    },
+    {
+      "id": "consent-v1/README.md",
+      "sha256": "db8212ae84a40a52c93588322ced4e583b4cd9196775ff13f77d5e4ceb8f654f"
+    },
+    {
+      "id": "equivalence-v1/key-order-sensitive.json",
+      "sha256": "e5d12a7a452dcec890ddd796a136f2fa4e67b04cc33a91448c4e35741e9f3d49"
+    },
+    {
+      "id": "equivalence-v1/shared-payload-bytes.json",
+      "sha256": "9b69da9d6e2e88754f6fe7b93a5dc66c5215013c0dad4d25d2c99248c35c8e30"
+    },
+    {
+      "id": "equivalence-v1/task-execution-canonical-cases.json",
+      "sha256": "942e07fa28c23b2ed7795a6f4ee141e542217970b0c4da401bf3c6b3d06abac3"
+    },
+    {
+      "id": "equivalence-v1/task-execution-oracle-digests.json",
+      "sha256": "9f3b9005f5891acb5fe5465d6ff8c6b4f75ff1c925fbf0a56e814ffa692f5a3d"
+    },
+    {
+      "id": "equivalence-v1/trust-core-digests.json",
+      "sha256": "9f3b9005f5891acb5fe5465d6ff8c6b4f75ff1c925fbf0a56e814ffa692f5a3d"
+    },
+    {
+      "id": "join-v1/README.md",
+      "sha256": "da23c8b7e772b854ca1eca726c0e46a4240aedc5152d3db74a915ca5826d3672"
+    },
+    {
+      "id": "policy-v1/README.md",
+      "sha256": "22f0a4b18636ed7a78215dff92e1d2fc2a8952962aa768823c65767ab7024cf7"
+    },
+    {
+      "id": "policy-v1/example.json",
+      "sha256": "6f544720e3aff8b9db221ff81bc30ec03894e6e060bce5ce22c85b6f8ad0acc1"
+    },
+    {
+      "id": "requester-v1/README.md",
+      "sha256": "16195e0ba2d0ae1bdcf33b096ad607f88a289b839c4a7fcb9762fe99bf3a5c0d"
+    },
+    {
+      "id": "resolution-v1/README.md",
+      "sha256": "16c266d9232cf0d9ed6c2f05aada79b8eac1ef9df41b6c398d74b86efe39e162"
+    },
+    {
+      "id": "revocation-v1/README.md",
+      "sha256": "5533a0687d3ae5f0912543cf583100f4cb06a1503bdf1a71d10264bc39cf40e2"
+    },
+    {
+      "id": "revocation-v1/example.json",
+      "sha256": "a74d08e53fac3dcde4d1a339832388eea0fe2f5ddd94f3e12ce009182e38b054"
+    },
+    {
+      "id": "walkthrough-v1/README.md",
+      "sha256": "4b982ac96647b1b3924758fe8d5b376a5ac335fe256f0b03c3c13463c5747374"
+    }
+  ],
+  "errata": []
+}

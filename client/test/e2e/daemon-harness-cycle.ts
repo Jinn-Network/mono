@@ -7,11 +7,14 @@
  * Spans:
  *   Anvil fork → earning bootstrap → production Daemon (MechAdapter)
  *   → prediction.v1 task post → daemon claims + executes (real harness)
- *   → on-chain deliver tx → activity counter increments.
+ *   → on-chain deliver tx → self-eval verdict → activity counter increments.
  *
  * Pick harness via JINN_E2E_HARNESS=prediction-v1-baseline|hermes-agent|claude-code|codex.
  * Defaults to prediction-v1-baseline (deterministic, no API key required).
  * Skips cleanly if the selected harness's API key isn't available.
+ *
+ * Activity credit on V3 is verdict-gated (`claimVerdictDelivery` → recordSolutionDelivery),
+ * not solution Deliver — see readActivityCount docstring.
  */
 import {
   harnessSelectorFromEnv,
@@ -25,13 +28,25 @@ import {
   postPredictionV1Task,
   waitForDaemonClaim,
   waitForDelivery,
+  waitForVerdict,
   readActivityCount,
+  startMockPolymarketGammaServer,
   ANVIL_PRIVATE_KEYS,
 } from './_daemon-harness-helpers.js';
 import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 
 async function main(): Promise<void> {
+  // One-swap M7 (#2461): the native variant. `JINN_E2E_MODE=native` forks Base Sepolia 84532 and
+  // exercises the native fleet boot legs (the legacy variant below keeps its Base-mainnet fork).
+  // Delegated to keep one public command (`yarn e2e:daemon-harness`) with a mode switch, matching
+  // the existing `JINN_E2E_HARNESS` selector convention.
+  if ((process.env['JINN_E2E_MODE'] ?? 'legacy').toLowerCase() === 'native') {
+    const { runNativeFleetLoop } = await import('./native-fleet-loop.js');
+    await runNativeFleetLoop();
+    return;
+  }
+
   const harness = harnessSelectorFromEnv();
 
   // Skip cleanly (exit 0) when the selected harness's API key is absent.
@@ -47,6 +62,7 @@ async function main(): Promise<void> {
 
   // Start the mock IPFS server before the daemon so its baseUrl is known.
   const mockIpfs = await startMockIpfsServer();
+  let mockGamma: Awaited<ReturnType<typeof startMockPolymarketGammaServer>> | undefined;
   try {
     console.log(`anvil rpc: ${fixture.anvil.rpcUrl}`);
     console.log(`operator EOA: ${fixture.operatorEoa.address}`);
@@ -80,6 +96,16 @@ async function main(): Promise<void> {
     console.log(`mock mech:    ${v3Env.mockMechAddress}`);
     console.log(`mock market:  ${v3Env.mockMarketplaceAddress}`);
 
+    // Offline Polymarket Gamma so self-eval does not hit live gamma-api (fixture market → 422).
+    // Same pattern as hermetic/full-loop.test.ts and T2.2-producer-evaluator.
+    const mockGammaServer = await startMockPolymarketGammaServer({
+      marketId: 'jinn-daemon-harness-e2e-task4',
+      conditionId: '0xcondition-daemon-harness-e2e-task4',
+      slug: 'jinn-daemon-harness-e2e-task4',
+    });
+    mockGamma = mockGammaServer;
+    console.log(`mock gamma:   ${mockGammaServer.baseUrl}`);
+
     // Start the daemon pointing at:
     //   - mock IPFS gateway so task fetches hit our in-process server
     //   - mock IPFS registry so envelope uploads hit our in-process server
@@ -91,6 +117,11 @@ async function main(): Promise<void> {
       mockIpfs.baseUrl,  // ipfsGatewayUrl — for GET /ipfs/{cid} (task fetch)
       v3Env,
       mockIpfs.baseUrl,  // ipfsRegistryUrl — for POST /api/v0/add (envelope upload)
+      // Task 18: build the stage-1 cutover composition root (main.ts's testnet branch) so a
+      // broadcaster is built and threaded to the daemon's legacy Safe-write call sites before
+      // daemon.start() — every Safe-executed transaction now requires one (Finding E16 / the C2
+      // ruling: per-daemon state, not a process-global — see startDaemon's opts doc comment).
+      { enableComposition: true, polymarketGammaBaseUrl: mockGammaServer.baseUrl },
     );
     try {
       console.log('daemon started — loops running');
@@ -113,6 +144,13 @@ async function main(): Promise<void> {
       const claim = await waitForDaemonClaim(fixture, posted, operator, v3Env);
       console.log(`daemon claimed task: requestId=${claim.requestId} tx=${claim.txHash}`);
 
+      // Anvil forks leave the `finalized` tag stuck at the fork point. Venue-base's chain log
+      // source falls back to `latest - 120` in that shape (see chain-log-source.ts), so the
+      // claim is only finalizable once ≥120 blocks have been mined past it. Without this the
+      // work loop hangs in `awaitFinalized` for the e2e's entire delivery wait.
+      await anvilJsonRpc(fixture.anvil.rpcUrl, 'anvil_mine', ['0x79']); // 121 blocks
+      console.log('mined 121 blocks so anvil-fork finality depth can cover the claim');
+
       // Wait for the daemon to complete the full settlement loop:
       // harness runs → envelope assembled + uploaded → deliverToMarketplace on-chain.
       const delivered = await waitForDelivery(fixture, claim, v3Env, mockIpfs);
@@ -127,12 +165,17 @@ async function main(): Promise<void> {
       }
       console.log(`  ✓ envelope.executor.implName = ${delivered.solverHarnessName}`);
 
+      // V3 activity increments on the first verdict, not on solution Deliver. Wait for the
+      // operator to self-evaluate (allowSolverSelfEvaluation: true on the posted task).
+      const verdict = await waitForVerdict(fixture, posted, operator, v3Env);
+      console.log(`verdict claimed: tx=${verdict.verdictTxHash}`);
+
       // Task 7 assertion: daemon's settle tx must have incremented the operator's
       // on-chain activity counter. The V3 router calls
       // `recordSolutionDelivery(safeAddress, solutionDigest)` on our locally-deployed
-      // TaskActivityCheckerV3, which increments `eligibleActivityWeight[safeAddress]`.
-      // Poll for up to 60s — the claimSolutionDelivery tx may execute slightly after
-      // the Deliver event we already observed.
+      // TaskActivityCheckerV3 from claimVerdictDelivery when the attempt finalizes.
+      // Poll for up to 60s — the claimVerdictDelivery tx may execute slightly after
+      // the VerdictDeliveryClaimed event we already observed.
       let activityAfter = activityBefore;
       const deadline = Date.now() + 60_000;
       while (Date.now() < deadline && activityAfter <= activityBefore) {
@@ -191,8 +234,12 @@ async function main(): Promise<void> {
       // Post a second prediction.v1 task and drive it to delivery.
       const posted2 = await postPredictionV1Task(fixture, operator, CREATOR_PRIV_KEY, mockIpfs, v3Env);
       console.log(`posted task 2: id=${posted2.taskId} cidDigest=${posted2.taskCidDigest}`);
-      const claim2 = await waitForDaemonClaim(fixture, posted2, operator, v3Env);
+      // Advance the fork head so the projector/archive feed observes TaskCreated for task 2
+      // promptly after the long verdict/activity-counter leg above.
+      await anvilJsonRpc(fixture.anvil.rpcUrl, 'anvil_mine', ['0x5']);
+      const claim2 = await waitForDaemonClaim(fixture, posted2, operator, v3Env, 180_000);
       console.log(`daemon claimed task 2: requestId=${claim2.requestId}`);
+      await anvilJsonRpc(fixture.anvil.rpcUrl, 'anvil_mine', ['0x79']);
       const delivered2 = await waitForDelivery(fixture, claim2, v3Env, mockIpfs);
       console.log(`delivered task 2: tx=${delivered2.deliveryTxHash}`);
 
@@ -233,6 +280,7 @@ async function main(): Promise<void> {
       await running.stop();
     }
   } finally {
+    await mockGamma?.close();
     await mockIpfs.close();
     await fixture.teardown();
   }

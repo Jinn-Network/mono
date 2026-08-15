@@ -1,0 +1,86 @@
+{
+  "kind": "https://spec.jinn.network/records/crypto-environment/v1",
+  "chainWorld": {
+    "kind": "https://spec.jinn.network/records/chain-environment/v1",
+    "record": {
+      "name": "chain",
+      "digest": {
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    }
+  },
+  "informationWorlds": [
+    {
+      "id": "yields",
+      "kind": "https://spec.jinn.network/records/information-world/v1",
+      "record": {
+        "name": "yields",
+        "digest": {
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      }
+    },
+    {
+      "id": "docs",
+      "kind": "https://spec.jinn.network/records/information-world/v1",
+      "record": {
+        "name": "docs",
+        "digest": {
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+        }
+      }
+    }
+  ],
+  "serviceRuntimes": [
+    {
+      "id": "replay",
+      "family": "http-replay",
+      "version": "0.2.0",
+      "image": {
+        "manifestDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "platform": "linux/amd64"
+      }
+    }
+  ],
+  "composition": {
+    "originRouting": [
+      {
+        "origin": "https://api.example.test",
+        "worldId": "yields",
+        "precedence": 0
+      },
+      {
+        "origin": "https://api.example.test",
+        "worldId": "docs",
+        "precedence": 1
+      },
+      {
+        "origin": "https://docs.example.test",
+        "worldId": "docs",
+        "precedence": 0
+      }
+    ],
+    "missPolicy": {
+      "mode": "declared-response",
+      "status": 404,
+      "body": {
+        "name": "miss",
+        "digest": {
+          "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      }
+    },
+    "endpointAllowlist": [
+      "https://api.example.test",
+      "https://docs.example.test"
+    ],
+    "requestBudget": {
+      "maxRequests": 200,
+      "maxResponseBytes": 8388608
+    }
+  },
+  "network.jinn.note": "an extension key a future consumer added",
+  "https://example.test/ext/provenance": {
+    "collector": "example"
+  }
+}

@@ -1,0 +1,54 @@
+name: Architecture Policy Audit
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: architecture-policy-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Read branch protection and owner state
+        id: audit
+        continue-on-error: true
+        env:
+          ARCHITECTURE_AUDIT_TOKEN: ${{ secrets.ARCHITECTURE_AUDIT_TOKEN || github.token }}
+        run: |
+          mkdir -p .architecture-audit
+          node .github/scripts/branch-protection-audit.mjs \
+            --repository Jinn-Network/mono \
+            --out .architecture-audit/audit.json \
+            --summary .architecture-audit/summary.md \
+            2> .architecture-audit/error.txt
+      - name: Publish audit summary
+        if: always()
+        run: |
+          if test -s .architecture-audit/summary.md; then
+            cat .architecture-audit/summary.md >> "${GITHUB_STEP_SUMMARY}"
+          else
+            {
+              echo '# Platform architecture policy audit failed'
+              echo ''
+              cat .architecture-audit/error.txt
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+      - name: Upload read-only audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-policy-audit
+          path: .architecture-audit
+          if-no-files-found: error
+          retention-days: 90
+      - name: Fail on policy drift
+        if: steps.audit.outcome != 'success'
+        run: exit 1

@@ -1,0 +1,54 @@
+{
+  "name": "@jinn-network/record-discovery-facts-trust",
+  "version": "0.1.0",
+  "description": "Facts-profile documents and record-fact recompute functions for the Jinn Trust Layer record kinds (key-binding, authorization, trust policy).",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/discovery/facts/trust"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./profiles/*": "./profiles/*"
+  },
+  "files": [
+    "dist/",
+    "profiles/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/record-discovery-protocol": "portal:../../protocol",
+    "@jinn-network/trust-core": "portal:../../../trust/core"
+  }
+}

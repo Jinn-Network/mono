@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "README.md",
+      "sha256": "15e1378572874f5a1b7094ba7f0ff970efbf986d2d08e50ba92600e3ed98a954"
+    },
+    {
+      "id": "benchmark-accounting/valid.json",
+      "sha256": "3b27ed32f4016140baa57d7d490b4ccfc870962f962d814ba8a88525ff2f5c2e"
+    },
+    {
+      "id": "report-v1/legacy-raw-payload.json",
+      "sha256": "4036d8dea49b6fd2cf546e29f75ca93d0a5881d6914d6d9a64dcdfe4e7c6543f"
+    },
+    {
+      "id": "report-v2/raw-v1-under-v2-kind.json",
+      "sha256": "4036d8dea49b6fd2cf546e29f75ca93d0a5881d6914d6d9a64dcdfe4e7c6543f"
+    },
+    {
+      "id": "report-v2/valid-envelope.json",
+      "sha256": "f1c04dfbcd8b81ea5d2a39a468f3a09e5da0795205ec7f988bd7fab546cf061a"
+    },
+    {
+      "id": "report-v2/wrong-media-envelope.json",
+      "sha256": "0e3703a6395e0185e5098ce05a9e24017bc9ca4d2c312576498f9b49fef4b6aa"
+    },
+    {
+      "id": "report-v2/wrong-payload-envelope.json",
+      "sha256": "5a39582727f0141cdacbf3aa3be887554f401763e85bbb1af7d5e0cda2ac004e"
+    }
+  ],
+  "errata": []
+}

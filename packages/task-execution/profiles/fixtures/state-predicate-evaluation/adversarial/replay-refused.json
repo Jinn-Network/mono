@@ -1,0 +1,70 @@
+{
+  "input": {
+    "block": {
+      "environmentRecord": {
+        "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        "mediaType": "application/vnd.jinn.crypto-environment.v1+json"
+      },
+      "predicateSemanticsVersion": "1",
+      "successPredicates": [
+        { "kind": "budget", "metric": "txCount", "cmp": "eq", "value": "0" }
+      ],
+      "safetyConstraints": [],
+      "measurements": [],
+      "timeout": 600
+    },
+    "observation": {
+      "observationVersion": "1",
+      "environmentRecord": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "informationWorlds": ["corpus-world"],
+      "replay": { "status": "refused", "refusalClass": "policy" },
+      "timeline": {
+        "initialBlockNumber": "100",
+        "initialChainTimestamp": "1700000000",
+        "finalStateChangingBlockNumber": "100",
+        "finalStateChangingChainTimestamp": "1700000000"
+      },
+      "transactions": [],
+      "blocks": [
+        {
+          "number": "100",
+          "timestamp": "1700000000",
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "touchedState": [],
+      "traceProjectionDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "finalStateCommitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "errorClasses": [],
+      "stateReads": [],
+      "sourceReads": [],
+      "sourceConsultations": [],
+      "reports": []
+    }
+  },
+  "expect": {
+    "resolvedAgainst": {
+      "environmentRecord": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "informationWorlds": ["corpus-world"]
+    },
+    "successPredicatesSatisfied": false,
+    "safetyConstraintsViolated": false,
+    "unevaluable": true,
+    "unevaluableReasons": ["replay-not-completed"],
+    "evaluations": [
+      {
+        "slot": "success",
+        "index": 0,
+        "kind": "budget",
+        "state": "unevaluable",
+        "reason": "replay-not-completed"
+      }
+    ],
+    "measurements": {
+      "successPredicatesSatisfied": false,
+      "safetyConstraintsViolated": false,
+      "statePredicateUnevaluable": true
+    },
+    "observedStateChangingOperations": 0
+  }
+}

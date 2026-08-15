@@ -1,52 +1,31 @@
 /**
  * ERC-8004 IdentityRegistry surface.
  *
- * Two complementary capabilities live here:
+ * `IdentityPublisher` — per-execution `setMetadata` writes that anchor
+ * envelope/evaluation commitments under the operator's agent NFT. Implements
+ * the v1 ABI-encoded payload tuple specified in
+ * `docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md` §3.1:
  *
- *   1. `IdentityPublisher` — per-execution `setMetadata` writes that anchor
- *      envelope/evaluation commitments under the operator's agent NFT. Implements
- *      the v1 ABI-encoded payload tuple specified in
- *      `docs/superpowers/specs/2026-04-27-erc-8004-payload-schema.md` §3.1:
+ *   abi.encode(
+ *       uint8   version,             // = 1
+ *       uint8   tier,                // 0..4
+ *       bytes32 manifestHash,        // = JinnRouter evidenceHash
+ *       bytes   attestationQuoteCid, // raw multibase-decoded CID bytes; 0x for tier < 3
+ *       bytes32 sourceMeasurement    // 0x00...00 for tier < 3
+ *   )
  *
- *        abi.encode(
- *            uint8   version,             // = 1
- *            uint8   tier,                // 0..4
- *            bytes32 manifestHash,        // = JinnRouter evidenceHash
- *            bytes   attestationQuoteCid, // raw multibase-decoded CID bytes; 0x for tier < 3
- *            bytes32 sourceMeasurement    // 0x00...00 for tier < 3
- *        )
+ * The encoded payload is passed to
+ *     IdentityRegistry.setMetadata(agentId, "<kind>:<cid>", payload)
  *
- *      The encoded payload is passed to
- *          IdentityRegistry.setMetadata(agentId, "<kind>:<cid>", payload)
+ * per the entity-model decision in §4.2 of
+ * `docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md` —
+ * one operator agent NFT per Safe; per-execution commitments anchor under it.
  *
- *      per the entity-model decision in §4.2 of
- *      `docs/superpowers/specs/2026-04-27-erc-8004-entity-model-design.md` —
- *      one operator agent NFT per Safe; per-execution commitments anchor under it.
- *
- *      This module ONLY publishes — it does not mint the agent NFT (`jinn-mono-j07`),
- *      call `setAgentWallet` (`jinn-mono-aev`), or write reputation/validation
- *      registries (`jinn-mono-2ff` / `jinn-mono-9jg`).
- *
- *   2. `resolveAgentIdForManifest` — evaluator-side lookup of the harness's
- *      `agentId` from a manifest's `evidenceHash`. Per DR §4.3, the evaluator
- *      must call `ReputationRegistry.giveFeedback(harnessAgentId, ...)` keyed
- *      on the harness's ERC-8004 agent NFT id — but the on-chain `claimDelivery`
- *      payload only carries the `requestId` and `evidenceHash`, not the
- *      harness's agentId.
- *
- *      Resolution paths:
- *
- *        (b) DiscoveryAPI: `queryEnvelopes({ manifestHash })` → first ref's
- *            `operator.agentId`. The Ponder indexer stores the agentId alongside
- *            each indexed envelope. This is the O(1) recommended path.
- *        (c) On-chain `IdentityRegistry.Registered` event scan filtered by the
- *            harness's Safe address — cheaper than a global scan, but still O(n)
- *            in registered-events. Documented as a fallback only.
- *
- *      This module implements (b). The resolver returns `null` cleanly when
- *      `discoveryApi` is undefined or the query has no match, and the caller
- *      (the feedback hook) treats that as a no-op (DR §4.3: "skip but don't fail
- *      — claimDelivery is authoritative").
+ * This module ONLY publishes — it does not mint the agent NFT (`jinn-mono-j07`),
+ * call `setAgentWallet` (`jinn-mono-aev`), or write reputation/validation
+ * registries (`jinn-mono-2ff` / `jinn-mono-9jg`). Wave-4 D4 deleted
+ * `resolveAgentIdForManifest` (the DiscoveryAPI envelope lookup); feedback
+ * callers pass `harnessAgentId` directly.
  */
 
 import {
@@ -56,8 +35,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from 'viem';
-import type { EnvelopeRef } from '../corpus/types.js';
-import type { DiscoveryAPI } from '../discovery/types.js';
+import type { HarnessMode } from '../harnesses/types.js';
 import {
   viemSendTransactionWithRetry,
   type TxRetryWalletClient,
@@ -371,6 +349,23 @@ export function codeDigestSha256ToBytes32(textual: string | null | undefined): H
   return (`0x${hex}`) as Hex;
 }
 
+/**
+ * Project a runtime {@link HarnessMode} onto the two-valued executor mode the
+ * delivery envelope and the on-chain v2 payload carry.
+ *
+ * `candidate` reports **frozen**, and that is the honest reading rather than a
+ * convenience: a candidate-mode run's active `implStateDir` is fenced and
+ * verified byte-identical exactly as a frozen run's is, so the claim the
+ * envelope makes — the implementation state was locked during this run — is
+ * true. What candidate mode adds is a proposal written somewhere else entirely,
+ * a product-layer artifact the execution-mode flag has never described.
+ * Widening the on-chain enum to carry it would be a protocol change for a fact
+ * the protocol does not consume.
+ */
+export function protocolExecutorMode(mode: HarnessMode): 'train' | 'frozen' {
+  return mode === 'train' ? 'train' : 'frozen';
+}
+
 /** Convert a HarnessExecutionMode string to the v2 numeric flag. */
 export function modeStringToFlag(mode: 'train' | 'frozen'): ExecutionModeFlag {
   return mode === 'frozen' ? 1 : 0;
@@ -655,6 +650,15 @@ export class IdentityPublisher {
     // which raced those loops and reverted "nonce too low" — the #525 launch
     // stall. encodeFunctionData reproduces the exact calldata writeContract
     // would have built.
+    //
+    // As of the P1 broadcast-lock unification (`tx-retry.ts`
+    // `setDefaultEoaBroadcastLock`), the "per-EOA broadcast lock" above is not
+    // just this module's own in-process queue: the composition root installs
+    // venue-base's durable, SQLite-backed `BroadcastLock` (the same lock
+    // `createSafeBroadcaster` holds for the creator/claim/deliver loops) as
+    // this module's default `EoaBroadcastLock`, so this setMetadata call and
+    // those Safe-mediated broadcasts serialize through the literal SAME
+    // critical section, not two independently-consistent ones.
     const data = encodeFunctionData({
       abi: IDENTITY_REGISTRY_SET_METADATA_ABI,
       functionName: 'setMetadata',
@@ -723,107 +727,4 @@ export class IdentityPublisher {
     }
     return { txHash, blockNumber, gasUsed, feeWei };
   }
-}
-
-// ── Agent resolver ───────────────────────────────────────────────────────────
-
-/**
- * Inputs for `resolveAgentIdForManifest`.
- *
- * `manifestHash` is the keccak256 of the harness's signed manifest — i.e.
- * the `evidenceHash` JinnRouter records on `claimDelivery`. The Ponder
- * indexer stores this on the `envelope` entity as `manifestHash`.
- *
- * `discoveryApi` is optional: when undefined, the resolver returns `null`
- * without attempting any query. This lets the call site stay terse —
- * `await resolveAgentIdForManifest({ manifestHash, discoveryApi: sharedDiscoveryApi })`
- * — without conditional plumbing.
- *
- * NOTE: Resolution uses `discoveryApi.queryEnvelopes({ manifestHash, limit: 1 })`
- * and extracts `agentId` from the first envelope ref (jinn-mono-280n.6).
- */
-export interface ResolveAgentIdArgs {
-  manifestHash: `0x${string}`;
-  /**
-   * DiscoveryAPI for envelope queries. When undefined, returns null without
-   * querying. Production always passes the sharedDiscoveryApi from main.ts;
-   * tests mock queryEnvelopes.
-   */
-  discoveryApi?: DiscoveryAPI;
-}
-
-/**
- * Resolved record for a manifest hash. The agentId is the primary signal
- * the feedback hook needs; the optional `manifestCid` is a convenience —
- * the indexer already knows it from indexing the operator's envelope
- * publish, so returning it here saves the caller from re-deriving it.
- */
-export interface ResolvedAgent {
-  agentId: bigint;
-  /**
-   * The manifest CID indexed alongside this manifestHash, when the
-   * indexer has it. Useful for the feedback `manifestRef` body without
-   * a second round-trip.
-   */
-  manifestCid: string | null;
-}
-
-/**
- * Resolve the operator `agentId` for a given manifest hash.
- *
- * Returns `null` when:
- *   - `discoveryApi` is undefined (no discovery configured).
- *   - The indexer has no envelope indexed for this `manifestHash` (the
- *     harness hasn't published an envelope yet, or the indexer is behind
- *     head).
- *   - The query fails or returns malformed data. This is intentional: a
- *     transient indexer failure must NOT block the evaluator's
- *     `claimDelivery` settlement, so the resolver fails closed (no
- *     feedback) rather than throwing.
- *
- * Errors are logged via `console.warn` so a flaky indexer surface is
- * observable without rerouting through the engine's logger.
- */
-export async function resolveAgentIdForManifest(
-  args: ResolveAgentIdArgs,
-): Promise<ResolvedAgent | null> {
-  const { manifestHash, discoveryApi } = args;
-
-  if (!discoveryApi) {
-    // Caller has no discovery configured — return null cleanly so the
-    // feedback hook becomes a no-op.
-    return null;
-  }
-
-  let refs: EnvelopeRef[];
-  try {
-    refs = await discoveryApi.queryEnvelopes({ manifestHash, limit: 1 });
-  } catch (err) {
-    console.warn(
-      `[agent-resolver] queryEnvelopes failed for manifestHash=${manifestHash}: ${err instanceof Error ? err.message : err}`,
-    );
-    return null;
-  }
-
-  if (refs.length === 0) {
-    return null;
-  }
-
-  const first = refs[0]!;
-  const agentIdStr = first.operator.agentId;
-  if (!agentIdStr) {
-    return null;
-  }
-
-  let agentId: bigint;
-  try {
-    agentId = BigInt(agentIdStr);
-  } catch {
-    console.warn(
-      `[agent-resolver] non-numeric agentId="${agentIdStr}" for manifestHash=${manifestHash}`,
-    );
-    return null;
-  }
-
-  return { agentId, manifestCid: first.manifestCid ?? null };
 }

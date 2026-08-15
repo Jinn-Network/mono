@@ -1,0 +1,223 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context",
+    "https://w3id.org/ro/terms/workflow-run/context",
+    {
+      "prov": "http://www.w3.org/ns/prov#",
+      "jinn": "https://spec.jinn.network/terms/"
+    }
+  ],
+  "@graph": [
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "name": "Autopilot issue #1697 source-backed protocol candidate",
+      "description": "A source-backed publication candidate used to test the Jinn Execution Evidence Protocol against one real Autopilot run.",
+      "dateCreated": "2026-07-23T20:00:49Z",
+      "datePublished": "2026-07-23T20:00:49Z",
+      "license": {
+        "@id": "https://rightsstatements.org/vocab/InC/1.0/"
+      },
+      "creator": {
+        "@id": "urn:uuid:ee77f5dc-40a6-4b6c-a57f-c52b740dbe93"
+      },
+      "hasPart": [
+        {
+          "@id": "artifacts/task.public.md"
+        },
+        {
+          "@id": "artifacts/result.patch"
+        },
+        {
+          "@id": "artifacts/executor.observed.json"
+        },
+        {
+          "@id": "artifacts/repository-input.observed.json"
+        },
+        {
+          "@id": "artifacts/trace.public.json"
+        },
+        {
+          "@id": "artifacts/scrub-receipt.json"
+        }
+      ],
+      "mentions": {
+        "@id": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2"
+      },
+      "jinn:conformanceStatus": "candidate-nonconforming"
+    },
+    {
+      "@id": "urn:uuid:ee77f5dc-40a6-4b6c-a57f-c52b740dbe93",
+      "@type": [
+        "SoftwareApplication",
+        "prov:Agent"
+      ],
+      "name": "Jinn protocol fixture assembler",
+      "softwareVersion": "0.1.0"
+    },
+    {
+      "@id": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2",
+      "@type": [
+        "CreateAction",
+        "prov:Activity"
+      ],
+      "name": "Autopilot implementation of issue #1697",
+      "instrument": {
+        "@id": "artifacts/executor.observed.json"
+      },
+      "object": [
+        {
+          "@id": "artifacts/task.public.md"
+        },
+        {
+          "@id": "artifacts/repository-input.observed.json"
+        }
+      ],
+      "result": {
+        "@id": "artifacts/result.patch"
+      },
+      "startTime": "2026-07-14T19:30:16.322Z",
+      "endTime": "2026-07-14T19:40:20.856Z",
+      "actionStatus": {
+        "@id": "https://schema.org/CompletedActionStatus"
+      },
+      "agent": {
+        "@id": "urn:uuid:ec15e06c-90b2-5f95-9b41-8b2115f8027c"
+      },
+      "resourceUsage": {
+        "@id": "#duration-ms"
+      },
+      "jinn:primaryTrace": {
+        "@id": "artifacts/trace.public.json"
+      }
+    },
+    {
+      "@id": "urn:uuid:ec15e06c-90b2-5f95-9b41-8b2115f8027c",
+      "@type": [
+        "SoftwareApplication",
+        "prov:Agent"
+      ],
+      "name": "Claude Code Autopilot coordinator for source session 1b110a92",
+      "identifier": {
+        "@type": "PropertyValue",
+        "propertyID": "https://claude.com/claude-code",
+        "value": "source-session:1b110a92-0095-4cd5-b230-847c7f0d6ba2"
+      }
+    },
+    {
+      "@id": "artifacts/task.public.md",
+      "@type": [
+        "File",
+        "CreativeWork",
+        "prov:Plan"
+      ],
+      "name": "Issue #1697 task, public derivative",
+      "encodingFormat": "text/markdown",
+      "sha256": "da4c3b0e697ec22c44b204b87b65f5db46a654de06f4ffcd0bd1511a631e43e3",
+      "prov:wasDerivedFrom": {
+        "@id": "urn:sha256:e756ba2396b38269c424e753938da5a0d5cbdc508a83965bd9fd8f9e8eb19462"
+      },
+      "prov:wasGeneratedBy": {
+        "@id": "#public-projection"
+      }
+    },
+    {
+      "@id": "urn:sha256:e756ba2396b38269c424e753938da5a0d5cbdc508a83965bd9fd8f9e8eb19462",
+      "@type": [
+        "File",
+        "CreativeWork",
+        "prov:Plan"
+      ],
+      "name": "Issue #1697 task reconstructed from the source transcript",
+      "encodingFormat": "text/markdown",
+      "sha256": "e756ba2396b38269c424e753938da5a0d5cbdc508a83965bd9fd8f9e8eb19462",
+      "jinn:accessClassification": "local-private"
+    },
+    {
+      "@id": "artifacts/executor.observed.json",
+      "@type": [
+        "File",
+        "SoftwareApplication"
+      ],
+      "name": "Observed executor configuration",
+      "softwareVersion": "2.1.197",
+      "encodingFormat": "application/json",
+      "sha256": "1d26a65faf9b941d23ca5e267aed1044ae8a2f0013cd18fff3e44c7588d1b2d7"
+    },
+    {
+      "@id": "artifacts/repository-input.observed.json",
+      "@type": "File",
+      "name": "Observed repository input",
+      "encodingFormat": "application/json",
+      "sha256": "2a4c378738a7684c84d8804b66edfac7bfbe1327859ae32c79648f13e107cbcb"
+    },
+    {
+      "@id": "artifacts/result.patch",
+      "@type": "File",
+      "name": "Final patch reported by the Autopilot execution",
+      "encodingFormat": "text/x-diff",
+      "sha256": "8ee8ef8ca507ca4c83d0b693404ec7ed36fd0f67df9551d8172dcca125d718f3",
+      "prov:wasGeneratedBy": {
+        "@id": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2"
+      }
+    },
+    {
+      "@id": "urn:sha256:96ab38d496a593d9217aefd7e9d37538c8e94bcf4d78650127ca0b8a892f5a00",
+      "@type": "File",
+      "name": "Native Claude Code project transcript",
+      "encodingFormat": "application/x-ndjson",
+      "sha256": "96ab38d496a593d9217aefd7e9d37538c8e94bcf4d78650127ca0b8a892f5a00",
+      "contentSize": 549916,
+      "about": {
+        "@id": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2"
+      },
+      "jinn:accessClassification": "local-private"
+    },
+    {
+      "@id": "artifacts/trace.public.json",
+      "@type": "File",
+      "name": "Task-relevant public trace projection",
+      "encodingFormat": "application/json",
+      "sha256": "8960a023ee136ca0c90e4eebc223e5cb9ac2b4486c75d8961496713504790ec1",
+      "about": {
+        "@id": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2"
+      },
+      "prov:wasDerivedFrom": {
+        "@id": "urn:sha256:96ab38d496a593d9217aefd7e9d37538c8e94bcf4d78650127ca0b8a892f5a00"
+      },
+      "prov:wasGeneratedBy": {
+        "@id": "#public-projection"
+      }
+    },
+    {
+      "@id": "artifacts/scrub-receipt.json",
+      "@type": "File",
+      "name": "Scrub and projection receipt",
+      "encodingFormat": "application/json",
+      "sha256": "db34ca1cd12fff495a32e033a9bbf5bdc4b4069077931e98dc59f2943630a1d9",
+      "about": {
+        "@id": "#public-projection"
+      }
+    },
+    {
+      "@id": "#public-projection",
+      "@type": "prov:Activity",
+      "name": "Public task and trace projection",
+      "endTime": "2026-07-23T20:00:49Z",
+      "instrument": {
+        "@id": "urn:git:commit:de3996ee67a4808d26e30c9401e237b70834ea3e"
+      },
+      "agent": {
+        "@id": "urn:uuid:ee77f5dc-40a6-4b6c-a57f-c52b740dbe93"
+      }
+    },
+    {
+      "@id": "#duration-ms",
+      "@type": "PropertyValue",
+      "name": "durationMs",
+      "propertyID": "https://spec.jinn.network/terms/durationMs",
+      "value": 604534,
+      "unitCode": "ms"
+    }
+  ]
+}

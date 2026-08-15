@@ -11,7 +11,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { canonicalJson } from '../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../src/util/canonical-json.js';
 import { cidToDigestHex } from '../src/adapters/mech/ipfs.js';
 import {
   hashDifferentialAdmissionReceiptV2,

@@ -1,0 +1,15 @@
+{
+  "name": "consumer-hostile-locator-private-address",
+  "kind": "consumer",
+  "description": "§7 / §14: a locator resolving to a private/link-local address (SSRF) is rejected before fetch.",
+  "input": {
+    "location": {
+      "profile": "https://spec.jinn.network/record-discovery/location/https/v1",
+      "locator": "https://169.254.169.254/latest/meta-data/"
+    }
+  },
+  "expect": {
+    "rejected": true,
+    "reason": "private-address"
+  }
+}

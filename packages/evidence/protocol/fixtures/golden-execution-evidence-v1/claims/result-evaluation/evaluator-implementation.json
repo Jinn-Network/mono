@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "jinn.fixture.evaluator-implementation.v1",
+  "name": "Focused Vitest result evaluator",
+  "version": "1.0.0",
+  "entrypoint": "evaluator.mjs#evaluateResult",
+  "source": {
+    "path": "evaluator.mjs",
+    "sha256": "3a8a0807de3a0b506774e15a5c20f28d5eceec01dd063700b43007c09736dfb1"
+  },
+  "runtime": {
+    "node": "22.22.2"
+  },
+  "testRunner": {
+    "package": "vitest",
+    "version": "4.1.10",
+    "yarnChecksum": "10c0/ff07294a57f9c62f3b503f7cf88a52ee0753ed26389a49cda430387a3898f39d80af47180b0af19e27acab5bd11ae95706bd4b44ce8befc97d3ae49af6ca4fc1"
+  }
+}

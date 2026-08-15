@@ -94,7 +94,7 @@ The state machine, one line per step:
     e. Call `distributor.stake()` — creates a Safe multisig + service registry entry + attaches the service to the staking contract. Master pays gas; the distributor pool provides the bond.
     f. Fund the agent EOA from master (0.005 ETH for txs).
     g. Deploy a mech on the marketplace (the on-chain identity your daemon claims requests from).
-4. **Daemon launch** — spawns three loops: CreatorLoop (post desired states), RestorerLoop (claim + execute), DeliveryWatcherLoop (claim deliveries + create eval jobs).
+4. **Daemon launch** — spawns the long-running loops. Every loop is conditional, so which ones start depends on the vertical mode and your config; the solve path is the work loop (claim + execute + deliver + settle) and the evaluate path is the evaluator loop. Full table: [`client/ARCHITECTURE.md`](../client/ARCHITECTURE.md) §6.
 
 After this, `jinn status` returns healthy. `http://127.0.0.1:7331/v1/status` is the JSON API.
 
@@ -173,8 +173,10 @@ jinn logs --follow
 # Dashboard UI
 open http://127.0.0.1:7331/
 
-# Direct HTTP — portfolio.v0 specifics.
-curl -s http://127.0.0.1:7331/v1/status | jq .portfolioV0
+# Direct HTTP — portfolio.v0 specifics. /v1/status is operator-class as of
+# spec §14.5 (issue #2404); pass the on-disk UI token.
+curl -s -H "x-jinn-ui-token: $(cat ~/.jinn-client/ui-token)" \
+  http://127.0.0.1:7331/v1/status | jq .portfolioV0
 ```
 
 The `portfolioV0` block shows:

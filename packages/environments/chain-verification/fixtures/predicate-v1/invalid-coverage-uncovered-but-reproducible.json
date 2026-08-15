@@ -1,0 +1,165 @@
+{
+  "protocol": "https://spec.jinn.network/chain-environment-verification/protocol/v1",
+  "scope": "component",
+  "outcome": "closed-reproducible",
+  "window": {
+    "startedAt": "2026-07-31T09:00:00.000Z",
+    "endedAt": "2026-07-31T09:04:00.000Z"
+  },
+  "verifier": {
+    "id": "https://spec.jinn.network/chain-environment-verification/conformance-verifier",
+    "version": "0.1.0",
+    "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "materials": [
+    {
+      "name": "materializer",
+      "digest": {
+        "sha256": "3ad113801e1a7b80b1062064ef8237ad672448d36fda050426059afab6770758"
+      }
+    },
+    {
+      "name": "probe-suite",
+      "digest": {
+        "sha256": "0b5a2df5ccb6c5e511944028089cb32709a405cddb44ff6e36b268cfa4420a6f"
+      }
+    },
+    {
+      "name": "comparator",
+      "digest": {
+        "sha256": "a827559dbc258e90dc1b0fcde5554b11ac584ddd0d8c90a76315b3b2fd6150a3"
+      }
+    },
+    {
+      "name": "state-artifact",
+      "digest": {
+        "sha256": "616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c"
+      }
+    },
+    {
+      "name": "source-proof-manifest",
+      "digest": {
+        "sha256": "ef6327d4bbd7f70e3690f13b300874eaf479325a1abf763c2d0e9a9007d9bf49"
+      }
+    },
+    {
+      "name": "fixture-coverage-manifest",
+      "digest": {
+        "sha256": "043ce0e7282b37c2e9e552f095f4ab28fd172c8bb1911b90738aeae5135acb55"
+      }
+    },
+    {
+      "name": "fixture-0-accounts",
+      "digest": {
+        "sha256": "c71336b36ad105700ff58f3d3e782891d51add670425da2104c4f107684c7bbb"
+      }
+    },
+    {
+      "name": "fixture-1-addresses",
+      "digest": {
+        "sha256": "84e04892e9f2caeea95223075537060e4fb1d273a95a525f53dc955d92d2074d"
+      }
+    },
+    {
+      "name": "fixture-2-rates",
+      "digest": {
+        "sha256": "398c88ae79a48ac9de7e642a7641e9a37f1ca5bbbacc38605503ebc36ada28d6"
+      }
+    }
+  ],
+  "environment": {
+    "closureClass": "closed-state",
+    "fidelityClass": "anchored-subset",
+    "anchor": {
+      "caip2": "eip155:1",
+      "chainId": 1,
+      "blockNumber": "21000000",
+      "blockHash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "stateRoot": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "timestamp": "1735689600",
+      "finalityPolicy": "finalized",
+      "authenticity": "declared"
+    },
+    "runtime": {
+      "family": "anvil",
+      "version": "1.3.7",
+      "imageManifestDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "platform": "linux/amd64",
+      "binaryDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "reportedVersion": "1.3.7",
+      "evmConfigurationDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "chainId": 1
+    },
+    "postFixtureCommitment": "0x8888888888888888888888888888888888888888888888888888888888888888",
+    "controls": {
+      "miningMode": "manual",
+      "orderingPolicy": "fifo",
+      "resetMechanism": "fresh-process"
+    },
+    "envelope": {
+      "rpcAllowlist": {
+        "read": [
+          "eth_call",
+          "eth_getBalance",
+          "eth_getBlockByNumber",
+          "eth_getTransactionReceipt"
+        ],
+        "stateChanging": [
+          "eth_sendRawTransaction",
+          "evm_mine",
+          "evm_increaseTime"
+        ]
+      },
+      "signerRoles": [
+        "agent"
+      ],
+      "permittedChainId": 1,
+      "maxima": {
+        "maxTransactions": "25",
+        "maxAggregateGas": "60000000",
+        "maxExecutionDurationMs": "600000"
+      },
+      "egressPolicyId": "jinn.egress.blackhole/1"
+    },
+    "coverage": {
+      "proofCovered": 5,
+      "fixtureDeclared": 1,
+      "uncovered": 1,
+      "mutatesSourceProtocolState": true
+    }
+  },
+  "isolation": {
+    "networkPolicy": {
+      "egress": "denied",
+      "dns": "absent",
+      "archiveRpc": "unreachable",
+      "forkBackend": "absent"
+    },
+    "closureEvidenceMode": "sealed-boundary",
+    "boundaryProbe": {
+      "probeId": "out-of-slice-read",
+      "readsEmptyOutsideSlice": false
+    },
+    "egressAttempts": [],
+    "forbiddenProbes": [],
+    "signerScope": {
+      "declaredRoles": [
+        "agent"
+      ],
+      "exposedAccounts": [],
+      "unexpectedAccounts": []
+    },
+    "resolutionLog": {
+      "name": "resolution-log",
+      "mediaType": "application/json",
+      "digest": {
+        "sha256": "212669aced5616d0e575776cb90f33aa5b8aae9fd5e666202c36515f2fbe4abe"
+      }
+    }
+  },
+  "cost": {
+    "artifactBytes": 1544,
+    "artifactCount": 9,
+    "wallSeconds": 0
+  }
+}

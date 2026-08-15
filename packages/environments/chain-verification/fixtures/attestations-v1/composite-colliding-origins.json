@@ -1,0 +1,183 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "crypto-environment",
+      "digest": {
+        "sha256": "65ef0dc3838506a80c51deba84fe5225fb40793351c3f6bc9c45e1f0849bd06b"
+      }
+    },
+    {
+      "name": "chain-world",
+      "digest": {
+        "sha256": "7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
+      }
+    }
+  ],
+  "predicateType": "https://spec.jinn.network/attestations/chain-environment-verification/v1",
+  "predicate": {
+    "protocol": "https://spec.jinn.network/chain-environment-verification/protocol/v1",
+    "scope": "composite",
+    "outcome": "capability-mismatch",
+    "window": {
+      "startedAt": "2026-07-31T09:00:00.000Z",
+      "endedAt": "2026-07-31T09:04:00.000Z"
+    },
+    "verifier": {
+      "id": "https://spec.jinn.network/chain-environment-verification/conformance-verifier",
+      "version": "0.1.0",
+      "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    "materials": [
+      {
+        "name": "chain-world-record",
+        "digest": {
+          "sha256": "7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
+        }
+      },
+      {
+        "name": "information-world-world-a",
+        "digest": {
+          "sha256": "b697dc797e5d1239945d420cbc42de881fdffe9afd58275fe2e7079e29877b5e"
+        }
+      },
+      {
+        "name": "information-world-world-b",
+        "digest": {
+          "sha256": "54b0c74bb2e57bc143b317dcd9fae737dbf4684f77dde9ba57f960b0ea0b6bd1"
+        }
+      }
+    ],
+    "environment": {
+      "closureClass": "closed-state",
+      "fidelityClass": "local",
+      "runtime": {
+        "family": "anvil",
+        "version": "1.3.7",
+        "imageManifestDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "platform": "linux/amd64",
+        "binaryDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "reportedVersion": "1.3.7",
+        "evmConfigurationDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "chainId": 1
+      },
+      "postFixtureCommitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "controls": {
+        "miningMode": "manual",
+        "orderingPolicy": "fifo",
+        "resetMechanism": "fresh-process"
+      },
+      "envelope": {
+        "rpcAllowlist": {
+          "read": [
+            "eth_call",
+            "eth_getBalance",
+            "eth_getBlockByNumber",
+            "eth_getTransactionReceipt"
+          ],
+          "stateChanging": [
+            "eth_sendRawTransaction",
+            "evm_mine",
+            "evm_increaseTime"
+          ]
+        },
+        "signerRoles": [
+          "agent"
+        ],
+        "permittedChainId": 1,
+        "maxima": {
+          "maxTransactions": "25",
+          "maxAggregateGas": "60000000",
+          "maxExecutionDurationMs": "600000"
+        },
+        "egressPolicyId": "jinn.egress.blackhole/1"
+      }
+    },
+    "isolation": {
+      "networkPolicy": {
+        "egress": "denied",
+        "dns": "absent",
+        "archiveRpc": "unreachable",
+        "forkBackend": "absent"
+      },
+      "closureEvidenceMode": "sealed-boundary",
+      "boundaryProbe": {
+        "probeId": "out-of-slice-read",
+        "readsEmptyOutsideSlice": false
+      },
+      "egressAttempts": [],
+      "forbiddenProbes": [],
+      "signerScope": {
+        "declaredRoles": [
+          "agent"
+        ],
+        "exposedAccounts": [],
+        "unexpectedAccounts": []
+      },
+      "resolutionLog": {
+        "name": "resolution-log",
+        "mediaType": "application/json",
+        "digest": {
+          "sha256": "3c27ab1442290187bb345860974e71d29900820ff6c7b2ec460644180ddc12eb"
+        }
+      }
+    },
+    "cost": {
+      "artifactBytes": 4711,
+      "artifactCount": 3,
+      "wallSeconds": 0
+    },
+    "composition": {
+      "routing": [
+        {
+          "origin": "https://api.llama.fi",
+          "world": "sha256:b697dc797e5d1239945d420cbc42de881fdffe9afd58275fe2e7079e29877b5e",
+          "precedence": 0
+        },
+        {
+          "origin": "https://api.llama.fi",
+          "world": "sha256:54b0c74bb2e57bc143b317dcd9fae737dbf4684f77dde9ba57f960b0ea0b6bd1",
+          "precedence": 0
+        }
+      ],
+      "collisions": [
+        {
+          "origin": "https://api.llama.fi",
+          "worlds": [
+            "sha256:54b0c74bb2e57bc143b317dcd9fae737dbf4684f77dde9ba57f960b0ea0b6bd1",
+            "sha256:b697dc797e5d1239945d420cbc42de881fdffe9afd58275fe2e7079e29877b5e"
+          ]
+        }
+      ],
+      "missPolicy": "declared-miss-response",
+      "allowlistedOrigins": [
+        "https://api.llama.fi"
+      ],
+      "requestBudget": {
+        "requests": 10,
+        "bytes": 1024,
+        "enforced": false
+      },
+      "components": [
+        {
+          "role": "chain-world",
+          "record": "sha256:7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
+        },
+        {
+          "role": "information-world",
+          "record": "sha256:b697dc797e5d1239945d420cbc42de881fdffe9afd58275fe2e7079e29877b5e"
+        },
+        {
+          "role": "information-world",
+          "record": "sha256:54b0c74bb2e57bc143b317dcd9fae737dbf4684f77dde9ba57f960b0ea0b6bd1"
+        }
+      ],
+      "wholeWorldOfflineBoot": true
+    },
+    "failure": {
+      "stage": "probe",
+      "reason": "origin-routing-collision",
+      "detail": "1 origin routing collision(s)"
+    }
+  }
+}

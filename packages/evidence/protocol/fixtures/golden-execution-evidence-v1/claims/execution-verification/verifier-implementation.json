@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "jinn.fixture.verifier-implementation.v1",
+  "name": "Fixture trace-policy verifier",
+  "version": "1.0.0",
+  "entrypoint": "verifier.mjs#verifyExecution",
+  "source": {
+    "path": "verifier.mjs",
+    "sha256": "1935c1001b4cfdccbc8a4701bc9ad47496ce540d516f386dab0499a8feef7a23"
+  },
+  "runtime": {
+    "node": "22.22.2"
+  },
+  "checks": [
+    "trace-sequence",
+    "allowed-tools",
+    "controlled-component-binding"
+  ]
+}

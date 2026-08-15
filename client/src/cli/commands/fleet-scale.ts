@@ -17,6 +17,10 @@ import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
 } from '../../config.js';
 import { isOperationalServiceStep } from '../../earning/types.js';
+import {
+  checkDaemonGuard as defaultCheckDaemonGuard,
+  daemonGuardEnvelope,
+} from '../daemon-guard.js';
 
 export interface FleetScaleDeps extends BaseCommandDeps {
   gatherIntrospectionRaw: typeof defaultGatherIntrospectionRaw;
@@ -26,6 +30,7 @@ export interface FleetScaleDeps extends BaseCommandDeps {
   retireFleetServiceOnChain: typeof defaultRetireFleetServiceOnChain;
   findServiceByDisplayIndex: typeof defaultFindServiceByDisplayIndex;
   isRecoverableTransactionError: typeof defaultIsRecoverableTransactionError;
+  checkDaemonGuard: typeof defaultCheckDaemonGuard;
 }
 
 const PRODUCTION_DEPS: FleetScaleDeps = {
@@ -34,6 +39,7 @@ const PRODUCTION_DEPS: FleetScaleDeps = {
   gatherIntrospectionRaw: defaultGatherIntrospectionRaw,
   resolveCliPassword: defaultResolveCliPassword,
   signerContextFactory: defaultCreateCliSignerContext,
+  checkDaemonGuard: defaultCheckDaemonGuard,
   bootstrapperFactory: (config) => new FleetBootstrapper({
     earningDir: config.earningDir,
     chain: (config as any).networkChain ?? (config.network === 'testnet' ? 'base-sepolia' : 'base'),
@@ -169,6 +175,19 @@ export function createFleetScaleCommand(deps: FleetScaleDeps = PRODUCTION_DEPS):
     }
 
     const { config, networkChain, chainConfig, fleetStore, masterWallet, publicClient } = built.ctx;
+
+    // D0a P3 (#525/#562/#897): both the grow (bootstrap) and shrink
+    // (retireFleetServiceOnChain) paths below sign Safe writes with the
+    // fleet's agent EOA / master signer, with no cross-process lock against a
+    // concurrently running daemon signing from the same EOA.
+    const daemonGuard = deps.checkDaemonGuard({ earningDir: config.earningDir, env: ctx.env });
+    if (daemonGuard.blocked) {
+      emitEnvelope(
+        daemonGuardEnvelope(daemonGuard, 'jinn fleet scale --to 3 --yes'),
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
 
     if (to > current) {
       const bootstrapper = deps.bootstrapperFactory({ ...config, networkChain } as any);

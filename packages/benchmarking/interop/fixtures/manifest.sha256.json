@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "swebench/expected.json",
+      "sha256": "48f58526c022b768faa96fc6f63812ffac6b95bcc1e907f4d2acb33f1e890cca"
+    },
+    {
+      "id": "swebench/expected.v2.json",
+      "sha256": "a4b1ad9ef872784d7d3d70440e60d00abc472409f84ba2553e069adf20ac6cab"
+    },
+    {
+      "id": "swebench/row.json",
+      "sha256": "72c44c8a0e3a569794e3bac282bf522067f15b305ea84f065523f4c4975f774d"
+    },
+    {
+      "id": "swebench/rows.multi-repo.json",
+      "sha256": "49c3b661d65897bba4663ad177a9ec61c36f0c4ce31b54a331bfb337644937a9"
+    }
+  ],
+  "errata": [
+    {
+      "id": "swebench/expected.json",
+      "supersededBy": "swebench/expected.v2.json",
+      "date": "2026-08-12",
+      "reason": "Provenance source became repo-level so clustered-bootstrap groups by source repo; every imported task digest changed. The superseded fixture pins the pre-fix digests and is retained unedited."
+    }
+  ]
+}

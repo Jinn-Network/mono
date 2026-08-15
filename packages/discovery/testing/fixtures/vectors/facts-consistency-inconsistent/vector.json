@@ -1,0 +1,62 @@
+{
+  "name": "facts-consistency-inconsistent",
+  "kind": "facts-consistency",
+  "description": "The announced `taskDigest` fact does not match the value recomputed from the record's own bytes -- a signed false statement by the source (§5.4, §10.4 step 2).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:5ef262f8ea7174fa73f80924bddc20ca2ca11bee7b575f9988ceaa8de2906126"
+      },
+      "facts": {
+        "taskDigest": "sha256:5feac0e544fa5277a1592c0dddca28acba997dc59259c91f2bc3020eb09da17d"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:acf5ca4229f81aed54b9e89a39c1de09b097ec00c1ff1412e9f5cc730670658a",
+        "announcementId": "ann-1"
+      }
+    },
+    "profile": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "kind": "https://spec.jinn.network/records/submission/v1",
+      "profile": "https://spec.jinn.network/facts/submission/v1",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:43a3a8f016024cd64de56a1ce8efeff6a4230e91826b2408bae0e94f18ef958b"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-1",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:5ef262f8ea7174fa73f80924bddc20ca2ca11bee7b575f9988ceaa8de2906126"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "facts": "inconsistent"
+  }
+}

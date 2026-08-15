@@ -1,0 +1,20 @@
+{
+  "predicate": {
+    "nonce": "authorization-golden-nonce",
+    "issuer": "urn:uuid:11111111-1111-4111-8111-111111111111",
+    "capabilities": [
+      "deliveries:submit"
+    ],
+    "expiry": "2026-08-01T00:00:00Z"
+  },
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "digest": {
+        "sha256": "12a0f8df9c5d16542e677cc1a4a61020c7b19963935f4bf74983af4f21b50b43"
+      },
+      "name": "input-digest"
+    }
+  ],
+  "predicateType": "https://spec.jinn.network/trust/authorization/v1"
+}

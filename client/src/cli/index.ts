@@ -12,6 +12,7 @@ import type { CommandContext, CommandModule } from './command.js';
 import { emitEnvelope } from '../errors/envelope.js';
 import { renderTopLevelHelp, renderCommandHelp } from './help.js';
 import { ConfigLoadError } from '../config.js';
+import { IntrospectionUnauthorizedError } from './introspection-context.js';
 
 import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
@@ -38,6 +39,7 @@ import mcpCommand from './commands/mcp.js';
 import migrateAgentIdCommand from './commands/migrate-agent-id.js';
 import backfillFailedDeliveriesCommand from './commands/backfill-failed-deliveries.js';
 import conformanceCommand from './commands/conformance.js';
+import evidenceCommand from './commands/evidence.js';
 import createCommand from './commands/create.js';
 import uiCommand from './commands/ui.js';
 import tasksCommand from './commands/tasks.js';
@@ -47,9 +49,14 @@ import solverPluginsCommand from './commands/solver-plugins.js';
 import integrationsCommand from './commands/integrations.js';
 import predictionScoreboardCommand from './commands/prediction-scoreboard.js';
 import captureCommand from './commands/capture.js';
-import codedigestRevertCheckCommand from './commands/codedigest-revert-check.js';
 import evalCommand from './commands/eval.js';
 import scrubCommand from './commands/scrub.js';
+import nativeRequesterCommand from './commands/native-requester.js';
+import ceremonyCommand from './commands/ceremony.js';
+import bootstrapRetryCommand from './commands/bootstrap-retry.js';
+import onboardingCompleteCommand from './commands/onboarding-complete.js';
+import policyCommand from './commands/policy.js';
+import wiringCommand from './commands/wiring.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -58,6 +65,8 @@ const COMMANDS: CommandModule[] = [
   quickstartCommand,
   authCommand,
   bootstrapCommand,
+  bootstrapRetryCommand,
+  onboardingCompleteCommand,
   fundRequirementsCommand,
   runCommand,
   stopCommand,
@@ -77,6 +86,7 @@ const COMMANDS: CommandModule[] = [
   migrateAgentIdCommand,
   backfillFailedDeliveriesCommand,
   conformanceCommand,
+  evidenceCommand,
   createCommand,
   uiCommand,
   tasksCommand,
@@ -86,9 +96,12 @@ const COMMANDS: CommandModule[] = [
   harnessesCommand,
   solverPluginsCommand,
   integrationsCommand,
-  codedigestRevertCheckCommand,
   evalCommand,
   scrubCommand,
+  nativeRequesterCommand,
+  ceremonyCommand,
+  policyCommand,
+  wiringCommand,
 ];
 
 /**
@@ -183,6 +196,23 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
           hint: 'Fix the configuration inputs and re-run the command.',
           exampleCli: exampleInvocation,
           details,
+        },
+        { writer, exit },
+      );
+      return;
+    }
+    if (err instanceof IntrospectionUnauthorizedError) {
+      // §14.5 / issue #2404: /v1/status's 401 gets a machine-readable shape
+      // rather than falling into the generic `fatal` bucket below.
+      // `ErrorCode` has no `unauthorized` member — don't mint one; `reason`
+      // in `details` carries the discriminator instead.
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err.message,
+          hint: 'Restart the daemon (it regenerates the token) or point --config at the right instance.',
+          exampleCli: exampleInvocation,
+          details: { reason: 'unauthorized', verb },
         },
         { writer, exit },
       );

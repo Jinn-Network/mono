@@ -1,0 +1,73 @@
+{
+  "name": "facts-consistency-indeterminate-unavailable-referenced-bytes",
+  "kind": "facts-consistency",
+  "description": "A referenced-record fact (drawn from the cited Task) cannot be recomputed because the referenced bytes are withheld -- `indeterminate`, and decision-grade use fails closed on it (§5.4, §10.4 step 2).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:3bb0ec9c0252184d0ba51109f1f8d4fb0dab6cd0f36cecfa2fb7dde90b939a27"
+      },
+      "facts": {
+        "taskDigest": "sha256:bf65fe8d29c8b3945c76a22c27775b3b6b2f38168e7f7a4d262314943160bc28",
+        "requesterIri": "did:key:zRequester"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:8abd62c3cb0dd7ce1f9dd0591591968ab7205b0bb23899405edee480cbc469a0",
+        "announcementId": "ann-2"
+      }
+    },
+    "profile": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "kind": "https://spec.jinn.network/records/submission/v1",
+      "profile": "https://spec.jinn.network/facts/submission/v1",
+      "fields": [
+        {
+          "name": "taskDigest",
+          "class": "record",
+          "referenceBearing": true
+        },
+        {
+          "name": "requesterIri",
+          "class": "record"
+        }
+      ]
+    },
+    "recordBytes": {
+      "taskDigest": "sha256:bf65fe8d29c8b3945c76a22c27775b3b6b2f38168e7f7a4d262314943160bc28",
+      "requesterIri": "did:key:zRequester"
+    },
+    "withheldReferencedDigests": [
+      "sha256:bf65fe8d29c8b3945c76a22c27775b3b6b2f38168e7f7a4d262314943160bc28"
+    ],
+    "decisionGrade": true,
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-2",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:3bb0ec9c0252184d0ba51109f1f8d4fb0dab6cd0f36cecfa2fb7dde90b939a27"
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "facts": "indeterminate",
+    "decisionGradeFailsClosed": true
+  }
+}

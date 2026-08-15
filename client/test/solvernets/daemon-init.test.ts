@@ -10,11 +10,11 @@
  *   2. Mocked store with a record in `status: 'launching'` →
  *      `recoverInFlightLaunches` is exercised; the record advances to
  *      `launched` and shows up in `pendingGenerators`.
- *   3. Mocked registry returning two summaries → catalog cache exposes both.
+ * Wave-4 D4 retired the ERC-8004 registry client and catalog refresher.
  *
  * Tests use a tmpdir-backed real `SolverNetStore` and hand-rolled mocks
- * for ipfs / publisher / subgraph / registryClient. The full daemon is
- * not started — Task 11's scope is the scaffolding extraction.
+ * for ipfs / publisher. The full daemon is not started — Task 11's scope
+ * is the scaffolding extraction.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,7 +25,6 @@ import path from 'path';
 import {
   initSolverNetSubsystem,
   type InitSolverNetSubsystemDeps,
-  DEFAULT_CATALOG_REFRESH_INTERVAL_MS,
 } from '../../src/solvernets/daemon-init.js';
 import {
   createSolverNetStore,
@@ -33,16 +32,11 @@ import {
   type SolverNetStore,
 } from '../../src/solvernets/store.js';
 import type {
-  SolverNetManifestSummary,
-  SolverNetRegistryClient,
-  SignerWithAgentEoa,
-} from '../../src/solvernets/registry-client.js';
-import type {
   IpfsClient,
   MetadataPublisher,
   SetMetadataPublishResult,
-} from '../../src/solvernets/registry-client-erc8004.js';
-import { DiscoveryUnavailableError } from '../../src/discovery/types.js';
+  SignerWithAgentEoa,
+} from '../../src/solvernets/launch-publisher.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -101,53 +95,6 @@ function buildLaunchedRecord(args: {
   return record;
 }
 
-interface MockRegistryClient extends SolverNetRegistryClient {
-  listLaunchedCalls: number;
-}
-
-function makeMockRegistryClient(args: {
-  summaries: SolverNetManifestSummary[];
-  failNextList?: Error;
-} = { summaries: [] }): MockRegistryClient {
-  let listLaunchedCalls = 0;
-  let failNextList = args.failNextList ?? null;
-  const client: MockRegistryClient = {
-    get listLaunchedCalls() { return listLaunchedCalls; },
-    async listLaunched() {
-      listLaunchedCalls += 1;
-      if (failNextList) {
-        const err = failNextList;
-        failNextList = null;
-        throw err;
-      }
-      return args.summaries;
-    },
-    async publishManifest() {
-      throw new Error('publishManifest not used in init tests');
-    },
-    async publishLifecycleTransition() {
-      return {
-        metadataTxHash: ('0x' + 'cc'.repeat(32)) as `0x${string}`,
-        metadataBlockNumber: 200,
-      };
-    },
-    async getManifest() {
-      throw new Error('getManifest not used in init tests');
-    },
-    async getManifestFromCache() {
-      return null;
-    },
-    async getLifecycleStatus() {
-      return {
-        status: 'launched' as const,
-        statusUpdatedAt: FIXED_NOW.toISOString(),
-        sourceBlock: 100,
-      };
-    },
-  };
-  return client;
-}
-
 interface MockPublisher extends MetadataPublisher {
   calls: number;
 }
@@ -178,25 +125,6 @@ function makeMockIpfs(): IpfsClient {
   };
 }
 
-function makeSampleSummary(id: string): SolverNetManifestSummary {
-  return {
-    manifestCid: `bafy-${id}`,
-    solverNetId: id,
-    name: `SolverNet ${id}`,
-    network: 'base-sepolia',
-    launcherAgentId: SAMPLE_LAUNCHER_AGENT_ID,
-    launcherSafeAddress: SAMPLE_LAUNCHER_SAFE,
-    status: 'launched',
-    statusUpdatedAt: FIXED_NOW.toISOString(),
-    contractId: 'prediction',
-    contractVersion: 'v1',
-    solutionPriceWei: '1000000000000000',
-    verdictPriceWei: '500000000000000',
-    openRoles: ['solver', 'evaluator'],
-    anchorBlock: 100,
-  };
-}
-
 // ── Setup ──────────────────────────────────────────────────────────────────
 
 let baseDir: string;
@@ -214,12 +142,8 @@ function buildDeps(overrides: Partial<InitSolverNetSubsystemDeps> = {}): InitSol
     store,
     ipfs,
     publisher,
-    registryClient: makeMockRegistryClient({ summaries: [] }),
-    network: 'base-sepolia',
     resolveSigner: async () => signer,
-    lifecycleSigner: signer,
     awaitTxConfirmation: async () => ({ blockNumber: 999 }),
-    disableCatalogAutoRefresh: true,
     now: () => FIXED_NOW,
     ...overrides,
   };
@@ -285,7 +209,6 @@ describe('initSolverNetSubsystem — record loading + filtering', () => {
       expect(subsystem.records).toHaveLength(0);
       expect(subsystem.pendingGenerators).toHaveLength(0);
       expect(subsystem.recovery.inFlightLaunches.resumed).toBe(0);
-      expect(subsystem.recovery.inFlightLifecycle.resumed).toBe(0);
     } finally {
       subsystem.stop();
     }
@@ -313,33 +236,6 @@ describe('initSolverNetSubsystem — in-flight recovery', () => {
       // And it shows up in pendingGenerators (Task 12 will spawn it).
       expect(subsystem.pendingGenerators).toHaveLength(1);
       expect(subsystem.pendingGenerators[0]?.record.solverNetId).toBe('net-resuming');
-    } finally {
-      subsystem.stop();
-    }
-  });
-
-  it('resumes a record with in-flight lifecycle transition', async () => {
-    // Record in the middle of a pause: status=launched, lifecycleProgress
-    // targeting paused. Recovery should advance it.
-    //
-    // NOTE: with the no-op subgraph and an awaitTxConfirmation that
-    // succeeds, the broadcasting phase will fire publishLifecycleTransition
-    // (mock returns success), then the confirming phase will succeed —
-    // the record finalizes at the target.
-    await store.writeRecord(buildLaunchedRecord({
-      solverNetId: 'net-pausing',
-      status: 'launched',
-      inFlightLifecycleTarget: 'paused',
-    }));
-
-    const subsystem = await initSolverNetSubsystem(buildDeps());
-    try {
-      expect(subsystem.recovery.inFlightLifecycle.resumed).toBe(1);
-      expect(subsystem.recovery.inFlightLifecycle.failed).toHaveLength(0);
-
-      const finalRec = await store.loadRecord('net-pausing');
-      expect(finalRec?.status).toBe('paused');
-      expect(finalRec?.lifecycleProgress).toBeUndefined();
     } finally {
       subsystem.stop();
     }
@@ -374,186 +270,11 @@ describe('initSolverNetSubsystem — in-flight recovery', () => {
   });
 });
 
-describe('initSolverNetSubsystem — catalog cache', () => {
-  it('initial refresh populates the cache with registry summaries', async () => {
-    const summaries = [makeSampleSummary('cat-1'), makeSampleSummary('cat-2')];
-    const registryClient = makeMockRegistryClient({ summaries });
-
-    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
-    try {
-      // The constructor kicks off a fire-and-forget refresh; await one tick
-      // of the microtask queue so the unawaited refresh resolves before we
-      // read.
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(subsystem.catalog.getCatalog()).toHaveLength(2);
-      expect(subsystem.catalog.getCatalog()[0]?.solverNetId).toBe('cat-1');
-      expect(subsystem.catalog.getCatalog()[1]?.solverNetId).toBe('cat-2');
-      expect(subsystem.catalog.lastRefreshedAt()?.toISOString()).toBe(FIXED_NOW.toISOString());
-      expect(subsystem.catalog.lastError()).toBeNull();
-      expect(registryClient.listLaunchedCalls).toBe(1);
-    } finally {
-      subsystem.stop();
-    }
-  });
-
-  it('records refresh errors without crashing', async () => {
-    const registryClient = makeMockRegistryClient({
-      summaries: [],
-      failNextList: new Error('subgraph 503'),
-    });
-
-    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
-    try {
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(subsystem.catalog.getCatalog()).toEqual([]);
-      expect(subsystem.catalog.lastError()?.message).toContain('subgraph 503');
-      // A generic failure carries no typed code.
-      expect(subsystem.catalog.lastError()?.code).toBeUndefined();
-      expect(subsystem.catalog.lastRefreshedAt()).toBeNull();
-    } finally {
-      subsystem.stop();
-    }
-  });
-
-  it('propagates an rpc_rate_limited code from a throttled RPC', async () => {
-    // jinn-mono #325: when the registry refresh fails because the RPC is
-    // rate-limited, the catalog cache must surface the typed code so the
-    // operator UI can render an actionable message instead of "stale".
-    const registryClient = makeMockRegistryClient({
-      summaries: [],
-      failNextList: new DiscoveryUnavailableError(
-        'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
-        new Error('429 Too Many Requests'),
-        'rpc_rate_limited',
-      ),
-    });
-
-    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
-    try {
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(subsystem.catalog.lastError()?.code).toBe('rpc_rate_limited');
-    } finally {
-      subsystem.stop();
-    }
-  });
-
-  it('reads rpc_rate_limited from an enrichment-layer error cause', async () => {
-    // The error can arrive wrapped: the registry client's IPFS-enrichment
-    // layer may surface its own Error whose `cause` is the typed
-    // DiscoveryUnavailableError. The cache must still extract the code.
-    const wrapped = new Error('listLaunched failed during enrichment');
-    (wrapped as { cause?: unknown }).cause = new DiscoveryUnavailableError(
-      'OnchainDiscoveryAPI: getLogs for MetadataSet failed',
-      undefined,
-      'rpc_rate_limited',
-    );
-    const registryClient = makeMockRegistryClient({
-      summaries: [],
-      failNextList: wrapped,
-    });
-
-    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
-    try {
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(subsystem.catalog.lastError()?.code).toBe('rpc_rate_limited');
-    } finally {
-      subsystem.stop();
-    }
-  });
-
-  it('manual refresh updates the cache and clears prior errors', async () => {
-    const registryClient = makeMockRegistryClient({
-      summaries: [makeSampleSummary('post-refresh')],
-      failNextList: new Error('first call fails'),
-    });
-
-    const subsystem = await initSolverNetSubsystem(buildDeps({ registryClient }));
-    try {
-      // Wait for the initial (failing) fire-and-forget refresh to settle.
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(subsystem.catalog.lastError()?.message).toContain('first call fails');
-
-      // Subsequent refresh succeeds and populates the snapshot.
-      await subsystem.catalog.refresh();
-      expect(subsystem.catalog.getCatalog()).toHaveLength(1);
-      expect(subsystem.catalog.getCatalog()[0]?.solverNetId).toBe('post-refresh');
-      expect(subsystem.catalog.lastError()).toBeNull();
-    } finally {
-      subsystem.stop();
-    }
-  });
-
-  it('honors a custom scheduler for the refresh interval', async () => {
-    type IntervalCallback = () => void;
-    const intervals: Array<{ cb: IntervalCallback; ms: number }> = [];
-    const cleared: unknown[] = [];
-    const scheduler = {
-      setInterval: (cb: () => void, ms: number) => {
-        intervals.push({ cb, ms });
-        return intervals.length;
-      },
-      clearInterval: (h: unknown) => {
-        cleared.push(h);
-      },
-    };
-
-    const registryClient = makeMockRegistryClient({
-      summaries: [makeSampleSummary('sched-1')],
-    });
-
-    const subsystem = await initSolverNetSubsystem(buildDeps({
-      registryClient,
-      disableCatalogAutoRefresh: false,
-      scheduler,
-      catalogRefreshIntervalMs: 12345,
-    }));
-    try {
-      expect(intervals).toHaveLength(1);
-      expect(intervals[0]?.ms).toBe(12345);
-
-      // Trigger the interval callback manually to confirm it refreshes.
-      intervals[0]?.cb();
-      // Allow the async refresh inside the cb to land.
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(registryClient.listLaunchedCalls).toBeGreaterThanOrEqual(2);
-    } finally {
-      subsystem.stop();
-    }
-    expect(cleared).toHaveLength(1);
-  });
-
-  it('exposes DEFAULT_CATALOG_REFRESH_INTERVAL_MS as a stable constant', () => {
-    // Pin the default so a refactor doesn't accidentally change it without
-    // updating the catalog-refresh budget docs.
-    expect(DEFAULT_CATALOG_REFRESH_INTERVAL_MS).toBe(30_000);
-  });
-});
-
 describe('initSolverNetSubsystem — stop()', () => {
-  it('cancels the catalog refresher (idempotent)', async () => {
-    const cleared: unknown[] = [];
-    const scheduler = {
-      setInterval: () => 'handle-1',
-      clearInterval: (h: unknown) => {
-        cleared.push(h);
-      },
-    };
-    const subsystem = await initSolverNetSubsystem(buildDeps({
-      disableCatalogAutoRefresh: false,
-      scheduler,
-    }));
+  it('is idempotent after catalog refresher retirement', async () => {
+    const subsystem = await initSolverNetSubsystem(buildDeps());
     subsystem.stop();
-    subsystem.stop(); // idempotent — only one clear
-    expect(cleared).toEqual(['handle-1']);
+    subsystem.stop();
+    expect(subsystem.records).toEqual([]);
   });
 });

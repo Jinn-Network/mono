@@ -1,0 +1,46 @@
+{
+  "schema": "demo1.p5-green-baseline-stop/1",
+  "recordedAt": "2026-08-13T02:09:59Z",
+  "attempt": 2,
+  "stage": "image-prestage",
+  "instanceId": "gerlero__foamlib-329",
+  "image": "swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781",
+  "platform": "linux/amd64",
+  "timeoutSeconds": 1800,
+  "timeoutClaim": {
+    "classification": "operator-attested-configured-bound-expiry",
+    "machineTimedOut": null,
+    "limitation": "The original runner collapsed a child timeout and another nonzero pull exit into the same UNAVAILABLE result. Its execution history did not expose boundedExit.timedOut or final monotonic elapsed, so this record does not assert a machine-proven timeout."
+  },
+  "diskBeforeAttempt": {
+    "availableKiB": 44939716,
+    "availableGiB": 42.857852935791016,
+    "minimumGiB": 40,
+    "passed": true
+  },
+  "result": {
+    "exitCode": 1,
+    "errorName": "EvaluationOperationalError",
+    "canonicalCode": "UNAVAILABLE",
+    "reason": "provider-unavailable",
+    "recoveryAdvice": "new-attempt-required",
+    "safeDetail": "oci grader unavailable: pinned grader image is unavailable"
+  },
+  "diskAfterAttempt": {
+    "availableKiB": 44297640,
+    "availableGiB": 42.245521545410156,
+    "minimumGiB": 40,
+    "passed": true
+  },
+  "exactDigestPresentAfterAttempt": false,
+  "dockerInspectError": "No such image: swerebench/sweb.eval.x86_64.gerlero_1776_foamlib-329@sha256:1f70f75a3faee203644429f61712d6d49a9a46ddb66eb199c8164e60cf027781",
+  "sessionExcerpt": {
+    "path": "green-baseline-attempt-2-session-excerpt.json",
+    "sha256": "63be2562938bfac51a071c1728bff46368b6b15ad3721766cecaab05ec1ebd55"
+  },
+  "goldOrEmptyGradeStarted": false,
+  "claudeCellStarted": false,
+  "fallbackAttempted": false,
+  "terminal": true,
+  "note": "The single authorized infrastructure-only retry used the unchanged pin, platform, timeout, and grader contract. The operator attests that the configured bound expired before the UNAVAILABLE result; the preserved machine evidence proves UNAVAILABLE and exact-image absence but not the child timeout bit. No third attempt is permitted."
+}

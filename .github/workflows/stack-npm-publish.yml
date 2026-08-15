@@ -1,0 +1,310 @@
+name: Stack npm Publish
+
+# The catalog-selected platform-v1 packages publish as one receipt-bound coherent set. Canary
+# publication consumes only the exact tarballs and immutable receipt produced by
+# the same run's reusable platform verification workflow.
+on:
+  push:
+    branches: [integration/evidence-v1, next]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Published stack release tag to verify, for example stack-v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'push' && 'stack-npm-publish-canary' || format('stack-npm-publish-stable-{0}', github.event.release.tag_name || inputs.release_tag) }}
+  cancel-in-progress: false
+
+jobs:
+  canary-verification:
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/platform-verification.yml
+    with:
+      source_sha: ${{ github.sha }}
+      lane: canary
+    secrets:
+      JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
+      JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
+
+  canary-publish:
+    name: stack-canary
+    needs: canary-verification
+    if: >-
+      github.event_name == 'push' &&
+      needs.canary-verification.result == 'success' &&
+      vars.PLATFORM_CANARY_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify exact publication checkout
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${SOURCE_SHA}"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install npm 11.19.0
+        run: npm install -g npm@11.19.0
+      - name: Download same-run prepublication artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-artifacts
+          path: .platform-verification
+      - name: Download same-run verification receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-receipt
+          path: .platform-verification-receipt
+      - name: Verify provenance and publish receipt-bound canary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          node .github/scripts/publish-verified-platform.mjs \
+            --verification-root .platform-verification \
+            --verification-receipt .platform-verification-receipt/verification-receipt.json \
+            --source-sha "${SOURCE_SHA}" \
+            --release-group platform-v1 \
+            --lane canary \
+            --registry https://registry.npmjs.org/ \
+            --repository "${GITHUB_REPOSITORY}" \
+            --out .platform-publication/publication-receipt.json
+      - name: Attest final publication receipt
+        uses: actions/attest@v4
+        with:
+          subject-path: .platform-publication/publication-receipt.json
+      - name: Upload final publication receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-publication-receipt
+          path: .platform-publication/publication-receipt.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
+
+  resolve-stable-source:
+    if: >-
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'stack-v')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.event.release.tag_name }}
+    steps:
+      - name: Require a stack semantic-version tag
+        run: |
+          if ! [[ "${RELEASE_TAG}" =~ ^stack-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Stable verification requires stack-v<semver>, got ${RELEASE_TAG}"
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install npm 11.19.0 for the read-only fixture baseline
+        run: npm install -g npm@11.19.0
+      - name: Resolve immutable stable verification source
+        id: source
+        run: |
+          set -euo pipefail
+          TAG_SHA="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}' | head -n1)"
+          if [ -z "${TAG_SHA}" ]; then
+            echo "::error::Release tag ${RELEASE_TAG} does not exist on origin"
+            exit 1
+          fi
+          PEELED="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          RESOLVED="$(git rev-parse "${TAG_SHA}^{commit}")"
+          CHECKED_OUT="$(git rev-parse HEAD)"
+          if [ "${PEELED}" != "${RESOLVED}" ] || [ "${CHECKED_OUT}" != "${RESOLVED}" ]; then
+            echo "::error::Release tag ${RELEASE_TAG}, origin, and checked-out HEAD do not peel to one commit"
+            exit 1
+          fi
+          TAG_VERSION="${RELEASE_TAG#stack-v}"
+          PLATFORM_VERSION="$(node --input-type=module <<'NODE'
+          import { loadCatalogPackages } from './.github/scripts/platform-catalog.mjs';
+          const versions = new Set(loadCatalogPackages(process.cwd(), { releaseGroup: 'platform-v1' })
+            .map(({ manifest }) => manifest.version));
+          if (versions.size !== 1) throw new Error(`platform-v1 package versions disagree: ${[...versions].join(', ')}`);
+          process.stdout.write([...versions][0]);
+          NODE
+          )"
+          if [ "${PLATFORM_VERSION}" != "${TAG_VERSION}" ]; then
+            echo "::error::Release tag ${RELEASE_TAG} names ${TAG_VERSION}, but platform-v1 is ${PLATFORM_VERSION}"
+            exit 1
+          fi
+          echo "TAG_VERSION=${TAG_VERSION}" >> "${GITHUB_ENV}"
+          echo "source_sha=${CHECKED_OUT}" >> "${GITHUB_OUTPUT}"
+      - name: Verify stable fixture immutability baseline
+        run: >-
+          node .github/scripts/fixture-immutability.mjs
+          --registry-baseline
+          --version "${TAG_VERSION}"
+
+  stable-verification:
+    needs: resolve-stable-source
+    if: needs.resolve-stable-source.result == 'success'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/platform-verification.yml
+    with:
+      source_sha: ${{ needs.resolve-stable-source.outputs.source_sha }}
+      lane: stable
+    secrets:
+      JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
+      JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
+
+  # Building and attesting an artifact is not proof that the public host serves it.
+  # This job proves the second half against the live origin and is the sole reason the
+  # unconditional hosting blocker could be removed. It touches the network, so it holds
+  # nothing but contents: read; attestation is a separate, network-free job.
+  stable-live-host-verification:
+    name: stable-live-host-verification
+    needs:
+      - resolve-stable-source
+      - stable-verification
+    if: >-
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'stack-v')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      PROFILE_HOST_ORIGIN: https://spec.jinn.network
+      SOURCE_SHA: ${{ needs.resolve-stable-source.outputs.source_sha }}
+      PUBLIC_KEY_URL: ${{ vars.JINN_PROFILE_MANIFEST_PUBLIC_KEY_URL }}
+      PUBLIC_KEY_SHA256: ${{ vars.JINN_PROFILE_MANIFEST_PUBLIC_KEY_SHA256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-stable-source.outputs.source_sha }}
+      - name: Verify exact verification checkout
+        run: test "$(git rev-parse HEAD)" = "${SOURCE_SHA}"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Download same-run profile root
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-artifacts
+          path: .platform-verification
+      - name: Download same-run verification receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-receipt
+          path: .platform-verification-receipt
+      - name: Bind the checked-out catalog digest
+        id: catalog
+        run: |
+          set -euo pipefail
+          DIGEST="$(node --input-type=module <<'NODE'
+          import { catalogSha256 } from './.github/scripts/build-prepublication-bundle.mjs';
+          process.stdout.write(catalogSha256(process.cwd()));
+          NODE
+          )"
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+      - name: Verify the live profile host serves the attested artifact
+        env:
+          CATALOG_DIGEST: ${{ steps.catalog.outputs.digest }}
+        run: |
+          node .github/scripts/verify-live-profile-host.mjs \
+            --root .platform-verification/profile-root \
+            --receipt .platform-verification-receipt/verification-receipt.json \
+            --source-sha "${SOURCE_SHA}" \
+            --catalog-digest "${CATALOG_DIGEST}" \
+            --release-group platform-v1 \
+            --lane stable \
+            --origin "${PROFILE_HOST_ORIGIN}" \
+            --public-key-url "${PUBLIC_KEY_URL}" \
+            --expect-public-key-sha256 "${PUBLIC_KEY_SHA256}" \
+            --out .platform-live-host/live-host-receipt.json
+      - name: Upload live host receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-live-host-receipt
+          path: .platform-live-host/live-host-receipt.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
+
+  stable-live-host-attestation:
+    name: stable-live-host-attestation
+    needs: stable-live-host-verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download live host receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-live-host-receipt
+          path: .platform-live-host-receipt
+      - name: Attest live host receipt
+        uses: actions/attest@v4
+        with:
+          subject-path: .platform-live-host-receipt/live-host-receipt.json
+
+  # The single node any future stable publisher depends on. It runs on every stable
+  # event and asserts exact success, so a skipped or failed upstream job is a refusal
+  # rather than an absence.
+  stable-publish-gate:
+    name: stable-publish-gate
+    needs:
+      - stable-verification
+      - stable-live-host-verification
+      - stable-live-host-attestation
+    if: >-
+      always() &&
+      ((github.event_name == 'release' && startsWith(github.event.release.tag_name, 'stack-v')) ||
+      github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Require same-run verification and live host proof
+        env:
+          VERIFICATION_RESULT: ${{ needs.stable-verification.result }}
+          LIVE_HOST_RESULT: ${{ needs.stable-live-host-verification.result }}
+          ATTESTATION_RESULT: ${{ needs.stable-live-host-attestation.result }}
+        run: |
+          if [ "${VERIFICATION_RESULT}" != "success" ] \
+            || [ "${LIVE_HOST_RESULT}" != "success" ] \
+            || [ "${ATTESTATION_RESULT}" != "success" ]; then
+            echo "::error::Stable release is gated: verification=${VERIFICATION_RESULT} live-host=${LIVE_HOST_RESULT} attestation=${ATTESTATION_RESULT}"
+            exit 1
+          fi
+          echo "Stable verification and live profile host proof both succeeded for this run."

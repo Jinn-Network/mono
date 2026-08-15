@@ -1,0 +1,25 @@
+{
+  "name": "item-content-corruption",
+  "kind": "item",
+  "description": "The fetched bytes for the announced digest re-hash to a different digest -- §10.4 step 1.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:584b846c6865b94fab600274f930bb58ff08f69fbaea6a9aa0c6f8e1590c28ee"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:05cf6326adfd4b14809361fa0a8d2b2271f58e707147e94cb8d02b6a05845d69",
+        "announcementId": "ann-6"
+      }
+    },
+    "fetchedBytes": "this is not the preimage of the announced digest"
+  },
+  "expect": {
+    "status": "content-corruption"
+  }
+}

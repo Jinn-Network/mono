@@ -11,7 +11,7 @@
 import { mkdtemp, cp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hashImplStateDir } from '../harnesses/freeze.js';
+import { hashImplStateDir, harnessHashOptions } from '../harnesses/freeze.js';
 import type { Harness, HarnessContext, Solution } from '../harnesses/types.js';
 
 export interface FreezeViolation {
@@ -46,9 +46,10 @@ export async function runHarnessWithFreezeFence(
   harness: Harness,
   ctx: HarnessContext,
 ): Promise<FenceResult> {
-  const hashOpts = harness.freezeStateHashIgnore?.length
-    ? { ignoreRelPaths: harness.freezeStateHashIgnore }
-    : undefined;
+  // The digest this returns is also the delivery envelope's `codeDigest`
+  // (`harnesses/engine/engine.ts`), so this single resolution fixes the fence
+  // identity and the on-chain identity together.
+  const hashOpts = harnessHashOptions(harness);
 
   if (ctx.mode === 'train') {
     const output = await harness.run(ctx);

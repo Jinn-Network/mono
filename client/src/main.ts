@@ -22,10 +22,11 @@
 import { config as dotenvConfig } from 'dotenv';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync as writeFileSyncMain } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
-import { randomBytes as cryptoRandomBytes } from 'node:crypto';
+import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
 import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
 import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.js';
@@ -33,12 +34,13 @@ import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.j
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
-import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
+import { hashProfileForHarness } from './harnesses/hash-profile.js';
 import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
@@ -53,20 +55,41 @@ import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.j
 import { ensureStableCwd } from './preflight/stable-cwd.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
-import { runFleetBootstrap, SetupBootstrapHalted } from './earning/bootstrap-run.js';
+import { runFleetBootstrap, runBootstrapWithDegradeOpen } from './earning/bootstrap-run.js';
+import { isEconomicBootstrapHalt, isPendingMasterFundingHalt } from './earning/bootstrap-halt-classification.js';
+import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
+import {
+  setDaemonReadiness,
+  getDaemonReadiness,
+  buildLoopMetricsSnapshot,
+} from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
+import { addressSetFromChainConfig, isAddressDigestCheckOverridden, verifyBroadcastTargetAddressSet } from './earning/address-digests.js';
 import { getJinnRouterAddress } from './contracts/addresses.js';
 import { FleetStateStore } from './earning/store.js';
 import { isOperationalServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner } from './earning/wallet.js';
+import { deriveLegacyBridgeSigner } from './daemon/trust-keys.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
+import {
+  buildDaemonStartupInfo,
+  resolveMainEntryEffectiveMode,
+  type DaemonStartupInfo,
+} from './daemon/daemon-startup-info.js';
+import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
+import { resolveFleetCompositionMode } from './daemon/native-composition-mode.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
 import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
+import type { PluginPublicationReader } from './plugin-registry/publication-reader.js';
+import {
+  createPluginPublicationReader,
+  createRpcPluginLogSource,
+} from './plugin-registry/publication-host.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Address } from 'viem';
 import {
@@ -74,14 +97,11 @@ import {
   DEFAULT_HARNESS,
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
-import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js';
 import { createAutopilotEvaluationContextResolver } from './autopilot/autopilot-evaluation-context-resolver.js';
 import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github-adoption-receipt-observer.js';
 import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
-import { createIssueRelayEvaluationContextResolver } from './issue-relay/evaluation-context-resolver.js';
-import { createIssueRelayGitHubRestReadPort } from './issue-relay/github-receipt-observer.js';
-import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
+import { protocolExecutorMode } from './erc8004/identity.js';
 import {
   makeConfiguredSemanticEvaluatorRunnerResolver,
 } from './harnesses/impls/jinn-repo-evaluator/semantic-runner-resolver.js';
@@ -90,11 +110,10 @@ import {
 } from './harnesses/impls/jinn-repo-evaluator/docker-immutable-verifier.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
-import { resolveContractFromSolverNetId } from './solvernets/launched-record-dispatcher.js';
 import type { Harness } from './harnesses/types.js';
 import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
-import { createClients } from './adapters/mech/safe.js';
+import { createClients, type VenueBroadcaster } from './adapters/mech/safe.js';
 import {
   findJoinedByName,
   loadSolverNets,
@@ -102,6 +121,8 @@ import {
 } from './solver-nets/registry.js';
 import { createCorpus } from './corpus/index.js';
 import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from './corpus/onchain-query.js';
+import { createHttpCorpusDiscovery } from '@jinn-network/core/corpus-read';
+import { createArchiveReadsFromStore, type ArchiveReads } from './archive/reads.js';
 import { CapturesStore } from './store/captures.js';
 import { createLiveCapturePublisher } from './captures/live-publisher.js';
 import { EnsurePendingCaptureProcessor, ensurePendingCapture, ingestStopHookCapture } from './captures/ingest.js';
@@ -123,8 +144,6 @@ import {
 } from './trajectory/transcript-watcher.js';
 import { defaultTranscriptWatchDirectories } from './trajectory/transcript-session-dirs.js';
 import { buildInfo } from './build-info.js';
-import { BASE_FEEDS } from './venues/chainlink/feeds.js';
-import { GeneratedTaskSource, StaticConfiguredTaskSource, filterBindableTasks } from './tasks/sources.js';
 import {
   checkRpcNetwork,
   logRpcLocalDevToStderr,
@@ -205,10 +224,48 @@ if (passwordResolution.source === 'generated') {
 
 const CONFIG_PATH = getConfigPathFromArgs();
 const config = loadConfig(CONFIG_PATH);
+/**
+ * One-swap M2 (#2461): the network AS WRITTEN, captured before the pre-launch clamp below rewrites
+ * mainnet to testnet. `resolveFleetCompositionMode` gates on THIS value, not the clamped one — an
+ * operator who wrote `network: "mainnet"` with `compositionMode: "native"` must see the refusal
+ * (DR-2026-08-05 decision 8). Letting the clamp turn that into a quiet native-on-testnet boot would
+ * be exactly the silent fallback the decision forbids.
+ */
+const CONFIGURED_NETWORK: 'mainnet' | 'testnet' = config.network;
 if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') {
   console.warn('[main] Mainnet is disabled before launch; using testnet defaults.');
   config.network = 'testnet';
   config.rpcUrl = 'https://base-sepolia-rpc.publicnode.com';
+}
+// #2380: same resolver `cli/commands/run.ts` used to route between this legacy entry and
+// native-main.ts. Recomputed here (not threaded through argv) so /v1/status and daemon_started
+// report the real resolved mode rather than assuming 'legacy'. `jinn run` only ever reaches this
+// entry when the resolver already chose legacy — but `jinn quickstart` imports main.ts directly,
+// unrouted (review #2380), so the reported mode is clamped to 'legacy' (what this entry actually
+// runs) with a loud warning on disagreement, rather than trusting the raw decision.
+const verticalDecision = resolveConfiguredOperatorVerticalMode(config);
+const { effectiveMode: reportedEffectiveMode, warning: verticalModeWarning } =
+  resolveMainEntryEffectiveMode(verticalDecision);
+if (verticalModeWarning !== undefined) {
+  console.warn(`[main] WARNING: ${verticalModeWarning}`);
+}
+/**
+ * One-swap M2 (#2461, DR-2026-08-05): which composition this ONE fleet daemon assembles.
+ *
+ * Absent `compositionMode` is legacy, so today's boot is byte-identical — nothing native is
+ * constructed and `native-fleet-runtime.js` is not even imported. Wave 3's deploy PR sets the key.
+ *
+ * Resolved HERE, at the top of boot, deliberately: `assertNativeDeployment` throws on native +
+ * mainnet, and that refusal must happen before a wallet is unlocked or a loop is built, not
+ * halfway through composition. Distinct from `verticalDecision` above, which selects an ENTRY
+ * POINT (this file vs. the retiring `native-main.ts`); this selects a COMPOSITION inside this one.
+ */
+const COMPOSITION_MODE = resolveFleetCompositionMode({
+  compositionMode: config.compositionMode,
+  configuredNetwork: CONFIGURED_NETWORK,
+});
+if (COMPOSITION_MODE === 'native') {
+  console.log('[main] composition mode: native (one-swap; compositionMode="native")');
 }
 // Issue #326: the embedded Claude agent chat surface (right rail + onboarding
 // "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
@@ -271,20 +328,7 @@ function configFileHasTopLevelKey(configPath: string | undefined, key: string): 
   }
 }
 
-export interface DaemonStartupInfo {
-  schemaVersion: 1;
-  generatedAt: string;
-  kind: 'daemon_started';
-  pid: number;
-  network: 'testnet' | 'mainnet';
-  phase: 'phase-1b' | 'phase-0';
-  apiPort: number;
-  masterAddress: `0x${string}`;
-  safeAddress: `0x${string}`;
-  mechAddress: `0x${string}`;
-  serviceIndex: number;
-  serviceId: number | null;
-}
+export type { DaemonStartupInfo };
 
 export interface SetupHaltedInfo {
   schemaVersion: 1;
@@ -320,21 +364,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // singleton here also runs the startup age-based cleanup of stale rotations.
   getFileLogger();
 
-  // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
+  // ── Daemon API bearer token (jinn-mono-pr64 hardening; §14.2) ────────────
   //
   // Cost-mutating API routes (`POST /v1/artifacts/acquire`, `POST /artifacts`)
-  // require an `Authorization: Bearer <token>` header. Read from env when
-  // operators want a stable token (e.g. multi-process tools); otherwise
-  // generate a fresh one per daemon process. Logged only as an 8-char prefix.
-  // The token is forwarded to the MCP subprocess via `DAEMON_API_TOKEN` env
-  // so `acquire_artifact` and `submit_restoration_result` can authenticate
-  // their calls back to the daemon.
+  // and the `POST /api/stop-hook` compat path require an
+  // `Authorization: Bearer <token>` header. Read from env when operators
+  // want a stable token (e.g. multi-process tools); otherwise resolve the
+  // token persisted at `<earningDir>/daemon-api-token` (mode 0600),
+  // generating it once on first boot. Persistence (not a fresh random value
+  // per boot) is required so an externally-installed stop-hook — the only
+  // production consumer of the bearer on the stop-hook route — has a stable
+  // value it can resolve when `DAEMON_API_TOKEN` isn't already in its own
+  // environment; see `jinn-stop-hook.ts`'s file-fallback. Logged only as an
+  // 8-char prefix. The token is forwarded to the MCP subprocess via
+  // `DAEMON_API_TOKEN` env so `acquire_artifact` and
+  // `submit_restoration_result` can authenticate their calls back to the
+  // daemon.
   const envToken = process.env['DAEMON_API_TOKEN']?.trim();
-  const apiToken = envToken && envToken.length > 0
-    ? envToken
-    : cryptoRandomBytes(32).toString('hex');
-  if (!envToken) {
-    console.log(`[main] Generated DAEMON_API_TOKEN (prefix=${apiToken.slice(0, 8)}...)`);
+  const daemonApiTokenFilePath = daemonApiTokenPath(config.earningDir);
+  let apiToken: string;
+  if (envToken && envToken.length > 0) {
+    apiToken = envToken;
+  } else {
+    const resolved = ensureDaemonApiToken(daemonApiTokenFilePath);
+    apiToken = resolved.token;
+    const verb = resolved.source === 'generated' ? 'Generated' : 'Loaded';
+    console.log(`[main] ${verb} DAEMON_API_TOKEN at ${daemonApiTokenFilePath} (prefix=${apiToken.slice(0, 8)}...)`);
   }
 
   // The keystore-presence probe happens twice: once now (to decide initial
@@ -367,6 +422,38 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // fail-loud on chain-id mismatch against the head provider.
   lastL2Probe = await probeFallbackChain(config.rpcUrls, config.network, 'L2');
   console.error(summarizeFallbackChain('L2', config.rpcUrls));
+
+  // Pinned broadcast-target address-set digest (#2407, spec §5). Integrity
+  // class — fail closed, never degrade-open: a resolved
+  // {staking proxy, distributor, marketplace, router, OLAS token} set that
+  // doesn't match the checked-in per-network digest means this daemon would
+  // broadcast against unexpected contracts (deployment-artifact paths are
+  // env-overridable; address fields are otherwise only presence-checked).
+  if (isAddressDigestCheckOverridden()) {
+    console.warn(
+      '[main] JINN_ADDRESS_DIGEST_OVERRIDE is set — skipping the pinned broadcast-target ' +
+        'address-set digest check. Only use this for a local Anvil fork or another deployment ' +
+        'deliberately not matching the pinned production address set.',
+    );
+  } else {
+    const addressSetCheck = verifyBroadcastTargetAddressSet({
+      chainId: CHAIN_CONFIG.chainId,
+      // #2407 L2: goes through the same helper the test suite calls against
+      // getChainConfig(...) directly, rather than reconstructing the set
+      // inline here — one place for the router fallback to live, so the
+      // test suite's coverage is the production set, not a narrower stand-in.
+      set: addressSetFromChainConfig(CHAIN_CONFIG),
+    });
+    if (!addressSetCheck.ok) {
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message: addressSetCheck.message,
+        hint: 'Verify the resolved deployment-artifact paths (testnetL2DeploymentPath / testnetMechDeploymentPath / testnetStolasDeploymentPath / JINN_TESTNET_*_DEPLOYMENT), or set JINN_ADDRESS_DIGEST_OVERRIDE=1 for a deliberately non-production deployment (e.g. a local Anvil fork).',
+        exampleCli: 'jinn doctor --human',
+        details: { field: 'addressSetDigest', chainId: CHAIN_CONFIG.chainId, diverged: addressSetCheck.diverged },
+      });
+    }
+  }
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);
   if (!portPreflight.ok) {
@@ -501,7 +588,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   const uiToken = ensureUiToken();
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
-  const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
+  // §14.4: env override wins, else the config-file value, else loopback.
+  // Previously this only ever read the env var, so `apiBindHost` written
+  // into the config file was silently dead — the auth gate (§14.3) must be
+  // unconditional BEFORE this activates, since a non-loopback bind now
+  // actually exposes operator-class routes to the network (bearer/token-
+  // gated, but reachable).
+  const apiBindHost = resolveApiBindHost(config.apiBindHost);
+  if (!isLoopbackBindHost(apiBindHost)) {
+    console.warn(
+      `[main] WARNING: apiBindHost is "${apiBindHost}" (non-loopback) — the daemon API ` +
+      'is reachable from other hosts on the network, not just this machine. Operator-class ' +
+      'routes are token-gated, but the bind host is your outer firewall — make sure this is intentional.',
+    );
+  }
   const operatorArtifactsConfig = {
     publicEndpoint: config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`,
     defaultPriceUsdc: config.operator?.defaultPriceUsdc ?? '0',
@@ -516,13 +616,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // Safe address and the prediction.v1 generator are not yet known at start-up.
   // We capture both into closures here and let `addLauncherRoutes` read them
   // lazily — by the time `/v1/launcher/status` is hit, both are populated.
-  let predictionGeneratorRef:
-    | { getState(): import('./solver-types/prediction-v1-auto.js').PredictionV1GeneratorStateSnapshot }
-    | undefined;
-  const launchedGeneratorStateBySolverType = new Map<
-    string,
-    () => LauncherGeneratorStateSnapshot | undefined
-  >();
   let safeAddressForLauncher: `0x${string}` | undefined;
   let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
 
@@ -545,31 +638,35 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./harnesses/readiness-registry.js').HarnessReadinessRegistry | undefined;
   } = { current: undefined };
 
-  // jinn-mono-u34i: same eager-register / late-populate pattern for the
-  // DiscoveryAPI. Pre-fix, /v1/discovery/* routes only mounted when
-  // `config.discovery` was set at startApiServer time — but main.ts builds
-  // `sharedDiscoveryApi` post-bootstrap, so the routes were never registered
-  // and the panel's /build page got a permanent 404 on plugin-publications +
-  // builder-artifacts. Holder ref lets the routes register eagerly and
-  // start returning real data the moment main.ts assigns holder.current.
-  const discoveryApiHolder: {
-    current: import('./discovery/types.js').DiscoveryAPI | undefined;
-  } = { current: undefined };
+  // Wave-4 D4: archive/projector reads for task-post-counts and launcher
+  // getTaskStatuses. Store already exists here, so the holder is populated
+  // immediately; the holder shape matches pluginReader's eager-register pattern.
+  const archiveReadsHolder: { current: ArchiveReads | undefined } = {
+    current: createArchiveReadsFromStore(sharedStore),
+  };
 
-  // #1037: same eager-register / late-populate pattern for the join applier.
-  // The join endpoint registers eagerly inside startApiServer; the applier is
-  // built only after the latest join-consuming subsystem (the engine view,
-  // wired in the Daemon ctor). The endpoint tolerates an empty holder in the
-  // gap between server-start and populate by falling back to
-  // restartRequired:true.
-  const joinApplierHolder: {
-    current: import('./daemon/join-applier.js').JoinApplier | undefined;
-  } = { current: undefined };
+  // One-swap R3 (#2461): the plugin-publication reader backing the /build page's
+  // plug-in routes, carved off `discovery/` onto the IdentityRegistry log source
+  // so those routes survive the D-wave deletion. Populated post-bootstrap.
+  const pluginReaderHolder: { current: PluginPublicationReader | undefined } = {
+    current: undefined,
+  };
 
   // #641: latest published `@jinn-network/client` version, back-filled by the
   // start-time npm-registry check below. `/v1/status.latestVersion` reads this
   // via the `latestVersion` getter threaded into the ApiServer status config.
   const latestVersionHolder: { current: string | null } = { current: null };
+
+  // #2405 (spec §4.1 intent-module law): `POST /api/admin/claim-rewards` is a
+  // thin front-end over `claimRewardsIntent`, built from the daemon's OWN
+  // signer/client objects — never re-derived from the keystore, never routed
+  // through the CLI module. Those objects (`publicClient`, `masterWallet`,
+  // `earningStore`) aren't constructed until after bootstrap completes, well
+  // after `startApiServer` registers the route (same eager-register /
+  // late-populate holder pattern used elsewhere in this file).
+  const claimRewardsRouteHolder: {
+    current: import('./api/admin-endpoint.js').ClaimRewardsRouteContext | undefined;
+  } = { current: undefined };
 
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
@@ -588,6 +685,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       bindHost: apiBindHost,
       corpus: () => corpusForApi,
       ui: { token: uiToken, handshakeKey },
+      // GET /ready + GET /metrics (spec §5/§6.1–§6.2, issue #2404). Injected
+      // (rather than server.ts importing daemon/loop-heartbeat.js directly)
+      // per the api→daemon architecture boundary — see the field docstrings
+      // on ApiServerConfig in server.ts.
+      getDaemonReadiness,
+      getLoopSnapshot: () => buildLoopMetricsSnapshot(sharedStore),
       hermesDoctor: {
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
@@ -617,6 +720,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               await closeCaptureReceiver();
             },
           }),
+        claimRewards: { holder: claimRewardsRouteHolder },
       },
       harnessStatus: {
         getStatus: async () => {
@@ -625,7 +729,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           const implStateDir = join(config.engine.implStateDirRoot, harnessStateDirName(defaultHarness));
           let codeDigest = '';
           try {
-            codeDigest = await hashImplStateDir(implStateDir);
+            // #2118: the status surface joins the harness's hash profile, so
+            // the digest the operator reads is the digest the fence enforces
+            // and the delivery envelope carries. Harnesses with no registered
+            // public profile keep the historical unfiltered hash here.
+            const profile = hashProfileForHarness(defaultHarness);
+            codeDigest = await hashImplStateDir(implStateDir, profile ? { profile } : {});
           } catch {
             // implStateDir may not exist yet on first boot. Surface as empty
             // rather than 500ing — the panel renders "—" gracefully.
@@ -754,8 +863,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // harness readiness routes. Until main.ts sets the holder, requests
       // return 503 subsystem_not_ready (the panel handles that gracefully).
       harnessReadinessRegistry: { holder: harnessReadinessRegistryHolder },
-      // jinn-mono-u34i: see discoveryApiHolder comment above.
-      discovery: { holder: discoveryApiHolder },
+      // Wave-4 D4: plugin-publication routes require pluginReader (no
+      // DiscoveryAPI fallback). Archive reads back task-post-counts.
+      pluginReader: { holder: pluginReaderHolder },
+      archiveReads: { holder: archiveReadsHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -853,14 +964,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             resolve();
           });
         },
-        // #1037: hot-apply a join to the running daemon. Populated after the
-        // join-consuming subsystems are built (see joinApplierHolder). Empty
-        // until then → the endpoint returns restartRequired:true.
-        joinApplier: joinApplierHolder,
         // #983: mutate the in-memory config so GET /v1/bootstrap reflects the
         // completion flag live (the endpoint persists to disk; this keeps the
-        // configReader's in-memory read consistent — same pattern as the
-        // join-applier's config write). Cast: JinnConfig has the optional field.
+        // configReader's in-memory read consistent).
+        // Cast: JinnConfig has the optional field.
         markOnboardingComplete: () => {
           (config as { onboardingComplete?: boolean }).onboardingComplete = true;
         },
@@ -914,15 +1021,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         onSolverNetsUpdated: () => {
           invalidatePredictionOperatorStatusCache(config);
         },
-        getGeneratorState: (netName) => {
-          if (netName === 'prediction') {
-            return predictionGeneratorRef?.getState();
-          }
-          const joined = findJoinedByName(config.joinedSolverNets, netName);
-          const solverType = joined ? solverTypeFromJoinedContract(joined) : undefined;
-          if (!solverType) return undefined;
-          return launchedGeneratorStateBySolverType.get(solverType)?.();
-        },
+        // Wave-4 D3 retired the launched-record generators (and with them the
+        // creator loop they fed), so no generator state exists to report. The
+        // hook stays on the launcher-status surface — its consumers already
+        // treat an absent snapshot as "no generator running", which is now
+        // always the truth.
+        getGeneratorState: () => undefined,
         getOpenTaskCount: (netName) => {
           if (!safeAddressForLauncher) return 0;
           const joined = findJoinedByName(config.joinedSolverNets, netName);
@@ -987,13 +1091,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             }));
           },
           // #579: on-chain finalized/open/expired status for the Recent posted
-          // Tasks chip. discoveryApiHolder is populated post-bootstrap; before
-          // that (or with no discovery API) we return an empty Map → all chips
-          // render 'unknown', the safe degraded default.
+          // Tasks chip. Wave-4 D4 reads ArchiveReads.getTaskStatuses, which
+          // degrades to an empty Map → chips render 'unknown'.
           fetchTaskStatuses: async (manifestCid: string) => {
-            const api = discoveryApiHolder.current;
-            if (!api) return new Map();
-            return api.getTaskStatuses({ manifestCid });
+            const reads = archiveReadsHolder.current;
+            if (!reads) return new Map();
+            return reads.getTaskStatuses({ manifestCid });
           },
         },
       },
@@ -1151,19 +1254,172 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     setupController.refresh({ keystoreExists: true, allComplete: false });
   }
 
-  // hjex.6: halt-and-resume loop for bootstrap retries.
-  // When failBootstrap() throws SetupBootstrapHalted, we wait for the operator
-  // to click Retry in the SPA (which resolves retryBootstrapResolve) rather
-  // than returning and exiting. On each retry, we loop back and call bootstrap()
-  // again. bootstrap() is idempotent — completed steps are no-ops.
-  let bootstrapResult;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  // Deployment-readiness gate (#958). In a deployment context (JINN_STATE_DIR
+  // set or a container/compose auth context) this fails loud and exits when a
+  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root).
+  // Outside a deployment context it only logs advisories — a plain local
+  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
+  // unfit environment refuses before we touch the pidfile.
+  //
+  // #2407 B1: this and the pidfile block below used to run much later, right
+  // before Daemon construction — AFTER the entire bootstrap retry loop and
+  // any degrade-open recovery window. That left the whole degraded window
+  // with no `daemon.pid` on disk, so `checkDaemonGuard` (cli/daemon-guard.ts)
+  // reported `not-running` and a concurrent `jinn withdraw` / `jinn bootstrap`
+  // / `jinn fleet scale` / `jinn solver-plugins publish` would race the
+  // degraded recovery loops' signer, and a second `jinn run` would start a
+  // second degraded set. Both gates now run here, before the retry loop and
+  // any degraded loops can start.
+  await applyDeploymentReadinessGate(
+    {
+      stateDir: config.stateDir,
+      earningDir: config.earningDir,
+      runtimeMode: config.runtimeMode,
+    },
+    {
+      env: process.env,
+      getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
+      detectAuthContext,
+    },
+  );
+
+  const pidPath = join(config.earningDir, 'daemon.pid');
+  applyPidfileLivenessGate(pidPath);
+
+  writeFileSyncMain(pidPath, String(process.pid) + '\n', 'utf-8');
+  const removePidfile = () => {
     try {
-      bootstrapResult = await runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress });
-      break; // success — exit the retry loop
-    } catch (err) {
-      if (err instanceof SetupBootstrapHalted) {
+      unlinkSync(pidPath);
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('exit', removePidfile);
+
+  // #2407 R2: a SIGINT/SIGTERM delivered during the bootstrap retry loop or
+  // the degrade-open window (before the full Daemon's own graceful
+  // SIGINT/SIGTERM handlers exist, further down) hits Node's default signal
+  // disposition, which terminates the process WITHOUT running
+  // `process.on('exit', ...)` handlers — `exit` fires for a clean return or
+  // `process.exit()`, not for a bare signal termination. Without this, a
+  // stale `daemon.pid` survives the process: on a normal host it
+  // self-heals (`checkPidfileLiveness`'s ESRCH branch), but in a container
+  // the daemon is PID 1 and `checkDaemonGuard` deliberately treats a
+  // pid-1 record as BLOCKING (preflight/pidfile-liveness.ts's
+  // self-or-pid1-container inversion, cli/daemon-guard.ts's docstring) —
+  // every CLI verb would refuse until a daemon happened to rewrite the
+  // file. This minimal early handler is superseded by the real graceful
+  // shutdown handlers once the full Daemon is constructed (see
+  // `process.removeListener` calls right before those are installed,
+  // further down) — it exists only to cover the window between here and
+  // there.
+  const removePidfileOnEarlySignal = (): void => {
+    removePidfile();
+    process.exit(0);
+  };
+  process.once('SIGINT', removePidfileOnEarlySignal);
+  process.once('SIGTERM', removePidfileOnEarlySignal);
+
+  // hjex.6: halt-and-resume loop for bootstrap retries, extracted into
+  // `runBootstrapWithDegradeOpen` (earning/bootstrap-run.ts, #2407 M3) so its
+  // ORDERING — degraded loops start before readiness flips 'degraded'; on
+  // retry, degraded recovery's `stop()` is awaited to completion BEFORE the
+  // next `runFleetBootstrap()` attempt; 'ready' flips only after a
+  // successful attempt, i.e. before the full Daemon is constructed below —
+  // is independently unit-tested rather than only reachable by spawning the
+  // whole daemon (main.ts itself stays impractical to test directly).
+  //
+  // The master-EOA signer/client used by degraded recovery is derived once
+  // here (cheap, no network calls) rather than per-halt: it's the same
+  // every time, and deriving it eagerly keeps `startDegraded` below
+  // synchronous, matching `runBootstrapWithDegradeOpen`'s sync
+  // `startDegraded` contract without threading async through it.
+  //
+  // #2407 R8: this derivation (specifically `decryptMnemonic`, which throws
+  // on a wrong JINN_PASSWORD) must stay INSIDE the try below — outside it,
+  // a bad password would propagate past the setupApiServer/store teardown
+  // this try's catch performs, leaving the listener bound and SQLite open.
+  let bootstrapResult;
+  try {
+    const degradedMnemonic = await decryptMnemonic(
+      await new FleetStateStore(config.earningDir).loadMnemonicKeystore(),
+      PASSWORD,
+    );
+    const degradedMasterAccount = deriveMasterSigner(degradedMnemonic);
+    const degradedPublicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
+    const degradedMasterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, degradedMasterAccount);
+
+    bootstrapResult = await runBootstrapWithDegradeOpen({
+      runBootstrap: () => runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress }),
+      setReadiness: setDaemonReadiness,
+      // #2407 / spec §5: degrade-open boot. An economic-class halt (funding
+      // shortfall, incomplete fleet, a recoverable on-chain error) must not
+      // leave the daemon fully dark while the caller awaits the retry signal
+      // — any part of the fleet that's ALREADY operational needs its
+      // eviction/checkpoint/balance-topup/reward-claim loops to keep running
+      // so a self-healing condition doesn't compound (ratifies
+      // earning/bootstrap.ts's #773/#789/#917 decision: eviction recovery
+      // belongs to the running eviction loop, never an inline boot-time
+      // broadcast). Integrity-class halts (bootstrap-halt-classification.ts)
+      // stay fail-closed — no degraded loops. Standalone-recovery-runner
+      // variant, not the full `Daemon` class: `Daemon` needs
+      // mechAddress/safeAddress/composition/adapter resolved from a
+      // COMPLETED bootstrap, none of which exist mid-halt — see
+      // degraded-recovery.ts's docstring.
+      startDegraded: (envelope) => {
+        if (!isEconomicBootstrapHalt(envelope)) {
+          console.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
+          return null;
+        }
+        try {
+          const handle = startDegradedRecoveryLoops({
+            earningDir: config.earningDir,
+            network: NETWORK_CHAIN,
+            publicClient: degradedPublicClient,
+            masterWallet: degradedMasterWallet,
+            mnemonic: degradedMnemonic,
+            rpcUrl: config.rpcUrl,
+            chainConfig: CHAIN_CONFIG,
+            intervals: {
+              evictionCheckIntervalMs: config.evictionCheckIntervalMs,
+              checkpointIntervalMs: config.checkpointIntervalMs,
+              // #2407 B2: omit balance-topup while a master-EOA
+              // funding_required halt is pending — it drains the exact
+              // balance the funding poller below is waiting to see cross
+              // the threshold (an absorbing state). See
+              // isPendingMasterFundingHalt's docstring. This exact
+              // predicate-to-interval-zero wiring join is inspection-covered,
+              // not independently unit-tested: isPendingMasterFundingHalt
+              // itself is tested (bootstrap-halt-classification.test.ts) and
+              // startDegradedRecoveryLoops' 0-disables-the-loop behavior is
+              // tested (degraded-recovery.test.ts) separately.
+              balanceTopupIntervalMs: isPendingMasterFundingHalt(envelope) ? 0 : config.balanceTopupIntervalMs,
+              rewardClaimIntervalMs: config.rewardClaimIntervalMs,
+            },
+            stakingMode: config.stakingMode,
+            jinnStore: sharedStore,
+          });
+          console.log(
+            '[main] Degraded readiness: recovery loops (eviction-check, checkpoint, ' +
+              'balance-topup, reward-claim) running for the already-operational fleet ' +
+              'while this halt is retried; claim/work path stays closed.' +
+              (isPendingMasterFundingHalt(envelope) ? ' balance-topup omitted (pending master-EOA funding halt).' : ''),
+          );
+          return handle;
+        } catch (degradedErr) {
+          console.error(
+            '[main] Failed to start degraded recovery loops (non-fatal — still waiting for retry):',
+            degradedErr instanceof Error ? degradedErr.message : degradedErr,
+          );
+          return null;
+        }
+      },
+      // hjex.6: Auto-resume funding poller. When the halt is a funding
+      // shortfall, poll the master EOA balance every
+      // JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance meets
+      // or exceeds the required amount, auto-signal the retry loop. Only
+      // runs while the halt signal is pending; stops on any signal.
+      awaitRetry: async (envelope) => {
         // Install the retry signal so the endpoint can unblock us.
         const retrySignal = new Promise<void>((resolve, reject) => {
           retryBootstrapResolve = resolve;
@@ -1171,14 +1427,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         });
         console.log('[main] Bootstrap halted. Waiting for retry signal from the dashboard...');
 
-        // hjex.6: Auto-resume funding poller.
-        // When the halt is a funding shortfall, poll the master EOA balance
-        // every JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance
-        // meets or exceeds the required amount, auto-signal the retry loop.
-        // Only runs while the halt signal is pending; stops on any signal.
         let fundingPollHandle: ReturnType<typeof setTimeout> | null = null;
-        const isHaltedOnFunding = err.envelope.code === 'funding_required';
-        const haltDetails = err.envelope.details as Record<string, unknown> | undefined;
+        const isHaltedOnFunding = envelope.code === 'funding_required';
+        const haltDetails = envelope.details as Record<string, unknown> | undefined;
         const haltAddress = typeof haltDetails?.['address'] === 'string'
           ? haltDetails['address'] as `0x${string}`
           : null;
@@ -1231,19 +1482,22 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           }
         }
         console.log('[main] Retry triggered — re-running bootstrap...');
-        continue; // loop back to the bootstrap() call
-      }
-      // If bootstrap throws an unexpected error (vs. SetupBootstrapHalted),
-      // tear down the API we just started so we don't leave a dangling listener.
-      await setupApiServer.close().catch(() => undefined);
-      await closeCaptureReceiver();
-      sharedStore.close();
-      throw err;
-    }
+      },
+    });
+  } catch (err) {
+    // If bootstrap throws an unexpected error (vs. SetupBootstrapHalted),
+    // tear down the API we just started so we don't leave a dangling listener.
+    await setupApiServer.close().catch(() => undefined);
+    await closeCaptureReceiver();
+    sharedStore.close();
+    throw err;
   }
 
   // Bootstrap completed — flip the controller into 'running' so any waiters
-  // (future loops gated on this) unblock.
+  // (future loops gated on this) unblock. `runBootstrapWithDegradeOpen`
+  // already flipped readiness to 'ready' before returning — this is the
+  // no-restart transition: the same process falls straight through to the
+  // existing full-boot code below, no restart-daemon.ts invocation needed.
   setupController.refresh({ keystoreExists: true, allComplete: true });
 
   // ── --no-daemon: exit cleanly after bootstrap completes ──────────────────
@@ -1315,6 +1569,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, masterAccount);
 
+  // #2405: populate the claim-rewards route holder now that the daemon's own
+  // signer/client objects exist — reuses `sharedStore` (already open for the
+  // daemon's lifetime) rather than opening a second handle onto the same
+  // SQLite file the way a fresh CLI process would.
+  claimRewardsRouteHolder.current = {
+    publicClient,
+    masterWallet,
+    fleetStore: earningStore,
+    chain: NETWORK_CHAIN,
+    distributorAddress: CHAIN_CONFIG.distributorAddress,
+    jinnStore: sharedStore,
+  };
+
   const evictionRecovery =
     config.stakingMode === 'standard' &&
     serviceId !== null &&
@@ -1332,71 +1599,27 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     .filter((entry) => entry.roles.includes('solver'))
     .map((entry) => entry.manifestCid);
 
-  // #547: only scan/ingest evaluation opportunities when this operator holds the
-  // evaluator role in at least one joined SolverNet. The join applier flips this
-  // on live via adapter.setEvaluatorEnabled(true).
-  const evaluatorEnabled = Object.values(config.joinedSolverNets ?? {})
-    .some((entry) => entry.roles.includes('evaluator'));
-
-  // ── DiscoveryAPI construction ─────────────────────────────────────────────
-  // Build the shared DiscoveryAPI used by MechAdapter (task discovery),
-  // the SolverNet registry client (lifecycle status), and the corpus library
-  // (envelope discovery). See spec/2026-05-11-discovery-api-and-shared-indexer.md §9.
-  let sharedDiscoveryApi: import('./discovery/types.js').DiscoveryAPI | undefined;
-  {
-    const onchainFloorOpts = {
-      rpcUrl: config.rpcUrl,
-      chainId: config.network === 'testnet' ? 84532 : 8453,
-      routerAddress: ROUTER_ADDRESS,
-      identityRegistryAddress: identityRegistryAddress ?? undefined,
-      safeAddress,
-      mechAddress: mechAddress ?? undefined,
-      taskDiscoveryFromBlock: config.network === 'testnet' ? 41_153_291 : 25_000_000,
-    } as const;
-    async function buildOnchainFloor(): Promise<import('./discovery/types.js').DiscoveryAPI> {
-      const { createOnchainDiscoveryAPI } = await import('./discovery/onchain.js');
-      return createOnchainDiscoveryAPI(onchainFloorOpts);
-    }
-
-    const discoveryConfig = config.discovery;
-    if (discoveryConfig) {
-      // A discovery block was explicitly set.
-      try {
-        const { createDiscoveryAPI } = await import('./discovery/factory.js');
-        sharedDiscoveryApi = createDiscoveryAPI(discoveryConfig, { ...onchainFloorOpts });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[main] DiscoveryAPI construction failed: ${msg} — falling back to onchain discovery`);
-        sharedDiscoveryApi = await buildOnchainFloor();
-      }
-    } else {
-      // No discovery config (mainnet without an explicit discovery block) —
-      // default to the always-live onchain floor.
-      sharedDiscoveryApi = await buildOnchainFloor();
-    }
+  // One-swap R3 (#2461): populate the carved plugin-publication reader over the
+  // IdentityRegistry log source. Reuses the already-built `publicClient` and the
+  // fallback-chain RPC. Plugin routes 503 until this is set.
+  if (identityRegistryAddress) {
+    pluginReaderHolder.current = createPluginPublicationReader({
+      logSource: createRpcPluginLogSource({
+        publicClient,
+        identityRegistry: identityRegistryAddress,
+        chainId: config.network === 'testnet' ? 84532 : 8453,
+      }),
+    });
   }
-
-  // jinn-mono-u34i: populate the holder so the /v1/discovery/* routes
-  // registered eagerly at server-start time start returning real data on
-  // the panel's next refetch. Before this, the routes 404'd forever and
-  // the /build page rendered "Discovery unavailable" permanently.
-  discoveryApiHolder.current = sharedDiscoveryApi;
 
   // #1037: the live task-discovery descriptor. Always present with a mutable
   // `solverNetManifestCids` array (`taskDiscoveryManifestCids` is a fresh
   // `.map` result, safe to push onto). The join applier holds this same object
   // reference and pushes a newly-joined cid onto it live.
   const taskDiscovery = {
-    discoveryApi: sharedDiscoveryApi,
     solverNetManifestCids: taskDiscoveryManifestCids,
     // No explicit `onchainFromBlock` by default — let `MechAdapter`'s
     // `DEFAULT_TASK_DISCOVERY_FROM_BLOCK` per-chain default flow through.
-    // Hardcoding here shadowed the adapter's default and re-introduced the
-    // ghost-task floor every release; removing the shadow makes `adapter.ts`
-    // the single source of truth. See gh #300. An operator MAY opt in to a
-    // recent floor via `taskDiscoveryOnchainFromBlock` to bound the canonical
-    // getLogs scan (which otherwise parses a large history on the main thread
-    // and can stall the loop) and lean on the indexer DiscoveryAPI.
     ...(config.taskDiscoveryOnchainFromBlock !== undefined
       ? { onchainFromBlock: config.taskDiscoveryOnchainFromBlock }
       : {}),
@@ -1418,23 +1641,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     createAutopilotEvaluationContextResolver({ github: autopilotGitHubRead });
   const autopilotAdoptionReceiptObserver =
     createAutopilotGitHubAdoptionReceiptObserver({ github: autopilotGitHubRead });
-  const issueRelayBotLogin =
-    process.env['JINN_ISSUE_RELAY_BOT_LOGIN']?.trim();
-  const issueRelayRequiredChecks =
-    process.env['JINN_ISSUE_RELAY_REQUIRED_CHECKS']
-      ?.split(',')
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0)
-    ?? [];
-  const issueRelayEvaluationContextResolver =
-    issueRelayBotLogin === undefined || issueRelayBotLogin.length === 0
-      ? undefined
-      : createIssueRelayEvaluationContextResolver({
-          relayBotLogin: issueRelayBotLogin,
-          github: createIssueRelayGitHubRestReadPort({
-            requiredCheckNames: issueRelayRequiredChecks,
-          }),
-        });
 
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrls,
@@ -1450,13 +1656,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     routerClaimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
     evictionRecovery,
     taskDiscovery,
-    evaluatorEnabled,
-    evaluationContextResolvers: {
-      autopilot: autopilotEvaluationContextResolver,
-      ...(issueRelayEvaluationContextResolver === undefined
-        ? {}
-        : { issueRelay: issueRelayEvaluationContextResolver }),
-    },
+    autopilotEvaluationContextResolver,
   }, sharedStore);
 
   // ── TaskEngine wiring ─────────────────────────────────────────────────
@@ -1543,6 +1743,35 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         }
       : undefined;
 
+  // Explicit learner routing (product design §10). The learner no longer wraps
+  // every SolverType by default. When the operator has not named an allowlist,
+  // derive it from the SolverNets they joined — that is the routing they already
+  // declared, so an existing deployment claims exactly what it joined rather
+  // than either everything (the retired default) or nothing (a silent stall).
+  const joinedSolverTypes = [
+    ...new Set(
+      Object.values(config.joinedSolverNets ?? {})
+        .filter((joined) => joined.roles.includes('solver') && joined.contract)
+        .map((joined) => `${joined.contract!.id}.${joined.contract!.version}`),
+    ),
+  ].sort();
+  // The array is deliberately mutable and shared by reference: both
+  // LearnerHarness instances hold this exact object, and `join-applier.ts`
+  // pushes onto it so a hot join reaches routing without a restart (#1037).
+  const operatorPinnedSolverTypes = config.harness.routing?.solverTypes;
+  const learnerRoutingSolverTypes: string[] = [...(operatorPinnedSolverTypes ?? joinedSolverTypes)];
+  const learnerRouting = {
+    solverTypes: learnerRoutingSolverTypes,
+    ...(config.harness.routing?.legacyDefaultRouting !== undefined
+      ? { legacyDefaultRouting: config.harness.routing.legacyDefaultRouting }
+      : {}),
+  };
+  console.log(
+    `[main] learner routing: ${learnerRouting.solverTypes.length > 0
+      ? learnerRouting.solverTypes.join(', ')
+      : '(none — this learner claims no SolverType)'}`,
+  );
+
   for (const impl of buildHarnesses({
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
@@ -1565,6 +1794,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       : {}),
     externalImpls,
     disabledNames: config.harnesses?.disabled,
+    learnerRouting,
+    ...(config.harness.candidate ? { learnerCandidate: config.harness.candidate } : {}),
     corpusEnv,
     hermesPath: config.hermesPath,
     hermesModel: config.hermesModel,
@@ -1611,14 +1842,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // is no longer needed and would throw on Hono's locked matcher.
   harnessReadinessRegistryHolder.current = harnessReadinessRegistry;
   console.log('[main] HarnessReadinessRegistry started; /v1/harnesses/readiness routes active.');
-
-  // #1037: always construct the engine eligibility view (mutable) so a
-  // hot-applied join can inject its cid live. Previously this was wired only
-  // when config.joinedSolverNets was truthy; a zero-join daemon then ran the
-  // legacy solverType gate. With an always-present empty view, a zero-join
-  // daemon rejects cid-bearing tasks (its discovery cid set is empty so it
-  // discovers none) and still passes legacy no-cid tasks. See plan §behaviour-change.
-  const joinedSolverNetsView = createMutableJoinedSolverNetsView(config.joinedSolverNets);
 
   // ── Engine deps ───────────────────────────────────────────────────────────────
 
@@ -1682,8 +1905,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     safeAddress,
   };
 
-  // Delivery deps: deliver to marketplace + claimDelivery via JinnRouter
-  const deliveryDeps = {
+  // Delivery deps: deliver to marketplace + claimDelivery via JinnRouter.
+  // `broadcaster` starts unset and is late-bound below, once the Stage-1 cutover composition
+  // root (if any — testnet only) has built one (finding E16 / the C2 ruling: no process-global —
+  // this daemon's one broadcaster is threaded explicitly to every legacy call site that needs it).
+  const deliveryDeps: import('./harnesses/engine/delivery.js').DeliveryDeps = {
     publicClient: agentClients.publicClient,
     walletClient: agentClients.walletClient,
     safeAddress,
@@ -1755,89 +1981,24 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     signer: { address: agentEoaAddress, privateKey: agentPrivateKey },
     clientGitSha: buildInfo.clientGitSha,
     identityPublisher,
-    harnessMode: config.harness.mode,
+    // The capture envelope's `executor.mode` is the same two-valued protocol
+    // field the delivery envelope carries; candidate mode reports frozen.
+    harnessMode: protocolExecutorMode(config.harness.mode),
     scrubPipeline: sellerScrubPipeline,
   });
   capturePublishRef.current = liveCapturePublisher.publishCapture;
 
-  // ── Reputation feedback hook (jinn-mono-yg4) ──────────────────────────────
-  //
-  // After the evaluator's claimDelivery succeeds, the engine fires
-  // `ReputationRegistry.giveFeedback(harnessAgentId, …)` so the harness's
-  // agent NFT accrues a rating (DR §4.3). This requires:
-  //
-  //   1. A `ReputationRegistryClient` for the active chain. We use the
-  //      canonical 0x8004… deployment; writes route through the operator's
-  //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
-  //      identity.
-  //   2. An agentId resolver — looks up the harness's agentId from the
-  //      parent manifest's evidenceHash via the shared `DiscoveryAPI`. When
-  //      no DiscoveryAPI is available the resolver returns null cleanly and
-  //      the hook becomes a no-op (defensive: feedback is non-fatal).
-  //
-  // Skipped when the operator hasn't minted an agent NFT yet (matches the
-  // IdentityPublisher gating above).
-  let reputationFeedback:
-    | NonNullable<import('./harnesses/engine/engine.js').TaskEngineOptions['reputationFeedback']>
-    | undefined;
-  if (agentId) {
-    const { getReputationRegistryAddress, ReputationRegistryClient } = await import(
-      './erc8004/index.js'
-    );
-    const chainId = config.network === 'testnet' ? 84532 : 8453;
-    const reputationRegistryAddress = getReputationRegistryAddress(chainId);
-    if (reputationRegistryAddress) {
-      const reputationClient = new ReputationRegistryClient({
-        reputationRegistryAddress,
-        publicClient: agentClients.publicClient,
-        walletClient: agentClients.walletClient,
-        safeAddress,
-      });
-      const { resolveAgentIdForManifest } = await import(
-        './erc8004/index.js'
-      );
-      reputationFeedback = {
-        client: reputationClient,
-        resolveAgentId: (manifestHash) =>
-          resolveAgentIdForManifest({ manifestHash, discoveryApi: sharedDiscoveryApi }),
-      };
-      console.log(
-        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${sharedDiscoveryApi ? ' discoveryApi=active' : ' (no discoveryApi — resolver always null)'}`,
-      );
-    } else {
-      console.log(
-        `[main] ReputationFeedback: disabled (no canonical ReputationRegistry deployed on chainId=${chainId})`,
-      );
-    }
-  } else {
-    console.log(
-      '[main] ReputationFeedback: disabled (no agent_id on active service — same gating as IdentityPublisher)',
-    );
-  }
-
   // ── SolverNet subsystem (Task 11 of solvernet-creation-and-launch.md) ─────
   //
-  // Loads owned launched records from `~/.jinn-client/solvernets/launched/`,
-  // resumes any in-flight launch / lifecycle transitions, and starts the
-  // operator catalog refresher. Generator construction per launched record
-  // lands in Task 12; until then we expose `pendingGenerators` so the
-  // upcoming wiring has a clean handoff point.
-  //
-  // The launch state machine resumes correctly through the receipt-confirmation
-  // path; discovery is now exclusively via DiscoveryAPI (280n.6).
+  // Loads owned launched records from `~/.jinn-client/solvernets/launched/`
+  // and resumes any in-flight launches. Wave-4 D4 retired the ERC-8004
+  // registry client and catalog refresher.
   let solverNetSubsystem: import('./solvernets/daemon-init.js').SolverNetSubsystem | undefined;
-  // Hoisted so the engine wiring below can pick the registry client up as
-  // its `manifestResolver` (Task 27 of the SolverNet creation-and-launch
-  // spec — task validation goes manifest → contract → schemas).
-  let solverNetRegistryClientForEngine:
-    | import('./solvernets/registry-client.js').SolverNetRegistryClient
-    | undefined;
   if (agentId && identityRegistryAddress && config.network === 'testnet') {
     const {
       initSolverNetSubsystem,
       createIpfsClientAdapter,
       createMetadataPublisherFromViem,
-      createDefaultRegistryClient,
     } = await import('./solvernets/daemon-init.js');
     const { createSolverNetStore } = await import('./solvernets/store.js');
 
@@ -1851,15 +2012,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       walletClient: agentClients.walletClient,
       publicClient: agentClients.publicClient,
     });
-    const solverNetRegistryClient = createDefaultRegistryClient({
-      ipfs: solverNetIpfs,
-      publisher: solverNetPublisher,
-      discoveryApi: sharedDiscoveryApi,
-      network: 'base-sepolia',
-    });
-    solverNetRegistryClientForEngine = solverNetRegistryClient;
 
-    const launcherSigner: import('./solvernets/registry-client.js').SignerWithAgentEoa = {
+    const launcherSigner: import('./solvernets/launch-publisher.js').SignerWithAgentEoa = {
       agentEoaAddress: privateKeyToAccount(agentPrivateKey).address as `0x${string}`,
       agentEoaPrivateKey: agentPrivateKey,
       agentId,
@@ -1870,18 +2024,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         store: solverNetStore,
         ipfs: solverNetIpfs,
         publisher: solverNetPublisher,
-        registryClient: solverNetRegistryClient,
-        network: 'base-sepolia',
         resolveSigner: async () => launcherSigner,
-        lifecycleSigner: launcherSigner,
         awaitTxConfirmation: async (txHash) => {
           const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
           return { blockNumber: Number(receipt.blockNumber) };
         },
       });
       console.log(
-        `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s), ` +
-          `${solverNetSubsystem.pendingGenerators.length} ready for spawn (Task 12)`,
+        `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s)`,
       );
 
       // jinn-mono-hqz0: populate the launcher endpoints' deps holder. The
@@ -1891,14 +2041,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // /launcher list page 404s on /v1/solvernets/launched.
       if (solverNetEndpointsDepsHolder) {
         const { LaunchAction } = await import('./solvernets/launch-state-machine.js');
-        const { LifecycleTransition } = await import('./solvernets/lifecycle-transitions.js');
         const awaitLauncherTxConfirmation = async (txHash: `0x${string}`) => {
           const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
           return { blockNumber: Number(receipt.blockNumber) };
         };
         const pendingGeneratorsRef = { current: solverNetSubsystem.pendingGenerators };
-        // Noop subgraph for launch/lifecycle state-machine mempool-drop recovery.
-        // Real subgraph extension lands in Task 25 (jinn-mono-280n).
+        // Noop subgraph for launch state-machine mempool-drop recovery.
         const noopSubgraph = {
           async fetchSetMetadataEvents() { return []; },
           async fetchSetMetadataEventsForCid() { return []; },
@@ -1908,40 +2056,15 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           ipfs: solverNetIpfs,
           publisher: solverNetPublisher,
           subgraph: noopSubgraph,
-          spawnGenerator: async () => {
-            /* Generators are spawned by main.ts post-launch loop;
-             * the launcher endpoint just persists the record here. */
-          },
-          awaitTxConfirmation: awaitLauncherTxConfirmation,
-        });
-        const lifecycleTransition = new LifecycleTransition({
-          store: solverNetStore,
-          registry: solverNetRegistryClient,
-          signer: launcherSigner,
-          subgraph: noopSubgraph,
           awaitTxConfirmation: awaitLauncherTxConfirmation,
         });
         if (!safeAddressForLauncher) {
           throw new Error('[main] safeAddressForLauncher missing at SolverNet endpoints registration');
         }
-        const getGeneratorState = (
-          solverNetId: string,
-        ): LauncherGeneratorStateSnapshot | undefined => {
-          const entry = pendingGeneratorsRef.current.find(
-            (g) => g.recordRef.current.solverNetId === solverNetId,
-          );
-          const resolved = resolveContractFromSolverNetId(
-            entry?.recordRef.current.solverNetId ?? solverNetId,
-          );
-          if (!resolved) return undefined;
-          return launchedGeneratorStateBySolverType.get(resolved.solverType)?.();
-        };
         solverNetEndpointsDepsHolder.current = {
           store: solverNetStore,
           launch: {
             launchAction,
-            lifecycleTransition,
-            getGeneratorState,
             pendingGenerators: pendingGeneratorsRef,
             signer: launcherSigner,
             network: 'base-sepolia',
@@ -1951,8 +2074,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               agentId: launcherSigner.agentId,
             },
           },
-          catalog: solverNetSubsystem.catalog,
-          registry: solverNetRegistryClient,
         };
         console.log('[main] SolverNet endpoints deps populated (jinn-mono-hqz0)');
       }
@@ -1967,117 +2088,36 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         '(requires testnet + agent_id + identity_registry_address — Task 11 scaffolding)',
     );
   }
-  // The catalog cache will be consumed by the API server in Tasks 14/15.
-  // The `pendingGenerators` set is iterated below to wire generators per
-  // launched record (Task 12).
-
-  // ── Auto Task generators (launched-record-driven) ────────────────────────
+  // The catalog cache is consumed by the API server (Tasks 14/15).
   //
-  // Per spec/2026-05-05-solvernet-creation-and-launch.md §11 + Task 22 of the
-  // implementation plan, generator construction is wholly driven by the
-  // SolverNet launched-record subsystem. The legacy
-  // `collectTestnetAutoTaskGenerators` path (config-block-keyed Polymarket
-  // generator + role-based hot-spawn gate) is retired — SolverNet ownership
-  // is determined by which launched records the daemon owns, not by the
-  // operator-config role enum.
-  const autoTasksDisabled = process.env['JINN_DISABLE_AUTO_TASKS'] === '1';
-  // ── SolverNet launched-record generators (Task 12 of
-  //     spec/2026-05-05-solvernet-creation-and-launch.md §11) ────────────────
-  //
-  // For each owned launched record where `status === 'launched'` and
-  // `generatorEnabled === true`, construct a prediction.v1 Polymarket
-  // generator wired to the live `recordRef` and `configRef` exposed by
-  // `initSolverNetSubsystem`. Lifecycle transitions (pause/resume/retire)
-  // and the SolverNet config API endpoint (Task 14) mutate these refs at
-  // runtime; the per-tick gate inside the generator picks the change up
-  // within one cadence — no daemon restart, no recreation.
-  const launchedRecordGenerators: Array<{
-    solverType: string;
-    generator: import('./tasks/sources.js').TaskGenerator;
-  }> = [];
-  if (solverNetSubsystem && !autoTasksDisabled) {
-    const { wireLaunchedRecordGenerators } = await import(
-      './solvernets/launched-record-dispatcher.js'
-    );
-    const wired = await wireLaunchedRecordGenerators({
-      pendingGenerators: solverNetSubsystem.pendingGenerators,
-      launchedDir: join(config.earningDir, 'solvernets', 'launched'),
-      staticConfig: {
-        agentEoa: agentEoaAddress,
-        safeAddress,
-        agentPrivateKey,
-        ipfsGatewayUrl: config.ipfsGatewayUrl,
-        stateDir: config.sweRebenchV2StateDir,
-        ...(sharedDiscoveryApi ? { discoveryApi: sharedDiscoveryApi } : {}),
-      },
-      logger: {
-        info: (message) => console.log(message),
-        warn: (message) => console.warn(message),
-      },
-    });
-    launchedRecordGenerators.push(...wired.generators);
-    for (const [solverType, getState] of wired.generatorStatesBySolverType) {
-      launchedGeneratorStateBySolverType.set(solverType, getState);
-    }
-    if (!predictionGeneratorRef && wired.predictionGeneratorRef) {
-      predictionGeneratorRef =
-        wired.predictionGeneratorRef as unknown as typeof predictionGeneratorRef;
-    }
-  }
-  if (config.network === 'mainnet' && !autoTasksDisabled && BASE_FEEDS['ETH / USD']) {
-    // Mainnet auto-task opt-in only; default is OFF. Reserved for a future flag.
-  }
-
-  // filterBindableTasks (issue #415): drop config-level tasks[] entries without
-  // solverNetManifestCid before they enter the creator loop. Such entries would
-  // throw a PermanentError on every attempt and retry every 30 min indefinitely.
-  const bindableConfigTasks = filterBindableTasks(config.tasks);
-  const taskSources = [
-    new StaticConfiguredTaskSource(bindableConfigTasks),
-    ...launchedRecordGenerators.map(({ solverType, generator }, idx) =>
-      new GeneratedTaskSource(`launched:${solverType}:${idx}`, generator, {
-        bucketKeyForTask: (task) => {
-          if (task.solverType === 'swe-rebench-v2.v1') {
-            const instanceId = task.spec?.['instance_id'];
-            const postedCount = task.eligibility?.['posted_count_after_record'];
-            if (typeof instanceId !== 'string' || typeof postedCount !== 'number') return undefined;
-            return `swe-rebench-v2:${instanceId}:${postedCount}`;
-          }
-          // Issue #1893: jinn-repo.v1 live-issue tasks bucket on
-          // <issueNumber>:<snapshotHash> (carried on `eligibility` by
-          // `jinn-repo-live-auto.ts`) rather than the default window-based
-          // key — the window's startTs/endTs changes every tick, which would
-          // defeat once-per-bucket dedup for a generator whose own re-post
-          // signal is a material issue edit, not the passage of time.
-          if (task.solverType === 'jinn-repo.v1' && task.spec?.['source'] === 'live-issue') {
-            const issueNumber = task.eligibility?.['issue_number'];
-            const snapshotHash = task.eligibility?.['snapshot_hash'];
-            if (typeof issueNumber !== 'number' || typeof snapshotHash !== 'string') return undefined;
-            return `jinn-repo-live:${issueNumber}:${snapshotHash}`;
-          }
-          return undefined;
-        },
-      }),
-    ),
-  ];
+  // Wave-4 D3 (Task 17 of the cutover stage-3 plan, DR-2026-08-05 decision 1)
+  // retired the launched-record generator dispatcher and the creator loop it
+  // fed. Nothing constructs task sources here any more: the native posting
+  // path is `posting[]` driven through the requester work client
+  // (`PostingLoop`), and one-off posts go through `jinn tasks submit`.
+  // `initSolverNetSubsystem`'s `pendingGenerators` set is now read only by the
+  // SolverNet endpoints, which use it for the record/config refs.
 
   // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
   //
   // Built once per daemon lifetime; the agent EOA private key stays in this
   // process's memory and never crosses into the MCP subprocess. The MCP
   // tool `acquire_artifact` proxies to `POST /v1/artifacts/acquire` instead.
-  // Always enabled when a DiscoveryAPI is available (which is always true after
-  // 280n.3 — the onchain floor is always constructed). Falls back to disabled
-  // when no discovery is available and no identity registry is set.
-  const corpusFactory = (sharedDiscoveryApi || identityRegistryAddress)
+  // Wave-4 D4: envelope discovery goes through core's HTTP corpus port from
+  // `config.discovery.url` (kept for R3b survivors). Falls back to the
+  // on-chain identity-registry scan when no URL is set.
+  const corpusHttpDiscovery = config.discovery?.url
+    ? createHttpCorpusDiscovery({ url: config.discovery.url })
+    : undefined;
+  const corpusFactory = (corpusHttpDiscovery || identityRegistryAddress)
     ? (store: Store) =>
         (corpusForApi = createCorpus({
-          ...(sharedDiscoveryApi ? { discovery: sharedDiscoveryApi } : {}),
+          ...(corpusHttpDiscovery ? { discovery: corpusHttpDiscovery } : {}),
           ipfsGatewayUrl: config.ipfsGatewayUrl,
           store,
           signer: { privateKey: agentPrivateKey },
           selfSafeAddress: safeAddress,
-          ...(!sharedDiscoveryApi && identityRegistryAddress
+          ...(!corpusHttpDiscovery && identityRegistryAddress
             ? {
                 onchain: {
                   rpcUrl: config.rpcUrl,
@@ -2091,7 +2131,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     : undefined;
   if (!corpusFactory) {
     console.warn(
-      '[main] Corpus disabled (no DiscoveryAPI or on-chain identity registry); ' +
+      '[main] Corpus disabled (no discovery.url or on-chain identity registry); ' +
         'MCP record lookup and artifact acquisition network branches will be unavailable.',
     );
   }
@@ -2185,12 +2225,346 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
   }
 
+  // ── Stage-1 cutover composition root (Task 12; loops started at close-out C8) ──────────────
+  //
+  // Testnet-only: `MarketplaceChainConfig` (TaskCoordinator/JinnRouterV3 addresses) is only
+  // defined for Base Sepolia (`@jinn-network/marketplace-binding`'s `BASE_SEPOLIA_TODAY`) — no
+  // equivalent contracts are deployed on Base mainnet yet (see CLAUDE.md's Phase 2 rollout).
+  // `composition` stays `undefined` on mainnet; `DaemonConfig.composition` is optional and the
+  // `work`/projector/evidence-driver config below is gated on it being defined.
+  let composition: import('./daemon/composition-root.js').OperatorComposition | undefined;
+  let workLoopConfig: Omit<import('./daemon/work-loop.js').WorkLoopConfig, 'composition' | 'store'> | undefined;
+  // One-swap M4a (#2461): the native evaluator composition + loop. Built only in native mode when
+  // the operator configured an evaluator; its resources (backend, evidence, discovery store) are
+  // closed in `shutdown()` below, alongside the composition the daemon's evaluator loop drives.
+  let fleetEvaluator: import('./daemon/native-fleet-evaluator.js').FleetNativeEvaluator | undefined;
+  let evaluatorConfig: import('./daemon/daemon.js').DaemonConfig['evaluator'] | undefined;
+  // One-swap M5d (#2461): the native posting loop config. Built only in native mode; the daemon's
+  // `buildPostingLoop` gate then makes it inert unless `posting[]` is non-empty.
+  let postingConfig: import('./daemon/daemon.js').DaemonConfig['posting'] | undefined;
+  // One-swap M6 (#2461): the opt-in public record-discovery archive plane. A separate listener
+  // over EVERY native signed source this operator owns — requester, solver and (when configured)
+  // evaluator (#2519); closed in `shutdown()` below.
+  let publicArchiveServer: import('./api/public-archive-server.js').PublicArchiveServer | undefined;
+  // #2519 F1: the requester's serving plane, captured where the requester write path is built (it
+  // needs the composition's venue, so it cannot be built at the archive mount) and mounted with
+  // the other archives once every native leg exists.
+  let fleetRequesterDiscovery:
+    | import('./daemon/native-fleet-serving-plane.js').FleetServedSource
+    | undefined;
+  if (config.network === 'testnet') {
+    const { buildOperatorComposition } = await import('./daemon/composition-root.js');
+    const { BASE_SEPOLIA_TODAY } = await import('@jinn-network/marketplace-binding');
+    // #2534 F3a: the registered documents and the claim allowlist are one list now, not two that
+    // drift. `prediction-forecast/1.0` — the sole `PHASE_B_NATIVE_PROFILE_ALLOWLIST` entry, i.e.
+    // the only profile a native operator may claim — was missing here, so every claimed
+    // prediction task failed to resolve its own profile and went terminal.
+    const { buildNativeProfileStore } = await import('./daemon/native-profile-documents.js');
+    const nativeProfileStore = buildNativeProfileStore();
+    // One-swap M2 (#2461): built ONLY when `compositionMode: "native"` selected it. The dynamic
+    // import keeps the native runtime graph (trust catalog, record transport, Base Sepolia read
+    // clients) off a legacy boot's module graph entirely — a default config loads none of it.
+    const nativeRuntime = COMPOSITION_MODE === 'native'
+      ? await (await import('./daemon/native-fleet-runtime.js')).buildFleetNativeRuntime({
+          config,
+          store: sharedStore,
+          publicClient,
+          safeAddress,
+          stateRoot: join(config.earningDir, '..', 'native'),
+          password: PASSWORD,
+          workerOwnerId: cryptoRandomUUID(),
+          logger: { warn: (message) => console.warn(message) },
+        })
+      : undefined;
+    composition = await buildOperatorComposition({
+      ...(nativeRuntime === undefined
+        ? {
+            mode: 'legacy' as const,
+            // The bridge signer is explicitly legacy-only. Native delivery/discovery keys must come
+            // from a persistent, effective-time-trusted RoleIdentitySet; native boot refuses without
+            // it, and `buildOperatorComposition` refuses a native composition that receives one.
+            legacyBridgeSigner: deriveLegacyBridgeSigner(agentPrivateKey),
+          }
+        : {
+            mode: 'native' as const,
+            nativeRoleIdentities: nativeRuntime.identities,
+            nativeClaimRuntime: nativeRuntime.claimRuntime,
+            nativeProjectorPorts: nativeRuntime.projectorPorts,
+            nativeRequesterStateDir: nativeRuntime.nativeRequesterStateDir,
+          }),
+      config,
+      publicClient,
+      // Service Safe is owned by the agent EOA (index N), not the master (index 0).
+      // Passing masterWallet here produces GS026 on every venue claim/Deliver/settle.
+      walletClient: agentClients.walletClient,
+      safeAddress,
+      mechAddress,
+      chain: BASE_SEPOLIA_TODAY,
+      stateRoot: join(config.earningDir, '..', 'engine', 'backend'),
+      evidenceRoot: join(config.earningDir, '..', 'evidence'),
+      venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
+      profileStore: nativeProfileStore,
+      store: sharedStore,
+      // Defect #45, same class as finding E39 below. `CompositionRootInput.logger` is optional and
+      // this call site never supplied it, so `buildProjector` omitted it in turn and EVERY
+      // `logger?.warn` inside `ProjectorLoop` and `createProjectorEnrich` was a no-op in
+      // production — including the one that reports a failed announcement publication. A verdict
+      // announcement could be suppressed on every single tick with nothing whatsoever in the
+      // daemon log. Same console-based shape every other loop in this file wires up.
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
+      ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
+    });
+
+    // Finding E16 / the C2 ruling: no process-global broadcaster — this daemon's ONE Safe
+    // broadcaster (built above, bound to `safeAddress`) is threaded explicitly to every legacy
+    // `executeSafeTransaction` call site this daemon owns, before any loop can write. Must run
+    // before `daemon.start()`; `adapter` / `deliveryDeps` are all
+    // constructed earlier in this function (composition is built last because it needs
+    // `identityRegistryAddress` etc. resolved first), so late-binding via setter/mutation is how
+    // they pick up the one broadcaster rather than each racing to build their own against the
+    // same Safe.
+    adapter.setBroadcaster(composition.broadcaster);
+    deliveryDeps.broadcaster = composition.broadcaster;
+
+    // C8: the work loop's own config — `composition`/`store` are supplied by `Daemon` itself.
+    // Finding E36 (ruled "build it"): `archive` is now fed from `composition.archive`, the real
+    // `ArchiveSubscription` over the projector's durable observation stream
+    // (`archive-subscription.js`). It stays empty in practice until the projector's own
+    // `resolveSubmissionBytes` (composition-root.ts file header, gap a) actually admits/announces
+    // a today-generation TaskCreated — a real, documented gap, not a stub this loop introduces.
+    // `claimGate`/`ledger` reuse the SAME instances `verifySettlementGrade` already reads
+    // (contract 2's dispatch-binding correlation).
+    //
+    // One-swap M3 (#2461): in native mode the SAME loop runs a different set of ports. Every
+    // native port below is the instance the composition (or `buildFleetNativeRuntime`) already
+    // returned — never a second construction — because program contract 2's dispatch-binding
+    // correlation only holds when the coordinator that admitted the claim intent is the one the
+    // loop drives, and `verifySettlementGrade` reads back through those same instances.
+    //
+    // `archive` is omitted and `acceptLegacyCards` is false: `WorkLoop`'s constructor refuses a
+    // native composition that carries either, so the two shapes cannot be mixed by accident.
+    const nativeWorkPorts = nativeRuntime === undefined ? undefined : {
+      nativeDiscovery: nativeRuntime.discovery,
+      nativeClaimCoordinator: composition.nativeClaimCoordinator!,
+      nativeSolutionCoordinator: composition.nativeSolutionCoordinator!,
+      nativeSolutionCorrections: composition.nativeSolutionCorrections!,
+    };
+    workLoopConfig = {
+      ...(nativeWorkPorts === undefined
+        ? { archive: composition.archive, acceptLegacyCards: true }
+        : { ...nativeWorkPorts, acceptLegacyCards: false }),
+      ledger: composition.engagementLedger,
+      claimGate: composition.claimGate,
+      estimateAiUnits: () => 0,
+      readSealedDocuments: composition.readSealedDocuments,
+      pollIntervalMs: config.pollIntervalMs,
+      // Finding E39: without a logger, `WorkLoopConfig.logger` falls back to a silent no-op
+      // (`work-loop.ts`'s `noopLogger`) and the per-tick outcome line (E39's fix) never reaches
+      // an operator. Same console-based shape every other loop in this file wires up.
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
+    };
+
+    // One-swap M4a (#2461): mount the native evaluator loop alongside the WorkLoop. Native mode
+    // only, and only when the operator configured an evaluator deployment + identity store — a
+    // native solver-only operator constructs no evaluator composition. The dynamic import keeps the
+    // evaluator graph off a legacy boot's module graph, exactly like `native-fleet-runtime`.
+    if (nativeRuntime !== undefined) {
+      const { buildFleetNativeEvaluator, fleetEvaluatorConfigured } =
+        await import('./daemon/native-fleet-evaluator.js');
+      if (fleetEvaluatorConfigured(config)) {
+        // Reuse the ONE Safe's venue verdict ports rather than opening a second venue on the same
+        // Safe (composition-root.ts's #525/#562/#897 nonce-race warning). `venue.verdict` is
+        // present for the "today" (V3) generation `BASE_SEPOLIA_TODAY` runs against.
+        const verdictPorts = composition.venue.verdict;
+        if (verdictPorts === undefined) {
+          throw new Error('native evaluator loop requires the composition venue to expose V3 verdict ports');
+        }
+        fleetEvaluator = await buildFleetNativeEvaluator({
+          config,
+          store: sharedStore,
+          publicClient,
+          safeAddress: safeAddress as `0x${string}`,
+          agentEoaAddress,
+          trust: nativeRuntime.trust,
+          records: nativeRuntime.records,
+          agentIri: nativeRuntime.agentIri,
+          verdictPorts,
+          password: PASSWORD,
+          stateRoot: join(config.earningDir, '..', 'native'),
+        });
+        // One-swap M4b (#2461): CLOSE FLIP-GATE 1. The projector was handed a late-bound
+        // verdict-observation port that refuses fail-closed by default; now that the durable
+        // evaluator `state` and the coordinator's own verification gate exist, install the REAL
+        // adapter so the projector re-verifies this operator's own announced verdicts against
+        // durable state instead of refusing them.
+        const { buildNativeVerdictObservationAdapter, buildNativeEvaluationDeliveryRecordResolver } =
+          await import('./daemon/native-verdict-observation.js');
+        nativeRuntime.installVerdictObservation(buildNativeVerdictObservationAdapter({
+          state: fleetEvaluator.state,
+          verification: fleetEvaluator.composition.verification,
+        }));
+        // Defect #45. Same state, same moment, same reason: the today generation this fleet pins
+        // carries no `evaluationDeliveryDigest` on `VerdictDeliveryClaimed`, so the announce leg's
+        // `resolveRecord('evaluation-delivery')` reads the durable artifact by engagement — and the
+        // gate installed just above is what then binds those bytes to exactly one durable row.
+        nativeRuntime.installEvaluationDeliveryRecords(
+          buildNativeEvaluationDeliveryRecordResolver(fleetEvaluator.state),
+        );
+        evaluatorConfig = {
+          composition: fleetEvaluator.composition,
+          pollIntervalMs: config.pollIntervalMs,
+          logger: {
+            info: (message) => console.log(message),
+            warn: (message) => console.warn(message),
+          },
+        };
+      }
+    }
+
+    // One-swap M5d (#2461): the native posting loop's host-wire. Native mode only, and same-instance
+    // by construction — the ports read THIS operator's one service Safe + agent EOA balances through
+    // the one `publicClient`, and `config.posting[]`. `buildFleetPostingRuntime` opens no store,
+    // wallet, or discovery consumer (the M5d provenance ledger: it is not a `native_discovery_*`
+    // consumer, so there is nothing to separate from the solver/evaluator queues). The daemon's
+    // `buildPostingLoop` gate then makes the loop inert unless `posting[]` is non-empty.
+    if (nativeRuntime !== undefined) {
+      const { buildFleetPostingRuntime } = await import('./daemon/native-fleet-posting.js');
+      // One-swap M5e (#2461): the requester WRITE port. Built only when the runtime produced the
+      // requester write authority (admission custody configured). It reuses the composition's ONE
+      // Safe broadcaster (`composition.venue.safe` — the SAME single-nonce authority the solver,
+      // evaluator and verdict legs serialize through) plus that venue's posting WAL and scope store;
+      // it opens NO second wallet or venue. When the authority is absent, `postTask` stays undefined
+      // and the posting loop's `post` remains the M5d fail-closed seam.
+      let fleetPostTask:
+        | ((target: import('./daemon/posting-loop.js').PostingLoopTarget) => Promise<{ readonly taskId?: string }>)
+        | undefined;
+      // One-swap M5f (#2461): the requester's reconcile step, which recovers durable posting drafts
+      // AND runs the G-loop adopt leg. Wired into the posting loop's reconcile port only on the write
+      // path — a solver-only boot has no posted tasks to adopt.
+      let fleetReconcile: (() => Promise<void>) | undefined;
+      if (nativeRuntime.requesterWrite !== undefined) {
+        const { buildFleetRequesterWrite } = await import('./daemon/native-fleet-requester-write.js');
+        const { createFileAdoptionReceiptStore } = await import('./daemon/native-adoption-receipt-store.js');
+        const { createRegistryPinPort } = await import('@jinn-network/marketplace-binding');
+        const ipfsApiUrl = config.ipfs?.apiUrl;
+        if (ipfsApiUrl === undefined) {
+          throw new Error('native requester write path requires config.ipfs.apiUrl to pin the task document');
+        }
+        const requesterWrite = buildFleetRequesterWrite({
+          ...nativeRuntime.requesterWrite,
+          creatorSafe: safeAddress as `0x${string}`,
+          safeBroadcast: composition.venue.safe,
+          intents: composition.venue.intents,
+          observe: composition.venue.observe,
+          ipfsPin: createRegistryPinPort({
+            registryUrl: ipfsApiUrl,
+            fetchImpl: globalThis.fetch.bind(globalThis),
+          }),
+          // Durable adoption receipts live next to the requester's associations, under its state dir.
+          adoptionReceipts: createFileAdoptionReceiptStore({
+            dir: join(nativeRuntime.requesterWrite.requesterStateDir, 'adoptions'),
+          }),
+          // Defect #48: the SAME digest-verified record-plane reader the projector already holds,
+          // so adoption can fetch the bytes of a delivery a SECOND operator produced and published
+          // there. Not a second transport, and not trusted — the caller re-derives the digest.
+          ...(nativeRuntime.projectorPorts.resolveDeliveryBytes === undefined
+            ? {}
+            : { recordPlaneBytes: nativeRuntime.projectorPorts.resolveDeliveryBytes }),
+          logger: {
+            info: (message) => console.log(message),
+            warn: (message) => console.warn(message),
+          },
+        });
+        fleetPostTask = (target) => requesterWrite.postTarget(target);
+        fleetReconcile = () => requesterWrite.reconcile();
+        // #2519 F1: the requester archive this operator must SERVE. Peers resolve the announced
+        // Submission bytes from it, and this operator's own discovery consumer resolves its
+        // `.well-known` introduction from it at boot.
+        fleetRequesterDiscovery = requesterWrite.discovery;
+      }
+      const postingRuntime = buildFleetPostingRuntime({
+        config,
+        safeAddress: safeAddress as `0x${string}`,
+        agentEoaAddress,
+        readBalanceWei: (address) => publicClient.getBalance({ address }),
+        logger: { warn: (message) => console.warn(message) },
+        ...(fleetPostTask === undefined ? {} : { postTask: fleetPostTask }),
+        ...(fleetReconcile === undefined ? {} : { reconcile: fleetReconcile }),
+      });
+      postingConfig = {
+        compositionMode: COMPOSITION_MODE,
+        postingEntryCount: postingRuntime.postingEntryCount,
+        ports: postingRuntime.ports,
+        intervalMs: config.pollIntervalMs,
+        logger: {
+          info: (message) => console.log(message),
+          warn: (message) => console.warn(message),
+        },
+      };
+    }
+
+    // One-swap M6 (#2461), corrected by #2519: expose the native signed archives on their OWN
+    // listener when the operator opts in (`publicArchive.enabled`; default off, loopback host).
+    // Structural exposure scoping — the listener carries only archive handlers, never an operator
+    // route (headless design §6). Legacy and default boots start nothing here.
+    //
+    // M6 mounted ONLY the solver publisher, which is what made a two-operator native loop
+    // impossible: nothing served this operator's requester (or evaluator) archive, so no consumer
+    // — including this operator's own, over its own requester source — could resolve those
+    // introductions. It runs HERE, after the evaluator and requester-write legs exist, because
+    // those two archives do not exist at composition time.
+    //
+    // That ordering is now safe rather than merely unavoidable: since #2521 nothing above resolves
+    // a source. `buildFleetNativeRuntime` constructs its consumers with the endpoints deferred, so
+    // this mount reliably precedes the first poll no matter how many statements sit between them,
+    // and a PEER that is not up yet — which no reordering here could ever fix — is refused at that
+    // poll instead of preventing this daemon from starting.
+    //
+    // ONE listener, not one port per role: every announcement's record locations are stamped
+    // against the single `config.publicBaseUrl`, so all three archives must answer on one origin.
+    // See `native-fleet-serving-plane.ts` for the full argument (and for the cold-start
+    // introduction that breaks the "publish before you can boot" deadlock).
+    if (COMPOSITION_MODE === 'native' && config.publicArchive.enabled) {
+      const { buildFleetArchiveHandler, fleetServedSource } =
+        await import('./daemon/native-fleet-serving-plane.js');
+      const served = [
+        ...(fleetRequesterDiscovery === undefined ? [] : [fleetRequesterDiscovery]),
+        ...(composition.nativeSolutionPublisher === undefined
+          ? []
+          : [fleetServedSource(composition.nativeSolutionPublisher)]),
+        ...(fleetEvaluator === undefined ? [] : [fleetServedSource(fleetEvaluator.composition.publisher)]),
+      ];
+      if (served.length === 0) {
+        console.warn('[archive] publicArchive.enabled but this native boot owns no signed source — not serving.');
+      } else {
+        const { startPublicArchiveServer } = await import('./api/public-archive-server.js');
+        publicArchiveServer = await startPublicArchiveServer({
+          handler: buildFleetArchiveHandler(served),
+          host: config.publicArchive.host,
+          port: config.publicArchive.port,
+        });
+        console.log(
+          `[archive] serving ${served.length} signed source(s): ${served.map(({ source }) => source.name).join(', ')}`,
+        );
+      }
+    }
+  }
+
   const daemon = new Daemon({
     adapter,
     runner,
-    taskSources,
     dbPath: config.dbPath,
     store: sharedStore,
+    composition,
+    work: workLoopConfig,
+    evaluator: evaluatorConfig,
+    posting: postingConfig,
     apiServer: setupApiServer,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
@@ -2198,12 +2572,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     apiToken,
     peers: config.peers.length > 0 ? config.peers : undefined,
     nodeEndpoint: config.nodeEndpoint,
-    creatorSafeAddress: safeAddress,
     sweRebenchV2StateDir: config.sweRebenchV2StateDir,
     corpusFactory,
-    harnessReadinessRegistry,
-    spendCap,
-    aiUnits,
     status: {
       earningDir: config.earningDir,
       rpcUrl: config.rpcUrl,
@@ -2213,6 +2583,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // the daemon's `evictionCheck` predicate (~line 2520 below).
       stOlasDistributorAddress: CHAIN_CONFIG.distributorAddress,
       network: config.network,
+      // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+      effectiveMode: reportedEffectiveMode,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
       rewardClaimIntervalMs: config.rewardClaimIntervalMs,
@@ -2244,55 +2616,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
-    restorationEngine: {
-      paths: {
-        workingDirRoot: config.engine.workingDirRoot,
-        implStateDirRoot: config.engine.implStateDirRoot,
-      },
-      packagingDeps,
-      envelopeDeps,
-      deliveryDeps,
-      adoptionReceiptObserver: autopilotAdoptionReceiptObserver,
-      implRegistry,
-      solverNetRegistry,
-      // #1827: resolves envelope.task.createdAt at claim() time. getBlock
-      // errors propagate deliberately — engine.ts retries a bounded number of
-      // times and keeps/fails the task before signing rather than emitting a
-      // provenance tuple without its authoritative creation timestamp.
-      blockTimestamp: {
-        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
-          const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
-          return Number(block.timestamp);
-        },
-        configuredRpcUrls: config.rpcUrls,
-      },
-      // Spec §14, Task 28: per-launch claim eligibility filter. Operators
-      // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
-      // the engine refuses tasks whose `manifestDigest = keccak256(cid)`
-      // doesn't match a joined entry (plus a role gate). Absent when the
-      // operator hasn't joined any nets yet — the engine then falls back to
-      // the legacy solverType-keyed gate.
-      // #1037: always wire the (mutable) view so a hot-applied join is live.
-      joinedSolverNets: joinedSolverNetsView,
-      // Spec §14: task validation resolves manifest → contract → schemas.
-      // Threaded only when the SolverNet registry client was constructed
-      // (testnet branch above). The engine treats absence as "schema
-      // validation skipped" — production callers always have it.
-      ...(solverNetRegistryClientForEngine
-        ? { manifestResolver: solverNetRegistryClientForEngine }
-        : {}),
-      identityPublisher,
-      reputationFeedback,
-      operatorConfig,
-      operatorSafeAddress: safeAddress,
-      harnessMode: config.harness.mode,
-      // #1393: corpus knowledge autoload — operator opt-out flag. The corpus
-      // instance itself is injected by the Daemon (built from corpusFactory).
-      knowledge: { enabled: config.engine.knowledgeAutoload },
-      // Share the one maintained scrub pipeline (incl. optional ML PII) so task
-      // trajectories and captures are scrubbed by the same stack before publish.
-      scrubPipeline: sellerScrubPipeline,
-    },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
         ? {
@@ -2373,61 +2696,21 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     watchdog: { autoRestart: config.watchdogAutoRestart },
   });
 
-  // #1037: populate the join applier now that all four join-consuming
-  // subsystems exist — the live task-discovery descriptor (`taskDiscovery`),
-  // the mutable engine view (`joinedSolverNetsView`), the readiness registry,
-  // and the SolverNet registry. The join endpoint registered eagerly at
-  // server-start; before this point it returns restartRequired:true.
-  joinApplierHolder.current = createJoinApplier({
-    taskDiscovery,
-    view: joinedSolverNetsView,
-    readiness: harnessReadinessRegistry,
-    registry: solverNetRegistry,
-    config,
-    enableEvaluator: () => adapter.setEvaluatorEnabled(true),
-  });
-
   if (config.watchdogAutoRestart) {
     console.log('[watchdog] auto-restart ENABLED (stale loop → non-zero exit)');
   }
 
-  // Write pidfile so `jinn stop` can find us. First, refuse the run if another
-  // daemon already owns this earning directory — see issue #649. The gate
-  // handles all three branches (refuse-and-exit, unlink-stale-and-continue,
-  // proceed); the writeFileSync below MUST stay outside the helper so the
-  // "// DO NOT add store mutations above this line — see #649" invariant is
-  // visible right here at the call site.
-  // Deployment-readiness gate (#958). In a deployment context (JINN_STATE_DIR
-  // set or a container/compose auth context) this fails loud and exits when a
-  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root).
-  // Outside a deployment context it only logs advisories — a plain local
-  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
-  // unfit environment refuses before we touch the pidfile.
-  await applyDeploymentReadinessGate(
-    {
-      stateDir: config.stateDir,
-      earningDir: config.earningDir,
-      runtimeMode: config.runtimeMode,
-    },
-    {
-      env: process.env,
-      getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
-      detectAuthContext,
-    },
-  );
-
-  const pidPath = join(config.earningDir, 'daemon.pid');
-  applyPidfileLivenessGate(pidPath);
-
-  writeFileSyncMain(pidPath, String(process.pid) + '\n', 'utf-8');
-  const removePidfile = () => {
-    try {
-      unlinkSync(pidPath);
-    } catch {
-      /* ignore */
-    }
-  };
-  process.on('exit', removePidfile);
+  // #2407 B1: the deployment-readiness gate + pidfile acquisition used to live
+  // here, AFTER the entire bootstrap retry loop — which left the whole
+  // degrade-open window (part 2) with no pidfile on disk at all. During that
+  // window `checkDaemonGuard` (cli/daemon-guard.ts) reads `daemon.pid` and
+  // reports `not-running`, so a concurrent `jinn withdraw` / `jinn bootstrap`
+  // / `jinn fleet scale` / `jinn solver-plugins publish` would proceed against
+  // the same signer as the degraded recovery loops, and a second `jinn run`
+  // would start a second degraded set entirely. Both gates now run near the
+  // top of `main()`, immediately before the bootstrap retry loop (see
+  // `setDaemonReadiness('bootstrapping')` above) — `pidPath` / `removePidfile`
+  // stay in scope for the shutdown handler below unchanged.
 
   // Graceful shutdown — Daemon doesn't own the API server or Store in this
   // flow (they were created in setup-mode before bootstrap), so we close
@@ -2445,6 +2728,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         harnessReadinessRegistry.stop();
         await daemon.stop();
         await setupApiServer.close().catch(() => undefined);
+        // Close the evaluator composition's own resources (backend children, evidence runtime,
+        // discovery store) after the loop that drives it has stopped.
+        await fleetEvaluator?.close().catch(() => undefined);
+        await publicArchiveServer?.close().catch(() => undefined);
         await closeCaptureReceiver();
       } catch (err) {
         exitCode = 1;
@@ -2465,6 +2752,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     return shutdownPromise;
   };
 
+  // #2407 R2: the early signal handler installed right after the pidfile
+  // write (bootstrap-retry-loop window) is superseded here — remove it
+  // before installing the real graceful handlers so a signal from this
+  // point on always drains through `shutdown()` (Daemon.stop(), file
+  // logger flush, etc.) rather than racing an immediate `process.exit(0)`.
+  process.removeListener('SIGINT', removePidfileOnEarlySignal);
+  process.removeListener('SIGTERM', removePidfileOnEarlySignal);
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 
@@ -2527,20 +2821,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     versionCheckTimer.unref();
   }
 
-  return {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    kind: 'daemon_started',
+  return buildDaemonStartupInfo({
     pid: process.pid,
     network: config.network,
-    phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
     apiPort: config.apiPort,
     masterAddress,
     safeAddress,
     mechAddress,
     serviceIndex,
     serviceId,
-  };
+    // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+    effectiveMode: reportedEffectiveMode,
+    implVersion: buildInfo.implVersion,
+  });
 }
 
 // ── Harness readiness registry factory ───────────────────────────────────────

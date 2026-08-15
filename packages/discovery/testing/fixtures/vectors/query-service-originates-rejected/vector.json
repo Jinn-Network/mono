@@ -1,0 +1,21 @@
+{
+  "name": "query-service-originates-rejected",
+  "kind": "query",
+  "description": "A query service response with no `provenance` field at all -- the service invented the item rather than aggregating a signed announcement; consumer conformance MUST reject it (§8 rule 1).",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:38f38a0204f91d14d4a26eee25351ee1af600821159dddbe309bee842f24e550"
+      },
+      "facts": {
+        "fabricated": true
+      }
+    },
+    "hasProvenance": false
+  },
+  "expect": {
+    "rejectedByConsumerConformance": true,
+    "reason": "no-provenance-service-originated"
+  }
+}

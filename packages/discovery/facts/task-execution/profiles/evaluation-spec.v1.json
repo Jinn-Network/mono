@@ -1,0 +1,8 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/evaluation-spec/v1",
+  "profile": "https://spec.jinn.network/facts/evaluation-spec/v1",
+  "fields": [
+    { "name": "family", "class": "record", "cloudEvents": { "attribute": "family", "scalar": "string" } }
+  ]
+}

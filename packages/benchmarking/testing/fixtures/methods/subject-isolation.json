@@ -1,0 +1,188 @@
+{
+  "methodId": "jinn.benchmarking.method/wilson",
+  "methodVersion": "1",
+  "parameters": {},
+  "verdictRule": "unanimous",
+  "matrices": [
+    {
+      "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+      "run": {
+        "digest": {
+          "sha256": "1a11111111111111111111111111111111111111111111111111111111111111"
+        }
+      },
+      "closeBoundary": {
+        "at": "2026-08-04T00:00:00Z"
+      },
+      "cells": [
+        {
+          "cellKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/armA/1",
+          "taskDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "submission": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "delivery": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+          "verdicts": [
+            "sha256:3111111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "validVerdicts": [
+            "sha256:3111111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        }
+      ],
+      "exclusions": [],
+      "attrition": {
+        "perArm": {
+          "armA": {
+            "expected": 1,
+            "judged": 1,
+            "unjudged": 0,
+            "unscorable": 0,
+            "expired": 0,
+            "invalidated": 0,
+            "excluded": 0,
+            "replacements": 0
+          }
+        },
+        "asymmetryFlags": []
+      },
+      "completeness": {
+        "expected": 1,
+        "judged": 1,
+        "floor": "1",
+        "runOutcome": "complete"
+      },
+      "assembly": {
+        "procedure": "jinn.benchmarking.assembly",
+        "version": "1.0"
+      }
+    },
+    {
+      "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+      "run": {
+        "digest": {
+          "sha256": "2a22222222222222222222222222222222222222222222222222222222222222"
+        }
+      },
+      "closeBoundary": {
+        "at": "2026-08-04T00:00:00Z"
+      },
+      "cells": [
+        {
+          "cellKey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/armA/1",
+          "taskDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "submission": "sha256:1222222222222222222222222222222222222222222222222222222222222222",
+          "delivery": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "verdicts": [
+            "sha256:3222222222222222222222222222222222222222222222222222222222222222"
+          ],
+          "validVerdicts": [
+            "sha256:3222222222222222222222222222222222222222222222222222222222222222"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        }
+      ],
+      "exclusions": [],
+      "attrition": {
+        "perArm": {
+          "armA": {
+            "expected": 1,
+            "judged": 1,
+            "unjudged": 0,
+            "unscorable": 0,
+            "expired": 0,
+            "invalidated": 0,
+            "excluded": 0,
+            "replacements": 0
+          }
+        },
+        "asymmetryFlags": []
+      },
+      "completeness": {
+        "expected": 1,
+        "judged": 1,
+        "floor": "1",
+        "runOutcome": "complete"
+      },
+      "assembly": {
+        "procedure": "jinn.benchmarking.assembly",
+        "version": "1.0"
+      }
+    }
+  ],
+  "verdictOutcomes": {
+    "sha256:3111111111111111111111111111111111111111111111111111111111111111": {
+      "verdict": "pass"
+    },
+    "sha256:3222222222222222222222222222222222222222222222222222222222222222": {
+      "verdict": "fail"
+    }
+  },
+  "expectedResults": {
+    "perSubject": [
+      {
+        "subjectSha256": "$subject:0",
+        "results": {
+          "verdictRule": "unanimous",
+          "arms": {
+            "armA": {
+              "n": 1,
+              "passRate": "1.0000",
+              "wilsonInterval": {
+                "low": "0.2065",
+                "high": "1.0000"
+              }
+            }
+          },
+          "conflicted": {
+            "count": 0,
+            "cellKeys": []
+          }
+        }
+      },
+      {
+        "subjectSha256": "$subject:1",
+        "results": {
+          "verdictRule": "unanimous",
+          "arms": {
+            "armA": {
+              "n": 1,
+              "passRate": "0.0000",
+              "wilsonInterval": {
+                "low": "0.0000",
+                "high": "0.7935"
+              }
+            }
+          },
+          "conflicted": {
+            "count": 0,
+            "cellKeys": []
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "input": {
+    "block": {
+      "subSpecs": [
+        { "spec": { "uri": "https://example.org/specs/nested-composite" }, "weight": "1" }
+      ]
+    },
+    "subSpecDepths": {
+      "https://example.org/specs/nested-composite": 2
+    }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

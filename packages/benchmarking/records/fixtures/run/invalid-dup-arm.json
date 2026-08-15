@@ -1,0 +1,21 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "benchmark": {
+    "digest": { "sha256": "5c26b8b5ab2cfe8feb60e9136c17eb0dde331c93e8fec7b305e205255eea5e87" }
+  },
+  "owner": "urn:uuid:22222222-2222-5222-8222-222222222222",
+  "arms": [
+    { "armId": "armA", "pinning": { "model": { "id": "claude-haiku-4-5" } } },
+    { "armId": "armB", "pinning": { "model": { "id": "claude-haiku-4-5" } } }
+  ],
+  "replicates": 1,
+  "policy": {
+    "completenessFloor": "1",
+    "cellWindow": 60000,
+    "replacement": { "allowed": false },
+    "independence": "gating",
+    "evaluation": {},
+    "submissionBaseline": {}
+  },
+  "closeAt": "2026-08-04T00:00:00Z"
+}

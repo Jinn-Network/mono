@@ -2,21 +2,23 @@ import { randomBytes } from 'node:crypto';
 import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
-import { CreatorLoop } from './creator.js';
-import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
-import { PeerSync } from './peer-sync.js';
 import type { EthHttpSigner } from '../auth/erc8128.js';
 import type { Corpus as CoreCorpus } from '@jinn-network/core/corpus-read';
 import { RewardClaimLoop, type RewardClaimLoopConfig } from './reward-claim-loop.js';
-import { TaskEngine, type TaskEngineOptions } from '../harnesses/engine/engine.js';
 import { BalanceTopupLoop, type BalanceTopupLoopConfig } from './balance-topup-loop.js';
 import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
 import { HarvestLoop, type HarvestLoopConfig } from './harvest-loop.js';
 import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
 import { WatchdogLoop, type WatchdogLoopRegistration } from './watchdog-loop.js';
-import { recordLoopTick, LOOP_REGISTRY, type LoopName } from './loop-heartbeat.js';
+import {
+  recordLoopTick,
+  LOOP_REGISTRY,
+  type LoopName,
+  getDaemonReadiness,
+  buildLoopMetricsSnapshot,
+} from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import {
@@ -24,17 +26,20 @@ import {
   isNonRecoverableInnerRevert,
   formatDecodedRevert,
 } from '../adapters/mech/safe-revert.js';
-import { StaticConfiguredTaskSource, type TaskSource } from '../tasks/sources.js';
-import type { Task } from '../types/index.js';
 import type { SignedEnvelope } from '../types/envelope.js';
-import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
-import { gateClaimByReadiness } from './readiness-gate.js';
-import { gateClaimBySpendCap } from './spend-cap-gate.js';
-import type { SpendCapDaemonConfig } from '../spend/daemon-config.js';
-import { gateClaimByAiUnits } from './ai-units-gate.js';
-import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
-import { blockIdUtc } from '../spend/ai-units.js';
-import { SkipLogDeduper } from './skip-log-dedup.js';
+import type { OperatorComposition } from './composition-root.js';
+import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
+import { EvaluatorLoop } from './evaluator-loop.js';
+import type { NativeEvaluatorComposition } from './native-evaluator-composition.js';
+import { PostingLoop, buildPostingLoop, type PostingLoopPorts } from './posting-loop.js';
+import { EvidenceDriverLoop } from './evidence-driver.js';
+import type { ProjectorLoop } from './projector-loop.js';
+import type { NativeOperatorHost } from './native-operator-host.js';
+import type { OperatorVerticalMode } from './native-vertical-mode.js';
+import {
+  configurePhaseDTransitionUsage,
+  recordPhaseDTransitionUse,
+} from '../compatibility/phase-d-transition-usage.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
 
@@ -83,6 +88,9 @@ function emitTickErrorOrRaceLost(
 }
 
 export interface DaemonConfig {
+  /** Compatibility daemon control. Native-v1 owns its lifecycle through nativeHost. */
+  verticalMode?: OperatorVerticalMode;
+  nativeHost?: NativeOperatorHost;
   adapter: ExecutionAdapter;
   /**
    * Legacy Runner only consumed by `LegacyClaudeImpl` via `buildHarnesses`.
@@ -112,6 +120,11 @@ export interface DaemonConfig {
    * has something to compare against.
    */
   apiToken?: string;
+  /**
+   * Parseable-but-ignored after Wave-4 D4 (peer-sync retired). Left on the
+   * config shape so existing `new Daemon({ peers })` call sites and the
+   * `peers` / `JINN_PEERS` config key do not become a schema break.
+   */
   peers?: string[];
   signer?: EthHttpSigner;
   /** This node's public HTTP endpoint (for 8004 registration) */
@@ -189,83 +202,106 @@ export interface DaemonConfig {
    */
   store?: Store;
 
-  /** Restoration task sources polled by CreatorLoop. */
-  taskSources?: TaskSource[];
-  /** Backwards-compatible static tasks; used when taskSources is omitted. */
-  tasks?: Task[];
-
   /**
-   * Creator Safe address — used to scope CreatorLoop's SQLite idempotency
-   * cache keys per-Safe. Without this, two co-located daemons on the same
-   * DB would collide. Optional for backwards compatibility.
+   * Resolved swe-rebench-v2 state dir from loadConfig. The creator and
+   * delivery-watcher hooks that consumed it retired with Wave-4 D2/D3; the
+   * field stays on the config surface because `main.ts` and the harness e2e
+   * rigs still pass it and the solver-type generator state store reads the
+   * same directory.
    */
-  creatorSafeAddress?: string;
-
-  /** Resolved swe-rebench-v2 state dir from loadConfig; threaded to creator/delivery hooks. */
   sweRebenchV2StateDir?: string;
 
   /**
-   * TaskEngine — sole path for marketplace request → claim → run → deliver.
-   * Evaluation tasks (`role === 'evaluation'`) dispatch via `supports()` to
-   * evaluation Harnesses; health-check tasks with no solverType use `legacy-claude` via
-   * the registry default.
+   * Loop watchdog (#1043; defaulted ON 2026-08-10, decision 3 of the
+   * operator standup, #2461/#2540). When armed, the daemon seeds a heartbeat
+   * for every started loop and runs a supervisor that detects any loop whose
+   * last tick has gone stale. `autoRestart` is the separately flag-gated
+   * recovery (default OFF per the locked Option A decision): off → detect +
+   * loud-log + structured `loop_watchdog_stale` event only; on → non-zero
+   * process.exit so Railway's ON_FAILURE policy restarts the daemon through
+   * its existing idempotent boot path.
+   *
+   * DEFAULT: omitting this field now ARMS the watchdog with
+   * `{ autoRestart: false }` — detection defaults on independent of whether a
+   * call site remembers to opt in (round-8's live gate run found zero
+   * `loop_watchdog_stale` events had ever fired because nothing wired
+   * `config.watchdog`). Pass the literal `false` to fully disable — the
+   * escape hatch for unit tests that don't exercise watchdog behavior and
+   * don't want the extra background timer.
+   *
+   * Legitimate long waits (e.g. a `ready-only` loop sitting out a `degraded`
+   * readiness window — funding shortfall, incomplete fleet, spec §5/#2407)
+   * are already excluded from staleness upstream of this flag: `runLoop` and
+   * the inline `engine-tick` loop both stamp their heartbeat every interval
+   * regardless of admission, so an intentionally-paused loop never looks
+   * stale to the watchdog. See `loop-heartbeat.ts` and
+   * `test/daemon/loop-admission.test.ts`.
    */
-  restorationEngine: Omit<TaskEngineOptions, 'store' | 'packagingDeps'> & {
-    /**
-     * Packaging deps minus `store` (Daemon owns the SQLite handle and threads
-     * it in at construction time).
-     */
-    packagingDeps?: Omit<NonNullable<TaskEngineOptions['packagingDeps']>, 'store'>;
+  watchdog?: { autoRestart: boolean; stalenessFactor?: number; checkIntervalMs?: number } | false;
+
+  /**
+   * The stage-1 cutover composition root (Task 12, `client/src/daemon/composition-root.ts`):
+   * the assembled `LocalTaskExecutionBackend` + marketplace pipeline config/ports + venue +
+   * (C8) real projector loop + claim gate + engagement ledger. Optional so the many existing
+   * `new Daemon(...)` call sites (unit tests, non-cutover daemons) keep compiling. When present,
+   * `start()` also starts `composition.projector` and an `EvidenceDriverLoop` over
+   * `composition.evidence` (close-out C8) — see `work` below for the third loop.
+   */
+  composition?: OperatorComposition;
+
+  /**
+   * The work loop (Task 13, `client/src/daemon/work-loop.ts`): closes the claim-to-settle loop
+   * against `composition`. Everything except `composition`/`store`, both of which the daemon
+   * supplies itself. Omitted, or `composition` absent -> the loop is not started.
+   */
+  work?: Omit<WorkLoopConfig, 'composition' | 'store'>;
+
+  /**
+   * The native evaluator loop (one-swap M4a, #2461, `client/src/daemon/evaluator-loop.ts`): drives
+   * the fleet evaluator composition's tick. `composition` is built by `main.ts`
+   * (`buildFleetNativeEvaluator`) and passed in; the daemon supplies `store` itself. Omitted -> the
+   * loop is not started. The composition's own resources (backend, evidence, discovery store) are
+   * closed by `main.ts`'s shutdown handler, not the daemon — the daemon owns only the loop cadence.
+   */
+  evaluator?: {
+    readonly composition: NativeEvaluatorComposition;
+    readonly pollIntervalMs?: number;
+    readonly logger?: { info(message: string): void; warn(message: string): void };
   };
 
   /**
-   * Per-harness readiness registry for pre-claim gating.
-   * When present, the engine-watcher loop checks harness readiness before
-   * claiming each task and skips tasks whose harness reports not-ready.
-   * Constructed and started by main.ts; omitted in unit-test contexts that
-   * don't exercise the cost-mutating claim path.
+   * The native posting loop (one-swap M5d, #2461, `client/src/daemon/posting-loop.ts`): drives the
+   * requester's `posting[]` config into posted Submissions. `main.ts` builds the ports
+   * (`native-fleet-posting.ts`) and passes them plus the composition mode and posting-entry count;
+   * the daemon supplies `store` itself and constructs the loop through `buildPostingLoop`, which is
+   * the single boot-inertness gate — a legacy composition or an empty `posting[]` yields no loop,
+   * so this daemon never registers the `posting` heartbeat or watchdog entry on a default boot.
    */
-  harnessReadinessRegistry?: HarnessReadinessRegistry;
-
-  /** Per-credential daily spend caps. Omitted -> no spend gating. */
-  spendCap?: SpendCapDaemonConfig;
-
-  /**
-   * AI-units ceiling — issue #815. When present, the engine-watcher loop
-   * gates each claim on a 6h-block + 7d-window AI-units cap per credential.
-   * Omitted only when no joined SolverNet resolves to a billed credential.
-   */
-  aiUnits?: AiUnitsDaemonConfig;
-
-  /**
-   * Loop watchdog (#1043). When supplied, the daemon seeds a heartbeat for
-   * every started loop and runs a supervisor that detects any loop whose last
-   * tick has gone stale. `autoRestart` is the flag-gated recovery (default OFF
-   * per the locked Option A decision): off → detect + loud-log + structured
-   * event only; on → non-zero process.exit so Railway's ON_FAILURE policy
-   * restarts the daemon through its existing idempotent boot path. Omitted in
-   * unit tests, so the watchdog is inert there.
-   */
-  watchdog?: {
-    autoRestart: boolean;
-    stalenessFactor?: number;
-    checkIntervalMs?: number;
+  posting?: {
+    readonly compositionMode: 'legacy' | 'native';
+    readonly postingEntryCount: number;
+    readonly ports: PostingLoopPorts;
+    readonly intervalMs?: number;
+    readonly logger?: { info(message: string): void; warn(message: string): void };
   };
+
+  /**
+   * Evidence-driver loop poll interval (ms), close-out C8. Only meaningful when `composition` is
+   * present — the loop drives `composition.evidence`'s local runtime `sync()` and publication
+   * policy (contract 6). Defaults to `LOOP_REGISTRY`'s own `evidence-driver` entry (30000).
+   */
+  evidenceDriverIntervalMs?: number;
 }
 
 export class Daemon {
   private store: Store;
-  private creatorLoop: CreatorLoop;
-  private restorationEngine: TaskEngine;
-  private engineStopped = false;
-  private deliveryWatcherLoop: DeliveryWatcherLoop;
+  private nativeHost?: NativeOperatorHost;
   private adapter: ExecutionAdapter;
   private loopPromises: Promise<void>[] = [];
   private cachedShutdownState: string | null = null;
   private apiServer?: ApiServer;
   private ownsApiServer = false;
   private ownsStore = false;
-  private peerSync?: PeerSync;
   private readonly apiPort: number;
   private readonly apiToken: string;
   private rewardClaimLoop?: RewardClaimLoop;
@@ -273,11 +309,40 @@ export class Daemon {
   private evictionLoop?: EvictionLoop;
   private harvestLoop?: HarvestLoop;
   private checkpointLoop?: CheckpointLoop;
+  private workLoop?: WorkLoop;
+  private evaluatorLoop?: EvaluatorLoop;
+  private postingLoop?: PostingLoop;
+  private projectorLoop?: ProjectorLoop;
+  private evidenceDriverLoop?: EvidenceDriverLoop;
   private watchdogLoop?: WatchdogLoop;
-  private skipLogDeduper = new SkipLogDeduper();
   private corpus?: Corpus;
 
   constructor(private readonly config: DaemonConfig) {
+    configurePhaseDTransitionUsage(
+      config.dbPath === ':memory:' ? undefined : `${config.dbPath}.phase-d-transition-usage.v1.json`,
+    );
+    const verticalMode = config.verticalMode ?? 'legacy';
+    if (verticalMode === 'native-v1') {
+      if (!config.nativeHost) throw new Error('native-v1 daemon requires a native operator host');
+      // The `restorationEngine` arm of this refusal retired with the TaskEngine
+      // (Wave-4 D1); the message is frozen until `legacy-operator-composition`
+      // flips at stage 5 (`.github/scripts/phase-d-transition-deletion.test.mjs`).
+      if (config.composition || config.work) {
+        throw new Error('native-v1 daemon refuses legacy restoration engine or compatibility composition');
+      }
+      this.nativeHost = config.nativeHost;
+    }
+    if (verticalMode === 'legacy') {
+      recordPhaseDTransitionUse('legacy-operator-composition');
+      // The `legacy-evaluator-delivery-watcher-loaded` counter is no longer
+      // recorded: its subject (DeliveryWatcherLoop) retired with Wave-4 D2, so a
+      // legacy boot no longer loads it and recording it would report a load that
+      // cannot happen. The signal NAME stays in the vocabulary
+      // (`compatibility/phase-d-transition-usage.ts`) and on `/v1/status` —
+      // dropping it from the Zod enum would make an already-written durable
+      // observation file carrying the counter fail strict validation on the next
+      // persist, which is an upgrade break outside this transition's scope.
+    }
     if (config.store) {
       this.store = config.store;
       this.ownsStore = false;
@@ -285,8 +350,8 @@ export class Daemon {
       this.store = new Store(config.dbPath);
       this.ownsStore = true;
     }
-    // #1393: build the corpus once, at construction time, so the TaskEngine
-    // (knowledge autoload) and the API server share one instance. Safe w.r.t.
+    // #1393: build the corpus once, at construction time, so the work loop
+    // and the API server share one instance. Safe w.r.t.
     // the #649 start() ordering constraint: createCorpus is pure closure
     // construction — no store writes, no network I/O.
     this.corpus = config.corpusFactory?.(this.store);
@@ -297,33 +362,6 @@ export class Daemon {
     // so the API server still has something to compare bearer headers
     // against. Production callers (main.ts) always pass an explicit token.
     this.apiToken = config.apiToken ?? randomBytes(32).toString('hex');
-    const taskSources = config.taskSources
-      ?? (config.tasks ? [new StaticConfiguredTaskSource(config.tasks)] : []);
-    this.creatorLoop = new CreatorLoop(
-      this.adapter,
-      taskSources,
-      this.store,
-      config.creatorSafeAddress,
-      config.sweRebenchV2StateDir,
-    );
-    this.deliveryWatcherLoop = new DeliveryWatcherLoop(
-      this.adapter,
-      this.store,
-      config.sweRebenchV2StateDir,
-    );
-
-    this.restorationEngine = new TaskEngine({
-      ...config.restorationEngine,
-      store: this.store,
-      knowledge: {
-        ...config.restorationEngine.knowledge,
-        ...(this.corpus ? { corpus: this.corpus } : {}),
-      },
-      packagingDeps: config.restorationEngine.packagingDeps
-        ? { ...config.restorationEngine.packagingDeps, store: this.store }
-        : undefined,
-    });
-
     if (config.rewardClaim && config.rewardClaim.intervalMs > 0) {
       this.rewardClaimLoop = new RewardClaimLoop({
         ...config.rewardClaim,
@@ -348,6 +386,49 @@ export class Daemon {
     }
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
       this.checkpointLoop = new CheckpointLoop({ ...config.checkpoint, jinnStore: this.store });
+    }
+    if (config.composition && config.work) {
+      this.workLoop = new WorkLoop({ ...config.work, composition: config.composition, store: this.store });
+    }
+    if (config.evaluator) {
+      this.evaluatorLoop = new EvaluatorLoop({
+        composition: config.evaluator.composition,
+        store: this.store,
+        pollIntervalMs: config.evaluator.pollIntervalMs ?? config.pollIntervalMs ?? 5000,
+        ...(config.evaluator.logger ? { logger: config.evaluator.logger } : {}),
+      });
+    }
+    if (config.posting) {
+      // `buildPostingLoop` is the boot-inertness gate: legacy composition or empty `posting[]`
+      // returns undefined, so no loop is constructed, heartbeated, or watchdog-registered.
+      this.postingLoop = buildPostingLoop({
+        compositionMode: config.posting.compositionMode,
+        postingEntryCount: config.posting.postingEntryCount,
+        options: {
+          store: this.store,
+          ports: config.posting.ports,
+          ...(config.posting.intervalMs !== undefined ? { intervalMs: config.posting.intervalMs } : {}),
+          ...(config.posting.logger ? { logger: config.posting.logger } : {}),
+        },
+      });
+    }
+    if (config.composition) {
+      // C8: the projector and evidence-driver loops are independent of `work` — both are started
+      // whenever a composition exists, regardless of whether the work loop is configured.
+      this.projectorLoop = config.composition.projector;
+      this.evidenceDriverLoop = new EvidenceDriverLoop({
+        evidence: config.composition.evidence,
+        intervalMs: config.evidenceDriverIntervalMs ?? 30_000,
+        store: this.store,
+      });
+      // One-swap M6 (#2461): thread the driver into the status config so `/v1/status` carries
+      // the `evidenceIndexing` block and `GET /v1/notifications` derives `evidence_indexing_failed`.
+      // The producer was previously unconnected — the consumer paths existed, but nothing set
+      // `evidenceDriver`, so the block was always absent. `EvidenceDriverLoop` structurally
+      // satisfies `EvidenceIndexingSource` (failures()/pending()).
+      if (config.status) {
+        config.status.evidenceDriver = () => this.evidenceDriverLoop ?? null;
+      }
     }
   }
 
@@ -376,6 +457,14 @@ export class Daemon {
       // pause data and the spend-cap row never reach the dashboard.
       this.apiServer.setStatusConfig(this.config.status);
     } else {
+      // Self-start path (embedded adapters / tests that construct `Daemon`
+      // directly without a pre-built `config.apiServer`). No `ui` is passed
+      // here, but `this.apiToken` (generated above at construction time,
+      // exactly like main.ts's DAEMON_API_TOKEN resolution) is always
+      // present — the server constructor's operator-class gate (§14.3) is
+      // unconditional and accepts that bearer token, so this path is not
+      // left unauthenticated. See `test/api/daemon-api-auth.test.ts` for the
+      // gate coverage against this exact `startApiServer` argument shape.
       this.apiServer = await startApiServer({
         port: this.apiPort,
         store: this.store,
@@ -383,95 +472,27 @@ export class Daemon {
         status: this.config.status,
         bindHost: this.config.apiBindHost,
         corpus,
+        // GET /ready + GET /metrics (spec §5/§6.1–§6.2, issue #2404) — same
+        // injection reasoning as main.ts's self-built server (api→daemon
+        // architecture boundary; see the field docstrings on
+        // ApiServerConfig in server.ts).
+        getDaemonReadiness,
+        getLoopSnapshot: () => buildLoopMetricsSnapshot(this.store),
       });
       this.ownsApiServer = true;
     }
 
-    // Only after the port is bound do we declare ourselves "running" in the
-    // store and emit the startup lifecycle event. Order matters: see #649.
+    // Native lifecycle ownership is established only after the API bind mutex. Recovery must
+    // finish and the signed source head must verify before any work loop can process a card.
+    if (this.nativeHost) await this.nativeHost.start();
+    else await this.workLoop?.initialize();
+
+    // Only after API bind AND native fail-closed initialization do we report running. A lease,
+    // recovery, or source-trust refusal must never leave a false startup-ok marker behind.
     this.store.setShutdownState('running');
     this.store.setDaemonStartedAt(new Date().toISOString());
     this.cachedShutdownState = 'running';
     emitEvent(this.store, { kind: 'startup', outcome: 'ok', detail: 'Daemon started' }, 'daemon');
-
-    // Start peer sync if peers configured
-    const peers = this.config.peers ?? (process.env['JINN_PEERS'] ?? '').split(',').filter(Boolean);
-    if (peers.length > 0) {
-      this.peerSync = new PeerSync({
-        peers,
-        store: this.store,
-        signer: this.config.signer,
-      });
-      this.loopPromises.push(
-        this.peerSync.run().catch(err => {
-          console.error('[daemon] peer-sync crashed:', err);
-          emitStructured({
-            kind: 'error',
-            message: 'peer-sync loop crashed',
-            errorCode: 'peer_sync_crashed',
-            details: { error: err instanceof Error ? err.message : String(err) },
-          });
-        }),
-      );
-    }
-
-    const engine = this.restorationEngine;
-    // #1422: recovery must NOT gate loop startup. RUNNING-state recovery
-    // re-executes the task's impl and awaits it — for a swe-rebench-v2
-    // evaluation that is a full Docker test-suite run, potentially hours —
-    // and awaiting it here silenced every loop AND the #1043 watchdog for
-    // the duration (zero heartbeats, zero log output). Recovery runs
-    // concurrently instead; the engine's processingRequestIds guard keeps
-    // the tick/watcher loops from double-driving a task recovery is still
-    // executing. Deliberately not in loopPromises either, so stop()'s
-    // loop-drain never waits on an in-flight impl re-execution.
-    void engine.recoverInFlight().catch(err => {
-      console.error('[daemon] in-flight recovery failed:', err);
-      emitStructured({
-        kind: 'error',
-        message: 'in-flight recovery failed',
-        errorCode: 'recovery_failed',
-        details: { error: err instanceof Error ? err.message : String(err) },
-      });
-    });
-    this.loopPromises.push(
-      this.creatorLoop.run().catch(err => {
-        console.error('[daemon] creator crashed:', err);
-        emitStructured({
-          kind: 'error',
-          message: 'creator loop crashed',
-          errorCode: 'creator_crashed',
-          details: { error: err instanceof Error ? err.message : String(err) },
-        });
-      }),
-      this._runEngineWatcherLoop(engine).catch(err => {
-        console.error('[daemon] engine-watcher crashed:', err);
-        emitStructured({
-          kind: 'error',
-          message: 'engine-watcher loop crashed',
-          errorCode: 'engine_watcher_crashed',
-          details: { error: err instanceof Error ? err.message : String(err) },
-        });
-      }),
-      engine.runTickLoop(this.config.pollIntervalMs ?? 5000).catch(err => {
-        console.error('[daemon] engine-tick crashed:', err);
-        emitStructured({
-          kind: 'error',
-          message: 'engine-tick loop crashed',
-          errorCode: 'engine_tick_crashed',
-          details: { error: err instanceof Error ? err.message : String(err) },
-        });
-      }),
-      this.deliveryWatcherLoop.run().catch(err => {
-        console.error('[daemon] delivery-watcher crashed:', err);
-        emitStructured({
-          kind: 'error',
-          message: 'delivery-watcher loop crashed',
-          errorCode: 'delivery_watcher_crashed',
-          details: { error: err instanceof Error ? err.message : String(err) },
-        });
-      }),
-    );
 
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
@@ -538,35 +559,111 @@ export class Daemon {
         }),
       );
     }
-    // #1043 loop watchdog. Inert unless config.watchdog is supplied.
+    if (this.workLoop) {
+      this.loopPromises.push(
+        this.workLoop.run().catch(err => {
+          console.error('[daemon] work loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'work loop crashed',
+            errorCode: 'work_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.evaluatorLoop) {
+      this.loopPromises.push(
+        this.evaluatorLoop.run().catch(err => {
+          console.error('[daemon] evaluator loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'evaluator loop crashed',
+            errorCode: 'evaluator_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.postingLoop) {
+      this.loopPromises.push(
+        this.postingLoop.run().catch(err => {
+          console.error('[daemon] posting loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'posting loop crashed',
+            errorCode: 'posting_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.projectorLoop) {
+      this.loopPromises.push(
+        this.projectorLoop.run().catch(err => {
+          console.error('[daemon] projector loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'projector loop crashed',
+            errorCode: 'projector_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.evidenceDriverLoop) {
+      this.loopPromises.push(
+        this.evidenceDriverLoop.run().catch(err => {
+          console.error('[daemon] evidence-driver loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'evidence-driver loop crashed',
+            errorCode: 'evidence_driver_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    // #1043 loop watchdog. Armed by default (2026-08-10 decision 3, #2461/
+    // #2540) — omitting `config.watchdog` no longer means "no watchdog", it
+    // means "watchdog with autoRestart: false". Pass the literal `false` to
+    // opt all the way out (see the DaemonConfig.watchdog docstring above).
     //
     // IDEMPOTENCY (AC#3): the only recovery action is the watchdog's non-zero
     // process.exit (see watchdog-loop.ts WATCHDOG_EXIT_CODE). It does NOT add a
     // mid-flight re-execution path to any loop. A wedged daemon recovers by
     // exiting → Railway ON_FAILURE restart (deploy/railway-*-operator/
     // railway.toml, maxRetries=10) → the existing idempotent boot path:
-    // engine.recoverInFlight() above (daemon.ts) re-drives in-flight tasks and
+    // the derivation-first boot path re-drives in-flight work and
     // src/preflight/pidfile-liveness.ts clears a stale lock. Both are already
     // idempotent, so a restart cannot double-claim / double-deliver / double-pay.
-    if (this.config.watchdog) {
+    if (this.config.watchdog !== false) {
+      const watchdogConfig = this.config.watchdog ?? { autoRestart: false };
       const interval = this.config.pollIntervalMs ?? 5000;
       // Derive the watchdog registrations from LOOP_REGISTRY (the single source
       // of loop names + defaults) — filter to the loops actually started, then
       // override the intervals that are operator/config-driven.
-      const started = new Set<LoopName>(['creator', 'engine-tick', 'engine-watcher', 'delivery-watcher']);
+      const started = new Set<LoopName>();
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
       if (this.evictionLoop) started.add('eviction-check');
       if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
-      if (peers.length > 0) started.add('peer-sync');
+      if (this.workLoop) started.add('work');
+      if (this.evaluatorLoop) started.add('evaluator');
+      if (this.postingLoop) started.add('posting');
+      if (this.projectorLoop) started.add('projector');
+      if (this.evidenceDriverLoop) started.add('evidence-driver');
       const overrides: Partial<Record<LoopName, number>> = {
-        'engine-tick': interval,
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
         'eviction-check': this.config.evictionCheck?.intervalMs,
         checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
+        work: this.config.work?.pollIntervalMs,
+        evaluator: this.config.evaluator?.pollIntervalMs ?? this.config.pollIntervalMs,
+        posting: this.config.posting?.intervalMs,
+        'evidence-driver': this.config.evidenceDriverIntervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
         .filter(r => started.has(r.name))
@@ -581,9 +678,9 @@ export class Daemon {
       this.watchdogLoop = new WatchdogLoop({
         store: this.store,
         loops: registrations,
-        stalenessFactor: this.config.watchdog.stalenessFactor,
-        checkIntervalMs: this.config.watchdog.checkIntervalMs,
-        autoRestart: this.config.watchdog.autoRestart,
+        stalenessFactor: watchdogConfig.stalenessFactor,
+        checkIntervalMs: watchdogConfig.checkIntervalMs,
+        autoRestart: watchdogConfig.autoRestart,
         isActive: () => this.cachedShutdownState === 'running',
       });
       this.loopPromises.push(
@@ -604,25 +701,17 @@ export class Daemon {
 
   async stop(): Promise<void> {
     emitStructured({ kind: 'system', message: 'daemon loops stopping' });
-    this.creatorLoop.stop();
-    this.engineStopped = true;
-    this.restorationEngine.stop();
-    await this.restorationEngine.releaseClaimedNotStarted().catch(err => {
-      console.error('[daemon] engine releaseClaimedNotStarted failed (non-fatal):', err);
-      emitStructured({
-        kind: 'error',
-        message: 'engine releaseClaimedNotStarted failed',
-        errorCode: 'engine_release_failed',
-        details: { error: err instanceof Error ? err.message : String(err) },
-      });
-    });
-    this.deliveryWatcherLoop.stop();
+    await this.nativeHost?.close();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
     this.evictionLoop?.stop();
     this.harvestLoop?.stop();
     this.checkpointLoop?.stop();
-    this.peerSync?.stop();
+    this.workLoop?.stop();
+    this.evaluatorLoop?.stop();
+    this.postingLoop?.stop();
+    this.projectorLoop?.stop();
+    this.evidenceDriverLoop?.stop();
     this.watchdogLoop?.stop();
 
     // Stop the adapter to unblock any pending async iterators
@@ -653,320 +742,5 @@ export class Daemon {
     return this.cachedShutdownState;
   }
 
-  /**
-   * Bridge loop: consumes adapter.watchForTasks(), claims eligible Tasks, and
-   * routes each internal request to the TaskEngine via observe() + process().
-   *
-   * For tasks without solverType, the engine dispatches to the legacy-claude Harness.
-   * For portfolio.v0 tasks, the engine dispatches to claude-mcp-hyperliquid.
-   * For portfolio.v0.eval tasks, the engine dispatches to portfolio-v0-evaluator.
-   *
-   * Canonical task provenance is populated from TaskCreated. The adapter keeps
-   * the later TaskAttemptCreated/evaluation claim provenance in separate
-   * `onchainClaim*` fields so it cannot overwrite the task creation anchor.
-   */
-  private async _runEngineWatcherLoop(engine: TaskEngine): Promise<void> {
-    const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1_000; // 24 h
-    // Yield to the macrotask queue every N announcements so even the first full
-    // scan of a large backlog hands control back to the HTTP server (so /health
-    // doesn't spike) instead of running as one uninterruptible contiguous block.
-    const YIELD_EVERY = 10;
-    let scanned = 0;
-
-    for await (const taskAnnouncement of this.adapter.watchForTasks()) {
-      if (this.engineStopped) break;
-      if (!taskAnnouncement.taskId) continue;
-
-      if (++scanned % YIELD_EVERY === 0) {
-        // setImmediate schedules a macrotask: the event loop drains pending I/O
-        // callbacks (HTTP requests) before resuming this loop.
-        await new Promise<void>(resolve => setImmediate(resolve));
-        if (this.engineStopped) break;
-      }
-
-      // canAcceptTask() resolves manifests, validates schemas, and probes
-      // impl.isReady() — expensive enough that re-running it for every
-      // persistently-unacceptable task each pass starves the HTTP API. Fast-skip
-      // tasks skipped within the bounded SKIP_RECHECK_TTL_MS; once the TTL
-      // elapses we fall through so a now-acceptable task is still picked up.
-      if (!this.skipLogDeduper.shouldRecheck(taskAnnouncement.taskId)) {
-        continue;
-      }
-
-      const solverType = taskAnnouncement.task.solverType ?? undefined;
-      const taskRole = (taskAnnouncement.task.role ?? 'restoration') as 'restoration' | 'evaluation';
-      const taskForEligibility = this.config.creatorSafeAddress
-        ? {
-            ...taskAnnouncement.task,
-            eligibility: {
-              ...(taskAnnouncement.task.eligibility ?? {}),
-              claimantSafe: this.config.creatorSafeAddress,
-            },
-          }
-        : taskAnnouncement.task;
-      const accept = await engine.canAcceptTask({
-        solverType,
-        taskRole,
-        task: taskForEligibility,
-      });
-      if (!accept.ok) {
-        // Log once per (taskId, reason) — the engine-watcher re-observes every
-        // pending task each pass, so an unguarded log here floods the console.
-        if (this.skipLogDeduper.recordSkip(taskAnnouncement.taskId, accept.reason)) {
-          console.log(`[daemon] skipping task ${taskAnnouncement.taskId} — ${accept.reason}`);
-        }
-        continue;
-      }
-      // Task is acceptable now; reset skip state so a future skip logs once and
-      // is re-checked immediately rather than fast-skipped.
-      this.skipLogDeduper.forget(taskAnnouncement.taskId);
-
-      const manifestCid = taskAnnouncement.task.solverNetManifestCid;
-      const gateLogger = { warn: (msg: string) => console.warn(msg), info: (msg: string) => console.log(msg) };
-
-      // Readiness gate: if the task's harness is not ready (e.g. claude unauthenticated),
-      // skip this task without blocking other loops. Logs once per ready↔not-ready transition.
-      if (this.config.harnessReadinessRegistry) {
-        if (manifestCid) {
-          const gate = gateClaimByReadiness({
-            manifestCid,
-            registry: this.config.harnessReadinessRegistry,
-            logger: gateLogger,
-          });
-          if (!gate.proceed) continue;
-        }
-      }
-
-      // Spend gate (issues #815, #1004): skip claims for a credential whose
-      // 6h-block or 7d-window ACTUAL USD spend + this claim's projected debit
-      // would exceed the matching USD cap. The accumulator reads
-      // actual_cost_usd_micros (delivered rows) / estimated_cost_usd_micros
-      // (in-flight), so the gate bounds real token spend, not a flat
-      // projection. For subscription credentials the USD ceiling is a *proxy*
-      // budget, not an exact bound on the provider's plan quota. Layered on
-      // top of the spend-cap gate below — the first guard to fire skips.
-      let aiUnitsForRow: number | null = null;
-      let estimatedCostUsdMicrosForRow: number | null = null;
-      let modelForRow: string | null = null;
-      const aiUnitsCfg = this.config.aiUnits;
-      if (aiUnitsCfg && manifestCid) {
-        const credentialId = aiUnitsCfg.manifestCredentials[manifestCid];
-        if (credentialId) {
-          // #1006: ai_units stays on the row for the legacy unit-denominated
-          // /v1/status surface the SPA still reads. Remove when #1006 migrates.
-          aiUnitsForRow = aiUnitsCfg.manifestProjectedAiUnits[manifestCid] ?? null;
-          modelForRow = aiUnitsCfg.manifestModels[manifestCid] ?? null;
-          const projectedUsdMicros = aiUnitsCfg.manifestProjectedUsdMicros[manifestCid] ?? null;
-          // Capture the claim-time USD estimate on the row so the accumulator
-          // has a value to read while the claim is in flight (before the
-          // delivered actual replaces it via finalizeClaimDelivered).
-          estimatedCostUsdMicrosForRow = projectedUsdMicros;
-          const now = new Date();
-          const block = this.store.usdMicrosThisBlock(credentialId, now);
-          const week = this.store.usdMicrosThisWeek(credentialId, now);
-          const aiGate = gateClaimByAiUnits({
-            credentialId,
-            projectedUsdMicros,
-            usdMicrosThisBlock: block.usdMicros,
-            usdMicrosThisWeek: week.usdMicros,
-            capPerBlockUsdMicros: aiUnitsCfg.capPerBlockUsdMicros,
-            capPerWeekUsdMicros: aiUnitsCfg.capPerWeekUsdMicros,
-            blockId: blockIdUtc(now),
-            logger: gateLogger,
-            hasPersistedCapReached: (w, bid) =>
-              this.store.hasAiUnitsCapReachedFor(credentialId, w, bid),
-          });
-          if (!aiGate.proceed) {
-            if (aiGate.newlyPaused) {
-              // Embed `[block=...][window=...]` markers in `detail` so the
-              // gate can hydrate its memo from this row after a daemon
-              // restart inside the same 6h block (issue #815 finding 1).
-              const marker = `[block=${blockIdUtc(now)}][window=${aiGate.window}] `;
-              emitEvent(this.store, {
-                kind: 'ai_units_cap_reached',
-                requestId: taskAnnouncement.taskId,
-                outcome: 'paused',
-                detail: `${marker}${aiGate.reason}`,
-                credentialId,
-              }, 'daemon');
-            }
-            continue;
-          }
-        }
-      }
-
-      // Spend-cap gate: skip claims for a credential that has hit its daily budget.
-      if (this.config.spendCap) {
-        // No manifest CID -> no credential to attribute -> task is not spend-gated.
-        const credentialId = manifestCid
-          ? this.config.spendCap.manifestCredentials[manifestCid]
-          : undefined;
-        const capUsd = credentialId ? this.config.spendCap.caps[credentialId] : undefined;
-        if (credentialId && capUsd != null) {
-          const spentTodayUsd = this.store.spentTodayMicros(credentialId) / 1_000_000;
-          const spendGate = gateClaimBySpendCap({
-            credentialId,
-            capUsd,
-            spentTodayUsd,
-            logger: gateLogger,
-          });
-          if (!spendGate.proceed) {
-            if (spendGate.newlyPaused) {
-              emitEvent(this.store, {
-                kind: 'spend_cap_reached',
-                requestId: taskAnnouncement.taskId,
-                outcome: 'paused',
-                detail: spendGate.reason,
-              }, 'daemon');
-            }
-            continue;
-          }
-        }
-      }
-
-      // Resolve credentialId once more for the enriched claim row (issue #815).
-      // Prefer the AI-units mapping (which considers the harness's billed
-      // credential), fall back to the spend-cap mapping for symmetry.
-      const enrichedCredentialId =
-        (manifestCid && aiUnitsCfg?.manifestCredentials[manifestCid]) ||
-        (manifestCid && this.config.spendCap?.manifestCredentials[manifestCid]) ||
-        null;
-
-      let request;
-      let runStartedAt: number;
-      try {
-        request = await this.adapter.claimTask(taskAnnouncement.taskId);
-        // Enriched claim row per issue #815: exactly one row per request,
-        // claim_status='claimed', carrying ai_units + estimated_cost_usd_micros.
-        // markOwnActivity writes the membership row only; this call writes the
-        // single activity_events row with the spend metadata.
-        this.store.markOwnActivity(request.requestId, 'claimed');
-        this.store.recordActivityEvent({
-          ts: new Date().toISOString(),
-          kind: 'claimed',
-          requestId: request.requestId,
-          solverType: solverType ?? null,
-          credentialId: enrichedCredentialId,
-          aiUnits: aiUnitsForRow,
-          claimStatus: 'claimed',
-          estimatedCostUsdMicros: estimatedCostUsdMicrosForRow,
-          model: modelForRow,
-        });
-        runStartedAt = Date.now();
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error(
-          `[daemon] claimTask failed for task ${taskAnnouncement.taskId}:`,
-          err instanceof Error ? err.message : err,
-        );
-        // Issue #815: exactly one activity_events row per failed-claim
-        // request, claim_status='claim_failed', ai_units=0. emitTickErrorOrRaceLost
-        // below writes a separate row with the error classification (kept for
-        // the existing race-loss + tick-error notification taxonomy); this
-        // dedicated row is what the cap-bookkeeping read path filters on.
-        this.store.recordActivityEvent({
-          ts: new Date().toISOString(),
-          kind: 'claim_failed',
-          requestId: taskAnnouncement.taskId,
-          solverType: solverType ?? null,
-          credentialId: enrichedCredentialId,
-          aiUnits: 0,
-          claimStatus: 'claim_failed',
-          detail: errorMessage,
-        });
-        const claimOutcome = emitTickErrorOrRaceLost(
-          this.store,
-          err,
-          { requestId: taskAnnouncement.taskId, solverType },
-          'daemon',
-        );
-        // Paired SSE signal for the operator-app `claim_failed` notification
-        // (OPERATOR-APP-SPEC §2.10). Terminal evaluation race losses are normal
-        // multi-operator no-ops — do not surface as claim_failed (#512).
-        if (claimOutcome !== 'race_lost') {
-          emitStructured({
-            kind: 'intent',
-            message: 'Task claim failed',
-            requestId: taskAnnouncement.taskId,
-            errorCode: 'claim_failed',
-            details: {
-              taskId: taskAnnouncement.taskId,
-              solverType,
-              source: 'daemon.claimTask',
-              error: errorMessage,
-            },
-          });
-        }
-        continue;
-      }
-
-      const windowStartTs = request.task.window?.startTs ?? Date.now();
-      const windowEndTs = request.task.window?.endTs ?? (windowStartTs + DEFAULT_WINDOW_MS);
-
-      // Warn on missing provenance; local/test adapters may legitimately lack it.
-      if (!request.taskCid) {
-        console.warn(`[daemon] task ${request.requestId} missing provenance field taskCid — manifest integrity checks may fail`);
-      }
-      if (!request.onchainCreationTx || request.onchainCreationBlock == null) {
-        const missing = [
-          !request.onchainCreationTx ? 'onchainCreationTx' : null,
-          request.onchainCreationBlock == null ? 'onchainCreationBlock' : null,
-        ].filter((field): field is string => field !== null);
-        const error = new Error(
-          `task ${request.requestId} missing canonical TaskCreated provenance: ${missing.join(', ')}`,
-        );
-        console.error(`[daemon] ${error.message}; refusing to create an engine row`);
-        emitTickErrorOrRaceLost(
-          this.store,
-          error,
-          { requestId: request.requestId, solverType },
-          'daemon',
-        );
-        continue;
-      }
-
-      try {
-        await engine.observe({
-          requestId: request.requestId,
-          taskId: request.taskId ?? taskAnnouncement.taskId,
-          attemptIndex: request.attemptIndex,
-          taskCid: request.taskCid ?? '',
-          onchainCreationTx: request.onchainCreationTx,
-          onchainCreationBlock: request.onchainCreationBlock,
-          solverType,
-          taskRole: (request.task.role ?? 'restoration') as 'restoration' | 'evaluation',
-          windowStartTs,
-          windowEndTs,
-          runStartedAt,
-          task: request.task,
-        });
-
-        // Drive the engine state machine for this request.
-        // process() advances one transition per call; the engine handles retries
-        // internally on the next daemon iteration if the task is re-encountered.
-        // Fire-and-forget: each task processes independently. SQLite serialises
-        // writes through better-sqlite3's synchronous interface, so concurrent
-        // process() calls don't corrupt state. Future readers: do NOT await — that
-        // would serialise all task processing into a single queue.
-        engine.process(request.requestId).catch(err => {
-          console.error(`[daemon] engine.process failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
-          emitTickErrorOrRaceLost(
-            this.store,
-            err,
-            { requestId: request.requestId, solverType },
-            'daemon',
-          );
-        });
-      } catch (err) {
-        console.error(`[daemon] engine.observe failed for ${request.requestId}:`, err instanceof Error ? err.message : err);
-        emitTickErrorOrRaceLost(
-          this.store,
-          err,
-          { requestId: request.requestId, solverType },
-          'daemon',
-        );
-      }
-    }
-  }
 
 }

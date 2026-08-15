@@ -1,0 +1,1 @@
+{"deadline":"2026-07-29T00:00:00Z","idempotencyKey":"adversarial-shared-key","nonce":"nonce-a","protocol":"https://spec.jinn.network/profiles/task-execution/v1","requester":"urn:uuid:f000000a-0000-5000-8000-00000000000a","submission":"urn:uuid:f000000c-0000-5000-8000-00000000000c","task":{"digest":{"sha256":"2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0"}}}

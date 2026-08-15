@@ -1,6 +1,6 @@
 import { useEffect, useState, type JSX } from 'react';
 import { api } from '../../api/client.js';
-import type { HarnessAuthStatusEntry } from '../../api/types.js';
+import type { HarnessAuthStatusEntry } from '../../../../../api/contract/index.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Badge } from '../../components/ui/badge.js';
 import {

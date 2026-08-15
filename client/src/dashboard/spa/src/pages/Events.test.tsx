@@ -6,7 +6,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { TooltipProvider } from '../components/ui/tooltip.js';
 import { EventsPage } from './Events.js';
 import { api } from '../api/client.js';
-import type { ActivityEventRow, ActivityEventsResponse } from '../api/types.js';
+import type { ActivityEventRow, ActivityEventsResponse } from '../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 
@@ -43,6 +43,13 @@ function row(id: number, kind: string, extra: Partial<ActivityEventRow> = {}): A
     solverType: null,
     outcome: 'ok',
     detail: null,
+    credentialId: null,
+    costUsdMicros: null,
+    model: null,
+    aiUnits: null,
+    claimStatus: null,
+    estimatedCostUsdMicros: null,
+    actualCostUsdMicros: null,
     ...extra,
   };
 }

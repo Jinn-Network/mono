@@ -1,0 +1,22 @@
+{
+  "input": {
+    "family": "deterministic-process",
+    "block": {
+      "image": { "uri": "https://example.org/images/swe-rebench-runner" },
+      "platform": "linux/amd64",
+      "workspace": { "root": "/workspace" },
+      "testMaterial": [
+        { "uri": "https://example.org/tests/patch.diff", "accessClass": "public" }
+      ],
+      "parser": {
+        "id": "jinn.parser.pytest-json-report",
+        "version": "1.0.0",
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "transitions": { "failToPass": ["test_a"], "passToPass": ["test_b"] },
+      "timeout": 1800,
+      "code": "import sys; exec(sys.stdin.read())"
+    }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

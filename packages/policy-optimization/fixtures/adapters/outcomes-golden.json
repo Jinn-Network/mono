@@ -1,0 +1,111 @@
+[
+  {
+    "record": {
+      "kind": "https://spec.jinn.network/records/delivery/v1",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444301"
+    },
+    "provenance": {
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333301",
+      "announcementId": "ann-c8-outcomes-301"
+    },
+    "entryTimestamp": "2026-08-03T08:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008301",
+    "statementVerdict": "pass",
+    "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111301",
+    "attributionFromChainEvent": "urn:jinn:agent:evaluator-a",
+    "task": {
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+      "profile": {
+        "uri": "https://spec.jinn.network/task-profiles/policy-c8-fixture/1.0",
+        "digest": { "sha256": "5fcb4f033d87b1ef1468334f795ebf5477aab90312f07a4b5d047c9e5cb6f3b9" }
+      },
+      "instructions": "Fixture task for the C8 policy-outcomes adapter kit (arm A).",
+      "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }]
+    },
+    "submission": {
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+      "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c801",
+      "task": { "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+      "requester": "urn:jinn:agent:policy-c8-requester",
+      "idempotencyKey": "policy-c8-fixture-arm-a",
+      "nonce": "0000000000000001",
+      "deadline": "2026-08-10T00:00:00Z",
+      "requirements": {
+        "harness": { "id": "claude-code", "version": "2.1.34" },
+        "model": { "provider": "anthropic", "id": "claude-haiku-4-5" },
+        "loadout": {
+          "kind": "jinn.skill.v1",
+          "name": "arm-a",
+          "digest": "sha256:aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa1"
+        },
+        "isolationPolicy": "unrestricted"
+      }
+    },
+    "profile": {
+      "profile": "https://spec.jinn.network/task-profiles/policy-c8-fixture/1.0",
+      "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3BvbGljeS1jOC1maXh0dXJlLzEuMCIsInJlcXVpcmVtZW50S2V5cyI6W119",
+      "requirementKeys": []
+    },
+    "fidelityEvidence": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    }
+  },
+  {
+    "record": {
+      "kind": "https://spec.jinn.network/records/delivery/v1",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444302"
+    },
+    "provenance": {
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333302",
+      "announcementId": "ann-c8-outcomes-302"
+    },
+    "entryTimestamp": "2026-08-03T09:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008302",
+    "statementVerdict": "fail",
+    "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111302",
+    "attributionFromChainEvent": "urn:jinn:agent:bench-harness",
+    "benchmarkRun": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "task": {
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+      "profile": {
+        "uri": "https://spec.jinn.network/task-profiles/policy-c8-fixture/1.0",
+        "digest": { "sha256": "5fcb4f033d87b1ef1468334f795ebf5477aab90312f07a4b5d047c9e5cb6f3b9" }
+      },
+      "instructions": "Fixture task for the C8 policy-outcomes adapter kit (arm B).",
+      "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }]
+    },
+    "submission": {
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+      "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c802",
+      "task": { "digest": { "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } },
+      "requester": "urn:jinn:agent:policy-c8-requester",
+      "idempotencyKey": "policy-c8-fixture-arm-b",
+      "nonce": "0000000000000002",
+      "deadline": "2026-08-10T00:00:00Z",
+      "requirements": {
+        "harness": { "id": "claude-code", "version": "2.1.34" },
+        "model": { "provider": "anthropic", "id": "claude-haiku-4-5" },
+        "loadout": {
+          "kind": "jinn.skill.v1",
+          "name": "arm-b",
+          "digest": "sha256:bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb2"
+        },
+        "isolationPolicy": "unrestricted"
+      }
+    },
+    "profile": {
+      "profile": "https://spec.jinn.network/task-profiles/policy-c8-fixture/1.0",
+      "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3BvbGljeS1jOC1maXh0dXJlLzEuMCIsInJlcXVpcmVtZW50S2V5cyI6W119",
+      "requirementKeys": []
+    },
+    "fidelityEvidence": {
+      "harness": "match",
+      "loadout": "mismatch"
+    }
+  }
+]

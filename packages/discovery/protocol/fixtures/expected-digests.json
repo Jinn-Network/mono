@@ -1,0 +1,6 @@
+{
+  "genesis": "sha256:f62faa566dda0363b0d5524e75f90010de427fc3f15d47a2f49a0bf45c3441ab",
+  "genesis-shuffled-keys": "sha256:f62faa566dda0363b0d5524e75f90010de427fc3f15d47a2f49a0bf45c3441ab",
+  "available-withdrawn": "sha256:906362803e38cdee7ae652ed98255c5e5a58cf24cafa060ced73390bdf55c0f2",
+  "head": "sha256:fb754d9199868c74c907516210c665b5ce122adbea190c3f4933fdde2e3b18cf"
+}

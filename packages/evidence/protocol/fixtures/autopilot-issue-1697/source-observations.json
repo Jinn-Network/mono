@@ -1,0 +1,118 @@
+{
+  "fixtureVersion": 1,
+  "source": {
+    "kind": "claude-code-project-transcript-jsonl",
+    "sessionId": "1b110a92-0095-4cd5-b230-847c7f0d6ba2",
+    "sha256": "96ab38d496a593d9217aefd7e9d37538c8e94bcf4d78650127ca0b8a892f5a00",
+    "bytes": 549916,
+    "records": 151,
+    "accessClassification": "local-private",
+    "copiedIntoFixture": false
+  },
+  "task": {
+    "source": "GitHub issue #1697 fetched during execution",
+    "title": "Hermetic gate downloads onnxruntime prebuilt from external CDN during yarn install (not hermetic)",
+    "reconstructedPrivateArtifact": {
+      "sha256": "e756ba2396b38269c424e753938da5a0d5cbdc508a83965bd9fd8f9e8eb19462",
+      "bytes": 1197,
+      "copiedIntoFixture": false
+    },
+    "publicDerivative": {
+      "path": "artifacts/task.public.md",
+      "sha256": "da4c3b0e697ec22c44b204b87b65f5db46a654de06f4ffcd0bd1511a631e43e3",
+      "bytes": 1183
+    }
+  },
+  "executor": {
+    "coordinatorHarness": "Claude Code",
+    "coordinatorHarnessVersion": "2.1.197",
+    "coordinatorModel": "claude-opus-4-8",
+    "workflow": "implement-issue",
+    "observedChildStages": [
+      "design",
+      "implement",
+      "simplify",
+      "independent-review",
+      "security-review",
+      "review-fix"
+    ],
+    "observationPath": "artifacts/executor.observed.json",
+    "immutableExecutorBundleAvailable": false
+  },
+  "execution": {
+    "id": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2",
+    "startedAt": "2026-07-14T19:30:16.322Z",
+    "endedAt": "2026-07-14T19:40:20.856Z",
+    "durationMs": 604534,
+    "lifecycleStatus": "completed",
+    "branch": "chore/1697-hermetic-gate-downloads-onnxruntime-prebuilt-from-external-c",
+    "targetBase": "next",
+    "baseCommitObserved": false,
+    "observedPreimageGitBlobSha1": "2fefd627c877981b63ef3390200e0648875d5952"
+  },
+  "result": {
+    "kind": "git-patch",
+    "path": "artifacts/result.patch",
+    "sha256": "8ee8ef8ca507ca4c83d0b693404ec7ed36fd0f67df9551d8172dcca125d718f3",
+    "bytes": 1895,
+    "reportedCommitSequence": [
+      "9056f80ee898826e6f78eb0e9e18173158d2cc2a",
+      "c1c814049eb9acbebf9d319e5f1663fb142b3e96"
+    ],
+    "reportedDelivery": {
+      "kind": "github-pull-request",
+      "number": 1704,
+      "base": "next",
+      "draft": true
+    }
+  },
+  "observedEvaluationEvidence": [
+    {
+      "scope": "initial patch before the restore-keys follow-up",
+      "evaluator": "independent review child",
+      "verdict": "approve",
+      "finding": "Add a restore-keys fallback",
+      "appliesToFinalResultBytes": false
+    },
+    {
+      "scope": "final patch",
+      "evaluator": "coordinator verification step",
+      "verdict": "inconclusive",
+      "evidence": [
+        "The final workflow parsed successfully as YAML.",
+        "The final diff contained the requested restore-keys change."
+      ],
+      "limitations": [
+        "No warm-cache run was observed.",
+        "No cold-cache run was observed.",
+        "The final result bytes did not receive another independent review."
+      ]
+    }
+  ],
+  "observedProcessEvidence": {
+    "orderedStageReportsAvailable": true,
+    "finalDiffObserved": true,
+    "branchPushObserved": true,
+    "pullRequestCreationObserved": true,
+    "cryptographicRuntimeAttestationAvailable": false
+  },
+  "privacy": {
+    "publicSourceCopyAllowed": false,
+    "reason": "The source contains local paths, identities, startup-hook payloads, and unrelated operator context.",
+    "checkOnlyScrubResult": {
+      "rejected": true,
+      "findings": 559,
+      "redactions": 411,
+      "unresolvedFlags": 0
+    },
+    "publicFixtureCheck": {
+      "rejected": true,
+      "findings": 5,
+      "redactions": 5,
+      "unresolvedFlags": 0,
+      "status": "blocked-pending-allowlist-or-detector-correction"
+    },
+    "publicProjectionPath": "artifacts/trace.public.json",
+    "scrubReceiptPath": "artifacts/scrub-receipt.json"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "name": "subscribe-per-item-drop-censoring-relay",
+  "kind": "subscribe",
+  "description": "§9.5: a relay delivers an entry with one item silently removed -- caught by the entry-granular spot-check, which re-fetches the full entry and re-applies filters locally.",
+  "input": {
+    "fullEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00.000Z",
+      "announcements": [
+        {
+          "announcementId": "ann-1",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773"
+          }
+        },
+        {
+          "announcementId": "ann-2",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:77ef1951f02f9226505a221e159a2aaf6ca86d961e273ea34bf3f3da801c9b98"
+          }
+        }
+      ]
+    },
+    "deliveredEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00.000Z",
+      "announcements": [
+        {
+          "announcementId": "ann-1",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773"
+          }
+        }
+      ]
+    },
+    "droppedAnnouncementId": "ann-2"
+  },
+  "expect": {
+    "caughtByEntryGranularSpotCheck": true
+  }
+}

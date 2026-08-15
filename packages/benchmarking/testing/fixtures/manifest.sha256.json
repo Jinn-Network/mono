@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "exports/croissant.json",
+      "sha256": "07513ba1240a90b7d16ab132be1cf531db4be350ade0570e5b86f807975b5362"
+    },
+    {
+      "id": "exports/eval-log.json",
+      "sha256": "3143c16c647b6f03063a5c58c699273270f501ad29aa97156f95f176a695cb4c"
+    },
+    {
+      "id": "exports/matrix-projection.json",
+      "sha256": "903a83d0de3aeca1abd854bced8d9fc13306c36dc0b457b3aaba006c5b2c2653"
+    },
+    {
+      "id": "exports/static-bundle.json",
+      "sha256": "53e3d3b27552033e6e9bf100c9db8dc74fc7093675304f3818ed75f42b4b58fa"
+    },
+    {
+      "id": "methods/avg-at-k.json",
+      "sha256": "d535e0e56548d26c10299b1a8af213ff7507f7afe35178f306cf25c980f80cc5"
+    },
+    {
+      "id": "methods/bradley-terry.json",
+      "sha256": "93c8ea2df720ef5ede8d44dc1cbd1801183abc9282765e45adb89c5d94757ad8"
+    },
+    {
+      "id": "methods/clean-subset.json",
+      "sha256": "3178064b405550ac89f3d50c6d2157a3afeb262c55412b276b238852c8a065c3"
+    },
+    {
+      "id": "methods/conflict-cases.json",
+      "sha256": "0784e581136c8ac3f9dfddcbc9d19e0d52931e239acd0ef062e91e07f6a5233c"
+    },
+    {
+      "id": "methods/conformance-cases.json",
+      "sha256": "3abf59001e4b53895bda5520e8af132275729a59e144bf9da773a2f87cd253b7"
+    },
+    {
+      "id": "methods/fully-attrited-avg-at-k.json",
+      "sha256": "292a38156987d6ce610aac0da6f601203cacb364c027707e8056055fe35f9b86"
+    },
+    {
+      "id": "methods/fully-attrited-pass-at-k.json",
+      "sha256": "166db1e206ac614c242b2a7c296f6889cf1b1103aeab7e4aeeb058385014c26a"
+    },
+    {
+      "id": "methods/fully-attrited-wilson.json",
+      "sha256": "80ca5b7e9dc9a4461f284ffcd936c592f14db9c5469ec54d3d14c5b9da8a883b"
+    },
+    {
+      "id": "methods/method-specs.json",
+      "sha256": "78903ad241416a0b59f636c6c8077d219bb7e0cd0d8bc9dda4aa18f317bafe1a"
+    },
+    {
+      "id": "methods/noninferiority-cluster-bca.json",
+      "sha256": "c68092bf4213bed1a55195d5ee6223ac08706c78d14342116a42ec1932d51376"
+    },
+    {
+      "id": "methods/noninferiority-fail.json",
+      "sha256": "618808a7e048485f47d141fe2788687c33486dbdbce7731b68ab2cd9455609d0"
+    },
+    {
+      "id": "methods/noninferiority-inconclusive.json",
+      "sha256": "52368d86a2602d275a08b4668e6e037442789ac2be8a1aa76b01a9db92bf245b"
+    },
+    {
+      "id": "methods/noninferiority-pass.json",
+      "sha256": "866633120fb560bb13d529a51bce268930232355c031f74c5304a0b9516abecd"
+    },
+    {
+      "id": "methods/paired-contract.json",
+      "sha256": "ea292e5dcb1bed1b4b35fca990e841326bd731bc70ffebb0ca48b8d15b05574f"
+    },
+    {
+      "id": "methods/paired-delta-shared-ensemble.v2.json",
+      "sha256": "33a81c543ecd8b7bbf0fc99132e9cb3aca96d25365286ce09e5037ac33771c8b"
+    },
+    {
+      "id": "methods/paired-delta-withheld.json",
+      "sha256": "5ec8b616468fb223aefb5681295c9c71cd884505685e13428d660120941a0874"
+    },
+    {
+      "id": "methods/paired-delta.json",
+      "sha256": "ee87f4d240c373131edf81677209e4183c2032db7d015a1149cdcfcc2b5dc7fd"
+    },
+    {
+      "id": "methods/paired-exclusion-r1.json",
+      "sha256": "327c6935a4bf9935849f920d198ec73e1ba6b6f6131319c139f6574eab467c30"
+    },
+    {
+      "id": "methods/paired-mcnemar.json",
+      "sha256": "764f44b1a175eb3287c82e6364e31782cedb567773b60d46dac4da86ae00fe53"
+    },
+    {
+      "id": "methods/pass-at-k-incompatible.json",
+      "sha256": "e437f6ea6f71b9518af3ae289b33d571354d3e4e79ca914bdd680d082e664d03"
+    },
+    {
+      "id": "methods/pass-at-k.json",
+      "sha256": "272f6d5a5012754520aa3689e2773e498f600336f94b650dd916bdb3514b61c8"
+    },
+    {
+      "id": "methods/provenance-cluster-sign-conformance.json",
+      "sha256": "e12d346125b4caaae62c2d4a8589da39d6eedaf4799e30f22e9037bcbac69900"
+    },
+    {
+      "id": "methods/provenance-cluster-sign-method-spec.json",
+      "sha256": "6869c2cedbb3547753f04b514b96f2ddee267a61c8cfd95f6166a10ed0d8cc6b"
+    },
+    {
+      "id": "methods/provenance-cluster-sign.json",
+      "sha256": "cd12cdd5c0112aa81488310aab2cc13807b1d7a58a06fa5e8c70bd7103eab8f5"
+    },
+    {
+      "id": "methods/subject-isolation.json",
+      "sha256": "234abb532372a672c4b53f42bb23469b310776a10ad334da25bdb30af2de989f"
+    },
+    {
+      "id": "methods/wilson.json",
+      "sha256": "418c7c04f6805353c3e9125aacf8d6bb7936aa63cda11746ac1d32728f8e0df7"
+    },
+    {
+      "id": "miniature-run/benchmark.json",
+      "sha256": "8ea5a1c0984af45d69250af44c2263d109262c04f6aae8a282fb67637a866977"
+    },
+    {
+      "id": "miniature-run/benchmark.sha256",
+      "sha256": "adf2696b6cac437cf049e3636efcc9819c6f0ab3ae34f95d57bbee354162fd86"
+    },
+    {
+      "id": "miniature-run/deliveries.json",
+      "sha256": "bedce8127af4ff7fd55704701cdc374c5fe779813376d998ec7b948fdc2490ed"
+    },
+    {
+      "id": "miniature-run/evaluation-spec.json",
+      "sha256": "6aee9fb4bce8bd8cabed43e2f8c3bffe88862ae180215f5e493d9508aa22f26e"
+    },
+    {
+      "id": "miniature-run/evaluation-spec.sealed.json",
+      "sha256": "6aee9fb4bce8bd8cabed43e2f8c3bffe88862ae180215f5e493d9508aa22f26e"
+    },
+    {
+      "id": "miniature-run/evidence.json",
+      "sha256": "e9e9cf0bae93211434e09d64087bf5ab786952f244ff0c9247f3a334eaecacfb"
+    },
+    {
+      "id": "miniature-run/expected-matrix.json",
+      "sha256": "24b4c94be8baa545ced7bfcdf0aadf9aaf6db9a64d3edb092f5581c589e823a1"
+    },
+    {
+      "id": "miniature-run/expected-matrix.sha256",
+      "sha256": "5194f4e32e8256877099913fc010dae73436df76dc1b696350637fa9a66bb1eb"
+    },
+    {
+      "id": "miniature-run/injected-scope.json",
+      "sha256": "6ed1f7e94bb0528a20903f624c95f47fd8214b5457911d6c25d340537eee2d9f"
+    },
+    {
+      "id": "miniature-run/run.json",
+      "sha256": "c5a81702c8aba6978e7159bdeac7b0439200c5c53dafc260b4032953334af777"
+    },
+    {
+      "id": "miniature-run/run.sha256",
+      "sha256": "dee2a46baaebec2d43a5ac7f49bf47736efcee95a25b41ca4e1d9382bbaf5311"
+    },
+    {
+      "id": "miniature-run/submissions.json",
+      "sha256": "2fee6d2edcdb7927b8a149053039f490f80acbb53ac26884029d7753fff51f4d"
+    },
+    {
+      "id": "miniature-run/tasks.json",
+      "sha256": "7c19e14ef2ebf6de51088c4a1e049ba50e244d99ca32f348be41a0a4335566b4"
+    },
+    {
+      "id": "miniature-run/verdicts.json",
+      "sha256": "3cfa0be76a2f1988641d5db093b17ab1ac1c1e9625d9ebbbcba36dde694d2a66"
+    },
+    {
+      "id": "ordering/transcripts.json",
+      "sha256": "7e9c75881166982f6de603023320c9f20551244e88c2b4207cbe5876e518e009"
+    }
+  ],
+  "errata": [
+    {
+      "id": "exports/eval-log.json",
+      "supersededBy": "exports/matrix-projection.json",
+      "date": "2026-08-12",
+      "reason": "This historical Jinn projection is not an Inspect EvalLog. Use the Jinn-owned Matrix projection fixture; genuine Inspect logs are produced by Inspect itself."
+    },
+    {
+      "id": "methods/paired-delta.json",
+      "supersededBy": "methods/paired-delta-shared-ensemble.v2.json",
+      "date": "2026-08-13",
+      "reason": "methods/paired-delta.json (sha256:ee87f4d240c373131edf81677209e4183c2032db7d015a1149cdcfcc2b5dc7fd) records draws=12000 as the total PRNG evaluations across two seed-identical endpoint passes. Use methods/paired-delta-shared-ensemble.v2.json (sha256:33a81c543ecd8b7bbf0fc99132e9cb3aca96d25365286ce09e5037ac33771c8b), where draws=6000 counts unique variates in their one shared bootstrap ensemble and equals resamples times clusterCount. The superseded fixture bytes and exact pre-correction package artifact must be retained unchanged to verify any record sealed under the old semantics."
+    }
+  ]
+}

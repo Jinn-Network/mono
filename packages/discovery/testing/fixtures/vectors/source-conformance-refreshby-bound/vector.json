@@ -1,0 +1,28 @@
+{
+  "name": "source-conformance-refreshby-bound",
+  "kind": "source-chain",
+  "description": "`refreshBy` must be at most 24h ahead of `issuedAt` under the published-source profile (§5.2) -- one head respects the bound, the other exceeds it.",
+  "input": {
+    "withinBound": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "origin": "did:key:zAgentSourceOne/feed",
+      "sequence": "0000000000000001",
+      "entry": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642",
+      "issuedAt": "2026-07-28T00:00:00.000Z",
+      "refreshBy": "2026-07-28T23:00:00.000Z"
+    },
+    "exceedsBound": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "origin": "did:key:zAgentSourceOne/feed",
+      "sequence": "0000000000000001",
+      "entry": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642",
+      "issuedAt": "2026-07-28T00:00:00.000Z",
+      "refreshBy": "2026-07-30T00:00:00.000Z"
+    },
+    "maxAheadHours": 24
+  },
+  "expect": {
+    "withinBoundConformant": true,
+    "exceedsBoundConformant": false
+  }
+}

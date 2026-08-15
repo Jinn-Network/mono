@@ -1,14 +1,26 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { maskUrlsInMessage } from '../rpc/transport.js';
 import type {
   EnvelopeProjection,
   EnvelopeProjectionMetadataValue,
   EnvelopeProjectionQuery,
 } from '../corpus/types.js';
-import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../harnesses/engine/persistence.js';
+import { ENGAGEMENT_LEDGER_SCHEMA } from '../daemon/engagement-ledger.js';
+import { NATIVE_DISCOVERY_SCHEMA } from '../daemon/native-discovery.js';
+import { NATIVE_OPERATOR_STATE_SCHEMA } from '../daemon/native-operator-state.js';
+import {
+  PROJECTOR_CANONICAL_JOURNAL_SCHEMA,
+  PROJECTOR_CURSOR_SCHEMA,
+  PROJECTOR_OBSERVATIONS_SCHEMA,
+} from '../daemon/projector-cursor.js';
+import { TASK_RUNS_SCHEMA, TaskRunPersistence } from './task-run-persistence.js';
+import { NativeTaskRunReadModel } from './native-task-run-read-model.js';
+import { NativeVerdictTallyReadModel } from './native-verdict-tally-read-model.js';
 import { PHASE_RUNS_SCHEMA, PhaseRunStore } from './phase-runs.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
+import type { VerdictTallyReadModel } from '../types/verdict-tally-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
 import { normalizeEnvelopeRole, type Role } from '../types/envelope.js';
 import { SEVEN_DAY_MS } from '../spend/ai-units.js';
@@ -601,7 +613,15 @@ export class Store {
     this.db.exec(SCHEMA);
     this.db.exec(TASK_RUNS_SCHEMA);
     this.db.exec(PHASE_RUNS_SCHEMA);
+    this.db.exec(ENGAGEMENT_LEDGER_SCHEMA);
+    this.db.exec(NATIVE_DISCOVERY_SCHEMA);
+    this.db.exec(NATIVE_OPERATOR_STATE_SCHEMA);
+    this.db.exec(PROJECTOR_CURSOR_SCHEMA);
+    this.db.exec(PROJECTOR_OBSERVATIONS_SCHEMA);
+    this.db.exec(PROJECTOR_CANONICAL_JOURNAL_SCHEMA);
     this.ensureArtifactsTaskColumns();
+    this.ensureEngagementLedgerRequestIdColumn();
+    this.ensureEngagementLedgerDispatchContextColumns();
     this.ensureRewardClaimsTxIndex();
     this.ensureNetworkArtifactsPeerCatalogId();
     this.ensureErc8004AnchorGasColumns();
@@ -611,15 +631,60 @@ export class Store {
     this.ensureActivityEventCostColumns();
     this.backfillActivityEvents();
     this.recordLegacyRestorationIntentsIgnored();
+    this.clearLegacyBalanceCacheErrors();
+  }
+
+  /**
+   * One-time migration (issue #2402, spec §14.2 item 2): a `balance_cache`
+   * row written before this fix can carry a raw, key-in-path RPC URL in its
+   * `error` column. `getBalanceCache()` re-masks on every read (see there),
+   * which covers every row a client still fetches — but a service/role that
+   * later drops out of the fleet (re-indexed display slot, removed service)
+   * leaves its row un-read forever, so re-mask-on-read never reaches it.
+   * Clearing the column outright at schema-init closes that orphan-row case;
+   * `error` is re-populated on the role's next fetch/failure regardless.
+   */
+  private clearLegacyBalanceCacheErrors(): void {
+    this.db.exec(`UPDATE balance_cache SET error = NULL WHERE error LIKE '%http%'`);
   }
 
   /**
    * Read-only task-run view for the status/build endpoints (#1584). Returns a
    * `TaskRunReadModel` backed by the engine persistence layer, keeping the
    * concrete `TaskRunPersistence` construction out of `api/`.
+   *
+   * Dual-read (one-swap R1, umbrella #2461, DR-2026-08-05): `compositionMode`
+   * selects the SOURCE behind the SAME port. `'native'` returns a read model
+   * over the native aggregate tables (`native_engagements` / `native_evaluations`)
+   * so the status plane reflects native solver + evaluator work; every other
+   * value (absent / `undefined` / `'legacy'`) returns the byte-unchanged legacy
+   * `TaskRunPersistence` over `task_runs`. Both boots work while the daemon is
+   * dark — a legacy operator reads `task_runs`, a flipped native operator reads
+   * the native tables — because in a single boot only one source is populated.
    */
-  taskRunReadModel(): TaskRunReadModel {
+  taskRunReadModel(compositionMode?: 'legacy' | 'native'): TaskRunReadModel {
+    if (compositionMode === 'native') {
+      return new NativeTaskRunReadModel(this.db);
+    }
     return new TaskRunPersistence(this.db);
+  }
+
+  /**
+   * Native verdict-tally read model for the status-plane outcome enrichment
+   * (one-swap R2, umbrella #2461, DR-2026-08-05). Returns a `VerdictTallyReadModel`
+   * over the native projector's canonical observation store
+   * (`native_canonical_observations`, joined to `native_engagements` for the
+   * decimal taskId), keeping the concrete read out of `api/` (#1584).
+   *
+   * This is native-only by construction: in legacy mode the per-task verdict
+   * tallies come from the network indexer through `DiscoveryAPI.getVerdictTallies`
+   * (not the Store), so `api/gather-status.ts` calls this ONLY when
+   * `compositionMode: "native"`. Dark on every legacy boot — the dual-read
+   * selection lives in `gather-status` (its `readPlaneMode` seam), exactly as
+   * R1's task-run repoint.
+   */
+  verdictTallyReadModel(): VerdictTallyReadModel {
+    return new NativeVerdictTallyReadModel(this.db);
   }
 
   /** Opaque generator phase-run persistence (#2042). */
@@ -645,6 +710,37 @@ export class Store {
       this.db.exec(`ALTER TABLE artifacts ADD COLUMN task_cid TEXT`);
     }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id)`);
+  }
+
+  /**
+   * Older on-disk DBs predate `request_id` on `engagement_ledger` (cutover stage 1 close-out C1
+   * / finding E24 gap 2 -- see `../daemon/engagement-ledger.ts`'s schema doc comment).
+   */
+  private ensureEngagementLedgerRequestIdColumn(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(engagement_ledger)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'request_id')) {
+      this.db.exec(`ALTER TABLE engagement_ledger ADD COLUMN request_id TEXT`);
+    }
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_engagement_ledger_request_id ON engagement_ledger (request_id)`,
+    );
+  }
+
+  /**
+   * Older on-disk DBs predate `dispatch_context_digest`/`dispatch_context_bytes` on
+   * `engagement_ledger` (finding E35, ruled -- see `../daemon/engagement-ledger.ts`'s schema doc
+   * comment: the work loop seals the dispatch-context document once, at claim time, into this
+   * row).
+   */
+  private ensureEngagementLedgerDispatchContextColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(engagement_ledger)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('dispatch_context_digest')) {
+      this.db.exec(`ALTER TABLE engagement_ledger ADD COLUMN dispatch_context_digest TEXT`);
+    }
+    if (!names.has('dispatch_context_bytes')) {
+      this.db.exec(`ALTER TABLE engagement_ledger ADD COLUMN dispatch_context_bytes TEXT`);
+    }
   }
 
   /** Older on-disk DBs predate `peer_catalog_id` on network_artifacts. */
@@ -2046,7 +2142,16 @@ export class Store {
       bondWei: r.bond_wei,
       assetExtraJson: r.asset_extra_json,
       fetchedAt: r.fetched_at,
-      error: r.error,
+      // Re-mask on read (issue #2402, spec §14.2 item 2) — NOT a one-shot
+      // scrub, this runs on every call. A row written before gather-status.ts's
+      // `errorMessage` choke point started masking RPC URLs can carry a raw
+      // key-in-path error string; masking again here is idempotent
+      // (already-masked errors have no `http(s)://` substring left to match)
+      // and guarantees such a row stops leaking on its very next read. The
+      // actual one-shot scrub is `clearLegacyBalanceCacheErrors()` at
+      // schema-init, which also covers rows for a role that's since dropped
+      // out of the fleet and would otherwise never be read again.
+      error: r.error === null ? null : maskUrlsInMessage(r.error),
     }));
   }
 

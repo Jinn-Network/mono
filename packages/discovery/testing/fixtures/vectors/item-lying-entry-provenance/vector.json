@@ -1,0 +1,49 @@
+{
+  "name": "item-lying-entry-provenance",
+  "kind": "item",
+  "description": "A query service cites a REAL entry digest that the consumer has genuinely verified onto the source's chain -- but that entry's own announcements[] does not announce this item at all (a different announcementId and a different record entirely). §10.4 step 3 requires the cited entry's OWN content to corroborate the claimed announcementId/record, not merely that some verified entry exists at that digest.",
+  "input": {
+    "item": {
+      "record": {
+        "kind": "https://spec.jinn.network/records/submission/v1",
+        "digest": "sha256:74d324af9ca0760378e5c7f3ffcad156d6460c84721ae8cc5d43dc10fff228e1"
+      },
+      "provenance": {
+        "source": {
+          "agent": "did:key:zAgentSourceOne",
+          "name": "feed"
+        },
+        "entry": "sha256:f6eea43ee20431b9c30d4dc1e17aa2407090ae2eb5a9534debd24dc35da1cc20",
+        "announcementId": "ann-lying-target"
+      }
+    },
+    "fetchedBytes": {
+      "note": "item-lying-entry-provenance fixture record bytes",
+      "kind": "submission"
+    },
+    "citedEntry": {
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "source": {
+        "agent": "did:key:zAgentSourceOne",
+        "name": "feed"
+      },
+      "sequence": "0000000000000001",
+      "previous": null,
+      "timestamp": "2026-07-28T12:00:00Z",
+      "announcements": [
+        {
+          "announcementId": "ann-unrelated",
+          "action": "available",
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          }
+        }
+      ]
+    },
+    "chainVerified": true
+  },
+  "expect": {
+    "status": "unauthorized-provenance"
+  }
+}

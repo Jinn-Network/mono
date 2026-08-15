@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,11 @@ import {
   InsufficientDiskError,
   matchInfraSignature,
 } from '../../../../src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.js';
+import {
+  CommandTimeoutError,
+  resolveImageDigest,
+  type CommandRunner,
+} from '../../../../src/solver-types/_swe-rebench-v2-substrate.js';
 
 // CI runners can have <20 GB free; tests construct PythonEvalRunner without
 // passing freeDiskBytes/diskFloorBytes, so the production env-driven 20 GB
@@ -17,6 +22,16 @@ import {
 // positive value here). Tests that exercise the disk-floor path pass their
 // own freeDiskBytes/diskFloorBytes options and are unaffected by this env.
 process.env['JINN_EVAL_DISK_FLOOR_GB'] = '0.000001';
+
+// Most tests here construct PythonEvalRunner without injecting `pruneRound` or
+// `commandRunner`, so the production cleanup shells out to the real `docker`
+// CLI. On a host whose Docker daemon is wedged those calls hang until their
+// bound expires, and the production default is 5 minutes — which would make
+// this file take hours. Pin a short bound: cleanup is incidental to every
+// assertion in this file (a timed-out prune is swallowed and logged), and the
+// `docker command timeouts` block below sets its own bound via the constructor
+// option (explicit option > env > default), so its assertions are unaffected.
+process.env['JINN_SWE_REBENCH_COMMAND_TIMEOUT_MS'] = '1000';
 
 const tempDirs: string[] = [];
 
@@ -663,5 +678,72 @@ describe('matchInfraSignature — 2026-05-14 triage fingerprints', () => {
   it('does NOT match a benign mention of .venv in a non-collision log', () => {
     const benign = 'INFO: Created virtual environment at /testbed/.venv';
     expect(matchInfraSignature(benign)).toBeNull();
+  });
+});
+
+/**
+ * A wedged Docker daemon makes every `docker` CLI call hang forever. Because
+ * `pruneRound` runs in `runEval`'s `finally`, an unbounded prune blocked the
+ * grade job *before* its attempt record was written — which is why hung runs
+ * left stale attempt records behind. Each docker call is now individually
+ * bounded, and a timeout is logged distinctly from a real Docker failure.
+ */
+describe('docker command timeouts', () => {
+  /** Stands in for a wedged daemon: every `docker` call simply never settles. */
+  const neverResolves: CommandRunner = () => new Promise<never>(() => {});
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('still returns the grade when every docker call is wedged', async () => {
+    const upstreamRepoDir = makeUpstreamFixture();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await new PythonEvalRunner({
+      upstreamRepoDir,
+      maxWorkers: 1,
+      commandRunner: neverResolves,
+      dockerCommandTimeoutMs: 25,
+    }).runEval(REQUEST);
+
+    // The eval graded fine; only the docker-side digest lookup and cleanup hung.
+    expect(result.passed_match).toBe(true);
+    expect(result.imageDigest).toBeUndefined();
+    // Every prune step timed out and was logged as a timeout, not as a Docker failure.
+    const warnings = warn.mock.calls.map((c) => String(c[0]));
+    expect(warnings.some((w) => /docker rmi .* timed out after 25ms/.test(w))).toBe(true);
+    expect(warnings.some((w) => /docker container prune -f timed out/.test(w))).toBe(true);
+    expect(warnings.some((w) => /docker builder prune -f timed out/.test(w))).toBe(true);
+    expect(warnings.some((w) => /Docker daemon may be wedged/.test(w))).toBe(true);
+  });
+
+  it('bounds the low-disk system prune too', async () => {
+    const upstreamRepoDir = makeUpstreamFixture();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Free disk stays below the floor, so `ensureDiskHeadroom` prunes and
+    // re-probes. With a wedged daemon that prune must abort, not hang.
+    await expect(new PythonEvalRunner({
+      upstreamRepoDir,
+      maxWorkers: 1,
+      commandRunner: neverResolves,
+      dockerCommandTimeoutMs: 25,
+      diskFloorBytes: 1_000_000_000,
+      freeDiskBytes: async () => 1,
+    }).runEval(REQUEST)).rejects.toBeInstanceOf(InsufficientDiskError);
+
+    expect(warn.mock.calls.map((c) => String(c[0])).some(
+      (w) => /docker system prune -f timed out/.test(w),
+    )).toBe(true);
+  });
+
+  it('surfaces a timeout as a typed error a caller can tell from a Docker failure', async () => {
+    const err = await resolveImageDigest('img:latest', neverResolves, 25).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CommandTimeoutError);
+    // A real Docker failure resolves with a non-zero exit and yields null.
+    expect(await resolveImageDigest('img:latest', async () => ({
+      exitCode: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon',
+    }))).toBeNull();
   });
 });

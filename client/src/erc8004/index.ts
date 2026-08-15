@@ -38,7 +38,7 @@ export {
   validatePayloadV2,
   codeDigestSha256ToBytes32,
   modeStringToFlag,
-  resolveAgentIdForManifest,
+  protocolExecutorMode,
   type ContentKind,
   type ExecutionPayload,
   type ExecutionPayloadV2,
@@ -49,8 +49,6 @@ export {
   type PublishContentResult,
   type PublishContentV2Args,
   type ManifestPublishArgs,
-  type ResolveAgentIdArgs,
-  type ResolvedAgent,
 } from './identity.js';
 export {
   createPublisherSafeResolver,

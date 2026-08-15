@@ -4,7 +4,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import type { CommitEchoCandidate } from './_swe-rebench-v2-commit-echo.js';
 import {

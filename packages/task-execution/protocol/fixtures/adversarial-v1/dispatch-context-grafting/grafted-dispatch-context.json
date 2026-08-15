@@ -1,0 +1,6 @@
+{
+  "taskDigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+  "submission": "urn:uuid:f000000f-0000-5000-8000-00000000000f",
+  "nonce": "grafted-nonce-not-actually-conveyed-at-dispatch",
+  "attempt": "urn:uuid:f0000010-0000-5000-8000-000000000010"
+}

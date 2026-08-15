@@ -61,7 +61,7 @@ Full-screen takeover that narrates the [11-step fleet bootstrap state machine](.
 
 When bootstrap reaches `complete`, the daemon flips into running mode and the SPA transitions to Operating. There is no Phase 4 — onboarding is one-time, not a permanent dashboard region.
 
-**Claude auth and the per-harness gate.** The daemon runs regardless of whether Claude is authenticated. Auth state is surfaced per-harness: each Harness that spawns a `claude` subprocess (currently `claude-code-learner`, `claude-mcp-prediction`, and `claude-mcp-prediction-apy`) implements `isReady()` via `probeClaudeAuth`. The engine-watcher skips claiming Tasks on SolverNets whose Harness returns `ready: false`; all other loops (reward-claim, delivery-watcher, peer-sync, etc.) continue normally. Per-harness auth setup is handled in the `/operator/join` flow (Stage B of the per-harness auth spec), where the SPA's `HarnessPrecheckPanel` reads the `isReady()` response and surfaces the appropriate `nextStep` action — install or sign-in.
+**Claude auth and the per-harness gate.** The daemon runs regardless of whether Claude is authenticated. Auth state is surfaced per-harness: each Harness that spawns a `claude` subprocess (currently `claude-code-learner`, `claude-mcp-prediction`, and `claude-mcp-prediction-apy`) implements `isReady()` via `probeClaudeAuth`. `HarnessReadinessRegistry` (`src/harnesses/readiness-registry.ts`) composes those probes on a refresh tick and serves them to `GET /v1/status` and the harness readiness / auth-status endpoints; the SPA's `HarnessReadinessStep` reads them and surfaces the appropriate `nextStep` action — install or sign-in. Readiness is **reporting, not a claim gate**: Wave-4 D1 retired the engine-watcher that skipped claiming on `ready: false`, and claim eligibility is now Settings → Claim policy & wiring ([`client/OPERATOR-APP-SPEC.md`](OPERATOR-APP-SPEC.md) §2.15). An unauthenticated harness therefore fails at execution time rather than being filtered before the claim.
 
 ### 3.2 Operating — bootstrap complete
 
@@ -76,7 +76,7 @@ The two-mode design — onboarding takeover, then operating dashboard — is int
 
 ### 3.3 Auth and binding
 
-The SPA is loopback-only by default. On startup the daemon prints a one-shot handshake URL with a random `?k=<key>` query param; the launcher opens it and the SPA exchanges the key for a `jinn_ui_token` cookie via `/auth/handshake`. Cost-mutating routes additionally require a bearer token (`DAEMON_API_TOKEN`, generated per-process unless the operator pins one). Details: `src/api/handshake.ts`, `src/api/ui-token.ts`, the SPA dev README at [`src/dashboard/spa/README.md`](src/dashboard/spa/README.md).
+The SPA is loopback-only by default. On startup the daemon prints a one-shot handshake URL with a random `?k=<key>` query param; the launcher opens it and the SPA exchanges the key for a `jinn_ui_token` cookie via `/auth/handshake`. Cost-mutating routes additionally require a bearer token (`DAEMON_API_TOKEN`, generated per-process unless the operator pins one). `GET /v1/status` is token-gated like every other operator-class route (spec §14.5); `GET /health`, `GET /ready`, and `GET /metrics` are the deliberate exception — shallow, unauthenticated-safe liveness/readiness/metrics endpoints for supervisors and scrapers (spec §6.1–§6.2). Details: `src/api/handshake.ts`, `src/api/ui-token.ts`, `src/api/health-endpoint.ts`, `src/api/metrics-endpoint.ts`, the SPA dev README at [`src/dashboard/spa/README.md`](src/dashboard/spa/README.md).
 
 ## 4. The CLI substrate
 
@@ -111,15 +111,15 @@ A `jinn run` process is layered top-to-bottom roughly like this:
   │   src/earning/bootstrap.ts  src/earning/store.ts           │
   ├────────────────────────────────────────────────────────────┤
   │ Daemon orchestrator                                        │
-  │   CreatorLoop · engine-watcher · engine-tick ·             │
-  │   DeliveryWatcher · RewardClaim · BalanceTopup ·           │
-  │   JinnClaim (L1↔L2) · PeerSync                             │
+  │   work · evaluator · posting · projector ·                 │
+  │   evidence-driver · reward-claim · balance-topup ·         │
+  │   eviction-check · checkpoint · harvest · watchdog         │
   │   src/daemon/daemon.ts + src/daemon/*-loop.ts              │
   ├────────────────────────────────────────────────────────────┤
-  │ Task engine                                                │
-  │   canAcceptTask · observe · process state machine ·        │
-  │   recoverInFlight · runTickLoop                            │
-  │   src/harnesses/engine/engine.ts                           │
+  │ Work pipeline + native coordinators                        │
+  │   claim gate · engagement ledger · spend caps ·            │
+  │   runPipeline: claim → submit → deliver → settle           │
+  │   src/daemon/composition-root.ts  native-*-coordinator.ts  │
   ├────────────────────────────────────────────────────────────┤
   │ Harness registry + SolverNet registry + Plugins            │
   │   solverType → harness selection · canonical + extra       │
@@ -150,21 +150,28 @@ The boundaries are real: each layer's interface is a TypeScript module export, a
 
 ## 6. Daemon loops
 
-The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises a fixed set of long-running loops. The README's "three concurrent loops" model is out of date; the current shape is eight, plus one-shot recovery on startup.
+The daemon orchestrator (`src/daemon/daemon.ts`) starts and supervises the long-running loops. There is no fixed set — **every loop is conditional**, so the running shape is a function of the vertical mode (`legacy` or `native-v1`) and config. `Daemon.start()` computes the started set (search `started.add(` in `daemon.ts`); `LOOP_REGISTRY` in `daemon/loop-heartbeat.ts` is the single source of loop names, heartbeat intervals, and admission class.
 
-| Loop | File | Job |
-|---|---|---|
-| `recoverInFlight` (one-shot) | `harnesses/engine/engine.ts` | On startup, walks SQLite for tasks left mid-state by a previous crash and re-enters their state machines. |
-| Creator | `daemon/creator.ts` | Pulls Tasks from configured `TaskSource`s and posts each via `JinnRouter.createTask`. Idempotent per `(creatorMultisig, desiredStateId)`. |
-| Engine-watcher | `daemon/daemon.ts` (`_runEngineWatcherLoop`) | Consumes `adapter.watchForTasks()` async iterator, calls `engine.canAcceptTask`, claims via `adapter.claimTask`, then `engine.observe` + fire-and-forget `engine.process`. Claim eligibility is gated by `joinedSolverNets[<manifestCid>]` — see §6.1 below. Per-operator claim policy is enforced on-chain via `canClaimTask`; the adapter must not impose an additional in-memory floor. |
-| Engine-tick | `harnesses/engine/engine.ts` (`runTickLoop`) | Every `pollIntervalMs`, drives in-flight Tasks whose state transitions are time-based rather than event-driven. |
-| Delivery-watcher | `daemon/delivery-watcher.ts` | Watches for delivered Solutions, calls `JinnRouter.claimDelivery` to settle them, and (for restoration role) creates the paired evaluation job. |
-| Reward-claim | `daemon/reward-claim-loop.ts` | Periodically pulls pending stOLAS distributor rewards for the master EOA. Disabled when `rewardClaimIntervalMs <= 0`. |
-| Balance-topup | `daemon/balance-topup-loop.ts` | Refills agent EOA gas + Safe ETH from the master wallet when balances cross configured thresholds. |
-| JinnClaim (L1↔L2) | `daemon/jinn-claim-loop.ts` | Cross-chain JINN claim path — emits `ClaimTicket` on L2, waits for L2→L1 finality (canonical) or plants a fixture (mock), submits the L1 distributor claim. Disabled unless `JINN_ETHEREUM_RPC_URL` and the JINN MVI artifacts are configured. |
-| Peer-sync | `api/peers.ts` (`PeerSync`) | When peers are configured, periodically syncs artifacts and node metadata from peer endpoints. Optional. |
+**Admission class** comes from `LOOP_REGISTRY`. `always` loops run whatever the daemon's readiness; `ready-only` loops are held while readiness is `bootstrapping` or `degraded`, so a daemon that has not finished — or has fallen out of — bootstrap does not claim, post, or settle.
 
-Each loop runs as a background Promise; failures emit a structured error event but do not crash the process. `daemon.stop()` signals each loop, drains in-flight work with a configurable timeout, and closes resources.
+| Loop | File | Starts when | Job |
+|---|---|---|---|
+| Work | `daemon/work-loop.ts` | `composition` + `work` configured | The native solver loop. Per card announced by the projector's archive: gate on projector catch-up, map to `SubmissionFacts`, gate on the rolling-window AI-units / spend-cap accounting, admit a claim intent in the engagement ledger, then drive the pipeline claim → submit → deliver → settle. Also reconciles in-flight settlements every tick. |
+| Evaluator | `daemon/evaluator-loop.ts` | `evaluator` configured | The evaluator counterpart of `work`: recover in-flight work → poll the signed opportunity source → acquire subject material → evaluate → deliver + settle a verdict. |
+| Posting | `daemon/posting-loop.ts` | native mode + non-empty `posting[]` | The native counterpart of `creator` — drives the requester's `posting[]` config through the marketplace binding. |
+| Projector | `daemon/projector-loop.ts` | `composition` configured | Reads venue chain events, reduces them into marketplace projection state, and publishes signed announcements into the local discovery archive the work loop reads. |
+| Evidence-driver | `daemon/evidence-driver.ts` | `composition` configured | Drives `sync()` on the local evidence runtime, decides publication, and surfaces indexing failures for the `/v1/status` rollup and the `evidence_indexing_failed` notification. |
+| Reward-claim | `daemon/reward-claim-loop.ts` | `rewardClaim.intervalMs > 0` | Periodically pulls pending stOLAS distributor rewards for all staked fleet services. |
+| Balance-topup | `daemon/balance-topup-loop.ts` | `balanceTopup.intervalMs > 0` | Refills agent EOA gas + Safe ETH from the master wallet when balances cross configured thresholds. |
+| Eviction-check | `daemon/eviction-loop.ts` | `evictionCheck.intervalMs > 0` | Polls each complete service's staking state; on `Evicted`, restakes it without needing a daemon restart. |
+| Checkpoint | `daemon/checkpoint-loop.ts` | `checkpoint.intervalMs > 0` | Calls bare `checkpoint()` on each staking proxy hosting a fleet service, so `tsCheckpoint` advances on the operator's pace rather than waiting for someone else to invoke it. |
+| Harvest | `daemon/harvest-loop.ts` | `harvest` enabled with repos or `sessions` | Commit-echo mining from configured local repos (task-creator v0). |
+
+Startup also runs **one-shot in-flight recovery** before any loop takes new work: `NativeOperatorHost.start()` in `native-v1`, `WorkLoop.initialize()` otherwise, which re-drives admitted claims and unsettled solutions (`reconcileStartup`) and syncs discovery. The work loop repeats the same reconcile on a cadence thereafter.
+
+Each loop runs as a background Promise; failures emit a structured error event but do not crash the process. The watchdog (`daemon/watchdog-loop.ts`) registers every started loop against its `LOOP_REGISTRY` heartbeat and exits non-zero when one goes stale, letting the supervisor restart through the idempotent boot path. `daemon.stop()` signals each loop, drains in-flight work with a configurable timeout, and closes resources.
+
+> Wave-4 D6 removed `creator`, `engine-tick`, `engine-watcher`, `delivery-watcher`, and `peer-sync` from `LOOP_REGISTRY` after D1–D4 deleted those loops ([DR-2026-08-05](../log/decisions/2026-08-05-cutover-one-swap-collapse.md), addendum 2026-08-13). Remaining ten: `posting`, `reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`, `projector`, `evidence-driver`, `work`, `evaluator`. Intervals and admission of the survivors are unchanged.
 
 ### 6.1 Generator ownership and the launched-record subsystem
 
@@ -172,20 +179,19 @@ A SolverNet's **generator** (the Creator-loop input that synthesizes new Tasks f
 
 On startup, `src/main.ts` walks the launched-record store at `~/.jinn-client/solvernets/launched/` for records this operator owns. For each record where `status === 'launched'` and `generatorEnabled === true`, the daemon constructs the matching SolverType-specific generator and wires it as a `TaskSource` on the Creator loop. Generator-config edits (cadence / allowlist / blocklist) hot-apply: the launcher SPA's PATCH writes both the on-disk record *and* an in-memory mirror inside the running generator's closure, so cadence changes take effect within one generator tick (no daemon restart). This was a P0 bug in the predecessor Launcher mode (`jinn-mono-p1t4.2`) and is regression-tested.
 
-Operator-side participation is the dual surface: writing a `joinedSolverNets[<manifestCid>]` config entry (via the SPA's Operator · Join flow at `/operator/join/:cid`) opts the operator into claiming Tasks for that launched SolverNet. The engine-watcher's `canAcceptTask` filters on these entries — a daemon with no joined SolverNets claims *no* tasks, and tasks whose `solverNetManifestCid` is not in `joinedSolverNets` are ignored regardless of contract type. Joining never starts a generator; that's launcher-only.
+Operator-side participation is the dual surface: a `joinedSolverNets[<manifestCid>]` config entry records which launched SolverNets this operator participates in. Wave-4 D1 retired the join/leave write path and the `canAcceptTask` claim gate that read it, so these entries no longer gate claiming — claim eligibility is Settings → Claim policy & wiring ([`client/OPERATOR-APP-SPEC.md`](OPERATOR-APP-SPEC.md) §2.15), and `/operator/memberships` is a read-only view until cutover stage 5. What the entries still do is scope discovery: at boot `main.ts` derives `taskDiscoveryManifestCids` from the entries holding the `solver` role and `evaluatorEnabled` from those holding `evaluator`, so a daemon with no joined SolverNets discovers no task or evaluation opportunities. Both are read once at startup — edits are restart-required, not hot-applied. Membership never starts a generator; that's launcher-only.
 
 The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone. Internal harness dispatch may still alias `solverType = `${contractId}.${contractVersion}`` for one migration cycle (per spec §15); new code does not introduce dependencies on it.
 
-### 6.2 SolverNet registry — IdentityRegistry-anchored manifests over IPFS
+### 6.2 SolverNet launch publish — IdentityRegistry-anchored manifests over IPFS
 
-Launched SolverNet manifests are discovered and resolved through a `SolverNetRegistryClient` (canonical interface in [`spec/2026-05-05-solvernet-creation-and-launch.md`](../spec/2026-05-05-solvernet-creation-and-launch.md) §13). The day-1 implementation is `IdentityRegistryBackedSolverNetRegistryClient`:
+Wave-4 D4 retired the ERC-8004 registry *reader* (`registry-client.ts`, `GET /v1/solvernets/registry*`). Catalog reads go through `discovery-client.listLaunchedSolverNets`. The launch path still pins a canonical manifest to IPFS and broadcasts `IdentityRegistry.setMetadata` via `client/src/solvernets/launch-publisher.ts` (helpers carved out of the retired client so launch recovery keeps working):
 
-- **Publish** — `publishManifest` canonicalizes the manifest (RFC 8785 JCS), pins the JSON to IPFS via `client/src/adapters/mech/ipfs.ts`, then calls `IdentityRegistry.setMetadata(launcherAgentId, "solvernet-manifest:<cid>", { schemaVersion: 'solvernet.lifecycle.v1', status, at, hash })`. This piggybacks the existing `IdentityPublisher` pattern (`client/src/erc8004/identity.ts`) and the network-trust v0 attestation pattern (`client/src/network-trust/attestation.ts`) — no new contract.
-- **Lifecycle transitions** (`publishLifecycleTransition`) are additional `setMetadata` writes against the same `solvernet-manifest:<cid>` key with updated `status` (`launched | paused | retired`). The manifest itself is signed once at launch and never re-signed; lifecycle authenticity flows from `msg.sender == launcher's agent wallet` (enforced on-chain by IdentityRegistry's access control on `setMetadata`).
-- **Discover** (`listLaunched`) — subgraph query for `Registered` events `WHERE key LIKE 'solvernet-manifest:%'` (no agentId filter — the registry is global per spec principle 6). The most-recent-wins resolver (`client/src/network-trust/most-recent-wins.ts`) picks the latest event per `(agentId, cid)` tuple to compute current status.
-- **Resolve** (`getManifest`) — IPFS fetch via the Autonolas gateway (or any configured gateway). Trust chain: signature recovers the agent EOA → `IdentityRegistry.getAgentByWallet(signer, atBlock: anchorBlock)` → `IdentityRegistry.getSafeForAgent(agentId, atBlock: anchorBlock)` MUST equal `manifest.launcher.safeAddress`. A stolen agent EOA can publish fake manifests but cannot redirect funding away from the legitimate launcher's Safe.
+- **Pin + broadcast** — canonicalize the manifest (RFC 8785 JCS), pin the JSON to IPFS via `client/src/adapters/mech/ipfs.ts`, then `IdentityRegistry.setMetadata(launcherAgentId, "solvernet-manifest:<cid>", { schemaVersion: 'solvernet.lifecycle.v1', status, at, hash })`. This piggybacks the existing `IdentityPublisher` pattern (`client/src/erc8004/identity.ts`) — no new contract.
+- **Lifecycle vocabulary** — `encodeLifecyclePayload` / `SOLVERNET_MANIFEST_KEY_PREFIX` stay; Wave-4 D3 retired the lifecycle *producer*, not the on-wire shape. Authenticity still flows from `msg.sender == launcher's agent wallet`.
+- **Most-recent-wins** — `client/src/solvernets/most-recent-wins.ts` remains for launch recovery (mempool-drop detection), not as a catalog reader.
 
-There is no hosted index, no dedicated SolverNet registry contract, and no launcher follow-list. The subgraph is the discovery substrate. The interface in spec §13 lets us swap backings (gas optimisation, alternative gateway, on-chain registry) without touching the manifest schema or operator flow.
+There is no hosted SolverNet registry contract and no launcher follow-list. Spec §13's client interface is gone from this process; the indexer GraphQL catalog (`discovery-client`) is the remaining list/resolve path.
 
 ## 7. Task lifecycle, end-to-end
 
@@ -199,39 +205,35 @@ operator                  daemon process              chain / network
                          └► adapter.submitTask  ────► JinnRouter.createTask
                                                       (Mech Marketplace announces)
 
-2.                          engine-watcher  ◄──────── adapter.watchForTasks
-                            │                         (claims arrive)
-                            ├► engine.canAcceptTask
-                            ├► adapter.claimTask  ──► JinnRouter (claim fee)
-                            ├► engine.observe (record provenance)
-                            └► engine.process
-                                │
-                                ├► SolverNet.resolve(solverType)
-                                ├► Harness.run(ctx)
+2.                          projector  ◄────────────── venue chain events
+                            └► signed announcements → local discovery archive
+                            work loop  ◄── announced cards from that archive
+                            ├► ClaimGate (is the projector caught up?)
+                            ├► SubmissionFacts + AI-units / spend-cap gate
+                            ├► ledger.admitClaimIntent (before any broadcast)
+                            └► runPipeline
+                                ├► claim  ─────────────► JinnRouter (claim fee)
+                                ├► backend.submit → Harness.run(ctx)
                                 │   ├► runner-scoped MCP (acquire_artifact, …)
                                 │   ├► corpus / subgraph / x402 reads
                                 │   └► ClaudeRunner spawns `claude` subprocess
                                 ├► packaging (artifact → SQLite served_artifacts)
                                 ├► envelope assembly (manifest → IPFS)
                                 ├► IdentityPublisher.setMetadata  ─► ERC-8004 IdentityRegistry
-                                └► adapter.deliverToMarketplace ──► Mech Marketplace
-                                                                    JinnRouter.claimDelivery
+                                └► deliver + settle ────► Mech Marketplace
+                                                          JinnRouter.claimDelivery
 
-3.                          delivery-watcher  ◄────── delivery events
-                            ├► JinnRouter.claimDelivery (operator-side)
-                            └► (restoration role) creates evaluation Task
-                                back to step 1 with role='evaluation'
+3.                          evaluator loop
+                            ├► poll the signed opportunity source
+                            ├► acquire subject material
+                            ├► evaluate, then deliver + settle a verdict
+                            └► ReputationRegistry.giveFeedback ─► ERC-8004 ReputationRegistry
+                                                                  (rates the harness's agent NFT)
 
-4.                          (evaluation Harness runs as in step 2)
-                            └► after evaluator's claimDelivery:
-                                ReputationRegistry.giveFeedback ─► ERC-8004 ReputationRegistry
-                                                                    (rates the harness's agent NFT)
-
-5.                          reward-claim-loop  ──────► stOLAS distributor
-                            └► (Phase 2) JinnClaim loop ─► JinnDistributor on L1
+4.                          reward-claim loop  ──────► stOLAS distributor
 ```
 
-The boundaries between steps are persisted in SQLite, so a crash anywhere is recoverable: `recoverInFlight` re-enters the state machine for any task left mid-flight, and the loops are idempotent.
+The boundaries between steps are persisted in SQLite, so a crash anywhere is recoverable: startup recovery (`NativeOperatorHost.start()` / `WorkLoop.initialize()`) re-drives admitted claims and unsettled solutions, and the loops are idempotent.
 
 A few non-obvious points:
 
@@ -239,7 +241,7 @@ A few non-obvious points:
 - **Artifact bytes live in the operator's SQLite + HTTP server**, not on IPFS; only the manifest envelope goes to IPFS. Evaluators fetch artifacts from the operator's `publicEndpoint` under x402 payment gating per [`spec/2026-04-30-phase-a-umbrella.md`](../spec/2026-04-30-phase-a-umbrella.md) §1.
 - **ERC-8004 anchoring is gated** on the bootstrap having minted an agent NFT for the active service. When `agent_id` is null on the active service, `IdentityPublisher` and `ReputationFeedback` are disabled with a clear log line.
 - **Tasks carry `solverNetManifestCid` as a BINDING field** (per [`spec/2026-05-05-solvernet-creation-and-launch.md`](../spec/2026-05-05-solvernet-creation-and-launch.md) §14). The on-chain `TaskCoordinator` task digest is `manifestDigest = keccak256(manifestCid)` — manifest-bound, not solverType-bound. This makes operator eligibility per-launch, not per-protocol: an operator participating in launcher A's Prediction is not automatically eligible to claim launcher B's Prediction tasks even though both share the same SolverNet contract. The Task document also carries `contractId` + `contractVersion` (e.g. `prediction` + `v1`) for harness dispatch; daemon-internal code may still use a derived `solverType = `${contractId}.${contractVersion}`` alias for one migration cycle but new code resolves the contract by `{ id, version }`.
-- **Manifest resolution is registry-mediated.** `operator.validateTask(taskDoc)` calls `registry.getManifest({ manifestCid: taskDoc.solverNetManifestCid })`, validates the task against `manifest.contract.schemas.task`, then dispatches via `manifest.contract.id + manifest.contract.version`. The day-1 registry is `IdentityRegistryBackedSolverNetRegistryClient` (see §6.2 below); the abstraction lets the backing be swapped without touching the manifest schema or operator flow.
+- **Manifest resolution is local + indexer-mediated.** Task validation reads the launched-record / IPFS manifest for `taskDoc.solverNetManifestCid`, then dispatches via `manifest.contract.id + manifest.contract.version`. Wave-4 D4 deleted the in-process ERC-8004 registry client; catalog list/resolve goes through `discovery-client` (see §6.2).
 
 ## 8. Extension points
 
@@ -277,7 +279,7 @@ Plugin authoring is documented at [`client/docs/solver-plugins.md`](docs/solver-
 
 ### Peers and corpus
 
-When `subgraphUrl` is configured, the daemon backfills artifact metadata and node endpoints from the Jinn ERC-8004 subgraph at startup, and the runtime corpus (`src/corpus/`) is wired so MCP tools (`search_artifacts`, `acquire_artifact`) can serve cross-operator queries. When `peers` is configured, `PeerSync` (`src/api/peers.ts`) periodically pulls artifact lists from each peer's HTTP endpoint.
+When `subgraphUrl` is configured, the daemon backfills artifact metadata and node endpoints from the Jinn ERC-8004 subgraph at startup, and the runtime corpus (`src/corpus/`) is wired so MCP tools (`search_artifacts`, `acquire_artifact`) can serve cross-operator queries. Wave-4 D4 retired the peer-sync loop; `peers` / `JINN_PEERS` remain parseable but unused.
 
 ### Local API extensions
 
@@ -297,7 +299,8 @@ A short pointer table for engineers diving in:
 | Adding a Harness (external npm) | [`client/docs/path-2/`](docs/path-2/) |
 | Authoring a SolverPlugin | [`client/docs/solver-plugins.md`](docs/solver-plugins.md) |
 | Bootstrap state machine | `src/earning/bootstrap.ts`, `src/earning/types.ts` |
-| Engine state machine | `src/harnesses/engine/engine.ts` |
+| Daemon loops + admission | `src/daemon/daemon.ts`, `src/daemon/loop-heartbeat.ts` |
+| Native work pipeline | `src/daemon/work-loop.ts`, `src/daemon/composition-root.ts` |
 | Marketplace adapter calls | `src/adapters/mech/contracts.ts`, `src/adapters/mech/adapter.ts` |
 | Storage schema | `src/store/store.ts` |
 | Launched-record store + draft store | `src/solvernets/store.ts`, `src/solvernets/launch-state-machine.ts`, `src/solvernets/lifecycle-transitions.ts` |
@@ -306,7 +309,7 @@ A short pointer table for engineers diving in:
 | Runner-scoped MCP tools | `src/mcp/server.ts` |
 | Operator SPA | `src/dashboard/spa/` (see its [README](src/dashboard/spa/README.md)) |
 | Launcher pages | `src/dashboard/spa/src/pages/Launcher.tsx`, `LauncherCreate.tsx`, `LauncherLaunched.tsx` |
-| Operator join flow | `src/dashboard/spa/src/pages/operator-catalog/JoinFlow.tsx` |
+| Operator memberships (read-only) | `src/dashboard/spa/src/pages/operator/MembershipsTab.tsx`, `src/dashboard/spa/src/pages/operator-catalog/RegistryCatalog.tsx` |
 | Tests | `client/test/` (see [`docs/runbooks/testing.md`](../docs/runbooks/testing.md)) |
 
 ## 10. Canonical references

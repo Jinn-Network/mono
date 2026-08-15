@@ -1,0 +1,219 @@
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { test } from 'node:test';
+
+const root = resolve(import.meta.dirname, '../..');
+const packageRoot = join(root, 'packages', 'environments');
+const DEPENDENCY_SECTIONS = [
+  'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
+];
+
+const ENVIRONMENT_PACKAGES = [
+  ['record', '@jinn-network/environment-record'],
+  ['verification', '@jinn-network/environment-verification'],
+  ['chain-record', '@jinn-network/chain-environment-record'],
+  ['chain-verification', '@jinn-network/chain-environment-verification'],
+  ['chain-extraction', '@jinn-network/chain-state-extraction'],
+  ['information-world', '@jinn-network/information-world'],
+];
+
+// Cross-tree Jinn dependencies live outside packages/environments; map name -> absolute dir
+// (benchmarking-package-inventory.test.mjs precedent).
+const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
+  ['@jinn-network/trust-testing', join(root, 'packages', 'trust', 'testing')],
+]);
+
+const JINN_DEPENDENCY_GRAPH = new Map([
+  // `record` is tier 2 and depends on NO Jinn package at runtime (design §3.3: zod +
+  // noble-class primitives only). evidence-protocol is a *test-only* devDependency: the
+  // cross-package seal-equivalence fixtures (program §5 contract 3) compare this package's
+  // locally re-implemented digest against the evidence tree's `recordDigest`. Production
+  // source never imports it; the source-boundary guard enforces that separately.
+  ['record', {
+    dependencies: [],
+    devDependencies: ['@jinn-network/evidence-protocol'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `verification` is tier 3 and takes exactly the two package edges design §3.3 gives it:
+  // the record kind it verifies, and trust/core for DSSE + JCS + hashing. `trust-testing` is
+  // a test-only devDependency: the conformance kit signs with real deterministic keys.
+  // (This map records Jinn dependencies only; `vitest` is an optional peer, asserted below.)
+  ['verification', {
+    dependencies: [
+      '@jinn-network/environment-record',
+      '@jinn-network/trust-core',
+    ],
+    // `trust-resolve` is install-graph only: `trust-testing` is portal-consumed, and a
+    // portal's own resolutions do not apply, so its Jinn dependency must be resolved here.
+    // The source-boundary guard bans importing it from anywhere in this package.
+    devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `chain-record` is tier 2 and depends on NO Jinn package at runtime (design §3: zod +
+  // noble-class primitives only). Two test-only devDependencies carry the cross-package
+  // seal-equivalence legs (program §4 contract 3): `environment-record` is the SWE sibling
+  // this package's primitives were materialized from, and `evidence-protocol` is the
+  // evidence tree's own digest spelling. The chain kind is a SIBLING of the SWE kind, never
+  // an extension of it, so a production import of either is a boundary failure.
+  ['chain-record', {
+    dependencies: [],
+    devDependencies: ['@jinn-network/environment-record', '@jinn-network/evidence-protocol'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `chain-verification` is tier 3 and takes exactly the two package edges design §3 gives
+  // it: the record kinds it verifies, and trust/core for DSSE + JCS + hashing + ordering.
+  // `trust-testing` is a test-only devDependency (the kit signs with real deterministic
+  // keys); `trust-resolve` is install-graph only, because a portal's own resolutions do not
+  // apply and `trust-testing`'s Jinn dependency must be resolved from here.
+  ['chain-verification', {
+    dependencies: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/trust-core',
+    ],
+    devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `chain-extraction` is tier 3. Design §3: it invokes chain-verification's closure check
+  // as a library and depends on the record kind it drafts; its only network dependency is
+  // the injected `ArchiveRpcPort`, which is a type, not a package.
+  ['chain-extraction', {
+    dependencies: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/chain-environment-verification',
+      '@jinn-network/trust-core',
+    ],
+    // `trust-resolve` is install-graph only (a portal's own resolutions do not apply, so
+    // `trust-testing`'s Jinn dependency is resolved here). Importing it is banned below.
+    devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `information-world` is tier 2 + tier 3 in one package (design §3, §4.4) and still takes
+  // ZERO Jinn runtime dependencies: the record layer is pure, and the replay service's only
+  // non-relative import is `node:http`. All three Jinn entries are test-only —
+  // `evidence-protocol` is the seal-equivalence oracle (program §4 contract 3),
+  // `chain-environment-record` is the composite whose composition block this package's routing
+  // input must accept without adaptation, and `chain-environment-verification` owns the CE3
+  // origin-routing assessment exercised by the ownership test. The source-boundary guard
+  // enforces that none reaches production source.
+  ['information-world', {
+    dependencies: [],
+    devDependencies: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/chain-environment-verification',
+      '@jinn-network/evidence-protocol',
+    ],
+    optionalDependencies: [],
+    peerDependencies: [],
+    // CE3's portal package resolves trust/core through its own manifest, but portal
+    // resolutions are local to the consuming package. Keep this install-graph resolution
+    // explicit without misrepresenting trust-core as a direct CE6 dependency.
+    resolutions: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/chain-environment-verification',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/trust-core',
+    ],
+  }],
+]);
+
+function readPackage(directory) {
+  const packageJson = join(packageRoot, directory, 'package.json');
+  assert.ok(existsSync(packageJson), `missing package manifest: ${packageJson}`);
+  return JSON.parse(readFileSync(packageJson, 'utf8'));
+}
+
+function packageManifests(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
+    const child = join(directory, entry.name);
+    const packageJson = join(child, 'package.json');
+    return [
+      ...(existsSync(packageJson) ? [packageJson] : []),
+      ...packageManifests(child),
+    ];
+  });
+}
+
+function jinnDependencyNames(manifest, section) {
+  return Object.keys(manifest[section] ?? {})
+    .filter((name) => name.startsWith('@jinn-network/')).sort();
+}
+
+function expectedPortal(directory, dependencyName) {
+  const inTree = ENVIRONMENT_PACKAGES.find(([, name]) => name === dependencyName);
+  const targetDir = inTree ? join(packageRoot, inTree[0]) : SIBLING_TREE_DIRS.get(dependencyName);
+  assert.ok(targetDir, `${directory} declares unknown Jinn dependency ${dependencyName}`);
+  return `portal:${relative(join(packageRoot, directory), targetDir) || '.'}`;
+}
+
+test('the environments package inventory is explicit and has one manifest per package', () => {
+  assert.equal(ENVIRONMENT_PACKAGES.length, JINN_DEPENDENCY_GRAPH.size);
+  for (const [directory, expectedName] of ENVIRONMENT_PACKAGES) {
+    const manifest = readPackage(directory);
+    assert.equal(manifest.name, expectedName);
+    assert.equal(
+      manifest.repository?.directory,
+      `packages/environments/${directory}`,
+      `${expectedName} has a stale repository directory`,
+    );
+  }
+  const actual = packageManifests(join(root, 'packages', 'environments'))
+    .map((packageJson) => {
+      const { name } = JSON.parse(readFileSync(packageJson, 'utf8'));
+      return [relative(packageRoot, dirname(packageJson)), name];
+    })
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  assert.deepEqual(
+    actual,
+    [...ENVIRONMENT_PACKAGES].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+  );
+});
+
+test('environments package Jinn dependencies and portal resolutions match the approved graph', () => {
+  for (const [directory] of ENVIRONMENT_PACKAGES) {
+    const manifest = readPackage(directory);
+    const approved = JINN_DEPENDENCY_GRAPH.get(directory);
+    assert.ok(approved, `missing dependency graph entry for ${directory}`);
+    for (const section of DEPENDENCY_SECTIONS) {
+      assert.deepEqual(jinnDependencyNames(manifest, section), approved[section],
+        `${directory} has unapproved Jinn ${section}`);
+    }
+    const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
+    const expectedResolutions = approved.resolutions ?? declared;
+    const resolutions = manifest.resolutions ?? {};
+    const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();
+    assert.deepEqual(resolved, expectedResolutions, `${directory} has unmatched Jinn resolutions`);
+    for (const dependencyName of expectedResolutions) {
+      assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
+        `${directory} must resolve ${dependencyName} through its matching portal`);
+    }
+  }
+});
+
+test('every environments package declares Vitest as an exact optional peer where it ships a kit', () => {
+  const expectedExports = new Map([
+    ['record', ['.', './fixtures/*', './schemas/*', './testing']],
+    ['verification', ['.', './fixtures/*', './testing']],
+    ['chain-record', ['.', './fixtures/*', './schemas/*', './testing']],
+    ['chain-verification', ['.', './fixtures/*', './testing']],
+    ['chain-extraction', ['.', './fixtures/*', './testing']],
+    ['information-world', ['.', './fixtures/*', './schemas/*', './testing']],
+  ]);
+  assert.equal(expectedExports.size, ENVIRONMENT_PACKAGES.length);
+  for (const [directory] of ENVIRONMENT_PACKAGES) {
+    const manifest = readPackage(directory);
+    assert.deepEqual(Object.keys(manifest.exports).sort(), expectedExports.get(directory),
+      `${directory} has an unapproved export map`);
+    assert.equal(manifest.peerDependencies?.vitest, '^4.1.8');
+    assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+  }
+});

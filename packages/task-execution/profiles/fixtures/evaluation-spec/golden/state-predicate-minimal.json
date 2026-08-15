@@ -1,0 +1,45 @@
+{
+  "protocol": "https://spec.jinn.network/profiles/evaluation-spec/v1",
+  "semanticsVersion": "4",
+  "family": "state-predicate",
+  "grader": { "uri": "https://example.org/graders/state-predicate-evaluator" },
+  "familyBlock": {
+    "environmentRecord": {
+      "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      "mediaType": "application/vnd.jinn.crypto-environment.v1+json"
+    },
+    "predicateSemanticsVersion": "1",
+    "successPredicates": [
+      {
+        "kind": "nativeBalance",
+        "account": "0x0000000000000000000000000000000000000001",
+        "cmp": "eq",
+        "value": "0"
+      }
+    ],
+    "safetyConstraints": [],
+    "measurements": [],
+    "timeout": 600
+  },
+  "measurements": [
+    { "name": "successPredicatesSatisfied", "type": "boolean", "required": true },
+    { "name": "safetyConstraintsViolated", "type": "boolean", "required": true },
+    { "name": "statePredicateUnevaluable", "type": "boolean", "required": true }
+  ],
+  "verdictRule": {
+    "all": [
+      {
+        "inconclusiveWhen": {
+          "threshold": { "measurement": "statePredicateUnevaluable", "op": "eq", "value": true }
+        },
+        "class": "state-predicate-unevaluable"
+      },
+      { "threshold": { "measurement": "successPredicatesSatisfied", "op": "eq", "value": true } },
+      { "not": { "threshold": { "measurement": "safetyConstraintsViolated", "op": "eq", "value": true } } }
+    ]
+  },
+  "unscorable": [
+    { "name": "state-predicate-unevaluable", "disposition": "recorded-inconclusive" }
+  ],
+  "evidenceConventions": { "requiredRefs": [] }
+}

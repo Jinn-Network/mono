@@ -1,0 +1,282 @@
+{
+  "verificationContract": {
+    "policyId": "jinn.chain-verification-policy/1",
+    "fixtureProbeCoverage": [
+      {
+        "probeIds": [
+          "accounts-smoke"
+        ],
+        "fixtureId": "accounts"
+      },
+      {
+        "probeIds": [
+          "addresses-smoke"
+        ],
+        "fixtureId": "addresses"
+      },
+      {
+        "probeIds": [
+          "rates-smoke"
+        ],
+        "fixtureId": "rates"
+      }
+    ],
+    "resetRequirements": {
+      "minimumRuns": 5,
+      "freshInstancePerRun": true
+    },
+    "closureCheckRequired": true,
+    "comparator": {
+      "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "version": "1.0.0",
+      "id": "canonical-observation-eq"
+    },
+    "baselineObservationDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "observationSchema": {
+      "digest": {
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "name": "observation.schema.json"
+    },
+    "probeSuite": {
+      "format": {
+        "version": "1",
+        "id": "jinn.chain-probes"
+      },
+      "descriptor": {
+        "digest": {
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "name": "probes"
+      }
+    }
+  },
+  "capabilityEnvelope": {
+    "egressPolicyId": "jinn.egress.blackhole/1",
+    "limits": {
+      "maxChainSecondsAdvance": 604800,
+      "maxBlockAdvance": 500,
+      "maxExecutionDurationMs": 600000,
+      "maxAggregateGas": "60000000",
+      "maxGasPerTransaction": "5000000",
+      "tokenSpendPolicies": [
+        {
+          "maxSpendUnits": "1000000000",
+          "token": "0xd0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0"
+        }
+      ],
+      "maxAggregateNativeValueWei": "5000000000000000000",
+      "maxTransactions": 25
+    },
+    "permittedChainId": 1,
+    "signerRoles": [
+      {
+        "accounts": [
+          "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+        ],
+        "role": "agent"
+      }
+    ],
+    "rpc": {
+      "stateChangingMethods": [
+        "eth_sendRawTransaction",
+        "evm_mine",
+        "evm_increaseTime"
+      ],
+      "readMethods": [
+        "eth_call",
+        "eth_getBalance",
+        "eth_getBlockByNumber",
+        "eth_getTransactionReceipt"
+      ]
+    },
+    "toolInterfaces": [
+      {
+        "schema": {
+          "digest": {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "name": "tools"
+        },
+        "version": "1.0",
+        "id": "jinn.chain-tools"
+      }
+    ]
+  },
+  "determinismControls": {
+    "resetMechanism": "fresh-process",
+    "timeWarp": {
+      "maxBlocksPerOperation": 7200,
+      "maxAggregateSeconds": 2592000,
+      "maxSecondsPerOperation": 86400
+    },
+    "timeoutClock": "chain-time",
+    "noncePolicy": "strict",
+    "replacementPolicy": "reject",
+    "prevrandao": "0x9999999999999999999999999999999999999999999999999999999999999999",
+    "coinbase": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+    "perTransactionGasCeiling": "15000000",
+    "blockGasLimit": "30000000",
+    "gasPricePolicy": {
+      "weiPerGas": "1000000000",
+      "mode": "fixed"
+    },
+    "baseFeePolicy": {
+      "weiPerGas": "1000000000",
+      "mode": "fixed"
+    },
+    "blockTimeProgression": {
+      "secondsPerBlock": 12,
+      "mode": "fixed-increment"
+    },
+    "initialTimestamp": 1735689612,
+    "initialBlockNumber": 21000001,
+    "mempoolPolicy": "none",
+    "orderingPolicy": "fifo",
+    "miningMode": "manual"
+  },
+  "fixtures": {
+    "accounts": [
+      {
+        "nativeBalanceWei": "10000000000000000000",
+        "address": "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "role": "agent"
+      },
+      {
+        "nativeBalanceWei": "0",
+        "address": "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+        "role": "counterparty"
+      }
+    ],
+    "modules": [
+      {
+        "module": {
+          "digest": {
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "name": "accounts"
+        },
+        "kind": "funded-accounts",
+        "id": "accounts"
+      },
+      {
+        "module": {
+          "digest": {
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "name": "addresses"
+        },
+        "kind": "address-book",
+        "id": "addresses"
+      },
+      {
+        "module": {
+          "digest": {
+            "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          },
+          "name": "rates"
+        },
+        "kind": "state-mutation",
+        "id": "rates"
+      }
+    ]
+  },
+  "stateMaterialization": {
+    "initialStateCommitment": "0x8888888888888888888888888888888888888888888888888888888888888888",
+    "mutatesSourceProtocolState": true,
+    "fixtureCoverage": {
+      "mutatedProofCoveredAccounts": 2,
+      "declared": {
+        "codeEntries": 0,
+        "storageSlots": 9,
+        "accounts": 3
+      },
+      "manifest": {
+        "digest": {
+          "sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+        },
+        "name": "mutations.json"
+      }
+    },
+    "sourceProofManifest": {
+      "coverage": {
+        "codeEntries": 7,
+        "storageSlots": 331,
+        "accounts": 9
+      },
+      "proofs": {
+        "digest": {
+          "sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+        },
+        "name": "proofs.json"
+      },
+      "proofFormat": "eip-1186"
+    },
+    "stateArtifact": {
+      "entryCounts": {
+        "codeEntries": 7,
+        "storageSlots": 340,
+        "accounts": 12
+      },
+      "format": {
+        "version": "1",
+        "id": "jinn.chain-state-slice"
+      },
+      "descriptor": {
+        "digest": {
+          "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+        },
+        "mediaType": "application/json",
+        "name": "state.json"
+      }
+    },
+    "materializer": {
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "version": "0.4.1",
+      "id": "anvil-state-loader"
+    },
+    "constructionMethod": "archive-extraction",
+    "fidelityClass": "anchored-subset",
+    "closureClass": "closed-state"
+  },
+  "sourceAnchor": {
+    "finalityPolicy": "finalized",
+    "timestamp": 1735689600,
+    "stateRoot": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "blockHash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "blockNumber": 21000000,
+    "genesisHash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "nativeChainId": 1,
+    "caip2ChainId": "eip155:1"
+  },
+  "runtime": {
+    "launch": {
+      "commandEvidence": "anvil --no-mining --order fifo",
+      "options": {
+        "order": "fifo",
+        "no-mining": true
+      }
+    },
+    "evm": {
+      "nonDefaultSettings": {
+        "disable-code-size-limit": false
+      },
+      "sandboxChainId": 1,
+      "hardfork": "cancun"
+    },
+    "binary": {
+      "version": "1.3.7",
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "name": "anvil"
+    },
+    "image": {
+      "indexDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "reference": "registry.example.test/chain/anvil@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "platform": "linux/amd64",
+      "manifestDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "version": "1.3.7",
+    "family": "anvil"
+  },
+  "kind": "https://spec.jinn.network/records/chain-environment/v1"
+}

@@ -1,0 +1,20 @@
+{
+  "input": {
+    "envelope": {
+      "payloadType": "application/vnd.in-toto+json",
+      "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJzdWJqZWN0IjpbeyJuYW1lIjoidGFzayIsImRpZ2VzdCI6eyJzaGEyNTYiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIn19LHsibmFtZSI6ImV2YWx1YXRpb24tc3BlYyIsImRpZ2VzdCI6eyJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIn19XSwicHJlZGljYXRlVHlwZSI6Imh0dHBzOi8vc3BlYy5qaW5uLm5ldHdvcmsvYXR0ZXN0YXRpb25zL2FkbWlzc2lvbi1yZWNlaXB0L3YxIiwicHJlZGljYXRlIjp7Imlzc3VlciI6Imh0dHBzOi8vc3BlYy5qaW5uLm5ldHdvcmsvYWdlbnRzL2FkbWlzc2lvbi1hdXRob3JpdHktZXhhbXBsZSJ9fQ==",
+      "signatures": [
+        {
+          "keyid": "did:key:z6Mkexample-admission-agent",
+          "sig": "c2lnbmF0dXJlLWJ5dGVz"
+        }
+      ]
+    },
+    "expectedTaskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expectedEvaluationSpecDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "expect": {
+    "ok": true,
+    "issuer": "https://spec.jinn.network/agents/admission-authority-example"
+  }
+}

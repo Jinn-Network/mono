@@ -1,0 +1,38 @@
+{
+  "name": "torn-tail",
+  "description": "The engaged/spawn-intended/spawned records are intact; the process crashed mid-write of the fourth record, leaving a torn (partial, unparseable) tail entry. `durableSeq()` must resume from max(intact seq)+1, never trusting an in-memory counter or the torn entry's own claimed seq.",
+  "events": [
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000102",
+      "seq": 1,
+      "type": "attempt-engaged",
+      "time": "2026-07-28T00:00:00.000Z",
+      "details": { "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f2", "taskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000102",
+      "seq": 2,
+      "type": "spawn-intended",
+      "time": "2026-07-28T00:00:00.100Z",
+      "details": { "launchPlanDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "nonce": "nonce-102" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000102",
+      "seq": 3,
+      "type": "spawned",
+      "time": "2026-07-28T00:00:00.250Z",
+      "details": { "nonce": "nonce-102", "pid": 4300, "startTime": 222222 }
+    },
+    {
+      "torn": true,
+      "rawPartialBytes": "{\"attemptId\":\"urn:uuid:00000000-0000-0000-0000-000000000102\",\"seq\":4,\"type\":\"prog",
+      "reason": "process crashed after fsync of record 3 but mid-write of record 4 — a JSONL torn line, not a parseable record"
+    }
+  ],
+  "expected": {
+    "durableSeq": 4,
+    "intactEventCount": 3,
+    "note": "record 4 is discarded wholesale (JSONL torn-tail tolerance, design §6.2); durableSeq is max(intact seq)+1 = 4, not 5 — the torn record's claimed seq is never trusted"
+  },
+  "conformance": { "reality": { "processAlive": true, "shimFingerprintPresent": true, "outcomeFilePresent": false }, "expectedResult": { "classification": "matching", "action": "resume-supervision" } }
+}

@@ -1,0 +1,84 @@
+{
+  "name": "@jinn-network/plugin-runtime",
+  "version": "0.1.0",
+  "description": "Jinn Plugin runtime skeleton — lifecycle, configuration, health, and structured logging for later components to compose.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "plugin/runtime"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "jinn-plugin-runtime": "./dist/bin.js",
+    "jinn-plugin-runtime-session": "./dist/session-host.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/evidence-catalog-sqlite": "0.1.0",
+    "@jinn-network/evidence-derivation": "0.1.0",
+    "@jinn-network/evidence-discovery": "0.1.0",
+    "@jinn-network/evidence-local-runtime": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/evidence-repository": "0.1.0",
+    "@jinn-network/evidence-retrieval": "0.1.0",
+    "@jinn-network/evidence-trace": "0.1.0",
+    "@jinn-network/evidence-trace-decode": "0.1.0",
+    "@jinn-network/execution-recorder": "0.1.0",
+    "@jinn-network/record-discovery-client": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "better-sqlite3": "13.0.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-catalog-sqlite": "portal:../../packages/evidence/catalog-sqlite",
+    "@jinn-network/evidence-derivation": "portal:../../packages/evidence/derivation",
+    "@jinn-network/evidence-discovery": "portal:../../packages/evidence/discovery",
+    "@jinn-network/evidence-local-runtime": "portal:../../packages/evidence/local-runtime",
+    "@jinn-network/evidence-protocol": "portal:../../packages/evidence/protocol",
+    "@jinn-network/evidence-repository": "portal:../../packages/evidence/repository",
+    "@jinn-network/evidence-retrieval": "portal:../../packages/evidence/retrieval",
+    "@jinn-network/evidence-trace": "portal:../../packages/evidence/trace",
+    "@jinn-network/evidence-trace-decode": "portal:../../packages/evidence/trace-decode",
+    "@jinn-network/execution-recorder": "portal:../../packages/evidence/execution-recorder",
+    "@jinn-network/record-discovery-client": "portal:../../packages/discovery/client",
+    "@jinn-network/record-discovery-protocol": "portal:../../packages/discovery/protocol",
+    "@jinn-network/record-discovery-serve": "portal:../../packages/discovery/serve",
+    "@jinn-network/trust-core": "portal:../../packages/trust/core",
+    "vite": "6.4.3"
+  }
+}

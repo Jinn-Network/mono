@@ -8,7 +8,6 @@ import type {
   DeliveredResult,
 } from '../types/index.js';
 import type { Hex } from 'viem';
-import type { VerdictCode } from './mech/verdict-code.js';
 import type { SignedTaskV1 } from '../types/task-document.js';
 
 export interface RecoverTaskPostInput {
@@ -19,11 +18,6 @@ export interface RecoverTaskPostInput {
 
 export interface PostTaskOptions {
   beforeBroadcast?: () => void | Promise<void>;
-  assertFunding?: (facts: {
-    creatorSafe: string;
-    solverNetManifestCid: string;
-    proposedSpendWei: bigint;
-  }) => void | Promise<void>;
   onTransactionHash?: (txHash: Hex) => void | Promise<void>;
 }
 
@@ -48,20 +42,7 @@ export interface ExecutionAdapter {
   watchForTasks(): AsyncIterable<TaskAnnouncement>;
   claimTask(taskId: string): Promise<TaskRequest>;
   submitResult(requestId: RequestId, result: TaskResult): Promise<void>;
-  claimEvaluation?(
-    taskId: string,
-    attemptIndex: number,
-    evaluationTaskCidDigest: Hex,
-  ): Promise<{
-    taskId: string;
-    attemptIndex: number;
-    verdictIndex: number;
-    requestId: string;
-    txHash: Hex;
-    blockNumber?: number;
-  }>;
   submitSolutionDelivery?(requestId: RequestId, solutionDigest: Hex): Promise<void>;
-  submitVerdictDelivery?(requestId: RequestId, verdictDigest: Hex, verdictCode: VerdictCode): Promise<void>;
 
   // Deliveries
   watchForDeliveries(): AsyncIterable<DeliveredResult>;

@@ -1,0 +1,6 @@
+{
+  "generation": "today",
+  "sequence": ["post", "claim", "deliver", "settle", "refund"],
+  "namedResidual": "claim-time spend burns an abandoned claim fee; revised no-valid-delivery-net-no-spend is M7",
+  "raceLoss": "rejected or delivered-unsettled, never failed"
+}

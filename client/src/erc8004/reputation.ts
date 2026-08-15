@@ -38,15 +38,9 @@
  * ── Harness-agentId resolution ─────────────────────────────────────────────
  *
  * Resolving the harness's `agentId` from the evaluator's perspective is
- * deferred to `resolveAgentIdForManifest` in `./identity.js`. The hook here
- * takes `harnessAgentId` as a direct input. The two natural resolution paths:
- *
- *   (b) DiscoveryAPI: `queryEnvelopes({ manifestHash })` → operator.agentId
- *   (c) on-chain scan of `IdentityRegistry.Registered` events for the
- *       harness's Safe (`getAgentByWallet` is not exposed on-chain).
- *
- * Path (b) via the Ponder indexer is O(1) and the recommended route;
- * (c) is the fallback when the discovery indexer is unavailable.
+ * the caller's job. The hook here takes `harnessAgentId` as a direct input.
+ * Wave-4 D4 deleted the DiscoveryAPI envelope lookup
+ * (`resolveAgentIdForManifest`).
  *
  * ── Score-mapping policy ─────────────────────────────────────────────────────
  *
@@ -84,7 +78,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from 'viem';
-import { executeSafeTransaction } from '../adapters/mech/safe.js';
+import { executeSafeTransaction, type VenueBroadcaster } from '../adapters/mech/safe.js';
 import { waitForTransactionReceiptWithRetry, withEoaBroadcastLock } from '../tx-retry.js';
 import { REPUTATION_REGISTRY_ABI } from './abis.js';
 import {
@@ -124,6 +118,13 @@ export interface ReputationRegistryConfig {
    * the Safe; when undefined, writes go directly from `walletClient.account`.
    */
   safeAddress?: Address;
+  /**
+   * The Safe broadcaster write txs route through when `safeAddress` is set (finding E16 / the C2
+   * ruling: no process-global — construct one bound to `safeAddress`, e.g. via
+   * `createDirectSafeBroadcaster`). Unused on the direct-EOA path. May also be supplied later via
+   * `setBroadcaster` for hosts that build the client before a broadcaster is available.
+   */
+  broadcaster?: VenueBroadcaster;
 }
 
 /**
@@ -241,12 +242,22 @@ export class ReputationRegistryClient {
   private readonly walletClient?: WalletClient;
   private readonly contractAddress: Address;
   private readonly safeAddress?: Address;
+  private broadcaster?: VenueBroadcaster;
 
   constructor(config: ReputationRegistryConfig) {
     this.publicClient = config.publicClient;
     this.walletClient = config.walletClient;
     this.contractAddress = config.reputationRegistryAddress;
     this.safeAddress = config.safeAddress;
+    this.broadcaster = config.broadcaster;
+  }
+
+  /**
+   * Late-bind the Safe broadcaster this client's writes route through (finding E16 / the C2
+   * ruling), for hosts that construct the client before a broadcaster is available.
+   */
+  public setBroadcaster(broadcaster: VenueBroadcaster): void {
+    this.broadcaster = broadcaster;
   }
 
   // ── Write paths ──────────────────────────────────────────────────────────
@@ -496,7 +507,7 @@ export class ReputationRegistryClient {
         to: this.contractAddress,
         value: 0n,
         data: calldata,
-      });
+      }, this.broadcaster);
     }
 
     const account = walletClient.account;

@@ -5,17 +5,21 @@
  * `respondToFeedback`) anchored on `manifestRef = "plugin:<cid>"` and the
  * keccak256 of that string as `manifestHash`. The agentId of the builder
  * being feedback-targeted is resolved from the indexer via
- * `DiscoveryAPI.listPluginPublications`.
+ * `PluginPublicationReader.listPluginPublications`.
  *
  * Tests mock at the factory boundary (reputationClientFactory,
- * discoveryApiFactory, bootstrapperFactory, resolveCliPassword) — never on
+ * pluginReaderFactory, bootstrapperFactory, resolveCliPassword) — never on
  * viem itself, per the plan.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { keccak256, toBytes } from 'viem';
 import { createSolverPluginsCommand } from '../../../src/cli/commands/solver-plugins.js';
-import type { DiscoveryAPI, PluginPublication } from '../../../src/discovery/types.js';
+import { DaemonGuardBlockedError, daemonGuardEnvelope } from '../../../src/cli/daemon-guard.js';
+import type {
+  PluginPublicationReader,
+  PluginPublication,
+} from '../../../src/plugin-registry/publication-reader.js';
 import {
   withTempConfig,
   makeCtx,
@@ -50,10 +54,10 @@ function fakePluginRow(cid: string, builderAgentId = '777'): PluginPublication {
   };
 }
 
-function discoveryWith(rows: PluginPublication[]): DiscoveryAPI {
+function discoveryWith(rows: PluginPublication[]): PluginPublicationReader {
   return {
     listPluginPublications: vi.fn(async () => rows),
-  } as unknown as DiscoveryAPI;
+  } as unknown as PluginPublicationReader;
 }
 
 describe('jinn solver-plugins endorse', () => {
@@ -74,7 +78,7 @@ describe('jinn solver-plugins endorse', () => {
 
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory,
       resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
     });
@@ -105,13 +109,56 @@ describe('jinn solver-plugins endorse', () => {
     expect(exits).toEqual([]);
   });
 
+  // D0a round-1 review (minor finding): a DaemonGuardBlockedError thrown from the lazy
+  // reputationClientFactory write closure must surface its full envelope through the shared
+  // emitWriteError helper, not collapse into publish_failed.
+  it('preserves the full daemon-guard envelope instead of collapsing it to publish_failed', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafyTestCid';
+    const row = fakePluginRow(cid, '777');
+    const guardEnvelope = daemonGuardEnvelope(
+      { blocked: true, pid: 987654, pidfilePath: '/tmp/e/daemon.pid', reason: 'alive' },
+      'jinn solver-plugins publish <source>',
+    );
+    const giveFeedback = vi.fn(async () => { throw new DaemonGuardBlockedError(guardEnvelope); });
+    const reputationClientFactory = vi.fn(() => ({
+      giveFeedback,
+      respondToFeedback: vi.fn(),
+      revokeFeedback: vi.fn(),
+      readAllFeedback: vi.fn(),
+      getSummary: vi.fn(),
+      getClients: vi.fn(),
+    }));
+
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      pluginReaderFactory: () => discoveryWith([row]),
+      reputationClientFactory,
+      resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
+    });
+
+    const { ctx, writes, exits } = makeCtx([
+      'endorse', cid,
+      '--score', '100',
+      '--score-decimals', '2',
+      '--config', configPath,
+    ]);
+    await command.run(ctx);
+
+    const out = parsedLine(writes) as any;
+    expect(out.error.code).toBe('invalid_invocation');
+    expect(out.error.message).toContain('987654');
+    expect(out.error.hint).toContain('JINN_ALLOW_CLI_BROADCAST_WITH_DAEMON');
+    expect(exits).toEqual([11]);
+  });
+
   it('emits keystore_missing envelope when resolveCliPassword fails', async () => {
     const configPath = withTempConfig();
     const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
 
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
+      pluginReaderFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -146,7 +193,7 @@ describe('jinn solver-plugins endorse', () => {
     const giveFeedback = vi.fn(async () => '0xtxwarn' as `0x${string}`);
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -187,7 +234,7 @@ describe('jinn solver-plugins endorse', () => {
     const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
+      pluginReaderFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -217,7 +264,7 @@ describe('jinn solver-plugins endorse', () => {
     const giveFeedback = vi.fn(async () => '0xtxreview' as `0x${string}`);
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -260,7 +307,7 @@ describe('jinn solver-plugins endorse', () => {
     const respondToFeedback = vi.fn(async () => '0xtxrespond' as `0x${string}`);
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -302,7 +349,7 @@ describe('jinn solver-plugins endorse', () => {
     const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
+      pluginReaderFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -329,7 +376,7 @@ describe('jinn solver-plugins endorse', () => {
     const respondToFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
+      pluginReaderFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -369,7 +416,7 @@ describe('jinn solver-plugins endorse', () => {
 
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1 } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -408,7 +455,7 @@ describe('jinn solver-plugins endorse', () => {
 
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -441,7 +488,7 @@ describe('jinn solver-plugins endorse', () => {
 
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([]),
+      pluginReaderFactory: () => discoveryWith([]),
       reputationClientFactory: () =>
         ({
           giveFeedback,

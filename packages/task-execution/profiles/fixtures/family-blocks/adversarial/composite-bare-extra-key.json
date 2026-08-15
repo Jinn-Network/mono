@@ -1,0 +1,13 @@
+{
+  "input": {
+    "family": "composite",
+    "block": {
+      "subSpecs": [
+        { "spec": { "uri": "https://example.org/specs/unit-tests" }, "weight": "0.5" },
+        { "spec": { "uri": "https://example.org/specs/lint" }, "weight": "0.5" }
+      ],
+      "code": "return sum(w * r for w, r in zip(weights, results))"
+    }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

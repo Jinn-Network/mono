@@ -178,7 +178,7 @@ describe('gatherStatusForApi', () => {
     });
   });
 
-  it('enriches COMPLETE solve run outcomes from discovery.getVerdictTallies (#502)', async () => {
+  it('enriches COMPLETE solve run outcomes from the native verdict tally store (#502)', async () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
@@ -204,10 +204,44 @@ describe('gatherStatusForApi', () => {
         `UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`,
       ).run(2_500, 'swe-complete');
 
-      const getVerdictTallies = vi.fn(async () =>
-        new Map([['42', { pass: 0, fail: 2 }]]),
-      );
-      const discovery = { getVerdictTallies } as unknown as import('../../src/discovery/types.js').DiscoveryAPI;
+      const digest = `sha256:${'a'.repeat(64)}`;
+      store.db.exec(`
+        CREATE TABLE IF NOT EXISTS native_canonical_observations (
+          observation_id TEXT PRIMARY KEY, observation_json TEXT NOT NULL, accepted_at TEXT NOT NULL
+        );
+      `);
+      store.db
+        .prepare(
+          `INSERT INTO native_engagements
+            (engagement_id, chain_id, coordinator, task_id, role, operator_agent, task_digest,
+             submission_uri, submission_digest, state, attempt_index, attempt_uri, request_id,
+             policy_json, capability_json, created_at, updated_at)
+           VALUES ('eng-42', '84532', '0xcoord', '42', 'solver', '0xop', ?,
+                   'urn:uuid:00000000-0000-0000-0000-000000000042', 'sha256:${'b'.repeat(64)}',
+                   'solution-settled', 0, NULL, '0xreq42', '{}', '{}',
+                   '2026-08-01T00:00:02.000Z', '2026-08-01T00:00:05.000Z')`,
+        )
+        .run(digest);
+      store.db
+        .prepare(
+          `INSERT INTO native_canonical_observations (observation_id, observation_json, accepted_at)
+           VALUES ('obs-42a', ?, '2026-08-01T00:00:06.000Z'),
+                  ('obs-42b', ?, '2026-08-01T00:00:07.000Z')`,
+        )
+        .run(
+          JSON.stringify({
+            id: 'obs-42a',
+            type: 'network.jinn.task-execution.attempt-terminal.v1',
+            taskdigest: digest,
+            data: { state: 'rejected', detail: 'verdict-fail' },
+          }),
+          JSON.stringify({
+            id: 'obs-42b',
+            type: 'network.jinn.task-execution.attempt-terminal.v1',
+            taskdigest: digest,
+            data: { state: 'rejected', detail: 'verdict-fail' },
+          }),
+        );
 
       const status = await gatherStatusForApi(store, {
         earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
@@ -215,16 +249,14 @@ describe('gatherStatusForApi', () => {
         network: 'testnet' as const,
         pollIntervalMs: 5000,
         rewardClaimIntervalMs: 0,
-        discovery,
       });
 
-      expect(getVerdictTallies).toHaveBeenCalledWith({ taskIds: ['42'] });
       const row = status.taskRuns?.recentTasks.find((r) => r.requestId === 'swe-complete');
       expect(row?.outcome).toBe('fail');
     });
   });
 
-  it('leaves outcome null when no discovery is supplied (#502)', async () => {
+  it('COMPLETE solve with no native tally degrades to awaiting, never fail (#502)', async () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
 
     await withTempStore(async (store) => {
@@ -252,7 +284,60 @@ describe('gatherStatusForApi', () => {
 
       const status = await gatherStatusForApi(store, undefined);
       const row = status.taskRuns?.recentTasks.find((r) => r.requestId === 'swe-complete-nodisc');
-      expect(row?.outcome).toBeNull();
+      expect(row?.outcome).toBe('awaiting');
+    });
+  });
+
+  it('native mode enriches solve outcomes from the native observation store, not discovery (R2 dual-read)', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      // A native solve engagement in a terminal (settled → COMPLETE) state.
+      const digest = `sha256:${'a'.repeat(64)}`;
+      store.db
+        .prepare(
+          `INSERT INTO native_engagements
+            (engagement_id, chain_id, coordinator, task_id, role, operator_agent, task_digest,
+             submission_uri, submission_digest, state, attempt_index, attempt_uri, request_id,
+             policy_json, capability_json, created_at, updated_at)
+           VALUES ('eng-701', '84532', '0xcoord', '701', 'solver', '0xop', ?,
+                   'urn:uuid:00000000-0000-0000-0000-000000000701', 'sha256:${'b'.repeat(64)}',
+                   'solution-settled', 0, NULL, '0xreq701', '{}', '{}',
+                   '2026-08-01T00:00:02.000Z', '2026-08-01T00:00:05.000Z')`,
+        )
+        .run(digest);
+      store.db.exec(`
+        CREATE TABLE IF NOT EXISTS native_canonical_observations (
+          observation_id TEXT PRIMARY KEY, observation_json TEXT NOT NULL, accepted_at TEXT NOT NULL
+        );
+      `);
+      store.db
+        .prepare(
+          `INSERT INTO native_canonical_observations (observation_id, observation_json, accepted_at)
+           VALUES ('obs-701', ?, '2026-08-01T00:00:06.000Z')`,
+        )
+        .run(
+          JSON.stringify({
+            id: 'obs-701',
+            type: 'network.jinn.task-execution.attempt-terminal.v1',
+            taskdigest: digest,
+            data: { state: 'delivered' },
+          }),
+        );
+
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-native-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        config: { compositionMode: 'native' } as unknown as JinnConfig,
+      });
+
+      const row = status.taskRuns?.recentTasks.find((r) => r.taskId === '701');
+      expect(row?.state).toBe('COMPLETE');
+      expect(row?.outcome).toBe('pass');
     });
   });
 
@@ -496,6 +581,32 @@ describe('gatherStatusForApi', () => {
         },
       });
       expect(thrown.latestVersion).toBeNull();
+    });
+  });
+
+  it('threads effectiveMode from the resolved decision, defaulting to legacy when absent (#2380)', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const withoutMode = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      expect(withoutMode.effectiveMode).toBe('legacy');
+
+      const withMode = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        effectiveMode: 'native-v1',
+      });
+      expect(withMode.effectiveMode).toBe('native-v1');
     });
   });
 
@@ -902,6 +1013,106 @@ describe('gatherStatusForApi — no staking reads on the hot path (#992)', () =>
       expect(calledStakingFns).toEqual([]);
       expect(apiStatus.statusMode).toBe('full');
       expect(apiStatus.fleet.services).toHaveLength(1);
+    });
+  });
+});
+
+// Regression coverage for spec §14.2 item 2 / issue #2402: `maskRpcHost`
+// only ever ran on the boot/preflight *log* path. The status error path
+// returned a caught viem error's raw `.message` — and a viem
+// `HttpRequestError` embeds the full request URL — so a failing paid RPC
+// (key-in-path) leaked its key into the unauthenticated `/v1/status`
+// response, AND into the SQLite balance cache that gets replayed on later
+// status calls.
+describe('gather-status RPC error masking (spec §14.2 item 2, issue #2402)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.doUnmock('viem');
+    vi.resetModules();
+  });
+
+  const LEAKY_URL = 'https://base-mainnet.g.alchemy.com/v2/SECRETKEY123';
+
+  function mockLeakyViem(): void {
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      const throwLeaky = () => {
+        throw new actual.HttpRequestError({
+          url: LEAKY_URL,
+          body: { method: 'eth_call' },
+          details: 'fetch failed',
+        });
+      };
+      return {
+        ...actual,
+        createPublicClient: () => ({
+          getBlockNumber: async () => throwLeaky(),
+          getChainId: async () => throwLeaky(),
+          getBalance: async () => throwLeaky(),
+          readContract: async () => throwLeaky(),
+        }),
+        http: () => ({}),
+      };
+    });
+  }
+
+  it('masks the RPC key out of raw.rpc / masterGas / l1MasterGas / balances.eth.master and out of the persisted balance cache', async () => {
+    mockLeakyViem();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-mask-test-'));
+      const fleetStore = new FleetStateStore(earningDir);
+      const state = await fleetStore.load('base-sepolia');
+      await fleetStore.save({
+        ...state,
+        master_address: '0x1111111111111111111111111111111111111111',
+        services: [
+          {
+            index: 1,
+            agent_address: '0x2222222222222222222222222222222222222222',
+            safe_address: '0x3333333333333333333333333333333333333333',
+            service_id: 41,
+            mech_address: null,
+            staking_address: '0x5555555555555555555555555555555555555555',
+            step: 'complete',
+            error: null,
+          },
+        ],
+      });
+
+      const status = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: LEAKY_URL,
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      // Nothing in the serialized /v1/status response should ever contain
+      // the secret — this is the end-to-end assertion the issue asks for.
+      expect(JSON.stringify(status)).not.toContain('SECRETKEY123');
+
+      expect(status.rpc.ok).toBe(false);
+      expect(status.rpc.error).toContain('base-mainnet.g.alchemy.com');
+      expect(status.rpc.error).not.toContain('SECRETKEY123');
+
+      expect(status.masterGas.error).toContain('base-mainnet.g.alchemy.com');
+      expect(status.masterGas.error).not.toContain('SECRETKEY123');
+
+      expect(status.l1MasterGas?.error).toContain('base-mainnet.g.alchemy.com');
+      expect(status.l1MasterGas?.error).not.toContain('SECRETKEY123');
+
+      expect(status.balances.eth.master.error).toContain('base-mainnet.g.alchemy.com');
+      expect(status.balances.eth.master.error).not.toContain('SECRETKEY123');
+
+      // Mask-before-persistence: the balance cache row written during this
+      // call must already carry the masked message, not the raw one.
+      const cacheEntry = store
+        .getBalanceCache()
+        .find((e) => e.role === 'service.0.agent');
+      expect(cacheEntry?.error).toContain('base-mainnet.g.alchemy.com');
+      expect(cacheEntry?.error).not.toContain('SECRETKEY123');
     });
   });
 });

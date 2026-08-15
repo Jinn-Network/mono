@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 
 import { z } from 'zod';
 
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import {
   AttributionVerdictProofSchema,
   verifyAttributionVerdictProof,

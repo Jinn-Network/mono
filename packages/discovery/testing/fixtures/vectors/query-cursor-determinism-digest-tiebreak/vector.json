@@ -1,0 +1,48 @@
+{
+  "name": "query-cursor-determinism-digest-tiebreak",
+  "kind": "query",
+  "description": "Two identical queries against an unchanged chain return items in the same order (record-digest tie-break on equal sort keys), per the evidence catalog reader's pagination rule (§8).",
+  "input": {
+    "page1": {
+      "items": [
+        {
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:ae878962d8bb73e99a38b8cb03638140c1eea3d17b4dc28467a21a5b3247bb80"
+          }
+        },
+        {
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:b81093a67e6b24ce24624c3d955e37a1788b7fdf50b35a72c1778ddb335c4687"
+          }
+        }
+      ],
+      "nextCursor": "cursor-after-b",
+      "complete": false,
+      "freshness": []
+    },
+    "page2SameCursor": {
+      "items": [
+        {
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:ae878962d8bb73e99a38b8cb03638140c1eea3d17b4dc28467a21a5b3247bb80"
+          }
+        },
+        {
+          "record": {
+            "kind": "https://spec.jinn.network/records/submission/v1",
+            "digest": "sha256:b81093a67e6b24ce24624c3d955e37a1788b7fdf50b35a72c1778ddb335c4687"
+          }
+        }
+      ],
+      "nextCursor": "cursor-after-b",
+      "complete": false,
+      "freshness": []
+    }
+  },
+  "expect": {
+    "deterministicOrderingWithDigestTiebreak": true
+  }
+}

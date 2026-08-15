@@ -1,0 +1,52 @@
+{
+  "name": "revised-task-created-2026-08-03",
+  "description": "A finalized revised-router TaskCreated log projects one accepted Submission observation and one available Submission announcement.",
+  "generation": "revised",
+  "logs": [
+    {
+      "event": "TaskCreated",
+      "chainId": 84532,
+      "address": "0x1111111111111111111111111111111111111111",
+      "blockNumber": "100",
+      "blockHash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+      "transactionHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "logIndex": 0,
+      "finalityTier": "finalized",
+      "args": {
+        "creator": "0x3333333333333333333333333333333333333333",
+        "taskCidDigest": "0x7777777777777777777777777777777777777777777777777777777777777777",
+        "submissionDigest": "0xf74de6f7baa7f7ef40ea6dcec644ff9b7d9c1de6eefc392e3508806308c5f111",
+        "taskId": "42",
+        "maxTotal": "2",
+        "maxConcurrent": "1",
+        "submissionDeadline": "1785369600",
+        "closeAt": "1785456000",
+        "responseTimeout": "3600",
+        "minVerdicts": "1",
+        "requireDistinctEvaluator": true,
+        "solutionMaxDeliveryRate": "100",
+        "verdictMaxDeliveryRate": "20",
+        "solutionBudget": "1000",
+        "verdictBudget": "200"
+      },
+      "projection": {
+        "timestamp": "2026-07-29T12:00:00Z",
+        "submission": "urn:uuid:11111111-1111-4111-8111-111111111111",
+        "taskDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+        "effectiveDeadline": "2026-07-30T12:00:00Z",
+        "dispatchContext": {
+          "uri": "urn:jinn:marketplace:dispatch-context:42:0",
+          "digest": {
+            "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "observationCount": 1,
+    "announcementCount": 1,
+    "observationSha256": "sha256:caba9046e32e06caf73f960141ae0bc5e535c17999e1840a04de90be42bbedb8",
+    "announcementSha256": "sha256:7869928eba47d3ee63cbe4fa134276680db9171d26145e8bc0205c10c045739a"
+  }
+}

@@ -16,6 +16,10 @@ on:
       - 'packages/indexer/**'
       - 'packages/sdk/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -35,10 +39,16 @@ jobs:
 
       - run: corepack enable
 
-      # The worker portal-links @jinn-network/indexer, which portal-links
-      # @jinn-network/sdk. The SDK's exports map points at compiled dist/*.js
-      # (dist/ is gitignored), so the SDK must be built before any worker step
-      # resolves the indexer portal chain.
+      - name: Build indexer record dependencies
+        working-directory: ${{ github.workspace }}
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+
+      # The worker portal-links @jinn-network/indexer, which portal-links the
+      # SDK and benchmarking records. Their exports maps point at compiled
+      # dist/*.js, so the complete portal closure is built before worker install.
       - name: Build @jinn-network/sdk
         working-directory: packages/sdk
         run: |

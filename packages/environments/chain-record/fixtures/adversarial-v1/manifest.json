@@ -1,0 +1,58 @@
+{
+  "fixtures": [
+    {
+      "id": "index-digest-as-manifest",
+      "description": "The multi-arch index digest presented as the platform manifest digest. Runtime behaviour is a per-platform fact, so an index-level record would be a claim by aggregation.",
+      "recordKind": "chain-environment",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "artifact-entry-uncovered",
+      "description": "One storage entry in the state artifact is neither proof-covered nor fixture-declared. This is the forged-slice gap E13 closes: real protocol code proven against the true root, with one tampered slot riding along unaccounted for.",
+      "recordKind": "chain-environment",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "anchor-root-as-initial-commitment",
+      "description": "The source anchor's state root presented as the post-fixture initial state commitment. They are two claims about two different worlds, and a verifier told they are one would read every legitimately fixtured world as a mismatch.",
+      "recordKind": "chain-environment",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "origin-precedence-undeclared",
+      "description": "Two information worlds claiming one origin with no declared precedence between them. Resolution would then depend on iteration order, which is a reproducibility hazard rather than a merge.",
+      "recordKind": "crypto-environment",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "bare-extension-key",
+      "description": "An un-namespaced extension key at the top level, indistinguishable from a core field a future version might add and therefore from a smuggled one.",
+      "recordKind": "chain-environment",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "digest-confusion-bare-hex",
+      "description": "Digest confusion, subject spelling in a body position: a bare-hex in-toto DigestSet value used where the record body requires the sha256:-prefixed spelling.",
+      "recordKind": "chain-environment",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "well-known-fixture-address",
+      "description": "A fixture account at a well-known development-mnemonic address whose private key is public. Publishing scripts from it makes every one of them a replayable transaction the moment anyone funds the address.",
+      "recordKind": "chain-environment",
+      "expectedDisposition": "invalid-document"
+    },
+    {
+      "id": "namespaced-extension-preserved",
+      "description": "A composite carrying namespaced extension keys, which must reach the sealed bytes and re-parse unchanged rather than being dropped or refused.",
+      "recordKind": "crypto-environment",
+      "expectedDisposition": "accepted"
+    },
+    {
+      "id": "recanonicalized-bytes",
+      "description": "The golden chain record re-serialized with pretty-printing: a valid document whose bytes are not the record's bytes, so it must not present as the same record.",
+      "recordKind": "chain-environment",
+      "expectedDisposition": "invalid-bytes"
+    }
+  ]
+}

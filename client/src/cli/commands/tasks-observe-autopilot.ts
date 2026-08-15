@@ -18,7 +18,8 @@ import {
 import { fetchRawBytesFromIpfs } from '../../adapters/mech/ipfs.js';
 import { loadConfig, getConfigPathFromArgs } from '../../config.js';
 import { getJinnRouterAddress } from '../../contracts/addresses.js';
-import { createHttpDiscoveryAPI } from '../../discovery/http.js';
+import { createHttpDiscoveryClient } from '../../discovery-client/http.js';
+import type { DiscoveryClient } from '../../discovery-client/types.js';
 import { createPublisherSafeResolver } from '../../erc8004/publisher-safe-resolver.js';
 import { getChainConfig } from '../../earning/contracts.js';
 import { createJinnPublicClient } from '../../earning/viem-clients.js';
@@ -36,9 +37,29 @@ export function parseAutopilotDeliveryCommandResult(
   return AutopilotDeliveryCommandResultV1Schema.parse(input);
 }
 
+/**
+ * Injected seam for the two reads this verb makes before it can answer.
+ *
+ * `createDiscovery` is the point of one-swap R3b (issue #2494) for this verb:
+ * it resolves to `discovery-client/`, never `discovery/`, so the D-wave can
+ * delete the legacy tree without taking the published external boundary with
+ * it. `client/test/architecture/discovery-client-neutrality.test.ts` pins that
+ * structurally; the deps also let a test drive the candidate fetch without a
+ * chain or an indexer.
+ */
+export interface ObserveAutopilotDeliveryDeps {
+  createDiscovery(
+    url: string,
+  ): Pick<DiscoveryClient, 'getAutopilotDeliveryCandidates'>;
+  latestBlockNumber(chainId: number, config: ReturnType<typeof loadConfig>): Promise<bigint>;
+}
+
 export async function runObserveAutopilotDelivery(
   ctx: CommandContext,
+  deps?: Partial<ObserveAutopilotDeliveryDeps>,
 ): Promise<void> {
+  const createDiscovery = deps?.createDiscovery
+    ?? ((url: string) => createHttpDiscoveryClient({ url }));
   let parsed: ReturnType<typeof parseArgs>;
   try {
     parsed = parseArgs({
@@ -122,7 +143,7 @@ export async function runObserveAutopilotDelivery(
     }
     const publicClient = createJinnPublicClient(config.rpcUrls, network);
     const observer = createAutopilotMarketplaceDeliveryObserver({
-      discovery: createHttpDiscoveryAPI({ url: config.discovery.url }),
+      discovery: createDiscovery(config.discovery.url),
       publicClient,
       mechMarketplaceAddress: getAddress(chainConfig.mechMarketplace),
       routerAddress: getAddress(routerAddress),
@@ -140,7 +161,9 @@ export async function runObserveAutopilotDelivery(
     const observation = await observeAutopilotMarketplaceDelivery(request, {
       chainId,
       observer,
-      latestBlockNumber: () => publicClient.getBlockNumber(),
+      latestBlockNumber: deps?.latestBlockNumber
+        ? () => deps.latestBlockNumber!(chainId, config)
+        : () => publicClient.getBlockNumber(),
     });
     const result = parseAutopilotDeliveryCommandResult({
       schemaVersion: 1,

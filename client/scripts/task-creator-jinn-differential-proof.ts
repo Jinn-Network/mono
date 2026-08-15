@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { canonicalJson } from '../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../src/util/canonical-json.js';
 import type { EvalRunner } from '../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import {
   runTargetedEmpiricalTestDerivation,

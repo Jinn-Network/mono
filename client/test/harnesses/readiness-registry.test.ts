@@ -65,31 +65,6 @@ describe('HarnessReadinessRegistry', () => {
     expect(byName.get('codex')?.nextStep?.description).toBe('Install Codex CLI');
   });
 
-  it('isReadyForClaim returns ready=false for unknown manifestCid', async () => {
-    const registry = new HarnessReadinessRegistry({
-      harnessesByName: {},
-      joinedHarnessesByCid: {},
-      tickIntervalMs: 4000,
-    });
-    await registry.refreshNow();
-    const status = registry.isReadyForClaim('bafkrei.unknown');
-    expect(status.ready).toBe(false);
-    expect(status.reason).toContain('not in joinedSolverNets');
-  });
-
-  it('isReadyForClaim returns cached status from last refresh', async () => {
-    const claude = fakeHarness('claude-code-learner', { ready: true, reason: 'ok' });
-    const registry = new HarnessReadinessRegistry({
-      harnessesByName: { 'claude-code-learner': claude },
-      joinedHarnessesByCid: {
-        'bafkrei.claude': { harnessName: 'claude-code-learner', roles: ['solver'] },
-      },
-      tickIntervalMs: 4000,
-    });
-    await registry.refreshNow();
-    expect(registry.isReadyForClaim('bafkrei.claude').ready).toBe(true);
-  });
-
   it('treats unknown harness name as not-registered', async () => {
     const registry = new HarnessReadinessRegistry({
       harnessesByName: {},  // empty registry
@@ -139,36 +114,10 @@ describe('HarnessReadinessRegistry', () => {
     });
     registry.start();
     await registry.refreshNow();
-    expect(registry.isReadyForClaim('bafkrei.claude').ready).toBe(false);
+    expect(registry.getSnapshot().harnesses[0]?.ready).toBe(false);
     await vi.advanceTimersByTimeAsync(4000);
-    expect(registry.isReadyForClaim('bafkrei.claude').ready).toBe(true);
+    expect(registry.getSnapshot().harnesses[0]?.ready).toBe(true);
     registry.stop();
-  });
-});
-
-describe('HarnessReadinessRegistry.setJoined (hot-apply, #1037)', () => {
-  it('makes a newly-joined cid claim-ready when its harness is already installed', async () => {
-    const harness: Harness = {
-      name: 'codex',
-      version: '0.0.0',
-      supports: () => true,
-      run: async () => { throw new Error('not used'); },
-      isReady: async () => ({ ready: true }),
-    };
-    const registry = new HarnessReadinessRegistry({
-      harnessesByName: { codex: harness },
-      joinedHarnessesByCid: {},
-    });
-    await registry.refreshNow();
-    // Unknown cid before the join.
-    expect(registry.isReadyForClaim('cidLive').ready).toBe(false);
-
-    await registry.setJoined('cidLive', { harnessName: 'codex', roles: ['solver'] });
-    expect(registry.isReadyForClaim('cidLive').ready).toBe(true);
-    expect(registry.getJoinedHarnessesByCid()['cidLive']).toEqual({
-      harnessName: 'codex',
-      roles: ['solver'],
-    });
   });
 });
 

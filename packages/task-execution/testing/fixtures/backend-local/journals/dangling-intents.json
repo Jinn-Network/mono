@@ -1,0 +1,30 @@
+{
+  "name": "dangling-intents",
+  "description": "A `spawn-intended` record with no corresponding `spawned` — the intent was journaled and fsynced, but the process crashed before fork/exec completed (or before the shim wrote its fingerprint). A dangling intent is benign: recovery probes reality and finds nothing (§6.4 row 'spawn-intended, no process, no outcome' → absent → lost, blame infrastructure).",
+  "events": [
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000106",
+      "seq": 1,
+      "type": "attempt-engaged",
+      "time": "2026-07-28T00:00:00.000Z",
+      "details": { "submission": "urn:uuid:00000000-0000-0000-0000-0000000000f6", "taskDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    },
+    {
+      "attemptId": "urn:uuid:00000000-0000-0000-0000-000000000106",
+      "seq": 2,
+      "type": "spawn-intended",
+      "time": "2026-07-28T00:00:00.100Z",
+      "details": { "launchPlanDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "nonce": "nonce-106" }
+    }
+  ],
+  "expected": {
+    "durableSeq": 3,
+    "intactEventCount": 2,
+    "scriptedReality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": false },
+    "classification": "absent",
+    "action": "lost",
+    "blame": "infrastructure",
+    "note": "distinct from the never-executed 'engaged, no spawn-intent' row (→ rejected) — here the intent WAS journaled, so the never-executed guarantee does not apply; the attempt is lost, not rejected"
+  },
+  "conformance": { "reality": { "processAlive": false, "shimFingerprintPresent": false, "outcomeFilePresent": false }, "expectedResult": { "classification": "absent", "action": "lost", "terminalState": "lost", "blame": "infrastructure" } }
+}

@@ -1,0 +1,8 @@
+{
+  "reference": {
+    "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "contentCid": "f01551220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "registrationText": "{\"digest\":\"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"kind\":\"artifact\",\"profile\":\"jinn.evidence-repository.ipfs-registration\",\"version\":1}\n",
+  "registrationCid": "f015512203be2cf6e4dbae57487b58ea315520f2689b32c80aeaaab2b9b5e9904b8362c5f"
+}

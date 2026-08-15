@@ -1,0 +1,55 @@
+{
+  "lineage": {
+    "upstream": {
+      "keys": [
+        "example-org__example-lib-4242"
+      ],
+      "revision": "0000000000000000000000000000000000000000",
+      "dataset": "example/upstream-dataset"
+    }
+  },
+  "rights": {
+    "basis": "upstream-permissive-filter",
+    "sourceLicense": "Apache-2.0"
+  },
+  "build": {
+    "provider": {
+      "version": "2",
+      "id": "swe-rebench"
+    },
+    "reproducibilityTier": 0
+  },
+  "parser": {
+    "uri": "https://example.test/parsers/pytest-text-1.0.0.tar.gz",
+    "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "version": "1.0.0",
+    "id": "pytest-text"
+  },
+  "invocations": {
+    "test": [
+      {
+        "cwd": "/testbed",
+        "args": [
+          "-m",
+          "pytest",
+          "-q",
+          "tests/test_core.py"
+        ],
+        "bin": "python"
+      }
+    ]
+  },
+  "workspace": "/testbed",
+  "image": {
+    "indexDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "reference": "registry.example.test/swe/example-lib@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "platform": "linux/amd64",
+    "manifestDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "source": {
+    "commit": "0000000000000000000000000000000000000001",
+    "repoUrl": "https://github.com/example-org/example-lib",
+    "repo": "example-org/example-lib"
+  },
+  "kind": "https://spec.jinn.network/records/environment/v1"
+}

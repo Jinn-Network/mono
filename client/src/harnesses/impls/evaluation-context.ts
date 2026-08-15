@@ -5,9 +5,6 @@ export const SOLUTION_TASK_CID_CONTEXT_KEY = 'solutionTaskCid' as const;
 export const RESTORATION_TASK_CID_CONTEXT_KEY = 'restorationTaskCid' as const;
 /** Strict, lifecycle-admitted context for the Autopilot semantic evaluator. */
 export const AUTOPILOT_EVALUATION_CONTEXT_KEY = 'autopilotEvaluation' as const;
-/** Strict, host-admitted context for the independent Issue Relay evaluator. */
-export const ISSUE_RELAY_EVALUATION_CONTEXT_KEY =
-  'issueRelayEvaluation' as const;
 
 /**
  * Eval `Task.context` key for the solution envelope's IPFS CID.

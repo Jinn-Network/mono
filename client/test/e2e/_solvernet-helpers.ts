@@ -34,7 +34,7 @@ import { baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
 import { IDENTITY_REGISTRY_SET_METADATA_ABI } from '../../src/erc8004/abis.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import {
   signManifest,
   type UnsignedSolverNetManifestV1,
@@ -44,7 +44,7 @@ import type {
   MetadataPublisher,
   SetMetadataPublishResult,
   SubgraphClient,
-} from '../../src/solvernets/registry-client-erc8004.js';
+} from '../../src/solvernets/launch-publisher.js';
 import type { SetMetadataEvent } from '../../src/solvernets/most-recent-wins.js';
 import type { SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
 

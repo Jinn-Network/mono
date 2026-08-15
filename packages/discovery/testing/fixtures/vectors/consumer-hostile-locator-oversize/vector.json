@@ -1,0 +1,16 @@
+{
+  "name": "consumer-hostile-locator-oversize",
+  "kind": "consumer",
+  "description": "§7 / §14: a location whose declared size exceeds any sane record ceiling is rejected before fetch.",
+  "input": {
+    "location": {
+      "profile": "https://spec.jinn.network/record-discovery/location/https/v1",
+      "locator": "https://example.org/records/huge-blob"
+    },
+    "declaredBytes": 5368709120
+  },
+  "expect": {
+    "rejected": true,
+    "reason": "oversize"
+  }
+}

@@ -1,0 +1,440 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context",
+    "https://w3id.org/ro/terms/workflow-run/context",
+    {
+      "prov": "http://www.w3.org/ns/prov#",
+      "jinn": "https://spec.jinn.network/terms/"
+    }
+  ],
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.3"
+      },
+      "about": {
+        "@id": "./"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": "Dataset",
+      "name": "Golden synthetic Execution Evidence v1 record",
+      "description": "A complete synthetic record demonstrating capture-time Task, inputs, Executor, Execution, Result, trace, observations, and provenance.",
+      "dateCreated": "2026-07-23T15:02:08Z",
+      "datePublished": "2026-07-23T15:02:08Z",
+      "license": {
+        "@id": "https://creativecommons.org/publicdomain/zero/1.0/"
+      },
+      "conformsTo": {
+        "@id": "https://spec.jinn.network/profiles/execution-evidence/v1"
+      },
+      "creator": {
+        "@id": "urn:uuid:44444444-4444-4444-8444-444444444444"
+      },
+      "hasPart": [
+        {
+          "@id": "task/task.md"
+        },
+        {
+          "@id": "inputs/repository-tree.json"
+        },
+        {
+          "@id": "inputs/repository/src/slug.ts"
+        },
+        {
+          "@id": "inputs/repository/test/slug.test.ts"
+        },
+        {
+          "@id": "inputs/knowledge.md"
+        },
+        {
+          "@id": "runtime/runtime-specification.json"
+        },
+        {
+          "@id": "runtime/runner.mjs"
+        },
+        {
+          "@id": "runtime/workflow.json"
+        },
+        {
+          "@id": "runtime/system-prompt.md"
+        },
+        {
+          "@id": "runtime/tool-policy.json"
+        },
+        {
+          "@id": "runtime/hosted-model.json"
+        },
+        {
+          "@id": "runtime/runtime-lock.json"
+        },
+        {
+          "@id": "results/slug-normalization.patch"
+        },
+        {
+          "@id": "trace/trace.jsonl"
+        },
+        {
+          "@id": "evidence/in-run-tests.json"
+        },
+        {
+          "@id": "external/marketplace-reference.json"
+        }
+      ],
+      "mentions": {
+        "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+      },
+      "prov:wasGeneratedBy": {
+        "@id": "#capture"
+      }
+    },
+    {
+      "@id": "https://spec.jinn.network/profiles/execution-evidence/v1",
+      "@type": [
+        "CreativeWork",
+        "Profile"
+      ],
+      "name": "Jinn Execution Evidence Profile 1.0"
+    },
+    {
+      "@id": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "@type": "CreativeWork",
+      "name": "CC0 1.0 Universal"
+    },
+    {
+      "@id": "task/task.md",
+      "@type": [
+        "File",
+        "CreativeWork",
+        "prov:Plan"
+      ],
+      "name": "Implement deterministic slug normalization",
+      "encodingFormat": "text/markdown",
+      "sha256": "1f42fd35cecf09d1bdf953fe4c7a1c8d25fd0bcf415a6b39aa7b61f1e982ef93",
+      "identifier": {
+        "@type": "PropertyValue",
+        "propertyID": "https://marketplace.example.invalid/schemes/task-id",
+        "value": "slug-normalization-17"
+      }
+    },
+    {
+      "@id": "inputs/repository-tree.json",
+      "@type": [
+        "File",
+        "Dataset"
+      ],
+      "name": "Exact repository snapshot consumed by the execution",
+      "encodingFormat": "application/json",
+      "sha256": "0c6d3f024ae4e4a87bda04b2b06a55b99cba73f9eb5a70f38f1857e549379b1d",
+      "hasPart": [
+        {
+          "@id": "inputs/repository/src/slug.ts"
+        },
+        {
+          "@id": "inputs/repository/test/slug.test.ts"
+        }
+      ]
+    },
+    {
+      "@id": "inputs/repository/src/slug.ts",
+      "@type": "File",
+      "name": "Base slug implementation",
+      "encodingFormat": "text/typescript",
+      "sha256": "a47e413df6cdc33ce9634783b047dc702b4a78177debe476ee2b0698eba7b5ff"
+    },
+    {
+      "@id": "inputs/repository/test/slug.test.ts",
+      "@type": "File",
+      "name": "Base slug tests",
+      "encodingFormat": "text/typescript",
+      "sha256": "2ddfeb6b357adaa5a86a59c7d78ca1d26d721c52e47f12e7e5a689f61860fc92"
+    },
+    {
+      "@id": "inputs/knowledge.md",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Repository guidance supplied to the executor",
+      "encodingFormat": "text/markdown",
+      "sha256": "36a4911c74dbe04c7dfad94248e9eeae38d4237b27086cebb0f1459f0182a086"
+    },
+    {
+      "@id": "runtime/runtime-specification.json",
+      "@type": [
+        "File",
+        "SoftwareApplication"
+      ],
+      "name": "Synthetic Autopilot coding runtime",
+      "softwareVersion": "1.0.0",
+      "encodingFormat": "application/json",
+      "sha256": "b1563a6db13e9214ca716653fc9862fa7fffc4e03c6a3b7ffde11b6922ba981a",
+      "hasPart": [
+        {
+          "@id": "runtime/runner.mjs"
+        },
+        {
+          "@id": "runtime/workflow.json"
+        },
+        {
+          "@id": "runtime/system-prompt.md"
+        },
+        {
+          "@id": "runtime/tool-policy.json"
+        },
+        {
+          "@id": "runtime/runtime-lock.json"
+        },
+        {
+          "@id": "runtime/hosted-model.json"
+        }
+      ],
+      "softwareRequirements": [
+        {
+          "@id": "urn:uuid:77777777-7777-4777-8777-777777777777"
+        },
+        {
+          "@id": "runtime/runtime-lock.json"
+        }
+      ]
+    },
+    {
+      "@id": "runtime/runner.mjs",
+      "@type": [
+        "File",
+        "SoftwareSourceCode"
+      ],
+      "name": "Executor entrypoint source",
+      "encodingFormat": "text/javascript",
+      "sha256": "4f24efa2d21d2e457487aef2f152b574c977f0750d4e8a5ca623d659cc60425a"
+    },
+    {
+      "@id": "runtime/workflow.json",
+      "@type": "File",
+      "name": "Effective workflow",
+      "encodingFormat": "application/json",
+      "sha256": "e1e0d8e2424598ef24ebf5b3c6f0e4ff03f3b94d0eb6c68eab4edd00b338f74c"
+    },
+    {
+      "@id": "runtime/system-prompt.md",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Effective system prompt",
+      "encodingFormat": "text/markdown",
+      "sha256": "db220054da8a9524f82f6505a04320f66300f21fd169f74a991b8b8bac319451"
+    },
+    {
+      "@id": "runtime/tool-policy.json",
+      "@type": "File",
+      "name": "Effective tool policy",
+      "encodingFormat": "application/json",
+      "sha256": "11bf01bd97086d09e8c55d1c4d8954ad97922e97c4ee60b0b916143939bf80a1"
+    },
+    {
+      "@id": "runtime/runtime-lock.json",
+      "@type": "File",
+      "name": "Observed runtime lock",
+      "encodingFormat": "application/json",
+      "sha256": "1717bb740edf41b607300c5358e148f4b42f12d8fcccca8903649385e0345018"
+    },
+    {
+      "@id": "runtime/hosted-model.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "Opaque hosted-model invocation descriptor",
+      "encodingFormat": "application/json",
+      "sha256": "dcaf7b063b278a45fe08b78873ce21dc9e337455e153fdbc43c2ceb8a125d848",
+      "about": {
+        "@id": "urn:uuid:77777777-7777-4777-8777-777777777777"
+      }
+    },
+    {
+      "@id": "urn:uuid:77777777-7777-4777-8777-777777777777",
+      "@type": "SoftwareApplication",
+      "name": "Synthetic opaque hosted Claude deployment",
+      "softwareVersion": "claude-synthetic-fixture-2026-07-01",
+      "provider": {
+        "@id": "https://www.anthropic.com/"
+      }
+    },
+    {
+      "@id": "urn:uuid:22222222-2222-4222-8222-222222222222",
+      "@type": [
+        "CreateAction",
+        "prov:Activity"
+      ],
+      "name": "Synthetic slug-normalization execution",
+      "instrument": {
+        "@id": "runtime/runtime-specification.json"
+      },
+      "object": [
+        {
+          "@id": "task/task.md"
+        },
+        {
+          "@id": "inputs/repository-tree.json"
+        },
+        {
+          "@id": "inputs/knowledge.md"
+        }
+      ],
+      "result": {
+        "@id": "results/slug-normalization.patch"
+      },
+      "startTime": "2026-07-23T15:00:00Z",
+      "endTime": "2026-07-23T15:02:07Z",
+      "actionStatus": {
+        "@id": "https://schema.org/CompletedActionStatus"
+      },
+      "agent": {
+        "@id": "urn:uuid:33333333-3333-4333-8333-333333333333"
+      },
+      "environment": {
+        "@id": "runtime/runtime-lock.json"
+      },
+      "resourceUsage": [
+        {
+          "@id": "#duration-ms"
+        },
+        {
+          "@id": "#input-tokens"
+        },
+        {
+          "@id": "#output-tokens"
+        }
+      ],
+      "identifier": {
+        "@type": "PropertyValue",
+        "propertyID": "https://marketplace.example.invalid/schemes/attempt-id",
+        "value": "attempt-42"
+      },
+      "subjectOf": {
+        "@id": "trace/trace.jsonl"
+      }
+    },
+    {
+      "@id": "urn:uuid:33333333-3333-4333-8333-333333333333",
+      "@type": [
+        "SoftwareApplication",
+        "prov:Agent"
+      ],
+      "name": "Synthetic Autopilot operator agent",
+      "identifier": {
+        "@type": "PropertyValue",
+        "propertyID": "https://marketplace.example.invalid/schemes/agent-id",
+        "value": "operator-agent-3"
+      }
+    },
+    {
+      "@id": "results/slug-normalization.patch",
+      "@type": "File",
+      "name": "Slug normalization implementation patch",
+      "encodingFormat": "text/x-diff",
+      "sha256": "c43b406505b8c53ff9bf0a1c57442080d99a14b9f278739cb426313cf3238b07",
+      "prov:wasGeneratedBy": {
+        "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+      }
+    },
+    {
+      "@id": "trace/trace.jsonl",
+      "@type": "File",
+      "name": "Native synthetic execution trace",
+      "encodingFormat": "application/x-ndjson",
+      "sha256": "49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a",
+      "conformsTo": {
+        "@id": "https://spec.jinn.network/formats/fixture-trace/v1"
+      },
+      "about": {
+        "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+      }
+    },
+    {
+      "@id": "https://spec.jinn.network/formats/fixture-trace/v1",
+      "@type": [
+        "CreativeWork",
+        "Profile"
+      ],
+      "name": "Synthetic fixture trace format 1.0"
+    },
+    {
+      "@id": "evidence/in-run-tests.json",
+      "@type": "File",
+      "name": "In-run test observation",
+      "encodingFormat": "application/json",
+      "sha256": "3ceef13187cc78434fcfd57b74aefdd005bdb143f9a628dbe7dcf2b115627602",
+      "about": {
+        "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+      },
+      "prov:wasGeneratedBy": {
+        "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+      }
+    },
+    {
+      "@id": "external/marketplace-reference.json",
+      "@type": [
+        "File",
+        "CreativeWork"
+      ],
+      "name": "External marketplace lifecycle references",
+      "encodingFormat": "application/json",
+      "sha256": "ace9082d640415c4c33a4c3b292bf3bb637b14959b7e5006ae417240f3797bbf",
+      "about": [
+        {
+          "@id": "task/task.md"
+        },
+        {
+          "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
+        }
+      ]
+    },
+    {
+      "@id": "#duration-ms",
+      "@type": "PropertyValue",
+      "name": "durationMs",
+      "propertyID": "https://spec.jinn.network/terms/durationMs",
+      "value": 127000,
+      "unitCode": "ms"
+    },
+    {
+      "@id": "#input-tokens",
+      "@type": "PropertyValue",
+      "name": "inputTokens",
+      "propertyID": "https://spec.jinn.network/terms/inputTokens",
+      "value": 1800,
+      "unitCode": "count"
+    },
+    {
+      "@id": "#output-tokens",
+      "@type": "PropertyValue",
+      "name": "outputTokens",
+      "propertyID": "https://spec.jinn.network/terms/outputTokens",
+      "value": 920,
+      "unitCode": "count"
+    },
+    {
+      "@id": "urn:uuid:44444444-4444-4444-8444-444444444444",
+      "@type": [
+        "SoftwareApplication",
+        "prov:Agent"
+      ],
+      "name": "Synthetic direct-capture producer",
+      "softwareVersion": "1.0.0"
+    },
+    {
+      "@id": "#capture",
+      "@type": "prov:Activity",
+      "name": "Direct evidence capture and sealing",
+      "endTime": "2026-07-23T15:02:08Z",
+      "agent": {
+        "@id": "urn:uuid:44444444-4444-4444-8444-444444444444"
+      }
+    }
+  ]
+}

@@ -1,46 +1,30 @@
 /**
- * Acceptance-test for issue #441: surface the `password_rotation_due`
- * notification in the operator dashboard SPA when the daemon's `/v1/status`
- * reports a `security.lastPasswordRotationAt` older than 90 days.
+ * Acceptance-test for issue #441, migrated for issue #2408 (server-side notifications).
  *
- * This is the Stage 7 (testing-jinn-app) regression. The unit tests in
- * `derive.test.ts` exercise the deriver against a synthetic `passwordRotatedAt`
- * input; this E2E exercises the full SPA wiring end-to-end:
- * - real `/v1/status` response carrying `security.lastPasswordRotationAt`
- * - `mapStatusToDeriveInput` reading `s.security.lastPasswordRotationAt`
- *   (useNotifications.ts) into the deriver's `passwordRotatedAt` field
- * - `deriveNotifications` firing `password_rotation_due` once the ISO timestamp
- *   is over the 90-day interval (derive.ts)
- * - the `NotificationsList` rendering the info notification with the data hooks
+ * `password_rotation_due` derivation moved from the SPA's `derive.ts` to the daemon's
+ * `GET /v1/notifications` (spec §6.5) — the 90-day-age rule is now server-side
+ * (`buildNotifications` in `client/src/api/notifications-build.ts`; parity-tested in
+ * `client/test/api/notifications-build.test.ts`). This E2E now proves the SPA renders
+ * whatever `/v1/notifications` reports, by mocking that endpoint directly instead of
+ * `/v1/status.security.lastPasswordRotationAt`.
  *
- * The effect is time-gated (only fires after 90 days), so a live daemon with a
- * fresh keystore file would show nothing. We mock `/v1/status` to inject an aged
- * timestamp (120 days ago) and assert the notification renders; the control case
- * injects `null` and asserts no such notification appears.
- *
- * Acceptance criteria (from issue #441):
- *   (a) aged `security.lastPasswordRotationAt` (>90d) ⇒ `password_rotation_due`
- *       renders.
- *   (b) null `security.lastPasswordRotationAt` ⇒ no `password_rotation_due`
- *       notification (while the snapshot deriver still produces a
- *       `funding_low` from the low-runway masterGas override below, proving
- *       the page mounted notifications — see issue #1296: funding_low now
- *       keys on per-chain `runwayDaysExcess < 3`, not zero balance alone).
+ * Acceptance criteria (from issue #441, re-verified post-migration):
+ *   (a) a `password_rotation_due` entry in the `/v1/notifications` payload renders.
+ *   (b) an empty `/v1/notifications` payload (alongside a `funding_low` control notice)
+ *       renders no `password_rotation_due` item.
  */
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mockDaemonApi, DEFAULT_STATUS_PAYLOAD } from './helpers/mock-daemon-api';
+import { mockDaemonApi } from './helpers/mock-daemon-api';
 
 const PORT = 17335;
 
 let daemon: ChildProcess | null = null;
 let homeDir = '';
 let handshakeUrl: string | null = null;
-
-const DAY_MS = 1000 * 60 * 60 * 24;
 
 test.beforeAll(async () => {
   homeDir = mkdtempSync(join(tmpdir(), 'jinn-password-rotation-e2e-'));
@@ -93,40 +77,34 @@ test.afterAll(async () => {
 });
 
 /**
- * Override the default `/v1/status` mock with one carrying a `security` block.
- * `lastPasswordRotationAt` is the keystore-password file's ISO mtime (#441);
- * pass a fixed ISO string or `null`. Registered AFTER mockDaemonApi so this
- * route wins (Playwright checks routes in reverse-registration order).
- *
- * Also overrides `masterGas` to a low-runway value so `funding_low` still
- * fires (#1296 — the deriver now keys funding_low on per-chain
- * `runwayDaysExcess < 3`; the shared DEFAULT_STATUS_PAYLOAD default is
- * healthy at runwayDaysExcess: '4'). Used as the "notifications surface
- * mounted" control signal by the absence test below.
+ * Override the default `/v1/notifications` mock with an explicit list. Registered AFTER
+ * mockDaemonApi so this route wins (Playwright checks routes in reverse-registration order).
  */
-async function mockStatusWithSecurity(
+async function mockNotifications(
   page: import('@playwright/test').Page,
-  lastPasswordRotationAt: string | null,
+  notifications: Array<Record<string, unknown>>,
 ): Promise<void> {
   await page.route(
-    (url) => url.pathname === '/v1/status',
+    (url) => url.pathname === '/v1/notifications',
     (route) =>
       route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({
-          ...DEFAULT_STATUS_PAYLOAD,
-          masterGas: { ...DEFAULT_STATUS_PAYLOAD.masterGas, runwayDaysExcess: '1' },
-          security: { lastPasswordRotationAt },
-        }),
+        body: JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), notifications }),
       }),
   );
 }
 
-test('password_rotation_due renders when security.lastPasswordRotationAt is older than 90 days (issue #441)', async ({ page }) => {
+test('password_rotation_due renders when the server reports it (issue #441, migrated #2408)', async ({ page }) => {
   await mockDaemonApi(page);
-  // 120 days ago — comfortably past the 90-day interval.
-  const aged = new Date(Date.now() - 120 * DAY_MS).toISOString();
-  await mockStatusWithSecurity(page, aged);
+  await mockNotifications(page, [
+    {
+      kind: 'password_rotation_due',
+      severity: 'info',
+      title: 'Password rotation due',
+      message: 'Keystore password is over 90 days old.',
+      jumpTo: '/operator/security',
+    },
+  ]);
 
   await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
 
@@ -135,24 +113,29 @@ test('password_rotation_due renders when security.lastPasswordRotationAt is olde
   await expect(rotationItem).toBeVisible({ timeout: 15_000 });
   await expect(rotationItem).toHaveAttribute('data-severity', 'info');
   await expect(rotationItem).toHaveCount(1);
-  // Message text from derive.ts.
+  // Message text from notifications-build.ts.
   await expect(rotationItem).toContainText('over 90 days old');
 });
 
-test('password_rotation_due is absent when security.lastPasswordRotationAt is null (issue #441)', async ({ page }) => {
+test('password_rotation_due is absent when the server omits it (issue #441, migrated #2408)', async ({ page }) => {
   await mockDaemonApi(page);
-  await mockStatusWithSecurity(page, null);
+  // Control: a different notification renders so we know the notifications surface mounted
+  // (otherwise "absent" is vacuously true).
+  await mockNotifications(page, [
+    {
+      kind: 'funding_low',
+      severity: 'warning',
+      title: 'Gas runway low',
+      message: 'Gas runway low — wallet on Base Sepolia below threshold; top up soon.',
+      jumpTo: '/overview',
+    },
+  ]);
 
   await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
 
-  // Control: a snapshot-derived notification must render so we know the
-  // notifications surface mounted (otherwise "absent" is vacuously true). The
-  // overridden /v1/status (mockStatusWithSecurity above) reports a
-  // low-runway `masterGas`, which the deriver maps to `funding_low`.
   const fundingLowItem = page.locator('[data-kind="funding_low"]');
   await expect(fundingLowItem).toBeVisible({ timeout: 15_000 });
 
-  // With null rotation timestamp, the password notice must not appear.
   const rotationItem = page.locator('[data-kind="password_rotation_due"]');
   await expect(rotationItem).toHaveCount(0);
 });

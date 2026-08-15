@@ -1,0 +1,194 @@
+[
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T01:00:00Z",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd001",
+      "announcementId": "ann-manip-001",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee001",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001001"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T02:00:00Z",
+    "attribution": "urn:jinn:agent:solver-b",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd002",
+      "announcementId": "ann-manip-002",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee002",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001002"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "fail",
+    "observedAt": "2026-07-31T03:00:00Z",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd003",
+      "announcementId": "ann-manip-003",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee003",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001003"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "fail",
+    "observedAt": "2026-07-31T04:00:00Z",
+    "attribution": "urn:jinn:agent:solver-b",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd004",
+      "announcementId": "ann-manip-004",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee004",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001004"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T05:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-1",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd005",
+      "announcementId": "ann-manip-005",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee005",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001005"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T06:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-2",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd006",
+      "announcementId": "ann-manip-006",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee006",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001006"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T07:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-3",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd007",
+      "announcementId": "ann-manip-007",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee007",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001007"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T08:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-4",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd008",
+      "announcementId": "ann-manip-008",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee008",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001008"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T09:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-5",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd009",
+      "announcementId": "ann-manip-009",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee009",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001009"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T10:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-6",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd010",
+      "announcementId": "ann-manip-010",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee010",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001010"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T11:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-7",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd011",
+      "announcementId": "ann-manip-011",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee011",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001011"
+    }
+  },
+  {
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-07-31T12:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-8",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd012",
+      "announcementId": "ann-manip-012",
+      "record": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee012",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-0000000001012"
+    }
+  }
+]

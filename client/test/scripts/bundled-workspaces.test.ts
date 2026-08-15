@@ -390,16 +390,25 @@ describe('bundled workspace packaging', () => {
     ) as {
       dependencies?: Record<string, string>;
       bundledDependencies?: string[];
+      resolutions?: Record<string, string>;
     };
 
     for (const packageName of clientManifest.bundledDependencies ?? []) {
-      const workspaceName = packageName.split('/').at(-1);
-      expect(workspaceName, `unsupported bundled workspace name ${packageName}`).toBeTruthy();
+      // The portal resolution is the ground truth for where a bundled workspace lives.
+      // The composition-stack packages are nested (`packages/evidence/local-runtime`), so
+      // the npm name cannot be turned back into a path by taking its last segment.
+      const portal = clientManifest.resolutions?.[packageName];
+      expect(
+        portal?.startsWith('portal:'),
+        `bundled workspace ${packageName} must have a portal resolution`,
+      ).toBe(true);
+      const workspaceRoot = path.resolve(clientRoot, portal!.slice('portal:'.length));
+      expect(
+        workspaceRoot.startsWith(repoRoot + path.sep),
+        `bundled workspace ${packageName} must resolve inside the repository`,
+      ).toBe(true);
       const workspaceManifest = JSON.parse(
-        await readFile(
-          path.join(repoRoot, 'packages', workspaceName!, 'package.json'),
-          'utf8',
-        ),
+        await readFile(path.join(workspaceRoot, 'package.json'), 'utf8'),
       ) as { version?: string; dependencies?: Record<string, string> };
 
       expect(

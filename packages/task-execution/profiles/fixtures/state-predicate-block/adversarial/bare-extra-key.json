@@ -1,0 +1,25 @@
+{
+  "input": {
+    "family": "state-predicate",
+    "block": {
+      "environmentRecord": {
+        "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        "mediaType": "application/vnd.jinn.crypto-environment.v1+json"
+      },
+      "predicateSemanticsVersion": "1",
+      "successPredicates": [
+        {
+          "kind": "nativeBalance",
+          "account": "0x0000000000000000000000000000000000000001",
+          "cmp": "eq",
+          "value": "0"
+        }
+      ],
+      "safetyConstraints": [],
+      "measurements": [],
+      "timeout": 600,
+      "shortcut": true
+    }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

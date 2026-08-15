@@ -1,0 +1,134 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "subjects": [
+    {
+      "digest": {
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "digest": {
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    }
+  ],
+  "method": {
+    "id": "jinn.benchmarking.method/paired-mcnemar",
+    "version": "1",
+    "parameters": {}
+  },
+  "results": {},
+  "disclosures": {
+    "perSubject": [
+      {
+        "subjectSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "integrityTiers": {
+          "re-derivable": 2,
+          "attested-only": 1
+        },
+        "pinning": {
+          "harness": {
+            "match": 1,
+            "mismatch": 1,
+            "unverifiable": 1
+          },
+          "model": {
+            "match": 2,
+            "mismatch": 0,
+            "unverifiable": 1
+          },
+          "loadout": {
+            "match": 3,
+            "mismatch": 0,
+            "unverifiable": 0
+          },
+          "isolation": {
+            "match": 2,
+            "mismatch": 1,
+            "unverifiable": 0
+          }
+        },
+        "independence": 1,
+        "completeness": {
+          "expected": 3,
+          "judged": 1,
+          "floor": "0.5",
+          "runOutcome": "cancelled"
+        },
+        "attrition": {
+          "perArm": {
+            "armA": {
+              "expected": 3,
+              "judged": 1,
+              "unjudged": 0,
+              "unscorable": 0,
+              "expired": 1,
+              "invalidated": 0,
+              "excluded": 1,
+              "replacements": 0
+            }
+          },
+          "asymmetryFlags": [
+            "cancelled-by-owner",
+            "duplicate-observation"
+          ]
+        }
+      },
+      {
+        "subjectSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "integrityTiers": {
+          "re-derivable": 0,
+          "attested-only": 4
+        },
+        "pinning": {
+          "harness": {
+            "match": 0,
+            "mismatch": 4,
+            "unverifiable": 0
+          },
+          "model": {
+            "match": 0,
+            "mismatch": 0,
+            "unverifiable": 4
+          },
+          "loadout": {
+            "match": 1,
+            "mismatch": 1,
+            "unverifiable": 2
+          },
+          "isolation": {
+            "match": 4,
+            "mismatch": 0,
+            "unverifiable": 0
+          }
+        },
+        "independence": 3,
+        "completeness": {
+          "expected": 4,
+          "judged": 3,
+          "floor": "0.75",
+          "runOutcome": "complete"
+        },
+        "attrition": {
+          "perArm": {
+            "armA": {
+              "expected": 4,
+              "judged": 3,
+              "unjudged": 1,
+              "unscorable": 0,
+              "expired": 0,
+              "invalidated": 0,
+              "excluded": 0,
+              "replacements": 2
+            }
+          },
+          "asymmetryFlags": [
+            "partial-coverage",
+            "duplicate-observation"
+          ]
+        }
+      }
+    ]
+  },
+  "author": "urn:uuid:66666666-6666-5666-8666-666666666666"
+}

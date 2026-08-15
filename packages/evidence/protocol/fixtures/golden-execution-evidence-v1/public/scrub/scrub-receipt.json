@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "jinn.fixture.scrub-receipt.v1",
+  "sourceRecord": "sha256:7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf",
+  "scrubber": {
+    "id": "urn:uuid:88888888-8888-4888-8888-888888888888",
+    "name": "Synthetic structure-aware scrubber",
+    "version": "1.0.0"
+  },
+  "policy": {
+    "name": "scrub/public-execution-policy.json",
+    "sha256": "40140317cf686ffff29d64eef1b2287eb4560ed09c44c7fa24d21f6eef0f71f7"
+  },
+  "completedAt": "2026-07-23T16:10:00Z",
+  "mappings": [
+    {
+      "source": "sha256:49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a",
+      "derived": "sha256:e261de0ff9ccfc2a2c074d26a1fe0683405c3829c7127b4d0eb3d235e9491e76"
+    }
+  ],
+  "dispositions": [
+    {
+      "class": "absolute-path",
+      "disposition": "redact",
+      "count": 1
+    },
+    {
+      "class": "credential",
+      "disposition": "redact",
+      "count": 1
+    },
+    {
+      "class": "reject",
+      "disposition": "reject",
+      "count": 0
+    }
+  ]
+}

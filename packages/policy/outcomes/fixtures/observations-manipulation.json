@@ -1,0 +1,410 @@
+[
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T01:00:00Z",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0001",
+      "announcementId": "ann-manip-001",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0001",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001001"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T02:00:00Z",
+    "attribution": "urn:jinn:agent:solver-b",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0002",
+      "announcementId": "ann-manip-002",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0002",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001002"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "fail",
+    "observedAt": "2026-08-05T03:00:00Z",
+    "attribution": "urn:jinn:agent:solver-a",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0003",
+      "announcementId": "ann-manip-003",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0003",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001003"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "fail",
+    "observedAt": "2026-08-05T04:00:00Z",
+    "attribution": "urn:jinn:agent:solver-b",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0004",
+      "announcementId": "ann-manip-004",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0004",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001004"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T05:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-1",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0005",
+      "announcementId": "ann-manip-005",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0005",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001005"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T06:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-2",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0006",
+      "announcementId": "ann-manip-006",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0006",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001006"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T07:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-3",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0007",
+      "announcementId": "ann-manip-007",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0007",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001007"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T08:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-4",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0008",
+      "announcementId": "ann-manip-008",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0008",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001008"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T09:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-5",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0009",
+      "announcementId": "ann-manip-009",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0009",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001009"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T10:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-6",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0010",
+      "announcementId": "ann-manip-010",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0010",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001010"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T11:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-7",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0011",
+      "announcementId": "ann-manip-011",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0011",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001011"
+    }
+  },
+  {
+    "tuple": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "id": "anthropic/claude-haiku-4-5"
+      },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "perAxisStatus": {
+      "harness": "match",
+      "model": "match",
+      "loadout": "match",
+      "isolationPolicy": "match"
+    },
+    "taskDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verdict": "pass",
+    "observedAt": "2026-08-05T12:00:00Z",
+    "attribution": "urn:jinn:agent:sybil-8",
+    "ref": {
+      "source": {
+        "agent": "https://spec.jinn.network/agents/projector",
+        "name": "base-marketplace"
+      },
+      "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0012",
+      "announcementId": "ann-manip-012",
+      "record": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0012",
+      "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000001012"
+    }
+  }
+]

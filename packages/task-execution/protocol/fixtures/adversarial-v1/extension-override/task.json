@@ -1,0 +1,18 @@
+{
+  "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
+  "profile": {
+    "uri": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+    "digest": {
+      "sha256": "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6"
+    }
+  },
+  "instructions": "Extensions must not override core semantics.",
+  "outputs": [
+    {
+      "name": "patch",
+      "mediaType": "text/x-diff",
+      "required": true
+    }
+  ],
+  "x-jinn-example.test/protocolOverride": "https://not-the-real-protocol.example/v9"
+}

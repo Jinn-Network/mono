@@ -1,0 +1,73 @@
+{
+  "name": "@jinn-network/evidence-contribution",
+  "version": "0.1.0",
+  "description": "Host-neutral disclosure authorization and publication workflow for Jinn Evidence.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/evidence/contribution"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/evidence-derivation": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/evidence-publication": "0.1.0",
+    "@jinn-network/evidence-repository": "0.1.0",
+    "canonicalize": "3.0.0"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/evidence-derivation": "portal:../derivation",
+    "@jinn-network/evidence-protocol": "portal:../protocol",
+    "@jinn-network/evidence-publication": "portal:../publication",
+    "@jinn-network/evidence-repository": "portal:../repository",
+    "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
+    "@jinn-network/record-discovery-serve": "portal:../../discovery/serve",
+    "@jinn-network/record-publication": "portal:../../discovery/publication",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "vite": "6.4.3"
+  }
+}

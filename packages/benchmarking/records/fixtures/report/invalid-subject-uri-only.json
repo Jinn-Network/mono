@@ -1,0 +1,18 @@
+{
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+  "subjects": [
+    {
+      "uri": "https://example.test/matrices/one"
+    }
+  ],
+  "method": {
+    "id": "jinn.benchmarking.method/wilson",
+    "version": "1",
+    "parameters": {}
+  },
+  "results": {},
+  "disclosures": {
+    "perSubject": []
+  },
+  "author": "urn:uuid:66666666-6666-5666-8666-666666666666"
+}

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "escrow/today-generation.json",
+      "sha256": "22ecbe6bfa5c79f2f0eb2a5a3ea593be6bc7df1e4e2effda3bb606511461196d"
+    },
+    {
+      "id": "projector/golden-events/revised-cross-batch-flow-2026-08-03.json",
+      "sha256": "f9b9dfb6f40e8a9f3ce94e71a83b4a87f098f45af00378912d69268448dea395"
+    },
+    {
+      "id": "projector/golden-events/revised-cross-batch-flow.json",
+      "sha256": "2bddcc897f775957d51128ecf25623b5288b896b28d4da8270b778a6f964940a"
+    },
+    {
+      "id": "projector/golden-events/revised-task-created-2026-08-03.json",
+      "sha256": "feb88fb4affe4ff490e1608c7473b558af4aaf07a31628823f48c04345ed56c5"
+    },
+    {
+      "id": "projector/golden-events/revised-task-created.json",
+      "sha256": "ae63d28f539f9f4ef32892931731942981aeef39727ffb05bf86e72b2c142463"
+    },
+    {
+      "id": "projector/reorg-scenarios/revised-task-created-reorg-2026-08-03.json",
+      "sha256": "34439dea2b12b7393a772062babebd39faf9eac3a787b4fe34cc357af21d0616"
+    },
+    {
+      "id": "projector/reorg-scenarios/revised-task-created-reorg.json",
+      "sha256": "0f59c59cf9fd4332e2b74a4650fa0d0994f85968ff9a3ec9ba41e3d1231dc6a3"
+    }
+  ],
+  "errata": [
+    {
+      "id": "projector/golden-events/revised-cross-batch-flow.json",
+      "supersededBy": "projector/golden-events/revised-cross-batch-flow-2026-08-03.json",
+      "date": "2026-08-03",
+      "reason": "Expected announcement bytes predate the corrected deterministic projector output; the published fixture is retained unchanged."
+    },
+    {
+      "id": "projector/golden-events/revised-task-created.json",
+      "supersededBy": "projector/golden-events/revised-task-created-2026-08-03.json",
+      "date": "2026-08-03",
+      "reason": "Expected announcement bytes predate the corrected deterministic projector output; the published fixture is retained unchanged."
+    },
+    {
+      "id": "projector/reorg-scenarios/revised-task-created-reorg.json",
+      "supersededBy": "projector/reorg-scenarios/revised-task-created-reorg-2026-08-03.json",
+      "date": "2026-08-03",
+      "reason": "Expected correction bytes predate the corrected deterministic projector output; the published fixture is retained unchanged."
+    }
+  ]
+}

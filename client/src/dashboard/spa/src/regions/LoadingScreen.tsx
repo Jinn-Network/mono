@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useEventStream } from '../api/events.js';
-import type { StructuredEvent } from '../api/types.js';
+import type { StructuredEvent } from '../../../../api/contract/index.js';
 import { Button } from '../components/ui/button.js';
 import { Card, CardContent } from '../components/ui/card.js';
 import { ScrollArea } from '../components/ui/scroll-area.js';

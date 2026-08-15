@@ -1,0 +1,45 @@
+{
+  "methodId": "jinn.benchmarking.method/wilson",
+  "methodVersion": "1",
+  "parameters": {},
+  "verdictRule": "unanimous",
+  "matrices": [{
+    "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+    "run": { "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+    "closeBoundary": { "at": "2026-08-04T00:00:00Z" },
+    "cells": [
+      {
+        "cellKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/armA/1",
+        "taskDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "armId": "armA", "replicate": 1, "dispatches": 1, "accounted": 1,
+        "submission": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "delivery": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+        "verdicts": ["sha256:3111111111111111111111111111111111111111111111111111111111111111"],
+        "validVerdicts": ["sha256:3111111111111111111111111111111111111111111111111111111111111111"],
+        "outcome": "judged",
+        "verification": { "harness": "match", "model": "match", "loadout": "match", "isolation": "match", "checksFailed": [] },
+        "integrityTier": "re-derivable"
+      },
+      {
+        "cellKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/armB/1",
+        "taskDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "armId": "armB", "replicate": 1, "dispatches": 0,
+        "verdicts": [], "validVerdicts": [], "outcome": "expired",
+        "verification": { "harness": "match", "model": "match", "loadout": "match", "isolation": "match", "checksFailed": [] },
+        "integrityTier": "re-derivable"
+      }
+    ],
+    "exclusions": [], "attrition": { "perArm": {}, "asymmetryFlags": [] },
+    "completeness": { "expected": 0, "judged": 0, "floor": "1", "runOutcome": "partial" },
+    "assembly": { "procedure": "jinn.benchmarking.assembly", "version": "1.0" }
+  }],
+  "verdictOutcomes": { "sha256:3111111111111111111111111111111111111111111111111111111111111111": { "verdict": "pass" } },
+  "expectedResults": {
+    "verdictRule": "unanimous",
+    "arms": {
+      "armA": { "n": 1, "passRate": "1.0000", "wilsonInterval": { "low": "0.2065", "high": "1.0000" } },
+      "armB": { "n": 0, "passRate": "0.0000", "wilsonInterval": { "low": "0.0000", "high": "0.0000" } }
+    },
+    "conflicted": { "count": 0, "cellKeys": [] }
+  }
+}

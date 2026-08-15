@@ -27,11 +27,7 @@ import {
   JinnRepoAutopilotSessionTaskSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoLegacySolutionPayloadSchema,
-  IssueRelayEvaluationContextV1Schema,
   type JinnRepoVerdictPayload,
-  type IssueRelayEvaluationContextV1,
-  type IssueRelayRoundV1,
-  type JinnRepoLiveIssueTask as SdkJinnRepoLiveIssueTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import {
   JinnRepoTaskSchema,
@@ -65,21 +61,8 @@ import {
 } from './autopilot-evaluation-context.js';
 import {
   AUTOPILOT_EVALUATION_CONTEXT_KEY,
-  ISSUE_RELAY_EVALUATION_CONTEXT_KEY,
   resolveSolutionEnvelopeCid,
 } from '../evaluation-context.js';
-import {
-  admitIssueRelayEvaluationOpportunity,
-} from './issue-relay-context.js';
-import {
-  createIssueRelayMechanicalRunner,
-  createIssueRelaySemanticAgentRunner,
-  runIssueRelaySemanticReview,
-  type IssueRelayMechanicalRunner,
-  type IssueRelayRepositoryGit,
-  type IssueRelaySemanticAgentRunner,
-} from './issue-relay-semantic.js';
-import { VerdictCode } from '../../../adapters/mech/verdict-code.js';
 
 /** The two verdict values emitted by this evaluator. jinn-repo grades are
  *  binary: the gold tests either resolve or they don't (unscorable runs throw
@@ -225,129 +208,6 @@ function parseAutopilotEvaluationTask(task: Task):
   return { ok: true, context: admission.context };
 }
 
-function parseIssueRelayEvaluationTask(task: Task):
-  | {
-      ok: true;
-      context: IssueRelayEvaluationContextV1;
-    }
-  | {
-      ok: false;
-      reason: string;
-    } {
-  const parsedTask = JinnRepoTaskSchema.safeParse(task.spec);
-  if (
-    !parsedTask.success
-    || !isLiveIssueTask(parsedTask.data)
-    || parsedTask.data.relay === undefined
-  ) {
-    return {
-      ok: false,
-      reason: parsedTask.success
-        ? 'source Task is not a Relay live issue'
-        : `malformed Relay source Task: ${summarizeZodError(parsedTask.error)}`,
-    };
-  }
-  const parsedContext = IssueRelayEvaluationContextV1Schema.safeParse(
-    task.context?.[ISSUE_RELAY_EVALUATION_CONTEXT_KEY],
-  );
-  if (!parsedContext.success) {
-    return {
-      ok: false,
-      reason:
-        `context.${ISSUE_RELAY_EVALUATION_CONTEXT_KEY} must be an accepted strict evaluation context`,
-    };
-  }
-  const resultJson = task.context?.['restorationResult'];
-  if (typeof resultJson !== 'string') {
-    return { ok: false, reason: 'context.restorationResult required' };
-  }
-  let envelope: ReturnType<typeof SignedEnvelopeSchema.parse>;
-  try {
-    envelope = SignedEnvelopeSchema.parse(JSON.parse(resultJson));
-  } catch (error) {
-    return {
-      ok: false,
-      reason:
-        `malformed Relay Solution envelope: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-    };
-  }
-  if (
-    envelope.solverType !== 'jinn-repo.v1'
-    || normalizeEnvelopeRole(envelope.role) !== 'solution'
-  ) {
-    return {
-      ok: false,
-      reason:
-        `expected jinn-repo.v1/solution envelope, got ${envelope.solverType}/${envelope.role}`,
-    };
-  }
-  const parsedSolution = JinnRepoLegacySolutionPayloadSchema.safeParse(
-    envelope.payload,
-  );
-  if (!parsedSolution.success) {
-    return {
-      ok: false,
-      reason: `malformed Relay repository result: ${summarizeZodError(parsedSolution.error)}`,
-    };
-  }
-  const solutionEnvelopeCid = resolveSolutionEnvelopeCid(task);
-  if (!solutionEnvelopeCid) {
-    return {
-      ok: false,
-      reason: 'context.solutionEnvelopeCid required for Relay evaluation',
-    };
-  }
-  const context = parsedContext.data as IssueRelayEvaluationContextV1;
-  const attemptIndex = task.attemptNumber;
-  if (
-    attemptIndex === undefined
-    || !Number.isSafeInteger(attemptIndex)
-    || attemptIndex < 0
-  ) {
-    return { ok: false, reason: 'Relay evaluation task attempt is required' };
-  }
-  const evaluationSuffix = `:evaluation:${attemptIndex}`;
-  if (!task.id.endsWith(evaluationSuffix)) {
-    return {
-      ok: false,
-      reason: 'Relay evaluation task id has an invalid deterministic suffix',
-    };
-  }
-  const sourceTaskId = task.id.slice(0, -evaluationSuffix.length);
-  if (
-    sourceTaskId.length === 0
-    || sourceTaskId !== context.correlation.taskId
-    || attemptIndex !== context.correlation.attemptIndex
-  ) {
-    return {
-      ok: false,
-      reason: 'Relay evaluation task id does not match accepted correlation',
-    };
-  }
-  const admission = admitIssueRelayEvaluationOpportunity({
-    task: parsedTask.data as SdkJinnRepoLiveIssueTask & {
-      readonly relay: IssueRelayRoundV1;
-    },
-    solution: parsedSolution.data,
-    taskId: context.correlation.taskId,
-    attemptIndex,
-    requestId: task.restorationRequestId ?? '',
-    solutionEnvelopeCid,
-    solutionOperatorSafe: envelope.participant.safeAddress,
-    evaluatorOperatorSafe: context.operators.evaluatorSafe,
-    observation: {
-      state: 'accepted',
-      context,
-    },
-  });
-  if (admission.kind !== 'accepted') {
-    return { ok: false, reason: admission.reason };
-  }
-  return { ok: true, context: admission.context };
-}
-
 export interface JinnRepoEvaluatorHarnessOptions {
   /** Marks a stub registry — `isReady()` reports requires-live-daemon. */
   stub?: boolean;
@@ -370,8 +230,8 @@ export interface JinnRepoEvaluatorHarnessOptions {
   grade?: GradeFn;
   /**
    * Live-issue grade-fn override (test injection). Defaults to
-   * {@link runJinnRepoLiveEval} resolved against the task's exact workspace
-   * repository.
+   * {@link runJinnRepoLiveEval} resolved against `JINN_MONO_REPO_URL` (or the
+   * public GitHub URL), mirroring {@link JinnRepoEvaluator}'s resolution order.
    */
   gradeLive?: LiveGradeFn;
   /** Deterministic exact-head checks, injectable for hermetic tests. */
@@ -380,12 +240,6 @@ export interface JinnRepoEvaluatorHarnessOptions {
   immutableMechanicalVerifier?: ImmutableMechanicalVerifier;
   /** Per-SolverNet semantic runtime resolver, injectable for hermetic tests. */
   semanticAgentRunnerResolver?: SemanticAgentRunnerResolver;
-  /** Relay jinn-mono.v1 deterministic checks, injected at the profile boundary. */
-  issueRelayMechanicalRunner?: IssueRelayMechanicalRunner;
-  /** Credential-free structured semantic review boundary for Relay. */
-  issueRelaySemanticRunner?: IssueRelaySemanticAgentRunner;
-  /** Public Git transport override for hermetic tests. */
-  issueRelayGit?: IssueRelayRepositoryGit;
 }
 
 export class JinnRepoEvaluatorHarness implements Harness {
@@ -400,10 +254,6 @@ export class JinnRepoEvaluatorHarness implements Harness {
   private readonly mechanicalRunner: AutopilotMechanicalRunner;
   private readonly immutableMechanicalVerifier: ImmutableMechanicalVerifier | undefined;
   private readonly semanticAgentRunnerResolver: SemanticAgentRunnerResolver | undefined;
-  private readonly issueRelayMechanicalRunner: IssueRelayMechanicalRunner | undefined;
-  private readonly issueRelaySemanticRunner: IssueRelaySemanticAgentRunner | undefined;
-  private readonly issueRelayGit: IssueRelayRepositoryGit | undefined;
-  private readonly issueRelayUsesImmutableVerifier: boolean;
   private readonly verifierReadinessCache: AutopilotReadinessCache = {};
   private readonly semanticReadinessCache =
     new WeakMap<SemanticAgentRunner, AutopilotReadinessCache>();
@@ -419,6 +269,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
         runJinnRepoLiveEval({
           spec: args.spec,
           patch: args.solution.patch,
+          monoRepoUrl: process.env['JINN_MONO_REPO_URL'] ?? DEFAULT_MONO_REPO_URL,
         }));
     this.immutableMechanicalVerifier = opts.immutableMechanicalVerifier;
     this.mechanicalRunner =
@@ -428,18 +279,6 @@ export class JinnRepoEvaluatorHarness implements Harness {
         immutableVerifier: opts.immutableMechanicalVerifier,
       });
     this.semanticAgentRunnerResolver = opts.semanticAgentRunnerResolver;
-    this.issueRelayMechanicalRunner =
-      opts.issueRelayMechanicalRunner
-      ?? (
-        opts.immutableMechanicalVerifier === undefined
-          ? undefined
-          : createIssueRelayMechanicalRunner(opts.immutableMechanicalVerifier)
-      );
-    this.issueRelaySemanticRunner = opts.issueRelaySemanticRunner;
-    this.issueRelayGit = opts.issueRelayGit;
-    this.issueRelayUsesImmutableVerifier =
-      opts.issueRelayMechanicalRunner === undefined
-      && opts.immutableMechanicalVerifier !== undefined;
   }
 
   supports(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
@@ -533,70 +372,6 @@ export class JinnRepoEvaluatorHarness implements Harness {
             semanticReadiness.reason
             ?? 'Autopilot semantic evaluator runtime is unavailable',
         };
-      }
-      return { ok: true };
-    }
-    if (
-      rawTaskSpecSource(task.spec) === 'live-issue'
-      && task.spec?.['relay'] !== undefined
-    ) {
-      const parsed = parseIssueRelayEvaluationTask(task);
-      if (!parsed.ok) return { ok: false, reason: parsed.reason };
-      if (!this.issueRelayMechanicalRunner) {
-        return {
-          ok: false,
-          reason: 'Issue Relay deterministic evaluator runtime is not configured',
-        };
-      }
-      if (this.issueRelayUsesImmutableVerifier && this.immutableMechanicalVerifier?.isReady) {
-        const readiness = await this.cachedReadiness(
-          this.verifierReadinessCache,
-          () => this.immutableMechanicalVerifier!.isReady!(),
-        );
-        if (!readiness.ready) {
-          return {
-            ok: false,
-            reason: readiness.reason
-              ?? 'Issue Relay immutable mechanical verifier is unavailable',
-          };
-        }
-      }
-      if (this.issueRelaySemanticRunner) return { ok: true };
-      if (!this.semanticAgentRunnerResolver) {
-        return {
-          ok: false,
-          reason: 'Issue Relay semantic evaluator runtime is not configured',
-        };
-      }
-      const semanticRuntime = await this.semanticAgentRunnerResolver.resolve({
-        ...(task.solverNetManifestCid
-          ? { manifestCid: task.solverNetManifestCid }
-          : {}),
-      });
-      if (!semanticRuntime) {
-        return {
-          ok: false,
-          reason: 'Issue Relay semantic evaluator runtime is not configured for SolverNet '
-            + (task.solverNetManifestCid ?? '<unknown>'),
-        };
-      }
-      if (semanticRuntime.runner.isReady) {
-        let cache = this.semanticReadinessCache.get(semanticRuntime.runner);
-        if (!cache) {
-          cache = {};
-          this.semanticReadinessCache.set(semanticRuntime.runner, cache);
-        }
-        const readiness = await this.cachedReadiness(
-          cache,
-          () => semanticRuntime.runner.isReady!(),
-        );
-        if (!readiness.ready) {
-          return {
-            ok: false,
-            reason: readiness.reason
-              ?? 'Issue Relay semantic evaluator runtime is unavailable',
-          };
-        }
       }
       return { ok: true };
     }
@@ -741,107 +516,6 @@ export class JinnRepoEvaluatorHarness implements Harness {
           metadata: {
             outcome: result.review.outcome,
             reviewedHead: parsed.context.correlation.reviewedHead,
-          },
-          access: { priceUsdc: '0' },
-        }],
-      };
-    }
-    if (rawSource === 'live-issue' && ctx.task.spec?.['relay'] !== undefined) {
-      const parsed = parseIssueRelayEvaluationTask(ctx.task);
-      if (!parsed.ok) {
-        throw new SkippableError(
-          'issue_relay_eval_pending',
-          `jinn-repo-evaluator: ${parsed.reason}`,
-        );
-      }
-      const mechanicalRunner = this.issueRelayMechanicalRunner;
-      if (!mechanicalRunner) {
-        throw new SkippableError(
-          'issue_relay_eval_pending',
-          'jinn-repo-evaluator: Issue Relay deterministic evaluator runtime is not configured',
-        );
-      }
-      let semanticRunner = this.issueRelaySemanticRunner;
-      let semanticRuntimeInfo:
-        | { readonly provider: string; readonly model?: string }
-        | undefined;
-      if (!semanticRunner) {
-        const semanticRuntime =
-          await this.semanticAgentRunnerResolver?.resolve({
-            ...(ctx.task.solverNetManifestCid
-              ? { manifestCid: ctx.task.solverNetManifestCid }
-              : {}),
-            ...(ctx.solverNet ? { solverNet: ctx.solverNet } : {}),
-          });
-        if (!semanticRuntime) {
-          throw new SkippableError(
-            'issue_relay_eval_pending',
-            'jinn-repo-evaluator: Issue Relay semantic evaluator runtime is not configured',
-          );
-        }
-        semanticRunner = createIssueRelaySemanticAgentRunner({
-          runner: semanticRuntime.runner,
-          abort: ctx.abort,
-          ...(semanticRuntime.model === undefined
-            ? {}
-            : { model: semanticRuntime.model }),
-        });
-        semanticRuntimeInfo = {
-          provider: semanticRuntime.provider,
-          ...(semanticRuntime.model === undefined
-            ? {}
-            : { model: semanticRuntime.model }),
-        };
-      }
-      const result = await runIssueRelaySemanticReview({
-        context: parsed.context,
-        runMechanical: mechanicalRunner,
-        runSemantic: semanticRunner,
-        ...(this.issueRelayGit === undefined
-          ? {}
-          : { git: this.issueRelayGit }),
-      });
-      const artifactPath = 'jinn-issue-relay-verdict.json';
-      await writeFile(
-        join(ctx.workingDir, artifactPath),
-        `${JSON.stringify(result, null, 2)}\n`,
-        'utf8',
-      );
-      const gating = result.outcome === 'pass'
-        ? {
-            passed: true,
-            verdict: 'PASS' as const,
-            verdictCode: VerdictCode.Pass,
-          }
-        : result.outcome === 'request-changes'
-          ? {
-              passed: false,
-              verdict: 'FAIL' as const,
-              verdictCode: VerdictCode.Fail,
-            }
-          : {
-              passed: false,
-              verdict: 'UNRESOLVED' as const,
-              verdictCode: VerdictCode.Unresolved,
-            };
-      return {
-        venueRef: { name: 'jinn-repo' },
-        gating,
-        informational: {
-          instance_id: instanceId,
-          reviewTarget: parsed.context.reviewTarget,
-          correlation: parsed.context.correlation,
-          ...(semanticRuntimeInfo === undefined
-            ? {}
-            : { semanticRuntime: semanticRuntimeInfo }),
-        },
-        verdictPayload: result as unknown as Record<string, unknown>,
-        artifacts: [{
-          path: artifactPath,
-          artifactType: 'jinn_issue_relay_verdict',
-          metadata: {
-            outcome: result.outcome,
-            evaluatedHead: result.evaluatedHead,
           },
           access: { priceUsdc: '0' },
         }],

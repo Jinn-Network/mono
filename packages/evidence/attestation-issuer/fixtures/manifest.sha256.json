@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "issuer-contract-v1/README.md",
+      "sha256": "4dd2f2cf5cc601abf4f688814a98c1ad5db8eddfb9382f3df1eb955d55bdec9e"
+    },
+    {
+      "id": "issuer-contract-v1/execution-verification.json",
+      "sha256": "2e953ac8f726805bcd59f0702fe9e78a7874e752ab6ce4ae13cb50128633b765"
+    },
+    {
+      "id": "issuer-contract-v1/expected-digests.json",
+      "sha256": "68991bf0ba2b91f71e801a1c00bc4a7ec5a4b0e42472be5358bbedd59fc959f7"
+    },
+    {
+      "id": "issuer-contract-v1/result-evaluation.json",
+      "sha256": "e34ed6bbf98996b6f3fbe18c976ff56b86e258bc37113a8a86f77b471a86f35f"
+    }
+  ],
+  "errata": []
+}
