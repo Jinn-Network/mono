@@ -34,11 +34,8 @@ import type { NativeEvaluatorComposition } from './native-evaluator-composition.
 import { PostingLoop, buildPostingLoop, type PostingLoopPorts } from './posting-loop.js';
 import { EvidenceDriverLoop } from './evidence-driver.js';
 import type { ProjectorLoop } from './projector-loop.js';
-import type { NativeOperatorHost } from './native-operator-host.js';
-import type { OperatorVerticalMode } from './native-vertical-mode.js';
 import {
   configurePhaseDTransitionUsage,
-  recordPhaseDTransitionUse,
 } from '../compatibility/phase-d-transition-usage.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
@@ -88,9 +85,6 @@ function emitTickErrorOrRaceLost(
 }
 
 export interface DaemonConfig {
-  /** Compatibility daemon control. Native-v1 owns its lifecycle through nativeHost. */
-  verticalMode?: OperatorVerticalMode;
-  nativeHost?: NativeOperatorHost;
   adapter: ExecutionAdapter;
   /**
    * Legacy Runner only consumed by `LegacyClaudeImpl` via `buildHarnesses`.
@@ -295,7 +289,6 @@ export interface DaemonConfig {
 
 export class Daemon {
   private store: Store;
-  private nativeHost?: NativeOperatorHost;
   private adapter: ExecutionAdapter;
   private loopPromises: Promise<void>[] = [];
   private cachedShutdownState: string | null = null;
@@ -321,28 +314,6 @@ export class Daemon {
     configurePhaseDTransitionUsage(
       config.dbPath === ':memory:' ? undefined : `${config.dbPath}.phase-d-transition-usage.v1.json`,
     );
-    const verticalMode = config.verticalMode ?? 'legacy';
-    if (verticalMode === 'native-v1') {
-      if (!config.nativeHost) throw new Error('native-v1 daemon requires a native operator host');
-      // The `restorationEngine` arm of this refusal retired with the TaskEngine
-      // (Wave-4 D1); the message is frozen until `legacy-operator-composition`
-      // flips at stage 5 (`.github/scripts/phase-d-transition-deletion.test.mjs`).
-      if (config.composition || config.work) {
-        throw new Error('native-v1 daemon refuses legacy restoration engine or compatibility composition');
-      }
-      this.nativeHost = config.nativeHost;
-    }
-    if (verticalMode === 'legacy') {
-      recordPhaseDTransitionUse('legacy-operator-composition');
-      // The `legacy-evaluator-delivery-watcher-loaded` counter is no longer
-      // recorded: its subject (DeliveryWatcherLoop) retired with Wave-4 D2, so a
-      // legacy boot no longer loads it and recording it would report a load that
-      // cannot happen. The signal NAME stays in the vocabulary
-      // (`compatibility/phase-d-transition-usage.ts`) and on `/v1/status` —
-      // dropping it from the Zod enum would make an already-written durable
-      // observation file carrying the counter fail strict validation on the next
-      // persist, which is an upgrade break outside this transition's scope.
-    }
     if (config.store) {
       this.store = config.store;
       this.ownsStore = false;
@@ -482,10 +453,9 @@ export class Daemon {
       this.ownsApiServer = true;
     }
 
-    // Native lifecycle ownership is established only after the API bind mutex. Recovery must
+    // Work-loop lifecycle ownership is established only after the API bind mutex. Recovery must
     // finish and the signed source head must verify before any work loop can process a card.
-    if (this.nativeHost) await this.nativeHost.start();
-    else await this.workLoop?.initialize();
+    await this.workLoop?.initialize();
 
     // Only after API bind AND native fail-closed initialization do we report running. A lease,
     // recovery, or source-trust refusal must never leave a false startup-ok marker behind.
@@ -701,7 +671,6 @@ export class Daemon {
 
   async stop(): Promise<void> {
     emitStructured({ kind: 'system', message: 'daemon loops stopping' });
-    await this.nativeHost?.close();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
     this.evictionLoop?.stop();

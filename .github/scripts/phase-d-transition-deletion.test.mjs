@@ -49,8 +49,8 @@ function containing(files, needle) {
     .sort();
 }
 
-test('the Phase D manifest is complete, path-valid, and keeps the Phase C default legacy', () => {
-  assert.equal(manifest.defaultPolicy.includes('remains legacy'), true);
+test('the Phase D manifest is complete, path-valid, and uses the stage-driven retirement frame', () => {
+  assert.equal(manifest.defaultPolicy.includes('stage-driven'), true);
   assert.deepEqual(manifest.transitions.map(({ id }) => id).sort(), EXPECTED_TRANSITIONS);
   for (const transition of manifest.transitions) {
     assert.equal(statSync(resolve(root, transition.noNewUseGuard.path)).isFile(), true);

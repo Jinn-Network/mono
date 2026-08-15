@@ -17,14 +17,14 @@ const VALIDATED = parseValidatedPhaseBClosureManifest(
 );
 
 describe('operator vertical mode', () => {
-  it('keeps legacy as the effective default and reports missing closure readiness', () => {
+  it('absent requestedMode takes the native boot gate instead of defaulting to a parallel legacy entry', () => {
     const config = JinnConfigSchema.parse({});
     expect(config.operator?.verticalMode).toBeUndefined();
     expect(resolveOperatorVerticalMode({
       requestedMode: config.operator?.verticalMode,
-      network: config.network,
-      chain: { ...BASE_SEPOLIA_TODAY, chainId: 8453 },
-    })).toEqual({ requestedMode: undefined, effectiveMode: 'legacy', readiness: 'live-closure-missing' });
+      network: 'testnet',
+      chain: BASE_SEPOLIA_TODAY,
+    })).toEqual({ requestedMode: undefined, effectiveMode: 'native-v1', readiness: 'explicit-native-unvalidated' });
   });
 
   it('admits explicit native-v1 for a closure run without treating a local receipt as release authority', () => {
@@ -48,12 +48,16 @@ describe('operator vertical mode', () => {
     });
   });
 
-  it('does not let a self-declared local receipt flip the production default', () => {
+  it('does not let a self-declared local receipt count as live-closure-validated', () => {
     expect(resolveOperatorVerticalMode({
       network: 'testnet',
       chain: BASE_SEPOLIA_TODAY,
       liveClosure: VALIDATED,
-    })).toEqual({ requestedMode: undefined, effectiveMode: 'legacy', readiness: 'live-closure-missing' });
+    })).toEqual({
+      requestedMode: undefined,
+      effectiveMode: 'native-v1',
+      readiness: 'explicit-native-unvalidated',
+    });
   });
 
   it('refuses mainnet and every contract/generation mismatch before considering closure readiness', () => {

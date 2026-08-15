@@ -42,22 +42,18 @@ function configuredChain(native: NonNullable<NonNullable<VerticalModeConfig['ope
 export function resolveConfiguredOperatorVerticalMode(config: VerticalModeConfig): OperatorVerticalDecision {
   const requestedMode = config.operator?.verticalMode;
   const native = config.operator?.native;
-  if (requestedMode === 'legacy') {
-    return resolveOperatorVerticalMode({
-      requestedMode,
-      network: config.network,
-      chain: native === undefined
-        ? ({ chainId: config.network === 'mainnet' ? 8453 : 84532 } as never)
-        : configuredChain(native),
-    });
+  // Axis 1 (which file runs) is gone. Absent or explicit-legacy configuration reports
+  // the fleet entry. Only a leftover `operator.verticalMode: "native-v1"` still takes
+  // the native boot gate, so it cannot silently mean a second product graph.
+  if (requestedMode !== 'native-v1') {
+    return {
+      requestedMode: requestedMode === 'legacy' ? 'legacy' : undefined,
+      effectiveMode: 'legacy',
+      readiness: requestedMode === 'legacy' ? 'explicit-legacy' : 'live-closure-missing',
+    };
   }
   if (native === undefined) {
-    if (requestedMode === 'native-v1') throw new Error('native-v1 requires operator.native configuration');
-    return {
-      requestedMode: undefined,
-      effectiveMode: 'legacy',
-      readiness: 'live-closure-missing',
-    };
+    throw new Error('native-v1 requires operator.native configuration');
   }
   let liveClosure: ValidatedPhaseBClosureManifest | undefined;
   if (existsSync(native.liveClosureReceiptPath)) {

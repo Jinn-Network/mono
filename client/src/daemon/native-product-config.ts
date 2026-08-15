@@ -245,13 +245,11 @@ export const NativeOperatorConfigSchema = z.object({
 
 export type NativeOperatorConfig = z.infer<typeof NativeOperatorConfigSchema>;
 
-export const NativeProductFileSchema = z.object({
-  network: z.literal('testnet'),
-  rpcUrl: publicHttpUrl,
-  operator: z.object({
-    verticalMode: z.enum(['legacy', 'native-v1']).optional(),
-    native: NativeOperatorConfigSchema,
-  }).strict(),
-}).strict();
-
-export type NativeProductConfig = z.infer<typeof NativeProductFileSchema>;
+/** In-process native production shape. The dedicated native-v1 file parser is gone (D5). */
+export type NativeProductConfig = {
+  readonly network: 'testnet';
+  readonly rpcUrl: string;
+  readonly operator: {
+    readonly native: NativeOperatorConfig;
+  };
+};

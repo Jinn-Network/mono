@@ -23,11 +23,9 @@ export interface DaemonStartupInfo {
   serviceId: number | null;
   /**
    * The daemon's resolved product mode (#2380). `main.ts` computes this via
-   * `resolveMainEntryEffectiveMode`, which clamps to `'legacy'` — the same value
-   * `resolveConfiguredOperatorVerticalMode` (the resolver `cli/commands/run.ts` uses to route
-   * between `main.ts` and `native-main.ts`) would produce for every `jinn run` invocation, but
-   * unconditionally so for every caller of `main.ts` (`jinn quickstart` reaches it directly,
-   * unrouted). Never a raw, unclamped re-derivation.
+   * `resolveMainEntryEffectiveMode`, which clamps to `'legacy'`. After D5 there is
+   * one `jinn run` entry; native composition is `compositionMode` inside this
+   * graph, not a second file. Never a raw, unclamped re-derivation.
    */
   effectiveMode: OperatorVerticalMode;
   /** This build's implementation version (`buildInfo.implVersion`). */
@@ -74,12 +72,9 @@ export interface MainEntryEffectiveMode {
 }
 
 /**
- * `main.ts` is the legacy-only entry point: its `Daemon` is unconditionally the legacy graph
- * regardless of what `resolveConfiguredOperatorVerticalMode` decides. Only `jinn run`'s CLI
- * routing (`cli/commands/run.ts`) actually consults that decision to choose between `main.ts` and
- * `native-main.ts` — `jinn quickstart` reaches `main.ts` directly, unrouted (confirmed the
- * complete set of `import('../../main.js')` call sites: review #2380). Reporting a non-legacy
- * `effectiveMode` from `main.ts` would mislabel a legacy-running instance as native — the one
+ * `main.ts` is the only `jinn run` entry (D5). Native composition is selected inside it via
+ * `compositionMode`, not a second file. Reporting a leftover `native-v1` verticalMode as
+ * `effectiveMode` would mislabel this graph as the retired parallel entry — the one
  * direction that must never happen for a field a Phase D collector uses to exempt an instance
  * from scrutiny. This clamps the reported mode to `'legacy'` unconditionally and surfaces a
  * loud-log warning when the resolver actually disagreed, rather than trusting the raw decision.

@@ -2,12 +2,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BASE_SEPOLIA_TODAY, type MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
+import type { NativeRequesterRoles } from '../native-requester/requester.js';
 import {
   createNativeRequester,
   createNativeRequesterPostTask,
-  type NativeRequesterRoles,
 } from '../native-requester/requester.js';
-import type { NativeDeploymentFactoryInput } from '../native-main.js';
 import {
   loadNativeInfrastructureBundle,
   type NativeInfrastructureFactoryInput,
@@ -18,11 +17,10 @@ import {
 } from './native-infrastructure-bundle.js';
 import { createNativeOperatorHost, type NativeOperatorHost } from './native-operator-host.js';
 import {
-  NativeProductFileSchema,
+  NativeOperatorConfigSchema,
   type NativeOperatorConfig,
   type NativeProductConfig,
 } from './native-product-config.js';
-import { createNativeRoleLease } from './native-role-lease.js';
 import { NativeConstructionScope } from './native-construction-scope.js';
 import { buildNativeSolverProductionHost } from './native-solver-production.js';
 import { buildNativeEvaluatorProductionHost } from './native-evaluator-production.js';
@@ -37,6 +35,25 @@ const ZERO_CODE_HASH = /^0x0{64}$/u;
 
 export class NativeProductionDeploymentError extends Error {
   override readonly name = 'NativeProductionDeploymentError';
+}
+
+export interface NativeDeploymentFactoryInput {
+  readonly config: NativeProductConfig;
+}
+
+function createInProcessRoleLease(): {
+  acquire(): Promise<void>;
+  owned(): Promise<boolean>;
+  renew(): Promise<void>;
+  release(): Promise<void>;
+} {
+  let held = false;
+  return {
+    async acquire() { held = true; },
+    async owned() { return held; },
+    async renew() {},
+    async release() { held = false; },
+  };
 }
 
 function chain(config: NativeOperatorConfig): MarketplaceChainConfig {
@@ -195,9 +212,21 @@ function loadProductionConfig(): NativeProductConfig {
   try { raw = JSON.parse(readFileSync(path, 'utf8')); } catch (cause) {
     throw new NativeProductionDeploymentError(`native structured config is invalid JSON: ${String(cause)}`);
   }
-  const parsed = NativeProductFileSchema.safeParse(raw);
+  if (typeof raw !== 'object' || raw === null) {
+    throw new NativeProductionDeploymentError('native structured config is invalid: expected an object');
+  }
+  const record = raw as Record<string, unknown>;
+  const rpcUrl = typeof record.rpcUrl === 'string' ? record.rpcUrl : '';
+  if (rpcUrl.length === 0) {
+    throw new NativeProductionDeploymentError('native structured config is invalid: rpcUrl is required');
+  }
+  const operator = record.operator;
+  const nativeRaw = typeof operator === 'object' && operator !== null
+    ? (operator as { native?: unknown }).native
+    : undefined;
+  const parsed = NativeOperatorConfigSchema.safeParse(nativeRaw);
   if (!parsed.success) throw new NativeProductionDeploymentError(`native structured config is invalid: ${parsed.error.message}`);
-  return parsed.data;
+  return { network: 'testnet', rpcUrl, operator: { native: parsed.data } };
 }
 
 async function openRoles(input: {
@@ -236,7 +265,7 @@ async function buildRequesterHost(input: {
   readonly infrastructure: NativeInfrastructurePrimitives;
   readonly trust: NativeTrustAuthority;
   readonly password: string;
-  readonly lease: ReturnType<typeof createNativeRoleLease>;
+  readonly lease: ReturnType<typeof createInProcessRoleLease>;
 }): Promise<NativeOperatorHost & { readonly requester: ReturnType<typeof createNativeRequester> }> {
   const scope = new NativeConstructionScope();
   try {
@@ -358,7 +387,7 @@ async function buildRoleHost(input: {
   readonly infrastructure: NativeInfrastructurePrimitives;
   readonly trust: NativeTrustAuthority;
   readonly password: string;
-  readonly lease: ReturnType<typeof createNativeRoleLease>;
+  readonly lease: ReturnType<typeof createInProcessRoleLease>;
 }): Promise<NativeOperatorHost> {
   switch (input.config.operator.native.role) {
     case 'requester': return buildRequesterHost(input);
@@ -379,11 +408,7 @@ export async function createNativeProductionOperatorHost(
     throw cause;
   }
   const config = input.config.operator.native;
-  const lease = createNativeRoleLease({
-    path: join(config.stateDir, `${config.role}.worker-lease.json`),
-    role: config.role,
-    agent: config.agent,
-  });
+  const lease = createInProcessRoleLease();
   let host: NativeOperatorHost | undefined;
   let closed = false;
   return {
@@ -486,11 +511,7 @@ export async function loadNativeRequesterCommandExecutor(input: { readonly passw
   scope.defer(infrastructure.close);
   assertNativeTargetInspection(config.operator.native, await infrastructure.inspectTarget());
   const native = config.operator.native;
-  const lease = createNativeRoleLease({
-    path: join(native.stateDir, 'requester.worker-lease.json'),
-    role: 'requester',
-    agent: native.agent,
-  });
+  const lease = createInProcessRoleLease();
   await lease.acquire();
   scope.defer(lease.release);
   const trust = await openNativeTrustCatalog({

@@ -90,12 +90,7 @@ function importGraph(entry: string): Set<string> {
 describe('native product import boundary', () => {
   it('cannot reach the compatibility daemon, bridges, TaskEngine, or delivery watcher', () => {
     const graph = new Set([
-      ...importGraph(join(SRC, 'native-main.ts')),
       ...importGraph(join(SRC, 'daemon/native-operator-host.ts')),
-      // native-main.ts's real production wiring lives behind a dynamic
-      // import of this module (see runtimeRelativeImports above). Without
-      // this root the BFS never leaves the ~6-file port-shaped stub graph
-      // and the guard passes regardless of what the production wiring does.
       ...importGraph(join(SRC, 'daemon/native-production-deployment.ts')),
     ]);
     const relative = [...graph].map((file) => normalize(file).replace(normalize(SRC), ''));
@@ -114,12 +109,12 @@ describe('native product import boundary', () => {
     );
     expect(staleAllowlistEntries).toEqual([]);
 
-    expect(relative).toContain('/native-main.ts');
+    expect(relative).toContain('/daemon/native-production-deployment.ts');
     expect(relative).toContain('/daemon/native-operator-host.ts');
   });
 
   it('contains no forbidden native fallback marker', () => {
-    const source = [...importGraph(join(SRC, 'native-main.ts'))]
+    const source = [...importGraph(join(SRC, 'daemon/native-production-deployment.ts'))]
       .map((file) => readFileSync(file, 'utf8')).join('\n');
     expect(source).not.toContain('ephemeral-discovery-key');
     expect(source).not.toContain('acceptLegacyCards: true');
