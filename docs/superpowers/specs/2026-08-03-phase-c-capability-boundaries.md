@@ -5,6 +5,7 @@
 - **Status:** Ratified by the operator's explicit implementation instruction on 2026-08-03
 - **Shape:** `architecture decision specification`
 - **Decision record:** [DR-2026-08-03](../../../log/decisions/2026-08-03-phase-c-capability-boundaries.md)
+  (decision 6 amended by [DR-2026-08-15](../../../log/decisions/2026-08-15-withdraw-task-supply-environment-publication-caste.md))
 - **Depends on:** the ratified platform architecture (DR-2026-07-30), the implemented Phase B
   native vertical, and the exact-byte identities of Task Execution, Evidence and Record Discovery.
 
@@ -36,10 +37,11 @@ the default only after an exact-head live closure receipt and measured zero lega
    permanent local catalog/publication outbox; the evidence-journal source is a permanent
    local-to-public adapter. Generic durable signed-source append/recovery belongs in
    `record-discovery-serve` behind injected I/O ports.
-5. **Task supply and environments.** No task-supply or environment package is ratified by Phase B
-   use alone. Publication remains disabled until each package's recorded graduation gate passes.
-   Task curation remains a disposable projection and its first real adapter belongs in a tier-4
-   consumer.
+5. **Task supply and environments.** No task-supply or environment package is ratified by
+   first-party use alone. They are not a special publication caste (DR-2026-08-15): classify
+   each package as sealed platform or implementations under the same candidate-canary bar as
+   other platform packages. Task curation remains a projection, not a record family; do not
+   extract it into Record Discovery facts until two real consumers prove that join.
 6. **Settlement.** Solution and verdict settlement retain distinct product owners. No shared
    settlement package is introduced without two independent consumers proving the same
    venue-neutral lifecycle.
