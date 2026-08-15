@@ -1,28 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, test } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 import { parseBenchmark } from "@jinn-network/benchmarking-records";
 import {
-  BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
-  BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
   BINARY_JUDGMENT_PROFILE_URI,
   canonicalJsonBytes,
   compareCodeUnitStrings,
   parseBinaryJudgmentAnalysisContext,
   parseEvaluationSpec,
   recordDigest,
-  sealBinaryJudgmentAnalysisContext,
-  sealBinaryJudgmentLabelResolution,
 } from "@jinn-network/task-execution-profiles";
+import {
+  isBinaryJudgmentEvaluationSpecification,
+} from "@jinn-network/task-execution-evaluator-adapters";
 import { TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
 import { BenchmarkProductError } from "../errors.js";
-import {
-  BINARY_JUDGMENT_ADMISSION_MANIFEST_PROTOCOL,
-  BinaryJudgmentAdmissionManifestSchema,
-  HUMAN_REVIEW_REPLACEMENT_LEDGER_PROTOCOL,
-  HumanReviewReplacementLedgerSchema,
-  sealHumanReviewDocument,
-} from "../human-review/contracts.js";
+import { BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED } from "../human-review/application.js";
+import { buildBinaryJudgmentAdmissionClosureWorkspacePorts } from "../human-review/verification-workspace.js";
+import { admitHumanTruth } from "../operations/human-review.js";
+import { createDraft } from "../operations/drafts.js";
+import { initWorkspace } from "../operations/init.js";
+import { putSealedBytes } from "../workspace/sealed-store.js";
 import {
   BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
   BINARY_ITEM_BANK_ENTRY_PROTOCOL,
@@ -35,10 +36,15 @@ import {
 } from "./binary-item-bank.js";
 
 const sha = (character: string) => `sha256:${character.repeat(64)}` as `sha256:${string}`;
+const digest = (value: string) => value as `sha256:${string}`;
 const ITEM_A_ID = "urn:uuid:00000000-0000-4000-8000-000000000001";
 const ITEM_B_ID = "urn:uuid:00000000-0000-4000-8000-000000000002";
 const ITEM_C_ID = "urn:uuid:00000000-0000-4000-8000-000000000003";
 const PROVENANCE = sha("a");
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 function item(itemId: string, candidateAnswer: string) {
   return {
@@ -83,91 +89,59 @@ function itemsJsonl(items: readonly ReturnType<typeof item>[]): string {
 }
 
 interface SeededEvidence {
-  readonly records: Map<string, Uint8Array>;
+  readonly workspaceDir: string;
+  readonly admissionVerificationPorts: ReturnType<typeof buildBinaryJudgmentAdmissionClosureWorkspacePorts>;
   readonly admissionManifestSha256: `sha256:${string}`;
   readonly admissions: readonly BinaryAdmissionIndexEntry[];
   readonly admittedItemSha256s: readonly `sha256:${string}`[];
-  readonly excludedItemSha256s: readonly `sha256:${string}`[];
 }
 
 function seedEvidence(input: {
   readonly draftId?: string;
   readonly admitted: readonly ReturnType<typeof item>[];
-  readonly excluded?: ReturnType<typeof item>;
 }): SeededEvidence {
-  const records = new Map<string, Uint8Array>();
-  const store = (bytes: Uint8Array): `sha256:${string}` => {
-    const digest = recordDigest(bytes);
-    records.set(digest.slice("sha256:".length), bytes);
-    return digest;
+  const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-item-intake-"));
+  roots.push(workspaceDir);
+  const draftId = input.draftId ?? "draft-1";
+  const context = {
+    workspaceDir,
+    principal: "operator",
+    clock: () => "2026-08-15T09:00:00.000Z",
   };
-  const resolved = input.admitted.map((value, index) => {
-    const itemSha256 = store(canonicalJsonBytes(value));
-    const label = sealBinaryJudgmentLabelResolution({
-      protocol: BINARY_JUDGMENT_LABEL_RESOLUTION_FORMAT_URI,
+  expect(initWorkspace(context).ok).toBe(true);
+  expect(createDraft(context, { draftId, name: "Synthetic intake" }).ok).toBe(true);
+  const candidates = input.admitted.map((value, index) => {
+    const itemSha256 = recordDigest(canonicalJsonBytes(value));
+    putSealedBytes(workspaceDir, canonicalJsonBytes(value));
+    return {
       itemSha256,
       itemId: value.itemId,
-      humanReviewEvaluationSpecSha256: sha("d"),
-      truthLabel: index % 2 === 0 ? "CORRECT" : "WRONG",
+      humanReviewEvaluationSpecSha256: BINARY_JUDGMENT_HUMAN_REVIEW_EVALUATION_SPEC_SEALED.digest,
       candidateClass: "synthetic",
-      stratum: "core",
-      truthAdmission: "operator-only",
-      operatorAssertionSha256: sha("e"),
-      resolvedAt: "2026-08-15T09:00:00.000Z",
-    });
-    store(label.bytes);
-    const analysis = sealBinaryJudgmentAnalysisContext({
-      protocol: BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
-      itemSha256,
-      itemId: value.itemId,
-      labelResolutionSha256: label.digest,
-      truthLabel: index % 2 === 0 ? "CORRECT" : "WRONG",
-      candidateClass: "synthetic",
-      stratum: "core",
-    });
-    store(analysis.bytes);
-    return { itemSha256, labelResolutionSha256: label.digest, analysisContextSha256: analysis.digest };
+      stratum: "core" as const,
+      poolPosition: index + 1,
+      operatorTruthLabel: index % 2 === 0 ? "CORRECT" as const : "WRONG" as const,
+    };
   });
-  const excludedItemSha256s = input.excluded === undefined
-    ? []
-    : [store(canonicalJsonBytes(input.excluded))];
-  const ledger = sealHumanReviewDocument(HumanReviewReplacementLedgerSchema, {
-    protocol: HUMAN_REVIEW_REPLACEMENT_LEDGER_PROTOCOL,
-    draftId: input.draftId ?? "draft-1",
-    entries: input.excluded === undefined ? [] : [{
-      excludedItemSha256: excludedItemSha256s[0],
-      replacementItemSha256: resolved[0]!.itemSha256,
-      candidateClass: "synthetic",
-      stratum: "core",
-      excludedPoolPosition: 1,
-      replacementPoolPosition: 2,
-      reason: "review-disagreement",
-    }],
-    sealedAt: "2026-08-15T09:00:00.000Z",
-  }, "replacement ledger");
-  store(ledger.bytes);
-  const manifest = sealHumanReviewDocument(BinaryJudgmentAdmissionManifestSchema, {
-    protocol: BINARY_JUDGMENT_ADMISSION_MANIFEST_PROTOCOL,
-    draftId: input.draftId ?? "draft-1",
+  const admitted = admitHumanTruth(context, {
+    draftId,
     truthAdmission: "operator-only",
-    labelResolutionSha256s: resolved.map((entry) => entry.labelResolutionSha256).sort(compareCodeUnitStrings),
-    analysisContextSha256s: resolved.map((entry) => entry.analysisContextSha256).sort(compareCodeUnitStrings),
-    excludedItemSha256s: [...excludedItemSha256s].sort(compareCodeUnitStrings),
-    replacementLedgerSha256: ledger.digest,
-    admittedAt: "2026-08-15T09:00:00.000Z",
-  }, "admission manifest");
-  store(manifest.bytes);
-  const admissions = resolved.map((entry) => ({
+    candidates,
+  });
+  if (!admitted.ok) throw new Error(JSON.stringify(admitted));
+  const admissions = admitted.result.resolutions.map((entry) => ({
     protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
-    admissionManifestSha256: manifest.digest,
-    ...entry,
+    admissionManifestSha256: digest(admitted.result.admissionManifestSha256),
+    itemSha256: digest(entry.itemSha256),
+    labelResolutionSha256: digest(entry.labelResolutionSha256),
+    analysisContextSha256: digest(entry.analysisContextSha256),
   })).sort((left, right) => compareCodeUnitStrings(left.itemSha256, right.itemSha256));
   return {
-    records,
-    admissionManifestSha256: manifest.digest,
+    workspaceDir,
+    admissionVerificationPorts: buildBinaryJudgmentAdmissionClosureWorkspacePorts(workspaceDir),
+    admissionManifestSha256: digest(admitted.result.admissionManifestSha256),
     admissions,
-    admittedItemSha256s: resolved.map((entry) => entry.itemSha256),
-    excludedItemSha256s,
+    admittedItemSha256s: admitted.result.resolutions.map((entry) => digest(entry.itemSha256)),
   };
 }
 
@@ -187,11 +161,7 @@ function convert(input: {
     description: "No licensed source bytes.",
     version: "1.0.0",
     author: "did:key:z6Mksynthetic",
-    resolveRecord: (digest) => {
-      const bytes = input.evidence.records.get(digest);
-      if (bytes === undefined) throw new Error(`missing ${digest}`);
-      return bytes;
-    },
+    admissionVerificationPorts: input.evidence.admissionVerificationPorts,
   });
 }
 
@@ -209,17 +179,19 @@ function expectProductError(run: () => unknown, code: string): BenchmarkProductE
 describe("convertBinaryItemBank", () => {
   test("seals only admitted items in cycle-free order and keeps truth/source locators out of Tasks", () => {
     const admitted = item(ITEM_A_ID, "admitted");
-    const excluded = item(ITEM_B_ID, "excluded");
     const reserve = item(ITEM_C_ID, "unselected reserve");
-    const evidence = seedEvidence({ admitted: [admitted], excluded });
+    const evidence = seedEvidence({ admitted: [admitted] });
 
-    const result = convert({ itemRows: [admitted, excluded, reserve], evidence });
+    const result = convert({ itemRows: [admitted, reserve], evidence });
 
     expect(result.items).toHaveLength(1);
     expect(result.items[0]?.itemSha256).toBe(evidence.admittedItemSha256s[0]);
-    expect(result.excludedItemSha256s).toEqual(evidence.excludedItemSha256s);
+    expect(result.excludedItemSha256s).toEqual([]);
     expect(result.nonAdmittedItemSha256s).toEqual([recordDigest(canonicalJsonBytes(reserve))]);
-    expect(result.replacementLedger.entries[0]?.replacementItemSha256).toBe(result.items[0]?.itemSha256);
+    expect(result.replacementLedger.entries).toEqual([]);
+    expect(result.publicationGrade).toBe(false);
+    expect(result.candidateClasses).toEqual(["synthetic"]);
+    expect(result.strata).toEqual(["core"]);
 
     const task = TaskSpecificationSchema.parse(JSON.parse(new TextDecoder().decode(result.items[0]!.task.bytes)));
     expect(task.profile.uri).toBe(BINARY_JUDGMENT_PROFILE_URI);
@@ -234,10 +206,11 @@ describe("convertBinaryItemBank", () => {
     expect(taskText).not.toContain("stratum");
 
     const specification = parseEvaluationSpec(result.items[0]!.evaluationSpec.bytes);
+    expect(isBinaryJudgmentEvaluationSpecification(specification)).toBe(true);
     expect((specification.familyBlock as { testMaterial: Array<{ digest: { sha256: string } }> }).testMaterial[0]?.digest.sha256)
       .toBe(result.items[0]!.analysisContextSha256.slice("sha256:".length));
     const context = parseBinaryJudgmentAnalysisContext(
-      evidence.records.get(result.items[0]!.analysisContextSha256.slice("sha256:".length))!,
+      evidence.admissionVerificationPorts.resolveExactRecord(result.items[0]!.analysisContextSha256),
     );
     expect(context.itemSha256).toBe(result.items[0]!.itemSha256);
     expect(context).not.toHaveProperty("taskDigest");
@@ -268,7 +241,7 @@ describe("convertBinaryItemBank", () => {
         sourceManifestJsonl: sourceJsonl(),
         admissionIndexJsonl: renderCanonicalJsonl(evidence.admissions),
         name: "x", description: "x", version: "1.0.0", author: "did:key:z",
-        resolveRecord: (digest) => evidence.records.get(digest)!,
+        admissionVerificationPorts: evidence.admissionVerificationPorts,
       }),
       "validation",
     );
@@ -291,7 +264,7 @@ describe("convertBinaryItemBank", () => {
           draftId: "draft-1", itemBankJsonl: malformed, sourceManifestJsonl: sourceJsonl(),
           admissionIndexJsonl: renderCanonicalJsonl(evidence.admissions),
           name: "x", description: "x", version: "1.0.0", author: "did:key:z",
-          resolveRecord: (digest) => evidence.records.get(digest)!,
+          admissionVerificationPorts: evidence.admissionVerificationPorts,
         }),
         "validation",
       );
@@ -321,11 +294,33 @@ describe("convertBinaryItemBank", () => {
     );
     expectProductError(
       () => convert({ itemRows: [first, second], evidence, draftId: "other-draft" }),
-      "validation",
+      "record-integrity",
     );
     expectProductError(
       () => convert({ itemRows: [{ ...first, candidateAnswer: "tampered" }, second], evidence }),
       "validation",
+    );
+  });
+
+  test("rejects a structurally valid closure when its authority signature is not trusted", () => {
+    const admitted = item(ITEM_A_ID, "signed but untrusted");
+    const evidence = seedEvidence({ admitted: [admitted] });
+    expectProductError(
+      () => convertBinaryItemBank({
+        draftId: "draft-1",
+        itemBankJsonl: itemsJsonl([admitted]),
+        sourceManifestJsonl: sourceJsonl(),
+        admissionIndexJsonl: renderCanonicalJsonl(evidence.admissions),
+        name: "x",
+        description: "x",
+        version: "1.0.0",
+        author: "did:key:z",
+        admissionVerificationPorts: {
+          ...evidence.admissionVerificationPorts,
+          verifyAuthoritySignature: () => false,
+        },
+      }),
+      "record-integrity",
     );
   });
 });

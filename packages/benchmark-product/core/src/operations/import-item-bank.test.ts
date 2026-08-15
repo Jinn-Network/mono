@@ -20,7 +20,11 @@ import {
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import type { OperationContext } from "./context.js";
 import { createDraft } from "./drafts.js";
-import { admitHumanTruth } from "./human-review.js";
+import {
+  admitHumanTruth,
+  createHumanReviewPackets,
+  signHumanReviewResponse,
+} from "./human-review.js";
 import { importBinaryItemBank } from "./import-item-bank.js";
 import { initWorkspace } from "./init.js";
 
@@ -29,19 +33,63 @@ afterEach(() => {
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
 });
 
-function setup(): { context: OperationContext; draftId: string } {
+function setup(): { context: OperationContext; draftId: string; setClock: (value: string) => void } {
   const workspaceDir = mkdtempSync(join(tmpdir(), "colophon-binary-import-"));
   workspaces.push(workspaceDir);
-  let tick = 0;
+  let now = "2026-08-15T10:00:00.000Z";
   const context: OperationContext = {
     workspaceDir,
     principal: "sponsor-1",
-    clock: () => `2026-08-15T10:00:${String(tick++).padStart(2, "0")}.000Z`,
+    clock: () => now,
   };
   expect(initWorkspace(context).ok).toBe(true);
   const created = createDraft(context, { draftId: "binary-draft", name: "Binary intake" });
   if (!created.ok) throw new Error(JSON.stringify(created));
-  return { context, draftId: created.result.draft.draftId };
+  return {
+    context,
+    draftId: created.result.draft.draftId,
+    setClock: (value) => { now = value; },
+  };
+}
+
+async function reviewItem(
+  context: OperationContext,
+  draftId: string,
+  item: {
+    readonly itemId: string;
+    readonly question: string;
+    readonly referenceAnswer: string;
+    readonly candidateAnswer: string;
+    readonly provenance: readonly [{ readonly digest: { readonly sha256: string } }];
+  },
+  labels: readonly ["CORRECT" | "WRONG", "CORRECT" | "WRONG"],
+) {
+  const reviewers = ["urn:jinn:reviewer:a", "urn:jinn:reviewer:b"] as const;
+  const packets = createHumanReviewPackets(context, {
+    draftId,
+    item,
+    evaluatorIds: reviewers,
+  });
+  if (!packets.ok) throw new Error(JSON.stringify(packets));
+  const verdicts = await Promise.all(packets.result.packets.map((packet, index) =>
+    signHumanReviewResponse(context, {
+      draftId,
+      configuredEvaluatorIds: reviewers,
+      activeEvaluatorId: packet.reviewerId,
+      packetSha256: packet.packetSha256,
+      visibilityReceiptSha256: packet.visibilityReceiptSha256,
+      label: labels[index]!,
+      complete: true,
+      completedAt: `2026-08-15T10:0${index + 1}:00.000Z`,
+    })));
+  if (!verdicts[0]?.ok || !verdicts[1]?.ok) throw new Error(JSON.stringify(verdicts));
+  return {
+    packets: packets.result,
+    verdictSha256s: [
+      verdicts[0].result.verdictSha256,
+      verdicts[1].result.verdictSha256,
+    ] as const,
+  };
 }
 
 describe("importBinaryItemBank", () => {
@@ -123,6 +171,8 @@ describe("importBinaryItemBank", () => {
     ]);
     expect(imported.result.truthAdmission).toBe("operator-only");
     expect(imported.result.publicationGrade).toBe(false);
+    expect(imported.result.candidateClasses).toEqual(["synthetic"]);
+    expect(imported.result.strata).toEqual(["core"]);
     expect(imported.result.draft.spec.taskSet).toEqual({
       kind: "benchmark",
       benchmarkSha256: imported.result.benchmarkSha256,
@@ -154,5 +204,95 @@ describe("importBinaryItemBank", () => {
       admissionIndexJsonl: admissions,
     });
     expect(wrongProfile).toMatchObject({ ok: false, error: { code: "validation" } });
+  });
+
+  test("authenticates human-review exclusion evidence and imports only its later same-slice replacement", async () => {
+    const { context, draftId, setClock } = setup();
+    const provenanceSha256 = `sha256:${"d".repeat(64)}` as const;
+    const disputedItem = {
+      itemId: "urn:uuid:30000000-0000-4000-8000-000000000001",
+      question: "Synthetic disputed question?",
+      referenceAnswer: "Synthetic reference.",
+      candidateAnswer: "Synthetic disputed candidate.",
+      provenance: [{ digest: { sha256: provenanceSha256.slice("sha256:".length) } }] as const,
+    };
+    const replacementItem = {
+      ...disputedItem,
+      itemId: "urn:uuid:30000000-0000-4000-8000-000000000002",
+      candidateAnswer: "Synthetic admitted reserve.",
+    };
+    const disputed = await reviewItem(context, draftId, disputedItem, ["CORRECT", "WRONG"]);
+    const replacement = await reviewItem(context, draftId, replacementItem, ["WRONG", "WRONG"]);
+    const reviewerRoster = [
+      { evaluatorId: "urn:jinn:reviewer:a", personId: "person-a", role: "domain-reviewer", conflicts: [] },
+      { evaluatorId: "urn:jinn:reviewer:b", personId: "person-b", role: "domain-reviewer", conflicts: [] },
+    ] as const;
+    setClock("2026-08-15T10:10:00.000Z");
+    const admitted = admitHumanTruth(context, {
+      draftId,
+      truthAdmission: "two-human-unanimous",
+      candidates: [
+        {
+          itemSha256: disputed.packets.itemSha256,
+          itemId: disputedItem.itemId,
+          humanReviewEvaluationSpecSha256: disputed.packets.humanReviewEvaluationSpecSha256,
+          candidateClass: "factual",
+          stratum: "core",
+          poolPosition: 1,
+          reviewVerdictSha256s: disputed.verdictSha256s,
+          reviewers: reviewerRoster,
+        },
+        {
+          itemSha256: replacement.packets.itemSha256,
+          itemId: replacementItem.itemId,
+          humanReviewEvaluationSpecSha256: replacement.packets.humanReviewEvaluationSpecSha256,
+          candidateClass: "factual",
+          stratum: "core",
+          poolPosition: 2,
+          reviewVerdictSha256s: replacement.verdictSha256s,
+          reviewers: reviewerRoster,
+          replacesItemSha256: disputed.packets.itemSha256,
+        },
+      ],
+    });
+    expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
+    if (!admitted.ok) throw new Error("unreachable");
+
+    const imported = importBinaryItemBank(context, {
+      profile: "binary-judgment@1",
+      draftId,
+      itemBankJsonl: renderCanonicalJsonl([
+        { protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL, item: disputedItem },
+        { protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL, item: replacementItem },
+      ]),
+      sourceManifestJsonl: renderCanonicalJsonl([{
+        protocol: BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
+        provenanceSha256,
+        source: { uri: "https://fixtures.example.test/replacement-source", digest: { sha256: "d".repeat(64) } },
+        license: { uri: "https://fixtures.example.test/replacement-license", digest: { sha256: "e".repeat(64) } },
+        attribution: { uri: "https://fixtures.example.test/replacement-attribution", digest: { sha256: "f".repeat(64) } },
+      }]),
+      admissionIndexJsonl: renderCanonicalJsonl(admitted.result.resolutions.map((resolution) => ({
+        protocol: BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
+        admissionManifestSha256: admitted.result.admissionManifestSha256,
+        itemSha256: resolution.itemSha256,
+        labelResolutionSha256: resolution.labelResolutionSha256,
+        analysisContextSha256: resolution.analysisContextSha256,
+      }))),
+    });
+    expect(imported.ok, JSON.stringify(imported)).toBe(true);
+    if (!imported.ok) throw new Error("unreachable");
+    expect(imported.result.publicationGrade).toBe(true);
+    expect(imported.result.candidateClasses).toEqual(["factual"]);
+    expect(imported.result.strata).toEqual(["core"]);
+    expect(imported.result.excludedItemSha256s).toEqual([
+      disputed.packets.itemSha256.slice("sha256:".length),
+    ]);
+    expect(imported.result.nonAdmittedItemSha256s).toEqual([]);
+    expect(imported.result.taskSha256s).toHaveLength(1);
+    const task = TaskSpecificationSchema.parse(JSON.parse(new TextDecoder().decode(
+      getSealedBytes(context.workspaceDir, imported.result.taskSha256s[0]!),
+    )));
+    expect(task.payload).toEqual(replacementItem);
   });
 });

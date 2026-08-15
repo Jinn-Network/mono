@@ -145,13 +145,16 @@ colophon import item-bank --workspace <dir> --principal <id> \
   --admissions <admissions.jsonl>
 ```
 
-Each file is canonical JSONL: UTF-8, LF-only, one canonical JSON object per line, a final LF,
+Each file is canonical JSONL: UTF-8 without a byte-order mark, LF-only, one canonical JSON object per line, a final LF,
 and rows sorted by their contract key. `items.jsonl` carries the strict solver-visible payload
 only. `sources.jsonl` maps each payload provenance digest to full source, license, and attribution
 descriptors without importing source bytes. `admissions.jsonl` indexes the exact F2-sealed
-admission manifest, label resolution, and analysis context records already in the workspace.
-The operation rejects missing or extra admission records, digest or item-id drift, truth/class/
-stratum mismatches, wrong-draft evidence, invalid replacement accounting, and non-canonical files.
+admission manifest, label resolution, and analysis context records already in the workspace. The
+index is not admission authority: import replays the complete signed F2 closure, including
+reviewer/key bindings and role-separated product-authority signatures, before deriving accepted
+items, exclusions, publication grade, classes, or strata. The operation rejects missing or extra
+admission records, digest or item-id drift, truth/class/stratum mismatches, wrong-draft evidence,
+invalid replacement accounting, unauthenticated closure records, and non-canonical files.
 Only admitted replacements become Tasks; excluded and unselected reserve rows are accounted but
 not dispatched. No model, Inspect, Harbor, network, or licensed-data backend is reimplemented.
 

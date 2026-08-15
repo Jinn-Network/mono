@@ -116,5 +116,26 @@ describe("colophon import item-bank", () => {
     ], { cwd: root, clock: () => "2026-08-15T11:01:01.000Z" });
     expect(wrongProfile.exitCode).toBe(2);
     expect(JSON.parse(wrongProfile.stdout)).toMatchObject({ ok: false, error: { code: "invalid-invocation" } });
+
+    writeFileSync(itemsPath, `\uFEFF${renderCanonicalJsonl([{
+      protocol: BINARY_ITEM_BANK_ENTRY_PROTOCOL,
+      item,
+    }])}`);
+    const bomPrefixed = await runCli([
+      "import", "item-bank",
+      "--workspace", workspaceDir,
+      "--principal", "sponsor-1",
+      "--profile", "binary-judgment@1",
+      "--draft", "d1",
+      "--items", itemsPath,
+      "--sources", sourcesPath,
+      "--admissions", admissionsPath,
+      "--json",
+    ], { cwd: root, clock: () => "2026-08-15T11:01:02.000Z" });
+    expect(bomPrefixed.exitCode).toBe(1);
+    expect(JSON.parse(bomPrefixed.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "validation", detail: expect.stringContaining("BOM") },
+    });
   });
 });

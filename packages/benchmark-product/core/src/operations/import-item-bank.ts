@@ -11,6 +11,7 @@ import {
   BINARY_ITEM_BANK_EVALUATOR_SEMANTICS,
   convertBinaryItemBank,
 } from "../intake/binary-item-bank.js";
+import { buildBinaryJudgmentAdmissionClosureWorkspacePorts } from "../human-review/verification-workspace.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import { refuse } from "../errors.js";
 import { recordWorkspaceAuthorship } from "../run/publication-authority.js";
@@ -48,6 +49,8 @@ export interface ImportBinaryItemBankResult {
   readonly nonAdmittedItemSha256s: readonly string[];
   readonly truthAdmission: "two-human-unanimous" | "operator-only";
   readonly publicationGrade: boolean;
+  readonly candidateClasses: readonly string[];
+  readonly strata: readonly ("core" | "stress")[];
 }
 
 function bare(digest: string): string {
@@ -93,7 +96,9 @@ export function importBinaryItemBank(
         description: input.description ?? draft.spec.description ?? "",
         version: input.version ?? "1.0.0",
         author,
-        resolveRecord: (sha256) => getSealedBytes(clocked.workspaceDir, sha256),
+        admissionVerificationPorts: buildBinaryJudgmentAdmissionClosureWorkspacePorts(
+          clocked.workspaceDir,
+        ),
       });
 
       // Retain protocol/profile/evaluator semantics as exact offline dependencies, not copied code.
@@ -173,7 +178,9 @@ export function importBinaryItemBank(
         excludedItemSha256s: converted.excludedItemSha256s.map(bare),
         nonAdmittedItemSha256s: converted.nonAdmittedItemSha256s.map(bare),
         truthAdmission: converted.admissionManifest.truthAdmission,
-        publicationGrade: converted.admissionManifest.truthAdmission === "two-human-unanimous",
+        publicationGrade: converted.publicationGrade,
+        candidateClasses: converted.candidateClasses,
+        strata: converted.strata,
       };
     },
   });

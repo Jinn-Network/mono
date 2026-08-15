@@ -18,44 +18,39 @@ import {
   type BenchmarkRecord,
 } from "@jinn-network/benchmarking-records";
 import {
-  BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
-  BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
   BINARY_JUDGMENT_EVALUATION_PARSER_SEALED,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
-  BINARY_JUDGMENT_LABEL_RESOLUTION_MEDIA_TYPE,
   BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE,
   BINARY_JUDGMENT_PROFILE_DIGEST,
   BINARY_JUDGMENT_PROFILE_URI,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
   BinaryJudgmentPayloadSchema,
   BinaryJudgmentSourceDescriptorSchema,
-  EVALUATION_SPEC_FORMAT_URI,
-  EVAL_SEMANTICS_VERSION,
   canonicalJsonBytes,
   compareCodeUnitStrings,
-  parseBinaryJudgmentAnalysisContext,
-  parseBinaryJudgmentLabelResolution,
   recordDigest,
-  sealBinaryJudgmentAnalysisContext,
-  sealBinaryJudgmentLabelResolution,
   sealEvaluationSpec,
-  type BinaryJudgmentAnalysisContext,
-  type BinaryJudgmentLabelResolution,
   type BinaryJudgmentPayload,
 } from "@jinn-network/task-execution-profiles";
+import {
+  buildBinaryJudgmentEvaluationSpecification,
+  isBinaryJudgmentEvaluationSpecification,
+} from "@jinn-network/task-execution-evaluator-adapters";
 import {
   TASK_EXECUTION_PROTOCOL_URI,
   documentDigest,
   sealTask,
 } from "@jinn-network/task-execution-protocol";
 import { refuse, refuseWithIssues } from "../errors.js";
-import {
-  BinaryJudgmentAdmissionManifestSchema,
-  HumanReviewReplacementLedgerSchema,
-  parseCanonicalHumanReviewBytes,
-  type BinaryJudgmentAdmissionManifest,
-  type HumanReviewReplacementLedger,
+import type {
+  BinaryJudgmentAdmissionManifest,
+  HumanReviewReplacementLedger,
 } from "../human-review/contracts.js";
+import {
+  BinaryJudgmentAdmissionClosureError,
+  verifyBinaryJudgmentAdmissionClosure,
+  type BinaryJudgmentAdmissionClosurePorts,
+} from "../human-review/verification.js";
 
 export const BINARY_ITEM_BANK_ENTRY_PROTOCOL =
   "https://spec.jinn.network/binary-judgment/item-bank-entry/v1" as const;
@@ -135,8 +130,8 @@ export interface ConvertBinaryItemBankInput {
   readonly description: string;
   readonly version: string;
   readonly author: string;
-  /** Exact workspace CAS resolver. The intake layer never invents or fetches admission evidence. */
-  readonly resolveRecord: (sha256: string) => Uint8Array;
+  /** Exact record resolution plus reviewer and role-separated authority trust. */
+  readonly admissionVerificationPorts: BinaryJudgmentAdmissionClosurePorts;
 }
 
 export interface ConvertedBinaryItem {
@@ -156,6 +151,9 @@ export interface ConvertedBinaryItemBank {
   readonly admissionManifest: BinaryJudgmentAdmissionManifest;
   readonly admissionManifestSha256: `sha256:${string}`;
   readonly replacementLedger: HumanReviewReplacementLedger;
+  readonly publicationGrade: boolean;
+  readonly candidateClasses: readonly string[];
+  readonly strata: readonly ("core" | "stress")[];
   readonly items: readonly ConvertedBinaryItem[];
   readonly excludedItemSha256s: readonly `sha256:${string}`[];
   readonly nonAdmittedItemSha256s: readonly `sha256:${string}`[];
@@ -222,79 +220,12 @@ function bare(digest: string): string {
   return digest.startsWith("sha256:") ? digest.slice("sha256:".length) : digest;
 }
 
-function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
-  return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
-}
-
-function resolveCanonical<T>(input: {
-  readonly digest: `sha256:${string}`;
-  readonly label: string;
-  readonly resolveRecord: (sha256: string) => Uint8Array;
-  readonly parse: (bytes: Uint8Array) => T;
-  readonly reseal: (value: T) => { readonly bytes: Uint8Array; readonly digest: `sha256:${string}` };
-}): { readonly value: T; readonly bytes: Uint8Array } {
-  const bytes = input.resolveRecord(bare(input.digest));
-  if (recordDigest(bytes) !== input.digest) {
-    refuse("record-integrity", input.label, `${input.label} bytes do not match ${input.digest}`);
-  }
-  let value: T;
-  try {
-    value = input.parse(bytes);
-  } catch (cause) {
-    refuse("validation", input.label, cause instanceof Error ? cause.message : String(cause));
-  }
-  const sealed = input.reseal(value);
-  if (sealed.digest !== input.digest || !bytesEqual(sealed.bytes, bytes)) {
-    refuse("record-integrity", input.label, `${input.label} is not in canonical sealed form`);
-  }
-  return { value, bytes };
-}
-
-function sameSorted(actual: readonly string[], expected: readonly string[]): boolean {
-  return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
-}
-
 function buildEvaluationSpec(analysisContextSha256: `sha256:${string}`) {
-  return sealEvaluationSpec({
-    protocol: EVALUATION_SPEC_FORMAT_URI,
-    semanticsVersion: EVAL_SEMANTICS_VERSION,
-    family: "deterministic-process",
-    grader: {
-      name: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
-      digest: { sha256: bare(BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest) },
-      accessClass: "public",
-    },
-    familyBlock: {
-      image: {
-        name: "binary-judgment-evaluation-parser-semantics.json",
-        digest: { sha256: bare(BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest) },
-      },
-      platform: "linux/amd64",
-      workspace: {},
-      testMaterial: [{
-        name: "analysis-context.json",
-        digest: { sha256: bare(analysisContextSha256) },
-        mediaType: BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
-        accessClass: "private",
-      }],
-      parser: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
-      transitions: { failToPass: [], passToPass: [] },
-      timeout: 60,
-    },
-    measurements: [
-      { name: "judgeDecision", type: "string", required: true },
-      { name: "truthLabel", type: "string", required: true },
-      { name: "agreement", type: "boolean", required: true },
-      { name: "parseValid", type: "boolean", required: true },
-      { name: "candidateClass", type: "string", required: true },
-      { name: "stratum", type: "string", required: true },
-      { name: "labelResolutionSha256", type: "string", required: true },
-      { name: "instrumentSha256", type: "string", required: true },
-    ],
-    verdictRule: { threshold: { measurement: "agreement", op: "eq", value: true } },
-    unscorable: [],
-    evidenceConventions: { requiredRefs: ["label-resolution.json"] },
-  });
+  const specification = buildBinaryJudgmentEvaluationSpecification(analysisContextSha256);
+  if (!isBinaryJudgmentEvaluationSpecification(specification)) {
+    throw new Error("shared binary-judgment EvaluationSpec builder failed its registered validator");
+  }
+  return sealEvaluationSpec(specification);
 }
 
 function buildTask(input: {
@@ -376,127 +307,80 @@ export function convertBinaryItemBank(input: ConvertBinaryItemBankInput): Conver
     refuse("validation", "admissions", "all admission rows must name one admission manifest");
   }
   const admissionManifestSha256 = admissions.records[0]!.admissionManifestSha256;
-  const admissionManifestBytes = input.resolveRecord(bare(admissionManifestSha256));
-  if (recordDigest(admissionManifestBytes) !== admissionManifestSha256) {
-    refuse("record-integrity", "admissionManifestSha256", "admission manifest digest mismatch");
+  let verifiedAdmission: ReturnType<typeof verifyBinaryJudgmentAdmissionClosure>;
+  try {
+    verifiedAdmission = verifyBinaryJudgmentAdmissionClosure({
+      admissionManifestSha256,
+      expectedDraftId: input.draftId,
+    }, input.admissionVerificationPorts);
+  } catch (cause) {
+    const path = cause instanceof BinaryJudgmentAdmissionClosureError ? cause.path : "admissionManifestSha256";
+    refuse(
+      "record-integrity",
+      path,
+      `admission closure authentication failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
   }
-  const admissionManifest = parseCanonicalHumanReviewBytes(
-    BinaryJudgmentAdmissionManifestSchema,
-    admissionManifestBytes,
-    "admission manifest",
+
+  if (verifiedAdmission.accepted.length !== admissions.records.length) {
+    refuse("validation", "admissions", "admission rows do not exactly cover verified accepted items");
+  }
+  const acceptedByItem = new Map(
+    verifiedAdmission.accepted.map((entry) => [entry.itemSha256, entry]),
   );
-  if (admissionManifest.draftId !== input.draftId) {
-    refuse("validation", "admissionManifest.draftId", "admission manifest belongs to another draft");
+  if (acceptedByItem.size !== verifiedAdmission.accepted.length) {
+    refuse("record-integrity", "admissionManifest", "verified closure admitted one item more than once");
   }
-
-  const indexedLabels = admissions.records.map((entry) => entry.labelResolutionSha256).sort(compareCodeUnitStrings);
-  const indexedContexts = admissions.records.map((entry) => entry.analysisContextSha256).sort(compareCodeUnitStrings);
-  if (!sameSorted(indexedLabels, admissionManifest.labelResolutionSha256s)) {
-    refuse("validation", "admissions", "admission rows do not exactly cover manifest label resolutions");
-  }
-  if (!sameSorted(indexedContexts, admissionManifest.analysisContextSha256s)) {
-    refuse("validation", "admissions", "admission rows do not exactly cover manifest analysis contexts");
-  }
-
-  const admittedItems = new Set<string>();
+  const indexedItems = new Set<string>();
   const converted = admissions.records.map((entry, index): ConvertedBinaryItem => {
+    const verified = acceptedByItem.get(entry.itemSha256);
+    if (verified === undefined) {
+      refuse("validation", `admissions.${index + 1}.itemSha256`, "index names an item outside the verified accepted closure");
+    }
+    if (
+      entry.admissionManifestSha256 !== verifiedAdmission.manifestSha256
+      || entry.labelResolutionSha256 !== verified.labelResolutionSha256
+      || entry.analysisContextSha256 !== verified.analysisContextSha256
+    ) {
+      refuse("record-integrity", `admissions.${index + 1}`, "index differs from the verified manifest/resolution/context join");
+    }
+    if (indexedItems.has(entry.itemSha256)) {
+      refuse("validation", "admissions", "item is indexed more than once");
+    }
+    indexedItems.add(entry.itemSha256);
+
     const item = itemsBySha.get(entry.itemSha256);
     if (item === undefined) refuse("validation", `admissions.${index + 1}.itemSha256`, "admitted item is absent from item bank");
-    if (admittedItems.has(entry.itemSha256)) refuse("validation", "admissions", "item is admitted more than once");
-    admittedItems.add(entry.itemSha256);
-
     const exactItemBytes = canonicalJsonBytes(item);
-    const storedItemBytes = input.resolveRecord(bare(entry.itemSha256));
-    if (!bytesEqual(exactItemBytes, storedItemBytes) || recordDigest(storedItemBytes) !== entry.itemSha256) {
+    if (recordDigest(exactItemBytes) !== entry.itemSha256 || item.itemId !== verified.itemId) {
       refuse("record-integrity", `admissions.${index + 1}.itemSha256`, "item bank payload differs from admitted item bytes");
     }
 
-    const label = resolveCanonical<BinaryJudgmentLabelResolution>({
-      digest: entry.labelResolutionSha256,
-      label: `admissions.${index + 1}.labelResolutionSha256`,
-      resolveRecord: input.resolveRecord,
-      parse: parseBinaryJudgmentLabelResolution,
-      reseal: sealBinaryJudgmentLabelResolution,
-    });
-    const analysis = resolveCanonical<BinaryJudgmentAnalysisContext>({
-      digest: entry.analysisContextSha256,
-      label: `admissions.${index + 1}.analysisContextSha256`,
-      resolveRecord: input.resolveRecord,
-      parse: parseBinaryJudgmentAnalysisContext,
-      reseal: sealBinaryJudgmentAnalysisContext,
-    });
-    const resolution = label.value;
-    const context = analysis.value;
-    const joins: readonly [boolean, string][] = [
-      [resolution.itemSha256 === entry.itemSha256, "resolution itemSha256"],
-      [context.itemSha256 === entry.itemSha256, "analysis itemSha256"],
-      [resolution.itemId === item.itemId, "resolution itemId"],
-      [context.itemId === item.itemId, "analysis itemId"],
-      [context.labelResolutionSha256 === entry.labelResolutionSha256, "analysis label resolution"],
-      [context.truthLabel === resolution.truthLabel, "truth label"],
-      [context.candidateClass === resolution.candidateClass, "candidate class"],
-      [context.stratum === resolution.stratum, "stratum"],
-      [resolution.truthAdmission === admissionManifest.truthAdmission, "truth admission"],
-    ];
-    for (const [matches, name] of joins) {
-      if (!matches) refuse("record-integrity", `admissions.${index + 1}`, `${name} join failed`);
-    }
-
-    const evaluationSpec = buildEvaluationSpec(entry.analysisContextSha256);
+    const evaluationSpec = buildEvaluationSpec(verified.analysisContextSha256);
     const task = buildTask({
       item,
-      itemSha256: entry.itemSha256,
+      itemSha256: verified.itemSha256,
       evaluationSpecSha256: evaluationSpec.digest,
       author: input.author,
     });
     return {
       itemId: item.itemId,
-      itemSha256: entry.itemSha256,
+      itemSha256: verified.itemSha256,
       itemBytes: exactItemBytes,
-      labelResolutionSha256: entry.labelResolutionSha256,
-      analysisContextSha256: entry.analysisContextSha256,
+      labelResolutionSha256: verified.labelResolutionSha256,
+      analysisContextSha256: verified.analysisContextSha256,
       evaluationSpec,
       task,
     };
   });
 
-  const excluded = new Set(admissionManifest.excludedItemSha256s);
-  for (const digest of excluded) {
-    if (admittedItems.has(digest)) refuse("record-integrity", "admissionManifest", "an excluded item is also admitted");
-    if (!itemsBySha.has(digest as `sha256:${string}`)) {
-      refuse("validation", "items", `excluded item ${digest} is absent from item bank`);
-    }
-    const itemBytes = canonicalJsonBytes(itemsBySha.get(digest as `sha256:${string}`)!);
-    const storedItemBytes = input.resolveRecord(bare(digest));
-    if (!bytesEqual(itemBytes, storedItemBytes) || recordDigest(storedItemBytes) !== digest) {
-      refuse("record-integrity", "admissionManifest.excludedItemSha256s", `excluded item ${digest} does not resolve exactly`);
-    }
-  }
-  const replacementLedgerBytes = input.resolveRecord(bare(admissionManifest.replacementLedgerSha256));
-  if (recordDigest(replacementLedgerBytes) !== admissionManifest.replacementLedgerSha256) {
-    refuse("record-integrity", "replacementLedgerSha256", "replacement ledger digest mismatch");
-  }
-  const replacementLedger = parseCanonicalHumanReviewBytes(
-    HumanReviewReplacementLedgerSchema,
-    replacementLedgerBytes,
-    "replacement ledger",
-  );
-  if (replacementLedger.draftId !== input.draftId) {
-    refuse("record-integrity", "replacementLedger.draftId", "replacement ledger belongs to another draft");
-  }
-  const ledgerExcluded = replacementLedger.entries.map((entry) => entry.excludedItemSha256).sort(compareCodeUnitStrings);
-  if (!sameSorted(ledgerExcluded, admissionManifest.excludedItemSha256s)) {
-    refuse("record-integrity", "replacementLedger", "replacement ledger does not exactly cover excluded items");
-  }
-  const convertedByItem = new Map(converted.map((entry) => [entry.itemSha256, entry]));
-  for (const [index, ledgerEntry] of replacementLedger.entries.entries()) {
-    const replacement = convertedByItem.get(ledgerEntry.replacementItemSha256 as `sha256:${string}`);
-    if (replacement === undefined) {
-      refuse("record-integrity", `replacementLedger.entries.${index}`, "replacement is not an admitted item");
-    }
-    const context = parseBinaryJudgmentAnalysisContext(input.resolveRecord(bare(replacement.analysisContextSha256)));
-    if (context.candidateClass !== ledgerEntry.candidateClass || context.stratum !== ledgerEntry.stratum) {
-      refuse("record-integrity", `replacementLedger.entries.${index}`, "replacement changed class or stratum");
+  const admittedItems = new Set(verifiedAdmission.accepted.map((entry) => entry.itemSha256));
+  const excluded = new Set(verifiedAdmission.excluded.map((entry) => entry.itemSha256));
+  for (const [index, exclusion] of verifiedAdmission.excluded.entries()) {
+    const item = itemsBySha.get(exclusion.itemSha256);
+    if (item === undefined) refuse("validation", "items", `verified excluded item ${exclusion.itemSha256} is absent from item bank`);
+    if (item.itemId !== exclusion.itemId || recordDigest(canonicalJsonBytes(item)) !== exclusion.itemSha256) {
+      refuse("record-integrity", `items.excluded.${index}`, "item bank payload differs from verified excluded item bytes");
     }
   }
 
@@ -520,7 +404,7 @@ export function convertBinaryItemBank(input: ConvertBinaryItemBankInput): Conver
       sourceManifestSha256: sources.digest,
       admissionIndexSha256: admissions.digest,
       admissionManifestSha256,
-      replacementLedgerSha256: admissionManifest.replacementLedgerSha256,
+      replacementLedgerSha256: verifiedAdmission.manifest.replacementLedgerSha256,
     },
   });
 
@@ -532,9 +416,12 @@ export function convertBinaryItemBank(input: ConvertBinaryItemBankInput): Conver
     itemBank: itemBankCommitment,
     sourceManifest: sourceManifestCommitment,
     admissionIndex: admissionIndexCommitment,
-    admissionManifest,
-    admissionManifestSha256,
-    replacementLedger,
+    admissionManifest: verifiedAdmission.manifest,
+    admissionManifestSha256: verifiedAdmission.manifestSha256,
+    replacementLedger: verifiedAdmission.replacementLedger,
+    publicationGrade: verifiedAdmission.publicationGrade,
+    candidateClasses: verifiedAdmission.classes,
+    strata: verifiedAdmission.strata,
     items: converted,
     excludedItemSha256s: [...excluded].sort(compareCodeUnitStrings) as `sha256:${string}`[],
     nonAdmittedItemSha256s,
