@@ -1,5 +1,35 @@
 # Cutover Stage 5 — Rename and Closure Implementation Plan
 
+> **Addendum 2026-08-15** (execution train after [#2688](https://github.com/Jinn-Network/mono/pull/2688)
+> landed the one-swap onto `next` at `6a09c9d36`):
+>
+> - **Branch target is `next`**, not `integration/evidence-v1`. Every merge that
+>   touches the operator tree publishes canary. Semantic deletions stay on
+>   `client/`; the paths-only rename is last so a missed `working-directory`
+>   cannot strand canary until that one mechanical PR.
+> - **D5 (native-v1 parallel entry) is stage 5**, not Wave 4
+>   ([DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)
+>   decision 3). Delete `native-main.ts`, `NativeProductFileSchema`, per-role
+>   file leases, the `Daemon` `native-v1` branch, and `run.ts` dual dispatch.
+>   Keep `main.ts` and `compositionMode: "native"`. Flip
+>   `legacy-operator-composition` in that PR; rewrite `defaultPolicy` to the
+>   stage-driven frame Wave 4 left unflipped.
+> - **Reorder vs Tasks 6–10:** re-home then delete `task_runs` and
+>   `joinedSolverNets` *before* the rename. Both are still boot-reachable
+>   (Task 8/9 stop-rule). Backup prune uses the shipped shape
+>   `<filePath>.backup-<ISO-basic>` from `client/src/config/atomic-write.ts`,
+>   not this plan's `config.json.pre-v2.*.bak` (finding F5: the code is right).
+> - **Rename file list grew.** Recensus at the rename PR. Known additions:
+>   `native-e2e-rig.yml`, `release-tier-1.yml`, `marketplace-ci.yml`,
+>   CODEOWNERS `/client/` blanket, reverse refs in
+>   `packages/marketplace/testing` and `packages/benchmarking/records`, and
+>   every `.github/scripts` that still `join(root, 'client')`. Canary-critical:
+>   flip `sdk-npm-publish.yml` `paths: client/**` and
+>   `npm-publish.yml` `working-directory: client` in the same commit as
+>   `git mv`.
+> - Historical task bodies below are **not** rewritten. The 2026-08-05 addendum
+>   still stands for the collapsed stages 2–4.
+>
 > **Addendum 2026-08-05** (per
 > [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)): stages
 > 2–4 collapsed into one wholesale swap. The Global Constraints dependency reads:
