@@ -294,7 +294,9 @@ function validateSecretForwardPlan(
   launcher: LauncherContract,
   plan: LaunchPlan,
 ): readonly { readonly grantKey: string; readonly target: string }[] {
-  const declared = launcher.capabilities().secretForwards;
+  const capabilities = launcher.capabilities();
+  const declared = capabilities.secretForwards;
+  const hostDeclared = capabilities.hostSecretForwards ?? [];
   const planned = declaredSecretForwards(plan);
   if (
     declared.length !== planned.length
@@ -320,7 +322,9 @@ function validateSecretForwardPlan(
   for (const value of Object.values(plan.env)) {
     if (!value.startsWith("secrets/")) continue;
     const target = value.slice("secrets/".length);
-    if (declared.filter((forward) => forward.target === target).length !== 1) {
+    const matchingDeclarations = declared.filter((forward) => forward.target === target).length
+      + hostDeclared.filter((forward) => forward.target === target).length;
+    if (matchingDeclarations !== 1) {
       throw new Error("launch environment secret reference has no declared secret forward");
     }
   }

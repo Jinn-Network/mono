@@ -1,13 +1,13 @@
 # Colophon self-serve experience
 
-- **Version:** 0.4
+- **Version:** 0.6
 - **Date:** 2026-08-13
 - **Updated:** 2026-08-14
 - **Status:** Accepted; implementation authorized 2026-08-13
 - **Decision owner:** Operator
 - **Design scope:** From a cold product-site visitor to a locally published, independently verified benchmark bundle
 - **Source of record:** This repository
-- **Review:** Architecture-boundary and standards/adversarial passes completed 2026-08-13; zero-Docker macOS arm64 qualification and local Mac Docker/Inspect acceptance added 2026-08-14
+- **Review:** Architecture-boundary and standards/adversarial passes completed 2026-08-13; zero-Docker macOS arm64 qualification, local Mac Docker/Inspect acceptance, and cheapest-capable Claude and Codex provider-path acceptance added 2026-08-14
 
 ## 1. Decision summary
 
@@ -694,8 +694,8 @@ admits the operator's exact Mac build candidates: Claude Code 2.1.222 uses a fre
 boundary and Codex 0.147.0 uses a fresh `CODEX_HOME` device-auth boundary. Admission binds adapter,
 observed version, and executable digest; every other build fails closed. Colophon never reads or
 copies the normal Claude or Codex home. Automated tests qualify isolation, validation, cleanup,
-and storage with injected login runners only: real interactive capture and provider acceptance
-remain explicit operator acceptance and publication gates.
+and storage with injected login runners. Section 10.5 records the later real interactive capture and
+one-cell provider acceptance; wider model/task efficacy and public support remain separate gates.
 
 The local-registry proof also installs the reader alone and refuses any resolved Colophon
 runner/core or task-execution backend, launcher, supervisor, or workspace package. To make that
@@ -744,8 +744,8 @@ test profiles use inert executables and a sentinel grant; no provider is contact
 On the operator's Apple-silicon Mac, the installed Claude Code 2.1.222 and Codex 0.147.0 binaries
 were also passed through the real `agent add` surface. Colophon resolved the Codex npm shim to its
 native executable, observed both versions, stored their exact digests and low-effort exact model
-IDs, and created no credential files. The actual provider login and quota-consuming call were not
-run.
+IDs, and created no credential files at that setup checkpoint. Section 10.5 records the later
+interactive login and quota-consuming acceptance runs.
 
 Docker Desktop acceptance on the same Mac built the pinned `linux/amd64` Inspect worker and ran
 the real multi-scorer OCI lifecycle: two arms, hosted sandbox, native Inspect logs, separate
@@ -759,6 +759,72 @@ local-registry proof uses real tarballs, an empty npm cache, actual `@1` selecto
 audited reader closure, the installed viewer-to-workspace handoff, tamper refusal, and no portal or
 source-tree paths. Public npm still depends on scope custody and one coherent stable published
 Jinn dependency set.
+
+### 10.5 Cheapest-capable runtime and live provider acceptance — 2026-08-14
+
+The v2 Demo-1 runtime policy starts at the cheapest qualified configuration rather than assuming
+that a stronger model is required. Its frozen candidate ladder is Claude Haiku 4.5 low, medium,
+then high effort, followed by Claude Sonnet 5 low effort. `claude-haiku-4-5-20251001` is a dated
+snapshot; Anthropic documents the post-4.6 `claude-sonnet-5` identifier as a pinned snapshot even
+though it is dateless. The accepted v1 Haiku/high runtime remains unchanged and verifiable as
+history.
+
+Each candidate gets one complete 12-task suitability cohort. Two through ten valid passes selects
+the candidate; fewer than two is a measured floor and advances exactly one rung; more than ten
+changes the task band instead of buying a stronger model. Missing loader evidence, authentication
+or launcher incompatibility, incomplete accounting, too few valid grader outcomes, excess
+timeouts, or unresolved infrastructure stops inconclusive. Those conditions never become an
+excuse to escalate. The policy and selection artifacts bind the decision digest, exact harness
+version and executable digest, skill digest, task-pool digest, and explicit provider-call ceilings
+(6 path-smoke calls, 12 per suitability candidate, 48 before human review, 200 for E2 rehearsal,
+and 600 for the official run).
+
+The operator then authorized a minimal paid acceptance on Apple silicon. Through the public CLI,
+Colophon used the protected Claude login captured in its own data directory, sealed one public
+SWE-rebench Conan task, pinned Claude Code 2.1.222 by executable digest, and selected
+`claude-haiku-4-5-20251001` at low effort. Three pre-provider or post-process gaps were found and
+fixed without rewriting failed evidence: ordinary Claude profiles were mistaken for Demo-1,
+host-owned secret references were rejected by a requester-only validator, and ordinary
+Claude/Codex repository edits were not harvested into the required patch output.
+
+The final immutable run `bf400209e7721a6307fe53b5d845c3291080009551a826a586b25c4ad7f16513`
+then completed both arms. The local baseline failed; the single Haiku-low solve spawned through the
+credential bridge, returned provider usage, exited zero, and produced a 5,862-byte patch. The
+pinned, network-disabled Docker grader judged that patch as passing. Colophon collected a complete
+2/2 matrix, sealed the report, published bundle
+`25b6b7af475937c9f0f731b615fab90456ba01416c3484aac6b33af3377f8396`, and the standalone
+`@colophon-claims/verify` implementation returned all six canonical checks. The authenticated
+loopback viewer returned the report and refused launch-token replay. This is provider-path and
+product-lifecycle acceptance, not evidence that Haiku or the skill is generally better: one task
+cannot support an efficacy claim.
+
+Codex 0.147.0 was then accepted through the same one-paid-cell shape. Its direct device login
+showed that this exact Codex release creates `log/codex-login.log` and a `tmp/arg0` helper tree in
+the fresh isolated `CODEX_HOME` as well as `auth.json`. Colophon initially rejected those extra
+artifacts and stored no credential. The final implementation permits only the bounded login log
+and the exact private helper layout whose symlinks resolve to the qualified executable, rejects
+every other artifact, copies only `auth.json`, and deletes the temporary login root. It never reads
+the operator's normal Codex home.
+
+The final immutable Codex run
+`e3a0d9c1a40e3061a175e40f49a892ee40dae82af0ba7673fcd28093483e2d3f`
+pinned Codex 0.147.0 by executable digest, exact model `gpt-5.6-luna`, and low effort. The spawn
+record confirms those flags and the isolated credential bridge. The single provider turn completed
+on its first dispatch with non-zero provider usage, exit zero, and a 2,035-byte harvested patch.
+The same pinned, network-disabled Docker grader judged the local baseline as failing and the Codex
+patch as passing. Colophon collected a complete 2/2 matrix
+`c75c90c2bc04496e66fd6527b1ac087663cdbca880dc9df0f033bbc0fc98634d`, sealed the
+report, and published bundle
+`02d2c5a2e5e36c7ce2235b74469287971f27df9845098794036505999c1d0066`. The standalone
+reader returned all six canonical checks; the authenticated loopback viewer returned the verified
+report and refused launch-token replay; a boundary scan found no profile identifier, credential
+reference, or login-artifact name in the bundle.
+
+The Claude and Codex results are provider-path and product-lifecycle acceptance only. They do not
+show that either model or any skill is generally better: each uses one task, and provider cost or
+subscription settlement is not independently measured. The 12-task cheapest-capable suitability
+cohort remains the first result-bearing model decision. Public-registry installation remains
+deliberately last.
 
 ## 11. Risks and controls
 
@@ -789,8 +855,9 @@ The operator must decide before public package publication:
 The v1 zero-Docker target decision is resolved: `linux/x64` and `darwin/arm64` are
 qualified by target-specific cold-registry jobs. That decision does not widen the
 qualification table for provider calls. The two named Mac executable identities above are the only
-prepublication login-capture candidates; real interactive acceptance is still required before they
-become a public support claim. Docker/Inspect retains its own local/runtime gates.
+prepublication login-capture candidates and have completed the one-task provider-path acceptance in
+section 10.5. Expanding the support claim to another build, platform, model, or task family requires
+its own qualification evidence. Docker/Inspect retains its own local/runtime gates.
 
 Later decisions are deliberately deferred:
 

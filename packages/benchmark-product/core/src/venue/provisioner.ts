@@ -412,8 +412,8 @@ async function removeDemo1Instructions(paths: WorkspacePaths): Promise<void> {
   ]);
 }
 
-/** Extracts repository changes without touching the real index and excludes both arms' files. */
-async function extractDemo1Patch(paths: WorkspacePaths): Promise<void> {
+/** Extracts repository changes without touching the real index. */
+async function extractRepositoryPatch(paths: WorkspacePaths, excludeDemo1Instructions: boolean): Promise<void> {
   const indexPath = join(paths.meta, "demo1-patch.index");
   await rm(indexPath, { force: true });
   const env = {
@@ -426,9 +426,13 @@ async function extractDemo1Patch(paths: WorkspacePaths): Promise<void> {
   await runGitOutput(["-C", paths.work, "read-tree", "HEAD"], env);
   await runGitOutput([
     "-C", paths.work, "add", "-A", "--", ".",
-    `:(exclude)${DEMO1_CLAUDE_MD_PATH}`,
-    `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}`,
-    `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}/**`,
+    ...(excludeDemo1Instructions
+      ? [
+        `:(exclude)${DEMO1_CLAUDE_MD_PATH}`,
+        `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}`,
+        `:(exclude)${DEMO1_SKILL_PLUGIN_DIRECTORY}/**`,
+      ]
+      : []),
   ], env);
   const patch = await runGitOutput([
     "-C", paths.work, "diff", "--cached", "--binary", "--full-index", "--no-color", "HEAD", "--",
@@ -477,6 +481,7 @@ function repositoryWorkProvisionerContract(
 ): ProvisionerContract {
   let resolved: { readonly base: ProvisionerContract; readonly mirrorDir: string } | undefined;
   let demo1Claude = false;
+  let repositoryEditingHarness = false;
   return {
     workspaceKind: (): WorkspaceKind => "worktree",
     async setup(view, paths, grants) {
@@ -516,12 +521,18 @@ function repositoryWorkProvisionerContract(
       });
       await base.setup(view, paths, grants);
       try {
-        demo1Claude = harnessId(view) === DEMO1_CLAUDE_HARNESS_ID;
-        if (demo1Claude) {
-          if (options.demo1Instructions === undefined) {
-            throw new ProvisioningRejectedError("Demo-1 Claude Code runtime has no instruction artifact inventory");
-          }
-          await installDemo1Instructions(view, paths, options.demo1Instructions);
+        // A normal profile-backed Claude Code arm shares the same public harness id as Demo-1.
+        // The frozen instruction inventory is the product-owned discriminator: venue.ts refuses
+        // configuring a Demo-1 runtime and a general Claude profile together, so its presence
+        // means this is the experiment-specific launcher/provisioner pair. Without it, preserve
+        // the ordinary repository-work path and never demand or remove Demo-1 artifacts.
+        const demo1Instructions = options.demo1Instructions;
+        const selectedHarness = harnessId(view);
+        repositoryEditingHarness = selectedHarness === "claude-code" || selectedHarness === "codex";
+        demo1Claude = demo1Instructions !== undefined
+          && selectedHarness === DEMO1_CLAUDE_HARNESS_ID;
+        if (demo1Claude && demo1Instructions !== undefined) {
+          await installDemo1Instructions(view, paths, demo1Instructions);
         }
       } catch (error) {
         // A product placement refusal happens after the platform has cut the worktree. Clean up
@@ -543,7 +554,12 @@ function repositoryWorkProvisionerContract(
       try {
         if (demo1Claude) {
           await removeDemo1Instructions(paths);
-          await extractDemo1Patch(paths);
+          await extractRepositoryPatch(paths, true);
+        } else if (repositoryEditingHarness && !existsSync(join(paths.out, "patch"))) {
+          // Claude Code and Codex express their result by editing the checked-out repository.
+          // Turn those exact bytes into the profile's required patch output before the generic
+          // harvester runs. A launcher-supplied patch remains authoritative when one exists.
+          await extractRepositoryPatch(paths, false);
         }
         // Same normalization contract as the solve path above, for this profile's declared slots.
         // Renames run BEFORE the delegated harvest because harvest stamps each artifact's
