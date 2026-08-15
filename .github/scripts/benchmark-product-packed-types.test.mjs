@@ -370,7 +370,8 @@ try {
   try {
     if (runT1ColdLifecycle) {
       await run('yarn', [
-        'test',
+        'vitest',
+        'run',
         'src/conformance/binary-qualification-cold-lifecycle.external.test.ts',
         '--reporter=verbose',
       ], {

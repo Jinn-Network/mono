@@ -39,7 +39,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/demo1-task-evidence-runner.test.mjs",
     "public-quickstart": "./quickstart/public-quickstart.mjs",
     "publication-release-rehearsal": "COLOPHON_PUBLICATION_RELEASE_REHEARSAL=1 vitest run src/conformance/publication-release-rehearsal.external.test.ts --reporter=verbose",
     "t1:cold:lifecycle": "node ../../../.github/scripts/benchmark-product-packed-types.test.mjs --t1-cold-lifecycle",
@@ -50,6 +50,9 @@
     "p5:offline:test": "node --preserve-symlinks --test scripts/p5-disk-gate.test.mjs scripts/p5-disk-reserve.test.mjs scripts/p5-accounting.test.mjs scripts/p5-stop-evidence.test.mjs scripts/p5-walkthrough.test.mjs scripts/mint-micro-slate.test.mjs",
     "p5:green": "node scripts/p5-green-baseline.mjs",
     "p5:walkthrough": "node scripts/p5-walkthrough.mjs",
+    "demo1:task-evidence:test": "node --test scripts/demo1-task-evidence-runner.test.mjs",
+    "demo1:task-evidence:freeze": "node scripts/demo1-task-evidence-freeze.mjs",
+    "demo1:task-evidence:check": "node scripts/demo1-task-evidence-freeze.mjs --check",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },

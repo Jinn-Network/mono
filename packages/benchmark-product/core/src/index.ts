@@ -218,13 +218,50 @@ export {
   DEMO1_OUTCOME_BLIND_TASK_CHECKS,
   DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR,
   DEMO1_PRE_RUN_FREEZE_SCHEMA,
+  DEMO1_REHEARSAL_POOL_REQUIREMENT,
   DEMO1_SKILLS_SOURCE_URL,
+  DEMO1_SUITABILITY_POOL_REQUIREMENT,
   buildDemo1PreRunFreeze,
   canonicalDemo1PreRunFreezeBytes,
   demo1PreRunFreezeDigest,
   parseDemo1UpstreamSkill,
   verifyDemo1PreRunFreeze,
 } from "./method/demo1-prerun.js";
+
+// Demo-1 task-evidence recovery is append-only: v2 remains authenticated while v3 binds the
+// complete task universe, candidate-specific domain checks, and a product-owned pool partition.
+export {
+  DEMO1_PERMISSIVE_TASK_LICENSES,
+  DEMO1_TASK_EVIDENCE_CHECKS,
+  DEMO1_TASK_EVIDENCE_POLICY_ID,
+  DEMO1_TASK_EVIDENCE_SCHEMA,
+  buildDemo1TaskEvidenceArtifact,
+  canonicalDemo1TaskEvidenceBytes,
+  demo1TaskEvidenceDigest,
+  verifyDemo1TaskEvidenceArtifact,
+} from "./method/demo1-task-evidence.js";
+export type {
+  Demo1TaskEvidenceArtifact,
+  Demo1TaskEvidenceBuildInput,
+  Demo1TaskEvidenceCandidate,
+  Demo1TaskEvidenceEntry,
+  Demo1TaskEvidenceUniverseTask,
+} from "./method/demo1-task-evidence.js";
+export {
+  DEMO1_POOL_PARTITION_POLICY,
+  DEMO1_PRE_RUN_FREEZE_V3_SCHEMA,
+  buildDemo1PreRunFreezeV3,
+  canonicalDemo1PreRunFreezeV3Bytes,
+  demo1PreRunFreezeV3AsV2,
+  demo1PreRunFreezeV3Digest,
+  verifyDemo1PreRunFreezeV3,
+} from "./method/demo1-prerun-v3.js";
+export type {
+  Demo1PreRunFreezeV3,
+  Demo1PreRunFreezeV3CandidateInventory,
+  Demo1PreRunFreezeV3Input,
+  Demo1PreRunFreezeV3SelectedTask,
+} from "./method/demo1-prerun-v3.js";
 
 // Demo-1 E4: benchmark-specific preregistration over an injected generic IPFS/ERC-8004 manifest
 // boundary. The witness is local handoff evidence, not a new record kind or publication claim.
