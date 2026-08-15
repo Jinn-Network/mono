@@ -24,8 +24,3 @@ conformance contract the two v1 sealed profile documents are checked against.
 
 No fixture file may contain a secret, a real signature, or personally identifying material — see
 Global Constraints (no secrets in sealed documents, ever).
-
-`binary-judgment-request/golden/unicode-line-endings.json` is also the cross-runtime rendering
-oracle for the TypeScript product binding and Python Inspect worker. It pins the exact payload and
-instrument inputs, rendered messages, semantic request, canonical request bytes, and digest. A
-consumer must not transcribe or normalize its expected values.
