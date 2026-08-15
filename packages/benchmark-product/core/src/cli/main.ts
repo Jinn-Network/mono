@@ -35,6 +35,7 @@ import {
   authorityGrant,
   authorityRevoke,
   authorityShow,
+  bindInspectBinaryJudge,
   createDraft,
   getDraft,
   importBinaryItemBank,
@@ -69,6 +70,7 @@ import {
   migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
+  type BindInspectBinaryJudgeInput,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
@@ -117,6 +119,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    --file <admission-manifest.json>
   runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
+  runtime inspect bind-judge --workspace <dir> --principal <id> --draft <draftId>
+                   --file <binding.json>
   runtime harbor select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
   runtime terminal-bench-2 select --workspace <dir> --principal <id> --draft <draftId>
@@ -187,6 +191,7 @@ const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "dra
 const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
 const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_INSPECT_BIND_JUDGE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
@@ -568,6 +573,23 @@ async function handleInspectRuntimeSelect(
     result,
     jsonMode,
     (value) => `selected Inspect evaluation ${value.selectionManifestSha256} for draft ${draftId}\n`,
+  );
+}
+
+function handleInspectRuntimeBindJudge(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): CliResult {
+  assertKnownFlags(args, RUNTIME_INSPECT_BIND_JUDGE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const binding = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as BindInspectBinaryJudgeInput["binding"];
+  const result = bindInspectBinaryJudge(opContext, { draftId, binding });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `bound Inspect binary judge ${value.selectionManifestSha256} to draft ${draftId}\n`,
   );
 }
 
@@ -1101,6 +1123,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["human-review response sign", handleHumanReviewResponseSign],
   ["human-review admit", handleHumanReviewAdmit],
   ["runtime inspect select", handleInspectRuntimeSelect],
+  ["runtime inspect bind-judge", handleInspectRuntimeBindJudge],
   ["runtime harbor select", handleHarborRuntimeSelect],
   ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],
   ["runtime terminal-bench migrate", handleTerminalBenchMigration],

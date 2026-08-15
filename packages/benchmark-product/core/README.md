@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **40 generated operations**, all shipped through the library and CLI
+contains **41 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -58,6 +58,7 @@ with an explicit shipped/deferred GUI disposition:
 | `authorityGrant` | `colophon authority grant` | Sponsor-only membership or grant change. |
 | `authorityRevoke` | `colophon authority revoke` | Sponsor-only grant or membership revocation. |
 | `authorityShow` | `colophon authority show` | Read the authority policy. |
+| `bindInspectBinaryJudge` | `colophon runtime inspect bind-judge` | Bind sealed binary-judge instruments to exact Run-arm requirements. |
 | `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
 | `getDraft` | `colophon draft show` | Read one draft. |
 | `createHumanReviewPackets` | `colophon human-review packet create` | Create blind item packets and visibility receipts before lock. |

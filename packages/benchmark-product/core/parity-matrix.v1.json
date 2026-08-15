@@ -83,6 +83,16 @@
       }
     },
     {
+      "operation": "bindInspectBinaryJudge",
+      "cliVerb": "runtime inspect bind-judge",
+      "authorityGated": false,
+      "description": "Binds sealed binary judge instruments to Run-arm requirements on an imported benchmark.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires machine-local OCI runtime paths and pre-sealed instrument digests; browser-supplied paths are forbidden"
+      }
+    },
+    {
       "operation": "createDraft",
       "cliVerb": "draft create",
       "authorityGated": false,

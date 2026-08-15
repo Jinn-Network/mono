@@ -159,6 +159,34 @@ export type {
   InspectScoringProjectionDisclosure,
 } from "./runtime/inspect/disclosure.js";
 export type { InspectScoringRequest, InspectScoreProjection } from "./runtime/inspect/manifest.js";
+export {
+  INSPECT_BINARY_JUDGE_ADAPTER_ID,
+  INSPECT_BINARY_JUDGE_LAUNCHER_ID,
+  INSPECT_BINARY_JUDGE_LAUNCHER_VERSION,
+  INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
+  InspectBinaryJudgeBindingRequestSchema,
+  InspectBinaryJudgeHostBindingSchema,
+  InspectBinaryJudgeSelectionManifestSchema,
+} from "./runtime/inspect/binary-judge-manifest.js";
+export type {
+  InspectBinaryJudgeArm,
+  InspectBinaryJudgeBindingRequest,
+  InspectBinaryJudgeHostBinding,
+  InspectBinaryJudgeSelectionManifest,
+} from "./runtime/inspect/binary-judge-manifest.js";
+export {
+  INSPECT_BINARY_JUDGE_CONFIG_FILENAME,
+  INSPECT_BINARY_JUDGE_OCI_CONFIG_PATH,
+  INSPECT_BINARY_JUDGE_OCI_OUTPUT_DIR,
+  INSPECT_BINARY_JUDGE_OUTPUT_FILES,
+  buildInspectBinaryJudgeOciRunArgs,
+  buildInspectBinaryJudgeWorkerInput,
+  inspectBinaryJudgeWorkerPath,
+  inspectBinaryJudgeWorkerSha256,
+  makeInspectBinaryJudgeLauncher,
+  validateInspectBinaryJudgePinning,
+} from "./runtime/inspect/binary-judge.js";
+export type { InspectBinaryJudgeWorkerInput } from "./runtime/inspect/binary-judge.js";
 
 // Demo-1's explicit real-Claude runtime and byte-preserving arm construction. The product does
 // not discover executables or source content ambiently; callers bind both before lock.
@@ -367,6 +395,7 @@ export {
   authorityRevoke,
   authorityShow,
   BINARY_ITEM_BANK_PROFILE,
+  bindInspectBinaryJudge,
   createDraft,
   getDraft,
   importBinaryItemBank,
@@ -409,6 +438,8 @@ export type {
   ArmWarning,
   AuthorityGrantInput,
   AuthorityRevokeInput,
+  BindInspectBinaryJudgeInput,
+  BindInspectBinaryJudgeResult,
   BenchmarkInspection,
   BenchmarkInspectionItem,
   CreateDraftInput,

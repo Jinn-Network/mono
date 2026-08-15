@@ -67,6 +67,11 @@ export {
   type SelectInspectEvaluationInput,
   type SelectInspectEvaluationResult,
 } from "./inspect-runtime.js";
+export {
+  bindInspectBinaryJudge,
+  type BindInspectBinaryJudgeInput,
+  type BindInspectBinaryJudgeResult,
+} from "./inspect-binary-judge.js";
 export { selectHarborRuntime, type SelectHarborRuntimeInput, type SelectHarborRuntimeResult } from "./harbor-runtime.js";
 export {
   migrateTerminalBenchLegacyTask,

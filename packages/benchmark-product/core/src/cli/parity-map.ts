@@ -59,6 +59,7 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   signHumanReviewResponse: "human-review response sign",
   admitHumanTruth: "human-review admit",
   selectInspectEvaluation: "runtime inspect select",
+  bindInspectBinaryJudge: "runtime inspect bind-judge",
   selectHarborRuntime: "runtime harbor select",
   selectTerminalBench2Runtime: "runtime terminal-bench-2 select",
   migrateTerminalBenchLegacyTask: "runtime terminal-bench migrate",
@@ -105,6 +106,7 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   signHumanReviewResponse: "human-review.response.sign",
   admitHumanTruth: "human-review.admit",
   selectInspectEvaluation: "runtime.inspect.select",
+  bindInspectBinaryJudge: "runtime.inspect.bind-judge",
   selectHarborRuntime: "runtime.harbor.select",
   selectTerminalBench2Runtime: "runtime.terminal-bench-2.select",
   migrateTerminalBenchLegacyTask: "runtime.terminal-bench.migrate",
@@ -150,6 +152,7 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
   signHumanReviewResponse: "Signs one human response with a configured evaluator identity and stores compact Result Evaluation evidence.",
   admitHumanTruth: "Validates two-person unanimous truth or explicit operator-only truth and derives resolution and analysis records.",
   selectInspectEvaluation: "Selects, probes, and digest-binds an unmodified Inspect evaluation and its runtime configuration.",
+  bindInspectBinaryJudge: "Binds sealed binary judge instruments to Run-arm requirements on an imported benchmark.",
   selectHarborRuntime: "Selects and digest-binds a managed Harbor runtime.",
   selectTerminalBench2Runtime: "Resolves one immutable Terminal-Bench 2 task and binds it to the managed Harbor runtime.",
   migrateTerminalBenchLegacyTask: "Transforms a legacy Terminal-Bench task through the pinned Harbor mapper and seals both byte histories.",
@@ -205,6 +208,7 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   signHumanReviewResponse: { status: "unavailable", reason: "requires a machine-local configured signer key; browser key custody is forbidden" },
   admitHumanTruth: { status: "unavailable", reason: "requires local signed-review, roster, and licensed truth evidence files" },
   selectInspectEvaluation: { status: "shipped", action: "runtime.inspect.select" },
+  bindInspectBinaryJudge: { status: "unavailable", reason: "requires machine-local OCI runtime paths and pre-sealed instrument digests; browser-supplied paths are forbidden" },
   // These inputs contain host paths/executable locations. A browser must not supply those
   // paths; a future server-configured runtime catalogue can safely expose them.
   selectHarborRuntime: { status: "unavailable", reason: "requires server-configured Harbor host paths; browser-supplied paths are forbidden" },
