@@ -23,8 +23,9 @@ import {
   type BenchmarkRecord,
 } from "@jinn-network/benchmarking-records";
 import {
-  BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
-  BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+  isBinaryJudgmentEvaluationSpecification,
+} from "@jinn-network/task-execution-evaluator-adapters";
+import {
   BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
   BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE,
   BINARY_JUDGMENT_PROFILE_DIGEST,
@@ -32,7 +33,6 @@ import {
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
   BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
   BinaryJudgmentPayloadSchema,
-  EVAL_SEMANTICS_VERSION,
   parseBinaryJudgmentAnalysisContext,
   parseBinaryJudgmentInstrument,
   parseBinaryJudgmentLabelResolution,
@@ -85,17 +85,6 @@ const EXPECTED_OUTPUTS = [
   { name: "judge-response", mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE, required: true },
   { name: "judge-observation", mediaType: BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE, required: true },
   { name: "inspect-log", mediaType: BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE, required: false },
-] as const;
-
-const EXPECTED_MEASUREMENTS = [
-  { name: "judgeDecision", type: "string", required: true },
-  { name: "truthLabel", type: "string", required: true },
-  { name: "agreement", type: "boolean", required: true },
-  { name: "parseValid", type: "boolean", required: true },
-  { name: "candidateClass", type: "string", required: true },
-  { name: "stratum", type: "string", required: true },
-  { name: "labelResolutionSha256", type: "string", required: true },
-  { name: "instrumentSha256", type: "string", required: true },
 ] as const;
 
 export const BINARY_INSTRUMENT_REPORT_LIMITATIONS = {
@@ -211,23 +200,10 @@ function validateEvaluationSpec(input: {
   const sealed = sealEvaluationSpec(spec);
   requireCanonicalReseal({ bytes, expectedDigest: input.evaluationDigest, sealed, path: "binary.evaluationSpec" });
 
-  const grader = object(spec.grader);
   const familyBlock = object(spec.familyBlock);
   const testMaterial = familyBlock?.["testMaterial"];
   if (
-    spec.semanticsVersion !== EVAL_SEMANTICS_VERSION
-    || spec.family !== "deterministic-process"
-    || grader === undefined
-    || !sameJson(grader, {
-      name: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.id,
-      digest: { sha256: bare(BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest) },
-      accessClass: "public",
-    })
-    || !sameJson(spec.measurements, EXPECTED_MEASUREMENTS)
-    || !sameJson(spec.verdictRule, { threshold: { measurement: "agreement", op: "eq", value: true } })
-    || !sameJson(spec.unscorable, [])
-    || !sameJson(spec.evidenceConventions, { requiredRefs: ["label-resolution.json"] })
-    || !Array.isArray(testMaterial)
+    !Array.isArray(testMaterial)
     || testMaterial.length !== 1
   ) {
     refuse("conflict", "binary.evaluationSpec", "binary evaluator or parser semantics drifted from the registered v1 contract");
@@ -239,23 +215,7 @@ function validateEvaluationSpec(input: {
   );
   if (
     material === undefined
-    || !sameJson(familyBlock, {
-      image: {
-        name: "binary-judgment-evaluation-parser-semantics.json",
-        digest: { sha256: bare(BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY.digest) },
-      },
-      platform: "linux/amd64",
-      workspace: {},
-      testMaterial: [{
-        name: "analysis-context.json",
-        digest: { sha256: bare(contextDigest) },
-        mediaType: BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
-        accessClass: "private",
-      }],
-      parser: BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
-      transitions: { failToPass: [], passToPass: [] },
-      timeout: 60,
-    })
+    || !isBinaryJudgmentEvaluationSpecification(spec)
     || !input.manifestContexts.has(contextDigest)
   ) {
     refuse("conflict", "binary.evaluationSpec.analysisContext", "EvaluationSpec does not bind one admitted analysis context");
