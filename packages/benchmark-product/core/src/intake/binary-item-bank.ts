@@ -24,14 +24,42 @@ import {
   BINARY_JUDGMENT_PROFILE_DIGEST,
   BINARY_JUDGMENT_PROFILE_URI,
   BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
-  BinaryJudgmentPayloadSchema,
-  BinaryJudgmentSourceDescriptorSchema,
   canonicalJsonBytes,
   compareCodeUnitStrings,
   recordDigest,
   sealEvaluationSpec,
   type BinaryJudgmentPayload,
 } from "@jinn-network/task-execution-profiles";
+import {
+  BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
+  BINARY_ITEM_BANK_ENTRY_PROTOCOL,
+  BINARY_ITEM_BANK_INTAKE_EXTENSION,
+  BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
+  BinaryAdmissionIndexEntrySchema,
+  BinaryItemBankEntrySchema,
+  BinaryItemBankIntakeExtensionSchema,
+  BinarySourceManifestEntrySchema,
+  type BinaryAdmissionIndexEntry,
+  type BinaryItemBankEntry,
+  type BinaryItemBankIntakeExtension,
+  type BinarySourceManifestEntry,
+} from "@colophon-claims/verify/admission";
+export {
+  BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
+  BINARY_ITEM_BANK_ENTRY_PROTOCOL,
+  BINARY_ITEM_BANK_INTAKE_EXTENSION,
+  BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
+  BinaryAdmissionIndexEntrySchema,
+  BinaryItemBankEntrySchema,
+  BinaryItemBankIntakeExtensionSchema,
+  BinarySourceManifestEntrySchema,
+};
+export type {
+  BinaryAdmissionIndexEntry,
+  BinaryItemBankEntry,
+  BinaryItemBankIntakeExtension,
+  BinarySourceManifestEntry,
+};
 import {
   buildBinaryJudgmentEvaluationSpecification,
   isBinaryJudgmentEvaluationSpecification,
@@ -51,60 +79,6 @@ import {
   verifyBinaryJudgmentAdmissionClosure,
   type BinaryJudgmentAdmissionClosurePorts,
 } from "../human-review/verification.js";
-
-export const BINARY_ITEM_BANK_ENTRY_PROTOCOL =
-  "https://spec.jinn.network/binary-judgment/item-bank-entry/v1" as const;
-export const BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL =
-  "https://spec.jinn.network/binary-judgment/source-manifest-entry/v1" as const;
-export const BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL =
-  "https://spec.jinn.network/binary-judgment/admission-index-entry/v1" as const;
-export const BINARY_ITEM_BANK_INTAKE_EXTENSION =
-  "https://product.jinn.network/extensions/binary-judgment-intake/v1" as const;
-
-const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u)
-  .transform((value) => value as `sha256:${string}`);
-
-export const BinaryItemBankEntrySchema = z.strictObject({
-  protocol: z.literal(BINARY_ITEM_BANK_ENTRY_PROTOCOL),
-  item: BinaryJudgmentPayloadSchema,
-});
-export type BinaryItemBankEntry = z.infer<typeof BinaryItemBankEntrySchema>;
-
-export const BinarySourceManifestEntrySchema = z.strictObject({
-  protocol: z.literal(BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL),
-  provenanceSha256: DigestSchema,
-  source: BinaryJudgmentSourceDescriptorSchema,
-  license: BinaryJudgmentSourceDescriptorSchema,
-  attribution: BinaryJudgmentSourceDescriptorSchema,
-}).superRefine((entry, ctx) => {
-  if (`sha256:${entry.source.digest.sha256}` !== entry.provenanceSha256) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["source", "digest", "sha256"],
-      message: "source digest must equal provenanceSha256",
-    });
-  }
-});
-export type BinarySourceManifestEntry = z.infer<typeof BinarySourceManifestEntrySchema>;
-
-export const BinaryAdmissionIndexEntrySchema = z.strictObject({
-  protocol: z.literal(BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL),
-  admissionManifestSha256: DigestSchema,
-  itemSha256: DigestSchema,
-  labelResolutionSha256: DigestSchema,
-  analysisContextSha256: DigestSchema,
-});
-export type BinaryAdmissionIndexEntry = z.infer<typeof BinaryAdmissionIndexEntrySchema>;
-
-export const BinaryItemBankIntakeExtensionSchema = z.strictObject({
-  profile: z.literal(BINARY_JUDGMENT_PROFILE_URI),
-  itemBankSha256: DigestSchema,
-  sourceManifestSha256: DigestSchema,
-  admissionIndexSha256: DigestSchema,
-  admissionManifestSha256: DigestSchema,
-  replacementLedgerSha256: DigestSchema,
-});
-export type BinaryItemBankIntakeExtension = z.infer<typeof BinaryItemBankIntakeExtensionSchema>;
 
 export function parseBinaryItemBankIntakeExtension(
   benchmark: BenchmarkRecord,

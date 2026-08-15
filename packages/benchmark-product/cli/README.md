@@ -50,5 +50,5 @@ doctor proves configuration, not provider acceptance.
 For a received bundle, prefer the smaller reader package:
 
 ```sh
-npx @colophon-claims/verify@1 ./bundle
+npx @colophon-claims/verify@2 ./bundle
 ```

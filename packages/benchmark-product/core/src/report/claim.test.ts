@@ -897,7 +897,17 @@ describe("claim-package/2 exact binary qualification gate", () => {
         compatibleCommand: BINARY_QUALIFICATION_COMPATIBLE_VERIFICATION_COMMAND,
       },
     };
+    delete claim.headline;
+    delete claim.comparison;
     expect(ClaimPackageSchema.safeParse(claim).success).toBe(true);
+
+    const topLevelConclusion = structuredClone(claim) as any;
+    topLevelConclusion.ranking = ["arm-a"];
+    expect(ClaimPackageSchema.safeParse(topLevelConclusion).success).toBe(false);
+
+    const nestedConclusion = structuredClone(claim) as any;
+    nestedConclusion.scope.arms[0].winner = true;
+    expect(ClaimPackageSchema.safeParse(nestedConclusion).success).toBe(false);
 
     const ranked = structuredClone(claim) as any;
     ranked.qualification.ranking = ["arm-a"];

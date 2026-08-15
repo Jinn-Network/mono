@@ -265,7 +265,40 @@ const ClaimPackageWireSchema = z.object({
   }
 });
 
+function exactKeys(value: unknown, allowed: readonly string[]): boolean {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && Object.keys(value).every((key) => allowed.includes(key));
+}
+
+function exactBinaryClaimControls(input: Record<string, unknown>): boolean {
+  const scope = input.scope;
+  const records = input.records;
+  const method = input.method;
+  const assurance = input.assurance;
+  const disclosures = input.disclosures;
+  const verification = input.verification;
+  return exactKeys(input, ["claimSchema", "scope", "records", "method", "results", "completeness", "attrition", "conflicted", "assurance", "disclosures", "limitations", "venueHonesty", "verification", "rehearsal", "qualification"])
+    && exactKeys(scope, ["draftId", "benchmarkSha256", "taskCount", "arms", "replicates", "venue"])
+    && Array.isArray((scope as { arms?: unknown }).arms)
+    && ((scope as { arms: unknown[] }).arms).every((arm) => exactKeys(arm, ["armId", "pinning"]))
+    && exactKeys(records, ["benchmarkSha256", "runSha256", "matrixSha256", "reportSha256", "reportEnvelopeSha256"])
+    && exactKeys(method, ["id", "version", "parameters", "preregistered"])
+    && exactKeys(assurance, ["preset", "resolved", "disclosure"])
+    && exactKeys((assurance as { resolved?: unknown })?.resolved, ["independence", "minVerdicts", "distinctEvaluator", "verdictRule"])
+    && exactKeys(disclosures, ["perSubject", "integrityTierCounts", "pinningUnverifiableCounts"])
+    && exactKeys((disclosures as { integrityTierCounts?: unknown })?.integrityTierCounts, ["re-derivable", "attested-only"])
+    && exactKeys((disclosures as { pinningUnverifiableCounts?: unknown })?.pinningUnverifiableCounts, ["harness", "model", "loadout", "isolation"])
+    && exactKeys(input.conflicted, ["count", "cellKeys"])
+    && exactKeys(verification, ["command", "compatibleCommand", "checks", "trustRoot"])
+    && (input.rehearsal === undefined || exactKeys(input.rehearsal, ["previewCount", "timestamps"]));
+}
+
 export const ClaimPackageSchema = z.preprocess((input) => {
+  if (typeof input === "object" && input !== null && !Array.isArray(input)
+    && (input as { readonly claimSchema?: unknown }).claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID
+    && !exactBinaryClaimControls(input as Record<string, unknown>)) {
+    return { claimSchema: "invalid-binary-claim-control-shape" };
+  }
   if (typeof input === "object" && input !== null && !Array.isArray(input)
     && (input as { readonly claimSchema?: unknown }).claimSchema === CLAIM_PACKAGE_SCHEMA_ID) {
     const { qualification: _legacyUnknown, ...legacy } = input as Record<string, unknown>;

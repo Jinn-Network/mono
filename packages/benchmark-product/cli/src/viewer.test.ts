@@ -24,6 +24,7 @@ function authenticated(files: Readonly<Record<string, string>>): VerifiedPublicB
   const manifestBytes = encoder.encode(JSON.stringify(manifest));
   return {
     verification: {
+      format: "benchmark-product-public-bundle/2",
       identity: "b".repeat(64),
       checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
       benchmarkSha256: "c".repeat(64),
@@ -177,6 +178,39 @@ describe("verified bundle viewer", () => {
     await viewer.close();
     viewers.pop();
     expect(workspaceCloses).toBe(1);
+  });
+
+  test("renders the neutral v4 qualification summary and format-scoped reader2 command", async () => {
+    const root = mkdtempSync(join(tmpdir(), "colophon-viewer-v4-"));
+    roots.push(root);
+    writeFileSync(join(root, "index.html"), "verified report");
+    const base = authenticated({ "index.html": "verified report", "evidence.json": "{}" });
+    const { comparison: _comparison, ...snapshot } = base;
+    const v4: VerifiedPublicBundleSnapshot = {
+      ...snapshot,
+      verification: {
+        ...base.verification,
+        format: "benchmark-product-public-bundle/4",
+        qualification: {
+          publicationGrade: true,
+          truthAdmission: "two-human-unanimous",
+          candidateClasses: ["factuality"],
+          strata: ["core", "stress"],
+          armCount: 4,
+          itemCount: 2,
+          exclusionCount: 0,
+        },
+      },
+    };
+    const viewer = await createVerifiedBundleViewer(root, 0, { verify: async () => v4 });
+    viewers.push(viewer);
+    const session = await claim(viewer);
+    const html = await (await fetch(session.base, { headers: { cookie: session.cookie } })).text();
+    expect(html).toContain("Verified binary qualification");
+    expect(html).toContain("two-human-unanimous");
+    expect(html).toContain("factuality");
+    expect(html).toContain("@colophon-claims/verify@2");
+    expect(html).not.toContain("What happened, task by task");
   });
 
   test("keeps a packaged-workspace start failure out of the browser response and permits a retry", async () => {

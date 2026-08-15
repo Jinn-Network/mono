@@ -68,13 +68,14 @@ import {
   terminalBenchMigrationBytes,
   type TerminalBenchMaterial,
 } from "./terminal-bench-2/manifest.js";
+import { INSPECT_SELECTION_CORRELATION_ROLE } from "@colophon-claims/verify";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
 export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";
 export const INSPECT_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/inspect-evidence/v1";
 export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./harbor/manifest.js";
 export const INSPECT_EVAL_LOG_ARTIFACT_ROLE = "https://product.jinn.network/artifact-roles/inspect/eval-log/v1";
-export const INSPECT_SELECTION_CORRELATION_ROLE = "https://product.jinn.network/artifact-roles/inspect/selection-manifest/v1";
+export { INSPECT_SELECTION_CORRELATION_ROLE };
 export const INSPECT_RUNTIME_PROVENANCE_ROLE = "https://product.jinn.network/artifact-roles/inspect/runtime-provenance/v1";
 
 type RuntimeRegistrationArtifact = Awaited<ReturnType<RuntimeEvidenceContributor["registration"]>>[number];

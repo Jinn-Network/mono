@@ -101,6 +101,8 @@ line to receive fixes without changing the bundle-format contract:
 ```text
 npx @colophon-claims/verify@1.0.0 <dir>
 npx @colophon-claims/verify@1 <dir>
+npx @colophon-claims/verify@2.0.0 <dir> # binary qualification bundle v4
+npx @colophon-claims/verify@2 <dir>     # compatible v2/v4 reader line
 ```
 
 It reads only the caller-selected immutable bundle, needs no workspace or

@@ -55,7 +55,7 @@ a registry command because the packages have not been published.
 For a received bundle, the smaller reader surface is:
 
 ```bash
-npx @colophon-claims/verify@1 ./bundle
+npx @colophon-claims/verify@2 ./bundle
 ```
 
 The contributor proof remains available from the mono:

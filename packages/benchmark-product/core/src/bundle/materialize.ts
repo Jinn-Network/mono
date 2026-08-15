@@ -17,6 +17,7 @@ import {
   parseMatrix,
   parseReport,
   parseRun,
+  readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import { SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
@@ -80,7 +81,12 @@ import {
 import { EVALUATOR_REQUIREMENT_KEY } from "../venue/venue.js";
 import { INSPECT_EMBEDDED_EVALUATOR_ID } from "../runtime/inspect/artifacts.js";
 import { INSPECT_ADAPTER_ID, InspectSelectionManifestSchema } from "../runtime/inspect/manifest.js";
+import {
+  INSPECT_BINARY_JUDGE_ADAPTER_ID,
+  InspectBinaryJudgeSelectionManifestSchema,
+} from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
+import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
 import { derivePublicComparison } from "@colophon-claims/verify";
 
 export const PUBLIC_BUNDLE_FILES = [
@@ -192,8 +198,10 @@ function recordClosure(input: MaterializeBundleInput): {
   const matrix = parseMatrix(matrixBytes);
   const report = parseReport(reportBytes);
   const draft = parseDraftDocument(JSON.parse(readFileSync(draftPath(workspaceDir, draftId), "utf8")));
-  const inspectRuntime = draft.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID;
-  const separateInspectVerifier = inspectRuntime
+  const genericInspectRuntime = draft.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID;
+  const binaryInspectRuntime = draft.spec.evaluationRuntime?.adapterId === INSPECT_BINARY_JUDGE_ADAPTER_ID;
+  const inspectRuntime = genericInspectRuntime || binaryInspectRuntime;
+  const separateInspectVerifier = genericInspectRuntime
     && deriveInspectEvaluationStrategy(run.policy.evaluation) === "separate-log-verification";
   const inspectSelectionSha256 = inspectRuntime
     ? draft.spec.evaluationRuntime?.selectionManifestSha256
@@ -202,12 +210,28 @@ function recordClosure(input: MaterializeBundleInput): {
     if (inspectSelectionSha256 === undefined) {
       refuse("record-integrity", "evidence-closure", "Inspect draft has no sealed runtime selection identity");
     }
+    const registeredSelections = readRunPublicationExtension(run as unknown as Record<string, unknown>)
+      ?.registrationArtifacts.filter((artifact) => artifact.role === INSPECT_SELECTION_CORRELATION_ROLE) ?? [];
+    if (
+      registeredSelections.length !== 1
+      || registeredSelections[0]!.artifact.mediaType !== "application/json"
+      || registeredSelections[0]!.artifact.digest.sha256 !== inspectSelectionSha256
+    ) {
+      refuse("record-integrity", "evidence-closure", "draft Inspect selection differs from the selection frozen in Run registration");
+    }
     const selectionBytes = getSealedBytes(workspaceDir, inspectSelectionSha256);
-    exactJson(selectionBytes, InspectSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+    if (binaryInspectRuntime) {
+      exactJson(selectionBytes, InspectBinaryJudgeSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+    } else {
+      exactJson(selectionBytes, InspectSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+    }
   }
 
   const claimBytes = new Uint8Array(readFileSync(claimPackageArtifactPath(workspaceDir, draftId)));
   const claim = exactJson(claimBytes, ClaimPackageSchema, "claim-package.json");
+  if (!Buffer.from(canonicalJsonBytes(claim)).equals(Buffer.from(claimBytes))) {
+    refuse("record-integrity", "claim-package.json", "claim package is not in exact canonical JSON encoding");
+  }
   const binaryQualification = claim.claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID;
   if (binaryQualification !== (report.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument)) {
     refuse("record-integrity", "claim-package.json", "claim schema and sealed Report method disagree on binary qualification");
@@ -388,7 +412,7 @@ function recordClosure(input: MaterializeBundleInput): {
       evaluation?: { digest?: { sha256?: string } };
       payload?: { selectionManifestSha256?: unknown };
     };
-    if (inspectRuntime) {
+    if (genericInspectRuntime) {
       if (task.payload?.selectionManifestSha256 !== inspectSelectionSha256) {
         refuse("record-integrity", "evidence-closure", `Inspect Task ${taskSha256} does not bind the draft's sealed runtime selection`);
       }
@@ -399,6 +423,7 @@ function recordClosure(input: MaterializeBundleInput): {
     const receipt = receipts.get(taskSha256);
     if (receipt !== undefined) addRole(evidenceRecords, receipt.sha256, "admission-receipt");
   }
+  if (binaryInspectRuntime) addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
 
   const journal = readRunJournalEntries(workspaceDir, draftId);
   const graph: BundleAssemblyHeader["graph"] = {

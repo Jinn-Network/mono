@@ -60,6 +60,10 @@ import {
   INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
   InspectBinaryJudgeSelectionManifestSchema,
 } from "../runtime/inspect/binary-judge-manifest.js";
+import {
+  BINARY_INSTRUMENT_REPORT_LIMITATIONS,
+  binaryInstrumentReportLimitations,
+} from "@colophon-claims/verify";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export {
@@ -80,33 +84,7 @@ const EXPECTED_OUTPUTS = [
   { name: "inspect-log", mediaType: BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE, required: false },
 ] as const;
 
-export const BINARY_INSTRUMENT_REPORT_LIMITATIONS = {
-  mutableModelAlias:
-    "The gpt-5.6-luna identifier is a mutable provider alias; this evidence does not prove invariant model weights across calls.",
-  reviewerKeyPerson:
-    "Distinct reviewer signing keys prove key control, not that the controllers are distinct people.",
-  cognitiveBlinding:
-    "Signed visibility and reveal receipts attest the review protocol; they do not technically prove cognitive blinding.",
-  operatorOnly:
-    "Truth uses operator-only admission and is not publication-grade two-human unanimous truth.",
-} as const;
-
-export function binaryInstrumentReportLimitations(
-  parameters: Readonly<Record<string, unknown>>,
-): readonly string[] {
-  const validation = validateBinaryInstrumentParameters(parameters);
-  if (!validation.ok) {
-    throw new TypeError(`invalid sealed binary-instrument parameters: ${validation.issues.join("; ")}`);
-  }
-  return [
-    BINARY_INSTRUMENT_REPORT_LIMITATIONS.mutableModelAlias,
-    BINARY_INSTRUMENT_REPORT_LIMITATIONS.reviewerKeyPerson,
-    BINARY_INSTRUMENT_REPORT_LIMITATIONS.cognitiveBlinding,
-    ...(parameters["truthAdmission"] === "operator-only"
-      ? [BINARY_INSTRUMENT_REPORT_LIMITATIONS.operatorOnly]
-      : []),
-  ];
-}
+export { BINARY_INSTRUMENT_REPORT_LIMITATIONS, binaryInstrumentReportLimitations };
 
 function sameJson(left: unknown, right: unknown): boolean {
   return Buffer.from(canonicalJsonBytes(left as never)).equals(Buffer.from(canonicalJsonBytes(right as never)));
