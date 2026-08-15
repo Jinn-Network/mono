@@ -27,8 +27,9 @@ const ANALYSIS_PROTOCOL = "https://spec.jinn.network/binary-judgment/analysis-co
 const SPEC_PROTOCOL = "https://spec.jinn.network/profiles/evaluation-spec/v1";
 const PARSER_ID = "network.jinn.parser.binary-judgment-evaluation";
 const PARSER_VERSION = "1.0.0";
-const RESPONSE_PARSER_DIGEST = `sha256:${"9".repeat(64)}` as const;
-const EVALUATION_METHOD_DIGEST = `sha256:${"8".repeat(64)}` as const;
+const TASK_PROFILE_DIGEST = "sha256:40f43e4ab9942f310da716e28ba2c1b8731fdf3c3837bb821573d4d8a0ec259d" as const;
+const RESPONSE_PARSER_DIGEST = "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073" as const;
+const EVALUATION_METHOD_DIGEST = "sha256:41b36eaffbac8c78133afd2075ec32fd73ed324395fe281dee525db17653937f" as const;
 const RUN_OWNER = "urn:uuid:77777777-7777-5777-8777-777777777777";
 
 const MEASUREMENTS = [
@@ -162,6 +163,9 @@ function makeFixture(options: {
   readonly tamper?: Tamper;
   readonly truthAdmission?: "two-human-unanimous" | "operator-only";
   readonly labelTruthAdmission?: "two-human-unanimous" | "operator-only";
+  readonly taskProfileDigest?: `sha256:${string}`;
+  readonly responseParserDigest?: `sha256:${string}`;
+  readonly evaluationParserDigest?: `sha256:${string}`;
 } = {}): {
   readonly input: MethodComputeInput;
   readonly matrix: MatrixRecord;
@@ -186,7 +190,7 @@ function makeFixture(options: {
         parser: {
           id: "network.jinn.parser.binary-accept-reject",
           version: "1.0.0",
-          digest: RESPONSE_PARSER_DIGEST,
+          digest: options.responseParserDigest ?? RESPONSE_PARSER_DIGEST,
         },
         invalidOutputDecision: "REJECT",
       },
@@ -236,11 +240,11 @@ function makeFixture(options: {
       family: "deterministic-process",
       grader: {
         name: PARSER_ID,
-        digest: { sha256: EVALUATION_METHOD_DIGEST.slice("sha256:".length) },
+        digest: { sha256: (options.evaluationParserDigest ?? EVALUATION_METHOD_DIGEST).slice("sha256:".length) },
         accessClass: "public",
       },
       familyBlock: {
-        parser: { id: PARSER_ID, version: PARSER_VERSION, digest: EVALUATION_METHOD_DIGEST },
+        parser: { id: PARSER_ID, version: PARSER_VERSION, digest: options.evaluationParserDigest ?? EVALUATION_METHOD_DIGEST },
         testMaterial: [{
           name: "analysis-context.json",
           digest: { sha256: analysisContextSha256.slice("sha256:".length) },
@@ -254,7 +258,10 @@ function makeFixture(options: {
     }));
     const taskBytes = sealTask({
       protocol: "https://spec.jinn.network/profiles/task-execution/v1",
-      profile: { digest: { sha256: "7".repeat(64) } },
+      profile: {
+        uri: "https://spec.jinn.network/task-profiles/binary-judgment/1.0",
+        digest: { sha256: (options.taskProfileDigest ?? TASK_PROFILE_DIGEST).slice("sha256:".length) },
+      },
       instructions: "Return one binary decision.",
       payload: { itemId: exactUuid(seed.id) },
       outputs: [{ name: "judge-response", mediaType: "text/plain; charset=utf-8", required: true }],
@@ -496,6 +503,18 @@ describe("binary-instrument@1 qualification oracle", () => {
 });
 
 describe("binary-instrument@1 tamper refusals", () => {
+  test.each([
+    { taskProfileDigest: `sha256:${"f".repeat(64)}` as const },
+    { responseParserDigest: `sha256:${"f".repeat(64)}` as const },
+    { evaluationParserDigest: `sha256:${"f".repeat(64)}` as const },
+  ])("rejects drift from frozen profile and parser semantics: %o", (drift) => {
+    const fixture = makeFixture(drift);
+    const method = createMethodRegistry().get("jinn.benchmarking.method/binary-instrument", "1")!;
+    expect(() => method.compute!(fixture.input)).toThrow(expect.objectContaining({
+      code: "binary-binding-mismatch",
+    }));
+  });
+
   test.each([
     "instrument",
     "truth",

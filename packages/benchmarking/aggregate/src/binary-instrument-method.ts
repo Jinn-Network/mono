@@ -27,12 +27,18 @@ const CANDIDATE_CLASS = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 
 const INSTRUMENT_REQUIREMENT_KEY = "network.jinn.binary-judgment.instrument";
 const ITEM_COMMITMENT_KEY = "network.jinn.binary-judgment.item-sha256";
+const TASK_PROFILE_URI = "https://spec.jinn.network/task-profiles/binary-judgment/1.0";
+const TASK_PROFILE_SHA256 = "40f43e4ab9942f310da716e28ba2c1b8731fdf3c3837bb821573d4d8a0ec259d";
 const INSTRUMENT_PROTOCOL = "https://spec.jinn.network/binary-judgment/judge-instrument/v1";
 const ANALYSIS_CONTEXT_PROTOCOL = "https://spec.jinn.network/binary-judgment/analysis-context/v1";
 const LABEL_RESOLUTION_PROTOCOL = "https://spec.jinn.network/binary-judgment/label-resolution/v1";
 const EVALUATION_SPEC_PROTOCOL = "https://spec.jinn.network/profiles/evaluation-spec/v1";
 const EVALUATION_PARSER_ID = "network.jinn.parser.binary-judgment-evaluation";
 const EVALUATION_PARSER_VERSION = "1.0.0";
+const EVALUATION_PARSER_SHA256 = "41b36eaffbac8c78133afd2075ec32fd73ed324395fe281dee525db17653937f";
+const RESPONSE_PARSER_ID = "network.jinn.parser.binary-accept-reject";
+const RESPONSE_PARSER_VERSION = "1.0.0";
+const RESPONSE_PARSER_DIGEST = "sha256:02aa652770de9e74415cd206c8741b6148e3ea82c21773983a6d8c66030d0073";
 
 export const BINARY_INSTRUMENT_MEASUREMENT_PROFILE = "binary-instrument@1" as const;
 export const BINARY_INSTRUMENT_MEASUREMENTS = {
@@ -389,6 +395,14 @@ function resolveTaskBinding(
 ): ExpectedTaskBinding {
   const taskWire = `sha256:${taskDigest}` as const;
   const task = resolveExactJson(taskWire, input.resolveTaskBytes, "Task");
+  const profile = task["profile"];
+  if (
+    !isObject(profile)
+    || digestObjectSha256(profile["digest"], taskWire, "Task.profile.digest") !== TASK_PROFILE_SHA256
+    || (profile["uri"] !== undefined && profile["uri"] !== TASK_PROFILE_URI)
+  ) {
+    throw new MethodInputError("binary-binding-mismatch", taskWire, "Task does not pin the binary-judgment/1.0 profile");
+  }
   const taskItemSha256 = wireSha256(task[ITEM_COMMITMENT_KEY], taskWire, `Task.${ITEM_COMMITMENT_KEY}`);
   const taskRequirements = task["requirements"];
   if (
@@ -427,6 +441,9 @@ function resolveTaskBinding(
     throw new MethodInputError("binary-binding-mismatch", specWire, `EvaluationSpec grader must be ${EVALUATION_PARSER_ID}`);
   }
   const evaluationMethodSha256 = digestObjectSha256(grader["digest"], specWire, "EvaluationSpec.grader.digest");
+  if (evaluationMethodSha256 !== EVALUATION_PARSER_SHA256) {
+    throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec grader digest is not the frozen binary evaluator semantics");
+  }
   const familyBlock = spec["familyBlock"];
   if (!isObject(familyBlock)) {
     throw new MethodInputError("binary-record-malformed", specWire, "EvaluationSpec.familyBlock must be an object");
@@ -436,6 +453,7 @@ function resolveTaskBinding(
     !isObject(parser)
     || parser["id"] !== EVALUATION_PARSER_ID
     || parser["version"] !== EVALUATION_PARSER_VERSION
+    || parser["digest"] !== `sha256:${EVALUATION_PARSER_SHA256}`
     || bareSha256(parser["digest"], specWire, "EvaluationSpec.familyBlock.parser.digest") !== evaluationMethodSha256
   ) {
     throw new MethodInputError("binary-binding-mismatch", specWire, "EvaluationSpec parser identity drifts from its grader");
@@ -548,11 +566,11 @@ function resolveArmInstruments(
     const parser = response["parser"];
     if (
       !isObject(parser)
-      || typeof parser["id"] !== "string"
-      || typeof parser["version"] !== "string"
-      || !SHA256_URI.test(String(parser["digest"]))
+      || parser["id"] !== RESPONSE_PARSER_ID
+      || parser["version"] !== RESPONSE_PARSER_VERSION
+      || parser["digest"] !== RESPONSE_PARSER_DIGEST
     ) {
-      throw new MethodInputError("binary-record-malformed", instrumentWire, "instrument parser identity is invalid");
+      throw new MethodInputError("binary-binding-mismatch", instrumentWire, "instrument parser is not the frozen ACCEPT/REJECT semantics");
     }
     instruments.set(arm.armId, instrumentWire.slice("sha256:".length));
   }
