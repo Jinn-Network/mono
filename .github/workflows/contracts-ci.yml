@@ -63,5 +63,6 @@ jobs:
           (cd packages/trust/testing && yarn install --immutable && yarn build)
           (cd packages/marketplace/binding && yarn install --immutable && yarn build)
           (cd packages/marketplace/projector && yarn install --immutable && yarn build)
+          (cd packages/marketplace/venue-base && yarn install --immutable && yarn build)
           (cd packages/marketplace/testing && yarn install --immutable && yarn build)
       - run: yarn test
