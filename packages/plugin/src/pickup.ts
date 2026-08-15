@@ -49,7 +49,7 @@ function isIdentifierShaped(word: string): boolean {
 }
 
 /** Path segments of a `/`-bearing identifier-shaped token (#1791 root cause
- *  1): an over-specific path like `client/src/dashboard/spa/src` rarely
+ *  1): an over-specific path like `operator/src/dashboard/spa/src` rarely
  *  matches a record's summary/tags verbatim, but a shorter segment within it
  *  (`dashboard`) often does. Each segment is cleaned, filtered to
  *  `MIN_PATH_SEGMENT_LENGTH`, stopword-filtered, and deduplicated against
@@ -117,7 +117,7 @@ export function deriveSearchTerms(
   //    but run through cleanWord's leading/trailing `_-./` strip (#1789) so
   //    a captured span like "npm test." doesn't keep its trailing period.
   //    cleanWord also keeps internal spaces, so a multi-word span
-  //    ("version status fetch") and a path-shaped one ("client/src/dash")
+  //    ("version status fetch") and a path-shaped one ("operator/src/dash")
   //    both keep their shape.
   for (const match of text.matchAll(QUOTED_SPAN_RE)) {
     if (terms.length >= maxTerms) break;
@@ -234,7 +234,7 @@ const REGEX_META_RE = /[.*+?^${}()|[\]\\]/g;
  *  to clear `RELEVANCE_FLOOR`. `_` counts as a word character so an
  *  identifier term like `update_available` is not split, while `/`, `-`, `.`
  *  and whitespace remain boundaries, so `dashboard` still matches inside
- *  `client/src/dashboard/spa`. */
+ *  `operator/src/dashboard/spa`. */
 function matchesWholeWord(haystack: string, term: string): boolean {
   const escaped = term.replace(REGEX_META_RE, '\\$&');
   return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'u').test(haystack);

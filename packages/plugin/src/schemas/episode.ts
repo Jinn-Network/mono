@@ -33,7 +33,7 @@ const UnixNanoSchema = z.string().regex(/^\d+$/, 'unix-nanosecond digit string')
  * `kind` tracks the DR-2026-07-14 §6 working names: `jinn.agent_turn` carries a
  * `role: user|assistant` in `attributes`; `jinn.tool_call` is a tool invocation.
  * Re-declared inline (rather than imported) because #1473 is still open and arch
- * §6 forbids the plugin package importing from `client/src/**`.
+ * §6 forbids the plugin package importing from `operator/src/**`.
  */
 const StepShape = {
   spanId: z.string().min(1),

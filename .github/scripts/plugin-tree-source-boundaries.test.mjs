@@ -83,7 +83,7 @@ const FORBIDDEN_PACKAGES = [
 const FORBIDDEN_ROOTS = [
   ...FROZEN_TRIO_ROOTS,
   join(root, 'apps'),
-  join(root, 'client'),
+  join(root, 'operator'),
   join(tree, 'frozen'),
 ];
 

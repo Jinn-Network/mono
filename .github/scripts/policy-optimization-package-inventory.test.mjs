@@ -230,7 +230,7 @@ test('no other package in the repository depends on the product', () => {
     }
   };
   walk(join(root, 'packages'));
-  for (const adjacent of ['client', 'apps', 'plugin', 'scripts']) {
+  for (const adjacent of ['operator', 'apps', 'plugin', 'scripts']) {
     const directory = join(root, adjacent);
     if (existsSync(directory)) walk(directory);
   }

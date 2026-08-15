@@ -8,7 +8,7 @@ const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'discovery');
 const discoveryDirectories = ['protocol', 'testing', 'serve', 'publication', 'client', 'facts/evidence', 'facts/trust', 'facts/task-execution', 'facts/benchmarking', 'facts/environments', 'facts/chain-environments', 'sources/evidence-journal', 'transport-http'];   // grows per package task
 const APPLICATION_AND_LEGACY_ROOTS = [
-  join(root, 'apps'), join(root, 'client'),
+  join(root, 'apps'), join(root, 'operator'),
   ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
     .map((d) => join(root, 'packages', d)),
 ];

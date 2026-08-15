@@ -99,7 +99,7 @@ fi
 # LAUNCHED_RECORD_JSON, if set, is the operator's owned launched record JSON
 # (schemaVersion solvernet.launched.v1). Written to
 # $JINN_EARNING_DIR/solvernets/launched/<solverNetId>.json — the path the
-# daemon walks at startup (client/src/main.ts). Skipped if the state tarball
+# daemon walks at startup (operator/src/main.ts). Skipped if the state tarball
 # already restored a record. The filename MUST be the record's solverNetId
 # (a SafeId: alnum/dash/underscore/dot).
 if [ -n "${LAUNCHED_RECORD_JSON:-}" ]; then

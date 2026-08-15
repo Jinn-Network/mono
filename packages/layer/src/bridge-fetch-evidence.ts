@@ -3,7 +3,7 @@
  *
  * Implements the VERIFIED verdict→solution join that reaches
  * the SOLVER's coding patch — the reference implementation is `fetchEvidence` in
- * client/scripts/distill-run-live.ts:
+ * operator/scripts/distill-run-live.ts:
  *
  *   verdict(ref.requestId, ref.chainId) → authoritative (taskId, attemptIndex, evaluator)
  *     + bounded verdictEnvelopeMeta candidates → historical publisher,

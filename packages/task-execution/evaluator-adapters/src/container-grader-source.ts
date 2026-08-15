@@ -333,7 +333,7 @@ async function readReport(directory: string, exitCode: number): Promise<ReportRe
  *
  * Capability grants have no channel into this source, by construction: the native evaluator
  * path seals evaluation Submissions grant-free and the host refuses a non-empty grant set
- * (`client/src/daemon/native-evaluator-composition.ts`). Nothing here reads a grant, and
+ * (`operator/src/daemon/native-evaluator-composition.ts`). Nothing here reads a grant, and
  * nothing here reads `process.env`.
  */
 export function containerGraderReportSource(

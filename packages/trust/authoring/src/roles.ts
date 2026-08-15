@@ -31,7 +31,7 @@ export type NativeRoleIdentityRole = (typeof NATIVE_ROLE_IDENTITY_ROLES)[number]
  * this constant elsewhere: a cross-tree parse-assertion fixture rather than a build edge. This
  * package is the trust tree's authoring half and the discovery tree depends on trust, so importing
  * discovery from here would invert that dependency. `roles.test.ts` pins the literal in this tree,
- * and `client/test/daemon/trust-authoring-round-trip.test.ts` — which imports both constants —
+ * and `operator/test/daemon/trust-authoring-round-trip.test.ts` — which imports both constants —
  * compares them, so a drift is a red test rather than a silent divergence.
  */
 const DISCOVERY_ANNOUNCEMENT_SCOPE = "jinn:discovery-announcements";
@@ -41,7 +41,7 @@ const DISCOVERY_ANNOUNCEMENT_SCOPE = "jinn:discovery-announcements";
  * duplicated here as a literal for the same reason as `DISCOVERY_ANNOUNCEMENT_SCOPE` above: this
  * (trust authoring) tree must not take a build edge on `@jinn-network/marketplace-binding` (which
  * depends on the whole task-execution + trust-resolve stack), so the constant is pinned here and
- * `client/test/daemon/trust-authoring-round-trip.test.ts` imports both and asserts they match — a
+ * `operator/test/daemon/trust-authoring-round-trip.test.ts` imports both and asserts they match — a
  * drift is a red test, not a silent divergence. Canonical definition:
  * `ADMISSION_RECEIPT_TRUST_SCOPE` in `@jinn-network/marketplace-binding`.
  */

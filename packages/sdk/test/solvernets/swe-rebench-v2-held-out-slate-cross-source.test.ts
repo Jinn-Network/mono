@@ -1,9 +1,9 @@
 /**
  * Single-source-of-truth guard (#820 Step 2).
  *
- * #817 ships the canonical held-out slate as a JSON artifact under client/.
+ * #817 ships the canonical held-out slate as a JSON artifact under operator/.
  * #820 embeds the same membership in the SDK so the indexer (which cannot
- * import client/) can slate-scope frozenResolvedRate. We do NOT physically move
+ * import operator/) can slate-scope frozenResolvedRate. We do NOT physically move
  * the artifact, so the two copies could drift. This test asserts the SDK's
  * embedded instanceId Set and content hash are byte-identical to the client
  * artifact, so any divergence fails CI loud.
@@ -20,7 +20,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const clientArtifactPath = resolve(
   here,
-  '../../../../client/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json',
+  '../../../../operator/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json',
 );
 
 describe('held-out slate cross-source parity (SDK ↔ client)', () => {

@@ -38,7 +38,7 @@ describe("index database", () => {
       .prepare(
         "INSERT INTO document_terms(rowid, summary, summary_idents, body, body_idents) VALUES (?,?,?,?,?)",
       )
-      .run(1, "snake_case_thing client/src/dashboard", "", "parse trajectory", "");
+      .run(1, "snake_case_thing operator/src/dashboard", "", "parse trajectory", "");
     const hit = (query: string): number =>
       (
         opened.database

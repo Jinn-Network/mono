@@ -3,7 +3,7 @@
  * lookup (issue #1472, spec §8).
  *
  * The engine tars each solve's working dir into a `system_snapshot` artifact
- * (hand-rolled POSIX ustar + gzip, `client/src/harnesses/engine/packaging.ts`
+ * (hand-rolled POSIX ustar + gzip, `operator/src/harnesses/engine/packaging.ts`
  * `createWorkdirTarball`) and publishes it donation-wrapped
  * (`jinn.artifact.donation.v1`: JSON with base64 `data`). Inside is the
  * harness's raw stdout transcript (`.claude-code/stdout.jsonl`,

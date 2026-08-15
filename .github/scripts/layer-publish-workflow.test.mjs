@@ -116,7 +116,7 @@ test('layer CI client compatibility filter names only existing test files', () =
   assert.ok(testPaths.length > 0, 'client-compat must run an explicit test filter');
   for (const testPath of testPaths) {
     assert.ok(
-      existsSync(resolve(root, 'client', testPath)),
+      existsSync(resolve(root, 'operator', testPath)),
       `client-compat references missing test: ${testPath}`,
     );
   }

@@ -1,0 +1,35 @@
+{
+  "method": "network.jinn.evaluation-method.swe-rebench-v2",
+  "version": "1.0.0",
+  "registrationId": "swe-rebench-v2",
+  "adapter": {
+    "package": "@jinn-network/task-execution-evaluator-adapters",
+    "export": "createSweRebenchEvaluatorRegistration",
+    "parser": "network.jinn.parser.swe-rebench-v2"
+  },
+  "graderReportSource": "container — the deployment module constructs its own containerGraderReportSource over the daemon Docker driver (createDockerContainerRuntime); the digest-pinned grader image runs the swe-rebench harness (apply patch, run the declared transitions) and leaves grader-output.json on the writable bind-mounted workdir, which the adapter reads",
+  "verdict": {
+    "pass": "every declared fail-to-pass transition now passes and no declared pass-to-pass transition broke",
+    "fail": "at least one declared transition did not hold",
+    "ungradeable": "the grader could not determine the transitions (e.g. pytest missing, container crash) — never a failing verdict, the attempt is retried"
+  },
+  "measurements": [
+    "passed"
+  ],
+  "scoring": {
+    "basis": "transition-satisfaction.v1",
+    "rule": "passed = every fail-to-pass node satisfied AND no pass-to-pass node broken"
+  },
+  "isolation": {
+    "readOnlyRootfs": false,
+    "rationale": "the swe-rebench-v2 grade path writes into the image rootfs at grade time — `python3 -m ensurepip --upgrade` and `python3 -m pip install pytest` land in the image's Python site-packages (see operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts PYTEST_INSTALL_GUARD), which lives on the rootfs, not under the writable bind-mounted workdir. A read-only rootfs would fail these installs on any instance whose base image lacks pytest. The container is still resource-capped and confined (--network none, --cap-drop ALL, --no-new-privileges, --pids-limit, --memory, --cpus, noexec/nosuid /tmp) per the driver defaults."
+  },
+  "evidence": "the adapter attaches the (tail-capped) test log as claim evidence; the deployment's evidenceWriter is a real, durable content-addressed filesystem repository",
+  "reference": [
+    "packages/task-execution/evaluator-adapters/src/swe-rebench/adapter.ts",
+    "packages/task-execution/evaluator-adapters/src/swe-rebench/parse.ts",
+    "packages/task-execution/evaluator-adapters/src/container-grader-source.ts",
+    "packages/task-execution/evaluator-adapters/src/registrations.ts#createSweRebenchEvaluatorRegistration",
+    "operator/src/daemon/native-evaluator-container-runtime.ts#createDockerContainerRuntime"
+  ]
+}

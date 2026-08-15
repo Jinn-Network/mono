@@ -37,7 +37,7 @@
  *    admits trailing zeros). Corrected the citation to `index.ts:110-118`.
  *
  * The resolution-snapshot shape was cross-checked against the real `ResolutionSnapshot`
- * interface at `client/src/venues/polymarket/client.ts:69-77`: the real `status` enum is
+ * interface at `operator/src/venues/polymarket/client.ts:69-77`: the real `status` enum is
  * `'unresolved' | 'resolved' | 'invalid' | 'cancelled' | 'ambiguous'`. There is no
  * `'unavailable'` value anywhere in the legacy stack (this matches Task 2 finding E4, already
  * reflected in `fixtures/parsers/prediction-market.parser.json`). The plan's
@@ -76,7 +76,7 @@ export interface PredictionFixture {
 
 const MARKET = { marketId: "0x5150", conditionId: "0xABCDEF" } as const;
 // 2026-05-31T12:00:00.000Z .. 2026-06-01T12:00:00.000Z — a 24h span, the maximum the legacy
-// task schema allows (`client/src/types/prediction.ts:67` refines
+// task schema allows (`operator/src/types/prediction.ts:67` refines
 // `window.endTs - window.startTs <= 86_400_000`). It brackets the `submittedAt` instant every
 // in-window fixture uses ("2026-06-01T00:00:00.000Z" = 1_780_272_000_000) and still excludes
 // the deliberately-late-rejected fixture's "2026-05-01T00:00:00.000Z".
@@ -100,7 +100,7 @@ function resolved(outcome: "YES" | "NO"): PredictionResolutionSnapshot {
 export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
   {
     name: "scored-yes-solver-beats-consensus",
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:252-273",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:252-273",
     resultBytes: result({
       probabilityYes: "0.900000",
       submittedAt: "2026-06-01T00:00:00.000Z",
@@ -121,7 +121,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
   },
   {
     name: "scored-no-solver-worse-than-consensus",
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:252-273",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:252-273",
     resultBytes: result({
       probabilityYes: "0.800000",
       submittedAt: "2026-06-01T00:00:00.000Z",
@@ -142,7 +142,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
   },
   {
     name: "inconclusive-market-unresolved",
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:136-141",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:136-141",
     resultBytes: result({
       probabilityYes: "0.500000",
       submittedAt: "2026-06-01T00:00:00.000Z",
@@ -161,7 +161,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
   },
   {
     name: "rejected-submission-outside-window",
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:120-131",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:120-131",
     resultBytes: result({
       probabilityYes: "0.900000",
       submittedAt: "2026-05-01T00:00:00.000Z",
@@ -175,7 +175,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
   },
   {
     name: "rejected-market-identity-mismatch",
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:231-250",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:231-250",
     resultBytes: result({
       probabilityYes: "0.900000",
       submittedAt: "2026-06-01T00:00:00.000Z",
@@ -189,7 +189,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
   },
   {
     name: "market-identity-condition-id-is-case-insensitive",
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:236",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:236",
     resultBytes: result({
       probabilityYes: "1.000000",
       submittedAt: "2026-06-01T00:00:00.000Z",
@@ -213,7 +213,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
     // Corrected from the plan's :112-118 (the schema-validation catch block, which only
     // wraps already-parsed JSON). The raw `JSON.parse(manifestJson)` call that this fixture
     // actually attacks is unguarded and sits outside that try/catch — see the module header.
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:80-81",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:80-81",
     resultBytes: encoder.encode("{ this is not json"),
     snapshot: resolved("YES"),
     market: MARKET,
@@ -228,7 +228,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
     // JS string — so there is no legacy line that performs byte-level UTF-8 decoding; the
     // nearest real behavior is still the unguarded `JSON.parse` at :81, which throws on the
     // non-JSON text these poison bytes decode to. See the module header.
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:80-81",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:80-81",
     resultBytes: Uint8Array.from([0xff, 0xfe, 0xfd, 0x00]),
     snapshot: resolved("YES"),
     market: MARKET,
@@ -241,7 +241,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
     // Corrected from the plan's :112-118 for the same reason: `JSON.parse("")` throws at
     // the unguarded call site, :81, not inside the schema-validation catch. See the module
     // header.
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:80-81",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:80-81",
     resultBytes: new Uint8Array(0),
     snapshot: resolved("YES"),
     market: MARKET,
@@ -258,7 +258,7 @@ export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
     // inside `PredictionV1RestorationPayloadSchema.parse` at index.ts:110, caught by the same
     // solution.schema catch block as the adversarial-result-is-* fixtures above. See the
     // module header.
-    provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:110-118",
+    provenance: "operator/src/harnesses/impls/prediction-v1-evaluator/index.ts:110-118",
     resultBytes: result({
       probabilityYes: "1.500000",
       submittedAt: "2026-06-01T00:00:00.000Z",

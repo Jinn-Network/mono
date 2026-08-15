@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: client
+        working-directory: operator
     steps:
       - name: Checkout without credentials
         working-directory: ${{ github.workspace }}

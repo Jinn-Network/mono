@@ -16,7 +16,7 @@ import { REPO } from './constants.js';
  * Autopilot itself — mirrors `engine:review`) plus ONE hidden JSON-in-a-
  * fenced-code-block "marker" comment per issue carrying the frozen snapshot
  * (title + body + base_commit + effort) the daemon-side generator
- * (`client/src/solver-types/jinn-repo-live-auto.ts`) reads to build the
+ * (`operator/src/solver-types/jinn-repo-live-auto.ts`) reads to build the
  * live-issue task doc. No shared database, no RPC between the two processes.
  *
  * ── Marker format (and why) ──────────────────────────────────────────────
@@ -108,7 +108,7 @@ import { REPO } from './constants.js';
  * discriminator: it needs no login to be threaded in from the caller, and it
  * is exactly the property that actually matters (a genuine write-access
  * identity), rather than one specific account name. The daemon-side consumer
- * (`client/src/solver-types/jinn-repo-live-auto.ts`) gates on the REST
+ * (`operator/src/solver-types/jinn-repo-live-auto.ts`) gates on the REST
  * equivalent field (`author_association`, snake_case there — the raw GitHub
  * REST API, vs. `gh`'s own camelCase JSON export here) via its
  * `markerTrustedAssociations` config; **the two sides must be configured

@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/core",
   "version": "0.1.2",
-  "description": "Domain core for Jinn — evidence/contribution stores, scrub, trajectory parsing, and corpus reads. Independent of client/src.",
+  "description": "Domain core for Jinn — evidence/contribution stores, scrub, trajectory parsing, and corpus reads. Independent of operator/src.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "license": "MIT",

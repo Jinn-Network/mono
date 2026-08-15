@@ -151,7 +151,7 @@ describe('production review acquisition port', () => {
       worktreeBase: '/worktrees',
       runnerId: 'runner-a',
       readSnapshot: async () => snapshot(),
-      changedFiles: async () => ['client/src/dashboard/spa/src/pages/Home.tsx'],
+      changedFiles: async () => ['operator/src/dashboard/spa/src/pages/Home.tsx'],
       runner: async (command, args) => {
         expect(command).toBe('gh');
         calls.push(args);
@@ -166,7 +166,7 @@ describe('production review acquisition port', () => {
           return JSON.stringify({
             encoding: 'base64',
             content: Buffer.from(
-              '/client/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n',
+              '/operator/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n',
             ).toString('base64'),
           });
         }
@@ -196,9 +196,9 @@ describe('production review acquisition port', () => {
       worktreeBase: '/worktrees',
       runnerId: 'runner-a',
       readSnapshot: async () => snapshot(),
-      changedFiles: async () => ['client/src/dashboard/spa/src/pages/Home.tsx'],
+      changedFiles: async () => ['operator/src/dashboard/spa/src/pages/Home.tsx'],
       codeownersText: () =>
-        '/client/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n',
+        '/operator/src/dashboard/spa/src/pages/ @Jinn-Network/codeowners\n',
       runner: async (command, args) => {
         expect(command).toBe('gh');
         if (args.some((arg) => arg.endsWith('/pulls/84'))) {

@@ -45,7 +45,7 @@ describe("NATIVE_ROLE_IDENTITY_REQUIREMENTS", () => {
    * The trust-tree half of the announce-plane pin (issue #2525). The value has to equal Record
    * Discovery's `DISCOVERY_SIGNING_SCOPE`, but this package cannot import the discovery tree
    * without inverting the dependency direction, so the literal is asserted here and the two
-   * constants are compared against each other in `client/test/daemon/trust-authoring-round-trip.ts`
+   * constants are compared against each other in `operator/test/daemon/trust-authoring-round-trip.ts`
    * (which imports both). A typo in this tree reddens here; a divergence reddens there.
    */
   it("carries the announce-plane scope on exactly the discovery roles", () => {

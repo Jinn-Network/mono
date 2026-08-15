@@ -13,7 +13,7 @@ import { ERC721_OWNER_OF_ABI, IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI } from "./a
 import { invalidInput, resolutionFailed } from "./errors.js";
 
 // ---------------------------------------------------------------------------
-// Promotes `client/src/erc8004/publisher-safe-resolver.ts` (multi-provider
+// Promotes `operator/src/erc8004/publisher-safe-resolver.ts` (multi-provider
 // fallback, per-provider chain-id validation, immutable caching) into the
 // `ChainFactResolver` interface `trust-core` defines (§17 I/O split). The
 // one behavioral change from the client-internal precedent: the

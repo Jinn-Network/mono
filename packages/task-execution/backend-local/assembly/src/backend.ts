@@ -744,11 +744,11 @@ function asSubmissionUri(value: string): SubmissionUri {
 // re-canonicalization. The envelope is therefore carried OUTSIDE the Delivery document entirely,
 // retrievable via `getDeliverySignature(digest)` keyed by the Delivery's own digest -- the only
 // identity `@jinn-network/marketplace-binding`'s `SettlementGradeVerificationInput` carries across
-// that package boundary (see `client/src/daemon/settlement-grade.ts`, the consumer this exists
+// that package boundary (see `operator/src/daemon/settlement-grade.ts`, the consumer this exists
 // for).
 
 /** The DSSE envelope's `payloadType` for the executor-binding signature (finding E31). Mirrors
- * `client/src/daemon/settlement-grade.ts`'s `EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE` constant --
+ * `operator/src/daemon/settlement-grade.ts`'s `EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE` constant --
  * duplicated, not imported, because this package has no dependency on the client or on
  * `@jinn-network/trust-core` (see below); the two literals must stay byte-identical. */
 const EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE =
@@ -761,7 +761,7 @@ const EXECUTOR_BINDING_DSSE_PAYLOAD_TYPE =
  * trust-core -- adding one is a `package.json` edit outside this task's write scope -- so this
  * four-line, spec-frozen byte layout is duplicated rather than imported, following the same
  * cross-boundary-duplication precedent `settlement-grade.ts`'s own `idempotencyKeyFor` already
- * uses. `client/test/daemon/settlement-grade.ts` proves this copy round-trips against the real
+ * uses. `operator/test/daemon/settlement-grade.ts` proves this copy round-trips against the real
  * trust-core functions.
  */
 function dssePreAuthEncoding(payloadType: string, payloadBytes: Uint8Array): Uint8Array {
@@ -788,7 +788,7 @@ function dssePreAuthEncoding(payloadType: string, payloadBytes: Uint8Array): Uin
  * file already uses -- byte-identical to what trust-core's `sealDsseEnvelope` emits. That is
  * load-bearing, not cosmetic (defect #34): the authority-bearing consumer of
  * these bytes is `parseExactDsseEnvelope` (reached via the client's `verifyNativeDsse` ->
- * `client/src/evaluator/native-subject-authority.ts`), which accepts ONLY the sole producer
+ * `operator/src/evaluator/native-subject-authority.ts`), which accepts ONLY the sole producer
  * encoding and rejects every alternate spelling by reconstructing through `sealDsseEnvelope`
  * and comparing bytes. This previously emitted plain `JSON.stringify` in `payloadType, payload,
  * signatures` insertion order -- structurally fine under the LOOSE `parseDsseEnvelope` the
@@ -803,7 +803,7 @@ function dssePreAuthEncoding(payloadType: string, payloadBytes: Uint8Array): Uin
  * keys with an identical `compareCodeUnitStrings` and emit compact separators, so for this
  * envelope's flat all-string shape the two serializers agree byte-for-byte;
  * `backend.evidence.test.ts` pins the exact bytes against an independently hand-sorted
- * expectation, and `client/test/daemon/settlement-grade.test.ts` round-trips these production
+ * expectation, and `operator/test/daemon/settlement-grade.test.ts` round-trips these production
  * bytes through the real `parseExactDsseEnvelope`/`verifyNativeDsse` path.
  */
 function sealExecutorBindingEnvelope(
@@ -3089,7 +3089,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
    * signed (finding E31), keyed by the Delivery's own digest -- `SettlementGradeVerificationInput`
    * (`@jinn-network/marketplace-binding`) carries no AttemptUri, only `deliveryDigest`, so digest
    * is the only identity available across that package boundary (see
-   * `client/src/daemon/settlement-grade.ts`). Returns `undefined` when no delivery-signing key
+   * `operator/src/daemon/settlement-grade.ts`). Returns `undefined` when no delivery-signing key
    * was configured at seal time (the additive default), or the digest is unknown to this backend.
    * An explicit implementation seam, like `recordDelivery` -- not part of `TaskExecutionBackend`.
    */

@@ -1,5 +1,5 @@
 /**
- * Wilson score interval (design §9.2 `wilson@1`). Ported from `client/src/eval/wilson.ts`
+ * Wilson score interval (design §9.2 `wilson@1`). Ported from `operator/src/eval/wilson.ts`
  * (adoption, not invention — design §9.2, plan M3 Task 3.2). Behaves well at the extremes (p=0,
  * p=1) and for small n, unlike the naive normal-approximation interval.
  */

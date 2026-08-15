@@ -9,7 +9,7 @@ on:
       - 'packages/layer/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
-      - 'client/**'
+      - 'operator/**'
       - '.github/workflows/layer-ci.yml'
       - '.github/workflows/layer-npm-publish.yml'
       - '.github/scripts/layer-publish-workflow.test.mjs'
@@ -23,7 +23,7 @@ on:
       - 'packages/layer/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
-      - 'client/**'
+      - 'operator/**'
       - '.github/workflows/layer-ci.yml'
       - '.github/workflows/layer-npm-publish.yml'
       - '.github/scripts/layer-publish-workflow.test.mjs'
@@ -85,17 +85,17 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: yarn install --immutable
-        working-directory: client
+        working-directory: operator
       - run: yarn build:plugin
-        working-directory: client
+        working-directory: operator
       - run: yarn build:core
-        working-directory: client
+        working-directory: operator
       - run: yarn build:layer
-        working-directory: client
+        working-directory: operator
       - run: yarn typecheck
-        working-directory: client
+        working-directory: operator
       - name: Test extracted-boundary consumers
-        working-directory: client
+        working-directory: operator
         run: |
           yarn vitest run \
             test/architecture/golden-envelope.test.ts \

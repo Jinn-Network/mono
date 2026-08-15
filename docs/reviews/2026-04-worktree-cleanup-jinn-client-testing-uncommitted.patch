@@ -29,7 +29,7 @@ index 3af24a32..297ae4ea 100644
 --- a/client/TESTNET_ACCEPTANCE.md
 +++ b/client/TESTNET_ACCEPTANCE.md
 @@ -90,6 +90,7 @@ These are intentionally distinct from the normal operator compose volumes.
-    Add the resulting `sk-*` token to `client/.env.acceptance`:
+    Add the resulting `sk-*` token to `operator/.env.acceptance`:
     ```bash
     echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env.acceptance
 +   yarn jinn auth --docker-compose --json

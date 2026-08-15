@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
     paths:
-      - 'client/**'
+      - 'operator/**'
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
@@ -14,7 +14,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'client/**'
+      - 'operator/**'
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
@@ -34,7 +34,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: client
+    working-directory: operator
 
 # Every job in this workflow is CPU-only. Both the current and nested legacy
 # onnxruntime-node installers otherwise fetch optional CUDA binaries during a
@@ -62,7 +62,7 @@ jobs:
       - name: Verify source boundaries
         run: node --test .github/scripts/operator-source-boundaries.test.mjs
       - name: Build the tree for the packed-types canary
-        working-directory: client
+        working-directory: operator
         run: |
           yarn install --immutable
           yarn build
@@ -93,7 +93,7 @@ jobs:
       # at code-review time. See jinn-mono-u34i.
       - run: yarn lint:no-late-mount
       # No-error-leak lint: blocks raw error.message stringification in any
-      # client/src/api/ file that talks to an RPC client. Catches the
+      # operator/src/api/ file that talks to an RPC client. Catches the
       # credential-leak class where a viem HttpRequestError's message (which
       # embeds the full request URL) reaches an unauthenticated response
       # unmasked. See spec §14.2 item 2, issue #2402.
@@ -213,7 +213,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
-          path: client/test-results/
+          path: operator/test-results/
           retention-days: 7
 
   degraded-daemon-guard-e2e:

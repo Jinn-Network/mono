@@ -4,7 +4,7 @@
  * The F9 conversion (policy-optimization implementation program §9 addendum,
  * docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md): the
  * `learner-public.v1` hash profile (mirrored here in `harness-state-package.ts`, and shipped in
- * `client/src/harnesses/freeze.ts#hashImplStateDir`) emits **bare** 64-character lowercase hex,
+ * `operator/src/harnesses/freeze.ts#hashImplStateDir`) emits **bare** 64-character lowercase hex,
  * while a `jinn.harness-state.v1` loadout pin's `digest` field carries the `sha256:`-prefixed
  * spelling (substrate §4.2's tuple example; every other single-digest field in the substrate —
  * `tupleDigest`, the candidate manifest digest, `ResolvedTaskProfile.digest` — uses the same

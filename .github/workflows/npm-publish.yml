@@ -37,7 +37,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: client
+    working-directory: operator
 
 jobs:
   publish:
@@ -164,7 +164,7 @@ jobs:
             esac
 
             if [ "${PUBLISH_VERSION}" != "${PACKAGE_VERSION}" ]; then
-              echo "::error::Release tag version ${PUBLISH_VERSION} does not match client/package.json version ${PACKAGE_VERSION}"
+              echo "::error::Release tag version ${PUBLISH_VERSION} does not match operator/package.json version ${PACKAGE_VERSION}"
               exit 1
             fi
 

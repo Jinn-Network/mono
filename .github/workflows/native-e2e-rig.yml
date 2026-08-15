@@ -59,15 +59,15 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
 
       - name: Install client deps
-        working-directory: client
+        working-directory: operator
         run: yarn install --immutable
 
       # Advisory: a network/anvil flake here must not read as a code failure. The
       # rig itself exits 0 when no Base Sepolia RPC is reachable (clean skip).
       - name: Native fleet G-loop rig (boot legs on a Base Sepolia fork)
-        working-directory: client
+        working-directory: operator
         run: yarn e2e:daemon-harness:native
 
       - name: G-archive separate-process consumer
-        working-directory: client
+        working-directory: operator
         run: yarn e2e:archive-second-daemon:separate-process

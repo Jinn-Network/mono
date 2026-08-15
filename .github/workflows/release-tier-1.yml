@@ -1,6 +1,6 @@
 name: release-tier-1
 
-# Release Tier 1 scenarios T1.1 + T1.2 (client/test/release/tier-1/).
+# Release Tier 1 scenarios T1.1 + T1.2 (operator/test/release/tier-1/).
 #
 # These are excluded from `vitest.config.ts` because they need prerequisites a
 # clean-checkout `yarn test` cannot assume — T1.1 forks live Base mainnet and
@@ -36,7 +36,7 @@ on:
 
 defaults:
   run:
-    working-directory: client
+    working-directory: operator
 
 # CPU-only job; keep the onnxruntime installers from fetching CUDA binaries.
 env:

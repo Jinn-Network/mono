@@ -2,7 +2,7 @@
  * Ponder HTTP API endpoint definition.
  *
  * Ponder requires this file to exist. It wires up:
- *   - GraphQL at `/graphql` — the daemon's client/src/discovery/http.ts hits
+ *   - GraphQL at `/graphql` — the daemon's operator/src/discovery/http.ts hits
  *     `<url>/graphql`; that is the only GraphQL mount (no longer at `/`).
  *   - `/explorer/*` — aggregation JSON routes (network KPIs, per-SolverNet
  *     stats, operator leaderboards). See src/api/explorer.ts.

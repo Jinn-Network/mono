@@ -77,8 +77,8 @@ test('every deleted transition cites Class A evidence, not just Class O counters
 });
 
 test('operator mode stays explicit and absent configuration still resolves to legacy', () => {
-  const mode = readFileSync(resolve(root, 'client/src/daemon/native-vertical-mode.ts'), 'utf8');
-  const daemon = readFileSync(resolve(root, 'client/src/daemon/daemon.ts'), 'utf8');
+  const mode = readFileSync(resolve(root, 'operator/src/daemon/native-vertical-mode.ts'), 'utf8');
+  const daemon = readFileSync(resolve(root, 'operator/src/daemon/daemon.ts'), 'utf8');
   if (deleted('legacy-operator-composition')) {
     assert.doesNotMatch(mode, /requestedMode === undefined[\s\S]*effectiveMode: 'legacy'/u);
     assert.doesNotMatch(daemon, /config\.verticalMode \?\? 'legacy'/u);
@@ -92,7 +92,7 @@ test('operator mode stays explicit and absent configuration still resolves to le
 
 test('marketplace-pipeline remains confined to the frozen legacy client inventory', () => {
   const consumers = containing(
-    sourceFiles(resolve(root, 'client/src')),
+    sourceFiles(resolve(root, 'operator/src')),
     '@jinn-network/marketplace-pipeline',
   );
   if (deleted('marketplace-pipeline')) {
@@ -100,10 +100,10 @@ test('marketplace-pipeline remains confined to the frozen legacy client inventor
     assert.equal(existsSync(resolve(root, 'packages/marketplace/pipeline')), false);
   } else {
     assert.deepEqual(consumers, [
-      'client/src/config/shape-v2.ts',
-      'client/src/daemon/composition-root.ts',
-      'client/src/daemon/engagement-ledger.ts',
-      'client/src/daemon/work-loop.ts',
+      'operator/src/config/shape-v2.ts',
+      'operator/src/daemon/composition-root.ts',
+      'operator/src/daemon/engagement-ledger.ts',
+      'operator/src/daemon/work-loop.ts',
     ]);
   }
 });
@@ -122,11 +122,11 @@ test('legacy synthesis stays visibly legacy and confined to its declared bridge 
 });
 
 test('legacy evaluator watcher and wiring diagnostics match their transition status', () => {
-  const watcher = resolve(root, 'client/src/daemon/delivery-watcher.ts');
+  const watcher = resolve(root, 'operator/src/daemon/delivery-watcher.ts');
   if (deleted('legacy-evaluator-delivery-watcher')) assert.equal(existsSync(watcher), false);
   else assert.equal(existsSync(watcher), true);
 
-  const config = readFileSync(resolve(root, 'client/src/config.ts'), 'utf8');
+  const config = readFileSync(resolve(root, 'operator/src/config.ts'), 'utf8');
   if (deleted('legacy-wiring-config')) {
     assert.doesNotMatch(config, /legacy-wiring-config-field/u);
   } else {
@@ -146,7 +146,7 @@ test('legacy task_runs store coupling stays confined to its declared inventory a
   const importsTaskRunPersistence = (path) => (
     /^import\s*\{[^}]*\bTaskRunPersistence\b[^}]*\}\s*from/mu.test(readFileSync(path, 'utf8'))
   );
-  const importers = sourceFiles(resolve(root, 'client/src'))
+  const importers = sourceFiles(resolve(root, 'operator/src'))
     .filter((path) => !path.endsWith('.test.ts'))
     .filter(importsTaskRunPersistence)
     .map((path) => relative(root, path))
@@ -155,11 +155,11 @@ test('legacy task_runs store coupling stays confined to its declared inventory a
   // settlement ownership reads the native engagement journal.
   assert.deepEqual(importers, [], 'TaskRunPersistence must have no remaining production importers');
 
-  const storeSource = readFileSync(resolve(root, 'client/src/store/store.ts'), 'utf8');
-  const nativeEvaluator = readFileSync(resolve(root, 'client/src/daemon/native-evaluator-production.ts'), 'utf8');
-  const nativeSolver = readFileSync(resolve(root, 'client/src/daemon/native-solver-production.ts'), 'utf8');
+  const storeSource = readFileSync(resolve(root, 'operator/src/store/store.ts'), 'utf8');
+  const nativeEvaluator = readFileSync(resolve(root, 'operator/src/daemon/native-evaluator-production.ts'), 'utf8');
+  const nativeSolver = readFileSync(resolve(root, 'operator/src/daemon/native-solver-production.ts'), 'utf8');
   if (deleted('legacy-task-run-store-coupling')) {
-    assert.equal(existsSync(resolve(root, 'client/src/store/task-run-persistence.ts')), false);
+    assert.equal(existsSync(resolve(root, 'operator/src/store/task-run-persistence.ts')), false);
     assert.doesNotMatch(storeSource, /CREATE TABLE IF NOT EXISTS task_runs/u);
     assert.doesNotMatch(nativeEvaluator, /TaskRunPersistence/u);
     assert.doesNotMatch(nativeSolver, /TaskRunPersistence/u);
@@ -173,8 +173,8 @@ test('marketplace-binding is the only capability package that composes its low-l
   const capabilityFiles = [
     ...sourceFiles(resolve(root, 'packages/task-supply/posting/src')),
     ...sourceFiles(resolve(root, 'packages/benchmarking/marketplace/src')),
-    ...sourceFiles(resolve(root, 'client/src/native-requester')),
-    ...sourceFiles(resolve(root, 'client/src/daemon')),
+    ...sourceFiles(resolve(root, 'operator/src/native-requester')),
+    ...sourceFiles(resolve(root, 'operator/src/daemon')),
   ];
   const imports = capabilityFiles.flatMap((path) => {
     const source = readFileSync(path, 'utf8');

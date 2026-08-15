@@ -67,7 +67,7 @@ export interface VerdictRow {
 }
 
 // ── Shared output types ───────────────────────────────────────────────────────
-// These mirror client/src/discovery/types.ts PluginPublication /
+// These mirror operator/src/discovery/types.ts PluginPublication /
 // PublishedArtifact / PluginScoreHistoryRow exactly so the SPA and SDK get
 // the same shape from both the indexer HTTP endpoints and the DiscoveryAPI.
 
@@ -285,7 +285,7 @@ export interface DistributionSignalOutput {
  * first distribution tag is its cluster; topTags are the co-occurring tags.
  * Seeds (provenance=imported) are excluded from every number unless
  * `includeSeeds` — the explorer's demonstrate-it-live toggle (spec §7).
- * Mirrors client/packages/harness-layer/src/signal.ts computeSignal.
+ * Mirrors operator/packages/harness-layer/src/signal.ts computeSignal.
  */
 export function buildDistributionSignal(
   metas: CaptureEnvelopeMetaRow[],

@@ -3,8 +3,8 @@
 // The named Defender-relayer profile as executable obligations (design §7 ruling 1): per-sender
 // serialized nonce assignment, a persistent (chainId, from, nonce) submission ledger,
 // fee-bumped replacement, stuck-nonce eviction, reconcile-on-nonce-too-low. Every scenario is
-// derived from the legacy oracles `client/src/tx-retry.ts` and
-// `client/src/adapters/mech/safe.ts` -- as cases, never as ported code (design §6.6).
+// derived from the legacy oracles `operator/src/tx-retry.ts` and
+// `operator/src/adapters/mech/safe.ts` -- as cases, never as ported code (design §6.6).
 import { describe, expect, test } from "vitest";
 import type { Address, Hex } from "viem";
 import type { VenueRevertClassification } from "./venue-fixtures.js";

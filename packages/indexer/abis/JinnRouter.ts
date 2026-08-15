@@ -1,6 +1,6 @@
 /**
  * JinnRouter ABI slice — only the events and function surfaces that the
- * indexer needs. Sourced from client/src/adapters/mech/types.ts.
+ * indexer needs. Sourced from operator/src/adapters/mech/types.ts.
  *
  * NOTE: the V3 JinnRouter (task-coordinator-router-v3) is the current
  * testnet contract. The mainnet deployment uses the same event signatures.

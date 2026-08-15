@@ -43,7 +43,7 @@ const ENVIRONMENTS_FOREIGN_PACKAGES = [
 // `import "../../evidence/protocol/src/index.js"` would otherwise slip past.
 const FORBIDDEN_ROOTS = [
   join(root, 'apps'),
-  join(root, 'client'),
+  join(root, 'operator'),
   ...['autopilot', 'benchmarking', 'core', 'discovery', 'evidence', 'indexer',
     'indexer-enrichment', 'layer', 'marketplace', 'plugin', 'sdk', 'task-execution', 'trust']
     .map((directory) => join(root, 'packages', directory)),

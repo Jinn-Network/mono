@@ -128,7 +128,7 @@ describe('stage1-seeds fixture set (issue #1771)', () => {
 
     it('does not flag repo-relative paths', () => {
       for (const clean of [
-        'client/src/dashboard/spa/src/notifications/useNotifications.test.tsx',
+        'operator/src/dashboard/spa/src/notifications/useNotifications.test.tsx',
         'sympy/printing/tests/test_latex.py',
         '$ yarn --cwd client test',
         'https://example.com/workspace/project/file.ts',

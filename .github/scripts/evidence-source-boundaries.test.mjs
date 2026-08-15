@@ -14,7 +14,7 @@ const evidenceDirectories = [
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
-  join(root, 'client'),
+  join(root, 'operator'),
   ...[
     'autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin',
     'sdk',
@@ -727,10 +727,10 @@ test('IPFS production boundary configuration catches application and legacy esca
       'import "@jinn-network/autopilot";',
       `import ${JSON.stringify(localSpecifier(join(root, 'packages', 'core', 'src')))};`,
       `import ${JSON.stringify(localSpecifier(join(root, 'packages', 'layer', 'src')))};`,
-      `import ${JSON.stringify(localSpecifier(join(root, 'client', 'src')))};`,
+      `import ${JSON.stringify(localSpecifier(join(root, 'operator', 'src')))};`,
       `import ${JSON.stringify(localSpecifier(join(root, 'apps', 'jinn-agent')))};`,
       'await import(`@jinn-network/evidence-protocol`);',
-      `require(\`${localSpecifier(join(root, 'client', 'plugins'))}\`);`,
+      `require(\`${localSpecifier(join(root, 'operator', 'plugins'))}\`);`,
     ].join('\n'));
     assert.equal(
       forbiddenImportsInFiles(

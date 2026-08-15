@@ -2,7 +2,7 @@
 
 > Canonical specification of the network explorer — the read-only web surface anyone uses to see the state of the Jinn network.
 >
-> **What this doc is.** A model of *what* the explorer shows, *what* a viewer can do, and *how* the explorer surfaces things that need attention. Spec, not implementation. It is the sibling of [`../../../client/OPERATOR-APP-SPEC.md`](../../../client/OPERATOR-APP-SPEC.md) and follows the same modelling discipline. Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`../../../spec/2026-04-28-canonical-docs.md`](../../../spec/2026-04-28-canonical-docs.md).
+> **What this doc is.** A model of *what* the explorer shows, *what* a viewer can do, and *how* the explorer surfaces things that need attention. Spec, not implementation. It is the sibling of [`../../../operator/OPERATOR-APP-SPEC.md`](../../../operator/OPERATOR-APP-SPEC.md) and follows the same modelling discipline. Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`../../../spec/2026-04-28-canonical-docs.md`](../../../spec/2026-04-28-canonical-docs.md).
 >
 > **What this doc is not.** It is not an API contract, a screen wireframe, or a description of the indexer's ingestion pipeline. The read-side data contract lives in [`../../../spec/2026-05-11-discovery-api-and-shared-indexer.md`](../../../spec/2026-05-11-discovery-api-and-shared-indexer.md). Protocol roles live in [`../../../SPEC.md`](../../../SPEC.md). UI tokens and posture live in [`../../../BRAND.md`](../../../BRAND.md) and [`../../../DESIGN.md`](../../../DESIGN.md).
 

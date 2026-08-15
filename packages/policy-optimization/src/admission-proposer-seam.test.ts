@@ -14,7 +14,7 @@
  * tuple with `buildPolicyTuple` and seals through `sealCandidateManifest`, so what crosses into
  * this package is a sealed `CandidateManifest` and a candidate tree — exactly what is constructed
  * here from the same `@jinn-network/policy-identity` primitives. The product's source boundary
- * denies `client/`, so importing the learner is not available and would not add anything: the seam
+ * denies `operator/`, so importing the learner is not available and would not add anything: the seam
  * is the sealed bytes, and the sealed bytes are what is tested.
  *
  * The fixtures are the JSON ones under `fixtures/admission/`, so the boundary this runs against is
@@ -112,7 +112,7 @@ const proposalRequest: PolicyProposalRequest = {
 
 /**
  * The C6-shaped candidate: the learner's Improve phase adding a skill to a candidate workspace,
- * then sealing. Constructed from the same primitives `client/src/harnesses/impls/learner/candidate.ts`
+ * then sealing. Constructed from the same primitives `operator/src/harnesses/impls/learner/candidate.ts`
  * uses, because the seam between the two packages is the sealed manifest and nothing else.
  */
 function learnerShapedCandidate(): { manifest: CandidateManifest; tree: readonly TreeEntry[] } {

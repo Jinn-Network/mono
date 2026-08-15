@@ -21,7 +21,7 @@ node_modules/
 .beads-credential-key
 
 # Per-operator dev helpers (not collaborative)
-client/start-daemon.sh
+operator/start-daemon.sh
 
 # Per-operator Claude context (personal profile, not collaborative)
 CLAUDE.local.md
@@ -99,7 +99,7 @@ packages/*/.pnp.loader.mjs
 # generate-architecture.mjs --check step with a misleading drift error (issue #2409, F8).
 .github/scripts/.tmp-observation-reader-guard-*
 
-# Python bytecode caches. The learner plugin ships `.py` hooks (client/plugins/learner/
+# Python bytecode caches. The learner plugin ships `.py` hooks (operator/plugins/learner/
 # hooks/lib/); running them locally materialises `__pycache__/` next to the source, and a
 # stray `.pyc` was committed once already (PR #2655 fix round). Never tracked.
 __pycache__/

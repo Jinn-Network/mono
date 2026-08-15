@@ -4,7 +4,7 @@ on:
   push:
     branches: [next]
     paths:
-      - 'client/**'
+      - 'operator/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
       - 'packages/sdk/**'

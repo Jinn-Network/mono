@@ -5,7 +5,7 @@
  * skips when `anvil` is not on PATH.
  *
  * Note: this test does NOT exercise the daemon's loader — that lives
- * in client/test/harnesses/external-impls/loader.test.ts. This test
+ * in operator/test/harnesses/external-impls/loader.test.ts. This test
  * exercises the impl in isolation; an integration test that loads
  * this package via the daemon's loader is a follow-up plan.
  */

@@ -1,5 +1,5 @@
 {
-  "note": "THE fork-healing fixture (substrate §4.2, §8). This is byte-for-byte the tree C3's shipped regression suite pins (`client/test/harnesses/hash-profile.test.ts`), and `expect.digest` is C3's `FORK_HEALING_FIXTURE_DIGEST`. The two units reproduce the same constant from two independent implementations of `learner-public.v1`; that agreement is the cross-unit byte-match the program requires, and this file is one half of it. Contents are UTF-8 with LF endings and a trailing newline.",
+  "note": "THE fork-healing fixture (substrate §4.2, §8). This is byte-for-byte the tree C3's shipped regression suite pins (`operator/test/harnesses/hash-profile.test.ts`), and `expect.digest` is C3's `FORK_HEALING_FIXTURE_DIGEST`. The two units reproduce the same constant from two independent implementations of `learner-public.v1`; that agreement is the cross-unit byte-match the program requires, and this file is one half of it. Contents are UTF-8 with LF endings and a trailing newline.",
   "profile": "learner-public.v1",
   "entries": [
     { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },

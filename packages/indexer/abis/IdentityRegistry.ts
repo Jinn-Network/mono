@@ -2,8 +2,8 @@
  * IdentityRegistry ABI slice — the MetadataSet event that the indexer
  * consumes for SolverNetManifest and Envelope entities.
  *
- * Sourced from client/src/corpus/onchain-query.ts and
- * client/src/erc8004/abis.ts.
+ * Sourced from operator/src/corpus/onchain-query.ts and
+ * operator/src/erc8004/abis.ts.
  *
  * Deployed addresses:
  *   Base Sepolia (84532): 0x8004A818BFB912233c491871b3d84c89A494BD9e

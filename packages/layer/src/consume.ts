@@ -40,7 +40,7 @@ export const DEFAULT_TESTNET_DISCOVERY_URL =
   'https://jinn-indexer-production.up.railway.app';
 /**
  * Default public IPFS gateway. Mirrors the `ipfsGatewayUrl` zod default in
- * client/src/config.ts (inline schema default; not exported as a constant).
+ * operator/src/config.ts (inline schema default; not exported as a constant).
  */
 export const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
 
@@ -223,7 +223,7 @@ export function createHarnessLayer(config: HarnessLayerConfig = {}): HarnessLaye
   // `signer.privateKey` and `selfSafeAddress` are required by CorpusOptions
   // but unused by the read paths this layer exposes (query / fetchManifest /
   // ipfs-and-origin acquire). Placeholders, same as the read-only corpus in
-  // client/src/mcp/server.ts.
+  // operator/src/mcp/server.ts.
   const corpus: Corpus<SignedEnvelope> = createCorpus(
     {
       discovery,

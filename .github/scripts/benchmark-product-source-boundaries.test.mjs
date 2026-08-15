@@ -32,7 +32,7 @@ const MEMBER_ALLOWED = new Map([
 ]);
 const WEB_CORE = '@colophon-claims/core';
 const FORBIDDEN_ROOTS = [
-  join(root, 'client'), join(root, 'apps'), join(root, 'plugin'), join(root, 'scripts'),
+  join(root, 'operator'), join(root, 'apps'), join(root, 'plugin'), join(root, 'scripts'),
   ...readdirSync(join(root, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name !== 'benchmark-product' && entry.name !== 'node_modules')
     .map((entry) => join(root, 'packages', entry.name)),

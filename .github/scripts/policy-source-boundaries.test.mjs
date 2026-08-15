@@ -72,7 +72,7 @@ const OUTCOMES_ALLOWED_JINN = ['@jinn-network/policy-identity'];
 // Relative-path escapes into the legacy tree and the sibling package trees are caught the same
 // way a package-name ban would not catch them.
 const FORBIDDEN_ROOTS = [
-  join(root, 'client'),
+  join(root, 'operator'),
   join(root, 'packages', 'marketplace'),
   join(root, 'packages', 'benchmarking'),
   join(root, 'packages', 'task-execution'),

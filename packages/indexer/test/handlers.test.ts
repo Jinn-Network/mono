@@ -23,7 +23,7 @@
  *      that event is evaluation-start, not finalization; finalization happens
  *      in VerdictDeliveryClaimed).
  *   5. Task / Attempt folding — TaskCreated → task row; TaskAttemptCreated →
- *      attempt row; shapes match the GraphQL fields client/src/discovery/http.ts
+ *      attempt row; shapes match the GraphQL fields operator/src/discovery/http.ts
  *      queries.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -92,7 +92,7 @@ beforeEach(() => {
 // ── Area 5: Task / Attempt folding ───────────────────────────────────────────
 
 describe('TaskCreated → task', () => {
-  it('creates a task row with the fields client/discovery/http.ts queries', async () => {
+  it('creates a task row with the fields operator/discovery/http.ts queries', async () => {
     await handleTaskCreated({
       event: taskCreatedEvent(
         {
@@ -111,7 +111,7 @@ describe('TaskCreated → task', () => {
 
     const row = db.get(task, { id: '7' });
     expect(row).toBeDefined();
-    // Fields TASKS_QUERY in client/src/discovery/http.ts selects:
+    // Fields TASKS_QUERY in operator/src/discovery/http.ts selects:
     //   id, taskCidDigest, manifestDigest, createdAtBlock, createdAtTx,
     //   claimWindowEnd, maxClaims, chainId  (+ finalized/refunded in `where`)
     expect(row).toMatchObject({
@@ -2325,7 +2325,7 @@ describe('MetadataSet evaluation: enrichment → verdictEnvelopeMeta', () => {
       id: 'task-uuid',
       solverType: 'swe-rebench-v2.v1',
       // The SOLVE-request id lives on the task body's top-level
-      // restorationRequestId (task.v1; client/src/types/task.ts).
+      // restorationRequestId (task.v1; operator/src/types/task.ts).
       restorationRequestId: SOLVE_REQUEST_ID,
       solverNetManifestCid: 'bafyManifestSweA',
       spec: { instance_id: 'sympy__sympy-27510' },

@@ -3,9 +3,9 @@
  *
  * A slate is a versioned, content-addressed set of swe-rebench-v2
  * `instance_id`s RESERVED from the training pool. #817 ships the canonical
- * train-stream exclusion in `client/`; the indexer (this package's consumer)
+ * train-stream exclusion in `operator/`; the indexer (this package's consumer)
  * needs the same membership to slate-scope `frozenResolvedRate` (#820 AC#1),
- * but the indexer cannot import from `client/` (see
+ * but the indexer cannot import from `operator/` (see
  * `packages/indexer/src/handlers.ts` header). So the membership is embedded
  * here, in the SDK both the indexer and clients may depend on.
  *
@@ -19,11 +19,11 @@
  * edit that also re-derives the hash passes.
  *
  * The embedded `instanceIds` + `hash` are kept byte-identical to the client
- * artifact (`client/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json`)
+ * artifact (`operator/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json`)
  * by a cross-source drift test. Scores are only comparable WITHIN a version; a
  * slate change is a distinct version (v2, ...), never an in-place edit.
  *
- * Hashing mirrors `_swe-rebench-v2-held-out-slate.ts` in `client/`:
+ * Hashing mirrors `_swe-rebench-v2-held-out-slate.ts` in `operator/`:
  * `sha256:` + sha256(RFC 8785 canonical JSON of the normalized artifact). The
  * artifact shape is flat (string scalars + a string array), so a minimal
  * inlined JCS canonicalizer reproduces the client's `canonicalize`-based hash
@@ -54,7 +54,7 @@ export interface LoadedHeldOutSlate {
 /**
  * Embedded v1 slate. Byte-identical (sans the `comment` doc field, which is not
  * part of the hashed artifact) to
- * `client/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json`.
+ * `operator/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json`.
  * Guarded against drift by `test/solvernets/swe-rebench-v2-held-out-slate-cross-source.test.ts`.
  */
 export const HELD_OUT_SLATE_V1: HeldOutSlateArtifact = {

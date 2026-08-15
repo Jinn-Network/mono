@@ -1,0 +1,30 @@
+# {{packageName}}
+
+Jinn runtime SolverPlugin — exposes MCP tools to every Jinn harness session, regardless of SolverNet.
+
+## What this is
+
+A runtime SolverPlugin declares `jinn.supports: ['jinn.runtime']` and is loaded by Jinn-running daemons as a global MCP tool source. Use this pattern when your plug-in's value is harness-shaped (a network tool, a data lookup, a system probe) rather than task-shaped.
+
+If your plug-in is task-shaped (skills + tools scoped to a specific SolverNet), use the `solver-type-plugin` pattern instead: `jinn create plugin <name> --pattern solver-type-plugin --solver-type <id>`.
+
+## Get started
+
+```bash
+yarn install
+yarn test
+```
+
+Replace `mcp/server.mjs` with a real MCP server implementation (typically via `@modelcontextprotocol/sdk`) exposing the tools you want available.
+
+## Publish
+
+```bash
+jinn solver-plugins validate path:.
+jinn solver-plugins publish path:.
+```
+
+## Reference
+
+- Quickstart: https://github.com/Jinn-Network/mono/blob/main/cargo/docs/build/quickstart.md (placeholder until `52x3.6` ships the canonical docs tree)
+- Existing reference: `operator/plugins/network-tools/` in the Jinn monorepo.

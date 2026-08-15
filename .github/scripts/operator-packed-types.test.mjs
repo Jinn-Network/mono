@@ -8,7 +8,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 // Flipped to 'operator' by the stage-5 rename commit.
-const TREE = 'client';
+const TREE = 'operator';
 const treeRoot = join(root, TREE);
 
 function run(command, args, options = {}) {

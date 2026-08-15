@@ -8,12 +8,12 @@ on:
       - 'packages/plugin/**'
       - 'packages/core/**'
       - 'packages/layer/**'
-      - 'client/src/solver-types/_swe-rebench-v2-*.ts'
-      - 'client/src/adapters/mech/ipfs.ts'
-      - 'client/src/harnesses/impls/swe-rebench-v2-evaluator/**'
-      - 'client/scripts/stage1-task-creator-acceptance.mjs'
-      - 'client/package.json'
-      - 'client/yarn.lock'
+      - 'operator/src/solver-types/_swe-rebench-v2-*.ts'
+      - 'operator/src/adapters/mech/ipfs.ts'
+      - 'operator/src/harnesses/impls/swe-rebench-v2-evaluator/**'
+      - 'operator/scripts/stage1-task-creator-acceptance.mjs'
+      - 'operator/package.json'
+      - 'operator/yarn.lock'
       - '.github/workflows/jinn-agent-ci.yml'
   push:
     branches: [next, main]
@@ -23,12 +23,12 @@ on:
       - 'packages/plugin/**'
       - 'packages/core/**'
       - 'packages/layer/**'
-      - 'client/src/solver-types/_swe-rebench-v2-*.ts'
-      - 'client/src/adapters/mech/ipfs.ts'
-      - 'client/src/harnesses/impls/swe-rebench-v2-evaluator/**'
-      - 'client/scripts/stage1-task-creator-acceptance.mjs'
-      - 'client/package.json'
-      - 'client/yarn.lock'
+      - 'operator/src/solver-types/_swe-rebench-v2-*.ts'
+      - 'operator/src/adapters/mech/ipfs.ts'
+      - 'operator/src/harnesses/impls/swe-rebench-v2-evaluator/**'
+      - 'operator/scripts/stage1-task-creator-acceptance.mjs'
+      - 'operator/package.json'
+      - 'operator/yarn.lock'
       - '.github/workflows/jinn-agent-ci.yml'
   workflow_dispatch:
   schedule:
@@ -201,10 +201,10 @@ jobs:
         with:
           node-version: '22'
       - name: Enable Corepack
-        working-directory: client
+        working-directory: operator
         run: corepack enable
       - name: Install client dependencies
-        working-directory: client
+        working-directory: operator
         run: yarn install --immutable
       - name: Plugin package boundary, schema, type, test, and build gates
         working-directory: packages/plugin
@@ -226,7 +226,7 @@ jobs:
           test/process-contract.test.ts
           test/contract-parity.test.ts
       - name: Build the daemon and run task-creator privacy gate
-        working-directory: client
+        working-directory: operator
         run: >-
           yarn build &&
           yarn vitest run

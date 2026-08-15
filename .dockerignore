@@ -18,11 +18,11 @@ node_modules
 **/.yarn/install-state.gz
 **/dist
 
-client/.acceptance
-client/.env
-client/.env.*
-client/acceptance-runs
-client/release-runs
+operator/.acceptance
+operator/.env
+operator/.env.*
+operator/acceptance-runs
+operator/release-runs
 contracts/cache
 contracts/out
 growth/docs/initial-network-recruitment

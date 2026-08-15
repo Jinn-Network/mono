@@ -50,7 +50,7 @@ export const LEARNER_PUBLIC_V1_EXCLUDED_ROOTS = [
 /**
  * `learner-public.v1` exhaustive top-level classification. Anything not named here fails
  * closed. Pinned against C3's shipped regression suite
- * (`client/test/harnesses/hash-profile.test.ts`); the two surfaces must not drift.
+ * (`operator/test/harnesses/hash-profile.test.ts`); the two surfaces must not drift.
  */
 export const LEARNER_PUBLIC_V1_ALLOWED_DIRS = [
   ".archive",

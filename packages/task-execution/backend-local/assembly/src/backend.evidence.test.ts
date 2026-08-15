@@ -395,7 +395,7 @@ describe("backend evidence capture posture (C3)", () => {
 // second seal pass, which is exactly the re-canonicalization seal-once forbids). The envelope is
 // retrievable via `getDeliverySignature(digest)`, keyed by the Delivery's own digest -- the only
 // identity `SettlementGradeVerificationInput` (`@jinn-network/marketplace-binding`) carries
-// across that package boundary (see `client/src/daemon/settlement-grade.ts`).
+// across that package boundary (see `operator/src/daemon/settlement-grade.ts`).
 
 /**
  * Test-local, byte-for-byte port of `@jinn-network/trust-core`'s `dssePreAuthEncoding` (this

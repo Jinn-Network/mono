@@ -17,7 +17,7 @@ name: hermetic-gate
 #
 # This gate needs NO secrets, so it is safe to run on PRs from forks. It posts a
 # single `hermetic-gate` check-run bound to github.sha via the shared poster
-# (client/scripts/release/post-check-run-verdict.mjs, owned by step 3).
+# (operator/scripts/release/post-check-run-verdict.mjs, owned by step 3).
 #
 # NOTE: this workflow is intentionally NOT a required check yet. Marking it
 # required is a separate, human-applied branch-protection step (see the spec's
@@ -92,17 +92,17 @@ jobs:
       - name: Cache client node_modules
         uses: actions/cache@v6
         with:
-          path: client/node_modules
-          key: ${{ runner.os }}-client-nodemodules-${{ hashFiles('client/yarn.lock') }}
+          path: operator/node_modules
+          key: ${{ runner.os }}-client-nodemodules-${{ hashFiles('operator/yarn.lock') }}
           restore-keys: |
             ${{ runner.os }}-client-nodemodules-
 
       - name: Install client deps
-        working-directory: client
+        working-directory: operator
         run: yarn install --immutable
 
       - name: Smoke snapshot builder entrypoint
-        working-directory: client
+        working-directory: operator
         run: yarn smoke:build-anvil-snapshot
 
       # Build the indexer (Ponder codegen) so the hermetic snapshot indexer
@@ -128,13 +128,13 @@ jobs:
       # remediation pointer, NOT a skip.
       - name: Assert snapshot fixture present
         run: |
-          STATE_DIR="client/test/_support/fixtures/anvil-base-v3-state"
+          STATE_DIR="operator/test/_support/fixtures/anvil-base-v3-state"
           # Hard fail if the dir is absent OR state.json is missing/empty. One OR
           # covers both "directory never created" and "directory exists but the
           # dumped state.json is missing or zero-length" (-s is false for both).
           if [ ! -d "$STATE_DIR" ] || [ ! -s "$STATE_DIR/state.json" ]; then
             echo "::error::Hermetic snapshot fixture missing/empty at $STATE_DIR/state.json"
-            echo "Run \`cd client && BASE_RPC_URL=... yarn tsx ../contracts/scripts/build-anvil-snapshot.ts\` and commit the fixture."
+            echo "Run \`cd operator && BASE_RPC_URL=... yarn tsx ../contracts/scripts/build-anvil-snapshot.ts\` and commit the fixture."
             echo "See docs/snapshots/base-v3-snapshot.md for the rollout order."
             exit 1
           fi
@@ -164,7 +164,7 @@ jobs:
       # the default unit `yarn test`), so this is the one place they execute.
       - name: Run hermetic suite
         id: hermetic
-        working-directory: client
+        working-directory: operator
         run: yarn test:hermetic
 
       # App-flow determinism (#1014, DR-2026-06-03): the deterministic
@@ -176,7 +176,7 @@ jobs:
       # reintroduce the T2.3 live-fork flake. Chromium is the only browser
       # playwright.config.ts targets.
       - name: Install Playwright Chromium for app-flow tests
-        working-directory: client
+        working-directory: operator
         run: yarn playwright install --with-deps chromium
 
       # Scoped allowlist (solvernet-flow + join) — deliberately NOT the whole
@@ -188,7 +188,7 @@ jobs:
       # regression.
       - name: App-flow determinism (Playwright, mocked daemon)
         id: appflow
-        working-directory: client
+        working-directory: operator
         run: yarn e2e:app-flow
 
       - name: Upload app-flow traces on failure
@@ -196,7 +196,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: app-flow-traces
-          path: client/test-results/
+          path: operator/test-results/
           retention-days: 7
 
       # Write the verdict JSON. Reaching this step means every prior step
@@ -247,7 +247,7 @@ jobs:
       # events `github.event.pull_request` is null, so the fork check is skipped.
       - name: Post hermetic-gate check-run
         if: always() && github.event.pull_request.head.repo.fork != true
-        working-directory: client
+        working-directory: operator
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}

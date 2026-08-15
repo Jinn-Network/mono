@@ -13,7 +13,7 @@ const taskExecutionDirectories = [
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
-  join(root, 'client'),
+  join(root, 'operator'),
   ...[
     'autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin',
     'sdk',
@@ -542,7 +542,7 @@ test('Task-execution production source never orders or formats with the host loc
 // Program §1 C5 / §9 addendum F9: `packages/task-execution/backend-local/workspace/src/
 // harness-state-package.ts` MIRRORS (never imports — client is tier 4, workspace is tier 3, and
 // the frozen dependency direction forbids the reverse edge) the `learner-public.v1` hash profile
-// shipped in `client/src/harnesses/hash-profile.ts`. This is the drift guard: it reads both
+// shipped in `operator/src/harnesses/hash-profile.ts`. This is the drift guard: it reads both
 // files as plain text (the established `packages/task-supply/curation` "drift" pattern —
 // `.github/scripts/task-supply-curation-guards.test.mjs`) and asserts the mirrored constants and
 // the cross-unit golden digest still agree. A third independent implementation exists in
@@ -558,8 +558,8 @@ function extractStringArrayLiteral(source, label) {
   return [...body.matchAll(/'([^']*)'|"([^"]*)"/g)].map((match) => match[1] ?? match[2]);
 }
 
-test('the mirrored learner-public.v1 profile constants match client/src/harnesses/hash-profile.ts', () => {
-  const clientSource = readFileSync(join(root, 'client', 'src', 'harnesses', 'hash-profile.ts'), 'utf8');
+test('the mirrored learner-public.v1 profile constants match operator/src/harnesses/hash-profile.ts', () => {
+  const clientSource = readFileSync(join(root, 'operator', 'src', 'harnesses', 'hash-profile.ts'), 'utf8');
   const workspaceSource = readFileSync(
     join(packages, 'backend-local', 'workspace', 'src', 'harness-state-package.ts'), 'utf8',
   );
@@ -607,8 +607,8 @@ test('the mirrored learner-public.v1 profile constants match client/src/harnesse
 
 test('the fork-healing golden digest constant is shared between client and the workspace mirror', () => {
   const digest = '90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8';
-  const clientTest = readFileSync(join(root, 'client', 'test', 'harnesses', 'hash-profile.test.ts'), 'utf8');
-  assert.ok(clientTest.includes(digest), 'client/test/harnesses/hash-profile.test.ts lost the fork-healing digest constant');
+  const clientTest = readFileSync(join(root, 'operator', 'test', 'harnesses', 'hash-profile.test.ts'), 'utf8');
+  assert.ok(clientTest.includes(digest), 'operator/test/harnesses/hash-profile.test.ts lost the fork-healing digest constant');
   const workspaceTest = readFileSync(
     join(packages, 'backend-local', 'workspace', 'src', 'harness-state-package.test.ts'), 'utf8',
   );

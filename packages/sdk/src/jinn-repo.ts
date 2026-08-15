@@ -16,7 +16,7 @@
  * Backward compatibility: a raw document with no `source` field is legacy
  * data and is treated as `source: 'merged-pr'`.
  *
- * Mirrors the daemon-side schema at `client/src/solver-types/jinn-repo.ts`;
+ * Mirrors the daemon-side schema at `operator/src/solver-types/jinn-repo.ts`;
  * the SDK keeps its own copy so SolverNet contract definitions can reference
  * it without the SDK importing from the client.
  */

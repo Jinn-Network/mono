@@ -34,7 +34,7 @@ const manifest = loadAndValidateTransitionManifest(manifestPath, { repoRoot: roo
 // observation-window receipt is collected out-of-band by the collector script, not read inline by
 // a gate. Both are fixed facts about the architecture, not per-transition data.
 const TRANSITION_MANIFEST_LOADER = '.github/scripts/transition-manifest.mjs';
-const OBSERVATION_WINDOW_READER = 'client/src/monitoring/phase-d-observation-window.ts';
+const OBSERVATION_WINDOW_READER = 'operator/src/monitoring/phase-d-observation-window.ts';
 
 // A deletionTest.command is a shell command string (e.g. "node --test <path>"); pull out the
 // path-shaped tokens rather than assuming a fixed argv position.
@@ -96,7 +96,7 @@ test('the derived gate-path list picks up every noNewUseGuard and deletionTest f
 });
 
 test('the derived forbidden-reader list picks up every declared usageSignal.sourceFile', () => {
-  assert.ok(FORBIDDEN_OBSERVATION_READERS.includes('client/src/compatibility/phase-d-transition-usage.ts'));
+  assert.ok(FORBIDDEN_OBSERVATION_READERS.includes('operator/src/compatibility/phase-d-transition-usage.ts'));
   assert.ok(FORBIDDEN_OBSERVATION_READERS.includes(OBSERVATION_WINDOW_READER));
   for (const transition of manifest.transitions) {
     if (typeof transition.usageSignal.sourceFile === 'string') {

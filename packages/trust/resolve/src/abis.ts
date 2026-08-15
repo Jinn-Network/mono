@@ -2,7 +2,7 @@
 
 // ---------------------------------------------------------------------------
 // ABI constants for the on-chain reads `trust-resolve` performs. Copied
-// from `client/src/erc8004/abis.ts` (`IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI`)
+// from `operator/src/erc8004/abis.ts` (`IDENTITY_REGISTRY_GET_AGENT_WALLET_ABI`)
 // plus the standard ERC-721 `ownerOf` and EIP-1271 `isValidSignature`
 // fragments this tree additionally needs (§7.2/§7.2a).
 // ---------------------------------------------------------------------------

@@ -4,12 +4,12 @@
  * This is the schema instance that is actually load-bearing at claim time:
  * `packages/sdk/src/contracts.ts` wires `JinnRepoTaskSchema` (this module)
  * into `JINN_REPO_V1_SOLVER_NET_CONTRACT.schemas.task.zod`, which
- * `client/src/harnesses/engine/engine.ts` `manifestBackedValidation`
+ * `operator/src/harnesses/engine/engine.ts` `manifestBackedValidation`
  * safeParses every claimed task spec against via `getSolverNetContract`.
- * The client's `client/src/solver-types/jinn-repo.ts` is now a thin
+ * The client's `operator/src/solver-types/jinn-repo.ts` is now a thin
  * re-export of this module (see PR #1898 review, issue #1889) — this test
  * mirrors the essential cases from
- * `client/test/solver-types/jinn-repo.schema.test.ts` directly against the
+ * `operator/test/solver-types/jinn-repo.schema.test.ts` directly against the
  * SDK export, so claim-time validation behavior is verified where it's
  * defined, not only where it's re-exported.
  */
@@ -46,8 +46,8 @@ describe('JinnRepoTaskSchema (SDK) — merged-pr branch (retrospective)', () => 
     merged_pr: 1042,
     language: 'typescript',
     problem_statement: 'Mech safe nonce is stale on retry; refresh it.',
-    test_files: ['client/test/adapters/mech/safe.nonce.test.ts'],
-    test_cmd: 'yarn vitest run client/test/adapters/mech/safe.nonce.test.ts',
+    test_files: ['operator/test/adapters/mech/safe.nonce.test.ts'],
+    test_cmd: 'yarn vitest run operator/test/adapters/mech/safe.nonce.test.ts',
   };
 
   it('accepts a well-formed legacy task (no `source`), defaulting source to merged-pr', () => {

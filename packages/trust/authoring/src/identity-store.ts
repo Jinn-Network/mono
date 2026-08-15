@@ -2,7 +2,7 @@
 
 /**
  * The encrypted identity-store codec — extracted verbatim from the daemon's
- * `client/src/daemon/role-identities.ts` per spec/2026-08-07-native-identity-ceremony.md §3.1.
+ * `operator/src/daemon/role-identities.ts` per spec/2026-08-07-native-identity-ceremony.md §3.1.
  *
  * The store format (`StoredIdentitySetV3` inside a scrypt/AES-256-GCM envelope) was implemented
  * twice — once in the daemon, once shadowed by the e2e fixtures — which is the proof it is a shared

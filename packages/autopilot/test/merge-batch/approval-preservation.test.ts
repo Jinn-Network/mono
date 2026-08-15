@@ -17,7 +17,7 @@ describe('classifyApprovalPreservation', () => {
   it('requires review when range-diff reports changed commits', () => {
     const output = [
       '1:  abc123 ! 1:  def456 fix(api): correct pagination',
-      '    @@ client/src/api/server.ts @@',
+      '    @@ operator/src/api/server.ts @@',
     ].join('\n');
 
     expect(classifyApprovalPreservation(output)).toEqual({

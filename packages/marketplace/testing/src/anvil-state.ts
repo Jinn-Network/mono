@@ -9,7 +9,7 @@ import { createPublicClient, http } from "viem";
 
 const BASE_SEPOLIA_CHAIN_ID = 84532;
 const DEFAULT_STATE_PATH = fileURLToPath(
-  new URL("../../../../client/test/_support/fixtures/anvil-base-v3-state/state.json", import.meta.url),
+  new URL("../../../../operator/test/_support/fixtures/anvil-base-v3-state/state.json", import.meta.url),
 );
 
 export interface SnapshotAnvil {

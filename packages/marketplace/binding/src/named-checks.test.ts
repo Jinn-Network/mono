@@ -795,7 +795,7 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
    * honest grade was measured against a time in its own past and `verdict-effective-time` refused
    * every live evaluation. These are the instants round 27 measured, held against the real gate:
    * the finalized head refuses the honest grade, the forward-looking bound the evaluator now
-   * derives (`preSettlementClaimTime` in `client/src/daemon/native-base-sepolia-infrastructure.ts`)
+   * derives (`preSettlementClaimTime` in `operator/src/daemon/native-base-sepolia-infrastructure.ts`)
    * admits it, and a grade dated past that bound still refuses. The last case is the one this
    * check exists for, and it must survive any widening of the pre-settlement stand-in.
    */

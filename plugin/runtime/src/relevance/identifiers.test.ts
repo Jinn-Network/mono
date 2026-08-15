@@ -20,7 +20,7 @@ describe("identifier expansion", () => {
 
   test("leaves separator-delimited identifiers alone (the tokenizer splits those)", () => {
     expect(expandIdentifiers("snake_case_thing")).toBe("snake_case_thing");
-    expect(expandIdentifiers("client/src/dashboard")).toBe("client/src/dashboard");
+    expect(expandIdentifiers("operator/src/dashboard")).toBe("operator/src/dashboard");
   });
 
   test("expands every token in a longer text, preserving order", () => {

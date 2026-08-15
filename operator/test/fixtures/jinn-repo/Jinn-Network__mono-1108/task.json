@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "jinn-repo.v1",
+  "instance_id": "Jinn-Network__mono-1108",
+  "repo": "Jinn-Network/mono",
+  "base_commit": "d82b0c3087d4af1826d7eaa62508dad91c621b9b",
+  "merged_pr": 1108,
+  "language": "typescript",
+  "problem_statement": "fix: refresh mech safe nonce on retry\n\nWhen Safe execTransaction hits a nonce-too-low error on the EOA nonce, the adapter does not refresh the pinned nonce before the next retry attempt. This causes the retry to use the same stale nonce and fail again.",
+  "test_files": [
+    "operator/test/adapters/mech/safe.test.ts"
+  ],
+  "test_cmd": "yarn vitest run operator/test/adapters/mech/safe.test.ts"
+}
