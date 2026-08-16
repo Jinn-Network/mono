@@ -6,6 +6,8 @@ import {
   DEMO1_PINNED_SKILLS_SOURCE,
   DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR,
   DEMO1_PRE_RUN_FREEZE_SCHEMA,
+  DEMO1_REHEARSAL_POOL_REQUIREMENT,
+  DEMO1_SUITABILITY_POOL_REQUIREMENT,
   buildDemo1PreRunFreeze,
   canonicalDemo1PreRunFreezeBytes,
   demo1PreRunFreezeDigest,
@@ -126,6 +128,10 @@ describe("Demo-1 canonical STOP artifact", () => {
     expect(frozen.inputs.exclusions.documentSkills).toEqual(DEMO1_DOCUMENT_SKILL_PATHS);
     expect(frozen.inputs.poolRequirements.officialFeasibilityFloor)
       .toEqual(DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR);
+    expect(frozen.inputs.poolRequirements.suitability)
+      .toEqual(DEMO1_SUITABILITY_POOL_REQUIREMENT);
+    expect(frozen.inputs.poolRequirements.rehearsal)
+      .toEqual(DEMO1_REHEARSAL_POOL_REQUIREMENT);
   });
 
   it("uses canonical bytes and refuses derived-field or execution-accounting substitution", () => {
@@ -183,6 +189,17 @@ describe("Demo-1 authenticated source and license boundary", () => {
 });
 
 describe("Demo-1 pre-E2 selection boundary", () => {
+  it.each([
+    ["suitability", "6-task/6-repository"],
+    ["rehearsal", "10-task/5-repository"],
+  ] as const)("refuses a caller-weakened %s pool requirement", (pool, expected) => {
+    const input = readyInput() as unknown as {
+      poolRequirements: Record<typeof pool, { tasks: number; repositories: number }>;
+    };
+    input.poolRequirements[pool] = { tasks: 1, repositories: 1 };
+    expect(() => buildDemo1PreRunFreeze(input as unknown as Demo1PreRunFreezeInput)).toThrow(expected);
+  });
+
   it("locks a qualifying winner before E2 while exact official capacity remains pending", () => {
     const frozen = buildDemo1PreRunFreeze(readyInput());
     expect(frozen.derived.status).toBe("ready");

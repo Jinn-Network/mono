@@ -169,9 +169,9 @@ describe('the dark sections are inert on the current daemon path', () => {
     expect(rest).toEqual(withoutNative);
   });
 
-  // The product boundary is `operator.verticalMode`, not these keys. An
-  // enabled evaluator block does not make the daemon native.
-  it('does not move the vertical-mode decision off legacy', () => {
+  // After D5 (deleted native-v1 parallel entry), omitted requestedMode on
+  // testnet + BASE_SEPOLIA_TODAY resolves to native-v1, not legacy.
+  it('does not move the vertical-mode decision off the resolver default', () => {
     const loaded = loadConfig(workspace(fleetConfigV2(nativeSections({ enabled: true }))));
     expect(loaded.operator?.verticalMode).toBeUndefined();
 
@@ -179,7 +179,7 @@ describe('the dark sections are inert on the current daemon path', () => {
       network: 'testnet',
       chain: BASE_SEPOLIA_TODAY,
     });
-    expect(decision.effectiveMode).toBe('legacy');
+    expect(decision.effectiveMode).toBe('native-v1');
   });
 });
 
