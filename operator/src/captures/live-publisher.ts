@@ -21,7 +21,7 @@ import {
   CaptureRateLimiter,
   type CaptureRateLimitDefaults,
 } from './rate-limit.js';
-import { CapturePublishRateLimitError, CapturePublishUnavailableError } from '../api/captures.js';
+import { CapturePublishRateLimitError, CapturePublishUnavailableError } from './publish-errors.js';
 import type { ScrubPipeline } from '../trajectory/scrub/pipeline.js';
 
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1' as const;

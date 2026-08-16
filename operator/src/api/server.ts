@@ -34,11 +34,6 @@ import { addEventsRoutes, createStoreLifecycleTail } from './events-endpoint.js'
 import { addActivityEventsRoutes } from './activity-events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
 import { addNotificationsRoutes } from './notifications-endpoint.js';
-import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
-import {
-  registerSolverNetsEndpoints,
-  type SolverNetsEndpointsDeps,
-} from './solvernets-endpoints.js';
 import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import {
@@ -54,13 +49,11 @@ import { addHarnessAuthStatusRoutes } from './harness-auth-status-endpoint.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
 import { addCodexDoctorRoutes, type CodexDoctorConfig } from './codex-doctor-endpoint.js';
-import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
   type OperatorArtifactsRoutesConfig,
 } from './operator-artifacts-endpoint.js';
 import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
-import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 import { addDiscoveryRoutes } from './discovery-endpoint.js';
 import type { ArchiveReads } from '../archive/reads.js';
 import type { PluginPublicationReader } from '../plugin-registry/publication-reader.js';
@@ -121,25 +114,7 @@ export interface ApiServerConfig {
   setup?: SetupRoutesConfig;
   /** When set, mounts the §2.15 Claim policy & wiring endpoints (GET/PUT). */
   claimPolicy?: ClaimPolicyRoutesConfig;
-  /**
-   * Launcher mode routes (`/v1/launcher/*`). Mounted only when supplied so
-   * tests and bootstrap-only API instances don't pay the deps wiring cost.
-   * Gated by the same UI token as `/v1/setup/*` — see the `app.use` block
-   * inside `startApiServer` below.
-   */
-  launcher?: LauncherRoutesDeps;
-  /** When set, GET /v1/solvernets exposes the catalog from a daemon registry. */
-  solverNets?: { registry: SolverNetsRegistry };
-  /**
-   * jinn-mono-hqz0: SolverNet creation/launch endpoints (drafts CRUD,
-   * launched CRUD, registry list/by-cid). Deps are populated AFTER
-   * startApiServer returns (the SolverNet subsystem in main.ts depends on
-   * post-bootstrap state), so we accept a holder ref. Routes register
-   * eagerly here and dereference `holder.current` per-request, returning
-   * 503 until the holder is populated.
-   */
-  solverNetsLauncher?: { holder: { current: SolverNetsEndpointsDeps | undefined } };
-  /** When set, POST /v1/setup/agent-binding/retry is mounted so the SPA can
+  /** When set, POST /v1/setup/agent-binding/retry is mounted so the operator can
    *  retry the ERC-1271 bind step for unbound services. */
   agentBinding?: AgentBindingRoutesConfig;
   /**
@@ -166,8 +141,8 @@ export interface ApiServerConfig {
    * `GET /v1/harnesses/:name/readiness` under the UI token gate.
    * SPA polls the composed endpoint; the join flow uses the per-harness one.
    *
-   * Accepts either a direct registry or a holder ref (same pattern as
-   * solverNetsLauncher). main.ts uses the holder shape because the registry is
+   * Accepts either a direct registry or a holder ref.
+   * main.ts uses the holder shape because the registry is
    * constructed post-bootstrap; routes register eagerly at server start so
    * Hono's matcher includes them before the first request — adding routes
    * after the matcher is built throws (jinn-mono-u34i field repro).
@@ -189,10 +164,8 @@ export interface ApiServerConfig {
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
   /** Path D local session-end hook endpoint. */
   stopHook?: StopHookRoutesDeps;
-  /** Operator review API for pending captures. */
-  captures?: CapturesRoutesDeps;
   /**
-   * Plugin-publication reader backing the /build page's plug-in routes
+   * Plugin-publication reader backing the plug-in routes
    * (`plugin-publications` / `builder-artifacts` / `plugin-scores`). Direct
    * instance or holder ref (eager-register / late-populate). Required for
    * those routes after Wave-4 D4 — there is no DiscoveryAPI fallback.
@@ -238,12 +211,9 @@ export interface ApiServerConfig {
 export interface ApiServer {
   port: number;
   close(): Promise<void>;
-  /** Underlying node http.Server, exposed so other subsystems (e.g. agent WS bridge)
-   *  can mount on the same port. */
+  /** Underlying node http.Server. */
   server: HttpServer;
-  /** Hono app, exposed so subsystems initialised AFTER startApiServer (e.g. the
-   *  SolverNet subsystem in main.ts) can mount their routes on the same instance.
-   *  See jinn-mono-hqz0. */
+  /** Hono app, exposed so tests can issue in-process requests. */
   app: Hono;
   /**
    * Replace the `status` config the GET /v1/status handler reads. The
@@ -254,21 +224,6 @@ export interface ApiServer {
    * spend-cap view — is silently dropped.
    */
   setStatusConfig(status: StatusGatherConfig | undefined): void;
-}
-
-/**
- * Resolve the `JINN_ENABLE_EMBEDDED_AGENT` env var. Default off. Anything
- * other than `1` / `true` (case-insensitive) is treated as off so a stray
- * value can't accidentally re-enable the surface.
- *
- * Issue #367: this also has a daemon-side consumer (`main.ts` gates the
- * `/api/agent/ws` bridge on it), so it stays a standalone helper.
- */
-export function isEmbeddedAgentEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env['JINN_ENABLE_EMBEDDED_AGENT'];
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true';
 }
 
 function parseArtifactSources(value: unknown): ArtifactSource[] | undefined {
@@ -512,21 +467,16 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   app.use('/v1/bootstrap', requireOperatorToken);
   app.use('/v1/rewards', requireOperatorToken);
   app.use('/v1/notifications', requireOperatorToken);
-  app.use('/v1/solvernets', requireOperatorToken);
-  app.use('/v1/solvernets/*', requireOperatorToken);
   app.use('/v1/auth/*', requireOperatorToken);
   app.use('/v1/setup/*', requireOperatorToken);
   app.use('/v1/operator', requireOperatorToken);
   app.use('/v1/operator/*', requireOperatorToken);
-  app.use('/v1/launcher', requireOperatorToken);
-  app.use('/v1/launcher/*', requireOperatorToken);
   app.use('/v1/discovery', requireOperatorToken);
   app.use('/v1/discovery/*', requireOperatorToken);
   app.use('/api/admin/*', requireOperatorToken);
   app.use('/api/harness/*', requireOperatorToken);
   app.use('/api/hermes/*', requireOperatorToken);
   app.use('/api/codex/*', requireOperatorToken);
-  app.use('/api/captures/*', requireOperatorToken);
   app.use('/v1/harnesses/*', requireOperatorToken);
   app.use('/v1/debug-report', requireOperatorToken);
   app.use('/v1/debug-report/*', requireOperatorToken);
@@ -547,10 +497,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     // `requireOperatorToken` (which would also accept the ui-token).
     app.use('/api/stop-hook', requireBearer);
     addStopHookRoutes(app, config.stopHook);
-  }
-
-  if (config.captures) {
-    addCapturesRoutes(app, config.captures);
   }
 
   if (config.bootstrap) {
@@ -607,36 +553,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     });
   }
 
-  if (config.solverNets) {
-    addSolverNetsRoutes(app, { registry: config.solverNets.registry });
-  }
-
-  // jinn-mono-hqz0: SolverNet creation/launch endpoints. Deps come from a
-  // post-bootstrap subsystem; we register the routes eagerly with a
-  // deps-proxy that dereferences a holder per-request. If the holder is
-  // empty (subsystem not ready yet) the routes effectively no-op via 503
-  // because the underlying handlers can't reach `store`. We surface a
-  // clear 503 by short-circuiting in a middleware before delegating.
-  if (config.solverNetsLauncher) {
-    const { holder } = config.solverNetsLauncher;
-    app.use('/v1/solvernets/drafts', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/drafts/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/launched', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/launched/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    // Build a Proxy whose property reads dereference the holder. Route
-    // handlers in solvernets-endpoints.ts read deps.store, deps.launch,
-    // etc. eagerly inside each handler, so per-request dereference is
-    // sufficient.
-    const depsProxy = new Proxy({} as SolverNetsEndpointsDeps, {
-      get(_target, prop) {
-        const live = holder.current;
-        if (!live) return undefined;
-        return live[prop as keyof SolverNetsEndpointsDeps];
-      },
-    });
-    registerSolverNetsEndpoints(app, depsProxy);
-  }
-
   if (config.agentBinding) {
     addAgentBindingRoutes(app, config.agentBinding);
   }
@@ -684,20 +600,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   }
 
   if (config.ui) {
-    // Setup routes (claude auth probe + login spawn, keystore password change)
+    // Setup routes (claude auth probe, keystore password change)
     // gated behind the UI token so external callers can't fingerprint the host
     // or rotate keys.
     addSetupRoutes(app, config.setup);
     if (config.claimPolicy) {
       addClaimPolicyRoutes(app, config.claimPolicy);
     }
-  }
-
-  // Launcher mode routes — gated by the UI token via the `app.use` block
-  // above. The launcher mode SPA is the only legitimate consumer; external
-  // callers cannot fingerprint per-SolverNet generator state without it.
-  if (config.ui && config.launcher) {
-    addLauncherRoutes(app, config.launcher);
   }
 
   // Bearer-token gate for POST /artifacts. Registered as `app.use` so it

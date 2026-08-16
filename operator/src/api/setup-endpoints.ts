@@ -13,11 +13,8 @@
  * a password and runs `jinn init` if no keystore is found). The panel
  * observes that flow via /v1/bootstrap; it does not drive it.
  *
- * Note 2: there is no `/v1/auth/claude/login` endpoint. claude sign-in
- * happens automatically through the embedded agent session — the wizard
- * is auto-dismissed and the OAuth URL is opened in a new tab via the
- * agent WS bridge (see agent-ws.ts). The operator just completes sign-in
- * in the tab that opens.
+ * Note 2: there is no `/v1/auth/claude/login` HTTP endpoint. Claude sign-in
+ * is `claude auth login` on the CLI (harness `isReady` nextStep.cli).
  */
 import type { Hono } from 'hono';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -41,7 +38,6 @@ import {
 import { createJinnPublicClient, type JinnOnchainNetwork } from '../earning/viem-clients.js';
 import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
-import { triggerAgentSpawn } from '../agent/agent-ws.js';
 import { DEFAULT_CONFIG_PATH, persistTopLevelConfigValue } from '../config.js';
 import { canonicalHarnessName } from '../harnesses/names.js';
 import {
@@ -223,16 +219,6 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       binary,
       ...(probe.email !== undefined ? { email: probe.email } : {}),
     });
-  });
-
-  // POST /v1/auth/claude/spawn — operator clicked Phase 1 Sign-in. Allows
-  // the daemon to spawn its embedded claude session (which then auto-walks
-  // the wizard and emits an auth_url WS frame to the SPA). For returning
-  // operators the daemon already detects auth at startup and pre-allows
-  // spawn; this endpoint is the manual gate-opener for fresh installs.
-  app.post('/v1/auth/claude/spawn', async (c) => {
-    const result = await triggerAgentSpawn();
-    return c.json(result, result.ok ? 202 : 500);
   });
 
   app.post('/v1/setup/claude/install', async (c) => {

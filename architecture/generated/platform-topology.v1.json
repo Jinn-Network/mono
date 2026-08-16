@@ -2082,7 +2082,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 5,
-      "discoveredFirstPartySurfaces": 2977,
+      "discoveredFirstPartySurfaces": 2969,
       "generatedOutputSources": 1349,
       "generatorSources": 643,
       "marketplaceControl": 2,
@@ -7059,16 +7059,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "operator/test/api/captures-endpoints.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "operator/test/api/claim-policy-endpoints.test.ts"
       },
       {
@@ -7140,16 +7130,6 @@
           "@ritsukai"
         ],
         "path": "operator/test/api/events-endpoint.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/feature-flags-inject.test.ts"
       },
       {
         "categories": [
@@ -7280,46 +7260,6 @@
           "@ritsukai"
         ],
         "path": "operator/test/api/history-build.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/launcher-endpoints.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/launcher-status.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/launcher-tasks.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/leaderboard-api.test.ts"
       },
       {
         "categories": [
@@ -7510,36 +7450,6 @@
           "@ritsukai"
         ],
         "path": "operator/test/api/setup-retry-endpoint.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/solvernets-catalog-build.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/solvernets-endpoint.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/solvernets-endpoints.test.ts"
       },
       {
         "categories": [
@@ -7850,6 +7760,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/architecture/golden-envelope.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/architecture/leftover-application-routes-retired.test.ts"
       },
       {
         "categories": [

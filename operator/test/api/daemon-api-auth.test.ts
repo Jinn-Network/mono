@@ -390,7 +390,7 @@ describe('daemon-api-auth (bearer middleware)', () => {
     expect(retryCalls).toBe(1);
   });
 
-  it('requires the UI token for SPA-only bootstrap, events, and SolverNet routes', async () => {
+  it('requires the UI token for operator-class bootstrap, events, and artifacts routes', async () => {
     await server.close();
     store.close();
 
@@ -425,23 +425,10 @@ describe('daemon-api-auth (bearer middleware)', () => {
           donation: { enabled: false },
         },
       },
-      solverNets: {
-        registry: {
-          list: () => [{
-            name: 'prediction',
-            description: 'Prediction',
-            state: 'live' as const,
-            contract: { id: 'prediction', version: 'v1' },
-            supportedRoles: ['solving' as const],
-            compatibleHarnesses: [],
-            compatiblePlugins: [],
-          }],
-        },
-      },
     });
     baseUrl = `http://127.0.0.1:${server.port}`;
 
-    for (const path of ['/v1/bootstrap', '/v1/events/recent', '/v1/solvernets', '/v1/operator/artifacts']) {
+    for (const path of ['/v1/bootstrap', '/v1/events/recent', '/v1/operator/artifacts']) {
       const unauthenticated = await fetch(`${baseUrl}${path}`);
       expect(unauthenticated.status).toBe(401);
 

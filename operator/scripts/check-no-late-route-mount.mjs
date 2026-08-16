@@ -20,26 +20,22 @@
  *   - operator/src/api/*-build.ts       (status/rollup builders that also mount)
  *   - operator/src/api/operator-artifacts-endpoint.ts (existing exception)
  *   - operator/src/api/peers.ts         (peer-sync subsystem; calls app.use)
- *   - operator/src/api/leaderboard-api.ts
  *   - operator/src/api/admin-endpoint.ts
  *   - operator/src/api/hermes-doctor-endpoint.ts
  *   - operator/src/api/harness-readiness-endpoint.ts
  *   - operator/src/api/harness-status-endpoint.ts
  *   - operator/src/api/bootstrap-endpoint.ts
  *   - operator/src/api/setup-endpoints.ts
- *   - operator/src/api/solvernets-endpoints.ts
  *   - operator/src/api/agent-binding-endpoint.ts
- *   - operator/src/api/captures-endpoint.ts
  *   - operator/src/api/stop-hook-endpoint.ts
  *   - operator/src/api/discovery-routes.ts
- *   - operator/src/api/launcher-endpoint.ts
  *   - operator/src/trajectory/llm-proxy.ts (standalone Hono instance, not the
  *                                         operator daemon's app)
  *
  * If you're adding a NEW route helper, drop it under operator/src/api/, end the
  * filename in *-endpoint.ts / *-endpoints.ts / *-routes.ts, and call it from
  * startApiServer in server.ts. Use the holder-ref pattern (see
- * solverNetsLauncher / harnessReadinessRegistry) if the registry isn't ready
+ * harnessReadinessRegistry) if the registry isn't ready
  * at startup time.
  *
  * If your route registration is genuinely a separate Hono app (not the
@@ -108,8 +104,8 @@ console.error('  bootstrap takes long enough that the panel makes API requests')
 console.error('  before these routes are added. See jinn-mono-u34i.\n');
 console.error('  Move the registration into a *-endpoint.ts / *-endpoints.ts /');
 console.error('  *-routes.ts file under operator/src/api/ and have startApiServer');
-console.error('  call it. Use the holder-ref pattern (solverNetsLauncher,');
-console.error('  harnessReadinessRegistry) if the registry is not ready at');
+console.error('  call it. Use the holder-ref pattern (harnessReadinessRegistry)');
+console.error('  if the registry is not ready at');
 console.error('  server-start time.\n');
 console.error('  Violations:');
 for (const v of violations) {

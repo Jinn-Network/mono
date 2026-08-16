@@ -55,7 +55,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn doctor` | Preflight checks: answers "would jinn run work?" without running it |
 | `jinn init` | Generate the master wallet and write the encrypted keystore |
 | `jinn quickstart` | Legacy compatibility alias for zero-to-running setup; prefer jinn run |
-| `jinn auth` | Legacy compatibility: check Claude authentication and persist daemon runtime mode |
+| `jinn auth` | Pairing and legacy Claude-auth: `jinn auth rotate` / `jinn auth token`, plus runtime mode |
 | `jinn bootstrap` | Advance the fleet state machine toward a running daemon |
 | `jinn bootstrap-retry` | Signal a running, halted daemon to retry its bootstrap state machine |
 | `jinn onboarding-complete` | Mark onboarding complete (daemon control route if running, config file otherwise) |
@@ -78,7 +78,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn conformance` | Run the envelope + trajectory conformance suite against a signed envelope CID |
 | `jinn evidence` | Read delivered evidence — resolve a task id to an envelope, and an envelope to its result |
 | `jinn create` | Scaffold a new Jinn external harness or SolverPlugin package |
-| `jinn ui` | Open the operator console in your browser (default http://127.0.0.1:3000) |
+| `jinn ui` | Open the operator console in your browser (assumes the console is running) |
 | `jinn tasks` | Submit and inspect Tasks |
 | `jinn solver-nets` | Manage SolverNet activation, Harness selection, and SolverNet-scoped plugins |
 | `jinn prediction-scoreboard` | Render the Prediction SolverNet Brier scoreboard Markdown report |
@@ -90,8 +90,9 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn scrub` | Scrub eval + review tooling |
 | `jinn native-vertical` | Native requester vertical and role-identity keygen for Base Sepolia |
 | `jinn ceremony` | Provision native trust artifacts: role custody, on-chain anchor, and the shared trust catalog |
-| `jinn policy` | Show the resolved claim policy (read-only) |
-| `jinn wiring` | Show execution-wiring and posting entries (read-only) |
+| `jinn policy` | Show or set the resolved claim policy |
+| `jinn wiring` | Show or set execution-wiring and posting entries |
+| `jinn restart` | Ask a running daemon to restart via POST /api/admin/restart |
 <!-- skill:cli-table:end -->
 
 ## Phase 2: MCP Configuration
@@ -149,8 +150,6 @@ Once configured, these MCP tools become available:
 | `activity_list` | List recent structured daemon events. Filter by kinds: intent, reward, fleet, system, error, log. |
 | `bootstrap_state` | Get the current bootstrap state machine: mode (setup|running|uninitialized), current step, services, master address, chain. |
 | `daemon_restart` | Request a daemon restart. Requires confirm=true. The daemon will shut down gracefully and the process will exit; the supervising shell or systemd unit must restart it. |
-| `loop_pause` | Pause a daemon loop by name (creator | engine_watcher | engine_tick | delivery_watcher | reward_claim | balance_topup | jinn_claim | peer_sync). NOTE: stubbed in v1-Slim; returns not_implemented. |
-| `loop_resume` | Resume a previously-paused daemon loop. NOTE: stubbed in v1-Slim; returns not_implemented. |
 <!-- skill:mcp-table:end -->
 
 ## Phase 3: Zero to Running

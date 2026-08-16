@@ -28,11 +28,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
 import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
-import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
+import { startApiServer, type ApiServer } from './api/server.js';
 import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.js';
 // addHarnessReadinessRoutes is wired through startApiServer's holder ref now
 // (jinn-mono-u34i). No direct import needed.
-import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import { ensureUiTokenRecord, defaultTokenPath } from './api/ui-token.js';
 import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
@@ -42,7 +41,6 @@ import { emitProgress } from './observability/progress.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
 import { hashProfileForHarness } from './harnesses/hash-profile.js';
 import { readModeState } from './harnesses/mode-state.js';
-import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
 import { formatBootstrapOperatorMessage } from './operator-errors.js';
 import { requestDaemonRestart } from './restart-daemon.js';
@@ -109,7 +107,7 @@ import {
   makeDockerImmutableMechanicalVerifier,
 } from './harnesses/impls/jinn-repo-evaluator/docker-immutable-verifier.js';
 import { loadExternalImpl } from './harnesses/external-impls/index.js';
-import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, HERMES_AGENT_HARNESS, harnessStateDirName } from './harnesses/names.js';
+import { harnessStateDirName } from './harnesses/names.js';
 import type { Harness } from './harnesses/types.js';
 import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
@@ -268,28 +266,11 @@ const COMPOSITION_MODE = resolveFleetCompositionMode({
 if (COMPOSITION_MODE === 'native') {
   console.log('[main] composition mode: native (one-swap; compositionMode="native")');
 }
-// Issue #326: the embedded Claude agent chat surface (right rail + onboarding
-// "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
-// action-authority / plugin-scope shape is still in design. Set
-// `JINN_ENABLE_EMBEDDED_AGENT=1` to re-enable it for development. This does
-// NOT affect Claude-Code-as-a-solver-harness — that path is independent.
-//
-// Issue #367: the SPA reads this flag via the injected `window.__JINN_FEATURES__`
-// (`resolveFeatureFlags` in api/server.ts) like every other operator-app flag.
-// This `embeddedAgentEnabled` const is the daemon-side consumer only — it gates
-// whether the `/api/agent/ws` bridge is mounted below.
-const embeddedAgentEnabled = isEmbeddedAgentEnabled();
 
 let activeClaudePath = config.claudePath ?? 'claude';
 const selectClaudePath = (claudePath: string): void => {
   activeClaudePath = claudePath;
   config.claudePath = claudePath;
-  // Harmless no-op when the embedded agent is disabled
-  // (`embeddedAgentEnabled` is false at this point): the agent surface
-  // that consumes this path isn't mounted, so the update has nothing to
-  // propagate to. Called unconditionally to keep the path in sync
-  // whenever the agent IS enabled.
-  updateAgentClaudePath(claudePath);
 };
 
 const NETWORK_CHAIN = config.network === 'testnet' ? 'base-sepolia' : 'base';
@@ -613,29 +594,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     },
   };
   let corpusForApi: ReturnType<typeof createCorpus> | undefined;
-  // Launcher mode wiring (Task 6 of spec/2026-05-05-launcher-role-and-mode.md).
-  // The API server is constructed before bootstrap finishes, so the operator's
-  // Safe address and the prediction.v1 generator are not yet known at start-up.
-  // We capture both into closures here and let `addLauncherRoutes` read them
-  // lazily — by the time `/v1/launcher/status` is hit, both are populated.
-  let safeAddressForLauncher: `0x${string}` | undefined;
-  let publicClientForLauncher: ReturnType<typeof createJinnPublicClient> | undefined;
 
-  // jinn-mono-hqz0: holder for SolverNet creation/launch endpoint deps.
-  // The routes register eagerly in startApiServer (Hono freezes its matcher
-  // on first request); subsystem init below populates `holder.current` and
-  // the route handlers dereference it per-request.
-  const solverNetEndpointsDepsHolder: {
-    current: import('./api/solvernets-endpoints.js').SolverNetsEndpointsDeps | undefined;
-  } = { current: undefined };
-
-  // jinn-mono-u34i: same pattern for the harness readiness registry. The
-  // registry is built post-bootstrap (depends on the keystore being
-  // available), but the routes must be registered at server start to land in
-  // Hono's matcher before the panel's first poll. Late-mounting via
-  // `addHarnessReadinessRoutes(setupApiServer.app, ...)` after the panel had
-  // been polling for minutes threw "Can not add a route since the matcher is
-  // already built" and crashed the daemon on the running-mode transition.
   const harnessReadinessRegistryHolder: {
     current: import('./harnesses/readiness-registry.js').HarnessReadinessRegistry | undefined;
   } = { current: undefined };
@@ -768,21 +727,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         config,
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
       },
-      captures: {
-        captures: capturesStore,
-        publishCapture: async (sessionId) => {
-          const publish = capturePublishRef.current;
-          if (!publish) {
-            throw new CapturePublishUnavailableError(
-              'Capture publisher is waiting for bootstrap to finish.',
-            );
-          }
-          return publish(sessionId);
-        },
-        setTrustedRepo: (repoRemoteUrl, trusted) => {
-          console.log(`[main] captures trust-repo ${trusted ? 'enabled' : 'disabled'} for ${repoRemoteUrl}`);
-        },
-      },
       stopHook: {
         onStopHook: async (payload) => {
           await ingestStopHookCapture(capturesStore, captureReceiver, payload);
@@ -818,52 +762,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           onboardingComplete: config.onboardingComplete,
         }),
       },
-      // SolverNet catalog. Stubbed to the bundled `prediction` net for v1.
-      // Once the daemon's harness/plugin registry is loaded, swap this for a
-      // real registry adapter (separate task in the page-split plan).
-      solverNets: {
-        registry: {
-          list: () => [
-            {
-              name: 'prediction',
-              description: 'Forecast resolved outcomes; rewarded by Brier score on verified resolutions.',
-              contract: { id: 'prediction', version: 'v1' },
-              state: 'live' as const,
-              supportedRoles: ['solving' as const, 'evaluating' as const],
-              compatibleHarnesses: [
-                { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
-              ],
-              compatiblePlugins: [
-                { name: 'jinn-prediction-plugin', version: '0.1.0', source: 'bundled' },
-              ],
-            },
-            {
-              name: 'swe-rebench-v2',
-              description: 'Code-issue benchmark tasks from SWE-rebench v2. Solvers submit unified-diff patches; evaluators run the per-instance Docker harness.',
-              contract: { id: 'swe-rebench-v2', version: 'v1' },
-              state: 'live' as const,
-              supportedRoles: ['solving' as const, 'evaluating' as const],
-              // Order matters: the dashboard pre-selects compatibleHarnesses[0]
-              // as the default solver harness. Hermes Agent is the SWE-rebench v2
-              // default per the 2026-05-12 decision (jinn-mono-8psp.2 / spec §10);
-              // operators may switch to Claude Code or Codex.
-              compatibleHarnesses: [
-                { name: HERMES_AGENT_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
-                { name: CLAUDE_CODE_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
-                { name: CODEX_HARNESS, version: '0.1.0', supportsRoles: ['solving' as const] },
-                { name: 'swe-rebench-v2-evaluator', version: '0.1.0', supportsRoles: ['evaluating' as const] },
-              ],
-              compatiblePlugins: [
-                { name: 'swe-rebench-v2-runtime', version: '0.1.0', source: 'bundled' },
-              ],
-            },
-          ],
-        },
-      },
-      // jinn-mono-hqz0: SolverNet creation/launch endpoints. Routes register
-      // eagerly here; deps are populated by main.ts post-bootstrap via the
-      // holder, and each route handler reads `holder.current` per-request.
-      solverNetsLauncher: { holder: solverNetEndpointsDepsHolder },
       // jinn-mono-u34i: same eager-register / late-populate pattern for the
       // harness readiness routes. Until main.ts sets the holder, requests
       // return 503 subsystem_not_ready (the panel handles that gracefully).
@@ -996,117 +894,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           filePath: passwordResolution.filePath,
         },
       },
-      // Launcher mode (Tasks 6 + 7). Deps are resolved lazily because the
-      // generator and Safe address are constructed after bootstrap, after
-      // this `startApiServer` call. By the time the SPA hits the route,
-      // bootstrap has completed and both refs are populated.
-      //
-      // Open-task-count is now real: it counts posted Tasks recorded against
-      // the creator Safe with the SolverNet's solver_type. The result is a
-      // strict superset of the in-flight count (we don't yet drop settled or
-      // failed Tasks; that lifecycle tracking lands with the router-watcher
-      // hardening lane, jinn-mono-l2zl.12). Safe balance is read live through
-      // the daemon's viem public client once bootstrap has created it.
-      // Reserved-budget remains unavailable until per-Task payment lifecycle
-      // state is persisted; return an empty string rather than a fake zero so
-      // the UI does not project runway from placeholder data.
-      //
-      // TODO(jinn-mono-l2zl.12): once Task lifecycle events are persisted,
-      // narrow `getOpenTaskCount` to states in
-      // ('open', 'claims-in-flight', 'fully-claimed') so the operator's
-      // "open Tasks" stat doesn't drift upward across the daemon's lifetime.
-      // TODO(jinn-mono launcher Task 8): real `getReservedBudgetWei`
-      // (sum of unconsumed claim payments across open Tasks).
-      launcher: {
-        getConfig: () => ({
-          executionWiring: config.executionWiring,
-          posting: config.posting,
-        }),
-        configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
-        onSolverNetsUpdated: () => {
-          invalidatePredictionOperatorStatusCache(config);
-        },
-        // Wave-4 D3 retired the launched-record generators (and with them the
-        // creator loop they fed), so no generator state exists to report. The
-        // hook stays on the launcher-status surface — its consumers already
-        // treat an absent snapshot as "no generator running", which is now
-        // always the truth.
-        getGeneratorState: () => undefined,
-        getOpenTaskCount: (netName) => {
-          if (!safeAddressForLauncher) return 0;
-          const solverType = (config.posting ?? []).some((entry) => entry.workKind === netName)
-            || (config.executionWiring ?? []).some((entry) => entry.workKind === netName)
-            ? netName
-            : undefined;
-          if (!solverType) return 0;
-          return sharedStore.countPostedTasksByCreatorAndSolverType({
-            creatorSafeAddress: safeAddressForLauncher,
-            solverType,
-          });
-        },
-        getReservedBudgetWei: () => '',
-        getSafeBalanceWei: async () => {
-          const safeAddress = safeAddressForLauncher;
-          const publicClient = publicClientForLauncher;
-          if (!safeAddress || !publicClient) return '';
-          try {
-            return (await publicClient.getBalance({
-              address: getAddress(safeAddress) as Address,
-            })).toString();
-          } catch (err) {
-            console.warn(
-              `[main] launcher status Safe balance read failed for ${safeAddress}: ${
-                err instanceof Error ? err.message : String(err)
-              }`,
-            );
-            return '';
-          }
-        },
-        safeAddress: () =>
-          safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000',
-        tasksDeps: {
-          // Resolved per-request for the same reason `safeAddress` is a
-          // closure — `safeAddressForLauncher` is undefined until bootstrap
-          // finishes. Before that, the response is an empty list, which is
-          // accurate (no posts can have happened pre-bootstrap).
-          get creatorAddress() {
-            return safeAddressForLauncher ?? '0x0000000000000000000000000000000000000000';
-          },
-          fetchPostedTasks: ({ creatorAddress, limit, before }) => {
-            // No-op when bootstrap hasn't resolved a Safe yet.
-            if (creatorAddress === '0x0000000000000000000000000000000000000000') {
-              return [];
-            }
-            const opts: { creatorSafeAddress: string; limit: number; before?: string } = {
-              creatorSafeAddress: creatorAddress,
-              limit,
-            };
-            if (before) opts.before = before;
-            const rows = sharedStore.listPostedTasksByCreator(opts);
-            return rows.map((r) => ({
-              taskId: r.taskId,
-              // On-chain decimal id (#579) — the launcher status chip keys its
-              // indexer lookup on this, not the off-chain display taskId. Empty
-              // string (no on-chain id recorded) maps to undefined so the
-              // gatherer falls back to taskId.
-              ...(r.protocolTaskId ? { protocolTaskId: r.protocolTaskId } : {}),
-              taskCid: r.taskCid,
-              solverType: r.solverType ?? undefined,
-              postedAt: r.postedAt,
-              ...(r.state ? { state: r.state } : {}),
-              ...(r.claims ? { claims: r.claims } : {}),
-            }));
-          },
-          // #579: on-chain finalized/open/expired status for the Recent posted
-          // Tasks chip. Wave-4 D4 reads ArchiveReads.getTaskStatuses, which
-          // degrades to an empty Map → chips render 'unknown'.
-          fetchTaskStatuses: async (manifestCid: string) => {
-            const reads = archiveReadsHolder.current;
-            if (!reads) return new Map();
-            return reads.getTaskStatuses({ manifestCid });
-          },
-        },
-      },
     });
   } catch (error) {
     await closeCaptureReceiver();
@@ -1169,58 +956,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     `[main] Setup-mode API up (mode=${setupController.mode()}). ` +
       `API: http://127.0.0.1:${setupApiServer.port} (no human surface)`,
   );
-
-  // ── Operator agent WebSocket bridge ──────────────────────────────────────
-  // Mount /api/agent/ws on the same HTTP server so the SPA's xterm.js panel
-  // can attach to a long-lived embedded `claude` subprocess. The embedded
-  // session reads MCP config we materialise to disk so it can reach the
-  // operator MCP server (`jinn mcp`) for tool calls.
-  //
-  // Issue #326: the embedded agent chat surface is hidden by default. The WS
-  // bridge mounts only when `JINN_ENABLE_EMBEDDED_AGENT=1` so the dev-time
-  // path stays end-to-end; with the flag off there is no /api/agent/ws route
-  // and the SPA never renders the chat panel. Claude-Code-as-solver-harness
-  // is independent of this bridge and unaffected.
-  if (embeddedAgentEnabled) {
-    const operatorMcpConfigPath = join(homedir(), '.jinn-client', 'operator-mcp-config.json');
-    try {
-      mkdirSync(dirname(operatorMcpConfigPath), { recursive: true });
-      writeFileSyncMain(
-        operatorMcpConfigPath,
-        JSON.stringify(
-          {
-            mcpServers: {
-              'jinn-operator': {
-                command: 'jinn',
-                args: ['mcp'],
-              },
-            },
-          },
-          null,
-          2,
-        ),
-      );
-    } catch (err) {
-      console.warn(
-        `[main] Failed to write operator MCP config at ${operatorMcpConfigPath}: ` +
-          (err instanceof Error ? err.message : String(err)),
-      );
-    }
-    attachAgentWs({
-      httpServer: setupApiServer.server,
-      uiToken,
-      claudePath: activeClaudePath,
-      cwd: process.cwd(),
-      mcpConfigPath: operatorMcpConfigPath,
-    });
-    console.log(
-      `[main] Agent WS bridge mounted at ws://127.0.0.1:${setupApiServer.port}/api/agent/ws`,
-    );
-  } else {
-    console.log(
-      '[main] Embedded agent surface disabled (set JINN_ENABLE_EMBEDDED_AGENT=1 to enable).',
-    );
-  }
 
   // ── Init-if-missing ──────────────────────────────────────────────────────
   // If the keystore is missing but we have a password, run `jinn init` now so
@@ -1544,10 +1279,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     agentId,
     identityRegistryAddress,
   } = bootstrapResult;
-  // Now that bootstrap has resolved a Safe, expose it to the Launcher
-  // mode endpoint so `/v1/launcher/status.budget.safeAddress` is accurate
-  // on the very first SPA poll. (Task 6 of the launcher plan.)
-  safeAddressForLauncher = safeAddress;
   const agentEoaAddress = privateKeyToAccount(agentPrivateKey).address as `0x${string}`;
 
   if (!mechAddress) {
@@ -1575,7 +1306,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   );
   const masterAccount = deriveMasterSigner(mnemonicForMaster);
   const publicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
-  publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, masterAccount);
 
   // #2405: populate the claim-rewards route holder now that the daemon's own
@@ -2041,50 +1771,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       console.log(
         `[main] SolverNet subsystem ready: ${solverNetSubsystem.records.length} owned record(s)`,
       );
-
-      // jinn-mono-hqz0: populate the launcher endpoints' deps holder. The
-      // routes themselves were registered eagerly inside startApiServer
-      // (Hono's matcher freezes before the holder is filled, so handlers
-      // dereference holder.current per-request). Without this the SPA's
-      // /launcher list page 404s on /v1/solvernets/launched.
-      if (solverNetEndpointsDepsHolder) {
-        const { LaunchAction } = await import('./solvernets/launch-state-machine.js');
-        const awaitLauncherTxConfirmation = async (txHash: `0x${string}`) => {
-          const receipt = await agentClients.publicClient.waitForTransactionReceipt({ hash: txHash });
-          return { blockNumber: Number(receipt.blockNumber) };
-        };
-        const pendingGeneratorsRef = { current: solverNetSubsystem.pendingGenerators };
-        // Noop subgraph for launch state-machine mempool-drop recovery.
-        const noopSubgraph = {
-          async fetchSetMetadataEvents() { return []; },
-          async fetchSetMetadataEventsForCid() { return []; },
-        };
-        const launchAction = new LaunchAction({
-          store: solverNetStore,
-          ipfs: solverNetIpfs,
-          publisher: solverNetPublisher,
-          subgraph: noopSubgraph,
-          awaitTxConfirmation: awaitLauncherTxConfirmation,
-        });
-        if (!safeAddressForLauncher) {
-          throw new Error('[main] safeAddressForLauncher missing at SolverNet endpoints registration');
-        }
-        solverNetEndpointsDepsHolder.current = {
-          store: solverNetStore,
-          launch: {
-            launchAction,
-            pendingGenerators: pendingGeneratorsRef,
-            signer: launcherSigner,
-            network: 'base-sepolia',
-            launcher: {
-              safeAddress: safeAddressForLauncher,
-              agentEoa: launcherSigner.agentEoaAddress,
-              agentId: launcherSigner.agentId,
-            },
-          },
-        };
-        console.log('[main] SolverNet endpoints deps populated (jinn-mono-hqz0)');
-      }
     } catch (err) {
       console.warn(
         `[main] SolverNet subsystem init failed; continuing without it: ${err instanceof Error ? err.message : String(err)}`,
@@ -2096,15 +1782,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         '(requires testnet + agent_id + identity_registry_address — Task 11 scaffolding)',
     );
   }
-  // The catalog cache is consumed by the API server (Tasks 14/15).
-  //
-  // Wave-4 D3 (Task 17 of the cutover stage-3 plan, DR-2026-08-05 decision 1)
-  // retired the launched-record generator dispatcher and the creator loop it
-  // fed. Nothing constructs task sources here any more: the native posting
-  // path is `posting[]` driven through the requester work client
-  // (`PostingLoop`), and one-off posts go through `jinn tasks submit`.
-  // `initSolverNetSubsystem`'s `pendingGenerators` set is now read only by the
-  // SolverNet endpoints, which use it for the record/config refs.
+  // `initSolverNetSubsystem` still loads owned launched records; generators
+  // retired with Wave-4 D3. The HTTP creation/launch surface retired in Stage 6.
 
   // ── Corpus (daemon-side, jinn-mono-vy37.1.6) ─────────────────────────────
   //

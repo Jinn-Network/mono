@@ -5,7 +5,7 @@
  * supports: daemon_restart (real, exits the process gracefully — see
  * `restart-daemon.ts` for the respawn / headless semantics), daemon_stop
  * (exits the process and stays down — never respawns), manual reward claims,
- * and loop pause/resume (stubbed — returns not_implemented).
+ * and never loop pause/resume (that stub retired in Stage 6 Task 17).
  */
 import type { Hono } from 'hono';
 import { claimRewardsIntent, type ClaimRewardsIntentInput } from '../intents/claim-rewards.js';
@@ -43,8 +43,8 @@ export interface AdminEndpointConfig {
    * A holder ref because those signer/client objects are built post-bootstrap
    * in main.ts, after this config is constructed (routes register eagerly at
    * server start — Hono freezes its matcher, so routes can't be added later;
-   * see the `solverNetsLauncher` / `harnessReadiness` holders for the same
-   * pattern). `current` is `undefined` until bootstrap completes.
+   * see the `harnessReadiness` holder for the same pattern). `current` is
+   * `undefined` until bootstrap completes.
    */
   claimRewards: { holder: { current: ClaimRewardsRouteContext | undefined } };
 }
@@ -111,15 +111,4 @@ export function addAdminRoutes(app: Hono, cfg: AdminEndpointConfig): void {
     }
   });
 
-  app.post('/api/admin/loop/:loop/:action', (c) => {
-    const loop = c.req.param('loop');
-    const action = c.req.param('action');
-    return c.json({
-      schemaVersion: 1,
-      ok: false,
-      reason: 'not_implemented',
-      loop,
-      action,
-    });
-  });
 }
