@@ -8,10 +8,12 @@ import {
   canonicalDemo1PreRunFreezeV4Bytes,
   demo1PreRunFreezeV4AsE2Input,
   demo1PreRunFreezeV4Digest,
+  demo1PreRunFreezeV4AsRehearsalPlanInput,
   verifyDemo1PreRunFreezeV4,
   type Demo1PreRunFreezeV4Input,
 } from "./skillsbench-prerun-v4.js";
 import { SKILLSBENCH_V1_1_SOURCE } from "./skillsbench-source.js";
+import { DEMO1_REHEARSAL_PLAN_SCHEMA, buildDemo1RehearsalPlan, verifyDemo1RehearsalPlan } from "./demo1-e2-design.js";
 import { readSkillsBenchReward } from "./skillsbench-reward.js";
 import { buildSkillsBenchUnit, type SkillsBenchUnitBuildInput } from "./skillsbench-unit.js";
 
@@ -234,5 +236,32 @@ describe("pre-run freeze v4", () => {
       expect(freeze.derived.seeds.taskSelection).toBeGreaterThan(0);
       expect(() => demo1PreRunFreezeV4AsE2Input(freeze)).toThrow();
     });
+  });
+});
+
+describe("rehearsal-plan bridge", () => {
+  const controls = {
+    oracle: readSkillsBenchReward({ rewardTxt: "1" }),
+    noOp: readSkillsBenchReward({ rewardTxt: "0" }),
+  };
+
+  it("refuses a freeze that has not earned E2", () => {
+    const freeze = buildDemo1PreRunFreezeV4(freezeInput(deepInventory(13, 3)));
+    expect(() => demo1PreRunFreezeV4AsRehearsalPlanInput(freeze)).toThrow(/authorizes "dynamic-controls", not E2/u);
+  });
+
+  it("maps cluster identity into E2's grouping slot and feeds the real plan builder", () => {
+    const freeze = buildDemo1PreRunFreezeV4(freezeInput(
+      deepInventory(13, 3).map((entry) => ({ ...entry, dynamicControls: controls })),
+    ));
+    const input = demo1PreRunFreezeV4AsRehearsalPlanInput(freeze);
+    expect(input.suitabilityTasks).toHaveLength(6);
+    expect(new Set(input.suitabilityTasks.map((t) => t.repository)).size).toBe(6);
+    expect(input.e2Tasks).toHaveLength(10);
+    expect(new Set(input.e2Tasks.map((t) => t.repository)).size).toBeGreaterThanOrEqual(5);
+    // The existing E2 machinery accepts it unchanged, which is the whole point of the bridge.
+    const plan = buildDemo1RehearsalPlan(input);
+    expect(plan.schema).toBe(DEMO1_REHEARSAL_PLAN_SCHEMA);
+    expect(() => verifyDemo1RehearsalPlan(plan)).not.toThrow();
   });
 });
