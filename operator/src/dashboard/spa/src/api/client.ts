@@ -2,7 +2,7 @@ import type {
   StatusV1Response,
   BootstrapState,
   ClaudeAuthState,
-  StructuredEvent,
+  OperatorLifecycleCloudEvent,
   ActivityEventRow,
   ActivityEventsResponse,
   SolverNetsCatalogResponse,
@@ -96,7 +96,7 @@ export const api = {
     const q = new URLSearchParams();
     if (kinds && kinds.length > 0) q.set('kinds', kinds.join(','));
     q.set('limit', String(limit));
-    return jfetch<{ events: StructuredEvent[] }>(`/v1/events/recent?${q.toString()}`);
+    return jfetch<{ events: OperatorLifecycleCloudEvent[] }>(`/v1/events/recent?${q.toString()}`);
   },
   getActivityEvents: (opts?: {
     kinds?: string[];

@@ -33,7 +33,7 @@ import { maskUrlsInMessage } from '../rpc/transport.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
 import type { ArtifactSource } from '../types/envelope.js';
-import { addEventsRoutes } from './events-endpoint.js';
+import { addEventsRoutes, createStoreLifecycleTail } from './events-endpoint.js';
 import { addActivityEventsRoutes } from './activity-events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
 import { addNotificationsRoutes } from './notifications-endpoint.js';
@@ -643,7 +643,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   app.use('/v1/debug-report', requireOperatorToken);
   app.use('/v1/debug-report/*', requireOperatorToken);
 
-  addEventsRoutes(app);
+  addEventsRoutes(app, {
+    tail: createStoreLifecycleTail(store),
+    source: `urn:jinn:operator-daemon:${config.bindHost ?? '127.0.0.1'}:${config.port}`,
+    subject: 'urn:jinn:operator:local',
+  });
   addActivityEventsRoutes(app, { store });
 
   if (config.stopHook) {

@@ -1,6 +1,27 @@
-import type { Store } from '../store/store.js';
+import type { ActivityEventRow, Store } from '../store/store.js';
 import { getFileLogger } from './file-logger.js';
 import { LIFECYCLE_KINDS, type LifecycleKind } from '../api/contract/lifecycle-kind.js';
+
+type LifecycleListener = (row: ActivityEventRow) => void;
+const lifecycleListeners = new Set<LifecycleListener>();
+
+/** Live tail for `/v1/events` SSE. The StructuredEvent ring is a separate private buffer. */
+export function subscribeLifecycle(listener: LifecycleListener): () => void {
+  lifecycleListeners.add(listener);
+  return () => {
+    lifecycleListeners.delete(listener);
+  };
+}
+
+function notifyLifecycle(row: ActivityEventRow): void {
+  for (const listener of lifecycleListeners) {
+    try {
+      listener(row);
+    } catch {
+      /* a subscriber failure must never affect emission */
+    }
+  }
+}
 
 /**
  * @deprecated Kept as an alias so existing importers don't need a rename. The vocabulary
@@ -35,7 +56,7 @@ export function emitEvent(
   component = 'lifecycle',
 ): void {
   const ts = new Date().toISOString();
-  store.recordActivityEvent({
+  const id = store.recordActivityEvent({
     ts,
     kind: event.kind,
     requestId: event.requestId ?? null,
@@ -46,6 +67,8 @@ export function emitEvent(
     detail: event.detail ?? null,
     credentialId: event.credentialId ?? null,
   });
+  const row = store.getActivityEventById(id);
+  if (row) notifyLifecycle(row);
 
   const payload = {
     ts,
