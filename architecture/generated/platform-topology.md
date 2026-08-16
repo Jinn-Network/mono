@@ -1604,7 +1604,7 @@ The exact 59-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3803 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3806 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1619,7 +1619,7 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | decisionRecords | 4 |
 | discoveredFirstPartySurfaces | 3004 |
 | generatedOutputSources | 1349 |
-| generatorSources | 644 |
+| generatorSources | 647 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
 | staticControl | 6 |
