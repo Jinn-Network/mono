@@ -182,10 +182,18 @@ pinned release, executing no model and pulling no image
 | Units failing on egress alone | 83 of 84 |
 | Other rejections | 21 statement disclosure, 19 licence, 6 answer collision |
 | **Counterfactual: units clearing every static check but egress** | **57 units / 45 clusters** |
+| **The same units after treatment feasibility** | **39 units / 33 clusters** — 18 lost to bodies that reference a sibling resource by relative path |
 
-**57 units across 45 clusters is comfortably above the 21/13 floor**, with room to lose units to
-the dynamic oracle and no-op controls and still clear it. The per-unit egress broker is therefore
-worth building, and **Decision 6 resolves to option (b)**.
+**39 units across 33 clusters is comfortably above the 21/13 floor**, after both the egress
+counterfactual and the arm-B relative-path filter, with room left to lose units to the dynamic
+oracle and no-op controls. The per-unit egress broker is therefore worth building, and **Decision 6
+resolves to option (b)**.
+
+The 18 losses are the relative-path rule doing real work: a body that says `run scripts/x.py`
+cannot move to the repository root without changing what that path resolves to, so arms A and B
+would not be receiving the same instructions in practice. Those units are `unverifiable` and are
+never hand-repaired, because repairing one would edit the instruction bytes the experiment holds
+fixed.
 
 **The amendment's own prediction was wrong, and that is recorded rather than quietly dropped.** The
 section below still says a second STOP was the more likely outcome. It was written before the

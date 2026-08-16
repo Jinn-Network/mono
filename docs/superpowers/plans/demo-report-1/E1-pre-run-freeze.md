@@ -219,12 +219,14 @@ that does not hash back to its declared Git object id.
 | Failing on egress alone | 83 of 84 |
 | Other rejections | 21 statement disclosure, 19 licence, 6 answer collision |
 | **Clearing every static check but egress** | **57 units / 45 clusters** |
+| **The same units after arm-B treatment feasibility** | **39 units / 33 clusters** |
 
 **Demo-1 therefore remains STOPPED**, now at a measured capacity of 1 against a floor of 21 rather
 than at the superseded method's domain ceiling. Nothing may execute.
 
 **But the source is not disqualified.** 57 units across 45 clusters clear everything except egress,
-which is comfortably above the floor with room to lose units to the dynamic oracle and no-op
+and 39 units across 33 clusters survive the arm-B relative-path feasibility filter on top of that —
+comfortably above the floor, with room left to lose units to the dynamic oracle and no-op
 controls. DR-2026-08-16 Decision 6 is therefore closed in favour of building the reviewed per-unit
 egress broker. That is a decision to build, not a finding that the source has passed.
 
