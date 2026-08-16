@@ -226,7 +226,7 @@ describe('release-client runner', () => {
     ]);
     expect(calls.some((call) =>
       call.command === 'node' &&
-      call.args.join(' ') === '../client/scripts/ensure-forge-std.mjs' &&
+      call.args.join(' ') === '../operator/scripts/ensure-forge-std.mjs' &&
       call.cwd?.endsWith('/contracts'),
     )).toBe(true);
     expect(calls.some((call) =>
