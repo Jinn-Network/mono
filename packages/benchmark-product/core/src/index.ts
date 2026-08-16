@@ -370,6 +370,18 @@ export type {
   SkillsBenchRewardInput,
   SkillsBenchRewardReading,
 } from "./method/skillsbench-reward.js";
+export {
+  NATIVE_SNAPSHOT_ALGORITHM,
+  NativeSnapshotRefusedError,
+  NativeSourceMutatedError,
+  STRICT_SNAPSHOT_POLICY,
+  createFilesystemNativeSnapshotPort,
+  createProcessNativeLauncher,
+} from "./runtime/native-ports.js";
+export type {
+  FilesystemSnapshotOptions,
+  ProcessLauncherOptions,
+} from "./runtime/native-ports.js";
 export type {
   Demo1PreRunFreezeV3,
   Demo1PreRunFreezeV3CandidateInventory,
