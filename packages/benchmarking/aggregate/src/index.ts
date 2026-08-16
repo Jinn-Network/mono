@@ -32,6 +32,34 @@ export type { CellRef, ExcludedReport } from "./exclusion.js";
 export { filterByCutoff } from "./clean-subset.js";
 export type { CleanSubsetBasis, CleanSubsetFilterResult } from "./clean-subset.js";
 
+// --- binary-instrument scientific replicate reduction ---
+export { BinaryInstrumentReductionError, reduceBinaryInstrumentReplicates } from "./binary-instrument.js";
+export type {
+  BinaryInstrumentDecision,
+  BinaryInstrumentExcludedItem,
+  BinaryInstrumentExclusionDetail,
+  BinaryInstrumentExclusionReason,
+  BinaryInstrumentExpectedContext,
+  BinaryInstrumentExpectedInstrument,
+  BinaryInstrumentItemContext,
+  BinaryInstrumentItemDecision,
+  BinaryInstrumentParsedCellInput,
+  BinaryInstrumentReducedCall,
+  BinaryInstrumentReduction,
+  BinaryInstrumentReductionErrorCode,
+  BinaryInstrumentReductionInput,
+  BinaryInstrumentStratum,
+  BinaryInstrumentTruthLabel,
+} from "./binary-instrument.js";
+export {
+  BINARY_INSTRUMENT_MEASUREMENT_PROFILE,
+  BINARY_INSTRUMENT_MEASUREMENTS,
+  BINARY_INSTRUMENT_PARAMETER_SCHEMA,
+  validateBinaryInstrumentQualificationProjection,
+  validateBinaryInstrumentParameters,
+} from "./binary-instrument-method.js";
+export type { BinaryInstrumentParameters } from "./binary-instrument-method.js";
+
 // --- the reference statistics library (design §9.2, adopted from the capability-eval seed) ---
 export { wilsonInterval } from "./stats/wilson.js";
 export type { WilsonInterval } from "./stats/wilson.js";

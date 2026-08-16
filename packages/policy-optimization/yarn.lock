@@ -213,6 +213,7 @@ __metadata:
   dependencies:
     "@jinn-network/task-execution-evaluation-harness": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/task-execution-supervisor": "npm:0.1.0"
   languageName: node
   linkType: soft

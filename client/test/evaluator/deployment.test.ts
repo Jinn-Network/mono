@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  BINARY_JUDGMENT_REGISTRATION_ID,
+  PREDICTION_REGISTRATION_ID,
+  SWE_REBENCH_REGISTRATION_ID,
+} from "@jinn-network/task-execution-evaluator-adapters";
 import { createTrustedEvaluatorDeployment } from "../../src/evaluator/deployment.js";
 
 describe("createTrustedEvaluatorDeployment", () => {
@@ -22,6 +27,13 @@ describe("createTrustedEvaluatorDeployment", () => {
     });
 
     expect(deployment.evidenceWriter).toBe(evidenceWriter);
-    expect(deployment.registrations).toHaveLength(2);
+    expect(deployment.registrations
+      .map(({ registrationId }) => registrationId)
+      .toSorted())
+      .toEqual([
+        BINARY_JUDGMENT_REGISTRATION_ID,
+        PREDICTION_REGISTRATION_ID,
+        SWE_REBENCH_REGISTRATION_ID,
+      ].toSorted());
   });
 });

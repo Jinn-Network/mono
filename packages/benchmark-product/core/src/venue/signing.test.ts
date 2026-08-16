@@ -1,5 +1,5 @@
 import { createPrivateKey, createPublicKey, verify as edVerify } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -17,6 +17,9 @@ import {
 
 const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
 const EVALUATOR_2 = "urn:jinn:benchmark-product:local-venue:evaluator-2";
+const REVIEWER_A = "urn:jinn:reviewer:a";
+const REVIEWER_B = "urn:jinn:reviewer:b";
+const INSPECT_EVALUATOR = "urn:jinn:benchmark-product:inspect-runtime:same-execution-scorer";
 const LEGACY_EVALUATOR = "urn:jinn:benchmark-product:local-venue:prediction-evaluator";
 
 const SPEC_DIGEST = "a".repeat(64);
@@ -129,9 +132,51 @@ describe("loadOrCreateEvaluatorSigningKeys", () => {
     }
   });
 
-  it("refuses a persisted slot whose sidecar names a different evaluator id", () => {
+  it("indexes identity independently of caller position and appends later identities monotonically", () => {
+    const reviewers = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: REVIEWER_A }, { id: REVIEWER_B }]);
+    const reviewerKeyIds = new Map(reviewers.map((entry) => [entry.id, entry.key.keyId]));
+
+    const [inspect] = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: INSPECT_EVALUATOR }]);
+    expect(inspect?.id).toBe(INSPECT_EVALUATOR);
+    expect(JSON.parse(readFileSync(join(workspaceDir, "venue", "evaluators", "3", "verdict-signing-key.json"), "utf8")))
+      .toEqual({ keyId: inspect!.key.keyId, evaluatorId: INSPECT_EVALUATOR });
+
+    const reversed = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: REVIEWER_B }, { id: REVIEWER_A }]);
+    expect(reversed.map((entry) => entry.id)).toEqual([REVIEWER_B, REVIEWER_A]);
+    expect(reversed.map((entry) => entry.key.keyId)).toEqual([
+      reviewerKeyIds.get(REVIEWER_B),
+      reviewerKeyIds.get(REVIEWER_A),
+    ]);
+
+    const subset = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: INSPECT_EVALUATOR }, { id: REVIEWER_B }]);
+    expect(subset.map((entry) => entry.id)).toEqual([INSPECT_EVALUATOR, REVIEWER_B]);
+    expect(subset.map((entry) => entry.key.keyId)).toEqual([inspect!.key.keyId, reviewerKeyIds.get(REVIEWER_B)]);
+  });
+
+  it("refuses duplicate evaluator ids in one request before minting", () => {
+    expect(() => loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }, { id: EVALUATOR_1 }]))
+      .toThrow(BenchmarkProductError);
+    expect(() => readFileSync(join(workspaceDir, "venue", "evaluators", "1", "verdict-signing-key.pem")))
+      .toThrow();
+  });
+
+  it("refuses duplicate evaluator identities persisted in different slots", () => {
+    const keys = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }, { id: EVALUATOR_2 }]);
+    writeFileSync(
+      join(workspaceDir, "venue", "evaluators", "2", "verdict-signing-key.json"),
+      `${JSON.stringify({ keyId: keys[1]!.key.keyId, evaluatorId: EVALUATOR_1 }, null, 2)}\n`,
+    );
+    expect(() => loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]))
+      .toThrow(BenchmarkProductError);
+  });
+
+  it("refuses non-numeric persisted slot directories", () => {
     loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]);
-    expect(() => loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_2 }]))
+    renameSync(
+      join(workspaceDir, "venue", "evaluators", "1"),
+      join(workspaceDir, "venue", "evaluators", "reviewer-a"),
+    );
+    expect(() => loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]))
       .toThrow(BenchmarkProductError);
   });
 

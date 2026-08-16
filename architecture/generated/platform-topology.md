@@ -83,7 +83,7 @@ The catalog contains **89** entries: **54** `platform-v1` packages, **8** disabl
 | @jinn-network/task-execution-supervisor | packages/task-execution/backend-local/supervisor | task-execution | 3 | platform | execution supervision capability | candidate | platform-v1 | canary-only | @jinn-network/task-execution-backend<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/task-execution-workspace | packages/task-execution/backend-local/workspace | task-execution | 3 | platform | workspace preparation capability | candidate | platform-v1 | canary-only | @jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/task-execution-evaluation-harness | packages/task-execution/evaluation-harness | task-execution | 3 | platform | evaluation orchestration capability | candidate | platform-v1 | canary-only | @jinn-network/attestation-issuer<br>@jinn-network/evidence-protocol<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace | — | — |
-| @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters | task-execution | 3 | platform | evaluator adapters | candidate | platform-v1 | canary-only | @jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-supervisor | — | — |
+| @jinn-network/task-execution-evaluator-adapters | packages/task-execution/evaluator-adapters | task-execution | 3 | platform | evaluator adapters | candidate | platform-v1 | canary-only | @jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor | — | — |
 | @jinn-network/task-execution-oci-grader | packages/task-execution/oci-grader | task-execution | 3 | platform | host-owned OCI grader execution | candidate | platform-v1 | canary-only | @jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-profiles | — | — |
 | @jinn-network/task-execution-profiles | packages/task-execution/profiles | task-execution | 1 | platform | task profile family | candidate | platform-v1 | canary-only | @jinn-network/task-execution-protocol<br>@noble/hashes<br>ajv<br>safe-regex<br>zod | — | — |
 | @jinn-network/task-execution-protocol | packages/task-execution/protocol | task-execution | 1 | platform | task-execution protocol | candidate | platform-v1 | canary-only | @noble/hashes<br>zod | — | — |
@@ -361,6 +361,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/task-execution-evaluation-harness | runtime | @jinn-network/task-execution-workspace |
 | @jinn-network/task-execution-evaluator-adapters | runtime | @jinn-network/task-execution-evaluation-harness |
 | @jinn-network/task-execution-evaluator-adapters | runtime | @jinn-network/task-execution-profiles |
+| @jinn-network/task-execution-evaluator-adapters | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/task-execution-evaluator-adapters | runtime | @jinn-network/task-execution-supervisor |
 | @jinn-network/task-execution-launchers | runtime | @jinn-network/task-execution-profiles |
 | @jinn-network/task-execution-launchers | runtime | @jinn-network/task-execution-protocol |
@@ -1254,6 +1255,7 @@ The exact 54-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/admission-receipt/adversarial/unsigned.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/admission-receipt/adversarial/wrong-subject.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/admission-receipt/golden/valid-signed.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/composite/adversarial/composite-depth-3.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/composite/adversarial/composite-fanout-33.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/composite/golden/within-bounds.json | — | — | — |
@@ -1369,7 +1371,13 @@ The exact 54-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/verdict-rule/golden/fractional-decimal-string-threshold.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/verdict-rule/golden/inconclusive-predicate.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/verdict-rule/golden/threshold-pass.json | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-accept-reject/1.0.0/semantics.json | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-accept-reject/1.0.0/semantics.sha256 | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.json | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/binary-judgment/parsers/binary-judgment-evaluation/1.0.0/semantics.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profile/v1/profile.json | — | — | https://spec.jinn.network/profiles/task-profile/v1 |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.json | — | — | https://spec.jinn.network/task-profiles/binary-judgment/1.0 |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.json | — | — | https://spec.jinn.network/task-profiles/evaluation-task/1.0 |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json | — | — | https://spec.jinn.network/task-profiles/prediction-forecast/1.0 |
@@ -1543,13 +1551,14 @@ The exact 54-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | https://spec.jinn.network/schemas/information-world/v1 | `$id` | schemas | @jinn-network/information-world | packages/environments/information-world/schemas/information-world.schema.json |
 | https://spec.jinn.network/schemas/trace-derivation-statement/v1 | `$id` | schemas | @jinn-network/evidence-trace | packages/evidence/trace/schemas/trace-derivation-statement.schema.json |
 | https://spec.jinn.network/schemas/trace/v1 | `$id` | schemas | @jinn-network/evidence-trace | packages/evidence/trace/schemas/trace.schema.json |
+| https://spec.jinn.network/task-profiles/binary-judgment/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/binary-judgment/1.0/profile.json |
 | https://spec.jinn.network/task-profiles/evaluation-task/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.json |
 | https://spec.jinn.network/task-profiles/prediction-forecast/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json |
 | https://spec.jinn.network/task-profiles/repository-work/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/repository-work/1.0/profile.json |
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3772 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3795 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1557,13 +1566,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 30 |
 | boundaryPolicies | 23 |
 | catalogManifests | 89 |
-| catalogPublicSurfaces | 1274 |
+| catalogPublicSurfaces | 1291 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 2978 |
-| generatedOutputSources | 1330 |
+| discoveredFirstPartySurfaces | 3001 |
+| generatedOutputSources | 1347 |
 | generatorSources | 645 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |

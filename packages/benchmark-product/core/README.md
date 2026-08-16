@@ -46,7 +46,7 @@ operator command.
 ## Operations library and CLI parity
 
 The generated [parity artifact](./parity-matrix.v1.json) is authoritative. It
-contains **36 generated operations**, all shipped through the library and CLI
+contains **41 generated operations**, all shipped through the library and CLI
 with an explicit shipped/deferred GUI disposition:
 
 | Library operation | CLI command | Purpose |
@@ -58,8 +58,13 @@ with an explicit shipped/deferred GUI disposition:
 | `authorityGrant` | `colophon authority grant` | Sponsor-only membership or grant change. |
 | `authorityRevoke` | `colophon authority revoke` | Sponsor-only grant or membership revocation. |
 | `authorityShow` | `colophon authority show` | Read the authority policy. |
+| `bindInspectBinaryJudge` | `colophon runtime inspect bind-judge` | Bind sealed binary-judge instruments to exact Run-arm requirements. |
 | `createDraft` | `colophon draft create` | Create a draft, optionally from JSON. |
 | `getDraft` | `colophon draft show` | Read one draft. |
+| `createHumanReviewPackets` | `colophon human-review packet create` | Create blind item packets and visibility receipts before lock. |
+| `signHumanReviewResponse` | `colophon human-review response sign` | Seal a response as compact Result Evaluation evidence with a configured evaluator signer. |
+| `admitHumanTruth` | `colophon human-review admit` | Derive two-person unanimous or explicitly operator-only truth records, including exclusion/replacement accounting. |
+| `importBinaryItemBank` | `colophon import item-bank` | Import admitted binary-judgment items from three canonical JSONL manifests. |
 | `importSweBenchRows` | `colophon import swebench` | Import SWE-bench-shaped rows through interop. |
 | `initWorkspace` | `colophon init` | Create a workspace and founding sponsor. |
 | `inspectDraft` | `colophon inspect` | Resolve benchmark, arms, and assurance facts. |
@@ -96,6 +101,8 @@ line to receive fixes without changing the bundle-format contract:
 ```text
 npx @colophon-claims/verify@1.0.0 <dir>
 npx @colophon-claims/verify@1 <dir>
+npx @colophon-claims/verify@2.0.0 <dir> # binary qualification bundle v4
+npx @colophon-claims/verify@2 <dir>     # compatible v2/v4 reader line
 ```
 
 It reads only the caller-selected immutable bundle, needs no workspace or
@@ -120,6 +127,47 @@ contract and post-dispatch ordering check are in the
 
 Every workspace command accepts `--workspace <dir>`, `--principal <id>`, and
 `--json`; command-specific flags are listed by `colophon help`.
+
+Human-review commands are intentionally CLI/core-only: they handle licensed local files and
+machine-local signing keys, so browser uploads and browser key custody are unavailable. Reviewer
+responses select an identity from a configured signer inventory; no command accepts raw private
+key material. Publication-grade truth requires two complete, matching reviews from distinct keys
+and roster-attested distinct people with no declared conflicts. Disagreement, incomplete review,
+or `indeterminate` excludes the item and requires a later same-class/stratum reserve before lock.
+Operator-only truth is sealed and signed for auditability but is always reported as
+non-publication-grade.
+
+Binary item-bank intake composes that admission boundary with the existing Task,
+EvaluationSpec, Benchmark, and sealed-store contracts:
+
+```text
+colophon import item-bank --workspace <dir> --principal <id> \
+  --profile binary-judgment@1 --draft <draftId> \
+  --items <items.jsonl> --sources <sources.jsonl> \
+  --admissions <admissions.jsonl>
+```
+
+Each file is canonical JSONL: UTF-8 without a byte-order mark, LF-only, one canonical JSON object per line, a final LF,
+and rows sorted by their contract key. `items.jsonl` carries the strict solver-visible payload
+only. `sources.jsonl` maps each payload provenance digest to full source, license, and attribution
+descriptors without importing source bytes. `admissions.jsonl` indexes the exact F2-sealed
+admission manifest, label resolution, and analysis context records already in the workspace. The
+index is not admission authority: import replays the complete signed F2 closure, including
+reviewer/key bindings and role-separated product-authority signatures, before deriving accepted
+items, exclusions, publication grade, classes, or strata. The operation rejects missing or extra
+admission records, digest or item-id drift, truth/class/stratum mismatches, wrong-draft evidence,
+invalid replacement accounting, unauthenticated closure records, and non-canonical files.
+Only admitted replacements become Tasks; excluded and unselected reserve rows are accounted but
+not dispatched. No model, Inspect, Harbor, network, or licensed-data backend is reimplemented.
+
+Consumers must authenticate an admission through
+`verifyBinaryJudgmentAdmissionClosureInWorkspace({ workspaceDir, admissionManifestSha256, expectedDraftId })`.
+It replays the exact manifest, resolutions, analysis contexts, item bytes, exclusion/replacement
+ledger, reviewer Result Evaluations, and role-separated authority evidence before returning
+derived publication status, classes, strata, accepted/excluded items, and the complete reachable
+digest inventory. Portable readers can call `verifyBinaryJudgmentAdmissionClosure` with their own
+exact-record resolver and reviewer/authority trust ports; neither API accepts caller-authored
+candidate truth.
 
 ## Authority and lifecycle behavior
 

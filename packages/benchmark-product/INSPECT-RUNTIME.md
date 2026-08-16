@@ -49,6 +49,11 @@ repetition cell, supervises attempts, retains exact artifacts, attributes the
 score, accounts for non-results, produces the signed Report, and verifies the
 portable bundle.
 
+The binary-judgment path described below is a deliberately smaller sibling:
+Inspect performs one generation and writes its native log, but does not score
+the response. The deterministic binary-judgment evaluator remains a later Jinn
+stage.
+
 ## Architecture status
 
 This integration is a private Tier 4 product adapter, not a Jinn protocol or
@@ -71,6 +76,131 @@ sandbox service: one task-level default Docker declaration, one environment,
 one fixed policy, and no task network. Operational containment and Inspect
 sandbox events do not become positive Jinn isolation evidence; OCI campaigns
 continue to report isolation as `unverifiable`.
+
+## Binary-judgment instrument binding
+
+`runtime inspect bind-judge` is an additive, versioned path for the
+`network.jinn.task-profile.binary-judgment` profile. It does not change the
+existing Inspect selection v1–v4 contracts. Intake must already have imported
+one shared, arm-neutral benchmark. The binding operation leaves those Tasks
+unchanged and puts one exact scalar
+`network.jinn.binary-judgment.instrument=sha256:<64-lowercase-hex>` requirement
+on each Run arm. Instrument IDs equal their arm IDs, arms are code-unit sorted,
+and every arm uses one identical generation block.
+
+One Matrix cell is exactly one Inspect sample and one broker call. The sealed
+contract fixes Luna as both requested and resolved model, `maxOutputTokens` to
+128, storage/background/streaming off, no tools, no fallback models, and zero
+retries. The generation request has no temperature field; the existing
+single-call Luna broker owns its locked provider policy. Inspect is invoked
+with one epoch and no scorer, so it cannot turn its native score into another
+Matrix vote.
+
+The input file has this shape. All digests are illustrative; production values
+must be the exact lowercase SHA-256 values of the locally built runtime sources,
+image, and already-sealed instruments:
+
+```json
+{
+  "schema": "jinn.network/benchmark-product/inspect-binary-judge-binding-request/1",
+  "manifest": {
+    "schema": "jinn.network/benchmark-product/inspect-binary-judge-selection/1",
+    "runtime": {
+      "imageDigest": "sha256:<64-lowercase-hex>",
+      "platform": "linux/amd64",
+      "pythonVersion": "3.11.9",
+      "inspectVersion": "0.3.255",
+      "inspectEvalsVersion": "0.16.0",
+      "openaiSdkVersion": "2.53.0",
+      "runtimeHostSourceSha256": "<64-lowercase-hex>",
+      "workerSourceSha256": "<64-lowercase-hex>",
+      "brokerSourceSha256": "<64-lowercase-hex>",
+      "modelProviderSourceSha256": "<64-lowercase-hex>"
+    },
+    "execution": {
+      "callsPerCell": 1,
+      "epochs": 1,
+      "inspectScorer": false,
+      "retries": 0,
+      "fallbacks": 0,
+      "tools": [],
+      "storage": false
+    },
+    "requirement": {
+      "key": "network.jinn.binary-judgment.instrument",
+      "valueShape": "sha256:<64-lowercase-hex>",
+      "comparison": "exact",
+      "location": "submission-effective-requirements"
+    },
+    "arms": [
+      {
+        "armId": "alpha",
+        "instrumentSha256": "sha256:<64-lowercase-hex>",
+        "model": "gpt-5.6-luna",
+        "generation": {
+          "reasoningEffort": "low",
+          "maxOutputTokens": 128,
+          "store": false,
+          "background": false,
+          "stream": false,
+          "serviceTier": "default",
+          "tools": [],
+          "fallbackModels": [],
+          "retries": 0,
+          "persistedConversation": false,
+          "metadata": null,
+          "promptCacheIdentifier": null
+        }
+      },
+      {
+        "armId": "beta",
+        "instrumentSha256": "sha256:<different-64-lowercase-hex>",
+        "model": "gpt-5.6-luna",
+        "generation": {
+          "reasoningEffort": "low",
+          "maxOutputTokens": 128,
+          "store": false,
+          "background": false,
+          "stream": false,
+          "serviceTier": "default",
+          "tools": [],
+          "fallbackModels": [],
+          "retries": 0,
+          "persistedConversation": false,
+          "metadata": null,
+          "promptCacheIdentifier": null
+        }
+      }
+    ]
+  },
+  "host": {
+    "kind": "oci",
+    "dockerPath": "/absolute/path/to/docker",
+    "imageDigest": "sha256:<same-runtime-image-digest>",
+    "platform": "linux/amd64",
+    "user": "65532:65532"
+  }
+}
+```
+
+Bind it only after the benchmark Tasks and instruments have been sealed:
+
+```bash
+benchmark-product runtime inspect bind-judge \
+  --workspace /absolute/path/to/workspace \
+  --principal sponsor-1 \
+  --draft my-draft \
+  --file /absolute/path/to/inspect-judge-binding.json
+```
+
+The launcher reconstructs and digest-checks the canonical semantic request from
+the sealed Task and selected instrument. It stages `inspect-run.json` and
+expects exactly `judge-response`, `judge-observation`, and the optional
+`inspect-log`. The observation binds the Task, arm, replicate, instrument,
+semantic request, response, broker event and usage, and exact call count. It
+contains no verdict. The raw response and optional official Inspect log retain
+the source evidence required by later portable replay; deterministic evaluation
+and aggregation remain outside this adapter.
 
 ## Installation and selection
 
