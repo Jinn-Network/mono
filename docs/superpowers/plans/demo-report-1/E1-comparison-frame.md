@@ -223,13 +223,19 @@ leaves the substantive claim** — §2.3's "removes the strongest objection to a
 arm A" no longer applies, and §2.7's "Not a judgment of any authored skill's quality" now carries
 that weight alone.
 
-**Open and gated.** 86 of the 87 active tasks declare `environment.network_mode: public`; exactly
-one declares `no-network`. Under §2.7's contamination discipline that is a live contradiction with
-the 21-unit floor, and DR-2026-08-16 Decision 6 leaves it deliberately open: the static admission
-stage produces the count of units surviving every check except network, at zero execution cost, and
-that number decides between a reviewed per-unit egress broker and an honest second STOP. Nothing
-may assume either outcome. **On present evidence a second STOP is the more likely outcome, and that
-is recorded before implementation rather than discovered after it.**
+**Open, gated, now closed.** 86 of the 87 active tasks declare `environment.network_mode: public`;
+exactly one declares `no-network`. Under §2.7's contamination discipline that is a live
+contradiction with the 21-unit floor, and DR-2026-08-16 Decision 6 gated the ruling on a number
+rather than a guess: the count of units surviving every static check except network, obtainable at
+zero execution cost.
+
+That count is now measured. Static capacity is **1 unit / 1 cluster** against a required 21 / 13,
+so **Demo-1 remains stopped and nothing may execute**. But **57 units across 45 clusters** clear
+every static check except egress, which is comfortably above the floor. Decision 6 therefore closes
+in favour of building the reviewed per-unit egress broker as its own packet. This amendment's
+original prediction — that a second STOP was more likely — was wrong; it is left standing in
+DR-2026-08-16 rather than edited out, because gating the ruling on evidence was worth doing exactly
+because the guess would have decided it wrongly.
 
 ## 2.4 Content identity: how it is guaranteed and how a reader audits it
 

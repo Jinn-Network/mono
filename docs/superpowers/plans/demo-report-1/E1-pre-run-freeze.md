@@ -202,6 +202,32 @@ verifiers are non-hermetic too — `verifier/test.sh` runs `apt-get update` and
 `curl https://astral.sh/uv/…`. Against a 21-unit floor, and under a contamination rule that makes
 unrestricted public networking ineligible without a separately reviewed mechanism, **this source
 may not be viable either.** DR-2026-08-16 Decision 6 gates the ruling on the static admission
-count, which costs no execution to obtain. **On present evidence a second STOP is the more likely
-outcome.** It is written here before the work starts so that, if it happens, it reads as the method
-holding rather than the method failing.
+count, which costs no execution to obtain.
+
+### Static admission result (2026-08-16)
+
+The gate has been run — `yarn skillsbench:inventory`, zero model arms, zero previews, zero Docker
+controls. It authenticates all 87 active tasks from the pinned release and refuses any byte stream
+that does not hash back to its declared Git object id.
+
+| Measure | Result |
+|---|---|
+| Inventoried | 84 of 87 |
+| Refused at construction | 3 — `simpo-code-reproduction` (git submodule), `earthquake-phase-association`, `seismic-phase-picking` (a `licenses` directory where a skill folder belongs) |
+| Independence clusters | 52, from 129 evidence-bearing edges |
+| **Static capacity** | **1 unit / 1 cluster** against a required **21 / 13** — **insufficient** |
+| Failing on egress alone | 83 of 84 |
+| Other rejections | 21 statement disclosure, 19 licence, 6 answer collision |
+| **Clearing every static check but egress** | **57 units / 45 clusters** |
+
+**Demo-1 therefore remains STOPPED**, now at a measured capacity of 1 against a floor of 21 rather
+than at the superseded method's domain ceiling. Nothing may execute.
+
+**But the source is not disqualified.** 57 units across 45 clusters clear everything except egress,
+which is comfortably above the floor with room to lose units to the dynamic oracle and no-op
+controls. DR-2026-08-16 Decision 6 is therefore closed in favour of building the reviewed per-unit
+egress broker. That is a decision to build, not a finding that the source has passed.
+
+**This document's earlier prediction — that a second STOP was the more likely outcome — was wrong,
+and is left standing above rather than edited out.** Gating the ruling on a number was worth doing
+precisely because the guess would have been the wrong answer.

@@ -167,6 +167,44 @@ count of units surviving every static check *except* network. That number decide
 Until that number exists, no implementation may assume either outcome. The freeze STOPs by default
 and the broker is additive, so the gate is reversible in both directions.
 
+### Decision 6 — closed 2026-08-16, resolved to option (b)
+
+The gate has been run. `yarn skillsbench:inventory` authenticates all 87 active tasks from the
+pinned release, executing no model and pulling no image
+(`execution: {modelArms: 0, previews: 0, dockerControls: 0}`).
+
+| Measure | Result |
+|---|---|
+| Inventoried | 84 of 87 |
+| Refused at construction | 3 — `simpo-code-reproduction` (git submodule; package not self-contained), `earthquake-phase-association` and `seismic-phase-picking` (a `licenses` directory where a skill folder belongs) |
+| Independence clusters over all inventoried units | 52, from 129 evidence-bearing edges |
+| **Static capacity as things stand** | **1 unit / 1 cluster** — against a required 21 / 13. **Insufficient.** |
+| Units failing on egress alone | 83 of 84 |
+| Other rejections | 21 statement disclosure, 19 licence, 6 answer collision |
+| **Counterfactual: units clearing every static check but egress** | **57 units / 45 clusters** |
+
+**57 units across 45 clusters is comfortably above the 21/13 floor**, with room to lose units to
+the dynamic oracle and no-op controls and still clear it. The per-unit egress broker is therefore
+worth building, and **Decision 6 resolves to option (b)**.
+
+**The amendment's own prediction was wrong, and that is recorded rather than quietly dropped.** The
+section below still says a second STOP was the more likely outcome. It was written before the
+number existed and it is left standing, because the point of gating the ruling on evidence was
+precisely that a guess — including this document's own — should not decide it.
+
+Two things follow, and neither is optional:
+
+1. **Today's honest state is still STOP.** Capacity is 1/21. The broker does not exist, so no
+   freeze may report `ready` and nothing may execute. Option (b) is a decision to build, not a
+   decision that the source has passed.
+2. **The broker is its own reviewed packet** with its own acceptance criteria: a per-unit allowlist
+   derived statically from the unit's own source; hard denial of `github.com`,
+   `raw.githubusercontent.com`, `codeload.github.com`, every SkillsBench mirror, and the benchmark
+   website; enforcement through the existing `network: "none" | "broker-only"` seam in
+   `packages/benchmark-product/core/src/runtime/inspect/oci.ts`; and a unit whose declared need
+   cannot be met by such an allowlist staying `unverifiable`. Until it lands and its evidence is
+   sealed, `runtimeIsolationSatisfiable` stays `unverifiable` for all 83 public-mode units.
+
 ## What this decision does not do
 
 - It does not rewrite, reinterpret, or retro-fit the historical STOP. The v2, task-evidence v1, and
@@ -244,6 +282,11 @@ manipulation check makes A-versus-B uninformative about delivery mechanism, the 
 outcome firewall, and every must-not-imply line in E1 §2.7.
 
 ## Honest statement of the likely outcome
+
+> **Superseded 2026-08-16 by the measured result in Decision 6.** The paragraph below is left
+> exactly as written. The counterfactual capacity is 57 units across 45 clusters, so the broker
+> path is viable and the prediction was wrong. Keeping a wrong prediction visible is the point:
+> the ruling was gated on a number so that no guess — including this one — would decide it.
 
 On the static evidence available when this DR was written, the most probable terminal state of a
 correct implementation is **a second, SkillsBench-backed STOP** — because 86 of 87 active tasks
