@@ -40,6 +40,11 @@ const portals = [
     archive: "evidence-repository.tgz",
   },
   {
+    name: "@jinn-network/execution-evidence-builder",
+    root: join(repoRoot, "packages", "evidence", "execution-evidence-builder"),
+    archive: "execution-evidence-builder.tgz",
+  },
+  {
     name: "@jinn-network/execution-recorder",
     root: join(repoRoot, "packages", "evidence", "execution-recorder"),
     archive: "execution-recorder.tgz",
