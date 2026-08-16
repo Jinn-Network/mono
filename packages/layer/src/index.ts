@@ -51,16 +51,21 @@ export {
 
 export {
   publish,
+  publishManifestBatch,
   PublishLedgerError,
   toPublishedEpisode,
   toTraceEnvelope,
   EPISODE_ARTIFACT_TYPE,
   TRACE_ENVELOPE_ARTIFACT_TYPE,
   type HarnessPublishDeps,
+  type ManifestBatchPublishDeps,
+  type ManifestBatchSetResult,
   type PublishedResult,
   type PublishOptions,
   type PublishResult,
 } from './publish.js';
+
+export { createEvidenceFetcher } from './bridge-fetch-evidence.js';
 
 export {
   extractSkill,

@@ -45,7 +45,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Install client dependencies
-        run: yarn --cwd client install --immutable
+        run: yarn --cwd operator install --immutable
 
       - name: Start alert capture webhook
         id: webhook
@@ -131,7 +131,7 @@ jobs:
           }
 
           set +e
-          OUTPUT="$(yarn --cwd client net-liveness 2>&1)"
+          OUTPUT="$(yarn --cwd operator net-liveness 2>&1)"
           CODE=$?
           set -e
 
@@ -198,7 +198,7 @@ jobs:
           cat > "$BODY_FILE" <<BODY_EOF
           ## Net-liveness probe posted a stale alert
 
-          The scheduled net-liveness monitor ran \`yarn --cwd client net-liveness\`
+          The scheduled net-liveness monitor ran \`yarn --cwd operator net-liveness\`
           and captured a stale alert payload. The chain is advancing and the
           indexer is caught up, but no attempt/verdict activity was indexed within
           the configured threshold.

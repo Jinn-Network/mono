@@ -15,14 +15,14 @@
 # Render dirs only — logic (api/ hooks/ lib/ notifications/) is agent-reviewable.
 # A NEW render directory must be added here by hand; the glob does not infer it.
 
-# Operator app (client/src/dashboard/spa)
-/client/src/dashboard/spa/src/App.tsx     @oaksprout @ritsukai
-/client/src/dashboard/spa/src/routes.ts   @oaksprout @ritsukai
-/client/src/dashboard/spa/src/pages/      @oaksprout @ritsukai
-/client/src/dashboard/spa/src/components/ @oaksprout @ritsukai
-/client/src/dashboard/spa/src/regions/    @oaksprout @ritsukai
-/client/src/dashboard/spa/src/shell/      @oaksprout @ritsukai
-/client/src/dashboard/spa/src/styles/     @oaksprout @ritsukai
+# Operator app (operator/src/dashboard/spa)
+/operator/src/dashboard/spa/src/App.tsx     @oaksprout @ritsukai
+/operator/src/dashboard/spa/src/routes.ts   @oaksprout @ritsukai
+/operator/src/dashboard/spa/src/pages/      @oaksprout @ritsukai
+/operator/src/dashboard/spa/src/components/ @oaksprout @ritsukai
+/operator/src/dashboard/spa/src/regions/    @oaksprout @ritsukai
+/operator/src/dashboard/spa/src/shell/      @oaksprout @ritsukai
+/operator/src/dashboard/spa/src/styles/     @oaksprout @ritsukai
 
 # Network explorer (packages/indexer/explorer)
 /packages/indexer/explorer/src/App.tsx     @oaksprout @ritsukai
@@ -56,7 +56,7 @@
 /.github/workflows/     @oaksprout @ritsukai
 /apps/broadcast-bot/    @oaksprout @ritsukai
 /apps/website/          @oaksprout @ritsukai
-/client/                @oaksprout @ritsukai
+/operator/                @oaksprout @ritsukai
 /packages/              @oaksprout @ritsukai
 /plugin/runtime/        @oaksprout @ritsukai
 /scripts/               @oaksprout @ritsukai

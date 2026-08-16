@@ -4,7 +4,7 @@ Print-only by design (spec 2026-07-17 §3.3): the doctor never executes a
 fix; every failure carries exactly one copy-paste ``remedy`` command. A check
 result is a plain dict ``{"name", "ok", "detail"}`` with ``"remedy"`` present
 exactly when ``ok`` is false — the client CLI's shape
-(``client/src/cli/commands/doctor.ts``).
+(``operator/src/cli/commands/doctor.ts``).
 
 Three call sites share one ``run_checks`` + one ``render``: the session-start
 fast path (``full=False``), ``/jinn doctor``, and the ``jinn-doctor``

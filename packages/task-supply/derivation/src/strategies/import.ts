@@ -13,7 +13,7 @@ export const IMPORT_STRATEGY_ID = "import.swe-rebench.v1" as const;
 
 /**
  * The upstream row fields this strategy reads. Declared locally, never imported: the legacy
- * shape lives in `client/`, which is reference-only (program §5 contract 12), and C2 declares
+ * shape lives in `operator/`, which is reference-only (program §5 contract 12), and C2 declares
  * its own for grouping (planning Finding (e)).
  */
 export interface UpstreamRebenchRow {

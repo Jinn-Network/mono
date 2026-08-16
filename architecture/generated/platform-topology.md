@@ -12,8 +12,8 @@ The catalog contains **94** entries: **13** `sealed-platform-v1` packages, **59*
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | @jinn-network/broadcast-bot | apps/broadcast-bot | repository-operations | — | repository-tooling | repository and community communications automation | stable-semantics | transitional-or-private | never | smol-toml<br>twitter-api-v2<br>viem<br>zod | — | — |
 | @jinn-network/website | apps/website | devx | 4 | product | developer-experience website product | candidate | transitional-or-private | private | class-variance-authority<br>clsx<br>fumadocs-core<br>fumadocs-mdx<br>fumadocs-ui<br>lucide-react<br>next<br>radix-ui<br>react<br>react-dom<br>tailwind-merge<br>zod | — | — |
-| @jinn-network/client | client | operator | 4 | product | operator daemon and application | transitional | legacy-product-lines | independent | @ethereumjs/wallet<br>@grpc/grpc-js<br>@hono/node-server<br>@huggingface/transformers<br>@jinn-network/attestation-issuer<br>@jinn-network/core<br>@jinn-network/environment-record<br>@jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/execution-evidence-builder<br>@jinn-network/execution-recorder<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-pipeline<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/plugin<br>@jinn-network/policy-identity<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-facts-task-execution<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/sdk<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-authoring<br>@jinn-network/trust-core<br>@jinn-network/trust-resolve<br>@lmoe/gliner-onnx<br>@modelcontextprotocol/sdk<br>@msgpack/msgpack<br>@noble/curves<br>@noble/ed25519<br>@noble/hashes<br>@opentelemetry/api<br>@opentelemetry/core<br>@opentelemetry/exporter-trace-otlp-grpc<br>@opentelemetry/exporter-trace-otlp-http<br>@opentelemetry/resources<br>@opentelemetry/sdk-node<br>@opentelemetry/sdk-trace-base<br>@safe-global/protocol-kit<br>@safe-global/safe-deployments<br>@safe-global/types-kit<br>@scure/bip32<br>@scure/bip39<br>@secretlint/core<br>@secretlint/secretlint-rule-preset-recommend<br>@slicekit/erc8128<br>@types/better-sqlite3<br>@x402/core<br>@x402/evm<br>@x402/fetch<br>@x402/hono<br>ajv<br>ajv-formats<br>better-sqlite3<br>bs58<br>canonicalize<br>chokidar<br>dotenv<br>hono<br>node-pty<br>protobufjs<br>safe-regex<br>semver<br>tokenlens<br>viem<br>ws<br>yaml<br>zod<br>zod-to-json-schema | @coinbase/cdp-sdk | — |
-| @jinn-network/operator-spa | client/src/dashboard/spa | operator | 4 | product | operator dashboard product | candidate | transitional-or-private | private | @hookform/resolvers<br>@radix-ui/react-alert-dialog<br>@radix-ui/react-dialog<br>@radix-ui/react-dropdown-menu<br>@radix-ui/react-label<br>@radix-ui/react-popover<br>@radix-ui/react-progress<br>@radix-ui/react-radio-group<br>@radix-ui/react-scroll-area<br>@radix-ui/react-slot<br>@radix-ui/react-switch<br>@radix-ui/react-tabs<br>@radix-ui/react-tooltip<br>@tanstack/react-query<br>@tanstack/react-table<br>class-variance-authority<br>clsx<br>html-to-image<br>lucide-react<br>react<br>react-dom<br>react-hook-form<br>sonner<br>tailwind-merge<br>tailwindcss-animate<br>wouter<br>xterm<br>xterm-addon-fit<br>xterm-addon-web-links<br>zod | — | — |
+| @jinn-network/client | operator | operator | 4 | product | operator daemon and application | transitional | legacy-product-lines | independent | @ethereumjs/wallet<br>@grpc/grpc-js<br>@hono/node-server<br>@huggingface/transformers<br>@jinn-network/attestation-issuer<br>@jinn-network/core<br>@jinn-network/environment-record<br>@jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/execution-evidence-builder<br>@jinn-network/execution-recorder<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-pipeline<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/plugin<br>@jinn-network/policy-identity<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-facts-task-execution<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/sdk<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-authoring<br>@jinn-network/trust-core<br>@jinn-network/trust-resolve<br>@lmoe/gliner-onnx<br>@modelcontextprotocol/sdk<br>@msgpack/msgpack<br>@noble/curves<br>@noble/ed25519<br>@noble/hashes<br>@opentelemetry/api<br>@opentelemetry/core<br>@opentelemetry/exporter-trace-otlp-grpc<br>@opentelemetry/exporter-trace-otlp-http<br>@opentelemetry/resources<br>@opentelemetry/sdk-node<br>@opentelemetry/sdk-trace-base<br>@safe-global/protocol-kit<br>@safe-global/safe-deployments<br>@safe-global/types-kit<br>@scure/bip32<br>@scure/bip39<br>@secretlint/core<br>@secretlint/secretlint-rule-preset-recommend<br>@slicekit/erc8128<br>@types/better-sqlite3<br>@x402/core<br>@x402/evm<br>@x402/fetch<br>@x402/hono<br>ajv<br>ajv-formats<br>better-sqlite3<br>bs58<br>canonicalize<br>chokidar<br>dotenv<br>hono<br>node-pty<br>protobufjs<br>safe-regex<br>semver<br>tokenlens<br>viem<br>ws<br>yaml<br>zod<br>zod-to-json-schema | @coinbase/cdp-sdk | — |
+| @jinn-network/operator-spa | operator/src/dashboard/spa | operator | 4 | product | operator dashboard product | candidate | transitional-or-private | private | @hookform/resolvers<br>@radix-ui/react-alert-dialog<br>@radix-ui/react-dialog<br>@radix-ui/react-dropdown-menu<br>@radix-ui/react-label<br>@radix-ui/react-popover<br>@radix-ui/react-progress<br>@radix-ui/react-radio-group<br>@radix-ui/react-scroll-area<br>@radix-ui/react-slot<br>@radix-ui/react-switch<br>@radix-ui/react-tabs<br>@radix-ui/react-tooltip<br>@tanstack/react-query<br>@tanstack/react-table<br>class-variance-authority<br>clsx<br>html-to-image<br>lucide-react<br>react<br>react-dom<br>react-hook-form<br>sonner<br>tailwind-merge<br>tailwindcss-animate<br>wouter<br>xterm<br>xterm-addon-fit<br>xterm-addon-web-links<br>zod | — | — |
 | @jinn-network/autopilot | packages/autopilot | autopilot | 4 | transitional | vendored tier-4 product residue | transitional | transitional-or-private | private | @jinn-network/sdk<br>zod | — | — |
 | @colophon-claims/cli | packages/benchmark-product/cli | benchmark-product | 4 | product | Colophon self-serve command and packaged local application | experimental | transitional-or-private | never | @colophon-claims/core<br>@colophon-claims/verify<br>next<br>react<br>react-dom | — | — |
 | @colophon-claims/core | packages/benchmark-product/core | benchmark-product | 4 | product | benchmark product core | experimental | transitional-or-private | never | @colophon-claims/verify<br>@fontsource-variable/newsreader<br>@fontsource-variable/public-sans<br>@fontsource/ibm-plex-mono<br>@jinn-network/attestation-issuer<br>@jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-evaluation<br>@jinn-network/benchmarking-evidence<br>@jinn-network/benchmarking-interop<br>@jinn-network/benchmarking-local<br>@jinn-network/benchmarking-native-capture<br>@jinn-network/benchmarking-protocol<br>@jinn-network/benchmarking-publication<br>@jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/record-publication<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-oci-grader<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>zod | — | — |
@@ -703,25 +703,25 @@ The exact 72-package trusted-publisher set is the union of stack-published group
 
 | Kind | Package | Source | Export | Packed targets | Self-identifying claim |
 | --- | --- | --- | --- | --- | --- |
-| fixtures | @jinn-network/client | client/fixtures/config.example.json | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/jinn-repo-live-issue-task.example.json | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/local-config.json | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/mint-candidate-example.json | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/prediction-apy-v0-intent.example.json | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/prediction-v1-task.example.json | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/aider/example-analytics.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/aider/example-chat-history.md | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/claude-code/example-session.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/claude-code/stream-json-example.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/claude-code/stream-json-with-model.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/codex/example-session.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/codex/exec-json-with-usage.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/codex/wrapped-0-129-mcp-tools.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/continue/dev_data/chat/0.2.0.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/continue/dev_data/edit/0.2.0.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/gemini/example-session.jsonl | — | — | — |
-| fixtures | @jinn-network/client | client/fixtures/transcripts/hermes-agent/session-example.json | — | — | — |
-| schemas | @jinn-network/client | client/schemas/jinn-manifest-v1.json | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/config.example.json | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/jinn-repo-live-issue-task.example.json | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/local-config.json | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/mint-candidate-example.json | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/prediction-apy-v0-intent.example.json | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/prediction-v1-task.example.json | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/aider/example-analytics.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/aider/example-chat-history.md | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/claude-code/example-session.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/claude-code/stream-json-example.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/claude-code/stream-json-with-model.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/codex/example-session.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/codex/exec-json-with-usage.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/codex/wrapped-0-129-mcp-tools.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/continue/dev_data/chat/0.2.0.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/continue/dev_data/edit/0.2.0.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/gemini/example-session.jsonl | — | — | — |
+| fixtures | @jinn-network/client | operator/fixtures/transcripts/hermes-agent/session-example.json | — | — | — |
+| schemas | @jinn-network/client | operator/schemas/jinn-manifest-v1.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/manifest.sha256.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/expected.json | — | — | — |
 | fixtures | @jinn-network/benchmarking-interop | packages/benchmarking/interop/fixtures/swebench/expected.v2.json | — | — | — |
@@ -1658,7 +1658,7 @@ The exact 72-package trusted-publisher set is the union of stack-published group
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3813 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3807 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1671,9 +1671,9 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 3014 |
+| discoveredFirstPartySurfaces | 3008 |
 | generatedOutputSources | 1369 |
-| generatorSources | 644 |
+| generatorSources | 642 |
 | marketplaceControl | 2 |
 | requiredGates | 22 |
 | staticControl | 6 |
@@ -1682,7 +1682,7 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 
 | Package | Path | Stability | Release | Supersedes | Replaced by | Status | Reason | Sunset condition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| @jinn-network/client | client | transitional | legacy-product-lines / independent | — | — | independently published during recomposition | The operator is being recomposed onto cataloged platform applications. | The operator-daemon cutover is complete and the legacy release coupling is retired. |
+| @jinn-network/client | operator | transitional | legacy-product-lines / independent | — | — | independently published during recomposition | The operator is being recomposed onto cataloged platform applications. | The operator-daemon cutover is complete and the legacy release coupling is retired. |
 | @jinn-network/autopilot | packages/autopilot | transitional | transitional-or-private / private | — | — | removal tracked | Autopilot has been extracted to Jinn-Network/autopilot; this package is vendored residue. | The monorepo no longer needs the vendored copy. |
 | @jinn-network/core | packages/core | transitional | legacy-product-lines / independent | — | — | independently published during cutover | The legacy kernel overlaps evidence applications and the plugin product stack. | Operator and plugin cutovers no longer import @jinn-network/core. |
 | @jinn-network/indexer | packages/indexer | transitional | transitional-or-private / never | — | — | logical split required | The package mixes platform projector and product explorer responsibilities. | The projector is re-derived onto the platform and the explorer remains a tier-4 product. |

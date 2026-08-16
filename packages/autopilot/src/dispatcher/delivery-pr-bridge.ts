@@ -51,7 +51,7 @@ import { REPO } from './constants.js';
 
 // ── Narrow wire-format schemas ──────────────────────────────────────────────
 //
-// Deliberately NOT importing `client/src/types/envelope.ts` or
+// Deliberately NOT importing `operator/src/types/envelope.ts` or
 // `@jinn-network/client` (autopilot must not depend on the client package —
 // coordinator override of the original plan) and NOT depending on
 // `@jinn-network/sdk` either: the envelope wire shape isn't exported by the
@@ -102,7 +102,7 @@ export const BridgeEnvelopeSchema = z.object({
   schemaVersion: z.literal('jinn.execution.v1'),
   solverType: z.string().min(1),
   // Accepts the legacy 'restoration' role alongside the canonical roles,
-  // mirroring `client/src/types/envelope.ts`'s RawRoleSchema — jinn-repo.v1
+  // mirroring `operator/src/types/envelope.ts`'s RawRoleSchema — jinn-repo.v1
   // is unlikely to ever emit the legacy role, but normalizing costs nothing.
   role: z.union([
     z.literal('solution'),
@@ -124,7 +124,7 @@ const SolutionPayloadSchema = z.object({
 
 /**
  * Task-doc parse for the live-issue branch only — mirrors the live-issue half
- * of `packages/sdk/src/jinn-repo.ts` / `client/src/solver-types/jinn-repo.ts`.
+ * of `packages/sdk/src/jinn-repo.ts` / `operator/src/solver-types/jinn-repo.ts`.
  * A task doc that fails this parse (wrong `source`, or malformed) is the
  * retrospective-rejection guard: it is never narrowed to a live-issue task,
  * so `runDeliveryBridge` treats it as "reject, never open a PR" regardless of

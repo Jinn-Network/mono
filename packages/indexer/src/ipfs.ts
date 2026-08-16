@@ -1,6 +1,6 @@
 /**
  * Minimal IPFS-gateway fetch helper for the indexer's envelope-enrichment pass.
- * Mirrors the gateway-base normalization in client/src/adapters/mech/ipfs.ts.
+ * Mirrors the gateway-base normalization in operator/src/adapters/mech/ipfs.ts.
  */
 
 export const DEFAULT_IPFS_GATEWAY = 'https://gateway.autonolas.tech';

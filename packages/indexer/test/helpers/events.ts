@@ -193,9 +193,9 @@ export function envelopePayloadV1(opts: {
 // ── Plug-in publication payloads (attd) ───────────────────────────────────────
 
 /**
- * Byte-identical to PLUGIN_PAYLOAD_TUPLE in client/src/erc8004/abis.ts. Re-stated
+ * Byte-identical to PLUGIN_PAYLOAD_TUPLE in operator/src/erc8004/abis.ts. Re-stated
  * here so tests are self-contained — the indexer package cannot import from
- * client/. A drift-guard test in handlers.plugin.test.ts compares this tuple to
+ * operator/. A drift-guard test in handlers.plugin.test.ts compares this tuple to
  * the canonical one via a hex-encoded fixture.
  */
 export const PLUGIN_PAYLOAD_TUPLE_TEST = [

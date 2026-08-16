@@ -61,7 +61,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: client
+    working-directory: operator
 
 jobs:
   environment-suite:
@@ -600,8 +600,8 @@ jobs:
             "${RUNNER_TEMP}"/env-suite/*.log \
             "${RUNNER_TEMP}"/preflight.json \
             "${RUNNER_TEMP}"/preflight-b.json \
-            client/tier-2-evidence/**/* \
-            client/tier-3-evidence/**/*; do
+            operator/tier-2-evidence/**/* \
+            operator/tier-3-evidence/**/*; do
             [ -f "$f" ] || continue
             sed -i -E 's#https?://[^[:space:]"'"'"']+#<redacted-url>#g' "$f"
           done
@@ -618,7 +618,7 @@ jobs:
             ${{ runner.temp }}/preflight.json
             ${{ runner.temp }}/preflight-b.json
             ${{ runner.temp }}/environment-suite-verdict.json
-            ${{ github.workspace }}/client/tier-2-evidence/
-            ${{ github.workspace }}/client/tier-3-evidence/
+            ${{ github.workspace }}/operator/tier-2-evidence/
+            ${{ github.workspace }}/operator/tier-3-evidence/
           retention-days: 14
           if-no-files-found: ignore

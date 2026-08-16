@@ -57,7 +57,7 @@ in-place checker upgrade — hence the clean-break re-wire.
 
 ## Addresses (Base Sepolia)
 
-Sourced from the bundled deploy artifacts in `client/deployments/`. Treat these
+Sourced from the bundled deploy artifacts in `operator/deployments/`. Treat these
 as the starting point; **Tier A re-reads the live wiring rather than trusting the
 artifacts** (the stOLAS artifact's reward-split fields are known-stale — see A4).
 
@@ -217,7 +217,7 @@ counter climbs for the operator while the reward proxy's `calculateStakingReward
 stays flat at ~0.
 
 > **Honest caveat — no automated live-Sepolia loop harness exists yet.** Every
-> e2e in `client/test/e2e/` (`_daemon-harness-helpers.ts`, `stolas.ts`) drives
+> e2e in `operator/test/e2e/` (`_daemon-harness-helpers.ts`, `stolas.ts`) drives
 > the loop against an **Anvil fork** with mock mech/marketplace. Driving a real
 > loop on live Base Sepolia means running the production daemon (creator +
 > solver + evaluator legs) against the real marketplace, real IPFS, and a real
@@ -241,7 +241,7 @@ unset BASE_SEPOLIA_RPC_URL
 **Start daemon** (prediction-only; isolated earning dir; no SWE generator):
 
 ```bash
-cd client
+cd operator
 export JINN_PASSWORD="$(cat ~/.jinn-client/keystore-password)"
 export JINN_CLAIM_LOOP_ENABLED=false
 export JINN_REWARD_CLAIM_INTERVAL_MS=60000
@@ -270,7 +270,7 @@ yarn jinn tasks submit --yes \
 `--execute`):
 
 ```bash
-cd client
+cd operator
 yarn release:olas-rails-smoke
 yarn release:olas-rails-smoke --execute
 ```
@@ -341,7 +341,7 @@ cat > ~/.jinn-client/config.json <<'EOF'
 }
 EOF
 
-cd client
+cd operator
 yarn build
 JINN_PASSWORD=<choose-one> node dist/bin/jinn.js run --bootstrap-only
 # Pauses at awaiting_funding and prints the agent EOA. Fund it with Base Sepolia
@@ -388,7 +388,7 @@ the attempt. Two ways to get the verdict leg:
 
 - **Two operators** — a second daemon (separate earning dir) claims the
   evaluation request and settles the verdict. This mirrors the
-  producer/evaluator pattern in `client/test/release/tier-2/T2.2-producer-evaluator.ts`.
+  producer/evaluator pattern in `operator/test/release/tier-2/T2.2-producer-evaluator.ts`.
 - **Self-eval allowed** — post the task with `disallowSolverSelfEvaluation:
   false` so the same operator can settle its own verdict (fine for a smoke).
 

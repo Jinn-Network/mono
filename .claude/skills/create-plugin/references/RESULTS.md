@@ -1,12 +1,12 @@
 # create-plugin dry-run results
 
-Captured live on 2026-06-14 against the built client (`cd client && yarn build`).
+Captured live on 2026-06-14 against the built client (`cd operator && yarn build`).
 Both scenarios were taken through scaffold → fill → validate (`ok:true`) →
 load-probe (positive + negative). Publish and SolverNet-join were **not** run
 (no chain writes, no funds). Temp dirs and `~/.jinn-client/solver-plugins/`
 vendored dirs were cleaned up afterward.
 
-Invocation form used: `node client/dist/bin/jinn.js <args>` (the built binary).
+Invocation form used: `node operator/dist/bin/jinn.js <args>` (the built binary).
 
 ---
 
@@ -15,7 +15,7 @@ Invocation form used: `node client/dist/bin/jinn.js <args>` (the built binary).
 ### 1. Scaffold
 
 ```
-$ node client/dist/bin/jinn.js create plugin @jinn-dryrun/st \
+$ node operator/dist/bin/jinn.js create plugin @jinn-dryrun/st \
     --pattern solver-type-plugin --solver-type demo.v1 --out-dir "$DRY"
 Created @jinn-dryrun/st at $DRY/@jinn-dryrun/st
 Next: cd $DRY/@jinn-dryrun/st && yarn install && yarn test
@@ -31,7 +31,7 @@ body with real `demo.v1` content, `grep -c placeholder` → `0`.
 ### 3. Validate (`ok:true`)
 
 ```
-$ node client/dist/bin/jinn.js solver-plugins validate "$ST"
+$ node operator/dist/bin/jinn.js solver-plugins validate "$ST"
 {"verb":"solver-plugins validate","ok":true,"plugin":{"name":"@jinn-dryrun/st","version":"0.1.0","solverType":"demo.v1","supports":["demo.v1"],"sha256":"ad45753f9457debeb07387a3896aef6219275f7a42ab6a5b5976577cb1d6cf0a","manifestPath":"/Users/.../.jinn-client/solver-plugins/st/jinn.plugin.json"}}
 ```
 
@@ -55,7 +55,7 @@ $ node .claude/skills/create-plugin/references/load-probe.mjs "$ST" bogus.v9
 ### 1. Scaffold
 
 ```
-$ node client/dist/bin/jinn.js create plugin @jinn-dryrun/rt \
+$ node operator/dist/bin/jinn.js create plugin @jinn-dryrun/rt \
     --pattern runtime-plugin --out-dir "$DRYB"
 Created @jinn-dryrun/rt at $DRYB/@jinn-dryrun/rt
 ```
@@ -74,7 +74,7 @@ rejects them — see below).
 ### 3. Validate (`ok:true`)
 
 ```
-$ node client/dist/bin/jinn.js solver-plugins validate "$RT"
+$ node operator/dist/bin/jinn.js solver-plugins validate "$RT"
 {"verb":"solver-plugins validate","ok":true,"plugin":{"name":"@jinn-dryrun/rt","version":"0.1.0","solverType":"jinn.runtime","supports":["jinn.runtime"],"sha256":"3e49703900c8deace6667dcd3a4f0cb4655aebc319e820194998f1d361a29101","manifestPath":"/Users/.../.jinn-client/solver-plugins/rt/jinn.plugin.json"}}
 ```
 
@@ -96,6 +96,6 @@ Adding the forbidden `jinn.solverType` key to a manifest makes validate fail
 with a clear message the skill reads, fixes, and re-runs:
 
 ```
-$ node client/dist/bin/jinn.js solver-plugins validate "$BADP"
+$ node operator/dist/bin/jinn.js solver-plugins validate "$BADP"
 {"verb":"solver-plugins validate","ok":false,"error":{"code":"invalid_solver_plugin","message":"SolverNet contracts own canonical solverType and schemas; plugin manifests must declare manifest.jinn.supports only"}}
 ```

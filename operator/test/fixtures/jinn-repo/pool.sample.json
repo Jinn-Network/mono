@@ -1,0 +1,17 @@
+[
+  {
+    "schemaVersion": "jinn-repo.v1",
+    "instance_id": "Jinn-Network__mono-1042",
+    "repo": "Jinn-Network/mono",
+    "base_commit": "abcdef1234567890abcdef1234567890abcdef12",
+    "merged_pr": 1042,
+    "language": "typescript",
+    "problem_statement": "Fix the task creation bug introduced in PR 1041.",
+    "test_files": ["operator/test/solver-types/jinn-repo.schema.test.ts"],
+    "test_cmd": "yarn test operator/test/solver-types/jinn-repo.schema.test.ts",
+    "gold_tests": {
+      "operator/test/solver-types/jinn-repo.schema.test.ts": "// gold test placeholder"
+    },
+    "solution_patch": "diff --git a/client/src/solver-types/jinn-repo.ts b/client/src/solver-types/jinn-repo.ts\n--- a/client/src/solver-types/jinn-repo.ts\n+++ b/client/src/solver-types/jinn-repo.ts\n// placeholder patch"
+  }
+]

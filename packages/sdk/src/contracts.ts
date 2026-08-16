@@ -146,7 +146,7 @@ export const PREDICTION_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     deterministic: true,
     inputs: ['prediction.v1 Task', 'prediction.v1 Solution', 'Polymarket/UMA resolution'],
     output: 'prediction.v1 Verdict',
-    implementation: 'client/src/harnesses/impls/prediction-v1-evaluator',
+    implementation: 'operator/src/harnesses/impls/prediction-v1-evaluator',
   },
   aggregationFunction: {
     id: 'prediction.trailing-mean-brier-spread.v1',
@@ -205,7 +205,7 @@ export const SWE_REBENCH_V2_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     deterministic: true,
     inputs: ['SWE-rebench v2 Task', 'SWE-rebench v2 Solution', 'per-instance Docker image'],
     output: 'SWE-rebench v2 Verdict',
-    implementation: 'client/src/harnesses/impls/swe-rebench-v2-evaluator',
+    implementation: 'operator/src/harnesses/impls/swe-rebench-v2-evaluator',
   },
   aggregationFunction: {
     id: 'swe-rebench-v2.multi-winrate.v1',
@@ -252,7 +252,7 @@ export const JINN_REPO_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     deterministic: true,
     inputs: ['Jinn repo Task', 'Jinn repo Solution', 'gold tests from corpus'],
     output: 'Jinn repo Verdict',
-    implementation: 'client/src/harnesses/impls/jinn-repo-evaluator',
+    implementation: 'operator/src/harnesses/impls/jinn-repo-evaluator',
   },
   aggregationFunction: {
     id: 'jinn-repo.multi-winrate.v1',
@@ -322,7 +322,7 @@ export const SESSION_DERIVED_V1_SOLVER_NET_CONTRACT: SolverNetContract = {
     deterministic: false, // composite uses LLM-judge component → non-deterministic
     inputs: ['session-derived Task', 'session-derived Solution', 'sourceCapture envelope'],
     output: 'session-derived Verdict (composite_score + signal_breakdown)',
-    implementation: 'client/src/harnesses/impls/session-derived-evaluator', // Phase 10 surface
+    implementation: 'operator/src/harnesses/impls/session-derived-evaluator', // Phase 10 surface
   },
   aggregationFunction: {
     id: 'session-derived-rolling-mean',

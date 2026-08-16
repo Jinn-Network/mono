@@ -99,7 +99,7 @@
    rather than a second indirection, so a utility always resolves to
    the live design-system value.
 
-   Naming is ported from client/src/dashboard/spa/tailwind.config.ts:
+   Naming is ported from operator/src/dashboard/spa/tailwind.config.ts:
    shadcn's semantic names (background / foreground / primary /
    secondary / muted / accent / destructive / border / input / ring /
    card / popover) plus the brand-only tones that have no shadcn

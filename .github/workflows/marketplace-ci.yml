@@ -331,7 +331,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      JINN_MARKETPLACE_ANVIL_STATE_PATH: ${{ github.workspace }}/client/test/_support/fixtures/anvil-base-v3-state/state.json
+      JINN_MARKETPLACE_ANVIL_STATE_PATH: ${{ github.workspace }}/operator/test/_support/fixtures/anvil-base-v3-state/state.json
     steps:
       - uses: actions/checkout@v4
         with:

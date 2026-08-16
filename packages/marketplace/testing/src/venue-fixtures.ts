@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 // Legacy behavior as fixtures (operator-daemon composition design §6.6). Every case below is
-// derived by READING the legacy oracles -- `client/src/tx-retry.ts`'s PERMANENT set and its
-// recoverable-substring ladder, `client/src/adapters/mech/safe.ts`'s GS013/GS026 handling, and
-// `client/src/adapters/mech/contracts.ts`'s claimDelivery ladder -- and re-expressing them as
+// derived by READING the legacy oracles -- `operator/src/tx-retry.ts`'s PERMANENT set and its
+// recoverable-substring ladder, `operator/src/adapters/mech/safe.ts`'s GS013/GS026 handling, and
+// `operator/src/adapters/mech/contracts.ts`'s claimDelivery ladder -- and re-expressing them as
 // data. No legacy code is ported; the fresh venue-base implementation must satisfy these.
 import { KNOWN_INNER_ERRORS, SafeInnerRevertError } from "@jinn-network/marketplace-binding";
 import { describe, expect, test } from "vitest";

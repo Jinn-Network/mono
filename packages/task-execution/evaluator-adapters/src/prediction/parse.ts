@@ -100,7 +100,7 @@ function readResult(bytes: Uint8Array): PredictionResult | undefined {
   return { probabilityYes, submittedAt };
 }
 
-// Real venue status enum (client/src/venues/polymarket/client.ts:69-77, Task 2 finding E4 /
+// Real venue status enum (operator/src/venues/polymarket/client.ts:69-77, Task 2 finding E4 /
 // Task 6 finding E12) — five values, no "unavailable" member.
 interface Snapshot {
   readonly status: "resolved" | "unresolved" | "invalid" | "cancelled" | "ambiguous";

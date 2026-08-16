@@ -545,7 +545,7 @@ function readDeploymentArtifact(cwd: string, fileName: string): UnknownRecord | 
   const candidates = [
     path.resolve(cwd, fileName),
     path.resolve(cwd, 'deployments', fileName),
-    path.resolve(cwd, '..', 'client', 'deployments', fileName),
+    path.resolve(cwd, '..', 'operator', 'deployments', fileName),
   ];
 
   for (const candidate of candidates) {

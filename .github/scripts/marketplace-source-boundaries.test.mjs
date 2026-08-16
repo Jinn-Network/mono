@@ -8,16 +8,16 @@ const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'marketplace');
 const marketplaceDirectories = ['binding', 'projector', 'pipeline', 'venue-base', 'testing'];
 const APPLICATION_AND_LEGACY_ROOTS = [
-  join(root, 'apps'), join(root, 'client'),
+  join(root, 'apps'), join(root, 'operator'),
   ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
     .map((d) => join(root, 'packages', d)),
 ];
 
 const LEGACY_PIPELINE_CLIENT_IMPORTS = [
-  'client/src/config/shape-v2.ts',
-  'client/src/daemon/composition-root.ts',
-  'client/src/daemon/engagement-ledger.ts',
-  'client/src/daemon/work-loop.ts',
+  'operator/src/config/shape-v2.ts',
+  'operator/src/daemon/composition-root.ts',
+  'operator/src/daemon/engagement-ledger.ts',
+  'operator/src/daemon/work-loop.ts',
 ];
 
 // binding implements the requester-facing TaskExecutionBackend as a peer (ruling §7.18): it may
@@ -335,7 +335,7 @@ test('drift: pipeline\'s duplicated RECORD_KINDS_SUBMISSION still equals record-
 
 test('marketplace-pipeline has only the frozen legacy client import allowlist', () => {
   assert.deepEqual(
-    files(join(root, 'client', 'src'))
+    files(join(root, 'operator', 'src'))
       .filter((file) => readFileSync(file, 'utf8').includes('@jinn-network/marketplace-pipeline'))
       .map((file) => relative(root, file))
       .sort(),

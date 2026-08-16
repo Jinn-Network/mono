@@ -11,7 +11,7 @@ const root = resolve(import.meta.dirname, '../..');
 // account key SET — accounts #0-#9 derived from the well-known
 // "test test test test test test test test test test test junk" mnemonic
 // (verbatim from `anvil`'s own startup output; also in
-// client/test/acceptance/_fixtures/anvil.ts:38-43 for accounts #0-#4). Every
+// operator/test/acceptance/_fixtures/anvil.ts:38-43 for accounts #0-#4). Every
 // one of these ten keys is as burned and public as account #0 alone.
 const ANVIL_DEV_KEYS = new Set([
   '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', // #0
@@ -34,7 +34,7 @@ const KEY_CONTEXTS = [
   /privateKeyToAccount\(\s*["'`](0x[0-9a-fA-F]{64})/g,
   /--private-key\s+["'`]?(0x[0-9a-fA-F]{64})/g,
 ];
-const SCAN_ROOTS = ['docs', 'examples', 'spec', 'client/README.md', 'README.md', 'CLAUDE.md', 'apps/website/content'];
+const SCAN_ROOTS = ['docs', 'examples', 'spec', 'operator/README.md', 'README.md', 'CLAUDE.md', 'apps/website/content'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git']);
 
 function markdownAndExampleFiles(path, out = []) {

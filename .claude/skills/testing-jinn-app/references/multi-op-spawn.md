@@ -10,7 +10,7 @@ Two flavors:
 
    ```typescript
    // Path relative to the importing file. Plan A's substrate-copy lives at
-   // `client/scripts/release/substrate-copy.ts` (outside `src/`, so the `@/`
+   // `operator/scripts/release/substrate-copy.ts` (outside `src/`, so the `@/`
    // alias does NOT reach it — use a relative path).
    import { copyWorkspace } from '../../scripts/release/substrate-copy';
 
@@ -65,7 +65,7 @@ trap "kill $OP_A_PID $OP_B_PID 2>/dev/null; rm -rf ~/jinn-dev/workspaces/$RUN_ID
 
 ## TypeScript recipe (automated tests)
 
-Use the helper at `client/test/helpers/multi-op-daemon.ts`:
+Use the helper at `operator/test/helpers/multi-op-daemon.ts`:
 
 ```typescript
 import { spawnMultiOpDaemons, type MultiOpHandle } from '../helpers/multi-op-daemon';

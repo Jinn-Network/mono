@@ -17,7 +17,7 @@ Contract 10. Run in order. Do not deploy with step 2 unfinished.
 > bridge — legacy cards only, retires with stage 5.
 >
 > See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` (leg H).
-> Runner: `cd client && yarn stage1:closed-loop` (`scripts/release/stage1-closed-loop.ts`).
+> Runner: `cd operator && yarn stage1:closed-loop` (`scripts/release/stage1-closed-loop.ts`).
 > Gold operators: **op-c** (evaluator/producer) + **op-d** (solver, staged from `~/.jinn-client`
 > services 72+). Do not use op-a/op-b — their Safes are stOLAS-distributor-owned (GS026).
 >
@@ -32,7 +32,7 @@ Contract 10. Run in order. Do not deploy with step 2 unfinished.
 - [ ] Stop posting new tasks against the fleet's manifest digests (pause launched-record
       generators). Record the stop time in the deploy PR thread.
 - [ ] Confirm the bridge fixture gate is green:
-      `client/test/bridge/converged-delivery-legacy-parse.test.ts`.
+      `operator/test/bridge/converged-delivery-legacy-parse.test.ts`.
 - [ ] Confirm the single-broadcaster architecture test reports zero offenders.
 
 ## 1. Stop claiming (previous canary, no new build)

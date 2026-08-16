@@ -6,7 +6,7 @@
 // `(creator Safe, Task CID digest, Submission digest)` in place of the retired
 // SolverNet-manifest-digest leg. This package owns the CRASH-SAFETY half only (persist before
 // broadcast; resolve on success; a pending intent blocks a concurrent re-broadcast) -- it does
-// NOT own a durable cross-session "already posted" ledger (that is `client/src/store`'s
+// NOT own a durable cross-session "already posted" ledger (that is `operator/src/store`'s
 // `task_posts` table, a host/pipeline concern outside this standalone package's boundary). A
 // caller that wants full idempotent resubmission across process restarts persists its own
 // completed-post record and checks it before calling `postTask` again.

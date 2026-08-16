@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 // The production `IpfsPinPort` (`venue/ipfs.ts`), adapted from
-// `client/src/adapters/mech/ipfs-pinfile.ts`'s registry-upload pattern (design §14 "declared
+// `operator/src/adapters/mech/ipfs-pinfile.ts`'s registry-upload pattern (design §14 "declared
 // impact"). Uploads the EXACT bytes handed to it -- no JCS re-encode round trip, and
 // `raw-leaves=true` so Kubo addresses the content with the raw codec (§3 audit: CID digest
 // equals sha256 of exact bytes). The returned registry CID is informational only; the binding

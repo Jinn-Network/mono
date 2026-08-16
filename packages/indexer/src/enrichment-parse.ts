@@ -158,7 +158,7 @@ export function parseVerdictEnvelopeLite(body: unknown): VerdictEnvelopeLite | n
 }
 
 // ── swe-rebench-v2 task-body resolver ─────────────────────────────────────────
-// Given an already-fetched task.v1 body (client/src/types/task-document.ts),
+// Given an already-fetched task.v1 body (operator/src/types/task-document.ts),
 // resolve the enrichment fields the indexer reads off the task body:
 //   - spec.instance_id                — launcher getInstanceSuccessCounts (#669)
 //   - top-level solverNetManifestCid  — manifest-scoped success counts (#669)
@@ -173,7 +173,7 @@ export interface InstanceFields {
   solverNetManifestCid: string;
   /**
    * The SOLVE-request id — the task body's top-level `restorationRequestId`
-   * (task.v1 schema; see client/src/types/task.ts). Equals the solution
+   * (task.v1 schema; see operator/src/types/task.ts). Equals the solution
    * attempt's `attemptEnvelopeMeta.requestId`, so persisting it makes
    * `verdictEnvelopeMeta.solutionRequestId = attemptEnvelopeMeta.requestId`
    * a single GraphQL join (#1433).

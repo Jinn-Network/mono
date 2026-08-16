@@ -38,7 +38,7 @@ const failClosed = readFixture<{
   cases: { name: string; why: string; entries: TreeEntry[]; expect: Record<string, unknown> }[];
 }>("fork-healing/fail-closed.json");
 
-/** C3's pinned constant (`client/test/harnesses/hash-profile.test.ts`). */
+/** C3's pinned constant (`operator/test/harnesses/hash-profile.test.ts`). */
 const FORK_HEALING_FIXTURE_DIGEST =
   "90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8";
 

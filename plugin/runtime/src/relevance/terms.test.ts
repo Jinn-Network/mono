@@ -15,9 +15,9 @@ describe("term derivation", () => {
   });
 
   test("identifier-shaped tokens outrank ordinary prose", () => {
-    const terms = deriveSearchTerms("the parseTrajectory helper in client/src/dashboard broke");
+    const terms = deriveSearchTerms("the parseTrajectory helper in operator/src/dashboard broke");
     expect(terms.indexOf("parsetrajectory")).toBeLessThan(terms.indexOf("helper"));
-    expect(terms).toContain("client/src/dashboard");
+    expect(terms).toContain("operator/src/dashboard");
   });
 
   test("the repository NAME is a term, the full slug is not", () => {

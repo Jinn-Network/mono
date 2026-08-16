@@ -41,9 +41,9 @@ describe('planMergeBatchWaves', () => {
 
   it('keeps overlapping PRs in the same reactive-overlap wave', () => {
     const waves = planMergeBatchWaves([
-      pr(20, ['client/src/store.ts']),
-      pr(21, ['client/src/store.ts']),
-      pr(22, ['client/src/api.ts']),
+      pr(20, ['operator/src/store.ts']),
+      pr(21, ['operator/src/store.ts']),
+      pr(22, ['operator/src/api.ts']),
     ], { maxWaveSize: 10 });
 
     expect(waves.map((w) => w.prs.map((p) => p.number))).toEqual([[20, 21], [22]]);
@@ -67,7 +67,7 @@ describe('planMergeBatchWaves', () => {
   it('puts large and solo PRs in single-PR waves', () => {
     const waves = planMergeBatchWaves([
       pr(1, ['a.ts']),
-      pr(2, ['client/package.json'], { risk: 'solo' }),
+      pr(2, ['operator/package.json'], { risk: 'solo' }),
       pr(3, ['c.ts'], { risk: 'large' }),
       pr(4, ['d.ts']),
     ], { maxWaveSize: 10 });

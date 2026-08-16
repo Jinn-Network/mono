@@ -4,7 +4,7 @@ The reference frontend is the **operator dashboard SPA** — the web UI an
 operator uses to watch and drive a Jinn daemon. It is not a standalone app:
 it ships inside the `@jinn-network/client` package and is served by the daemon
 itself. Its domain model, surfaces, and actions are specified in
-[`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md).
+[`operator/OPERATOR-APP-SPEC.md`](operator/OPERATOR-APP-SPEC.md).
 
 This document gets a stranger from nothing to their own running mirror of that
 frontend, on their own domain, in under an hour — without asking anyone.
@@ -53,11 +53,11 @@ and [Permissionless](PRINCIPLES.md#permissionless).
 
 ## The one-command path: `docker compose up -d`
 
-This reuses the existing [`client/docker-compose.yml`](client/docker-compose.yml)
+This reuses the existing [`operator/docker-compose.yml`](operator/docker-compose.yml)
 and the public image `ghcr.io/jinn-network/client`. From the repo root:
 
 ```bash
-cd client
+cd operator
 
 # 1. Write your secrets into a .env next to the compose file.
 echo "JINN_PASSWORD=choose-a-strong-password" > .env
@@ -83,7 +83,7 @@ without TLS + the token gate in front.
 
 **Pin the image for a reproducible deploy.** `:latest` is fine for a quick try.
 For a deploy you can reproduce later, edit the `image:` line in
-`client/docker-compose.yml` from:
+`operator/docker-compose.yml` from:
 
 ```yaml
 image: ghcr.io/jinn-network/client:latest
@@ -171,19 +171,19 @@ slice of that same image.
 ## Build from source at a tagged commit (reproducible path)
 
 To build the image yourself instead of pulling it, use the existing
-[`client/Dockerfile`](client/Dockerfile). Its build context is the **repo root**
+[`operator/Dockerfile`](operator/Dockerfile). Its build context is the **repo root**
 (the client depends on `packages/sdk` through a Yarn portal), and `yarn build`
 bundles the SPA into `dist/`. From the repo root, on a checked-out tag:
 
 ```bash
 git checkout <tag>
-docker build -f client/Dockerfile \
+docker build -f operator/Dockerfile \
   -t jinn-client:<tag> \
   --build-arg JINN_BUILD_COMMIT=$(git rev-parse HEAD) \
   .
 ```
 
-Run your build by replacing the `image:` line in `client/docker-compose.yml`
+Run your build by replacing the `image:` line in `operator/docker-compose.yml`
 with `jinn-client:<tag>`, then `docker compose up -d` as above.
 
 `JINN_BUILD_COMMIT` is the reproducibility receipt: it is baked into the image
@@ -214,5 +214,5 @@ than forgotten.
 
 The daemon you stand up is a real operator. Its network and funding status —
 testnet by default, wallet/Safe funding, what it does on-chain — are described
-in [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md) and in the root
+in [`operator/OPERATOR-APP-SPEC.md`](operator/OPERATOR-APP-SPEC.md) and in the root
 [`CLAUDE.md`](CLAUDE.md) under "Running the Client".

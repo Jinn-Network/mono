@@ -51,7 +51,7 @@ const PYTEST_TAIL = [
 export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze([
   {
     name: "resolved-all-transitions",
-    provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:555-559",
+    provenance: "operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:555-559",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -67,7 +67,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "resolved-despite-extra-unlisted-test-failing",
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:270-283",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:270-283",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -88,7 +88,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "unresolved-fail-to-pass-still-failing",
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:284-295",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:284-295",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -108,7 +108,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "unresolved-pass-to-pass-broken",
-    provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:555-559",
+    provenance: "operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:555-559",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -128,7 +128,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "ungradeable-docker-unavailable",
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:318-331",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:318-331",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -144,7 +144,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "ungradeable-patch-corrupt",
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:333-346",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:333-346",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -160,7 +160,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "ungradeable-patch-does-not-apply",
-    provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:229",
+    provenance: "operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:229",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -176,7 +176,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "ungradeable-workdir-not-git-repo",
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:348-361",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:348-361",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -195,7 +195,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
     // Verified against the real file: the VENV_COLLISION triage constant is declared at
     // eval-runner.test.ts:578-582 (the plan's cited :576-580 is the section comment plus the
     // first two array lines, missing the constant's third line and its `.join()`).
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:578-582",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:578-582",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -217,7 +217,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
     name: "ungradeable-pytest-missing",
     // Verified: MISSING_PYTEST is declared at eval-runner.test.ts:584-585 (the plan's cited
     // :582-583 is the tail of the VENV_COLLISION block, two lines early).
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:584-585",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:584-585",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -235,7 +235,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
     name: "ungradeable-requests-dep-mismatch",
     // Verified: REQUESTS_DEP_WARNING is declared at eval-runner.test.ts:587-588 (the plan's
     // cited :585-586 is the MISSING_PYTEST line plus a blank line, two lines early).
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:587-588",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:587-588",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -255,7 +255,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
     name: "ungradeable-conftest-import-error",
     // Verified: CONFTEST_IMPORT_ERROR is declared at eval-runner.test.ts:590-591 (the plan's
     // cited :588-589 is the REQUESTS_DEP_WARNING line plus a blank line, two lines early).
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:590-591",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:590-591",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -271,7 +271,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "ungradeable-upstream-setup-error",
-    provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:363-370",
+    provenance: "operator/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:363-370",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -284,7 +284,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "adversarial-report-lacks-exit-code",
-    provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:501-507",
+    provenance: "operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:501-507",
     transitions: TRANSITIONS,
     report: { instance_id: "acme__widget-1", from_fail_to_pass: [], failed_from_pass_to_pass: [] },
     log: "",
@@ -296,7 +296,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
     // `eval_no_report` or a matched infra reason — not this case). A non-object item falls
     // through the same `?? {}` default and missing-`exit_code` check as a malformed item:
     // eval-runner.ts:491-507.
-    provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:491-507",
+    provenance: "operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:491-507",
     transitions: TRANSITIONS,
     report: "the upstream harness crashed before writing a report",
     log: "",
@@ -304,7 +304,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "adversarial-transition-arrays-carry-non-strings",
-    provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:251-253",
+    provenance: "operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:251-253",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -328,7 +328,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
     // `INFRA_SIGNATURES` (eval-runner.ts:216-242) and falls through, ungradeable-free, to a
     // graded failure — eval-runner.ts:256-261 (capLogTail) confirms the log is truncated
     // before matching, not after.
-    provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:256-261",
+    provenance: "operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:256-261",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",
@@ -344,7 +344,7 @@ export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze(
   },
   {
     name: "adversarial-empty-log-non-zero-exit-no-signature",
-    provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:539-553",
+    provenance: "operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:539-553",
     transitions: TRANSITIONS,
     report: {
       instance_id: "acme__widget-1",

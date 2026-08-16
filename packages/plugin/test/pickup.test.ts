@@ -45,8 +45,8 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
   });
 
   it('prioritises identifier-shaped tokens (underscore/dash/dot/slash/digit/camelCase)', () => {
-    const terms = deriveSearchTerms('fix the client/src/store bug in version-status.test.ts');
-    expect(terms).toContain('client/src/store');
+    const terms = deriveSearchTerms('fix the operator/src/store bug in version-status.test.ts');
+    expect(terms).toContain('operator/src/store');
     expect(terms).toContain('version-status.test.ts');
   });
 
@@ -120,8 +120,8 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
   });
 
   it('path-segments a `/`-bearing identifier-shaped token, contributing each cleaned segment (>=3 chars) after the full token (#1791)', () => {
-    const terms = deriveSearchTerms('fix the flake under client/src/dashboard/spa/src please');
-    expect(terms).toContain('client/src/dashboard/spa/src');
+    const terms = deriveSearchTerms('fix the flake under operator/src/dashboard/spa/src please');
+    expect(terms).toContain('operator/src/dashboard/spa/src');
     expect(terms).toContain('client');
     expect(terms).toContain('dashboard');
     expect(terms).toContain('spa');
@@ -178,11 +178,11 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
 
     it('strips leading/trailing separators but preserves internal ones on real identifiers', () => {
       const terms = deriveSearchTerms(
-        'ship update_available, fix version-status, review client/src/dashboard, tune AI-units, hit /v1/status.',
+        'ship update_available, fix version-status, review operator/src/dashboard, tune AI-units, hit /v1/status.',
       );
       expect(terms).toContain('update_available');
       expect(terms).toContain('version-status');
-      expect(terms).toContain('client/src/dashboard');
+      expect(terms).toContain('operator/src/dashboard');
       expect(terms).toContain('ai-units');
       // Leading `/` is stripped like any other leading separator (see #1786
       // AC and the pickup.ts docstring for the trade-off this accepts).
@@ -217,8 +217,8 @@ describe('deriveSearchTerms (rescope §3.3)', () => {
     });
 
     it('preserves internal separators on a path-shaped backticked span', () => {
-      const terms = deriveSearchTerms('look at `client/src/dashboard` please');
-      expect(terms).toContain('client/src/dashboard');
+      const terms = deriveSearchTerms('look at `operator/src/dashboard` please');
+      expect(terms).toContain('operator/src/dashboard');
     });
   });
 });
@@ -292,7 +292,7 @@ describe('scoreKnowledgeHit (rescope §3.3 step 3)', () => {
     });
 
     it('still matches a term bounded by path separators', () => {
-      const h = hit({ snippet: 'touches client/src/dashboard/spa', tags: [] });
+      const h = hit({ snippet: 'touches operator/src/dashboard/spa', tags: [] });
       expect(scoreKnowledgeHit(h, ['dashboard'])).toBe(1);
     });
 
@@ -667,7 +667,7 @@ describe('lexical v2 validation table (#1791 decision comment)', () => {
   it('Run B (verbatim, #1791): retrieves the on-topic source record; the same-repo distractor scores repo-name-only and is excluded; the other-domain distractor scores 0', () => {
     const message =
       'The dashboard notification tests keep going flaky in CI. Please look at the async waits in ' +
-      'the notifications tests under client/src/dashboard/spa/src and make them deterministic, then ' +
+      'the notifications tests under operator/src/dashboard/spa/src and make them deterministic, then ' +
       'run that test file.';
     const terms = deriveSearchTerms(message, REPO);
 

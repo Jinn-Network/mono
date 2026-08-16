@@ -1,6 +1,6 @@
 /**
  * `noninferiority-iut@1` (design §9.2): the capability-eval composite intersection-union gate.
- * Ported from `client/src/eval/capability-stats.ts` (adoption, not invention — the design names
+ * Ported from `operator/src/eval/capability-stats.ts` (adoption, not invention — the design names
  * this file as the seed, plan M3 Task 3.2). PASS requires BOTH legs to independently reject
  * their null at `alpha`: quality is non-inferior (one-sided BCa bootstrap lower bound above
  * `-deltaAbs`, AND the mean relative regression under `relativeCap`) AND cost is strictly lower

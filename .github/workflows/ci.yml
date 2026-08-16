@@ -3,23 +3,25 @@ name: CI
 on:
   pull_request:
     paths:
-      - 'client/**'
+      - 'operator/**'
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/npm-publish.yml'
       - '.github/scripts/npm-publish-workflow.test.mjs'
+      - '.github/scripts/operator-*.test.mjs'
   push:
     branches: [main]
     paths:
-      - 'client/**'
+      - 'operator/**'
       - 'packages/sdk/**'
       - 'packages/core/**'
       - 'packages/plugin/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/npm-publish.yml'
       - '.github/scripts/npm-publish-workflow.test.mjs'
+      - '.github/scripts/operator-*.test.mjs'
   # Manual trigger for the soft-gate e2e jobs (task-creator-marketplace-e2e).
   # Deliberately NOT wired to `schedule:` — a cron trigger on this workflow
   # would run every other job nightly too; dispatch keeps the soft gate
@@ -32,7 +34,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: client
+    working-directory: operator
 
 # Every job in this workflow is CPU-only. Both the current and nested legacy
 # onnxruntime-node installers otherwise fetch optional CUDA binaries during a
@@ -42,6 +44,31 @@ env:
   ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
 jobs:
+  architecture:
+    name: Operator tree architecture
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - name: Verify package inventory and portal graph
+        run: node --test .github/scripts/operator-package-inventory.test.mjs
+      - name: Verify source boundaries
+        run: node --test .github/scripts/operator-source-boundaries.test.mjs
+      - name: Build the tree for the packed-types canary
+        working-directory: operator
+        run: |
+          yarn install --immutable
+          yarn build
+      - name: Verify packed types
+        run: node --test .github/scripts/operator-packed-types.test.mjs
+
   check:
     name: Typecheck & Test
     runs-on: ubuntu-latest
@@ -66,7 +93,7 @@ jobs:
       # at code-review time. See jinn-mono-u34i.
       - run: yarn lint:no-late-mount
       # No-error-leak lint: blocks raw error.message stringification in any
-      # client/src/api/ file that talks to an RPC client. Catches the
+      # operator/src/api/ file that talks to an RPC client. Catches the
       # credential-leak class where a viem HttpRequestError's message (which
       # embeds the full request URL) reaches an unauthenticated response
       # unmasked. See spec §14.2 item 2, issue #2402.
@@ -186,7 +213,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-traces
-          path: client/test-results/
+          path: operator/test-results/
           retention-days: 7
 
   degraded-daemon-guard-e2e:

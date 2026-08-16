@@ -85,7 +85,7 @@ describe("parsePredictionResult", () => {
     expect(outcome.scores).toBeUndefined();
   });
 
-  // Real venue status values beyond resolved/unresolved (client/src/venues/polymarket/client.ts:73,
+  // Real venue status values beyond resolved/unresolved (operator/src/venues/polymarket/client.ts:73,
   // per Task 2 finding E4 / Task 6 finding E12): a structurally valid snapshot reporting
   // invalid/cancelled/ambiguous must be read (not rejected as unreadable) and fail
   // market.resolution with the real status as detail.

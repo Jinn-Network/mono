@@ -34,7 +34,7 @@ schema does not publish a scrub-component manifest. See
    pattern: `git show <fix-sha>~1:<file>` to get the pre-fix content, run the
    failing command for real, apply the real fix, rerun).
 2. **Normalize paths.** Every path in every step must be repo-relative
-   (`client/src/...`, not `/Users/you/jinn-mono/client/src/...`). Strip
+   (`operator/src/...`, not `/Users/you/jinn-mono/client/src/...`). Strip
    machine/user identifiers from command output (hostnames, local
    usernames, absolute paths in stack traces).
 3. **Scrub.** Read the episode once, end to end, for anything that

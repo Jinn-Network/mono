@@ -1,7 +1,7 @@
 # .railwayignore — gitignore-style filter for `railway up` (and the watch trigger).
 #
 # Why this file exists: this worktree is ~942 MB at the root (the SPA build
-# artefacts under client/ alone are 754 MB), which silently exceeds Railway's
+# artefacts under operator/ alone are 754 MB), which silently exceeds Railway's
 # upload size cap. A `railway up` from the worktree root then "fails before
 # build" with no associated build (the upload itself is rejected) instead of
 # producing a usable build log.

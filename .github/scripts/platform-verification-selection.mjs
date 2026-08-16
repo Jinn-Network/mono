@@ -102,7 +102,7 @@ function buildGraph(repoRoot) {
 }
 
 /**
- * Longest matching catalog path wins: both `client` and `client/src/dashboard/spa`
+ * Longest matching catalog path wins: both `operator` and `operator/src/dashboard/spa`
  * are catalogued, and a change under the latter must not be attributed to the former.
  */
 function matchPackage(changedPath, packages) {

@@ -55,7 +55,7 @@ function buildValidManifest(): SolverNetManifestV1 {
         deterministic: true,
         inputs: ['task', 'solution', 'resolution'],
         output: 'verdict',
-        implementation: 'client/src/harnesses/impls/prediction-v1-evaluator',
+        implementation: 'operator/src/harnesses/impls/prediction-v1-evaluator',
       },
       aggregationFunction: {
         id: 'prediction.trailing-mean-brier-spread.v1',

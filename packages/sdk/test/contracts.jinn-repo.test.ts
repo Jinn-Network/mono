@@ -22,7 +22,7 @@ describe('JINN_REPO_V1_SOLVER_NET_CONTRACT', () => {
     const contract = SOLVER_NET_CONTRACTS['jinn-repo.v1'];
     expect(contract.evaluationFunction.deterministic).toBe(true);
     expect(contract.evaluationFunction.implementation).toBe(
-      'client/src/harnesses/impls/jinn-repo-evaluator',
+      'operator/src/harnesses/impls/jinn-repo-evaluator',
     );
   });
 

@@ -2,7 +2,7 @@ name: Operator Images
 
 # Canary lane for the per-harness operator container images (#1066), mirroring
 # npm-publish.yml's canary cadence. On every push to `next` this:
-#   1. builds the container-native base (`client/Dockerfile`) from THIS commit,
+#   1. builds the container-native base (`operator/Dockerfile`) from THIS commit,
 #   2. builds each operator overlay FROM that exact base DIGEST — so base+overlay
 #      are welded to one commit and can never be mismatched,
 #   3. SMOKE-BOOTS each overlay with its baked default CMD (catches the pre-#988
@@ -20,7 +20,7 @@ on:
   push:
     branches: [next]
     paths:
-      - 'client/**'
+      - 'operator/**'
       - 'deploy/railway-launcher-operator/**'
       - 'deploy/railway-operator-codex/**'
       - '.github/workflows/operator-images.yml'
@@ -65,7 +65,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: client/Dockerfile
+          file: operator/Dockerfile
           load: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.base_repo }}:smoke-${{ steps.meta.outputs.sha }}
@@ -86,7 +86,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: client/Dockerfile
+          file: operator/Dockerfile
           push: true
           platforms: linux/amd64
           tags: |

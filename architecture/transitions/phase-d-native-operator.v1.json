@@ -1,23 +1,18 @@
 {
   "schemaVersion": 1,
   "phase": "phase-d-native-operator",
-  "defaultPolicy": "The operator default remains legacy until an exact-head live closure proves both settlements, native operations are resolved, and measured legacy use is zero for the approved observation window.",
+  "defaultPolicy": "Retirement is stage-driven under the composition cutover (DR-2026-08-04-b): a row flips to `deleted` in the PR train that deletes its machinery, citing Class A evidence; there is no default flip",
   "transitions": [
     {
       "id": "legacy-operator-composition",
       "owner": "client operator composition",
       "entryPoints": [
-        "client/src/daemon/daemon.ts",
-        "client/src/daemon/native-vertical-mode.ts",
-        "client/src/daemon/operator-host-factory.ts"
+        "operator/src/daemon/daemon.ts",
+        "operator/src/daemon/native-vertical-mode.ts",
+        "operator/src/daemon/operator-host-factory.ts"
       ],
-      "replacement": "The native production deployment selected by the explicit native-v1 operator mode.",
-      "consumers": [
-        "client/src/daemon/native-vertical-config.ts",
-        "client/src/index.ts",
-        "client/src/main.ts",
-        "client/src/native-main.ts"
-      ],
+      "replacement": "The single jinn run entry (operator/src/main.ts) with compositionMode native fleet composition.",
+      "consumers": [],
       "defaultMode": "legacy",
       "noNewUseGuard": {
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
@@ -25,8 +20,8 @@
       },
       "usageSignal": {
         "name": "legacy-operator-composition",
-        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
-        "sourceDescription": "durable counters exposed by GET /v1/status, incremented at client/src/daemon/daemon.ts:336 when the daemon selects legacy vertical mode",
+        "sourceFile": "operator/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "durable counters exposed by GET /v1/status; the increment at daemon construction retired with the native-v1 parallel entry (Stage 5 PR 2 / D5)",
         "zeroDefinition": "No production instance selects the legacy graph during the approved observation window."
       },
       "migration": {
@@ -45,22 +40,23 @@
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
-      "targetPullRequest": "Phase D1 default flip",
-      "status": "planned"
+      "targetPullRequest": "Stage 5 PR 2 (D5 native-v1 parallel entry)",
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-05-cutover-one-swap-collapse.md"
     },
     {
       "id": "marketplace-pipeline",
       "owner": "marketplace legacy compatibility",
       "entryPoints": [
         "packages/marketplace/pipeline/src/index.ts",
-        "client/src/daemon/work-loop.ts"
+        "operator/src/daemon/work-loop.ts"
       ],
       "replacement": "Native tier-4 claim policy plus marketplace binding and task-execution backend capabilities.",
       "consumers": [
-        "client/src/config/shape-v2.ts",
-        "client/src/daemon/composition-root.ts",
-        "client/src/daemon/engagement-ledger.ts",
-        "client/src/main.ts"
+        "operator/src/config/shape-v2.ts",
+        "operator/src/daemon/composition-root.ts",
+        "operator/src/daemon/engagement-ledger.ts",
+        "operator/src/main.ts"
       ],
       "defaultMode": "legacy",
       "noNewUseGuard": {
@@ -69,8 +65,8 @@
       },
       "usageSignal": {
         "name": "marketplace-pipeline-invocation",
-        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
-        "sourceDescription": "durable counter exposed by GET /v1/status and instrumented at the legacy runPipeline call (client/src/daemon/work-loop.ts:466)",
+        "sourceFile": "operator/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "durable counter exposed by GET /v1/status and instrumented at the legacy runPipeline call (operator/src/daemon/work-loop.ts:466)",
         "zeroDefinition": "No production runPipeline invocation occurs during the approved observation window."
       },
       "migration": {
@@ -96,15 +92,15 @@
       "id": "legacy-task-submission-synthesis",
       "owner": "client legacy projector bridge",
       "entryPoints": [
-        "client/src/daemon/bridge-legacy-delivery.ts",
-        "client/src/daemon/projector-enrich.ts"
+        "operator/src/daemon/bridge-legacy-delivery.ts",
+        "operator/src/daemon/projector-enrich.ts"
       ],
       "replacement": "Native exact Task and Submission records obtained through verified Record Discovery entries.",
       "consumers": [
-        "client/src/adapters/mech/adapter.ts",
-        "client/src/daemon/archive-subscription.ts",
-        "client/src/daemon/composition-root.ts",
-        "client/src/daemon/work-loop-corpus.ts"
+        "operator/src/adapters/mech/adapter.ts",
+        "operator/src/daemon/archive-subscription.ts",
+        "operator/src/daemon/composition-root.ts",
+        "operator/src/daemon/work-loop-corpus.ts"
       ],
       "defaultMode": "legacy",
       "noNewUseGuard": {
@@ -113,8 +109,8 @@
       },
       "usageSignal": {
         "name": "legacy-task-submission-synthesis",
-        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
-        "sourceDescription": "durable counter exposed by GET /v1/status and instrumented at legacy Task/Submission synthesis (client/src/daemon/bridge-legacy-delivery.ts:126)",
+        "sourceFile": "operator/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "durable counter exposed by GET /v1/status and instrumented at legacy Task/Submission synthesis (operator/src/daemon/bridge-legacy-delivery.ts:126)",
         "zeroDefinition": "No synthesized legacy Task or Submission card is produced during the approved observation window."
       },
       "migration": {
@@ -139,8 +135,8 @@
       "id": "legacy-evaluator-delivery-watcher",
       "owner": "client legacy evaluator composition",
       "entryPoints": [
-        "client/src/daemon/delivery-watcher.ts",
-        "client/src/daemon/daemon.ts"
+        "operator/src/daemon/delivery-watcher.ts",
+        "operator/src/daemon/daemon.ts"
       ],
       "replacement": "Native evaluator composition and its durable evaluation, publication, and verdict-settlement sagas.",
       "consumers": [],
@@ -151,7 +147,7 @@
       },
       "usageSignal": {
         "name": "legacy-evaluator-delivery-watcher-loaded",
-        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
+        "sourceFile": "operator/src/compatibility/phase-d-transition-usage.ts",
         "sourceDescription": "durable counter exposed by GET /v1/status; it was instrumented on legacy delivery-watcher load until Wave-4 D2 deleted the watcher, and is no longer recorded. The name stays in the signal vocabulary so an already-written durable observation file carrying the counter still validates.",
         "zeroDefinition": "No legacy delivery watcher or evaluator component is loaded during the approved observation window."
       },
@@ -178,17 +174,11 @@
       "id": "legacy-wiring-config",
       "owner": "client legacy configuration",
       "entryPoints": [
-        "client/src/config/shape-v2.ts",
+        "operator/src/config/shape-v2.ts",
         "packages/marketplace/pipeline/src/index.ts"
       ],
       "replacement": "NativeTier4ClaimPolicy and injected native capability, model, harness, plugin, and credential ports.",
-      "consumers": [
-        "client/src/api/claim-policy-endpoints.ts",
-        "client/src/config.ts",
-        "client/src/daemon/composition-root.ts",
-        "client/src/daemon/engagement-ledger.ts",
-        "client/src/daemon/work-loop.ts"
-      ],
+      "consumers": [],
       "defaultMode": "legacy",
       "noNewUseGuard": {
         "path": ".github/scripts/marketplace-source-boundaries.test.mjs",
@@ -196,8 +186,8 @@
       },
       "usageSignal": {
         "name": "legacy-wiring-config-field",
-        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
-        "sourceDescription": "accepted configuration parse diagnostics exposed by GET /v1/status and instrumented in client/src/config.ts:1480",
+        "sourceFile": "operator/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "accepted configuration parse diagnostics exposed by GET /v1/status and instrumented in operator/src/config.ts:1480",
         "zeroDefinition": "No accepted production configuration supplies a legacy wiring, model, plugin, or credential field."
       },
       "migration": {
@@ -215,8 +205,9 @@
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
-      "targetPullRequest": "Phase D2/D4 wiring deletion",
-      "status": "planned"
+      "targetPullRequest": "Stage 5 PR 4 (retire legacy SolverNet config keys)",
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-05-cutover-one-swap-collapse.md"
     },
     {
       "id": "legacy-taskengine-carve",
@@ -300,19 +291,12 @@
       "id": "legacy-task-run-store-coupling",
       "owner": "client native production store coupling",
       "entryPoints": [
-        "client/src/store/store.ts",
-        "client/src/store/task-run-persistence.ts",
-        "client/src/daemon/native-evaluator-production.ts",
-        "client/src/daemon/native-solver-production.ts"
+        "operator/src/store/store.ts",
+        "operator/src/daemon/native-evaluator-production.ts",
+        "operator/src/daemon/native-solver-production.ts"
       ],
-      "replacement": "A native-owned store that does not create the legacy task_runs schema.",
-      "consumers": [
-        "client/src/adapters/mech/adapter.ts",
-        "client/src/api/gather-status.ts",
-        "client/src/cli/commands/backfill-failed-deliveries.ts",
-        "client/src/daemon/work-loop-corpus.ts",
-        "client/src/harnesses/engine/backfill-failed-deliveries.ts"
-      ],
+      "replacement": "Store no longer creates the retired engine table. Status and launcher projections read native_engagements / native_evaluations.",
+      "consumers": [],
       "defaultMode": "not-applicable",
       "noNewUseGuard": {
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
@@ -321,17 +305,17 @@
       "usageSignal": {
         "name": "legacy_task_run_store_coupling_consumers",
         "sourceFile": null,
-        "sourceDescription": "architecture import inventory (static audit); no durable runtime counter exists yet because both legacy and native production paths currently construct client/src/store/store.ts unconditionally, so there is no legacy/native toggle to count",
-        "zeroDefinition": "No native production module (directly or transitively) constructs client/src/store/store.ts or imports TaskRunPersistence; native evaluator and solver production own a store that does not create the legacy task_runs schema."
+        "sourceDescription": "architecture import inventory (static audit); no durable runtime counter exists yet because both legacy and native production paths currently construct operator/src/store/store.ts unconditionally, so there is no legacy/native toggle to count",
+        "zeroDefinition": "No native production module (directly or transitively) constructs operator/src/store/store.ts or imports TaskRunPersistence; native evaluator and solver production own a store that does not create the legacy task_runs schema."
       },
       "migration": {
-        "description": "Introduce a native-owned store (or a schema split) that does not create task_runs, and repoint client/src/daemon/native-evaluator-production.ts and client/src/daemon/native-solver-production.ts to it. The legacy Store class keeps serving its declared legacy consumers (engine.ts, work-loop-corpus.ts, delivery-watcher.ts, adapters/mech/adapter.ts, gather-status.ts, the backfill-failed-deliveries pair) until their own Phase D transitions delete them.",
+        "description": "Introduce a native-owned store (or a schema split) that does not create task_runs, and repoint operator/src/daemon/native-evaluator-production.ts and operator/src/daemon/native-solver-production.ts to it. The legacy Store class keeps serving its declared legacy consumers (engine.ts, work-loop-corpus.ts, delivery-watcher.ts, adapters/mech/adapter.ts, gather-status.ts, the backfill-failed-deliveries pair) until their own Phase D transitions delete them.",
         "compatibility": "The legacy task_runs schema and TaskRunPersistence remain frozen and available to the declared legacy consumers throughout Phase C/D1-D4; only the native production entry points are expected to stop depending on them."
       },
       "sunsetCondition": {
         "description": "Native evaluator and solver production construct a store that does not create the legacy task_runs schema, and no native production path depends on TaskRunPersistence.",
         "evidence": [
-          "native-evaluator-production.ts and native-solver-production.ts import a native-owned store instead of client/src/store/store.ts",
+          "native-evaluator-production.ts and native-solver-production.ts import a native-owned store instead of operator/src/store/store.ts",
           "zero TaskRunPersistence imports outside the declared legacy consumer inventory"
         ]
       },
@@ -339,8 +323,9 @@
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
-      "targetPullRequest": "Phase D1 native store decoupling",
-      "status": "planned"
+      "targetPullRequest": "Stage 5 PR 3 (retire engine-table persistence)",
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-05-cutover-one-swap-collapse.md"
     }
   ]
 }

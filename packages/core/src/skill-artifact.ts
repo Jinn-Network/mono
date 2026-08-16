@@ -12,7 +12,7 @@ import { z } from 'zod/v3';
  * so they publish as a skill-only wrapper (`publishSkill()`,
  * packages/layer/src/publish-skill.ts, DR-2026-07-06).
  * Access/pricing come from the enclosing Artifact
- * entry (client/src/types/envelope.ts ArtifactSchema: sha256,
+ * entry (operator/src/types/envelope.ts ArtifactSchema: sha256,
  * access.endpoint, access.priceUsdc, metadata.tags).
  *
  * Frozen-caps review (AC3, additive): this schema is a NEW artifact payload
@@ -23,7 +23,7 @@ import { z } from 'zod/v3';
  * any artifactType string. Companion-file content lives here, free of the
  * trace envelope's 16 KiB step-attribute cap, under its own 1 MiB total cap.
  *
- * Precedent: client/src/trajectory/harness-bundle-schema.ts.
+ * Precedent: operator/src/trajectory/harness-bundle-schema.ts.
  */
 export const SKILL_ARTIFACT_TYPE = 'jinn.skill.v1' as const;
 

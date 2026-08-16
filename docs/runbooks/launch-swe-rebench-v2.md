@@ -14,7 +14,7 @@
 ## Pre-flight
 
 1. **Daemon up, bootstrap complete.** `~/.jinn-client/earning/earning_state.json` shows `step: 'complete'`. Master Safe is funded with enough ETH to anchor a `setMetadata` tx (≈0.0005 Base Sepolia ETH plus runway for posting tasks at the prices you'll set in Step 4).
-2. **SPA bundle current.** From `client/`: `yarn build` produces `dist/dashboard/`. Re-bundle if `templates.ts` or any Step file changed since the last run.
+2. **SPA bundle current.** From `operator/`: `yarn build` produces `dist/dashboard/`. Re-bundle if `templates.ts` or any Step file changed since the last run.
 3. **Daemon launched against testnet.** `network: 'testnet'` in `~/.jinn-client/config.json`, `apiPort: 7332` (or the value you've been running with). Run `node dist/bin/jinn.js run` and wait until the SPA serves at `http://127.0.0.1:7332/dashboard/`.
 4. **UI session active.** Open `http://127.0.0.1:7332/dashboard/` and accept the disclaimer / log in so the SPA holds a UI token. The launch endpoint is gated by that token.
 

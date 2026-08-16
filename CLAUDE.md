@@ -21,7 +21,7 @@ Other canonical docs:
 - `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)
 - `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
 - `GLOSSARY.md` — read whenever a Jinn-specific term appears; never redefine terms locally
-- [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md) — read before designing, extending, or reasoning about the operator app's data model, actions, or notification taxonomy (referenced from `SPEC.md` Roles → Operator)
+- [`operator/OPERATOR-APP-SPEC.md`](operator/OPERATOR-APP-SPEC.md) — read before designing, extending, or reasoning about the operator app's data model, actions, or notification taxonomy (referenced from `SPEC.md` Roles → Operator)
 
 ## Coding Rules
 
@@ -97,7 +97,7 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 legacy/jinn-cli-agents-reference/  Git subtree — historical Jinn agent repo, retained as
                  read-only reference (IMPORTANT: see below)
 
-client/          TypeScript daemon — the main runnable component
+operator/          TypeScript daemon — the main runnable component
   src/
     main.ts              Production entry point (`jinn run` from the published package)
     config.ts            Config loader (file > env > defaults)
@@ -184,7 +184,7 @@ docs/            Design specs and implementation plans
 ### Quick validation (Anvil fork, no real funds)
 
 ```bash
-cd client
+cd operator
 yarn install
 yarn typecheck   # should be zero errors
 yarn test        # vitest suite, all pass
@@ -215,7 +215,7 @@ JINN_PASSWORD=your-secret jinn run         # supply password via env (no on-disk
 The daemon will:
 1. Run the earning bootstrap (wallet → Safe → service → staking → mech)
 2. Pause at `awaiting_funding` if the wallet needs ETH/OLAS — fund and re-run
-3. Start the daemon's long-running loops — which ones depends on vertical mode and config; see [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) §6
+3. Start the daemon's long-running loops — which ones depends on vertical mode and config; see [`operator/ARCHITECTURE.md`](operator/ARCHITECTURE.md) §6
 
 ### Repo contributors only
 
@@ -223,7 +223,7 @@ When iterating inside this repo, run the *built* binary so you get the same
 dashboard the published package serves:
 
 ```bash
-cd client
+cd operator
 yarn build           # compiles tsc + bundles SPA into dist/dashboard
 node dist/bin/jinn.js run
 ```
@@ -316,7 +316,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | _(none — env-only)_  | JINN_NET_LIVENESS_WEBHOOK_URL | unset — generic incoming-webhook URL (Slack-compatible) for the cron-driven net-liveness probe (#1044, `yarn net-liveness`, `docs/runbooks/net-liveness.md`). Unset → NO-OP: the probe still classifies and logs, it just never posts. |
 | _(none — env-only)_  | JINN_NET_LIVENESS_THRESHOLD_MINUTES | 30 — staleness threshold (minutes) for the net-liveness probe; converted to Base block-space at 30 blocks/min. |
 | _(none — env-only)_  | JINN_VERSION_CHECK | enabled (default). Gates the start-time npm-registry check (#641) that logs one line when a newer `@jinn-network/client` has been published and backs the dashboard's `update_available` banner. Opt out with `0` / `false` / `no` / empty. Best-effort — a registry outage degrades silently, never gates boot. |
-| _(none — flag/env-only)_  | JINN_NATIVE_CONFIG_PATH | unset — path to the native-v1 structured config file for `jinn run --native-config <path>` (issue #2378). Resolution order: `--native-config` flag > this env var > default `~/.jinn-client/native-config.json`. Deliberately never the legacy `config.json` — the legacy loader's shape-v2 migration and native's strict schema are mutually unsatisfiable on one file, so native gets its own file, own resolver, own loader (`client/src/daemon/native-config-path.ts`), never routed through `loadConfig`/`migrateConfigShapeV2`. Naming a native config that resolves to effective mode `legacy` (an omitted or explicit `operator.verticalMode: "legacy"`) is `invalid_invocation`, never a silent legacy boot. |
+| _(none — flag/env-only)_  | JINN_NATIVE_CONFIG_PATH | unset — path to the native-v1 structured config file for `jinn run --native-config <path>` (issue #2378). Resolution order: `--native-config` flag > this env var > default `~/.jinn-client/native-config.json`. Deliberately never the legacy `config.json` — the legacy loader's shape-v2 migration and native's strict schema are mutually unsatisfiable on one file, so native gets its own file, own resolver, own loader (`operator/src/daemon/native-config-path.ts`), never routed through `loadConfig`/`migrateConfigShapeV2`. Naming a native config that resolves to effective mode `legacy` (an omitted or explicit `operator.verticalMode: "legacy"`) is `invalid_invocation`, never a silent legacy boot. |
 
 `JINN_PASSWORD` is env-only — never in config files.
 
@@ -361,12 +361,12 @@ probe is log-only — secondary-slot 429s never gate startup; only
 
 This is the JSON-RPC transport layer. It is **distinct from** the indexer
 HTTP read path (`discovery.url` / `JINN_DISCOVERY_URL`), which
-`createHttpCorpusDiscovery` and `client/src/discovery-client/http.ts`
+`createHttpCorpusDiscovery` and `operator/src/discovery-client/http.ts`
 still consult. The RPC fallback chain operates beneath both.
 
 `discovery.url` / `discovery.mode` / `JINN_DISCOVERY_URL` stay (R3b
 survivors, evidence CLI, `jinn tasks watch`, MCP env, corpus HTTP).
-Wave-4 D4 deleted `client/src/discovery/` (factory, on-chain floor, HTTP
+Wave-4 D4 deleted `operator/src/discovery/` (factory, on-chain floor, HTTP
 fat client, `with-fallback`); `fallbackToOnchain` remains parseable but
 is not consulted. When the indexer is unreachable those HTTP readers
 raise `DiscoveryUnavailableError` — there is no silent `eth_getLogs`
@@ -392,11 +392,11 @@ Per DR-2026-06-30 (tokenless, OLAS-native), Jinn has no DAO token, no treasury e
 
 ### How the daemon works
 
-See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. There is no fixed daemon shape: **every loop is conditional**, so the running set depends on the vertical mode (`legacy` or `native-v1`) and config. Today that set is `work` and `evaluator` (the native solve and evaluate paths), `posting`, `projector`, `evidence-driver`, and the support/earning loops (`reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`). Startup runs one-shot in-flight recovery before any loop takes work. `LOOP_REGISTRY` in `client/src/daemon/loop-heartbeat.ts` is the single source of loop names, heartbeat intervals, and admission class; the started set is computed in `Daemon.start()` (search `started.add(`). Wave-4 D1 retired `engine-watcher` and `engine-tick` with the TaskEngine, D2 retired `delivery-watcher`, D3 retired `creator`, and D4 retired `peer-sync`; Wave-4 D6 removed all five leftover `LOOP_REGISTRY` rows. Remaining ten: `posting`, `reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`, `projector`, `evidence-driver`, `work`, `evaluator`. Per DR-2026-06-30 the reward-claim loop is the sole reward path (stOLAS `RewardClaimLoop`); the former L2→L1 jinn-claim loop was removed with the JINN token. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
+See [`operator/ARCHITECTURE.md`](operator/ARCHITECTURE.md) for the integrating narrative — operator app, CLI, daemon loops, task lifecycle, and extension points. There is no fixed daemon shape: **every loop is conditional**, so the running set depends on the vertical mode (`legacy` or `native-v1`) and config. Today that set is `work` and `evaluator` (the native solve and evaluate paths), `posting`, `projector`, `evidence-driver`, and the support/earning loops (`reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`). Startup runs one-shot in-flight recovery before any loop takes work. `LOOP_REGISTRY` in `operator/src/daemon/loop-heartbeat.ts` is the single source of loop names, heartbeat intervals, and admission class; the started set is computed in `Daemon.start()` (search `started.add(`). Wave-4 D1 retired `engine-watcher` and `engine-tick` with the TaskEngine, D2 retired `delivery-watcher`, D3 retired `creator`, and D4 retired `peer-sync`; Wave-4 D6 removed all five leftover `LOOP_REGISTRY` rows. Remaining ten: `posting`, `reward-claim`, `balance-topup`, `eviction-check`, `checkpoint`, `harvest`, `projector`, `evidence-driver`, `work`, `evaluator`. Per DR-2026-06-30 the reward-claim loop is the sole reward path (stOLAS `RewardClaimLoop`); the former L2→L1 jinn-claim loop was removed with the JINN token. Each loop's tx calls increment on-chain activity counters that the OLAS staking contract reads at checkpoints to determine reward eligibility.
 
 Generators are **launched-record-driven**, not config-flag-driven (per `spec/2026-05-05-solvernet-creation-and-launch.md` §11). On startup the daemon walks `~/.jinn-client/solvernets/launched/` for records this operator owns; for each record where `status === 'launched'` and `generatorEnabled === true`, it spawns the matching SolverType-specific generator. The legacy `taskGenerator.enabled` config flag and the predecessor Launcher mode's `roles.includes('launching')` gate are gone — gating is "do I have a launched record where I'm the owner." Joining a SolverNet as an operator (writing a `joinedSolverNets[<manifestCid>]` config entry, see §12) never starts a generator; that's launcher-only.
 
-Operator participation is keyed by `manifestCid`, not by SolverNet name. The operator's local config has the shape `joinedSolverNets[<manifestCid>] = { name, manifestCid, roles, harness, plugins, model }` — one entry per launched SolverNet the operator has joined. Edits to this shape are restart-required; the daemon does not hot-reload SolverNet config. Claim eligibility filters on these entries: a daemon with no joined SolverNets does not claim *any* tasks, and tasks whose `solverNetManifestCid` is not in `joinedSolverNets` are ignored regardless of contract type. Each `harness` reads its own auth store (the daemon only forwards an allowlisted env set); for the per-harness auth store + rotate command, and why `client/.env` is repo-dev-only, see [`docs/operator/rotating-harness-keys.md`](docs/operator/rotating-harness-keys.md).
+Operator participation is keyed by `manifestCid`, not by SolverNet name. The operator's local config has the shape `joinedSolverNets[<manifestCid>] = { name, manifestCid, roles, harness, plugins, model }` — one entry per launched SolverNet the operator has joined. Edits to this shape are restart-required; the daemon does not hot-reload SolverNet config. Claim eligibility filters on these entries: a daemon with no joined SolverNets does not claim *any* tasks, and tasks whose `solverNetManifestCid` is not in `joinedSolverNets` are ignored regardless of contract type. Each `harness` reads its own auth store (the daemon only forwards an allowlisted env set); for the per-harness auth store + rotate command, and why `operator/.env` is repo-dev-only, see [`docs/operator/rotating-harness-keys.md`](docs/operator/rotating-harness-keys.md).
 
 ### Earning bootstrap
 
@@ -441,7 +441,7 @@ where tests go, the mock policy, shared helpers. Design rationale lives in
 
 ```bash
 # Client
-cd client
+cd operator
 yarn install         # install deps (CI: yarn install --immutable)
 yarn build           # tsc compile + bundle SPA into dist/dashboard
 yarn test            # vitest run
@@ -466,7 +466,7 @@ yarn test            # Hardhat tests
 
 ## Adding SolverTypes
 
-To add a new **in-repo** SolverType (typed `spec`, `jinn tasks submit --spec-file`, optional auto-generators, and Harness/evaluator pairing), follow [`docs/runbooks/add-solver-type.md`](docs/runbooks/add-solver-type.md). SolverType definitions live under `client/src/solver-types/`; Task documents live under `client/src/tasks/`; Harness selection is owned by SolverNet config and `client/src/harnesses/impls/index.ts` (`buildHarnesses`).
+To add a new **in-repo** SolverType (typed `spec`, `jinn tasks submit --spec-file`, optional auto-generators, and Harness/evaluator pairing), follow [`docs/runbooks/add-solver-type.md`](docs/runbooks/add-solver-type.md). SolverType definitions live under `operator/src/solver-types/`; Task documents live under `operator/src/tasks/`; Harness selection is owned by SolverNet config and `operator/src/harnesses/impls/index.ts` (`buildHarnesses`).
 
 ## Spec Conventions
 
@@ -478,7 +478,7 @@ All frontends in this repo follow the rules below. They exist so that any operat
 
 ### Every frontend ships with a spec
 
-Place the spec under `spec/` (or, for a frontend that already has a dedicated subtree, alongside its source — e.g. [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md) or [`packages/indexer/explorer/EXPLORER-APP-SPEC.md`](packages/indexer/explorer/EXPLORER-APP-SPEC.md)) using the `YYYY-MM-DD-<topic>.md` convention from §Spec Conventions. The spec is the source of truth for the frontend's domain model, surfaces, and behavior. UI changes that alter the model or the action surface land *with* a spec update in the same PR.
+Place the spec under `spec/` (or, for a frontend that already has a dedicated subtree, alongside its source — e.g. [`operator/OPERATOR-APP-SPEC.md`](operator/OPERATOR-APP-SPEC.md) or [`packages/indexer/explorer/EXPLORER-APP-SPEC.md`](packages/indexer/explorer/EXPLORER-APP-SPEC.md)) using the `YYYY-MM-DD-<topic>.md` convention from §Spec Conventions. The spec is the source of truth for the frontend's domain model, surfaces, and behavior. UI changes that alter the model or the action surface land *with* a spec update in the same PR.
 
 ### Spec must include a domain model
 

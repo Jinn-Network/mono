@@ -8,7 +8,7 @@
  * `unavailable`) so an adapter never crashes across the port boundary.
  *
  * The dependency arrow is one-way: harness-layer imports the ports/schemas
- * FROM `@jinn-network/plugin`; the plugin package never imports `client/**`.
+ * FROM `@jinn-network/plugin`; the plugin package never imports `operator/**`.
  */
 export { createCorpusAdapter } from './corpus-adapter.js';
 export { episodeToCorpusRecord, type EpisodeRecordProjection } from './episode-record.js';

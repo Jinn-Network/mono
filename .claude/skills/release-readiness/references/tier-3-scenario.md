@@ -4,9 +4,9 @@
 
 The single Tier 3 scenario, as `environment-suite.yml` runs it (historically: release-readiness Phase 5, human-invoked, on a laptop).
 
-**Implementation:** `client/test/release/tier-3/T3.1-producer-evaluator-real.ts`
+**Implementation:** `operator/test/release/tier-3/T3.1-producer-evaluator-real.ts`
 
-**Orchestrator:** `client/scripts/release/run-tier-3.ts`
+**Orchestrator:** `operator/scripts/release/run-tier-3.ts`
 
 ## Pre-conditions
 

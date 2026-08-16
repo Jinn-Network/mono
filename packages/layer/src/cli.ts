@@ -1,7 +1,7 @@
 /**
  * jinn-layer CLI — the human surface over the harness-layer consume path.
  *
- * Verbs (same command-module spirit as client/src/cli/commands/, kept
+ * Verbs (same command-module spirit as operator/src/cli/commands/, kept
  * self-contained so the package stays embeddable):
  *
  *   jinn-layer corpus search "<query>" [--limit N] [--json]

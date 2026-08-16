@@ -29,7 +29,7 @@ Subgraph V3 indexing has not yet been built (jinn-mono-qwdc.36). Until that land
 ## Pre-cutover checklist
 
 - [ ] `cd contracts && yarn test` — 449/449 passing on the renamed contracts (verified at commit `217cb804`)
-- [ ] `cd client && npx tsc --noEmit && yarn vitest run` — daemon typecheck + tests green (verified at commit `11e3d47f`)
+- [ ] `cd operator && npx tsc --noEmit && yarn vitest run` — daemon typecheck + tests green (verified at commit `11e3d47f`)
 - [ ] Verify no in-flight tasks on Base Sepolia TaskCoordinator (`https://sepolia.basescan.org/address/<address>`) — should be 0 or only tasks the team is intentionally orphaning
 - [ ] Confirm `DEPLOYER_PRIVATE_KEY` env var is set for the deploy environment
 - [ ] Confirm `BASE_SEPOLIA_RPC_URL` is reachable
@@ -82,7 +82,7 @@ cd contracts && yarn test
 
 # 2. Daemon Anvil-fork e2e — full lifecycle on a Base Sepolia fork with
 #    the upgrade applied in-fork (canonical pre-deploy gate)
-cd client && yarn e2e
+cd operator && yarn e2e
 # Expected: 4 phases pass. The "Base Sepolia fork Task-first full loop
 # with real Mech" phase is the load-bearing one — it forks live Base
 # Sepolia via Anvil, runs `upgradeTaskStackInsideFork` to swap the
@@ -165,7 +165,7 @@ If Studio rejects the publish, fix the schema/handler issue before the live cuto
 
 After both contract upgrade and subgraph redeploy are live, walk the operator dashboard manually to confirm the loop works end-to-end. The existing `testing-jinn-app` skill has a recipe; the launcher-specific path is:
 
-1. **Spawn the daemon** against your bootstrapped fleet (`node dist/bin/jinn.js run --no-ui`) — see `client/CLAUDE.md` for the contributor flow.
+1. **Spawn the daemon** against your bootstrapped fleet (`node dist/bin/jinn.js run --no-ui`) — see `operator/CLAUDE.md` for the contributor flow.
 2. **Switch to Launcher mode** in the dashboard. The list page should be empty if you've never launched.
 3. **Walk Create flow** (`/launcher/create`) for the Prediction template. Steps 1–5: define → review contract → configure generator → configure pricing → review and launch. The launch action progresses pinning → recording → broadcasting → confirming → spawning → launched.
 4. **Confirm the post-launch dashboard** at `/launcher/launched/:solverNetId` shows: status badge `launched`, manifest summary (name, contract id/version, prices), generator status, recent tasks (likely empty until first poll), spend panel.
@@ -175,7 +175,7 @@ After both contract upgrade and subgraph redeploy are live, walk the operator da
 
 If any step diverges from expected, capture the failure (logs, screenshots, daemon state) and decide whether to roll back via the section below or fix forward.
 
-The Playwright e2e at `client/test/dashboard/solvernet-flow.e2e.test.ts` covers scenario 1 (happy-path Launch) automatically; the lifecycle / operator catalog / empty states / crash-recovery scenarios are filed as `jinn-mono-qwdc.37` and would automate this walk further when complete.
+The Playwright e2e at `operator/test/dashboard/solvernet-flow.e2e.test.ts` covers scenario 1 (happy-path Launch) automatically; the lifecycle / operator catalog / empty states / crash-recovery scenarios are filed as `jinn-mono-qwdc.37` and would automate this walk further when complete.
 
 ## Rollback
 

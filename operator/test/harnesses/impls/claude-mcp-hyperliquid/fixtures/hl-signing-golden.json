@@ -1,0 +1,35 @@
+{
+  "_description": "Golden Hyperliquid L1-action signature — regenerated via operator/scripts/gen-hl-signing-fixture.py.",
+  "_source_sdk": "hyperliquid-python-sdk",
+  "inputs": {
+    "privateKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "signerAddress": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+    "action": {
+      "type": "order",
+      "orders": [
+        {
+          "a": 0,
+          "b": true,
+          "p": "50000.0",
+          "s": "0.001",
+          "r": false,
+          "t": {
+            "limit": {
+              "tif": "Gtc"
+            }
+          }
+        }
+      ],
+      "grouping": "na"
+    },
+    "nonce": 1712000000000,
+    "vaultAddress": null,
+    "expiresAfter": null,
+    "isMainnet": false
+  },
+  "expected": {
+    "r": "0xbc0d2aad2a8485c07d3c372f73488d2e153eadbd6a7200e28f60ef97fcd09826",
+    "s": "0x3f004bda7a2585f7a67e4953dbd1fb040384ed93c5fde2d37104f07225202960",
+    "v": 27
+  }
+}

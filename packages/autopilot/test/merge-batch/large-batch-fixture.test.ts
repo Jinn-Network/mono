@@ -26,14 +26,14 @@ describe('large-batch fixture', () => {
   it('plans 50 PRs into bounded waves with solo lanes and review skips', () => {
     const prs: MergeBatchPr[] = Array.from({ length: 50 }, (_, i) => {
       const number = i + 1;
-      return pr(number, `client/src/module-${number}.ts`);
+      return pr(number, `operator/src/module-${number}.ts`);
     });
 
-    prs[4] = pr(5, 'client/package.json', { risk: 'solo' });
-    prs[9] = pr(10, 'client/src/store.ts');
-    prs[10] = pr(11, 'client/src/store.ts');
-    prs[19] = pr(20, 'client/src/feature.ts', { dependsOnPrNumbers: [19] });
-    prs[29] = pr(30, 'client/src/review.ts', {
+    prs[4] = pr(5, 'operator/package.json', { risk: 'solo' });
+    prs[9] = pr(10, 'operator/src/store.ts');
+    prs[10] = pr(11, 'operator/src/store.ts');
+    prs[19] = pr(20, 'operator/src/feature.ts', { dependsOnPrNumbers: [19] });
+    prs[29] = pr(30, 'operator/src/review.ts', {
       review: { kind: 'awaiting-maintainer-review' },
     });
 

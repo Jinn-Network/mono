@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 /**
- * On-chain verdict codes, re-homed verbatim from `client/src/adapters/mech/verdict-code.ts`
+ * On-chain verdict codes, re-homed verbatim from `operator/src/adapters/mech/verdict-code.ts`
  * (design §14 "declared impact"; `contracts/src/tasks/TaskCoordinator.sol`'s `VerdictCode`
  * enum). `recordVerdict` rejects 0 (None) and anything > 4.
  *

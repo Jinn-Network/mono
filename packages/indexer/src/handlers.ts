@@ -226,7 +226,7 @@ function requiredVerdictsForFinalization(value: number): number {
 }
 
 // ── ABI tuple for payload decoding ────────────────────────────────────────────
-// Matches PAYLOAD_TUPLE_V2 in client/src/erc8004/abis.ts. We try V2 first,
+// Matches PAYLOAD_TUPLE_V2 in operator/src/erc8004/abis.ts. We try V2 first,
 // then fall back to V1 (without the trailing harness identity fields).
 
 export const PAYLOAD_TUPLE_V2 = [
@@ -274,7 +274,7 @@ export function decodeEnvelopePayload(value: Hex): {
 
 // ── Plug-in publication tuples (attd) ────────────────────────────────────────
 // Byte-identical to PLUGIN_PAYLOAD_TUPLE / REVOCATION_PAYLOAD_TUPLE in
-// client/src/erc8004/abis.ts — the indexer package cannot import from client/,
+// operator/src/erc8004/abis.ts — the indexer package cannot import from operator/,
 // so these are duplicated here and guarded by the drift test in
 // test/handlers.plugin.test.ts.
 
@@ -889,7 +889,7 @@ export function parseEnvelopeLite(body: unknown): EnvelopeLite | null {
   // this parser path auto-lights-up — no further indexer change needed.
   //
   // Why NOT sessionProvenance.originatingTool.name: the envelope schema in
-  // client/src/types/envelope.ts:170 enforces sessionProvenance only on
+  // operator/src/types/envelope.ts:170 enforces sessionProvenance only on
   // role='capture' envelopes; role='restoration' (the ones we enrich) never
   // carry it. Reading it would be 100% empty (it was, in the first cut).
   const model = safeStr(executorObj['model']);
@@ -1535,7 +1535,7 @@ export async function handleMetadataSet({
     // ── Evaluation envelope enrichment → verdictEnvelopeMeta (ebu7.13) ─────
     // Only for evaluation envelopes (kind === 'evaluation'). The off-chain body
     // carries the evaluator's ACTUAL outcome — the on-chain verdictCode is
-    // submitted as Pass(1) by default in the daemon (client/src/adapters/mech/
+    // submitted as Pass(1) by default in the daemon (operator/src/adapters/mech/
     // adapter.ts:899 + engine.ts:1751 fall-through), so failed evaluations
     // appear as Pass on-chain. The envelope is the source of truth.
     // verdictEnvelopeMeta is optional for backward compat with callers/tests
@@ -1558,7 +1558,7 @@ export async function handleMetadataSet({
           // its local counter for that instance (#669).
           //
           // We also read the task body's top-level `solverNetManifestCid`
-          // (task.v1 schema; see client/src/types/task-document.ts) so the
+          // (task.v1 schema; see operator/src/types/task-document.ts) so the
           // launcher's getInstanceSuccessCounts can scope by SolverNet —
           // preventing multi-SolverNet operators with overlapping
           // instance_id pools from cross-tenant over-counting

@@ -5,7 +5,7 @@
  *
  * This is the **distilled-skill producer** #1394 anticipated but did not ship:
  * the artifact payload is the canonical `SkillArtifactV1`
- * (client/src/types/skill-artifact.ts) with `provenance.kind: 'distilled'` and
+ * (operator/src/types/skill-artifact.ts) with `provenance.kind: 'distilled'` and
  * the DR-2026-07-06 distill fields (`skillKind`, `distillPromptSha256`,
  * `distribution`, `verifiabilityTier`). The stored `skill.skillMd` is rendered
  * WITHOUT the `metadata.jinn` frontmatter block — the structured provenance
@@ -91,7 +91,7 @@ export interface PublishSkillResult {
  * Lifecycle is *content* — not an injected collaborator — so it rides an
  * optional param, preserving the deps/content seam and keeping every existing
  * 2-arg call site working. Honored at read time only when the successor's
- * operator matches the superseded record's operator (client/.../consume.ts).
+ * operator matches the superseded record's operator (operator/.../consume.ts).
  */
 export interface SkillLifecycle {
   /** Envelope/manifest CID of the prior record this one replaces. */

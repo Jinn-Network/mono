@@ -42,7 +42,7 @@ corepack yarn --cwd packages/core install --immutable
 corepack yarn --cwd packages/core build
 corepack yarn --cwd packages/layer install --immutable
 corepack yarn --cwd packages/layer build
-corepack yarn --cwd client install --immutable
+corepack yarn --cwd operator install --immutable
 export JINN_LAYER_BIN="$PWD/packages/layer/dist/bin/jinn-layer.js"
 ```
 
@@ -98,7 +98,7 @@ approval. Do not include skill-distillation material in this launch.
 
 ```bash
 set -o pipefail
-corepack yarn --cwd client stage2:validate-curated-seeds --episodes-dir \
+corepack yarn --cwd operator stage2:validate-curated-seeds --episodes-dir \
   "$HOME/.jinn-client/local-corpus/launch-15" \
   --repo Jinn-Network/mono --json \
   | tee /tmp/stage2-mono-launch-15-audit.json
@@ -116,7 +116,7 @@ Require:
 The checked-in negative control must still exit `1`:
 
 ```bash
-corepack yarn --cwd client stage2:validate-curated-seeds --episodes-dir \
+corepack yarn --cwd operator stage2:validate-curated-seeds --episodes-dir \
   "$PWD/packages/layer/fixtures/stage1-seeds" --json
 ```
 
@@ -169,7 +169,7 @@ The preview derives the real operator identity but performs no IPFS, RPC,
 chain, ledger, or seed-state writes:
 
 ```bash
-corepack yarn --cwd client stage2:publish-curated-seeds \
+corepack yarn --cwd operator stage2:publish-curated-seeds \
   --episodes-dir "$HOME/.jinn-client/local-corpus/launch-15/wave-1" \
   --report /tmp/stage2-mono-wave-1-plan.json \
   --json
@@ -181,7 +181,7 @@ digests. The private key and password are never printed.
 Only after that exact preview is approved, execute:
 
 ```bash
-corepack yarn --cwd client stage2:publish-curated-seeds \
+corepack yarn --cwd operator stage2:publish-curated-seeds \
   --episodes-dir "$HOME/.jinn-client/local-corpus/launch-15/wave-1" \
   --report /tmp/stage2-mono-wave-1-plan.json \
   --json --yes

@@ -6,13 +6,13 @@ import { SPECIFIER, tsFiles } from './import-scan.js';
 
 /**
  * Core's headline invariant (#1833, spec §4.3.2): `packages/core/src` must
- * have ZERO imports resolving into `client/src`. Core is the domain package
- * that sits BELOW the daemon; any relative escape into `client/src` inverts
- * the dependency arrow and is forbidden. From `packages/core`, `client/src`
- * is `../../client/src`.
+ * have ZERO imports resolving into `operator/src`. Core is the domain package
+ * that sits BELOW the daemon; any relative escape into `operator/src` inverts
+ * the dependency arrow and is forbidden. From `packages/core`, `operator/src`
+ * is `../../operator/src`.
  */
 const pkgRoot = fileURLToPath(new URL('../../', import.meta.url));
-const clientSrc = normalize(join(pkgRoot, '..', '..', 'client', 'src'));
+const clientSrc = normalize(join(pkgRoot, '..', '..', 'operator', 'src'));
 
 function relativeSpecifiers(source: string): string[] {
   const specs: string[] = [];
@@ -26,8 +26,8 @@ function posix(p: string): string {
   return p.split(sep).join('/');
 }
 
-describe('core ↛ client/src (#1833)', () => {
-  it('no import in core/src resolves into client/src', () => {
+describe('core ↛ operator/src (#1833)', () => {
+  it('no import in core/src resolves into operator/src', () => {
     const escapes: string[] = [];
     for (const file of tsFiles(join(pkgRoot, 'src'))) {
       const source = readFileSync(file, 'utf-8');
@@ -40,7 +40,7 @@ describe('core ↛ client/src (#1833)', () => {
     }
     expect(
       escapes.sort(),
-      `core/src imports escaping into client/src (forbidden — core is below the daemon):\n${escapes.join('\n')}`,
+      `core/src imports escaping into operator/src (forbidden — core is below the daemon):\n${escapes.join('\n')}`,
     ).toEqual([]);
   });
 });

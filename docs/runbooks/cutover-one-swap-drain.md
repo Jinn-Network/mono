@@ -57,7 +57,7 @@ step 7 unfinished.
       every owned record in a terminal state (no in-flight ERC-8004 lifecycle transition)
 - [ ] Evidence driver: `evidenceIndexing.pending === 0` and
       `evidenceIndexing.failures.length === 0` on `/v1/status`
-      (`client/src/api/contract/status.ts` shape; announce-after-indexed, contract 6)
+      (`operator/src/api/contract/status.ts` shape; announce-after-indexed, contract 6)
 
 ## 5. Wait for terminal states
 
@@ -72,7 +72,7 @@ step 7 unfinished.
 One table, all flows. This table plus the per-flow chain probe (`cast call
 claimed(requestId)`) IS the loud-stranding record (contract 10 / design §4) — the
 `unreleased_attempt` notification kind is not wired on this branch
-(`client/src/api/notifications-build.ts`) and nothing here depends on it.
+(`operator/src/api/notifications-build.ts`) and nothing here depends on it.
 
 | taskId | attemptIndex | requestId | flow (evaluation \| solve \| post) |
 | --- | --- | --- | --- |
@@ -123,8 +123,8 @@ Two real Base Sepolia operators, honestly distinct: A = service 72, B = service 
 ### Gate artifact (ii) — container-grade proof, separately run
 
 A **real** container-graded evaluation through the M4c Docker path
-(`client/src/daemon/native-evaluator-container-runtime.ts` with
-`client/deployments/evaluator/swe-rebench-v2-deployment.mjs`). Run outside the G-loop;
+(`operator/src/daemon/native-evaluator-container-runtime.ts` with
+`operator/deployments/evaluator/swe-rebench-v2-deployment.mjs`). Run outside the G-loop;
 a green unit suite does not satisfy this.
 
 > **Correction (DR-2026-08-05 addendum, 2026-08-10 — operator ruling, strict reading):**

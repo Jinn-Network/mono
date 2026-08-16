@@ -602,7 +602,7 @@ describe('dispatchReview', () => {
   // list AND CODEOWNERS from origin/next via the runner (git diff / git show),
   // so the fake serves both — no dependency on the real repo's CODEOWNERS.
   const CODEOWNERS_FIXTURE =
-    '/client/src/dashboard/spa/src/pages/ @oaksprout @ritsukai\n/SPEC.md @oaksprout @ritsukai\n';
+    '/operator/src/dashboard/spa/src/pages/ @oaksprout @ritsukai\n/SPEC.md @oaksprout @ritsukai\n';
   function diffRunner(changedFiles: string): CommandRunner {
     return async (cmd, args) => {
       if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'list') return `worktree /x\nHEAD a\nbranch refs/heads/next\n`;
@@ -618,7 +618,7 @@ describe('dispatchReview', () => {
 
   it('marks a PR touching a code-owned path as HUMAN-SURFACE / advisory (no approve)', async () => {
     const { spawn, calls } = makeSpawn();
-    await dispatchReview(PR, CFG, { runner: diffRunner('client/src/dashboard/spa/src/pages/Tasks.tsx\n'), spawn, leaseStore: TEST_LEASE_STORE });
+    await dispatchReview(PR, CFG, { runner: diffRunner('operator/src/dashboard/spa/src/pages/Tasks.tsx\n'), spawn, leaseStore: TEST_LEASE_STORE });
     const prompt = promptOf(calls);
     expect(prompt).toContain('HUMAN-SURFACE');
     expect(prompt).toContain('review:needs-human');

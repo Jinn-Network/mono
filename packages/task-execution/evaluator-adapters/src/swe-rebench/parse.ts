@@ -40,7 +40,7 @@ export interface SweRebenchTransitions {
 /**
  * Container-output signatures meaning the evaluation aborted before grading anything — the
  * environment is the problem, not the solution. Transcribed as data from the legacy
- * classification table (`client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:216-242`);
+ * classification table (`operator/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:216-242`);
  * the fixtures in `./fixtures.ts` are its regression suite.
  */
 const INFRASTRUCTURE_SIGNATURES: readonly {

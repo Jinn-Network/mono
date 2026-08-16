@@ -33,7 +33,7 @@ Operators stake through the stOLAS `ExternalStakingDistributor`: the bond is *le
 
 **Curator.** Launches and configures a SolverNet — an objective, the evaluation criteria attempts are graded against, and how many attempts — and funds its tasks (the Curator-funding stream). The demand side; does not stake or earn from staking. Its self-interest is the built-in quality control: it stops funding SolverNets that produce junk.
 
-**Operator.** Runs a node that solves and/or evaluates whatever SolverNet it has joined, and earns OLAS from both streams. Role is per-task, not per-operator. The user-facing surface an operator interacts with to run a node is canonical in [`client/OPERATOR-APP-SPEC.md`](client/OPERATOR-APP-SPEC.md).
+**Operator.** Runs a node that solves and/or evaluates whatever SolverNet it has joined, and earns OLAS from both streams. Role is per-task, not per-operator. The user-facing surface an operator interacts with to run a node is canonical in [`operator/OPERATOR-APP-SPEC.md`](operator/OPERATOR-APP-SPEC.md).
 
 **Evaluator.** Judges a solution against the Curator-defined goal and records a verdict; an operator plays this role per-task. A solver cannot evaluate its own solution (self-eval prevention, default-on, testnet-relaxable).
 

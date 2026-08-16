@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 /**
  * Forbidden-import architecture test for #1658 (AC3). Scans every module
  * under src/ for specifiers the package-architecture spec §6 forbids:
- * client/src, any sibling @jinn-network/* package (this package depends on
+ * operator/src, any sibling @jinn-network/* package (this package depends on
  * zod only), viem, the MCP SDK, node:fs/net/child_process, and process.env
  * reads. node:crypto is explicitly permitted (used by plugin.ts for
  * randomUUID()). Matches both static `from '<spec>'` imports and dynamic
@@ -21,7 +21,7 @@ function specifierRegex(innerPattern: string): RegExp {
 }
 
 const FORBIDDEN_PATTERNS: Array<{ label: string; regex: RegExp }> = [
-  { label: 'client/src', regex: specifierRegex('[^\'"]*\\bclient\\/src\\/[^\'"]*') },
+  { label: 'operator/src', regex: specifierRegex('[^\'"]*\\bclient\\/src\\/[^\'"]*') },
   { label: '@jinn-network/*', regex: specifierRegex('@jinn-network\\/[^\'"]*') },
   { label: 'viem', regex: specifierRegex('viem') },
   { label: '@modelcontextprotocol/sdk', regex: specifierRegex('@modelcontextprotocol\\/sdk(\\/[^\'"]*)?') },
@@ -72,7 +72,7 @@ describe('src → forbidden-import boundary (#1658)', () => {
       "import { createPublicClient } from 'viem';",
       "import fs from 'node:fs';",
       "import { Client } from '@modelcontextprotocol/sdk';",
-      "import { something } from 'client/src/foo.js';",
+      "import { something } from 'operator/src/foo.js';",
       "const token = process.env.SECRET;",
     ].join('\n');
     const found = findForbiddenImports(synthetic);

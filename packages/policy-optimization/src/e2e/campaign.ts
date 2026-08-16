@@ -389,7 +389,7 @@ export interface Participant {
  * The C6 candidate this campaign admits: the sealed manifest bytes and the materialized tree the
  * shipped learner emitted, as committed fixtures.
  *
- * See FINDING F-C9-1 — `client/` cannot import this package (release-group `transitional-or-private`
+ * See FINDING F-C9-1 — `operator/` cannot import this package (release-group `transitional-or-private`
  * is outside `legacy-product-lines`' allowed set) and this package's source boundary denies
  * `@jinn-network/client` by name, so the seam between the two is the sealed bytes and nothing else.
  * The client-side integration test emits these and asserts byte-equality with the committed copies;

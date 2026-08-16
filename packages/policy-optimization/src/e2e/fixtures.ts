@@ -53,7 +53,7 @@ export const EVALUATOR = "urn:uuid:c9000000-0000-5000-8000-000000000004";
 /**
  * The proposer identity the learner is configured with on the client side, and the one the
  * committed C6 manifest fixture carries. Restated here so the product's own campaign can name
- * the same party without importing anything from `client/` (see FINDING F-C9-1).
+ * the same party without importing anything from `operator/` (see FINDING F-C9-1).
  */
 export const LEARNER_PROPOSER =
   "did:pkh:eip155:84532:0x1111111111111111111111111111111111111111";

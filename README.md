@@ -37,7 +37,7 @@ Jinn has no canonical frontend. The reference frontend lives in this repo and is
 
 | Instance | Operator | Source | Notes |
 |----------|----------|--------|-------|
-| Operator dashboard SPA | self-hosted (any operator) | [`client/`](client/) | Served locally by every `jinn run` — the reference frontend. |
+| Operator dashboard SPA | self-hosted (any operator) | [`operator/`](operator/) | Served locally by every `jinn run` — the reference frontend. |
 | [Jinn network explorer](https://jinn-indexer-production.up.railway.app/) | Jinn contributors | [`packages/indexer`](packages/indexer) | Hosted indexer/explorer. |
 
 ## Community-run surfaces

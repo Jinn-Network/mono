@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 
 /**
  * CID validation for harness-layer network boundaries. Keep this package-local:
- * the harness-layer ↔ client/src architecture seam is shrink-only.
+ * the harness-layer ↔ operator/src architecture seam is shrink-only.
  *
  * The live Autonolas registry emits CIDv1 raw objects, including the historical
  * base16 form `f01551220<sha256>`. We deliberately support only the two codecs

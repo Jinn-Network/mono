@@ -48,7 +48,7 @@ export interface BaseVenue {
    * a host can share it with OTHER broadcast domains against the same agent EOA that do not route
    * through this venue's Safe broadcaster (finding #525/#562/#897: two independently-locked
    * broadcasters over one EOA can still collide on a nonce). See
-   * `client/src/tx-retry.ts`'s `setDefaultEoaBroadcastLock`.
+   * `operator/src/tx-retry.ts`'s `setDefaultEoaBroadcastLock`.
    */
   readonly broadcastLock: BroadcastLock;
   /** Feature-disabled V3 evaluator primitives; absent for revised V4 venues. */
