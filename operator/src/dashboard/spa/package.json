@@ -49,7 +49,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.4.20",
-    "jsdom": "^29",
+    "jsdom": "^30",
     "postcss": "^8.4.49",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
