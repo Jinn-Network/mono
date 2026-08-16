@@ -21,7 +21,7 @@ Other canonical docs:
 - `BRAND.md` — read before producing any user-facing artifact (UI, slides, docs, marketing copy)
 - `GROWTH.md` — read before planning distribution, campaigns, channel strategy, or growth experiments
 - `GLOSSARY.md` — read whenever a Jinn-specific term appears; never redefine terms locally
-- [`operator/OPERATOR-APP-SPEC.md`](operator/OPERATOR-APP-SPEC.md) — read before designing, extending, or reasoning about the operator app's data model, actions, or notification taxonomy (referenced from `SPEC.md` Roles → Operator)
+- [`apps/operator-console/OPERATOR-APP-SPEC.md`](apps/operator-console/OPERATOR-APP-SPEC.md) — read before designing, extending, or reasoning about the operator app's data model, actions, or notification taxonomy (referenced from `SPEC.md` Roles → Operator)
 
 ## Coding Rules
 
@@ -478,7 +478,7 @@ All frontends in this repo follow the rules below. They exist so that any operat
 
 ### Every frontend ships with a spec
 
-Place the spec under `spec/` (or, for a frontend that already has a dedicated subtree, alongside its source — e.g. [`operator/OPERATOR-APP-SPEC.md`](operator/OPERATOR-APP-SPEC.md) or [`packages/indexer/explorer/EXPLORER-APP-SPEC.md`](packages/indexer/explorer/EXPLORER-APP-SPEC.md)) using the `YYYY-MM-DD-<topic>.md` convention from §Spec Conventions. The spec is the source of truth for the frontend's domain model, surfaces, and behavior. UI changes that alter the model or the action surface land *with* a spec update in the same PR.
+Place the spec under `spec/` (or, for a frontend that already has a dedicated subtree, alongside its source — e.g. [`apps/operator-console/OPERATOR-APP-SPEC.md`](apps/operator-console/OPERATOR-APP-SPEC.md) or [`packages/indexer/explorer/EXPLORER-APP-SPEC.md`](packages/indexer/explorer/EXPLORER-APP-SPEC.md)) using the `YYYY-MM-DD-<topic>.md` convention from §Spec Conventions. The spec is the source of truth for the frontend's domain model, surfaces, and behavior. UI changes that alter the model or the action surface land *with* a spec update in the same PR.
 
 ### Spec must include a domain model
 

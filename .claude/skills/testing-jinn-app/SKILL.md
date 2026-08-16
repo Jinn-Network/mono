@@ -10,7 +10,7 @@ The jinn app is the operator dashboard SPA at `operator/src/dashboard/spa/`, ser
 1. **Manual smoke** via `chrome-devtools` MCP against a live daemon — for spotting UX/layout paper cuts during development.
 2. **Automated E2E** via Playwright with route-mocked daemon API — for regression coverage in `operator/test/dashboard/`.
 
-**Canonical domain model.** What these tests must cover is defined by [`operator/OPERATOR-APP-SPEC.md`](../../../client/OPERATOR-APP-SPEC.md) — the operator app's canonical spec. It models the app as 14 components (§2.1 Daemon through §2.14 Generator panel), each described along four axes: **Static**, **Streams**, **Actions**, and **State messages**. The [Spec coverage map](#spec-coverage-map) below maps each component to the recipe or test that covers it.
+**Canonical domain model.** What these tests must cover is defined by [`apps/operator-console/OPERATOR-APP-SPEC.md`](../../../apps/operator-console/OPERATOR-APP-SPEC.md) — the operator app's canonical spec. It models the app as 14 components (§2.1 Daemon through §2.14 Generator panel), each described along four axes: **Static**, **Streams**, **Actions**, and **State messages**. The [Spec coverage map](#spec-coverage-map) below maps each component to the recipe or test that covers it.
 
 ## When to use
 

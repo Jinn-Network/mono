@@ -1,0 +1,159 @@
+/* ============================================================
+   JINN — foundations.css
+   Spacing, radii, shadows, motion, borders. The brutalist rules.
+   ============================================================ */
+
+:root {
+  /* SPACING — 4px base, rigid scale. Brutalism rewards discipline. */
+  --space-0:  0;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+  --space-9:  96px;
+  --space-10: 128px;
+
+  /* RADII — softened brutalism. Square is no longer the default;
+     subtle rounding everywhere, pills for status. */
+  --radius-0:     0;      /* only when hard edges are structurally required */
+  --radius-1:     4px;    /* chips, small inputs, tight affordances */
+  --radius-2:     6px;    /* default for buttons, inputs, small cards */
+  --radius-3:     10px;   /* panels, large cards, images, dialogs */
+  --radius-pill:  999px;  /* status chips */
+
+  /* BORDERS — hairline is default. Accent is for state. */
+  --border-hair:   1px solid var(--border);
+  --border-strong: 1px solid var(--border-strong);
+  --border-accent: 1px solid var(--border-accent);
+  --border-dashed: 1px dashed var(--border);
+
+  /* SHADOWS — use sparingly. Brutalism prefers crisp edges over depth.
+     When used, they are *hard* offset shadows, not soft blurs. */
+  --shadow-0: none;
+  --shadow-hard-sm: 2px 2px 0 0 var(--blue-950);
+  --shadow-hard:    4px 4px 0 0 var(--blue-950);
+  --shadow-hard-lg: 6px 6px 0 0 var(--blue-950);
+  /* One soft shadow — only for floating overlays (menus, toasts) */
+  --shadow-float: 0 12px 32px -8px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.3);
+
+  /* MOTION — short, linear. No springs. No bounces. Things appear. */
+  --ease-linear:   linear;
+  --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);  /* rare */
+  --dur-instant:   0ms;
+  --dur-fast:      80ms;
+  --dur-base:      140ms;
+  --dur-slow:      240ms;
+
+  /* Z */
+  --z-base:    1;
+  --z-sticky:  10;
+  --z-overlay: 100;
+  --z-modal:   1000;
+  --z-toast:   2000;
+
+  /* GRID — explorer & decks use an 8-col rigid grid on data pages */
+  --grid-gutter: var(--space-5);
+  --max-content: 1440px;
+}
+
+/* ------------------------------------------------------------
+   UTILITY PRIMITIVES
+   ------------------------------------------------------------ */
+
+.divider       { border-top: var(--border-hair); }
+.divider-strong{ border-top: var(--border-strong); }
+.divider-dashed{ border-top: var(--border-dashed); }
+
+.surface        { background: var(--bg); }
+.surface-elev   { background: var(--bg-elevated); }
+.surface-sunken { background: var(--bg-sunken); }
+
+/* Panel — the workhorse container. Subtle radius. Hairline. No shadow. */
+.panel {
+  background: var(--bg-elevated);
+  border: var(--border-hair);
+  border-radius: var(--radius-3);
+}
+
+/* Chip — the one place we allow roundedness */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: var(--border-hair);
+  border-radius: var(--radius-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  background: transparent;
+}
+.chip-solid {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+.chip-accent {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ------------------------------------------------------------
+   PROTECTION / CAPSULE RULES
+   Text on images uses a TOP/BOTTOM protection gradient, not a
+   blurred capsule. Capsules are reserved for status chips.
+   ------------------------------------------------------------ */
+.protect-bottom {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(7,13,24,0.0) 40%,
+    rgba(7,13,24,0.88) 100%
+  );
+}
+.protect-top {
+  background: linear-gradient(
+    to top,
+    transparent 0%,
+    rgba(7,13,24,0.0) 40%,
+    rgba(7,13,24,0.88) 100%
+  );
+}
+
+/* ------------------------------------------------------------
+   FOCUS — visible, sharp, no glow
+   ------------------------------------------------------------ */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------
+   SIGILS / TEXTURES — optional backing patterns
+   Used sparingly on hero sections, empty states.
+   ------------------------------------------------------------ */
+.texture-grid {
+  background-image:
+    linear-gradient(to right, rgba(122,167,220,0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(122,167,220,0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.texture-dots {
+  background-image: radial-gradient(rgba(220,184,102,0.14) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.texture-scan {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0,0,0,0.18) 2px,
+    rgba(0,0,0,0.18) 3px
+  );
+}
