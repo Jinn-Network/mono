@@ -33,7 +33,16 @@ import {
 } from "@jinn-network/task-execution-backend-local";
 import { predictionV1BaselineLauncher, type LauncherCapabilities, type LauncherContract, type LaunchPlan } from "@jinn-network/task-execution-launchers";
 import { makeClaudeCodeLauncher, makeCodexLauncher } from "@jinn-network/task-execution-launchers";
+import { canonicalJsonBytes, recordDigest } from "@jinn-network/trust-core";
 import {
+  BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE,
+  BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
+  BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
+  BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE,
+  BINARY_JUDGMENT_PROFILE_URI,
+  BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+  BinaryJudgmentEvaluationContextSchema,
+  buildBinaryJudgmentProfile,
   buildEvaluationTaskProfile,
   buildPredictionForecastProfile,
   buildRepositoryWorkProfile,
@@ -42,6 +51,10 @@ import {
   parseEvaluationSpec,
   parserAllowlistKey,
   PREDICTION_FORECAST_PROFILE_URI,
+  parseBinaryJudgmentAnalysisContext,
+  parseBinaryJudgmentInstrument,
+  parseBinaryJudgmentLabelResolution,
+  parseBinaryJudgmentObservation,
   REPOSITORY_WORK_PROFILE_URI,
   sealTaskProfile,
   verifyEvaluationSubject,
@@ -54,11 +67,16 @@ import type { TaskSpecification } from "@jinn-network/task-execution-protocol";
 import { makeEvaluationLauncher } from "@jinn-network/task-execution-evaluation-harness/launcher";
 import { defineEvaluatorRegistration } from "@jinn-network/task-execution-evaluation-harness";
 import {
+  BINARY_JUDGMENT_CONTEXT_KEY,
+  BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME,
+  BINARY_JUDGMENT_PARSER,
   contextResolutionSnapshotSource,
+  createBinaryJudgmentEvaluatorRegistration,
   createPredictionEvaluatorRegistration,
   createSweRebenchEvaluatorRegistration,
   PREDICTION_PARSER,
   SWE_REBENCH_PARSER,
+  isBinaryJudgmentEvaluationSpecification,
 } from "@jinn-network/task-execution-evaluator-adapters";
 import {
   ensurePinnedOciImage,
@@ -93,7 +111,18 @@ import {
 } from "../runtime/inspect/host.js";
 import { makeInspectLauncher } from "../runtime/inspect/launcher.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
-import { assertInspectOciBrokerReady, inspectOciRunnerPath } from "../runtime/inspect/oci.js";
+import {
+  assertInspectOciBrokerConnectionReady,
+  assertInspectOciBrokerReady,
+  inspectOciRunnerPath,
+} from "../runtime/inspect/oci.js";
+import {
+  assertInspectBinaryJudgeSelectionUndrifted,
+  makeInspectBinaryJudgeLauncher,
+  readInspectBinaryJudgeHostBinding,
+  readInspectBinaryJudgeSelectionManifest,
+} from "../runtime/inspect/binary-judge.js";
+import { INSPECT_BINARY_JUDGE_ADAPTER_ID } from "../runtime/inspect/binary-judge-manifest.js";
 import {
   inspectLogVerifierParser,
   inspectLogVerifierMethod,
@@ -319,14 +348,16 @@ function evaluatorIri(index: number): string {
 /** Evaluator registration id, `index` 1-based — used BOTH parent-side (the launcher's
  * `registrations` + `selectRegistration`) and in the generated deployment module the spawned
  * harness loads; the spawned harness selects by exact id match, so the two must agree. */
-type EvaluationAdapterKind = "prediction" | "swe-rebench" | "inspect-log-verifier";
+type EvaluationAdapterKind = "prediction" | "swe-rebench" | "binary-judgment" | "inspect-log-verifier";
 
 function evaluatorRegistrationId(index: number, kind: EvaluationAdapterKind): string {
   const prefix = kind === "prediction"
     ? "prediction-market"
     : kind === "swe-rebench"
       ? "swe-rebench-v2"
-      : "inspect-log-verifier";
+      : kind === "binary-judgment"
+        ? "binary-judgment"
+        : "inspect-log-verifier";
   return `${prefix}:evaluator-${index}`;
 }
 
@@ -461,6 +492,7 @@ function writeEvaluationDeploymentModule(
     readonly id: string;
     readonly predictionRegistrationId: string;
     readonly sweRebenchRegistrationId: string;
+    readonly binaryJudgmentRegistrationId: string;
     readonly inspectRegistrationId: string;
   }[],
   grader: {
@@ -493,6 +525,7 @@ function writeEvaluationDeploymentModule(
 // Do not edit by hand -- regenerated on every createLocalVenue() call.
 import {
   contextResolutionSnapshotSource,
+  createBinaryJudgmentEvaluatorRegistration,
   createPredictionEvaluatorRegistration,
   createSweRebenchEvaluatorRegistration,
   evaluatorAdaptersParserAllowlist,
@@ -537,6 +570,13 @@ export const evaluationHarnessDeployment = Object.freeze({
       }),
       registrationId: evaluator.sweRebenchRegistrationId,
     },
+    {
+      ...createBinaryJudgmentEvaluatorRegistration({
+        evaluatorId: evaluator.id,
+        signerHandle: ${JSON.stringify(SIGNER_HANDLE)},
+      }),
+      registrationId: evaluator.binaryJudgmentRegistrationId,
+    },
     ...(INSPECT === null ? [] : [createInspectLogVerifierRegistration({
       ...INSPECT,
       registrationId: evaluator.inspectRegistrationId,
@@ -575,12 +615,16 @@ function resolveTaskProfileFor(
   evaluationProfile: TaskProfileDocument,
   repositoryWorkProfile: TaskProfileDocument,
   inspectProfile?: TaskProfileDocument,
+  binaryJudgmentProfile?: TaskProfileDocument,
 ): (descriptor: TaskSpecification["profile"]) => TaskProfileDocument {
   return (descriptor) => {
     if (descriptor.uri === PREDICTION_FORECAST_PROFILE_URI) return predictionProfile;
     if (descriptor.uri === EVALUATION_TASK_PROFILE_URI) return evaluationProfile;
     if (descriptor.uri === REPOSITORY_WORK_PROFILE_URI) return repositoryWorkProfile;
     if (descriptor.uri === INSPECT_TASK_PROFILE_URI && inspectProfile !== undefined) return inspectProfile;
+    if (descriptor.uri === BINARY_JUDGMENT_PROFILE_URI && binaryJudgmentProfile !== undefined) {
+      return binaryJudgmentProfile;
+    }
     return refuse(
       "execution",
       "task.profile.uri",
@@ -593,7 +637,12 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const { workspaceDir } = options;
   const runtimeBindingWorkspaceDir = options.runtimeBindingWorkspaceDir ?? workspaceDir;
   const runtimeId = options.evaluationRuntime?.adapterId ?? "jinn-native";
-  if (runtimeId !== "jinn-native" && runtimeId !== INSPECT_ADAPTER_ID && runtimeId !== HARBOR_ADAPTER_ID) {
+  if (
+    runtimeId !== "jinn-native"
+    && runtimeId !== INSPECT_ADAPTER_ID
+    && runtimeId !== INSPECT_BINARY_JUDGE_ADAPTER_ID
+    && runtimeId !== HARBOR_ADAPTER_ID
+  ) {
     refuse("venue-unavailable", "evaluationRuntime.adapterId", `unsupported evaluation runtime "${runtimeId}"`);
   }
   const inspectSelection = runtimeId === INSPECT_ADAPTER_ID
@@ -601,6 +650,18 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     : undefined;
   const inspectHost = runtimeId === INSPECT_ADAPTER_ID
     ? readInspectHostBinding(runtimeBindingWorkspaceDir, options.evaluationRuntime!.selectionManifestSha256)
+    : undefined;
+  const inspectBinaryJudgeSelection = runtimeId === INSPECT_BINARY_JUDGE_ADAPTER_ID
+    ? readInspectBinaryJudgeSelectionManifest(
+      runtimeBindingWorkspaceDir,
+      options.evaluationRuntime!.selectionManifestSha256,
+    )
+    : undefined;
+  const inspectBinaryJudgeHost = runtimeId === INSPECT_BINARY_JUDGE_ADAPTER_ID
+    ? readInspectBinaryJudgeHostBinding(
+      runtimeBindingWorkspaceDir,
+      options.evaluationRuntime!.selectionManifestSha256,
+    )
     : undefined;
   const inspectEvaluationStrategy = inspectSelection === undefined
     ? undefined
@@ -671,6 +732,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     signer: createVerdictDsseSigner(key),
     predictionRegistrationId: evaluatorRegistrationId(index + 1, "prediction"),
     sweRebenchRegistrationId: evaluatorRegistrationId(index + 1, "swe-rebench"),
+    binaryJudgmentRegistrationId: evaluatorRegistrationId(index + 1, "binary-judgment"),
     inspectRegistrationId: evaluatorRegistrationId(index + 1, "inspect-log-verifier"),
   }));
   const registry = createEvaluationCellRegistry();
@@ -696,6 +758,16 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
             : {}),
         },
       }),
+    ...(inspectBinaryJudgeSelection === undefined || inspectBinaryJudgeHost === undefined
+      ? {}
+      : {
+        inspectBinaryJudge: {
+          workspaceDir: runtimeBindingWorkspaceDir,
+          selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
+          manifest: inspectBinaryJudgeSelection,
+          host: inspectBinaryJudgeHost,
+        },
+      }),
     ...(harborSelection === undefined || harborHost === undefined
       ? {}
       : {
@@ -712,6 +784,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const evaluationProfile = buildEvaluationTaskProfile();
   const repositoryWorkProfile = buildRepositoryWorkProfile();
   const inspectProfile = inspectSelection === undefined ? undefined : buildInspectTaskProfile();
+  const binaryJudgmentProfile = inspectBinaryJudgeSelection === undefined
+    ? undefined
+    : buildBinaryJudgmentProfile();
   const sealedEvaluationProfile = sealTaskProfile(evaluationProfile);
   const profileStore: ProfileStore = {
     get(digest) {
@@ -741,6 +816,14 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     : makeInspectLauncher({
       host: inspectHost,
       manifest: inspectSelection,
+      hostConnectionDescriptor: options.inspectHostConnectionDescriptor,
+    });
+  const inspectBinaryJudgeLauncher = inspectBinaryJudgeSelection === undefined
+    || inspectBinaryJudgeHost === undefined
+    ? undefined
+    : makeInspectBinaryJudgeLauncher({
+      host: inspectBinaryJudgeHost,
+      manifest: inspectBinaryJudgeSelection,
       hostConnectionDescriptor: options.inspectHostConnectionDescriptor,
     });
   const inspectVerifier = inspectSelection === undefined
@@ -810,6 +893,17 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
         registrationId: evaluator.sweRebenchRegistrationId,
       },
     },
+    {
+      evaluatorId: evaluator.id,
+      kind: "binary-judgment" as const,
+      registration: {
+        ...createBinaryJudgmentEvaluatorRegistration({
+          evaluatorId: evaluator.id,
+          signerHandle: SIGNER_HANDLE,
+        }),
+        registrationId: evaluator.binaryJudgmentRegistrationId,
+      },
+    },
     ...(inspectVerifier === undefined ? [] : [{
       evaluatorId: evaluator.id,
       kind: "inspect-log-verifier" as const,
@@ -838,10 +932,11 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const evaluationHarnessDigest = sha256Hex(readFileSync(evaluationHarnessEntrypointPath));
   const deploymentModulePath = writeEvaluationDeploymentModule(
     workspaceDir,
-    evaluators.map(({ id, predictionRegistrationId, sweRebenchRegistrationId, inspectRegistrationId }) => ({
+    evaluators.map(({ id, predictionRegistrationId, sweRebenchRegistrationId, binaryJudgmentRegistrationId, inspectRegistrationId }) => ({
       id,
       predictionRegistrationId,
       sweRebenchRegistrationId,
+      binaryJudgmentRegistrationId,
       inspectRegistrationId,
     })),
     sweRebenchGrader,
@@ -1020,6 +1115,36 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       },
     };
   }
+  if (
+    inspectBinaryJudgeLauncher !== undefined
+    && inspectBinaryJudgeSelection !== undefined
+    && inspectBinaryJudgeHost !== undefined
+  ) {
+    const selectionManifestSha256 = options.evaluationRuntime!.selectionManifestSha256;
+    const executable = {
+      path: process.execPath,
+      digest: inspectBinaryJudgeSelection.runtime.runtimeHostSourceSha256,
+    };
+    launcherDeployments[inspectBinaryJudgeLauncher.id] = {
+      executable,
+      async probe() {
+        assertInspectBinaryJudgeSelectionUndrifted(
+          runtimeBindingWorkspaceDir,
+          selectionManifestSha256,
+        );
+        await assertInspectOciBrokerConnectionReady(
+          inspectBinaryJudgeHost,
+          options.inspectHostConnectionDescriptor,
+        );
+        return {
+          ready: true,
+          executable,
+          harnessVersions: ["1"],
+          models: ["gpt-5.6-luna"],
+        };
+      },
+    };
+  }
   if (harborLauncher !== undefined && harborSelection !== undefined && harborHost !== undefined) {
     launcherDeployments[HARBOR_LAUNCHER_ID] = {
       executable: { path: harborHost.executable, digest: harborSelection.harbor.executableSha256 },
@@ -1039,6 +1164,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const isolationPosture = deriveVenueIsolationPosture([
     VENUE_ISOLATION_POLICY,
     ...(inspectHost?.kind === "oci" ? [INSPECT_OCI_ISOLATION_POLICY] : []),
+    ...(inspectBinaryJudgeHost === undefined ? [] : [INSPECT_OCI_ISOLATION_POLICY]),
   ]);
   const provisionerCapabilities: ProvisionerCapabilities = {
     taskProfiles: [
@@ -1046,6 +1172,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       EVALUATION_TASK_PROFILE_URI,
       REPOSITORY_WORK_PROFILE_URI,
       ...(inspectProfile === undefined ? [] : [INSPECT_TASK_PROFILE_URI]),
+      ...(binaryJudgmentProfile === undefined ? [] : [BINARY_JUDGMENT_PROFILE_URI]),
       ...(harborSelection === undefined ? [] : [PREDICTION_FORECAST_PROFILE_URI, REPOSITORY_WORK_PROFILE_URI]),
     ],
     workspaceKinds: ["dir", "worktree"],
@@ -1056,6 +1183,13 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       "text/x-diff",
       "text/markdown",
       ...(inspectProfile === undefined ? [] : [INSPECT_NATIVE_LOG_MEDIA_TYPE, INSPECT_SUMMARY_MEDIA_TYPE]),
+      ...(binaryJudgmentProfile === undefined
+        ? []
+        : [
+          BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+          BINARY_JUDGMENT_OBSERVATION_MEDIA_TYPE,
+          BINARY_JUDGMENT_INSPECT_LOG_MEDIA_TYPE,
+        ]),
     ],
     isolation: isolationPosture.provisionerCapabilities,
   };
@@ -1070,6 +1204,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       evaluationProfile,
       repositoryWorkProfile,
       inspectProfile,
+      binaryJudgmentProfile,
     ),
     launchers: [
       baselineLauncher,
@@ -1079,6 +1214,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       ...profiledAgentLaunchers,
       evaluationLauncher,
       ...(inspectLauncher === undefined ? [] : [inspectLauncher]),
+      ...(inspectBinaryJudgeLauncher === undefined ? [] : [inspectBinaryJudgeLauncher]),
       ...(harborLauncher === undefined ? [] : [harborLauncher]),
     ],
     launcherDeployments,
@@ -1145,13 +1281,23 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       ? "prediction"
       : parserKey === parserAllowlistKey(SWE_REBENCH_PARSER)
         ? "swe-rebench"
-        : inspectVerifier !== undefined && parserKey === inspectVerifier.parserAllowlistKey
-          ? "inspect-log-verifier"
-          : refuse(
-            "validation",
-            "evaluationSpecBytes.familyBlock.parser",
-            `local venue has no evaluator registration for parser ${familyBlock.parser.id}`,
-          );
+        : parserKey === parserAllowlistKey(BINARY_JUDGMENT_PARSER)
+          ? "binary-judgment"
+          : inspectVerifier !== undefined && parserKey === inspectVerifier.parserAllowlistKey
+            ? "inspect-log-verifier"
+            : refuse(
+              "validation",
+              "evaluationSpecBytes.familyBlock.parser",
+              `local venue has no evaluator registration for parser ${familyBlock.parser.id}`,
+            );
+
+    if (adapterKind === "binary-judgment" && !isBinaryJudgmentEvaluationSpecification(evaluationSpec)) {
+      return refuse(
+        "validation",
+        "evaluationSpecBytes",
+        "binary judgment evaluation requires the exact frozen parser, material, measurement, and verdict contract",
+      );
+    }
 
     let evaluationContextBytes: Uint8Array;
     if (adapterKind === "prediction") {
@@ -1192,6 +1338,89 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
       // fixture-controlled context port. Keep the generic provisioner's required context file
       // present but semantically empty.
       evaluationContextBytes = new TextEncoder().encode("{}");
+    } else if (adapterKind === "binary-judgment") {
+      const artifacts = new Map<string, Uint8Array>();
+      for (const artifact of input.resultArtifacts) {
+        if (artifacts.has(artifact.name)) {
+          return refuse("validation", "resultArtifacts", `binary judgment repeats ${artifact.name}`);
+        }
+        artifacts.set(artifact.name, artifact.bytes);
+      }
+      const allowedNames = new Set(["judge-response", "judge-observation", "inspect-log"]);
+      if (
+        !artifacts.has("judge-response")
+        || !artifacts.has("judge-observation")
+        || [...artifacts.keys()].some((name) => !allowedNames.has(name))
+      ) {
+        return refuse(
+          "validation",
+          "resultArtifacts",
+          "binary judgment requires judge-response and judge-observation, with only an optional inspect-log",
+        );
+      }
+      const responseBytes = artifacts.get("judge-response")!;
+      const observationBytes = artifacts.get("judge-observation")!;
+      const observation = parseBinaryJudgmentObservation(observationBytes);
+      if (
+        observation.taskDigest !== subjectTaskDigest
+        || observation.response.digest !== recordDigest(responseBytes)
+      ) {
+        return refuse(
+          "record-integrity",
+          "resultArtifacts",
+          "binary judgment response and observation do not bind the exact subject Task and response bytes",
+        );
+      }
+
+      const [analysisDescriptor] = familyBlock.testMaterial;
+      if (
+        familyBlock.testMaterial.length !== 1
+        || analysisDescriptor?.name !== BINARY_JUDGMENT_ANALYSIS_CONTEXT_NAME
+        || analysisDescriptor.mediaType !== BINARY_JUDGMENT_ANALYSIS_CONTEXT_MEDIA_TYPE
+        || analysisDescriptor.accessClass !== "private"
+        || analysisDescriptor.digest === undefined
+      ) {
+        return refuse(
+          "validation",
+          "evaluationSpecBytes.familyBlock.testMaterial",
+          "binary judgment requires one exact private analysis-context descriptor",
+        );
+      }
+      const analysisContextBytes = getSealedBytes(
+        runtimeBindingWorkspaceDir,
+        analysisDescriptor.digest.sha256,
+      );
+      const analysisContext = parseBinaryJudgmentAnalysisContext(analysisContextBytes);
+      const labelResolutionBytes = getSealedBytes(
+        runtimeBindingWorkspaceDir,
+        analysisContext.labelResolutionSha256.slice("sha256:".length),
+      );
+      parseBinaryJudgmentLabelResolution(labelResolutionBytes);
+      const instrumentBytes = getSealedBytes(
+        runtimeBindingWorkspaceDir,
+        observation.instrumentSha256.slice("sha256:".length),
+      );
+      parseBinaryJudgmentInstrument(instrumentBytes);
+
+      const inline = (bytes: Uint8Array) => ({
+        digest: recordDigest(bytes),
+        bytesBase64: Buffer.from(bytes).toString("base64"),
+      });
+      const context = BinaryJudgmentEvaluationContextSchema.parse({
+        protocol: BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
+        evaluationSpecSha256: evaluationSpecDigest,
+        taskDigest: subjectTaskDigest,
+        armId: observation.armId,
+        replicate: observation.replicate,
+        judgeObservationSha256: recordDigest(observationBytes),
+        responseSha256: recordDigest(responseBytes),
+        material: {
+          instrument: inline(instrumentBytes),
+          labelResolution: inline(labelResolutionBytes),
+          analysisContext: inline(analysisContextBytes),
+        },
+      });
+      evaluationContextBytes = canonicalJsonBytes({ [BINARY_JUDGMENT_CONTEXT_KEY]: context });
     } else {
       const resultNames = input.resultArtifacts.map((artifact) => artifact.name).sort();
       if (resultNames.length !== 2 || resultNames[0] !== "inspect-log" || resultNames[1] !== "inspect-summary") {

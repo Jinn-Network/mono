@@ -15,6 +15,8 @@ import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "./profile/errors.js";
 
 export const BUNDLE_FORMAT = "benchmark-product-public-bundle/2" as const;
+export const BUNDLE_V4_FORMAT = "benchmark-product-public-bundle/4" as const;
+export const SUPPORTED_BUNDLE_FORMATS = [BUNDLE_FORMAT, BUNDLE_V4_FORMAT] as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -26,7 +28,7 @@ export const BundleManifestFileSchema = z.object({
 });
 
 export const BundleManifestSchema = z.object({
-  format: z.literal(BUNDLE_FORMAT),
+  format: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_V4_FORMAT)]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
 
@@ -46,6 +48,11 @@ export interface VerifiedBundleSnapshot extends BuiltBundleManifest {
 export interface VerifyBundleSnapshotDeps {
   /** Deterministic adversarial boundary: every byte is already authenticated before this runs. */
   readonly afterManifestValidated?: () => void;
+}
+
+export interface BuildBundleManifestOptions {
+  /** Defaults to v2 so existing producer and golden bytes remain immutable. */
+  readonly format?: (typeof SUPPORTED_BUNDLE_FORMATS)[number];
 }
 
 function sha256(bytes: Uint8Array): string {
@@ -155,7 +162,11 @@ function walkTree(root: string, directory = root): string[] {
   return files;
 }
 
-export function buildBundleManifest(bundleDir: string, filePaths: readonly string[]): BuiltBundleManifest {
+export function buildBundleManifest(
+  bundleDir: string,
+  filePaths: readonly string[],
+  options: BuildBundleManifestOptions = {},
+): BuiltBundleManifest {
   const seen = new Set<string>();
   const files = [...filePaths]
     .map((path) => {
@@ -168,7 +179,7 @@ export function buildBundleManifest(bundleDir: string, filePaths: readonly strin
       return { path, sha256: sha256(bytes), bytes: bytes.length };
     })
     .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
-  const manifest = BundleManifestSchema.parse({ format: BUNDLE_FORMAT, files });
+  const manifest = BundleManifestSchema.parse({ format: options.format ?? BUNDLE_FORMAT, files });
   const bytes = canonicalJsonBytes(manifest);
   return { manifest, bytes, identity: sha256(bytes) };
 }

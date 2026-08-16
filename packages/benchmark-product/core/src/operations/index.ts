@@ -39,12 +39,39 @@ export {
 export { sampleInit, type SampleInitInput, type SampleInitResult, type SampleInitTaskSummary } from "./sample.js";
 
 export { importSweBenchRows, type ImportSweBenchRowsInput, type ImportSweBenchRowsResult } from "./import.js";
+export {
+  BINARY_ITEM_BANK_PROFILE,
+  importBinaryItemBank,
+  type ImportBinaryItemBankInput,
+  type ImportBinaryItemBankResult,
+} from "./import-item-bank.js";
+
+export {
+  admitHumanTruth,
+  createHumanReviewPackets,
+  signHumanReviewResponse,
+  type AdmitHumanTruthInput,
+  type AdmitHumanTruthResult,
+  type CreateHumanReviewPacketsInput,
+  type CreateHumanReviewPacketsResult,
+  type HumanAdmissionCandidateInput,
+  type HumanAdmissionExclusionSummary,
+  type HumanAdmissionResolutionSummary,
+  type HumanReviewPacketSummary,
+  type SignHumanReviewResponseInput,
+  type SignHumanReviewResponseResult,
+} from "./human-review.js";
 
 export {
   selectInspectEvaluation,
   type SelectInspectEvaluationInput,
   type SelectInspectEvaluationResult,
 } from "./inspect-runtime.js";
+export {
+  bindInspectBinaryJudge,
+  type BindInspectBinaryJudgeInput,
+  type BindInspectBinaryJudgeResult,
+} from "./inspect-binary-judge.js";
 export { selectHarborRuntime, type SelectHarborRuntimeInput, type SelectHarborRuntimeResult } from "./harbor-runtime.js";
 export {
   migrateTerminalBenchLegacyTask,

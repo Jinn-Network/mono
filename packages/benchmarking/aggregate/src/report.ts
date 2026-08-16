@@ -117,6 +117,7 @@ export interface MethodPorts {
   readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
   readonly resolveRunBytes: (runDigest: string) => Uint8Array | undefined;
   readonly resolveTaskBytes: (taskDigest: string) => Uint8Array | undefined;
+  readonly resolveRecordBytes?: (recordDigest: string) => Uint8Array | undefined;
   readonly resolveAnchoredBenchmarkAnnouncement?: (benchmarkDigest: string) => Uint8Array | undefined;
   readonly verifyAnchoredBenchmarkAnnouncement?: AnchoredBenchmarkAnnouncementVerifier;
   readonly registry: MethodRegistry;
@@ -201,6 +202,9 @@ function computeInputFor(
     resolveVerdictBytes: ports.resolveVerdictBytes,
     resolveRunBytes: ports.resolveRunBytes,
     resolveTaskBytes: ports.resolveTaskBytes,
+    ...(ports.resolveRecordBytes === undefined
+      ? {}
+      : { resolveRecordBytes: ports.resolveRecordBytes }),
     registry: ports.registry,
     ...(ports.resolveAnchoredBenchmarkAnnouncement === undefined
       ? {}

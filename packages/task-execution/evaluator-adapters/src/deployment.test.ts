@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, test } from "vitest";
+import { binaryJudgmentEvaluationMethodDescriptor } from "./binary-judgment/adapter.js";
 import { createEvaluatorDeployment } from "./deployment.js";
+import { BINARY_JUDGMENT_REGISTRATION_ID } from "./registrations.js";
 
 const evidenceWriter = {
   async putClaimEvidence() {
@@ -28,12 +30,19 @@ describe("createEvaluatorDeployment", () => {
     expect(deployment.evidenceWriter).toBe(evidenceWriter);
     expect(deployment.maxClaimEvidenceBytes).toBe(config.maxClaimEvidenceBytes);
     expect(deployment.parserAllowlist.size).toBeGreaterThan(0);
-    expect(deployment.registrations).toHaveLength(2);
+    expect(deployment.registrations).toHaveLength(3);
     expect(deployment.registrations.every((registration) =>
       registration.evaluatorIdentity.id === config.evaluatorId
-      && registration.signer.handle === config.signerHandle
-      && registration.evaluationMethod === config.evaluationMethod,
+      && registration.signer.handle === config.signerHandle,
     )).toBe(true);
+    const binary = deployment.registrations.find(
+      ({ registrationId }) => registrationId === BINARY_JUDGMENT_REGISTRATION_ID,
+    );
+    expect(binary?.evaluationMethod).toEqual(binaryJudgmentEvaluationMethodDescriptor());
+    expect(deployment.registrations
+      .filter(({ registrationId }) => registrationId !== BINARY_JUDGMENT_REGISTRATION_ID)
+      .every(({ evaluationMethod }) => evaluationMethod === config.evaluationMethod))
+      .toBe(true);
   });
 
   test("refuses a deployment that omits the caller-owned evaluator identity", () => {
