@@ -7,7 +7,7 @@
  * so it is drop-in installable by the wider `skills` ecosystem.
  *
  * Division of labour after the #1394 reconciliation:
- *   - `client/src/types/skill-artifact.ts` (#1394, shipped) owns the CANONICAL
+ *   - `operator/src/types/skill-artifact.ts` (#1394, shipped) owns the CANONICAL
  *     stored form: `SkillArtifactV1` with structured `SkillProvenanceSchema`.
  *   - `./skill.ts` (shipped) owns consume-side recognition (`extractSkill`).
  *   - THIS module is the distiller-side package builder/renderer: the
@@ -31,7 +31,7 @@ const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /**
  * The distiller-side provenance meta carried on a `SkillPackage` (and embedded
  * as `metadata.jinn` frontmatter in EXPORT renders). The canonical stored form
- * is `SkillProvenanceSchema` in `client/src/types/skill-artifact.ts`;
+ * is `SkillProvenanceSchema` in `operator/src/types/skill-artifact.ts`;
  * `publishSkill()` maps this onto it (`provenance` → `sourceEnvelopeCids`,
  * `distilledFrom` is derived as its length there and not stored twice).
  */

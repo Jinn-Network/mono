@@ -10,13 +10,13 @@
  *
  * ## FINDING F-C7c-1 — the semantics are mirrored, the boundary is a port
  *
- * The shipped exclusion machinery lives in `client/`: `excludeHeldOutSlate`
- * (`client/src/solver-types/_swe-rebench-v2-held-out-slate.ts`, instance-id exclusion) and
- * `loadCapabilitySlateRepos` (`client/src/eval/capability-slate.ts`, repo exclusion). This package
- * is tier 4 like `client/`, but a *different* product, and the source-boundary guard denies
- * `client/` outright. Three options were available:
+ * The shipped exclusion machinery lives in `operator/`: `excludeHeldOutSlate`
+ * (`operator/src/solver-types/_swe-rebench-v2-held-out-slate.ts`, instance-id exclusion) and
+ * `loadCapabilitySlateRepos` (`operator/src/eval/capability-slate.ts`, repo exclusion). This package
+ * is tier 4 like `operator/`, but a *different* product, and the source-boundary guard denies
+ * `operator/` outright. Three options were available:
  *
- * 1. Import it. Refused — the guard denies it, and lifting a `client/` module into a product's
+ * 1. Import it. Refused — the guard denies it, and lifting a `operator/` module into a product's
  *    dependency graph is exactly the tier-4-to-tier-4 edge the guard exists to make deliberate.
  * 2. Port the whole thing: the host supplies a `heldOut(record) => boolean` predicate. Refused —
  *    it makes the *rule* the host's, so a host that supplies a permissive predicate satisfies R5

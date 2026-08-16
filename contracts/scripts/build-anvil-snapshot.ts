@@ -9,7 +9,7 @@
 import { fileURLToPath } from 'node:url';
 
 export async function main(): Promise<void> {
-  const builder = await import(new URL('../../client/scripts/build-anvil-snapshot.ts', import.meta.url).href);
+  const builder = await import(new URL('../../operator/scripts/build-anvil-snapshot.ts', import.meta.url).href);
   const buildAnvilSnapshot = builder['buildAnvilSnapshot'];
   if (typeof buildAnvilSnapshot !== 'function') {
     throw new Error('client snapshot builder did not export buildAnvilSnapshot()');

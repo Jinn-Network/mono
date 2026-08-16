@@ -7,7 +7,7 @@ export type JinnMonoVerificationProfile =
 
 type Workspace =
   | 'apps/broadcast-bot'
-  | 'client'
+  | 'operator'
   | 'contracts'
   | 'packages/autopilot'
   | 'packages/core'
@@ -96,12 +96,12 @@ interface WorkspacePolicy {
 const WORKSPACE_POLICY: readonly WorkspacePolicy[] = [
   {
     root: 'packages/plugin',
-    affected: ['packages/plugin', 'packages/core', 'packages/layer', 'client'],
+    affected: ['packages/plugin', 'packages/core', 'packages/layer', 'operator'],
     typecheckArgs: ['yarn', 'typecheck'],
   },
   {
     root: 'packages/core',
-    affected: ['packages/core', 'packages/layer', 'client'],
+    affected: ['packages/core', 'packages/layer', 'operator'],
     typecheckArgs: ['yarn', 'typecheck'],
   },
   {
@@ -110,7 +110,7 @@ const WORKSPACE_POLICY: readonly WorkspacePolicy[] = [
       'packages/sdk',
       'packages/indexer',
       'packages/indexer-enrichment',
-      'client',
+      'operator',
       'packages/autopilot',
     ],
     typecheckArgs: ['yarn', 'typecheck'],
@@ -127,12 +127,12 @@ const WORKSPACE_POLICY: readonly WorkspacePolicy[] = [
   },
   {
     root: 'packages/layer',
-    affected: ['packages/layer', 'client'],
+    affected: ['packages/layer', 'operator'],
     typecheckArgs: ['yarn', 'typecheck'],
   },
   {
-    root: 'client',
-    affected: ['client'],
+    root: 'operator',
+    affected: ['operator'],
     typecheckArgs: ['yarn', 'typecheck'],
   },
   {

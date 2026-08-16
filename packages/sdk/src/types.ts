@@ -1,6 +1,6 @@
 // Public contract surface for Jinn external Harness authors.
 //
-// These types are mirrored from `client/src/harnesses/types.ts` at SDK
+// These types are mirrored from `operator/src/harnesses/types.ts` at SDK
 // publish time. The SDK is the stable boundary; @jinn-network/client
 // internals are not.
 

@@ -11,7 +11,7 @@ image; everything they share lives here.
 ## The base image
 
 `ghcr.io/jinn-network/client` is the container-native base, built from
-`client/Dockerfile` by [`.github/workflows/docker.yml`](../.github/workflows/docker.yml)
+`operator/Dockerfile` by [`.github/workflows/docker.yml`](../.github/workflows/docker.yml)
 on every published GitHub Release (tag `vX.Y.Z` or `client-vX.Y.Z`). The workflow
 pushes three tags: `:<version>`, `:sha-<short>`, and `:latest` (linux/amd64 +
 linux/arm64).
@@ -36,7 +36,7 @@ env-only at runtime).
 authenticate the pull: on Railway add GHCR registry credentials (a token with
 **`read:packages`**), or `echo "$GHCR_TOKEN" | docker login ghcr.io …` before
 the overlay build. The **`ARG` build-from-source** overlay (one shared
-Dockerfile, no registry pull, full rebuild per target — needs `client/` +
+Dockerfile, no registry pull, full rebuild per target — needs `operator/` +
 `packages/sdk/` in context) is the no-registry fallback.
 
 ## The overlay pattern
@@ -77,13 +77,13 @@ welding overlay+base to one commit — see the canary lane below.
 
 ### Build context — what each build actually needs
 
-- **The base image** (`client/Dockerfile`, built **once** in CI by
-  `.github/workflows/docker.yml`) compiles only **`client/` + `packages/sdk/`**
+- **The base image** (`operator/Dockerfile`, built **once** in CI by
+  `.github/workflows/docker.yml`) compiles only **`operator/` + `packages/sdk/`**
   (the SDK is a Yarn-portal workspace dependency). It does **not** touch
   `contracts/`, `docs/`, `spec/`, etc. — the build context is the repo root but
   `.dockerignore` keeps it to those two subtrees.
 - **An overlay build** needs only this recipe's **`deploy/<recipe>/` files +
-  pull access to the base image** — no monorepo compilation, no `client/`, no
+  pull access to the base image** — no monorepo compilation, no `operator/`, no
   `sdk/`. On Railway, point the service at this repo with
   `RAILWAY_DOCKERFILE_PATH=deploy/<recipe>/Dockerfile`; Railway clones the repo
   for context but the build only `COPY`s `deploy/<recipe>/seed.sh` and pulls the

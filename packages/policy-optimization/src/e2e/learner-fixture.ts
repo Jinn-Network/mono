@@ -5,7 +5,7 @@
  *
  * ## The seam is the bytes — see FINDING F-C9-1
  *
- * `client/` cannot import this package and this package cannot import `client/`. Both directions
+ * `operator/` cannot import this package and this package cannot import `operator/`. Both directions
  * are enforced, deliberately:
  *
  * - `architecture/platform-packages.v1.json` puts `@jinn-network/policy-optimization` in release

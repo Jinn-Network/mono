@@ -1,7 +1,7 @@
 # Phase B acceptance criteria (ids 1–62)
 
 This is the canonical enumeration behind the `acceptanceCriteria` field of the Phase B
-closure manifest (`client/src/daemon/phase-b-closure-manifest.ts`), which requires exactly
+closure manifest (`operator/src/daemon/phase-b-closure-manifest.ts`), which requires exactly
 62 entries with ids 1–62, every one `passed`, each carrying at least one evidence digest.
 The manifest's ids are meaningless without this list; a live closure run attaches evidence
 per criterion below.

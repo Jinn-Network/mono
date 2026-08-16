@@ -15,7 +15,7 @@
 > hashes, and verify gates below are what actually ran that day, so nothing beneath
 > this banner is retro-edited. For the current operator path see
 > [`docs/operator-testnet.md`](../operator-testnet.md); for the current daemon loop set
-> see [`client/ARCHITECTURE.md`](../../client/ARCHITECTURE.md) §6.
+> see [`operator/ARCHITECTURE.md`](../../client/ARCHITECTURE.md) §6.
 
 > Status: archived (was: ready)
 > Date: 2026-04-29
@@ -256,7 +256,7 @@ cd cargo/client
 ./scripts/sync-deployments.sh   # copies the new artifacts into the bundled deployments
 ```
 
-Verify: `client/deployments/` now contains `deployment-jinn-mvi-l1-sepolia.json` and `deployment-jinn-mvi-l2-baseSepolia.json`.
+Verify: `operator/deployments/` now contains `deployment-jinn-mvi-l1-sepolia.json` and `deployment-jinn-mvi-l2-baseSepolia.json`.
 
 ### Step 4.2 — update daemon config
 

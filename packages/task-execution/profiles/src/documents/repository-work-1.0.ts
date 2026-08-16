@@ -69,7 +69,7 @@ export type RepositoryWorkProvenanceKind = "mined" | "synthetic" | "live";
 
 /**
  * A structural subset of the legacy `jinn-repo.v1` SolverType task fields
- * (`client/src/solver-types/jinn-repo.ts`, backed by `@jinn-network/sdk/solvernets/jinn-repo`)
+ * (`operator/src/solver-types/jinn-repo.ts`, backed by `@jinn-network/sdk/solvernets/jinn-repo`)
  * this migration needs. Declared locally, never imported: profiles imports
  * `task-execution-protocol` only (Global Constraints) — no SDK/client dependency.
  */

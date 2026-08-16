@@ -28,8 +28,8 @@ describe('layer architecture boundary', () => {
       for (const match of readFileSync(file, 'utf8').matchAll(specifier)) {
         const imported = match[1]!;
         if (
-          imported.includes('client/src')
-          || imported.includes('client/packages')
+          imported.includes('operator/src')
+          || imported.includes('operator/packages')
           || imported === '@jinn-network/client'
           || imported.startsWith('@jinn-network/client/')
         ) {

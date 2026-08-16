@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 // Today-mode ABI slice for the OLAS Mech Marketplace, re-homed from
-// `client/src/adapters/mech/types.ts` (`MECH_MARKETPLACE_ABI`, `MECH_ABI`), trimmed to the
+// `operator/src/adapters/mech/types.ts` (`MECH_MARKETPLACE_ABI`, `MECH_ABI`), trimmed to the
 // entries this binding decodes (design §14 "declared impact").
 export const MECH_MARKETPLACE_ABI = [
   {

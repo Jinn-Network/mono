@@ -10,7 +10,7 @@ const hasAnvil = await anvilAvailable();
 
 test("Anvil state resolution has a committed default and accepts a local path only", () => {
   expect(resolveAnvilStatePath("   ")).toMatch(
-    /client\/test\/_support\/fixtures\/anvil-base-v3-state\/state\.json$/u,
+    /operator\/test\/_support\/fixtures\/anvil-base-v3-state\/state\.json$/u,
   );
   expect(resolveAnvilStatePath("fixtures/state.json")).toBe(resolve("fixtures/state.json"));
 });

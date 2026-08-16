@@ -100,7 +100,7 @@ function validSpec(): EvaluationSpec {
 
 /**
  * The live round-24 receipt shape, verbatim from the native requester's Submission annotation
- * (`client/src/native-requester/requester.ts`): a named, media-typed, sha256-pinned descriptor.
+ * (`operator/src/native-requester/requester.ts`): a named, media-typed, sha256-pinned descriptor.
  */
 const ADMISSION_RECEIPT_MEDIA_TYPE = "application/vnd.in-toto+json";
 const admissionReceiptBytes = encoder.encode(

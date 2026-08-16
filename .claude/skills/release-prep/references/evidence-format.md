@@ -3,7 +3,7 @@
 > **Superseded gate, retained diagnostic.** Per the two-gate redesign
 > (`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md` §7),
 > the **publish gate is two SHA-bound check-runs** — `hermetic-gate` and
-> `environment-suite`, posted via `client/scripts/release/post-check-run-verdict.mjs`
+> `environment-suite`, posted via `operator/scripts/release/post-check-run-verdict.mjs`
 > — **not** the `marker.txt` documented below. The `jinn-release-evidence:v1`
 > marker is **no longer parsed by `npm-publish.yml`** and no longer gates a
 > release; if release-prep is run at all (its mechanical run-role is retired —

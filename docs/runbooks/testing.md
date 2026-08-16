@@ -13,7 +13,7 @@ Four tiers. Most tests belong in the **integration** tier.
    boundaries from `test/_support/`. This is the default tier for CLI commands,
    engine state-machine logic, API builders, harnesses, and daemon loops.
 3. **E2E** — real anvil fork, real IPFS, real or mocked Claude. One file per
-   protocol scenario in `client/test/e2e/`.
+   protocol scenario in `operator/test/e2e/`.
 4. **Manual acceptance** — `yarn release:testnet-acceptance`. Out of scope for
    this runbook.
 
@@ -26,12 +26,12 @@ Four tiers. Most tests belong in the **integration** tier.
 ## Where does the file go?
 
 Tests mirror `src/`:
-- `client/src/cli/commands/doctor.ts` → `client/test/cli/commands/doctor.test.ts`
+- `operator/src/cli/commands/doctor.ts` → `operator/test/cli/commands/doctor.test.ts`
 
 When a single test file grows past ~400 LOC, split by aspect:
 - `test/cli/commands/foo/a.test.ts`, `test/cli/commands/foo/b.test.ts`
 
-E2E scripts live in `client/test/e2e/<scenario>.ts` and are invoked via
+E2E scripts live in `operator/test/e2e/<scenario>.ts` and are invoked via
 `yarn e2e`, `yarn e2e-prediction-apy-v0`, etc. — not vitest.
 
 ## What do I mock?
@@ -158,7 +158,7 @@ binaries and exercise the full CLI dispatch surface. It is **not** run by
 default — invoke it explicitly:
 
 ```bash
-cd client
+cd operator
 yarn e2e:cold-start-builder
 ```
 
@@ -172,8 +172,8 @@ indexer event ingest → Discovery API surface → operator install → stub-Her
 task run → envelope attribution → SPA panels render. A dual-role test verifies
 that a pre-bootstrapped identity is reused without re-minting.
 
-**Fixture files** live under `client/test/acceptance/_fixtures/`. See
-`client/test/acceptance/ACCEPTANCE.md` for the full fixture inventory.
+**Fixture files** live under `operator/test/acceptance/_fixtures/`. See
+`operator/test/acceptance/ACCEPTANCE.md` for the full fixture inventory.
 
 **CI gating:** The acceptance tier is NOT in the per-PR CI gate (which runs
 only `yarn typecheck` + `yarn test`). It is run nightly and as part of the
@@ -186,13 +186,13 @@ release gate before a Monday named cut.
 If `yarn test` fails loading SQLite with an ABI mismatch (built for a different Node than the one running), reinstall native deps against the active runtime:
 
 ```bash
-cd client
+cd operator
 corepack enable   # pin Yarn via packageManager
 rm -rf node_modules
 yarn install
 ```
 
-Use **Node 22** where possible (`engines` in `client/package.json`). CI should match that major version.
+Use **Node 22** where possible (`engines` in `operator/package.json`). CI should match that major version.
 
 ## CI gates
 

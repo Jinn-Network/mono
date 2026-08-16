@@ -15,7 +15,7 @@
  * doc are parsed against this schema in `test/envelope.test.ts`).
  *
  * Step shape mirrors the capture-span shape (`SpanRow`,
- * `client/src/store/captures.ts`) minus session/trace IDs, which are hoisted
+ * `operator/src/store/captures.ts`) minus session/trace IDs, which are hoisted
  * to `session`.
  *
  * Plan: docs/superpowers/plans/2026-07-02-jinn-harness-network-v0-plan.md
@@ -69,7 +69,7 @@ const TrimmedString = (max: number) =>
 
 /**
  * One compressed trace step. Mirrors `SpanRow`
- * (client/src/store/captures.ts): scrubbed `attributes` plus the
+ * (operator/src/store/captures.ts): scrubbed `attributes` plus the
  * `redactedKeys` receipt of what the scrub pipeline removed.
  */
 export const TraceStepSchema = z.strictObject({

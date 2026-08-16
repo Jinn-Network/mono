@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 // A minimal, standalone Safe `execTransaction` helper, adapted from
-// `client/src/adapters/mech/safe.ts` (design §14 "declared impact"; design §3 "all
+// `operator/src/adapters/mech/safe.ts` (design §14 "declared impact"; design §3 "all
 // state-changing calls Safe-routed"). Deliberately simpler than the client's production
 // version: no shared nonce-ledger, no cross-process lock, no eviction-recovery retry loop --
 // those are venue-concurrency concerns and they are re-homed to

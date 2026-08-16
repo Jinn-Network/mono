@@ -1,7 +1,7 @@
 /**
  * Verdict signing (G2, spec `docs/superpowers/plans/2026-08-05-benchmark-product-m1-composition-dossier.md`
  * §2 G2): the evaluation harness writes an UNSIGNED in-toto Result Evaluation Statement to
- * `out/verdict`. No shipped platform path DSSE-signs it (`client/src/daemon/native-evaluator-
+ * `out/verdict`. No shipped platform path DSSE-signs it (`operator/src/daemon/native-evaluator-
  * composition.ts:308-350` is the closest pattern, but it is marketplace-coupled and not reusable
  * directly). This module owns that missing step for the local venue: a workspace-held Ed25519
  * signing key, the DSSE wrap over the harness's own unsigned bytes, and a reader for the sealed

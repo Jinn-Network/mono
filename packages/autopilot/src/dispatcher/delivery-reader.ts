@@ -6,16 +6,16 @@ import type { BridgeEnvelope, DeliveredRecord, DeliveryReader } from './delivery
  * + plain HTTP GET against the IPFS gateway for envelope/task documents.
  *
  * NARROW by design (coordinator override, issue #1892): replicates the
- * minimal GraphQL query shape from `client/src/discovery/http.ts`'s
+ * minimal GraphQL query shape from `operator/src/discovery/http.ts`'s
  * `QUERY_ENVELOPES_QUERY` and the plain-fetch pattern from
- * `client/src/corpus/fetch.ts` — does not import either (autopilot must not
+ * `operator/src/corpus/fetch.ts` — does not import either (autopilot must not
  * depend on `@jinn-network/client`). Also does not replicate
- * `client/src/adapters/mech/ipfs.ts`'s multi-codec/multi-gateway fallback
+ * `operator/src/adapters/mech/ipfs.ts`'s multi-codec/multi-gateway fallback
  * machinery; a single gateway GET is enough for this reader's job.
  *
  * The indexer's `envelopes` query has no `solverType` filter (solverType
  * lives in the IPFS envelope body, not an indexed column — see
- * `client/src/discovery/http.ts`'s note on `queryEnvelopes`), so this reader
+ * `operator/src/discovery/http.ts`'s note on `queryEnvelopes`), so this reader
  * fetches a page of the most recent envelope rows and filters client-side
  * after resolving each body from IPFS.
  *
@@ -37,7 +37,7 @@ interface EnvelopesGqlResponse {
   errors?: Array<{ message?: string }>;
 }
 
-/** Mirrors the minimal shape of `QUERY_ENVELOPES_QUERY` in `client/src/discovery/http.ts`. */
+/** Mirrors the minimal shape of `QUERY_ENVELOPES_QUERY` in `operator/src/discovery/http.ts`. */
 const ENVELOPES_QUERY = `
 query RecentEnvelopes($limit: Int!) {
   envelopes(

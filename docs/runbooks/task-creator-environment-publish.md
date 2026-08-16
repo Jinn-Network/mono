@@ -58,7 +58,7 @@ optional and defaults to `ghcr.io/jinn-network/task-environment`.
 
 ## Preflight
 
-From `client/`:
+From `operator/`:
 
 ```sh
 yarn task-creator:environment-publish --config ./environment.json

@@ -4,7 +4,7 @@
  * a corrupt or non-object file ⇒ `{}` (never throws on read). Writes are
  * atomic (temp file + rename) and create the parent dir on demand.
  *
- * In-package on purpose: harness-layer must NOT reach into `client/src/**`
+ * In-package on purpose: harness-layer must NOT reach into `operator/src/**`
  * (the one-way dependency arrow), so the mineable-store idiom is reproduced
  * here rather than imported.
  */

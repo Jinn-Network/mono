@@ -75,7 +75,7 @@ jobs:
           PREV_TAG: ${{ steps.window.outputs.prev_tag }}
         shell: bash
         run: |
-          CURRENT_VERSION="$(node -e "console.log(JSON.parse(require('fs').readFileSync('client/package.json','utf8')).version)")"
+          CURRENT_VERSION="$(node -e "console.log(JSON.parse(require('fs').readFileSync('operator/package.json','utf8')).version)")"
           # Suggested bump: patch by default (handbook §Cadence). Base the
           # suggestion on the previous stable tag so a prep PR that already
           # bumped package.json to the target version still drafts that target,

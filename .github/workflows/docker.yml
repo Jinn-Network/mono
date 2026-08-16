@@ -10,7 +10,7 @@ permissions:
 
 defaults:
   run:
-    working-directory: client
+    working-directory: operator
 
 jobs:
   build-and-push:
@@ -42,10 +42,10 @@ jobs:
               ;;
           esac
 
-          # working-directory default is `client/`, no extra cd.
+          # working-directory default is `operator/`, no extra cd.
           PACKAGE_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
           if [ "${VERSION}" != "${PACKAGE_VERSION}" ]; then
-            echo "::error::Release tag version ${VERSION} does not match client/package.json version ${PACKAGE_VERSION}"
+            echo "::error::Release tag version ${VERSION} does not match operator/package.json version ${PACKAGE_VERSION}"
             exit 1
           fi
 
@@ -70,7 +70,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: client/Dockerfile
+          file: operator/Dockerfile
           load: true
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.image_repo }}:smoke-${{ steps.meta.outputs.sha }}
@@ -102,7 +102,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: client/Dockerfile
+          file: operator/Dockerfile
           push: true
           tags: |
             ${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.version }}

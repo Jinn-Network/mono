@@ -154,7 +154,7 @@ the public transport that must work.
 Run these on the release branch before PR or canary:
 
 ```bash
-cd client
+cd operator
 yarn typecheck
 yarn vitest run \
   src/dashboard/spa/src/pages/Launcher.test.tsx \

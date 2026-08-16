@@ -56,8 +56,8 @@ failed and restart the bootstrap, creating duplicate operations.
   badge updates to "Staked" within one polling cycle without a reload.
 - [ ] The badge value is still correct after a reload (no regression).
 
-**Files/components.** `client/src/dashboard/spa/` — Earning tab status badge
-and the earning-state query that feeds it; `client/src/earning/store.ts`.
+**Files/components.** `operator/src/dashboard/spa/` — Earning tab status badge
+and the earning-state query that feeds it; `operator/src/earning/store.ts`.
 ```
 
 **Taxonomy values:**
@@ -79,7 +79,7 @@ and the earning-state query that feeds it; `client/src/earning/store.ts`.
 | Interview brevity | Pass. One question covered both missing slots (impact and AC). No over-questioning. |
 | Body length | Pass. Each section is within the 4-sentence cap; no external URLs. |
 
-**Weakness found:** The `Files/components` entry lists `client/src/earning/store.ts` as
+**Weakness found:** The `Files/components` entry lists `operator/src/earning/store.ts` as
 a probable target. This is a reasonable inference but the skill instructs to list what
 the person knows. The dogfooder did not name this file; it was inferred. The skill
 says "Files/components — where in the codebase, if they know" and permits "Unknown" —
@@ -131,7 +131,7 @@ or evaluation problems cannot isolate relevant entries without scrolling.
 - [ ] Selecting "All" (or clearing the filter) restores the full feed.
 - [ ] The filter resets when navigating away from the Activity feed.
 
-**Files/components.** `client/src/dashboard/spa/` — Activity feed view;
+**Files/components.** `operator/src/dashboard/spa/` — Activity feed view;
 activity query/store that feeds the feed.
 ```
 
@@ -184,7 +184,7 @@ docs about how to actually set that up."
 Agent asked: whether a new section in an existing doc or a new standalone page was
 expected, and which step the dogfooder got stuck on.
 
-Dogfooder: new section in `client/docs/operator/` is fine; got stuck finding the
+Dogfooder: new section in `operator/docs/operator/` is fine; got stuck finding the
 manifest CID.
 
 **Issue Type confirmation:** `docs` — confirmed by dogfooder.
@@ -194,7 +194,7 @@ manifest CID.
 ```
 Title: No operator-facing docs for joining a SolverNet
 
-**Context.** The operator dashboard and `client/docs/operator/` do not
+**Context.** The operator dashboard and `operator/docs/operator/` do not
 document how to join an existing SolverNet. CLAUDE.md describes the
 `joinedSolverNets` config shape for contributors, but there is no
 operator-facing guide explaining how to find a SolverNet's manifest CID,
@@ -204,14 +204,14 @@ add the config entry, and restart the daemon.
 self-serve; they must ask in Discord or read contributor-internal docs.
 
 **Acceptance criteria.**
-- [ ] `client/docs/operator/` contains a section or page covering how to
+- [ ] `operator/docs/operator/` contains a section or page covering how to
   join a SolverNet (find manifest CID, add `joinedSolverNets` entry,
   restart daemon).
 - [ ] The doc explains what a manifest CID is and where to find it for a
   given SolverNet.
 - [ ] No existing operator doc is broken or made inconsistent by the addition.
 
-**Files/components.** `client/docs/operator/` — new section or page;
+**Files/components.** `operator/docs/operator/` — new section or page;
 `spec/2026-05-05-solvernet-creation-and-launch.md` as the source spec.
 ```
 

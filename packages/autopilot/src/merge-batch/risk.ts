@@ -2,7 +2,7 @@ import type { MergeBatchPr, MergeBatchRisk } from './types.js';
 
 const SOLO_PATHS = [
   '.github/workflows/',
-  'client/package.json',
+  'operator/package.json',
   'packages/autopilot/package.json',
   'packages/sdk/package.json',
   'contracts/',

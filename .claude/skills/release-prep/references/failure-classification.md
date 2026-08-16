@@ -13,7 +13,7 @@ Every `fail` verdict has a `failClass` — release-readiness uses it to decide w
 
 ## Detection
 
-`classifyFailure(err)` in `client/scripts/release/scenario-types.ts` regex-matches the error message against pattern lists. Conservative default: unknown errors are classified `real-bug` (so a genuine bug isn't accidentally treated as a flake).
+`classifyFailure(err)` in `operator/scripts/release/scenario-types.ts` regex-matches the error message against pattern lists. Conservative default: unknown errors are classified `real-bug` (so a genuine bug isn't accidentally treated as a flake).
 
 ## Adding patterns
 

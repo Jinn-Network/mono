@@ -21,7 +21,7 @@ describe('buildJinnMonoV1VerificationPlan', () => {
       'packages/sdk',
       'packages/indexer',
       'packages/indexer-enrichment',
-      'client',
+      'operator',
       'packages/autopilot',
     ]);
     expect(plan.commands).toEqual([
@@ -125,7 +125,7 @@ describe('buildJinnMonoV1VerificationPlan', () => {
       touchedPaths: [
         'packages/core/src/index.ts',
         'packages/plugin/src/index.ts',
-        'client/src/index.ts',
+        'operator/src/index.ts',
       ],
     });
 
@@ -133,7 +133,7 @@ describe('buildJinnMonoV1VerificationPlan', () => {
       'packages/plugin',
       'packages/core',
       'packages/layer',
-      'client',
+      'operator',
     ]);
   });
 

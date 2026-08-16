@@ -10,7 +10,7 @@
  * (a `skipped` row; no new envelope); re-running over CHANGED content
  * republishes and points the new record's provenance at the prior
  * `envelopeRef` via `supersedes` — skills carry it in
- * `SkillArtifactV1.provenance.supersedes` (client/src/types/skill-artifact.ts,
+ * `SkillArtifactV1.provenance.supersedes` (operator/src/types/skill-artifact.ts,
  * already schema'd for this, issue #1462); episodes carry it in the
  * `seed.attribution` step attribute (episode-fetch.ts's step convention),
  * since the frozen `jinn.trace-envelope.v0` has no top-level field for it.

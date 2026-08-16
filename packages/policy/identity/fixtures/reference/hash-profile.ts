@@ -5,7 +5,7 @@
  * materialization rule (substrate §4.2).
  *
  * This is the fork-healing half of the kit. The digest it produces is the one C3's shipped
- * regression suite (`client/test/harnesses/hash-profile.test.ts`) pins, and the fixture tree is
+ * regression suite (`operator/test/harnesses/hash-profile.test.ts`) pins, and the fixture tree is
  * byte-for-byte the same tree — so the cross-unit byte-match the program requires is a fact this
  * kit can assert on its own, from a second implementation, without importing C3's code.
  *

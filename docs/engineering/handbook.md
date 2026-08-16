@@ -19,7 +19,7 @@ Canonical references:
 
 Two-train release model:
 
-- **`next` is the integration branch.** Every PR targets `next`. Every push to `next` that touches `client/**` publishes `<package.version>-canary.<sha8>` to npm under the `canary` dist-tag within minutes (`.github/workflows/npm-publish.yml`). Operators on `npm install -g @jinn-network/client@canary` receive the rolling build.
+- **`next` is the integration branch.** Every PR targets `next`. Every push to `next` that touches `operator/**` publishes `<package.version>-canary.<sha8>` to npm under the `canary` dist-tag within minutes (`.github/workflows/npm-publish.yml`). Operators on `npm install -g @jinn-network/client@canary` receive the rolling build.
 - **`main` is the released-train head.** It is advanced only by `.github/workflows/promote-main.yml`, which fast-forwards main to the v<semver> tag on `release: published`. `main` HEAD therefore always reflects what is currently in npm `@latest`.
 - **Weekly named Build Notes cut every Monday.** A Monday cron creates a GitHub Release **draft** at 09:00 UTC against `next` HEAD. Captain reviews (Hermes-style: build-name + highlights + known-issues + auto-aggregated PRs and closed Issues), then publishes. Publish triggers (a) npm `latest`, (b) `promote-main.yml` to fast-forward main, (c) CHANGELOG auto-mirror. Default `npm install -g @jinn-network/client` gets the weekly named stable build.
 - **Publish guard — verify two SHA-bound check-runs, re-run nothing.** On `release: published`, `npm-publish.yml`'s stable-publish step is gated by the **two-gate redesign** ([`docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md`](../superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md) §7/§15): it resolves the release SHA and queries it for two check-runs — `hermetic-gate=success` (deterministic CI, per-PR) **and** `environment-suite=success` (real testnet, gates the cut) — both bound to *that* SHA. Green both → publish; otherwise refuse, naming the missing/stale verdict. The guard **executes no tests** (~4 minutes of re-running becomes a sub-second query). The transitional repo variable `JINN_ENVIRONMENT_SUITE_WAIVED == 'true'` waives the `environment-suite` requirement until the step-4 testnet-gate secrets are provisioned (the waiver is logged loudly; `hermetic-gate` is never waived). This **replaces** the prior Tier-1 re-run plus hand-typed `jinn-release-evidence:v1` marker parse — the Tier 1/2/3 ladder is retired and a rebase auto-invalidates a stale verdict (the SHA no longer matches).
@@ -73,7 +73,7 @@ then:
 
 - `npm-publish.yml` (release event branch) → npm `latest`.
 - `.github/workflows/promote-main.yml` → fast-forwards `main` to the tagged commit on `next`. After this runs, `git log main` shows exactly the named-cut commit.
-- `.github/workflows/changelog-mirror.yml` → appends Release body to `client/CHANGELOG.md` under Unreleased.
+- `.github/workflows/changelog-mirror.yml` → appends Release body to `operator/CHANGELOG.md` under Unreleased.
 
 The Project board's Sprint view resets to the new Monday; shipped items move to the Roadmap view's Done column.
 
@@ -145,7 +145,7 @@ The ten rules below land in this handbook + [`CLAUDE.md`](../../CLAUDE.md) immed
 5. **(Deferred — open)** Supervised-diff for the self-modifying learner. Phase A.5+ learner ships proposed changes as PRs against the repo; designated reviewer approves before merge. Concrete mechanism is open. **Status: open.**
 6. **Integration tests > mocks for migration / contract surfaces.** Mock policy stays for the unit-test pyramid; migration tests must hit a real database or a forked chain (per `superpowers:test-driven-development`'s position on the test pyramid).
 7. **TDD for new features, regression test for fixes.** Per `superpowers:test-driven-development`. TDD on `feat` / `refactor`; regression-first on `fix`; deferred-not-waived on `fix(incident)`.
-   - **Boundary tests for numeric gates.** When a `fix` (or any change) touches a numeric threshold — funding gate, balance check, runway warning, drip target — the regression test must mock at the boundary (`gate`, `gate - 1 wei`), not at "comfortably above" (0.05 ETH, 0.1 ETH). The 2026-05-18 canary regression (jinn-mono-u34i: Stage 1 gate == transfer amount) shipped through CI because every existing mock was at 0.05 ETH — way above the 0.01 ETH gate, so the "gate exactly equals transfer" failure mode was invisible. Boundary mocks are cheap, catch this class of bug deterministically, and double as documentation of what the gate actually enforces. See `client/test/earning/staged-bootstrap-stage1.test.ts` and `staged-bootstrap-stage1and2.test.ts` for the pattern.
+   - **Boundary tests for numeric gates.** When a `fix` (or any change) touches a numeric threshold — funding gate, balance check, runway warning, drip target — the regression test must mock at the boundary (`gate`, `gate - 1 wei`), not at "comfortably above" (0.05 ETH, 0.1 ETH). The 2026-05-18 canary regression (jinn-mono-u34i: Stage 1 gate == transfer amount) shipped through CI because every existing mock was at 0.05 ETH — way above the 0.01 ETH gate, so the "gate exactly equals transfer" failure mode was invisible. Boundary mocks are cheap, catch this class of bug deterministically, and double as documentation of what the gate actually enforces. See `operator/test/earning/staged-bootstrap-stage1.test.ts` and `staged-bootstrap-stage1and2.test.ts` for the pattern.
 8. **Auto-canary on every push to `next`; Monday-only named stable cut promotes `main`.** Cadence policy from §Cadence above. Hotfix sub-flow may bypass `next`; back-merge is mandatory.
 9. **`canary` for rolling patches, `latest` for Monday named.** Dist-tag policy from §Dist-tags above.
 10. **PRs target `next`, not `main`.** The only exception is `fix(incident)` hotfixes (target `main` directly, mandatory back-merge per §Hotfix sub-flow / `docs/runbooks/hotfix.md`). Branch protection on `main` enforces this (issue #589). See §Cadence above for the why-anchor.
@@ -174,7 +174,7 @@ Per the engineering handbook umbrella and DR-2026-05-18 (retire `bd`, single-tra
 - **GitHub Projects (v2)** — public sprint board (this handbook §Sprint surface above).
 - **Public GitHub Issues** — the single source of truth for engineering work. Externally visible at create-time; the public surface and the working surface are the same surface (per DR-2026-05-18).
 - **GitHub Releases + auto-generated notes** — the devlog. Monday cuts. Released artifacts: `v2026.MM.DD` + `vX.Y.Z` dual tags.
-- **CHANGELOG.md** — `client/CHANGELOG.md` auto-mirrored from Release body on publish via `.github/workflows/changelog-mirror.yml`. npm-tarball-shipped.
+- **CHANGELOG.md** — `operator/CHANGELOG.md` auto-mirrored from Release body on publish via `.github/workflows/changelog-mirror.yml`. npm-tarball-shipped.
 - **Repo-as-docs** — `docs/` (engineering, runbooks, specs, decisions). GitHub Pages-ready.
 - **GitHub Discussions** — RFCs / Q&A / governance prep through Phase 2.
 

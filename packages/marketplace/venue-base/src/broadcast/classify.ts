@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 // Written fresh against the venue kit's fixture table (design §6.6). The legacy
-// `client/src/tx-retry.ts` is the behavioral oracle those fixtures were derived from; no line of
+// `operator/src/tx-retry.ts` is the behavioral oracle those fixtures were derived from; no line of
 // it is ported here.
 import { KNOWN_INNER_ERRORS, SafeInnerRevertError } from "@jinn-network/marketplace-binding";
 

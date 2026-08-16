@@ -135,7 +135,7 @@ test('evidenceCitation must be Class A (a decision record or spec), not merely a
   const errors = validateTransitionManifest(manifest({ transitions: [transition({
     status: 'deleted',
     consumers: [],
-    evidenceCitation: 'client/src/compatibility/phase-d-transition-usage.ts',
+    evidenceCitation: 'operator/src/compatibility/phase-d-transition-usage.ts',
   })] }), { repoRoot });
   assert.ok(errors.some((error) => error.includes('evidenceCitation must live under')));
 
@@ -192,7 +192,7 @@ test('validator rejects a usageSignal file reference that does not exist in the 
     transitions: [transition({
       usageSignal: {
         name: 'marketplace_pipeline_invocations',
-        sourceFile: 'client/src/daemon/phase-d-transition-usage.ts',
+        sourceFile: 'operator/src/daemon/phase-d-transition-usage.ts',
         sourceDescription: 'durable counter exposed by GET /v1/status',
         zeroDefinition: 'No production invocation during the approved observation window.',
       },

@@ -12,7 +12,7 @@ while the indexer-independent loops (jinn-claim, balance-topup) keep emitting
 on-chain activity and mask the outage. No single operator can be trusted to
 notice their own stall, so liveness must be observed from *outside* any daemon.
 
-The probe is therefore a standalone, stateless script — `client/scripts/net-liveness-probe.ts`,
+The probe is therefore a standalone, stateless script — `operator/scripts/net-liveness-probe.ts`,
 run as `yarn net-liveness`. It is cron-driven, NOT in-daemon, and holds no state
 between runs. It does not touch the daemon, the daemon loops, or `/v1/status`.
 
@@ -97,7 +97,7 @@ stall is caught within one window.
 
 The checked-in workflow at `.github/workflows/net-liveness.yml` runs every 15
 minutes and can be run manually with `workflow_dispatch`. It executes
-`yarn --cwd client net-liveness` with a local capture webhook; when the probe
+`yarn --cwd operator net-liveness` with a local capture webhook; when the probe
 posts a `stale` payload, the workflow opens or updates a
 `[net-liveness-stall]` GitHub issue labelled `automated:net-liveness`, then
 fails the run so the scheduled check stays red until recovery. A later healthy
@@ -118,7 +118,7 @@ cadence:
 
 ```
 cron schedule: */15 * * * *
-start command:  cd client && yarn net-liveness
+start command:  cd operator && yarn net-liveness
 ```
 
 Set `JINN_NET_LIVENESS_WEBHOOK_URL`, `JINN_NET_LIVENESS_THRESHOLD_MINUTES`,

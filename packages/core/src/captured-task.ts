@@ -2,7 +2,7 @@
  * Captured-task schema — the raw, pre-scrub input to the harness capture path.
  *
  * Extracted from the former client harness layer in C2 (#1833):
- * the parse half of capture.ts has no scrub / `client/src` dependency (only
+ * the parse half of capture.ts has no scrub / `operator/src` dependency (only
  * zod + the two envelope enums), so it moved into `@jinn-network/core`.
  * C5 subsequently moved the scrub implementation alongside it while leaving
  * capture orchestration in the layer.

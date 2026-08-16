@@ -11,7 +11,7 @@ describe('merge-batch types', () => {
       author: 'contributor',
       linkedIssueNumber: 501,
       blockedOn: 'Nothing',
-      files: ['client/src/api/server.ts'],
+      files: ['operator/src/api/server.ts'],
       additions: 42,
       deletions: 9,
       dependsOnPrNumbers: [],

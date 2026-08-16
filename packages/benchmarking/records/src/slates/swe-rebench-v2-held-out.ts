@@ -36,7 +36,7 @@
  * never locale-based collation.
  *
  * The embedded `instanceIds` + `hash` are kept byte-identical to the client
- * artifact (`client/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json`)
+ * artifact (`operator/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json`)
  * by the cross-source parity test. Scores are only comparable WITHIN a
  * version; a slate change is a distinct version (v2, ...), never an in-place
  * edit.
@@ -63,7 +63,7 @@ export interface LoadedHeldOutSlate {
 /**
  * Embedded v1 slate. Byte-identical (sans the `comment` doc field, which is not
  * part of the hashed artifact) to
- * `client/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json`.
+ * `operator/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json`.
  * Guarded against drift by the parity test beside this file, and by
  * `packages/sdk/test/solvernets/swe-rebench-v2-held-out-slate-cross-source.test.ts`
  * for the sdk ↔ client pair.

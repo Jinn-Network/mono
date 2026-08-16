@@ -7,7 +7,7 @@ describe("prediction fixtures", () => {
   test("every fixture names its legacy provenance", () => {
     expect(PREDICTION_FIXTURES.length).toBeGreaterThanOrEqual(9);
     for (const fixture of PREDICTION_FIXTURES) {
-      expect(fixture.provenance).toMatch(/^client\/(src|test)\/.+:\d+/u);
+      expect(fixture.provenance).toMatch(/^operator\/(src|test)\/.+:\d+/u);
     }
   });
 

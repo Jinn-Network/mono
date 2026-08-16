@@ -5,7 +5,7 @@
  * (substrate §4.2). The fixture trees here are byte-for-byte the ones authored for the
  * `@jinn-network/policy-identity` kit (`packages/policy/identity/fixtures/fork-healing/*.json`,
  * on branch `claude/policy-c1-kit`) and pinned by C3's shipped regression suite
- * (`client/test/harnesses/hash-profile.test.ts`) — inlined here (not imported: the fixture
+ * (`operator/test/harnesses/hash-profile.test.ts`) — inlined here (not imported: the fixture
  * branch is unmerged and this package cannot depend on the pure policy-identity package anyway)
  * so all three independent implementations are proven against the same bytes. If any of the
  * three ever disagree, the `FORK_HEALING_DIGEST` assertion here — or its counterpart in the

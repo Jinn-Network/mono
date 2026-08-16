@@ -176,7 +176,7 @@ function scriptedRunner(cfg: {
     }
     if (cmd === 'gh' && args[0] === 'pr' && args[1] === 'view') {
       const n = Number(args[2]);
-      return JSON.stringify({ files: (cfg.files?.[n] ?? ['client/src/x.ts']).map((p) => ({ path: p })) });
+      return JSON.stringify({ files: (cfg.files?.[n] ?? ['operator/src/x.ts']).map((p) => ({ path: p })) });
     }
     if (cmd === 'git' && args[0] === 'show') return cfg.codeowners ?? '# no owned paths\n';
     if (cmd === 'gh' && args[1] === 'merge' && cfg.failMerge?.includes(Number(args[2]))) {

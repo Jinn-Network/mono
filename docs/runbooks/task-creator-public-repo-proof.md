@@ -10,7 +10,7 @@ posting path remain unchanged.
 Run the offline proof first:
 
 ```sh
-cd client
+cd operator
 yarn task-creator:public-repo-e2e
 ```
 
@@ -56,8 +56,8 @@ for Vitest JSON parser-contract coverage. It must never be used as a Jinn
 empirical, admission, mint, or public-testnet proof.
 
 The real Jinn source has the two reviewed regression paths
-`client/test/daemon/daemon-recovery-nonblocking.test.ts` and
-`client/test/harnesses/engine/recovery.test.ts`. It needs a generated,
+`operator/test/daemon/daemon-recovery-nonblocking.test.ts` and
+`operator/test/harnesses/engine/recovery.test.ts`. It needs a generated,
 sanitised differential-admission receipt: two stable broken and two stable
 fixed targeted observations per path, their F2P/P2P sets, public test-patch
 hash, gold-patch hash only, image/parser/platform/environment bindings, and
@@ -92,7 +92,7 @@ never add signing material or registry credentials to a command argument, a
 tracked file, or an environment-spec JSON file.
 
 ```sh
-cd client
+cd operator
 
 # First review this side-effect-free config parse.
 yarn task-creator:environment-publish --config "$HOME/secure/jinn-environment-publish.json"
@@ -181,7 +181,7 @@ export JINN_TASK_CREATOR_DIFFERENTIAL_RECEIPT_PATH="$HOME/secure/jinn-differenti
 export JINN_TASK_CREATOR_DIFFERENTIAL_RECEIPT_CID='QmYwAPJzv5CZsnAzt8auVTLF9rYx8S1R52eX5GJH2RGfZp'
 export JINN_TASK_CREATOR_DIFFERENTIAL_RECEIPT_HASH='sha256:...'
 
-cd client
+cd operator
 yarn task-creator:mint-preflight:jinn-mono
 # or: yarn task-creator:mint-preflight:unjs-destr
 ```

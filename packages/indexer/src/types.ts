@@ -4,8 +4,8 @@
  * This file provides pure utility functions used by the Ponder event handlers
  * in src/index.ts. The DiscoveryAPI type mirrors that previously lived here
  * have been removed — the canonical types live in the daemon at
- * client/src/discovery/types.ts, and the GraphQL adapter has moved to
- * client/src/discovery/http.ts (jinn-mono-280n.4).
+ * operator/src/discovery/types.ts, and the GraphQL adapter has moved to
+ * operator/src/discovery/http.ts (jinn-mono-280n.4).
  *
  * The three functions below are the only things that belong here:
  *   - tierFromRaw: maps uint8 evidence tier to a string evidence tier value
@@ -33,7 +33,7 @@ export function tierFromRaw(value: number): 'self-signed' | 'committed' | 'attes
  * Parses the key of an IdentityRegistry.MetadataSet event to determine its
  * kind and CID. Returns null if the key does not match any known pattern.
  *
- * Known key patterns (from client/src/corpus/onchain-query.ts):
+ * Known key patterns (from operator/src/corpus/onchain-query.ts):
  *   `envelope:<cid>`    — execution evidence
  *   `evaluation:<cid>`  — evaluation verdict
  *   `capture:<cid>`     — capture
@@ -72,7 +72,7 @@ export function parseSolverNetManifestKey(key: string): string | null {
  * plug-in record; a key with an empty cid is not a valid record.
  *
  * Canonical declaration: `PLUGIN_METADATA_KEY_PREFIX` in
- * `client/src/erc8004/plugin-registry.ts`. Cross-package imports are not wired
+ * `operator/src/erc8004/plugin-registry.ts`. Cross-package imports are not wired
  * in this codebase, so we keep a local copy here.
  */
 export const PLUGIN_KEY_PREFIX = 'plugin:';

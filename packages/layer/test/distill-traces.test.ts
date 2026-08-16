@@ -81,7 +81,7 @@ describe('local distill trace primitives', () => {
       sessionId: 's1',
       summary: 'Fix pytest image setup',
       command: 'pytest -q',
-      file: 'client/test/foo.test.ts',
+      file: 'operator/test/foo.test.ts',
       error: 'pytest: command not found',
       redactedKeys: ['tool.args.token'],
     }));
@@ -92,7 +92,7 @@ describe('local distill trace primitives', () => {
       sourceTool: 'codex',
       summary: 'Fix pytest image setup',
       commands: ['pytest -q'],
-      filesTouched: ['client/test/foo.test.ts'],
+      filesTouched: ['operator/test/foo.test.ts'],
       errorSnippets: ['pytest: command not found'],
       outcome: 'completed',
       redactionFlags: ['redacted'],
@@ -111,7 +111,7 @@ describe('local distill trace primitives', () => {
   it('searches cards by text, command, file, error, tool, and outcome', () => {
     const cards = [
       traceCardFromCapture(capture({ sessionId: 's1', summary: 'Fix setup', command: 'pytest -q', error: 'pytest missing' })),
-      traceCardFromCapture(capture({ sessionId: 's2', summary: 'Edit UI', file: 'client/src/App.tsx' })),
+      traceCardFromCapture(capture({ sessionId: 's2', summary: 'Edit UI', file: 'operator/src/App.tsx' })),
     ];
 
     expect(searchTraceCards(cards, { query: 'setup' }).map((c) => c.sessionId)).toEqual(['s1']);

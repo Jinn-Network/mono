@@ -58,14 +58,14 @@ interface ReleasePrepInput {
 
 ## How to invoke
 
-The tier runners execute under plain `tsx` and do **not** auto-load `client/.env`.
+The tier runners execute under plain `tsx` and do **not** auto-load `operator/.env`.
 Scenarios that need secrets — `BASE_SEPOLIA_RPC_URL` (T2.1, T2.3), `BASE_RPC_URL`,
 `OPENROUTER_API_KEY`, `TENDERLY_*` — silently **skip or fail** with an "env not set"
-error when those vars are unexported. Source `client/.env`, **then unset
+error when those vars are unexported. Source `operator/.env`, **then unset
 `JINN_PASSWORD`**, before every local invocation:
 
 ```bash
-cd client
+cd operator
 set -a && . ./.env && set +a          # export the secrets the runners need
 unset JINN_PASSWORD                    # MUST unset — see warning below
 
@@ -80,7 +80,7 @@ yarn release:tier-1 <candidate-version>
 > `.jinn-client/keystore-password` file. An inherited `JINN_PASSWORD` overrides that
 > file, fails keystore decryption, and the daemon exits with `exitCode 50` before
 > its API is reachable — surfacing as a misleading "daemon did not become reachable"
-> `real-bug` verdict on T2.1/T2.3. `client/.env` carries the *developer's own*
+> `real-bug` verdict on T2.1/T2.3. `operator/.env` carries the *developer's own*
 > `JINN_PASSWORD`, so a blind `. ./.env` poisons every substrate scenario. Unset it.
 
 In CI the secrets are injected as GitHub Actions env vars, so the `.env` step is a

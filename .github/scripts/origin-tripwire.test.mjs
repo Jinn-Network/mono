@@ -52,10 +52,10 @@ test('reports a hit with the correct repository-relative path and 1-based line n
 
 test('an excluded exact path is not reported', () => {
   withTempRepo((root) => {
-    // Excluded even though `client/src/` is an enforced scope: exclusions win.
-    mkdirSync(join(root, 'client', 'src', 'daemon'), { recursive: true });
+    // Excluded even though `operator/src/` is an enforced scope: exclusions win.
+    mkdirSync(join(root, 'operator', 'src', 'daemon'), { recursive: true });
     writeFileSync(
-      join(root, 'client', 'src', 'daemon', 'bridge-legacy-delivery.ts'),
+      join(root, 'operator', 'src', 'daemon', 'bridge-legacy-delivery.ts'),
       "export const KEY = 'https://jinn.network/bridge/legacy-execution-envelope/1.0';\n",
     );
 
@@ -112,9 +112,9 @@ test('node_modules and dist are skipped', () => {
 
 test('a hit outside the frozen files and dated-record trees is still reported alongside exclusions', () => {
   withTempRepo((root) => {
-    mkdirSync(join(root, 'client', 'src', 'daemon'), { recursive: true });
+    mkdirSync(join(root, 'operator', 'src', 'daemon'), { recursive: true });
     writeFileSync(
-      join(root, 'client', 'src', 'daemon', 'bridge-legacy-delivery.ts'),
+      join(root, 'operator', 'src', 'daemon', 'bridge-legacy-delivery.ts'),
       "export const KEY = 'https://jinn.network/bridge/legacy-execution-envelope/1.0';\n",
     );
     mkdirSync(join(root, 'spec'), { recursive: true });
@@ -138,7 +138,7 @@ test('a hit outside the frozen files and dated-record trees is still reported al
 
 test('isExcludedPath: exact paths and directory prefixes both match, unrelated paths do not', () => {
   assert.equal(
-    isExcludedPath('client/src/daemon/bridge-legacy-delivery.ts', DEFAULT_EXCLUSIONS),
+    isExcludedPath('operator/src/daemon/bridge-legacy-delivery.ts', DEFAULT_EXCLUSIONS),
     true,
   );
   assert.equal(isExcludedPath('spec/2026-01-01-example.md', DEFAULT_EXCLUSIONS), true);
@@ -157,7 +157,7 @@ test('isExcludedPath: exact paths and directory prefixes both match, unrelated p
 test('isEnforcedPath covers the source scopes an identifier can be minted from', () => {
   for (const enforced of [
     '.github/scripts/build-profile-root.mjs',
-    'client/src/daemon/native.ts',
+    'operator/src/daemon/native.ts',
     'plugin/runtime/src/index.ts',
     'packages/discovery/protocol/src/identifiers.ts',
     'packages/evidence/protocol/schemas/task.schema.json',
@@ -170,7 +170,7 @@ test('isEnforcedPath covers the source scopes an identifier can be minted from',
     'architecture/generated/platform-topology.md', // generated output
     'packages/trust/core/fixtures/sealing-v1/key-binding.json', // sealed pre-re-seal bytes
     'docs/runbooks/stack-npm-publishing.md',
-    'client/test/daemon/native-trust-catalog.test.ts',
+    'operator/test/daemon/native-trust-catalog.test.ts',
     'README.md',
   ]) {
     assert.equal(isEnforcedPath(reported), false, reported);
@@ -212,7 +212,7 @@ test('the exclusion list is closed: widening it is a reviewed edit', () => {
     '.github/scripts/origin-tripwire.test.mjs',
     '.github/scripts/public-surface-assets.mjs',
     '.github/scripts/public-surface-assets.test.mjs',
-    'client/src/daemon/bridge-legacy-delivery.ts',
+    'operator/src/daemon/bridge-legacy-delivery.ts',
     'packages/benchmarking/records/src/identifiers.test.ts',
     'packages/discovery/facts/benchmarking/src/identifiers.test.ts',
     'packages/discovery/protocol/src/grammar.test.ts',
@@ -244,9 +244,9 @@ test('this repository is clean: the CLI exits zero on the real tree', () => {
 
 test('the CLI exits non-zero and names the DR when an enforced scope regresses', () => {
   withTempRepo((root) => {
-    mkdirSync(join(root, 'client', 'src'), { recursive: true });
+    mkdirSync(join(root, 'operator', 'src'), { recursive: true });
     writeFileSync(
-      join(root, 'client', 'src', 'regressed.ts'),
+      join(root, 'operator', 'src', 'regressed.ts'),
       "export const KIND = 'https://jinn.network/records/task/1.0';\n",
     );
     assert.throws(
@@ -258,7 +258,7 @@ test('the CLI exits non-zero and names the DR when an enforced scope regresses',
       (error) => {
         assert.equal(error.status, 1);
         assert.match(error.stderr, /DR-2026-08-04 re-seal/u);
-        assert.match(error.stderr, /client\/src\/regressed\.ts:1/u);
+        assert.match(error.stderr, /operator\/src\/regressed\.ts:1/u);
         return true;
       },
     );

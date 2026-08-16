@@ -1,11 +1,11 @@
 # create-plugin CLI cheatsheet
 
 Verbatim commands and exact JSON output shapes. Source-of-truth:
-`client/src/cli/commands/create.ts`, `solver-plugins.ts`,
+`operator/src/cli/commands/create.ts`, `solver-plugins.ts`,
 `solver-plugins-publish.ts`, `solver-nets.ts`. Output shapes are single-line
 JSON unless noted (`solver-nets` pretty-prints with 2-space indent).
 
-Run the CLI as `node client/dist/bin/jinn.js <args>` (built; AC#4 load-probe
+Run the CLI as `node operator/dist/bin/jinn.js <args>` (built; AC#4 load-probe
 also needs the build) or `yarn jinn <args>` (dev, `tsx`). Either works for the
 scaffold/validate verbs.
 
@@ -78,7 +78,7 @@ Common failure messages:
 
 ## 3. Load-probe (AC#4) — `references/load-probe.mjs`
 
-Prereq: `cd client && yarn build` (the probe imports `client/dist/plugins/index.js`).
+Prereq: `cd operator && yarn build` (the probe imports `operator/dist/plugins/index.js`).
 
 ```
 node .claude/skills/create-plugin/references/load-probe.mjs <abs-targetRoot> <target>

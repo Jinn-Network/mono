@@ -18,11 +18,11 @@
       "mode": "package"
     },
     {
-      "path": "client",
+      "path": "operator",
       "mode": "package"
     },
     {
-      "path": "client/src/dashboard/spa",
+      "path": "operator/src/dashboard/spa",
       "mode": "package"
     },
     {
@@ -671,7 +671,7 @@
       "supersedes": [],
       "replacedBy": [],
       "name": "@jinn-network/client",
-      "path": "client",
+      "path": "operator",
       "domain": "operator",
       "role": "operator daemon and application",
       "tier": 4,
@@ -719,7 +719,7 @@
       "supersedes": [],
       "replacedBy": [],
       "name": "@jinn-network/operator-spa",
-      "path": "client/src/dashboard/spa",
+      "path": "operator/src/dashboard/spa",
       "domain": "operator",
       "role": "operator dashboard product",
       "tier": 4,
@@ -728,7 +728,7 @@
       "authority": {
         "documents": [
           {
-            "path": "client/OPERATOR-APP-SPEC.md",
+            "path": "operator/OPERATOR-APP-SPEC.md",
             "status": "current"
           }
         ],

@@ -5,12 +5,12 @@ description: Use when smoke-testing or writing regression coverage for the jinn 
 
 # Testing the Jinn App
 
-The jinn app is the operator dashboard SPA at `client/src/dashboard/spa/`, served by the jinn daemon's HTTP API. Two complementary recipes drive it end-to-end — both share the same daemon-spawn pattern; they differ in whether the API is real or mocked.
+The jinn app is the operator dashboard SPA at `operator/src/dashboard/spa/`, served by the jinn daemon's HTTP API. Two complementary recipes drive it end-to-end — both share the same daemon-spawn pattern; they differ in whether the API is real or mocked.
 
 1. **Manual smoke** via `chrome-devtools` MCP against a live daemon — for spotting UX/layout paper cuts during development.
-2. **Automated E2E** via Playwright with route-mocked daemon API — for regression coverage in `client/test/dashboard/`.
+2. **Automated E2E** via Playwright with route-mocked daemon API — for regression coverage in `operator/test/dashboard/`.
 
-**Canonical domain model.** What these tests must cover is defined by [`client/OPERATOR-APP-SPEC.md`](../../../client/OPERATOR-APP-SPEC.md) — the operator app's canonical spec. It models the app as 14 components (§2.1 Daemon through §2.14 Generator panel), each described along four axes: **Static**, **Streams**, **Actions**, and **State messages**. The [Spec coverage map](#spec-coverage-map) below maps each component to the recipe or test that covers it.
+**Canonical domain model.** What these tests must cover is defined by [`operator/OPERATOR-APP-SPEC.md`](../../../client/OPERATOR-APP-SPEC.md) — the operator app's canonical spec. It models the app as 14 components (§2.1 Daemon through §2.14 Generator panel), each described along four axes: **Static**, **Streams**, **Actions**, and **State messages**. The [Spec coverage map](#spec-coverage-map) below maps each component to the recipe or test that covers it.
 
 ## When to use
 
@@ -27,7 +27,7 @@ All commands assume cwd = `jinn-mono/client`.
 2. Spawn: `node dist/bin/jinn.js run --no-ui`. **Against the operator's real `~/.jinn`, that's the whole command** — the daemon auto-reads `~/.jinn-client/keystore-password` (written at first bootstrap) when `JINN_PASSWORD` is unset. Do NOT ask the operator for a password.
 
    > **CAVEAT — Restart-button / respawn tests must NOT use `--no-ui`.**
-   > `--no-ui` sets `JINN_NO_UI=1`, which puts the daemon into headless/supervised mode. In that mode, `requestDaemonRestart` (see `client/src/restart-daemon.ts`) skips the in-process respawn and calls `process.exit(0)` instead — it expects an external supervisor (systemd, Docker, etc.) to bring the daemon back. If you are testing the operator **Restart** button or any restart-respawn behaviour (issue #289), launch the daemon **without** `--no-ui`; otherwise the restart kills the daemon with no respawn and the test cannot pass.
+   > `--no-ui` sets `JINN_NO_UI=1`, which puts the daemon into headless/supervised mode. In that mode, `requestDaemonRestart` (see `operator/src/restart-daemon.ts`) skips the in-process respawn and calls `process.exit(0)` instead — it expects an external supervisor (systemd, Docker, etc.) to bring the daemon back. If you are testing the operator **Restart** button or any restart-respawn behaviour (issue #289), launch the daemon **without** `--no-ui`; otherwise the restart kills the daemon with no respawn and the test cannot pass.
 
    Env vars only matter when you're deviating from the default setup:
    - `HOME=<tmpdir>` — only set for a *fresh, clean-state* spawn (e.g. E2E test). Omit to attach to the bootstrapped fleet at `~/.jinn` (Base Sepolia master `0xE64bAf0073a71b0Cb2C0558bB16f24b45E1FB5CF`, agent #5474, safe `0x0e767E28C6889CcD0DfB88E631a3702D56Ce24FC`).
@@ -72,10 +72,10 @@ All commands assume cwd = `jinn-mono/client`.
 
 ## Automated E2E (Playwright)
 
-Live template: `client/test/dashboard/spa-config.e2e.test.ts`. The pattern:
+Live template: `operator/test/dashboard/spa-config.e2e.test.ts`. The pattern:
 
 1. `test.beforeAll` — spawn daemon (same recipe), poll `/v1/bootstrap` until reachable.
-2. `mockDaemonApi(page)` — `page.route(...)` intercepts every endpoint the page touches. The current set, drawn from `client/src/dashboard/spa/src/api/client.ts` (`api.solvernets.*` and `api.operator.*`):
+2. `mockDaemonApi(page)` — `page.route(...)` intercepts every endpoint the page touches. The current set, drawn from `operator/src/dashboard/spa/src/api/client.ts` (`api.solvernets.*` and `api.operator.*`):
    - `/v1/bootstrap` → running-mode payload (`mode: 'running'`, fleet, chain, joinedSolverNets)
    - `/v1/status` → status snapshot
    - `/auth/handshake**` → suppress redirect, return `{"ok":true}`
@@ -90,13 +90,13 @@ Live template: `client/test/dashboard/spa-config.e2e.test.ts`. The pattern:
 5. Assert: `expect(page).toHaveURL(...)`, `expect(page.getByText(/configuration saved/i)).toBeVisible()`.
 6. `test.afterAll` — SIGTERM, fall back to SIGKILL after 500ms.
 
-Run a single E2E file: `yarn build && playwright test --config=playwright.config.ts test/dashboard/spa-config.e2e.test.ts` (model after the `e2e:spa` script in `client/package.json`).
+Run a single E2E file: `yarn build && playwright test --config=playwright.config.ts test/dashboard/spa-config.e2e.test.ts` (model after the `e2e:spa` script in `operator/package.json`).
 
 ## Multi-operator scenarios
 
 The single-op recipes above (manual smoke, automated E2E) cover testing one operator in isolation. Multi-operator scenarios — where two daemons interact via the chain and via the operator app — require additional infrastructure that this section documents. Reference docs in `references/` cover each pattern in detail.
 
-Spawn pattern: two (or more) daemons run concurrently against distinct HOMEs (substrate-derived workspaces from Plan A's `substrate-copy`, or fresh tmp HOMEs for clean-state E2Es). Each daemon gets a distinct `JINN_API_PORT`. Helpers in `client/test/helpers/multi-op-daemon.ts` wrap the spawn + teardown lifecycle.
+Spawn pattern: two (or more) daemons run concurrently against distinct HOMEs (substrate-derived workspaces from Plan A's `substrate-copy`, or fresh tmp HOMEs for clean-state E2Es). Each daemon gets a distinct `JINN_API_PORT`. Helpers in `operator/test/helpers/multi-op-daemon.ts` wrap the spawn + teardown lifecycle.
 
 Three method-pattern reference docs cover the mechanics:
 
@@ -110,7 +110,7 @@ the release pipeline); the last is a **manual** runbook (deliberately not gated)
 - [`references/scenario-spa-route-smoke.md`](references/scenario-spa-route-smoke.md) — T1.4: load every SPA route against a mocked daemon, assert clean.
 - [`references/scenario-cross-op-donation.md`](references/scenario-cross-op-donation.md) — T2.1: op-a produces corpus artifact, op-b consumes via x402.
 - [`references/scenario-producer-evaluator.md`](references/scenario-producer-evaluator.md) — T2.2: op-a solves task on Anvil-fork, op-b evaluates.
-- [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) — **Paired (two-operator) SPA flow — manual runbook.** op-a launches a SolverNet, op-b discovers + joins. Driving two real daemons against real testnet is inherently flaky, so this is a **human-run spot check, not an automated/gating test** (#1014 — a flaky non-gating browser test re-creates the un-gateable T2.3 shape #960 deleted). The *deterministic* create→launch→join coverage that DOES gate lives in `client/test/dashboard/{solvernet-flow,join}.e2e.test.ts` (`yarn e2e:app-flow`, hermetic gate).
+- [`references/scenario-multi-op-spa-flow.md`](references/scenario-multi-op-spa-flow.md) — **Paired (two-operator) SPA flow — manual runbook.** op-a launches a SolverNet, op-b discovers + joins. Driving two real daemons against real testnet is inherently flaky, so this is a **human-run spot check, not an automated/gating test** (#1014 — a flaky non-gating browser test re-creates the un-gateable T2.3 shape #960 deleted). The *deterministic* create→launch→join coverage that DOES gate lives in `operator/test/dashboard/{solvernet-flow,join}.e2e.test.ts` (`yarn e2e:app-flow`, hermetic gate).
 
 ### Things to watch for (multi-op specific)
 
@@ -142,7 +142,7 @@ In addition to the single-op concerns listed earlier:
 
 ## Spec coverage map
 
-The recipes above are surface/route-keyed; this table pivots back to the spec's component model (§2.1–§2.14) so each component can be checked off against the SPA surface that renders it and the recipe or test that covers it. Unit-test paths are relative to `client/src/dashboard/spa/src/`; e2e paths are under `client/test/dashboard/`.
+The recipes above are surface/route-keyed; this table pivots back to the spec's component model (§2.1–§2.14) so each component can be checked off against the SPA surface that renders it and the recipe or test that covers it. Unit-test paths are relative to `operator/src/dashboard/spa/src/`; e2e paths are under `operator/test/dashboard/`.
 
 | Spec component (§) | SPA surface(s) | Covered by |
 |---|---|---|
@@ -174,11 +174,11 @@ Cells with a coverage gap carry a **NOTE** naming the closing issue or marking t
 ## References
 
 - Canonical spec: `spec/2026-05-05-solvernet-creation-and-launch.md` (v0.2) — creation + launch flow, manifest shape, generator ownership, operator join, registry interface
-- E2E template: `client/test/dashboard/spa-config.e2e.test.ts`
-- Launcher e2e (real-daemon happy path): `client/test/dashboard/solvernet-flow.e2e.test.ts`
-- Older single-page e2e (setup mode): `client/test/dashboard/spa.e2e.test.ts`
-- Routing tests: `client/src/dashboard/spa/src/App.routing.test.tsx`
-- AppShell viewport-lock: `client/src/dashboard/spa/src/shell/AppShell.tsx`
-- Launcher SPA pages: `client/src/dashboard/spa/src/pages/Launcher.tsx`, `LauncherCreate.tsx`, `LauncherLaunched.tsx`, and the operator catalog at `client/src/dashboard/spa/src/pages/operator-catalog/JoinFlow.tsx`
-- SDK surface: `client/src/dashboard/spa/src/api/client.ts` (`api.solvernets.*`, `api.operator.*`)
-- Playwright config: `client/playwright.config.ts`
+- E2E template: `operator/test/dashboard/spa-config.e2e.test.ts`
+- Launcher e2e (real-daemon happy path): `operator/test/dashboard/solvernet-flow.e2e.test.ts`
+- Older single-page e2e (setup mode): `operator/test/dashboard/spa.e2e.test.ts`
+- Routing tests: `operator/src/dashboard/spa/src/App.routing.test.tsx`
+- AppShell viewport-lock: `operator/src/dashboard/spa/src/shell/AppShell.tsx`
+- Launcher SPA pages: `operator/src/dashboard/spa/src/pages/Launcher.tsx`, `LauncherCreate.tsx`, `LauncherLaunched.tsx`, and the operator catalog at `operator/src/dashboard/spa/src/pages/operator-catalog/JoinFlow.tsx`
+- SDK surface: `operator/src/dashboard/spa/src/api/client.ts` (`api.solvernets.*`, `api.operator.*`)
+- Playwright config: `operator/playwright.config.ts`

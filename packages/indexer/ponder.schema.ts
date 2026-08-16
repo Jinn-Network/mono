@@ -395,7 +395,7 @@ export const solverNetManifest = onchainTable(
  *   `evaluation:<manifestCid>` — evaluation verdict envelope
  *   `capture:<manifestCid>`   — capture envelope
  *
- * Key parsing mirrors client/src/corpus/onchain-query.ts::parseExecutionMetadataKey.
+ * Key parsing mirrors operator/src/corpus/onchain-query.ts::parseExecutionMetadataKey.
  *
  * Supports queryEnvelopes: filter by kind, evidenceTier.
  * solverType is in the IPFS manifest body, not on-chain — not filterable here.
@@ -490,7 +490,7 @@ export const pluginPublication = onchainTable(
      * digestDirectory output as a 32-byte hex string. Persisted as text (not
      * `t.hex()`) because the column also serves as the fork-attribution join
      * key against envelope.plugins[].sha256, which is a hex string per
-     * client/src/types/envelope.ts.
+     * operator/src/types/envelope.ts.
      */
     pluginSha256: t.text().notNull(),
     /** SolverType ids — indexed for SolverNet browse. */
@@ -531,7 +531,7 @@ export const pluginPublication = onchainTable(
 
 /**
  * A published HarnessCheckpoint anchor. From IdentityRegistry.MetadataSet with key
- * prefix `harness.checkpoint:<manifestPinCid>` (client/src/cli/commands/checkpoint.ts).
+ * prefix `harness.checkpoint:<manifestPinCid>` (operator/src/cli/commands/checkpoint.ts).
  *
  * The on-chain value for a `harness.checkpoint:<cid>` MetadataSet is the manifest CID
  * string itself — redundant with the key, not an ABI-encoded ExecutionPayload tuple.
@@ -674,7 +674,7 @@ export const attemptEnvelopeMeta = onchainTable(
  *
  * Background: the on-chain `JinnRouter.VerdictDeliveryClaimed.verdictCode`
  * defaults to Pass(1) for failed evaluations (daemon bug in
- * `client/src/adapters/mech/adapter.ts:899` + engine.ts fall-through).
+ * `operator/src/adapters/mech/adapter.ts:899` + engine.ts fall-through).
  * The evaluator's real judgment is written correctly in the off-chain
  * evaluation envelope on IPFS (anchored via `IdentityRegistry.MetadataSet`
  * with key `evaluation:<cid>`). This table is the source of truth for whether
@@ -760,7 +760,7 @@ export const verdictEnvelopeMeta = onchainTable(
     /**
      * SolverNet manifest CID the task was posted under, read from the task
      * body's top-level `solverNetManifestCid` field (task.v1 schema; see
-     * `client/src/types/task-document.ts`). Populated in the same IPFS task-body
+     * `operator/src/types/task-document.ts`). Populated in the same IPFS task-body
      * fetch that resolves `instanceId`, so the read pays no extra round-trip.
      * Empty string when the enrichment branch did not run (non-swe-rebench-v2
      * solverTypes) or when the task body was unfetchable.
@@ -774,7 +774,7 @@ export const verdictEnvelopeMeta = onchainTable(
     /**
      * The SOLVE-request id (MechMarketplace requestId of the solution attempt),
      * read from the task body's top-level `restorationRequestId` field (task.v1
-     * schema; see `client/src/types/task.ts`). Makes the knowledge tuple
+     * schema; see `operator/src/types/task.ts`). Makes the knowledge tuple
      * `(task, solution, verdict)` a first-class GraphQL join:
      * `verdictEnvelopeMeta.solutionRequestId = attemptEnvelopeMeta.requestId`
      * resolves a verified verdict to its solution envelope with no extra IPFS

@@ -9,7 +9,7 @@ import type { VoucherIdentity } from "./spellings.js";
 // ---------------------------------------------------------------------------
 // The §17 I/O split: these are the interface TYPES `core` defines and
 // `trust-resolve` implements against (chain reads, anchor lookups, 1271
-// witness verification -- promoting `client/src/erc8004/publisher-safe-
+// witness verification -- promoting `operator/src/erc8004/publisher-safe-
 // resolver.ts`). `core` never implements them and never imports `resolve`;
 // it only calls them through injection, in `verify.ts`.
 // ---------------------------------------------------------------------------

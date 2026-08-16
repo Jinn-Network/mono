@@ -1,6 +1,6 @@
 /**
  * Cross-source parity: the records embed must stay byte-identical to the
- * canonical client artifact (the membership hub until client/ retires) —
+ * canonical client artifact (the membership hub until operator/ retires) —
  * same discipline as packages/sdk/test/solvernets/
  * swe-rebench-v2-held-out-slate-cross-source.test.ts, which covers the
  * sdk ↔ client pair. Transitively, all three copies agree.
@@ -34,7 +34,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const clientArtifactPath = resolve(
   here,
-  '../../../../../client/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json',
+  '../../../../../operator/src/solver-types/slates/held-out-slate.swe-rebench-v2.v1.json',
 );
 
 /**

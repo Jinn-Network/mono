@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-// Re-homed from `client/src/adapters/mech/safe-revert.ts` (design §14 "declared impact"); this
+// Re-homed from `operator/src/adapters/mech/safe-revert.ts` (design §14 "declared impact"); this
 // module was already standalone (viem-only), so it ports verbatim except for the trimmed
 // `KNOWN_INNER_ERRORS`/`NON_RECOVERABLE_INNER_NAMES` tables, which keep only the JinnRouterV3 +
 // TaskCoordinator selectors this binding actually calls into (posting today; claim/deliver at

@@ -3,7 +3,7 @@ pragma solidity ^0.8.25;
 
 /// @title MockV3Aggregator
 /// @notice Minimal Chainlink AggregatorV3Interface implementation for e2e testing.
-/// @dev Used by client/scripts/e2e-prediction-v0.ts to produce deterministic
+/// @dev Used by operator/scripts/e2e-prediction-v0.ts to produce deterministic
 ///      oracle rounds on an Anvil fork. Owner-pushed rounds let tests drive
 ///      the round-spanning-resolveTs logic in prediction-v0-evaluator.
 contract MockV3Aggregator {

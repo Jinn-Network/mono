@@ -38,13 +38,13 @@ longer probes for or skips on missing endpoints.
 
 ## Implementation location
 
-`client/test/release/tier-2/T2.2-producer-evaluator.ts` (callable) +
+`operator/test/release/tier-2/T2.2-producer-evaluator.ts` (callable) +
 `T2.2-producer-evaluator.test.ts` (Vitest wrapper).
 
 ## How it works
 
 T2.2 composes the `yarn e2e:daemon-harness` helpers
-(`client/test/e2e/_daemon-harness-helpers.ts`) — the existing pattern that
+(`operator/test/e2e/_daemon-harness-helpers.ts`) — the existing pattern that
 already does producer → solve → deliver → activity the real way — and extends
 them with the genuinely-new **evaluator/verdict leg**.
 
@@ -115,7 +115,7 @@ stack. The two-operator shape preserves the producer/evaluator contract.
 - An Anvil-forkable Base RPC (`BASE_RPC_URL`, defaults to the public
   `https://mainnet.base.org`).
 - Compiled `contracts/` artifacts — `compileContracts` builds them at runtime.
-- The shared daemon-harness helpers at `client/test/e2e/_daemon-harness-helpers.ts`
+- The shared daemon-harness helpers at `operator/test/e2e/_daemon-harness-helpers.ts`
   (`setupAnvilFixture`, `bootstrapStakedOperator`, `deployMinimalV3Stack`,
   `deployOperatorMech`, `startDaemon`, `postPredictionV1Task`,
   `waitForDaemonClaim`, `waitForDelivery`, `waitForVerdict`, `readActivityCount`,

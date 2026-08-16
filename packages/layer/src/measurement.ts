@@ -3,7 +3,7 @@
  * (spec/2026-07-06-distillation-v1.md §11, D9/D11).
  *
  * REUSES the capability-eval rig — `comparePaired` / `mcnemarExact` (exact
- * McNemar) from `client/src/eval/paired.ts`. This module is only the analysis
+ * McNemar) from `operator/src/eval/paired.ts`. This module is only the analysis
  * layer that composes those into the three-arm gate; the actual per-arm run
  * (executing the harness against the `cap-v0` slate with each corpus snapshot
  * pre-installed, graded by the swe-rebench-v2 grader) is wired at run time and

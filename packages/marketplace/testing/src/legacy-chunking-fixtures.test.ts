@@ -120,7 +120,7 @@ describe("legacy chunking oracles have not drifted from the fixtures", () => {
   }
 
   test("the unchunked TaskCreated recovery lookback still declares its 64-block floor", () => {
-    const source = readOracle("client/src/adapters/mech/contracts.ts");
+    const source = readOracle("operator/src/adapters/mech/contracts.ts");
     if (source === undefined) {
       expect(true).toBe(true);
       return;
@@ -131,18 +131,18 @@ describe("legacy chunking oracles have not drifted from the fixtures", () => {
   });
 
   test("the discovery floor's per-pass chunk caps still match the bounded-scan fixtures", () => {
-    // Wave-4 D4 deleted `client/src/discovery/onchain.ts`. The numeric
+    // Wave-4 D4 deleted `operator/src/discovery/onchain.ts`. The numeric
     // fixtures in this file are now the sole record of those caps.
-    expect(readOracle("client/src/discovery/onchain.ts")).toBeUndefined();
+    expect(readOracle("operator/src/discovery/onchain.ts")).toBeUndefined();
     expect(
       LEGACY_BOUNDED_SCAN_RULES.every((rule) => rule.maxChunksPerPass === 50),
     ).toBe(true);
   });
 
   test("the discovery floor still sizes chunks as a delta, which is why the fixtures restate the rule in counts", () => {
-    expect(readOracle("client/src/discovery/onchain.ts")).toBeUndefined();
+    expect(readOracle("operator/src/discovery/onchain.ts")).toBeUndefined();
     const discoveryFloor = LEGACY_CHUNK_CONSTANTS.find(
-      (entry) => entry.source === "client/src/discovery/onchain.ts",
+      (entry) => entry.source === "operator/src/discovery/onchain.ts",
     );
     expect(discoveryFloor?.convention).toBe("delta");
     expect(discoveryFloor?.requestWidthBlocks).toBe(2_000n);

@@ -79,7 +79,7 @@ const VERIFICATION_INSTALL_ORDER = [
   'packages/layer',
   'packages/indexer',
   'packages/indexer-enrichment',
-  'client',
+  'operator',
   'contracts',
   'packages/autopilot',
   'apps/broadcast-bot',
@@ -877,24 +877,24 @@ export function makeProductionMarketplaceVerificationPort(
         if (
           plannedRoots.includes('packages/indexer')
           || plannedRoots.includes('packages/indexer-enrichment')
-          || plannedRoots.includes('client')
+          || plannedRoots.includes('operator')
         ) {
           requiredRoots.add('packages/sdk');
         }
         if (
           plannedRoots.includes('packages/core')
           || plannedRoots.includes('packages/layer')
-          || plannedRoots.includes('client')
+          || plannedRoots.includes('operator')
         ) {
           requiredRoots.add('packages/plugin');
         }
         if (
           plannedRoots.includes('packages/layer')
-          || plannedRoots.includes('client')
+          || plannedRoots.includes('operator')
         ) {
           requiredRoots.add('packages/core');
         }
-        if (plannedRoots.includes('client')) {
+        if (plannedRoots.includes('operator')) {
           requiredRoots.add('packages/layer');
         }
         const installRoots = VERIFICATION_INSTALL_ORDER.filter((root) =>
@@ -940,7 +940,7 @@ export function makeProductionMarketplaceVerificationPort(
         for (const root of installRoots.filter((value) =>
           value === 'packages/core'
           || value === 'packages/layer'
-          || value === 'client')) {
+          || value === 'operator')) {
           const label = `${root}:trusted-native-rebuild`;
           const rebuilt = await run([
             'exec',

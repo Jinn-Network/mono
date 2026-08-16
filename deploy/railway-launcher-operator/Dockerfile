@@ -30,7 +30,7 @@ RUN if ! command -v gosu >/dev/null 2>&1 || [ ! -f /etc/ssl/certs/ca-certificate
 # Codex CLI for a Codex-backed solver lane on the hosted launcher. Pinned to the
 # version covered by the codex-code adapter's stdin contract tests.
 RUN npm install -g @openai/codex@0.133.0
-COPY client/plugins/learner/hooks/session-start /app/dist/plugins/learner/hooks/session-start
+COPY operator/plugins/learner/hooks/session-start /app/dist/plugins/learner/hooks/session-start
 RUN chmod +x /app/dist/plugins/learner/hooks/session-start
 COPY deploy/railway-launcher-operator/patch-codex-session-start-context.js /usr/local/bin/patch-codex-session-start-context.js
 RUN node /usr/local/bin/patch-codex-session-start-context.js

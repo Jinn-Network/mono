@@ -1,7 +1,7 @@
 /**
  * Shared test fixture builders for system_snapshot shapes: a minimal ustar
  * writer mirroring the engine's hand-rolled writer
- * (client/src/harnesses/engine/packaging.ts — 512-byte headers, regular files
+ * (operator/src/harnesses/engine/packaging.ts — 512-byte headers, regular files
  * only, names ≤100 chars, octal size@124, `ustar` magic@257, checksum@148),
  * plus gzip and the jinn.artifact.donation.v1 wrapper as packaging publishes it.
  */

@@ -34,7 +34,7 @@ export const DEFAULT_SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.git']
  */
 export const ENFORCED_SCOPE_PREFIXES = [
   '.github/scripts/',
-  'client/src/',
+  'operator/src/',
   'plugin/runtime/src/',
 ];
 const ENFORCED_PACKAGE_DIRECTORIES = /\/(?:src|schemas|profiles)\//u;
@@ -62,7 +62,7 @@ export const DEFAULT_EXCLUSIONS = {
     // evaluators as a literal wire-format string. It is not a protocol identifier the re-seal
     // renames -- see DR-2026-08-04's "envelope" ruling (the *record*
     // `records/delivery-envelope/1.0` was renamed by the migration; this carrier key was not).
-    'client/src/daemon/bridge-legacy-delivery.ts',
+    'operator/src/daemon/bridge-legacy-delivery.ts',
     'packages/task-execution/backend-local/assembly/src/backend.evidence.test.ts',
 
     // -- The recognition machinery itself --

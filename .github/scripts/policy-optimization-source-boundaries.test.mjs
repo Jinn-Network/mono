@@ -90,7 +90,7 @@ const EXPLICITLY_DENIED = [
 
 // Relative-path escapes into other trees are caught the same way a package-name ban would not.
 const FORBIDDEN_ROOTS = [
-  join(root, 'client'),
+  join(root, 'operator'),
   join(root, 'apps'),
   join(root, 'plugin'),
   join(root, 'packages', 'marketplace'),

@@ -183,8 +183,8 @@ describe('marketplace patch validation', () => {
     ['backslash traversal', 'a\\..\\..\\secret.txt'],
     ['lowercase Git metadata component', 'a/src/.git/config'],
     ['case-variant Git metadata component', 'a/src/.GiT/config'],
-    ['package manifest', 'a/client/package.json'],
-    ['package lock', 'a/client/yarn.lock'],
+    ['package manifest', 'a/operator/package.json'],
+    ['package lock', 'a/operator/yarn.lock'],
     ['Yarn configuration', 'a/client/.yarnrc.yml'],
     ['Yarn plugin', 'a/client/.yarn/plugins/plugin.cjs'],
     ['installed dependency', 'a/client/node_modules/better-sqlite3/install.js'],
@@ -192,9 +192,9 @@ describe('marketplace patch validation', () => {
     ['trusted sandbox config shadow', 'a/client/jinn-autopilot-trusted.yml'],
     ['TypeScript control', 'a/client/tsconfig.json'],
     ['Vitest control', 'a/client/vitest.config.ts'],
-    ['existing test', 'a/client/test/security.test.ts'],
-    ['co-located test', 'a/client/src/security.test.ts'],
-    ['test snapshot', 'a/client/src/__snapshots__/security.test.ts.snap'],
+    ['existing test', 'a/operator/test/security.test.ts'],
+    ['co-located test', 'a/operator/src/security.test.ts'],
+    ['test snapshot', 'a/operator/src/__snapshots__/security.test.ts.snap'],
   ])('rejects %s', (_name, unsafePath) => {
     expectValidationReason(
       patchWithPathSurface('old-marker', unsafePath),

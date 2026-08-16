@@ -49,9 +49,9 @@ beforeEach(() => {
 // ── ABI tuple drift guard ─────────────────────────────────────────────────────
 
 describe('PLUGIN_PAYLOAD_TUPLE (drift guard)', () => {
-  it('decodes a payload that was encoded against the canonical client/erc8004 tuple shape', () => {
+  it('decodes a payload that was encoded against the canonical operator/erc8004 tuple shape', () => {
     // Encode with the test-local copy of the tuple (sourced from
-    // client/src/erc8004/abis.ts PLUGIN_PAYLOAD_TUPLE) and decode with the
+    // operator/src/erc8004/abis.ts PLUGIN_PAYLOAD_TUPLE) and decode with the
     // indexer-local copy. If the two drift, this fails.
     const encoded = encodeAbiParameters(PLUGIN_PAYLOAD_TUPLE_TEST, [
       1,

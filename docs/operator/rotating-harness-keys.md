@@ -13,7 +13,7 @@ So there are two valid ways to give a harness a key:
 1. **Put it in the harness's own auth store** (the canonical path — survives restarts, no shell wiring). Done via the harness's `login` command or by editing its credential file.
 2. **Put it in the daemon process's environment** under a name the allowlist forwards. Useful for containers and secret managers.
 
-Both are documented per harness below. Do **not** use the repo's `client/.env` for this — see [client/.env is dev-only](#clientenv-is-dev-only).
+Both are documented per harness below. Do **not** use the repo's `operator/.env` for this — see [operator/.env is dev-only](#clientenv-is-dev-only).
 
 ## Per-harness reference
 
@@ -35,7 +35,7 @@ SolverNet evaluator daemons must provide `CLAUDE_CODE_OAUTH_TOKEN` (preferred)
 or `ANTHROPIC_API_KEY` in the daemon environment. Readiness fails before a
 marketplace claim when neither explicit credential is present.
 
-In headless containers the host keychain is unavailable, so the OAuth token must be forwarded as `CLAUDE_CODE_OAUTH_TOKEN`. The Docker path for this is documented in [`client/README.md`](../../client/README.md) (the "Docker" section) — note the distinction in the next section.
+In headless containers the host keychain is unavailable, so the OAuth token must be forwarded as `CLAUDE_CODE_OAUTH_TOKEN`. The Docker path for this is documented in [`operator/README.md`](../../client/README.md) (the "Docker" section) — note the distinction in the next section.
 
 ### codex
 
@@ -57,13 +57,13 @@ Model / provider precedence: `JINN_HERMES_MODEL` / `JINN_HERMES_PROVIDER` in the
 
 > Note on the rotate subcommand: a `hermes auth add` subcommand could **not** be confirmed in the harness code as shipped. The verified surfaces are `hermes login` (OAuth), the `~/.hermes/.env` file (provider key), and `hermes auth list` (used by the readiness probe). For an explicit add/rotate subcommand, run `hermes --help` against your installed version rather than relying on an unverified command.
 
-## client/.env is dev-only
+## operator/.env is dev-only
 
-**Do not put provider API keys in the repo's `client/.env` and expect them to take effect at runtime — they will not reach the harness subprocess.**
+**Do not put provider API keys in the repo's `operator/.env` and expect them to take effect at runtime — they will not reach the harness subprocess.**
 
-`client/.env` is loaded by `dotenv` in `client/src/main.ts` **only** when `JINN_LOAD_DEV_ENV=1` or `NODE_ENV=development`, and it is resolved relative to the compiled module inside the repo checkout. The published global package (`npm install -g @jinn-network/client`, then `jinn run`) sets neither of those, and ships no `client/.env`, so the file is never read in a normal operator install. It exists for repo contributors iterating from source. Use each harness's own auth store / command (the table above) instead.
+`operator/.env` is loaded by `dotenv` in `operator/src/main.ts` **only** when `JINN_LOAD_DEV_ENV=1` or `NODE_ENV=development`, and it is resolved relative to the compiled module inside the repo checkout. The published global package (`npm install -g @jinn-network/client`, then `jinn run`) sets neither of those, and ships no `operator/.env`, so the file is never read in a normal operator install. It exists for repo contributors iterating from source. Use each harness's own auth store / command (the table above) instead.
 
-**This is a different file from the docker-compose `.env`.** When you run the daemon under Docker Compose, [`client/README.md`](../../client/README.md) tells you to create a `.env` next to `docker-compose.yml` holding `CLAUDE_CODE_OAUTH_TOKEN` (and `JINN_PASSWORD`). That one is read by `docker-compose` and injected into the container's `process.env`, where the adapter allowlist then picks it up — so it works. The warning here is only about the **repo `client/.env`** that `main.ts` conditionally loads, not the docker-compose env-file.
+**This is a different file from the docker-compose `.env`.** When you run the daemon under Docker Compose, [`operator/README.md`](../../client/README.md) tells you to create a `.env` next to `docker-compose.yml` holding `CLAUDE_CODE_OAUTH_TOKEN` (and `JINN_PASSWORD`). That one is read by `docker-compose` and injected into the container's `process.env`, where the adapter allowlist then picks it up — so it works. The warning here is only about the **repo `operator/.env`** that `main.ts` conditionally loads, not the docker-compose env-file.
 
 ## Why a wrong key fails
 
@@ -75,10 +75,10 @@ The symptom is a delayed, quiet failure rather than a loud startup error:
 
 In all three cases the daemon's readiness check (it probes the responsible harness before spending gas on a claim) records the Task as FAILED locally with a clear reason instead of burning a claim. So a wrong or missing key shows up as harness-not-ready and failing claims, not a crash.
 
-To confirm a key is actually loaded, use the operator app's **per-harness precheck / doctor panel** (the §2.9 Harness Selection surface in [`client/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md)) — it runs each harness's own readiness probe (the same probe the daemon uses) and reports installed / authenticated / ready, with a re-check action. If the panel says ready, the key is reaching the binary; if it says auth-expired or not-configured, rotate it via the table above and re-check.
+To confirm a key is actually loaded, use the operator app's **per-harness precheck / doctor panel** (the §2.9 Harness Selection surface in [`operator/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md)) — it runs each harness's own readiness probe (the same probe the daemon uses) and reports installed / authenticated / ready, with a re-check action. If the panel says ready, the key is reaching the binary; if it says auth-expired or not-configured, rotate it via the table above and re-check.
 
 ## Links
 
 - Operator testnet runbook: [`docs/operator-testnet.md`](../operator-testnet.md)
-- Client README (Docker auth, SolverNet harness toggles): [`client/README.md`](../../client/README.md)
-- Operator app spec — §2.9 Harness Selection: [`client/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md)
+- Client README (Docker auth, SolverNet harness toggles): [`operator/README.md`](../../client/README.md)
+- Operator app spec — §2.9 Harness Selection: [`operator/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md)

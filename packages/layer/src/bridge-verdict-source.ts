@@ -17,7 +17,7 @@
  *     envelope patch).
  *
  * The predecessor's `attemptEnvelopeMeta(requestId=verdict.requestId)` join is
- * gone: probed live (see client/scripts/distill-run-live.ts), that key does not
+ * gone: probed live (see operator/scripts/distill-run-live.ts), that key does not
  * match, so the join returned empty. The real link runs through the task doc's
  * chain-indexed verdict/attempt tuple, resolved lazily in the evidence fetcher.
  *

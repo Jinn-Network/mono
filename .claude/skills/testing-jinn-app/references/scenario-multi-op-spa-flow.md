@@ -43,7 +43,7 @@ on-chain identities (EOA / Safe / agentId), each a `.jinn-client` tree.
   §Earning bootstrap), each in its own HOME, each funded with testnet ETH + OLAS.
 
 Each operator's keystore decrypts with its **own** `keystore-password` file.
-`JINN_PASSWORD` env takes precedence over that file (`client/src/main.ts`), so if
+`JINN_PASSWORD` env takes precedence over that file (`operator/src/main.ts`), so if
 the two operators have **different** passwords (they usually do), do NOT export a
 single `JINN_PASSWORD` — let each daemon read its own file. (This is why the
 env-suite's `spawnMultiOpDaemons` strips `JINN_PASSWORD`.)
@@ -51,7 +51,7 @@ env-suite's `spawnMultiOpDaemons` strips `JINN_PASSWORD`.)
 ## Spawn the two daemons (sequentially)
 
 ```bash
-cd client && yarn build   # need dist/bin/jinn.js + dist/dashboard
+cd operator && yarn build   # need dist/bin/jinn.js + dist/dashboard
 
 # op-a (launcher) — HOME points at the dir whose .jinn-client is the operator
 HOME=~/jinn-dev/operators/op-b JINN_API_PORT=17341 JINN_NETWORK=testnet \

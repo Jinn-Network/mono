@@ -125,7 +125,7 @@ checks only apply to the `'attested'` tier. This is expected for most V1 operato
 envelope.schema FAIL: schemaVersion: Invalid literal value, expected 'jinn.execution.v1'
 ```
 Your envelope was built with a newer or older version of the assembly library. Upgrade
-`client/src/harnesses/engine/envelope-assembly.ts` to match the current schema.
+`operator/src/harnesses/engine/envelope-assembly.ts` to match the current schema.
 
 ### `envelope.hash-signature`: hash mismatch
 ```

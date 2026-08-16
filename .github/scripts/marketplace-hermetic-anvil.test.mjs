@@ -31,7 +31,7 @@ test('marketplace Anvil verification binds the committed snapshot explicitly', (
   const harness = read('packages/marketplace/testing/src/anvil-state.ts');
 
   assert.match(workflow, /JINN_MARKETPLACE_ANVIL_STATE_PATH/u);
-  assert.match(workflow, /client\/test\/_support\/fixtures\/anvil-base-v3-state\/state\.json/u);
+  assert.match(workflow, /operator\/test\/_support\/fixtures\/anvil-base-v3-state\/state\.json/u);
   assert.match(workflow, /src\/escrow-lifecycle\.test\.ts/u);
   assert.match(harness, /--load-state/u);
   assert.match(harness, /--chain-id/u);

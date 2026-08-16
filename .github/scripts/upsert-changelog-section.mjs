@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 
-const changelogPath = process.env.CHANGELOG_PATH ?? 'client/CHANGELOG.md';
+const changelogPath = process.env.CHANGELOG_PATH ?? 'operator/CHANGELOG.md';
 const releaseName = (process.env.RELEASE_NAME ?? '').trim();
 const releaseTag = (process.env.RELEASE_TAG ?? '').trim();
 const releaseDate = ((process.env.RELEASE_DATE ?? '').split('T')[0] || new Date().toISOString().slice(0, 10));

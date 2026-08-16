@@ -261,7 +261,7 @@ there is nothing to roll back. Do not manufacture a closure receipt merely to ex
 These commands are read-only with respect to RPC, wallets, IPFS, and chain state:
 
 ```bash
-cd client
+cd operator
 yarn vitest run \
   test/architecture/native-product-mutation-gate.test.ts \
   test/architecture/phase-b-native-runbook.test.ts
