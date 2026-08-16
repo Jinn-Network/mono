@@ -170,7 +170,9 @@ for (const taskId of admitted) {
 
     const oracle = readReward(oracleOut);
     const noOp = readReward(noOpOut);
-    const eligible = oracle === "1" && noOp === "0";
+    // Rewards are decimal, not string-equal: several tasks write "1.000000". Comparing strings
+    // silently rejects a passing oracle, which is a wrong rejection no schema check would catch.
+    const eligible = Number(oracle) === 1 && Number(noOp) === 0;
     results.units[taskId] = { baseImage: pinned, oracleReward: oracle, noOpReward: noOp, eligible };
     console.log(`oracle=${oracle} noop=${noOp} ${eligible ? "ELIGIBLE" : "rejected"}`);
   } catch (error) {

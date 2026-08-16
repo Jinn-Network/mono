@@ -45,6 +45,42 @@
       "oracleReward": "1",
       "noOpReward": "0",
       "eligible": true
+    },
+    "drone-planning-control": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1.000000",
+      "noOpReward": "0.000000",
+      "eligible": false
+    },
+    "edit-pdf": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "energy-ac-optimal-power-flow": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "energy-market-pricing": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "energy-unit-commitment": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "enterprise-information-search": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
     }
   }
 }

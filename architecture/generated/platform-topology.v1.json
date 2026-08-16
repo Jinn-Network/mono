@@ -2082,7 +2082,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2998,
+      "discoveredFirstPartySurfaces": 2999,
       "generatedOutputSources": 1349,
       "generatorSources": 644,
       "marketplaceControl": 2,
@@ -19846,6 +19846,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/src/conformance/publication-release-rehearsal.external.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance/skillsbench-calibration-report.external.test.ts"
       },
       {
         "categories": [
