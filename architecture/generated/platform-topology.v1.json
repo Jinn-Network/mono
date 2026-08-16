@@ -512,6 +512,11 @@
       {
         "from": "@jinn-network/client",
         "kind": "runtime",
+        "to": "@jinn-network/execution-evidence-builder"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
         "to": "@jinn-network/execution-recorder"
       },
       {
@@ -42988,6 +42993,7 @@
           "@jinn-network/evidence-local-runtime",
           "@jinn-network/evidence-protocol",
           "@jinn-network/evidence-repository",
+          "@jinn-network/execution-evidence-builder",
           "@jinn-network/execution-recorder",
           "@jinn-network/marketplace-binding",
           "@jinn-network/marketplace-pipeline",
