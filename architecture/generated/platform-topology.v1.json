@@ -1928,7 +1928,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2978,
       "generatedOutputSources": 1330,
-      "generatorSources": 642,
+      "generatorSources": 645,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -2459,6 +2459,36 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/observation-reader-gate-boundary.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/operator-package-inventory.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/operator-packed-types.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/operator-source-boundaries.test.mjs"
       },
       {
         "categories": [
