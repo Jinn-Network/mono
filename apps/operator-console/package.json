@@ -14,6 +14,7 @@
     "e2e:funding-sequence": "playwright test --config=playwright.config.ts e2e/funding-sequence.e2e.ts"
   },
   "dependencies": {
+    "@jinn-network/lifecycle-notifications": "portal:../../packages/lifecycle-notifications",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.27.0",

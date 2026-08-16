@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "apps/operator-console/**"
+      - "packages/lifecycle-notifications/**"
       - ".github/workflows/operator-console-ci.yml"
       - "docs/design/jinn-design-system/project/colors_and_type.css"
       - "docs/design/jinn-design-system/project/foundations.css"
@@ -11,6 +12,7 @@ on:
     branches: [next]
     paths:
       - "apps/operator-console/**"
+      - "packages/lifecycle-notifications/**"
       - ".github/workflows/operator-console-ci.yml"
       - "docs/design/jinn-design-system/project/colors_and_type.css"
       - "docs/design/jinn-design-system/project/foundations.css"
@@ -36,7 +38,16 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Build lifecycle-notifications
+        working-directory: packages/lifecycle-notifications
+        run: |
+          yarn install --immutable
+          yarn build
       - run: yarn install --immutable
+        working-directory: apps/operator-console
       - run: yarn test
+        working-directory: apps/operator-console
       - run: yarn typecheck
+        working-directory: apps/operator-console
       - run: yarn build
+        working-directory: apps/operator-console

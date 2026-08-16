@@ -1,8 +1,11 @@
 'use client';
 
+import { NOTIFICATION_KINDS } from '@jinn-network/lifecycle-notifications';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { classifySurface, SurfaceStatus, useDaemonJson } from '@/lib/use-daemon';
+
+const KNOWN_KINDS = new Set<string>(NOTIFICATION_KINDS);
 
 type Notification = {
   kind: string;
@@ -55,6 +58,9 @@ export default function NotificationsPage() {
                   {item.severity}
                 </Badge>
                 <span className="font-mono text-[13px]">{item.title}</span>
+                {KNOWN_KINDS.has(item.kind) ? null : (
+                  <span className="font-mono text-[12px] text-muted-foreground">{item.kind}</span>
+                )}
               </div>
               <p className="m-0 font-mono text-[12px] text-muted-foreground">{item.message}</p>
             </div>

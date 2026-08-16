@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'trust');
-const trustDirectories = ['authoring', 'core', 'resolve', 'testing'];
+const trustDirectories = ['authoring', 'core', 'observation', 'resolve', 'testing'];
 
 // Program ruling §7.9: trust-core's boundary guard allowlists exactly these
 // three externals (@noble/hashes + zod, the evidence floor, plus @noble/curves
@@ -38,6 +38,10 @@ const AUTHORING_ALLOWED_EXTERNALS = [
 ];
 const AUTHORING_ALLOWED_DEPENDENCIES = ['@jinn-network/trust-core', 'bs58'];
 const AUTHORING_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
+
+const OBSERVATION_ALLOWED_EXTERNALS = ['node:fs', 'node:path', 'zod'];
+const OBSERVATION_ALLOWED_DEPENDENCIES = ['zod'];
+const OBSERVATION_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
@@ -320,6 +324,33 @@ test('trust-authoring manifest dependencies match the approved externals allowli
   );
   assert.deepEqual(Object.keys(authoringManifest.optionalDependencies ?? {}), []);
   assert.deepEqual(Object.keys(authoringManifest.peerDependencies ?? {}), []);
+});
+
+test('trust-observation production source imports only the allowed externals', () => {
+  const source = join(packages, 'observation', 'src');
+  const production = files(source).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  assert.deepEqual(
+    disallowedExternalsInFiles(production, OBSERVATION_ALLOWED_EXTERNALS),
+    [],
+    'trust-observation production source may import only zod and node:fs/path',
+  );
+});
+
+test('trust-observation manifest dependencies match the approved externals allowlist', () => {
+  const observationManifest = manifest('observation');
+  assert.deepEqual(
+    Object.keys(observationManifest.dependencies ?? {}).sort(),
+    [...OBSERVATION_ALLOWED_DEPENDENCIES].sort(),
+    'trust-observation dependencies must be exactly zod',
+  );
+  const devDependencies = Object.keys(observationManifest.devDependencies ?? {}).sort();
+  assert.deepEqual(
+    devDependencies.filter((name) => !OBSERVATION_ALLOWED_DEV_DEPENDENCIES.includes(name)),
+    [],
+    'trust-observation devDependencies must stay within the toolchain allowlist',
+  );
+  assert.deepEqual(Object.keys(observationManifest.optionalDependencies ?? {}), []);
+  assert.deepEqual(Object.keys(observationManifest.peerDependencies ?? {}), []);
 });
 
 test('trust production source never uses ambient network APIs', () => {
