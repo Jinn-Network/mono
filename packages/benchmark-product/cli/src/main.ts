@@ -31,6 +31,7 @@ Primary commands:
   colophon open --bundle <dir> [--port <n>] [--no-browser]
   colophon open [--workspace <dir>] [--port <n>] [--no-browser]
   colophon import swebench ...     Import your own SWE-bench tasks
+  colophon import item-bank ...    Import admitted binary-judgment item manifests
   colophon bundle verify ...       Verify through the full product
   colophon help --advanced         Show the explicit lifecycle commands
 

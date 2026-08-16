@@ -1,10 +1,11 @@
-import type { BenchmarkRecord, MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, type BenchmarkRecord, type MatrixRecord, type ReportRecord, type RunRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "./errors.js";
 import { buildClaimPackage, type ClaimPackage } from "./claim.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
 import { previewDisclosureSummaryLine } from "./preview-log.js";
 import { venueIsolationPostureForPolicy } from "./isolation.js";
+import { binaryInstrumentReportLimitations } from "./binary-qualification.js";
 
 export interface ClaimRecordIdentities { readonly benchmarkSha256: string; readonly runSha256: string; readonly matrixSha256: string; readonly reportSha256: string | undefined; readonly reportEnvelopeSha256: string; }
 const equal = (left: Uint8Array, right: Uint8Array) => left.length === right.length && left.every((byte, index) => byte === right[index]);
@@ -29,8 +30,11 @@ export function assertClaimConsistency(input: { readonly claim: ClaimPackage; re
   const expected = buildClaimPackage({ draftId: input.draftId, benchmarkSha256: identities.benchmarkSha256, runRecord, runSha256: identities.runSha256, matrixRecord, matrixSha256: identities.matrixSha256, reportRecord, reportSha256: identities.reportSha256, reportEnvelopeSha256: identities.reportEnvelopeSha256, venueHonesty: buildLocalVenueHonesty(matrixRecord.cells, runRecord), verificationCommandVerb: "bundle verify", assurance: { preset: input.assurancePreset, resolved: { independence: runRecord.policy.independence, minVerdicts, distinctEvaluator, verdictRule } }, ...(input.rehearsal === undefined ? {} : { previewDisclosure: input.rehearsal }) });
   if (!equal(canonicalJsonBytes(claim), canonicalJsonBytes(expected))) refuse("record-integrity", "claim-consistency", `claim package ${firstDifference(claim, expected)} is not the exact projection of verified facts`);
   const rehearsalLine = input.rehearsal === undefined ? undefined : previewDisclosureSummaryLine(input.rehearsal);
-  const expectedLimitations = [...localVenueLimitsForRun(runRecord), ...(input.additionalLimitations ?? []), ...(rehearsalLine === undefined ? [] : [rehearsalLine])];
+  const binaryLimitations = reportRecord.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument
+    ? binaryInstrumentReportLimitations((plan?.parameters ?? {}) as Readonly<Record<string, unknown>>)
+    : [];
+  const expectedLimitations = [...localVenueLimitsForRun(runRecord), ...(input.additionalLimitations ?? []), ...binaryLimitations, ...(rehearsalLine === undefined ? [] : [rehearsalLine])];
   const posture = venueIsolationPostureForPolicy(runRecord.policy.submissionBaseline?.isolationPolicy);
-  if ((posture.inventory.length > 1 || (input.additionalLimitations?.length ?? 0) > 0) && !equal(canonicalJsonBytes(reportRecord.limitations ?? []), canonicalJsonBytes(expectedLimitations))) refuse("record-integrity", "claim-consistency", "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history");
+  if ((posture.inventory.length > 1 || (input.additionalLimitations?.length ?? 0) > 0 || binaryLimitations.length > 0) && !equal(canonicalJsonBytes(reportRecord.limitations ?? []), canonicalJsonBytes(expectedLimitations))) refuse("record-integrity", "claim-consistency", "Report limitations are not the exact disclosure derived from the sealed Run and rehearsal history");
   if (rehearsalLine === undefined ? (reportRecord.limitations ?? []).some((line) => line.includes("disposable preview rehearsal(s)")) : !(reportRecord.limitations ?? []).includes(rehearsalLine)) refuse("record-integrity", "claim-consistency", "claim rehearsal and verified Report disclosure disagree");
 }

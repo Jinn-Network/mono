@@ -29,7 +29,7 @@ import { initWorkspace } from "./init.js";
 import { readAuditEntries } from "../audit/journal.js";
 import { materializePublicBundle } from "../bundle/materialize.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
-import { BUNDLE_V3_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V3_FORMAT, buildBundleManifest } from "../bundle/manifest.js";
 import { runCli } from "../cli/main.js";
 import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
@@ -840,6 +840,7 @@ describe("portable public bundle", () => {
       rmSync(workspaceDir, { recursive: true, force: true });
       const verified = await verifyPublicBundle(copied);
       expect(verified.identity).toBe(materialized.identity);
+      expect(verified.format).toBe(BUNDLE_FORMAT);
       expect(verified.checks).toEqual([
         "manifest",
         "evidence-closure",
