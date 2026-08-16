@@ -11,6 +11,7 @@ import {
   type BinaryInstrumentItemDecision,
   type BinaryInstrumentParsedCellInput,
   type BinaryInstrumentReducedCall,
+  type BinaryInstrumentReduction,
 } from "./binary-instrument.js";
 import type { Method, MethodComputeInput } from "./method.js";
 import {
@@ -1661,6 +1662,93 @@ export type BinaryInstrumentQualificationComputeInput = Omit<MethodComputeInput,
   readonly matrices: readonly [MatrixRecord];
 };
 
+export interface BinaryInstrumentQualificationProjectionInput {
+  readonly parameters: Readonly<Record<string, unknown>>;
+  readonly reduction: BinaryInstrumentReduction;
+  readonly instruments: readonly { readonly armId: string; readonly instrumentSha256: string }[];
+}
+
+/** Matrix-neutral projection shared by the legacy Matrix-v1 and evidence-native pipelines. */
+export function projectBinaryInstrumentQualification(
+  input: BinaryInstrumentQualificationProjectionInput,
+): unknown {
+  const parameters = parametersFrom(input.parameters);
+  const instruments = new Map(input.instruments.map(({ armId, instrumentSha256 }) => {
+    const digest = instrumentSha256.startsWith("sha256:") ? instrumentSha256.slice(7) : instrumentSha256;
+    if (!SHA256.test(digest)) throw new Error(`invalid instrument digest for ${armId}`);
+    return [armId, digest] as const;
+  }));
+  if (instruments.size !== input.instruments.length) throw new Error("instrument arm ids must be unique");
+  const { reduction } = input;
+  const arms: Record<string, unknown> = Object.create(null);
+  for (const armId of [...instruments.keys()].sort(compareCodeUnitStrings)) {
+    const armItems = reduction.items.filter((item) => item.armId === armId);
+    const armExcluded = reduction.excluded.filter((item) => item.armId === armId);
+    const armCalls = reduction.evaluatedCalls.filter((call) => call.armId === armId);
+    const byCandidateClass: Record<string, unknown> = Object.create(null);
+    for (const candidateClass of parameters.candidateClasses) {
+      byCandidateClass[candidateClass] = projection(
+        armItems.filter((item) => item.context.candidateClass === candidateClass),
+        armExcluded.filter((item) => item.context.candidateClass === candidateClass),
+        armCalls.filter((call) => call.context.candidateClass === candidateClass),
+        parameters.k,
+      );
+    }
+    const byStratum: Record<string, unknown> = Object.create(null);
+    for (const stratum of parameters.strata) {
+      byStratum[stratum] = projection(
+        armItems.filter((item) => item.context.stratum === stratum),
+        armExcluded.filter((item) => item.context.stratum === stratum),
+        armCalls.filter((call) => call.context.stratum === stratum),
+        parameters.k,
+      );
+    }
+    arms[armId] = {
+      instrumentSha256: `sha256:${instruments.get(armId)!}`,
+      ...projection(armItems, armExcluded, armCalls, parameters.k),
+      byCandidateClass,
+      byStratum,
+    };
+  }
+  return {
+    configuration: {
+      verdictRule: parameters.verdictRule,
+      k: parameters.k,
+      reduction: parameters.reduction,
+      measurementProfile: parameters.measurementProfile,
+      candidateClasses: [...parameters.candidateClasses],
+      strata: [...parameters.strata],
+      parserInvalidPolicy: parameters.parserInvalidPolicy,
+      truthAdmission: parameters.truthAdmission,
+      intervalAlpha: parameters.intervalAlpha,
+    },
+    arms,
+    itemDecisions: reduction.items.map((item) => ({
+      taskDigest: item.taskDigest,
+      armId: item.armId,
+      instrumentSha256: `sha256:${item.instrumentSha256}`,
+      context: wireContext(item.context),
+      cellKeys: [...item.cellKeys],
+      accepted: item.accepted,
+      rejected: item.rejected,
+      decision: item.decision,
+      unstable: item.unstable,
+    })),
+    excluded: {
+      count: reduction.excluded.length,
+      items: reduction.excluded.map((item) => ({
+        taskDigest: item.taskDigest,
+        armId: item.armId,
+        instrumentSha256: `sha256:${item.instrumentSha256}`,
+        context: wireContext(item.context),
+        cellKeys: [...item.cellKeys],
+        reasons: item.reasons.map((reason) => ({ reason: reason.reason, cellKeys: [...reason.cellKeys] })),
+      })),
+    },
+    conflicted: reduction.conflicted,
+  };
+}
+
 /** Pure registered-method core. All external bytes enter only through digest-bound resolver ports. */
 export function computeBinaryInstrumentQualification(
   input: BinaryInstrumentQualificationComputeInput,
@@ -1725,75 +1813,12 @@ export function computeBinaryInstrumentQualification(
     cells,
   });
 
-  const arms: Record<string, unknown> = Object.create(null);
-  for (const armId of [...instruments.keys()].sort(compareCodeUnitStrings)) {
-    const armItems = reduction.items.filter((item) => item.armId === armId);
-    const armExcluded = reduction.excluded.filter((item) => item.armId === armId);
-    const armCalls = reduction.evaluatedCalls.filter((call) => call.armId === armId);
-    const byCandidateClass: Record<string, unknown> = Object.create(null);
-    for (const candidateClass of parameters.candidateClasses) {
-      byCandidateClass[candidateClass] = projection(
-        armItems.filter((item) => item.context.candidateClass === candidateClass),
-        armExcluded.filter((item) => item.context.candidateClass === candidateClass),
-        armCalls.filter((call) => call.context.candidateClass === candidateClass),
-        parameters.k,
-      );
-    }
-    const byStratum: Record<string, unknown> = Object.create(null);
-    for (const stratum of parameters.strata) {
-      byStratum[stratum] = projection(
-        armItems.filter((item) => item.context.stratum === stratum),
-        armExcluded.filter((item) => item.context.stratum === stratum),
-        armCalls.filter((call) => call.context.stratum === stratum),
-        parameters.k,
-      );
-    }
-    arms[armId] = {
-      instrumentSha256: `sha256:${instruments.get(armId)!.digest}`,
-      ...projection(armItems, armExcluded, armCalls, parameters.k),
-      byCandidateClass,
-      byStratum,
-    };
-  }
-
-  return {
-    configuration: {
-      verdictRule: parameters.verdictRule,
-      k: parameters.k,
-      reduction: parameters.reduction,
-      measurementProfile: parameters.measurementProfile,
-      candidateClasses: [...parameters.candidateClasses],
-      strata: [...parameters.strata],
-      parserInvalidPolicy: parameters.parserInvalidPolicy,
-      truthAdmission: parameters.truthAdmission,
-      intervalAlpha: parameters.intervalAlpha,
-    },
-    arms,
-    itemDecisions: reduction.items.map((item) => ({
-      taskDigest: item.taskDigest,
-      armId: item.armId,
-      instrumentSha256: `sha256:${item.instrumentSha256}`,
-      context: wireContext(item.context),
-      cellKeys: [...item.cellKeys],
-      accepted: item.accepted,
-      rejected: item.rejected,
-      decision: item.decision,
-      unstable: item.unstable,
+  return projectBinaryInstrumentQualification({
+    parameters: input.parameters,
+    reduction,
+    instruments: [...instruments.entries()].map(([armId, instrument]) => ({
+      armId,
+      instrumentSha256: instrument.digest,
     })),
-    excluded: {
-      count: reduction.excluded.length,
-      items: reduction.excluded.map((item) => ({
-        taskDigest: item.taskDigest,
-        armId: item.armId,
-        instrumentSha256: `sha256:${item.instrumentSha256}`,
-        context: wireContext(item.context),
-        cellKeys: [...item.cellKeys],
-        reasons: item.reasons.map((reason) => ({
-          reason: reason.reason,
-          cellKeys: [...reason.cellKeys],
-        })),
-      })),
-    },
-    conflicted: reduction.conflicted,
-  };
+  });
 }

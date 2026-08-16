@@ -15,11 +15,13 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packagesRoot = join(packageRoot, "..");
 const protocolRoot = join(packagesRoot, "protocol");
 const repositoryRoot = join(packagesRoot, "repository");
+const builderRoot = join(packagesRoot, "execution-evidence-builder");
 const temporaryRoot = await mkdtemp(
   join(tmpdir(), "jinn-execution-recorder-"),
 );
 const protocolArchive = join(temporaryRoot, "evidence-protocol.tgz");
 const repositoryArchive = join(temporaryRoot, "evidence-repository.tgz");
+const builderArchive = join(temporaryRoot, "execution-evidence-builder.tgz");
 const recorderArchive = join(temporaryRoot, "execution-recorder.tgz");
 const consumer = join(temporaryRoot, "consumer");
 
@@ -97,6 +99,9 @@ try {
   await run("yarn", ["pack", "--out", repositoryArchive], {
     cwd: repositoryRoot,
   });
+  await run("yarn", ["pack", "--out", builderArchive], {
+    cwd: builderRoot,
+  });
   await run("yarn", ["pack", "--out", recorderArchive], {
     cwd: packageRoot,
   });
@@ -117,6 +122,7 @@ try {
       dependencies: {
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
         "@jinn-network/evidence-repository": `file:${repositoryArchive}`,
+        "@jinn-network/execution-evidence-builder": `file:${builderArchive}`,
         "@jinn-network/execution-recorder": `file:${recorderArchive}`,
         vitest: "4.1.8",
       },
@@ -124,7 +130,7 @@ try {
   );
   await run(
     "npm",
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+    ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps"],
     { cwd: consumer },
   );
 
@@ -194,6 +200,7 @@ test("packed execution recorder exposes its public distribution contract", async
     await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"),
   );
   assert.deepEqual(packageJson.dependencies, {
+    "@jinn-network/execution-evidence-builder": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0",
   });

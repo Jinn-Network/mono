@@ -60,6 +60,46 @@ export const resultEvaluationRecompute: RecordFactRecompute = async (bytes) => {
   }
 };
 
+export const executionEvidenceRecomputeV2: RecordFactRecompute = async (bytes) => {
+  try {
+    const digest = recordDigest(bytes);
+    const result = validateAndProjectEvidenceRecord({ family: "execution-evidence", digest }, bytes);
+    if (!result.conforms || result.projection.family !== "execution-evidence") return noFacts();
+    const { projection } = result;
+    return {
+      executionId: projection.executionId,
+      executorId: projection.executorId,
+      taskDigest: projection.task.digest,
+      runtimeDigest: projection.runtime.digest,
+      resultDigests: projection.results.map(({ digest }) => digest),
+      outcome: projection.outcome,
+      startedAt: projection.startedAt,
+      endedAt: projection.endedAt,
+      publishedAt: projection.publishedAt,
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
+export const resultEvaluationRecomputeV2: RecordFactRecompute = async (bytes) => {
+  try {
+    const digest = recordDigest(bytes);
+    const result = validateAndProjectEvidenceRecord({ family: "result-evaluation", digest }, bytes);
+    if (!result.conforms || result.projection.family !== "result-evaluation") return noFacts();
+    const { projection } = result;
+    return {
+      evaluatorId: projection.evaluatorId,
+      verdict: projection.verdict,
+      evaluatedAt: projection.evaluatedAt,
+      taskDigest: projection.taskSubject.digest,
+      resultDigests: projection.resultSubjects.map(({ digest }) => digest),
+    };
+  } catch {
+    return noFacts();
+  }
+};
+
 export const executionVerificationRecompute: RecordFactRecompute = async (bytes) => {
   try {
     const digest = recordDigest(bytes);
@@ -87,6 +127,22 @@ export const EVIDENCE_FACTS_RECOMPUTE: FactsRecompute = {
         return executionEvidenceRecompute;
       case RECORD_KINDS.resultEvaluation:
         return resultEvaluationRecompute;
+      case RECORD_KINDS.executionVerification:
+        return executionVerificationRecompute;
+      default:
+        return undefined;
+    }
+  },
+};
+
+/** Explicit registry for the coexisting Evidence public-facts v2 profiles. */
+export const EVIDENCE_FACTS_RECOMPUTE_V2: FactsRecompute = {
+  get(kind: string): RecordFactRecompute | undefined {
+    switch (kind) {
+      case RECORD_KINDS.executionEvidence:
+        return executionEvidenceRecomputeV2;
+      case RECORD_KINDS.resultEvaluation:
+        return resultEvaluationRecomputeV2;
       case RECORD_KINDS.executionVerification:
         return executionVerificationRecompute;
       default:

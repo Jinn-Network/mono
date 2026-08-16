@@ -26,15 +26,22 @@ export interface PreparedExecutionQuery extends PreparedPageQuery {
   readonly taskDigest?: string;
   readonly resultId?: string;
   readonly resultDigest?: string;
+  readonly resultDigestsAll?: readonly string[];
   readonly executorId?: string;
+  readonly runtimeDigest?: string;
+  readonly identifierScheme?: string;
+  readonly identifierValue?: string;
   readonly outcome?: string;
   readonly startedAfterMs?: number;
   readonly startedBeforeMs?: number;
+  readonly publishedAfterMs?: number;
+  readonly publishedBeforeMs?: number;
 }
 
 export interface PreparedEvaluationQuery extends PreparedPageQuery {
   readonly taskDigest?: string;
   readonly resultDigest?: string;
+  readonly resultDigestsAll?: readonly string[];
   readonly evaluatorId?: string;
   readonly verdict?: string;
   readonly evaluatedAfterMs?: number;
@@ -137,6 +144,18 @@ function digest(value: unknown, field: string): string | undefined {
     invalid(`${field} must be a canonical lowercase SHA-256 digest.`);
   }
   return value;
+}
+
+function digests(value: unknown, field: string): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) {
+    invalid(`${field} must be a non-empty array of SHA-256 digests.`);
+  }
+  const accepted = value.map((item) => digest(item, field)!);
+  if (new Set(accepted).size !== accepted.length) {
+    invalid(`${field} must not contain duplicate digests.`);
+  }
+  return Object.freeze([...accepted].sort());
 }
 
 const RFC3339 =
@@ -271,10 +290,16 @@ export function prepareExecutionQuery(
     "taskDigest",
     "resultId",
     "resultDigest",
+    "resultDigestsAll",
     "executorId",
+    "runtimeDigest",
+    "identifierScheme",
+    "identifierValue",
     "outcome",
     "startedAfter",
     "startedBefore",
+    "publishedAfter",
+    "publishedBefore",
   ], "Execution query");
   const prepared = {
     executionId: optionalString(query.executionId, "executionId"),
@@ -282,10 +307,16 @@ export function prepareExecutionQuery(
     taskDigest: digest(query.taskDigest, "taskDigest"),
     resultId: optionalString(query.resultId, "resultId"),
     resultDigest: digest(query.resultDigest, "resultDigest"),
+    resultDigestsAll: digests(query.resultDigestsAll, "resultDigestsAll"),
     executorId: optionalString(query.executorId, "executorId"),
+    runtimeDigest: digest(query.runtimeDigest, "runtimeDigest"),
+    identifierScheme: optionalString(query.identifierScheme, "identifierScheme"),
+    identifierValue: optionalString(query.identifierValue, "identifierValue"),
     outcome: query.outcome,
     startedAfterMs: timestamp(query.startedAfter, "startedAfter"),
     startedBeforeMs: timestamp(query.startedBefore, "startedBefore"),
+    publishedAfterMs: timestamp(query.publishedAfter, "publishedAfter"),
+    publishedBeforeMs: timestamp(query.publishedBefore, "publishedBefore"),
   };
   if (
     prepared.outcome !== undefined &&
@@ -315,6 +346,7 @@ export function prepareEvaluationQuery(
     "availability",
     "taskDigest",
     "resultDigest",
+    "resultDigestsAll",
     "evaluatorId",
     "verdict",
     "evaluatedAfter",
@@ -323,6 +355,7 @@ export function prepareEvaluationQuery(
   const prepared = {
     taskDigest: digest(query.taskDigest, "taskDigest"),
     resultDigest: digest(query.resultDigest, "resultDigest"),
+    resultDigestsAll: digests(query.resultDigestsAll, "resultDigestsAll"),
     evaluatorId: optionalString(query.evaluatorId, "evaluatorId"),
     verdict: query.verdict,
     evaluatedAfterMs: timestamp(query.evaluatedAfter, "evaluatedAfter"),

@@ -32,6 +32,7 @@ const externalPackages = [
   [join(evidenceRoot, 'protocol'), '@jinn-network/evidence-protocol'],
   [join(evidenceRoot, 'repository'), '@jinn-network/evidence-repository'],
   [join(evidenceRoot, 'discovery'), '@jinn-network/evidence-discovery'],
+  [join(evidenceRoot, 'execution-evidence-builder'), '@jinn-network/execution-evidence-builder'],
   [join(evidenceRoot, 'execution-recorder'), '@jinn-network/execution-recorder'],
   [join(evidenceRoot, 'attestation-issuer'), '@jinn-network/attestation-issuer'],
 ];

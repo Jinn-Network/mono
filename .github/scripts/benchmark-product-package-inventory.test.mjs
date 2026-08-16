@@ -30,8 +30,11 @@ const PACKAGE_VERSIONS = new Map([
 
 const CORE_JINN = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/benchmarking-evaluation', '@jinn-network/benchmarking-evidence',
   '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-native-capture', '@jinn-network/benchmarking-protocol',
   '@jinn-network/benchmarking-publication', '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run',
+  '@jinn-network/execution-evidence-builder',
   '@jinn-network/record-discovery-protocol', '@jinn-network/record-discovery-serve',
   '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication',
   '@jinn-network/task-admission', '@jinn-network/task-execution-backend',
@@ -42,17 +45,20 @@ const CORE_JINN = [
   '@jinn-network/task-execution-workspace', '@jinn-network/trust-core',
 ];
 const VERIFY_JINN = [
-  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records',
-  '@jinn-network/benchmarking-run', '@jinn-network/task-admission',
+  '@jinn-network/benchmarking-run', '@jinn-network/benchmarking-protocol', '@jinn-network/task-admission',
   '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
   '@jinn-network/trust-core',
 ];
 const TRANSITIVE_PORTALS = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/benchmarking-evaluation', '@jinn-network/benchmarking-evidence',
   '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-local',
+  '@jinn-network/benchmarking-native-capture', '@jinn-network/benchmarking-protocol',
   '@jinn-network/benchmarking-records', '@jinn-network/benchmarking-run',
   '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
+  '@jinn-network/execution-evidence-builder',
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository',
   '@jinn-network/execution-recorder', '@jinn-network/task-admission',
   '@jinn-network/task-execution-backend', '@jinn-network/task-execution-backend-local',
@@ -68,9 +74,9 @@ const PUBLICATION_PORTALS = [
   '@jinn-network/record-discovery-transport-http', '@jinn-network/record-publication',
 ];
 const VERIFY_PORTALS = [
-  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-aggregate', '@jinn-network/benchmarking-evidence', '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local', '@jinn-network/benchmarking-records',
-  '@jinn-network/benchmarking-run', '@jinn-network/environment-record',
+  '@jinn-network/benchmarking-run', '@jinn-network/benchmarking-protocol', '@jinn-network/environment-record', '@jinn-network/evidence-protocol',
   '@jinn-network/task-admission',
   '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol',
   '@jinn-network/trust-core',
@@ -79,7 +85,8 @@ const VERIFY_PORTALS = [
 const APPROVED = new Map([
   ['core', { colophon: ['@colophon-claims/verify'], jinn: CORE_JINN, portals: [
     '@colophon-claims/verify', ...CORE_JINN, '@jinn-network/environment-record', '@jinn-network/evidence-discovery',
-    '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
+    '@jinn-network/evidence-protocol',
+    '@jinn-network/evidence-repository', '@jinn-network/execution-recorder',
     '@jinn-network/record-discovery-client',
   ] }],
   ['cli', { colophon: ['@colophon-claims/core', '@colophon-claims/verify'], jinn: [], portals: [
@@ -97,13 +104,18 @@ const SIBLING_TREE_DIRS = new Map([
   ...PRODUCT_PACKAGES.map(([directory, name]) => [name, join(packageRoot, directory)]),
   ['@jinn-network/attestation-issuer', join(root, 'packages/evidence/attestation-issuer')],
   ['@jinn-network/benchmarking-aggregate', join(root, 'packages/benchmarking/aggregate')],
+  ['@jinn-network/benchmarking-evaluation', join(root, 'packages/benchmarking/evaluation')],
+  ['@jinn-network/benchmarking-evidence', join(root, 'packages/benchmarking/evidence')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages/benchmarking/interop')],
   ['@jinn-network/benchmarking-local', join(root, 'packages/benchmarking/local')],
+  ['@jinn-network/benchmarking-native-capture', join(root, 'packages/benchmarking/native-capture')],
+  ['@jinn-network/benchmarking-protocol', join(root, 'packages/benchmarking/protocol')],
   ['@jinn-network/benchmarking-publication', join(root, 'packages/benchmarking/publication')],
   ['@jinn-network/benchmarking-records', join(root, 'packages/benchmarking/records')],
   ['@jinn-network/benchmarking-run', join(root, 'packages/benchmarking/run')],
   ['@jinn-network/environment-record', join(root, 'packages/environments/record')],
   ['@jinn-network/evidence-discovery', join(root, 'packages/evidence/discovery')],
+  ['@jinn-network/execution-evidence-builder', join(root, 'packages/evidence/execution-evidence-builder')],
   ['@jinn-network/evidence-protocol', join(root, 'packages/evidence/protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages/evidence/repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages/evidence/execution-recorder')],

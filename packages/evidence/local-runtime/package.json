@@ -53,6 +53,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/execution-evidence-builder": "portal:../execution-evidence-builder",
     "@jinn-network/evidence-discovery": "portal:../discovery",
     "@jinn-network/evidence-catalog-sqlite": "portal:../catalog-sqlite",
     "@jinn-network/evidence-protocol": "portal:../protocol",

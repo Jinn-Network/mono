@@ -34,6 +34,7 @@ const packRoots = [
   [join(packagesRoot, "evidence", "protocol"), "evidence-protocol.tgz"],
   [join(packagesRoot, "evidence", "repository"), "evidence-repository.tgz"],
   [join(packagesRoot, "evidence", "discovery"), "evidence-discovery.tgz"],
+  [join(packagesRoot, "evidence", "execution-evidence-builder"), "execution-evidence-builder.tgz"],
   [join(packagesRoot, "evidence", "execution-recorder"), "execution-recorder.tgz"],
   [packageRoot, "task-execution-testing.tgz"],
 ];
@@ -123,6 +124,7 @@ try {
         "@jinn-network/evidence-protocol": `file:${archives.get("evidence-protocol.tgz")}`,
         "@jinn-network/evidence-repository": `file:${archives.get("evidence-repository.tgz")}`,
         "@jinn-network/evidence-discovery": `file:${archives.get("evidence-discovery.tgz")}`,
+        "@jinn-network/execution-evidence-builder": `file:${archives.get("execution-evidence-builder.tgz")}`,
         "@jinn-network/execution-recorder": `file:${archives.get("execution-recorder.tgz")}`,
         "@jinn-network/task-execution-testing": `file:${testingArchive}`,
         "@types/node": "^22.0.0",
