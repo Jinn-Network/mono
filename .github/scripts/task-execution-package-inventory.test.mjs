@@ -119,18 +119,20 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   }],
   // evaluator-adapters (composition design §6.3): concrete result parsers plugged into
   // the evaluation harness's deployment allowlist. Production surface is the adapter
-  // contract (evaluation-harness), the EvaluationSpec vocabulary (profiles), and the
-  // Attempt identity (supervisor). Nothing else — no evidence package, no backend.
+  // contract (evaluation-harness), the EvaluationSpec vocabulary (profiles), the Task
+  // document contract (protocol), and the Attempt identity (supervisor). Nothing else —
+  // no evidence package, no backend.
   ['evaluator-adapters', {
     dependencies: [
       '@jinn-network/task-execution-evaluation-harness',
       '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
       '@jinn-network/task-execution-supervisor',
     ],
     devDependencies: [
       '@jinn-network/attestation-issuer', '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository', '@jinn-network/task-execution-backend',
-      '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-launchers',
       '@jinn-network/task-execution-workspace',
     ],
     optionalDependencies: [], peerDependencies: [],

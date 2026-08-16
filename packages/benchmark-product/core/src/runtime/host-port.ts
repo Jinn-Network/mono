@@ -14,6 +14,7 @@ import type {
 } from "./inspect/manifest.js";
 import type { EvaluationRuntimeBinding } from "../domain/draft.js";
 import type { Demo1ClaudeRuntimeBinding } from "../venue/demo1-claude.js";
+import { INSPECT_BINARY_JUDGE_ADAPTER_ID } from "./inspect/binary-judge-manifest.js";
 import { configuredAgentRuntimes, profileMatchesArmPinning } from "../agent/index.js";
 import {
   assessAgentRuntimeReadiness,
@@ -177,6 +178,7 @@ export function createDefaultBenchmarkRuntimeHost(hostOptions: BenchmarkRuntimeH
     },
     createVenue(binding, venueOptions) {
       const descriptor = binding?.adapterId === "inspect"
+        || binding?.adapterId === INSPECT_BINARY_JUDGE_ADAPTER_ID
         ? createOpenAIConnectionDescriptor(hostOptions.openAI, venueOptions.workspaceDir, repositoryRoot)
         : { cleanup() {} };
       try {

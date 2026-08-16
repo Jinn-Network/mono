@@ -40,6 +40,7 @@ export {
  */
 export const FIXTURE_FAMILIES: string[] = [
   "admission-receipt",
+  "binary-judgment-request",
   "composite",
   "equivalence",
   "evaluation-spec",

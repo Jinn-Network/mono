@@ -21,6 +21,12 @@ const PRODUCT_PACKAGES = [
   ['verify', '@colophon-claims/verify', 'public'],
   ['web', '@colophon-claims/web', 'private'],
 ];
+const PACKAGE_VERSIONS = new Map([
+  ['@colophon-claims/core', '1.0.0'],
+  ['@colophon-claims/cli', '1.0.0'],
+  ['@colophon-claims/verify', '2.0.0'],
+  ['@colophon-claims/web', '0.1.0'],
+]);
 
 const CORE_JINN = [
   '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
@@ -155,10 +161,10 @@ test('the Colophon claims inventory is explicit and derives its membership from 
     assert.equal(manifest.name, name);
     assert.equal(manifest.repository?.directory, `packages/benchmark-product/${directory}`);
     assert.equal(manifest.type, 'module');
-    assert.equal(manifest.version, visibility === 'public' ? '1.0.0' : '0.1.0');
+    assert.equal(manifest.version, PACKAGE_VERSIONS.get(name));
     assert.equal(manifest.private === true, visibility === 'private', `${name} visibility drifted`);
     for (const dependency of dependencyNames(manifest, COLOPHON_SCOPE)) {
-      assert.equal(manifest.dependencies?.[dependency], '1.0.0', `${name} must pin public sibling ${dependency} exactly`);
+      assert.equal(manifest.dependencies?.[dependency], PACKAGE_VERSIONS.get(dependency), `${name} must pin public sibling ${dependency} exactly`);
     }
   }
 });

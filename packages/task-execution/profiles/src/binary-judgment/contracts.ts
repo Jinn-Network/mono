@@ -1,0 +1,466 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { z } from "zod";
+import { Buffer } from "node:buffer";
+
+import { canonicalJsonBytes, recordDigest, sealDocument } from "../bytes.js";
+import {
+  BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI,
+  BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI,
+  BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI,
+  BINARY_JUDGMENT_OBSERVATION_FORMAT_URI,
+  BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+  BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+} from "../identifiers.js";
+import { assertValidDocument, parseJsonDocument } from "../zod-parse.js";
+
+const Sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
+const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+const NonEmptyStringSchema = z.string().min(1);
+export const BinaryJudgmentItemIdSchema = z.string().regex(
+  /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+);
+
+function decodeCanonicalBase64(value: string): Uint8Array | undefined {
+  try {
+    const decoded = Buffer.from(value, "base64");
+    if (decoded.byteLength === 0 || decoded.toString("base64") !== value) return undefined;
+    return new Uint8Array(decoded);
+  } catch {
+    return undefined;
+  }
+}
+
+export const CanonicalBase64Schema = z.string().superRefine((value, ctx) => {
+  if (decodeCanonicalBase64(value) === undefined) {
+    ctx.addIssue({ code: "custom", message: "bytesBase64 must be non-empty canonical RFC 4648 base64" });
+  }
+});
+
+export const BinaryJudgmentInlineMaterialSchema = z.strictObject({
+  digest: Sha256DigestSchema,
+  bytesBase64: CanonicalBase64Schema,
+}).superRefine((material, ctx) => {
+  const bytes = decodeCanonicalBase64(material.bytesBase64);
+  if (bytes !== undefined) {
+    const actual = recordDigest(bytes);
+    if (actual !== material.digest) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["digest"],
+        message: `material digest does not match bytesBase64 (${actual})`,
+      });
+    }
+  }
+});
+export type BinaryJudgmentInlineMaterial = z.infer<typeof BinaryJudgmentInlineMaterialSchema>;
+
+export function decodeBinaryJudgmentInlineMaterial(
+  material: BinaryJudgmentInlineMaterial,
+): Uint8Array {
+  const validated = assertValidDocument(
+    BinaryJudgmentInlineMaterialSchema,
+    material,
+    "BinaryJudgmentInlineMaterial",
+  );
+  return decodeCanonicalBase64(validated.bytesBase64)!;
+}
+
+/**
+ * A digest-only in-toto ResourceDescriptor projection for solver-visible provenance. Source
+ * names and locators remain in the source manifest because even an innocent-looking URI can
+ * become a covert truth/class channel into the judge Task.
+ */
+export const BinaryJudgmentProvenanceDescriptorSchema = z.strictObject({
+  digest: z.strictObject({ sha256: Sha256HexSchema }),
+});
+export type BinaryJudgmentProvenanceDescriptor = z.infer<
+  typeof BinaryJudgmentProvenanceDescriptorSchema
+>;
+
+/** Full public source/license descriptor for instrument custody, never rendered to the model. */
+export const BinaryJudgmentSourceDescriptorSchema = z.strictObject({
+  name: NonEmptyStringSchema.optional(),
+  uri: NonEmptyStringSchema,
+  digest: z.strictObject({ sha256: Sha256HexSchema }),
+  mediaType: NonEmptyStringSchema.optional(),
+  downloadLocation: NonEmptyStringSchema.optional(),
+});
+export type BinaryJudgmentSourceDescriptor = z.infer<typeof BinaryJudgmentSourceDescriptorSchema>;
+
+/** The complete solver-visible body. Unknown fields are truth-leak attempts and fail closed. */
+export const BinaryJudgmentPayloadSchema = z.strictObject({
+  itemId: BinaryJudgmentItemIdSchema,
+  question: z.string(),
+  referenceAnswer: z.string(),
+  candidateAnswer: z.string(),
+  provenance: z.array(BinaryJudgmentProvenanceDescriptorSchema).min(1),
+});
+export type BinaryJudgmentPayload = z.infer<typeof BinaryJudgmentPayloadSchema>;
+
+export const BINARY_JUDGMENT_TEMPLATE_FIELDS = [
+  "question",
+  "referenceAnswer",
+  "candidateAnswer",
+] as const;
+export type BinaryJudgmentTemplateField = (typeof BINARY_JUDGMENT_TEMPLATE_FIELDS)[number];
+
+export const BinaryJudgmentTemplateSegmentSchema = z.union([
+  z.strictObject({ literal: z.string() }),
+  z.strictObject({ field: z.enum(BINARY_JUDGMENT_TEMPLATE_FIELDS) }),
+]);
+export type BinaryJudgmentTemplateSegment = z.infer<typeof BinaryJudgmentTemplateSegmentSchema>;
+
+export const BinaryJudgmentMessageTemplateSchema = z.strictObject({
+  role: z.enum(["developer", "user"]),
+  segments: z.array(BinaryJudgmentTemplateSegmentSchema).min(1),
+});
+export type BinaryJudgmentMessageTemplate = z.infer<typeof BinaryJudgmentMessageTemplateSchema>;
+
+export const BinaryJudgmentMessageSchema = z.strictObject({
+  role: z.enum(["developer", "user"]),
+  text: z.string(),
+});
+export type BinaryJudgmentMessage = z.infer<typeof BinaryJudgmentMessageSchema>;
+
+export const BinaryJudgmentGenerationSchema = z.strictObject({
+  reasoningEffort: z.enum(["none", "low"]),
+  maxOutputTokens: z.literal(128),
+  store: z.literal(false),
+  background: z.literal(false),
+  stream: z.literal(false),
+  serviceTier: z.literal("default"),
+  tools: z.tuple([]),
+  fallbackModels: z.tuple([]),
+  retries: z.literal(0),
+  persistedConversation: z.literal(false),
+  metadata: z.null(),
+  promptCacheIdentifier: z.null(),
+});
+export type BinaryJudgmentGeneration = z.infer<typeof BinaryJudgmentGenerationSchema>;
+
+export const BINARY_ACCEPT_REJECT_PARSER_ID =
+  "network.jinn.parser.binary-accept-reject" as const;
+export const BINARY_ACCEPT_REJECT_PARSER_VERSION = "1.0.0" as const;
+export const BINARY_JUDGMENT_EVALUATION_PARSER_ID =
+  "network.jinn.parser.binary-judgment-evaluation" as const;
+export const BINARY_JUDGMENT_EVALUATION_PARSER_VERSION = "1.0.0" as const;
+
+/** Sealed, code-free semantics for the only response parser admitted by v1 instruments. */
+export function buildBinaryAcceptRejectParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_ACCEPT_REJECT_PARSER_ID,
+      version: BINARY_ACCEPT_REJECT_PARSER_VERSION,
+    },
+    input: {
+      mediaType: BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE,
+      utf8: "strict",
+      trimCodePoints: ["U+0020", "U+0009", "U+000D", "U+000A"],
+      normalization: "none",
+    },
+    accepted: ["ACCEPT", "REJECT"],
+    invalidOutputDecision: "REJECT",
+  } as const;
+}
+
+export const BINARY_ACCEPT_REJECT_PARSER_SEALED = sealDocument(
+  buildBinaryAcceptRejectParserSemantics(),
+);
+export const BINARY_ACCEPT_REJECT_PARSER_IDENTITY = {
+  id: BINARY_ACCEPT_REJECT_PARSER_ID,
+  version: BINARY_ACCEPT_REJECT_PARSER_VERSION,
+  digest: BINARY_ACCEPT_REJECT_PARSER_SEALED.digest,
+} as const;
+
+/**
+ * The umbrella parser commits the complete v1 response-parser registry and the comparison map.
+ * Adding a parser or changing truth semantics therefore changes this document's digest.
+ */
+export function buildBinaryJudgmentEvaluationParserSemantics() {
+  return {
+    protocol: BINARY_JUDGMENT_PARSER_SEMANTICS_FORMAT_URI,
+    parser: {
+      id: BINARY_JUDGMENT_EVALUATION_PARSER_ID,
+      version: BINARY_JUDGMENT_EVALUATION_PARSER_VERSION,
+    },
+    responseParsers: [BINARY_ACCEPT_REJECT_PARSER_IDENTITY],
+    comparison: {
+      ACCEPT: "CORRECT",
+      REJECT: "WRONG",
+      passWhen: "agreement=true",
+    },
+  } as const;
+}
+
+export const BINARY_JUDGMENT_EVALUATION_PARSER_SEALED = sealDocument(
+  buildBinaryJudgmentEvaluationParserSemantics(),
+);
+export const BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY = {
+  id: BINARY_JUDGMENT_EVALUATION_PARSER_ID,
+  version: BINARY_JUDGMENT_EVALUATION_PARSER_VERSION,
+  digest: BINARY_JUDGMENT_EVALUATION_PARSER_SEALED.digest,
+} as const;
+
+export function binaryJudgmentPromptTemplateDigest(
+  messages: readonly BinaryJudgmentMessageTemplate[],
+): `sha256:${string}` {
+  return recordDigest(canonicalJsonBytes(messages));
+}
+
+const ParserIdentitySchema = z.strictObject({
+  id: z.literal(BINARY_ACCEPT_REJECT_PARSER_ID),
+  version: z.literal(BINARY_ACCEPT_REJECT_PARSER_VERSION),
+  digest: z.literal(BINARY_ACCEPT_REJECT_PARSER_IDENTITY.digest),
+});
+
+export const BinaryJudgmentInstrumentSchema = z
+  .strictObject({
+    protocol: z.literal(BINARY_JUDGMENT_INSTRUMENT_FORMAT_URI),
+    instrumentId: NonEmptyStringSchema.regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u),
+    messages: z.array(BinaryJudgmentMessageTemplateSchema).min(1),
+    promptTemplateSha256: Sha256DigestSchema,
+    promptSource: BinaryJudgmentSourceDescriptorSchema,
+    license: BinaryJudgmentSourceDescriptorSchema,
+    attribution: BinaryJudgmentSourceDescriptorSchema,
+    model: z.strictObject({
+      adapter: z.literal("jinn-openai"),
+      requested: z.literal("gpt-5.6-luna"),
+      generation: BinaryJudgmentGenerationSchema,
+    }),
+    response: z.strictObject({
+      mediaType: z.literal(BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE),
+      parser: ParserIdentitySchema,
+      invalidOutputDecision: z.literal("REJECT"),
+    }),
+  })
+  .superRefine((instrument, ctx) => {
+    const usedFields = new Set<BinaryJudgmentTemplateField>();
+    for (const message of instrument.messages) {
+      for (const segment of message.segments) {
+        if ("field" in segment) usedFields.add(segment.field);
+      }
+    }
+    for (const field of BINARY_JUDGMENT_TEMPLATE_FIELDS) {
+      if (!usedFields.has(field)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["messages"],
+          message: `message templates must interpolate ${field} at least once`,
+        });
+      }
+    }
+    const expected = binaryJudgmentPromptTemplateDigest(instrument.messages);
+    if (instrument.promptTemplateSha256 !== expected) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["promptTemplateSha256"],
+        message: `promptTemplateSha256 does not match canonical messages (${expected})`,
+      });
+    }
+  });
+export type BinaryJudgmentInstrument = z.infer<typeof BinaryJudgmentInstrumentSchema>;
+
+export const BinaryJudgmentSemanticRequestSchema = z.strictObject({
+  model: z.literal("gpt-5.6-luna"),
+  messages: z.array(BinaryJudgmentMessageSchema).min(1),
+  generation: BinaryJudgmentGenerationSchema,
+});
+export type BinaryJudgmentSemanticRequest = z.infer<typeof BinaryJudgmentSemanticRequestSchema>;
+
+export function renderBinaryJudgmentMessages(
+  payloadInput: BinaryJudgmentPayload,
+  instrumentInput: BinaryJudgmentInstrument,
+): BinaryJudgmentMessage[] {
+  const payload = assertValidDocument(
+    BinaryJudgmentPayloadSchema,
+    payloadInput,
+    "BinaryJudgmentPayload",
+  );
+  const instrument = assertValidDocument(
+    BinaryJudgmentInstrumentSchema,
+    instrumentInput,
+    "BinaryJudgmentInstrument",
+  );
+  return instrument.messages.map((message) => ({
+    role: message.role,
+    text: message.segments.map((segment) => (
+      "literal" in segment ? segment.literal : payload[segment.field]
+    )).join(""),
+  }));
+}
+
+/**
+ * Reconstructs the digestable scientific request. Capability tokens, correlations, clocks, and
+ * backend transport envelopes are intentionally absent because they are ambient execution data.
+ */
+export function buildBinaryJudgmentSemanticRequest(
+  payload: BinaryJudgmentPayload,
+  instrument: BinaryJudgmentInstrument,
+): BinaryJudgmentSemanticRequest {
+  return {
+    model: instrument.model.requested,
+    messages: renderBinaryJudgmentMessages(payload, instrument),
+    generation: instrument.model.generation,
+  };
+}
+
+export function binaryJudgmentSemanticRequestDigest(
+  payload: BinaryJudgmentPayload,
+  instrument: BinaryJudgmentInstrument,
+): `sha256:${string}` {
+  return recordDigest(canonicalJsonBytes(buildBinaryJudgmentSemanticRequest(payload, instrument)));
+}
+
+export const BinaryJudgmentObservationSchema = z.strictObject({
+  protocol: z.literal(BINARY_JUDGMENT_OBSERVATION_FORMAT_URI),
+  taskDigest: Sha256DigestSchema,
+  armId: NonEmptyStringSchema,
+  replicate: z.number().int().positive(),
+  instrumentSha256: Sha256DigestSchema,
+  requestSha256: Sha256DigestSchema,
+  response: z.strictObject({
+    digest: Sha256DigestSchema,
+    mediaType: z.literal(BINARY_JUDGMENT_RESPONSE_MEDIA_TYPE),
+  }),
+  provider: z.strictObject({
+    requestedModel: z.literal("gpt-5.6-luna"),
+    resolvedModel: z.literal("gpt-5.6-luna"),
+    responseId: NonEmptyStringSchema,
+    eventSha256: Sha256DigestSchema,
+    usage: z.strictObject({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      totalTokens: z.number().int().nonnegative(),
+    }),
+  }),
+  call: z.strictObject({
+    count: z.literal(1),
+    retries: z.literal(0),
+    fallbacks: z.literal(0),
+  }),
+  limitations: z.tuple([z.literal("mutable-model-alias")]),
+}).superRefine((observation, ctx) => {
+  if (
+    observation.provider.usage.totalTokens
+    !== observation.provider.usage.inputTokens + observation.provider.usage.outputTokens
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["provider", "usage", "totalTokens"],
+      message: "totalTokens must equal inputTokens + outputTokens",
+    });
+  }
+});
+export type BinaryJudgmentObservation = z.infer<typeof BinaryJudgmentObservationSchema>;
+
+export const BinaryJudgmentTruthLabelSchema = z.enum(["CORRECT", "WRONG"]);
+export type BinaryJudgmentTruthLabel = z.infer<typeof BinaryJudgmentTruthLabelSchema>;
+export const BinaryJudgmentStratumSchema = z.enum(["core", "stress"]);
+export type BinaryJudgmentStratum = z.infer<typeof BinaryJudgmentStratumSchema>;
+
+/** Evaluator-only admitted analysis attributes. This document must never be a Task input. */
+export const BinaryJudgmentAnalysisContextSchema = z.strictObject({
+  protocol: z.literal(BINARY_JUDGMENT_ANALYSIS_CONTEXT_FORMAT_URI),
+  // This is the canonical imported item/payload commitment, sealed before EvaluationSpec/Task.
+  // Referencing taskDigest here would form Task -> EvaluationSpec -> context -> Task.
+  itemSha256: Sha256DigestSchema,
+  itemId: BinaryJudgmentItemIdSchema,
+  labelResolutionSha256: Sha256DigestSchema,
+  truthLabel: BinaryJudgmentTruthLabelSchema,
+  candidateClass: NonEmptyStringSchema.regex(/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u),
+  stratum: BinaryJudgmentStratumSchema,
+});
+export type BinaryJudgmentAnalysisContext = z.infer<typeof BinaryJudgmentAnalysisContextSchema>;
+
+/** Exact digest joins staged by the evaluation harness; bytes still require independent hashing. */
+export const BinaryJudgmentEvaluationContextSchema = z.strictObject({
+  protocol: z.literal(BINARY_JUDGMENT_EVALUATION_CONTEXT_FORMAT_URI),
+  evaluationSpecSha256: Sha256DigestSchema,
+  taskDigest: Sha256DigestSchema,
+  armId: NonEmptyStringSchema,
+  replicate: z.number().int().positive(),
+  judgeObservationSha256: Sha256DigestSchema,
+  responseSha256: Sha256DigestSchema,
+  material: z.strictObject({
+    instrument: BinaryJudgmentInlineMaterialSchema,
+    labelResolution: BinaryJudgmentInlineMaterialSchema,
+    analysisContext: BinaryJudgmentInlineMaterialSchema,
+  }),
+});
+export type BinaryJudgmentEvaluationContext = z.infer<
+  typeof BinaryJudgmentEvaluationContextSchema
+>;
+
+export function parseBinaryJudgmentPayload(bytes: Uint8Array): BinaryJudgmentPayload {
+  return parseJsonDocument(BinaryJudgmentPayloadSchema, bytes, "BinaryJudgmentPayload");
+}
+
+export function parseBinaryJudgmentInstrument(bytes: Uint8Array): BinaryJudgmentInstrument {
+  return parseJsonDocument(BinaryJudgmentInstrumentSchema, bytes, "BinaryJudgmentInstrument");
+}
+
+export function sealBinaryJudgmentInstrument(
+  value: BinaryJudgmentInstrument,
+): { bytes: Uint8Array; digest: `sha256:${string}` } {
+  return sealDocument(assertValidDocument(
+    BinaryJudgmentInstrumentSchema,
+    value,
+    "BinaryJudgmentInstrument",
+  ));
+}
+
+export function parseBinaryJudgmentObservation(bytes: Uint8Array): BinaryJudgmentObservation {
+  return parseJsonDocument(BinaryJudgmentObservationSchema, bytes, "BinaryJudgmentObservation");
+}
+
+export function sealBinaryJudgmentObservation(
+  value: BinaryJudgmentObservation,
+): { bytes: Uint8Array; digest: `sha256:${string}` } {
+  return sealDocument(assertValidDocument(
+    BinaryJudgmentObservationSchema,
+    value,
+    "BinaryJudgmentObservation",
+  ));
+}
+
+export function parseBinaryJudgmentAnalysisContext(
+  bytes: Uint8Array,
+): BinaryJudgmentAnalysisContext {
+  return parseJsonDocument(
+    BinaryJudgmentAnalysisContextSchema,
+    bytes,
+    "BinaryJudgmentAnalysisContext",
+  );
+}
+
+export function sealBinaryJudgmentAnalysisContext(
+  value: BinaryJudgmentAnalysisContext,
+): { bytes: Uint8Array; digest: `sha256:${string}` } {
+  return sealDocument(assertValidDocument(
+    BinaryJudgmentAnalysisContextSchema,
+    value,
+    "BinaryJudgmentAnalysisContext",
+  ));
+}
+
+export function parseBinaryJudgmentEvaluationContext(
+  bytes: Uint8Array,
+): BinaryJudgmentEvaluationContext {
+  return parseJsonDocument(
+    BinaryJudgmentEvaluationContextSchema,
+    bytes,
+    "BinaryJudgmentEvaluationContext",
+  );
+}
+
+export function sealBinaryJudgmentEvaluationContext(
+  value: BinaryJudgmentEvaluationContext,
+): { bytes: Uint8Array; digest: `sha256:${string}` } {
+  return sealDocument(assertValidDocument(
+    BinaryJudgmentEvaluationContextSchema,
+    value,
+    "BinaryJudgmentEvaluationContext",
+  ));
+}

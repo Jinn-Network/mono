@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/task-execution-evaluator-adapters",
   "version": "0.1.0",
-  "description": "Concrete evaluator adapters for the Jinn evaluation harness: the swe-rebench grader-report parser and the prediction scorer, plugged into a deployment parser allowlist.",
+  "description": "Concrete deterministic evaluator adapters for binary judgment, swe-rebench, and prediction, plugged into the Jinn evaluation harness allowlist.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -40,6 +40,7 @@
   "dependencies": {
     "@jinn-network/task-execution-evaluation-harness": "0.1.0",
     "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
     "@jinn-network/task-execution-supervisor": "0.1.0"
   },
   "devDependencies": {
@@ -48,7 +49,6 @@
     "@jinn-network/evidence-repository": "0.1.0",
     "@jinn-network/task-execution-backend": "0.1.0",
     "@jinn-network/task-execution-launchers": "0.1.0",
-    "@jinn-network/task-execution-protocol": "0.1.0",
     "@jinn-network/task-execution-workspace": "0.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",

@@ -76,6 +76,8 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
+  BINARY_ACCEPT_REJECT_PARSER_IDENTITY,
+  BINARY_JUDGMENT_PROFILE_URI,
   EVAL_SEMANTICS_VERSION,
   TASK_PROFILE_FORMAT_URI,
   sealDocument,
@@ -92,6 +94,12 @@ if (TASK_PROFILE_FORMAT_URI !== "https://spec.jinn.network/profiles/task-profile
   throw new Error("root import failed");
 }
 if (EVAL_SEMANTICS_VERSION !== "4") throw new Error("semanticsVersion seed mismatch");
+if (BINARY_JUDGMENT_PROFILE_URI !== "https://spec.jinn.network/task-profiles/binary-judgment/1.0") {
+  throw new Error("binary-judgment root exports failed");
+}
+if (!BINARY_ACCEPT_REJECT_PARSER_IDENTITY.digest.startsWith("sha256:")) {
+  throw new Error("binary parser identity did not resolve from root import");
+}
 if (typeof sealDocument !== "function") throw new Error("sealDocument did not resolve from root import");
 const probe = sealDocument({ smoke: "test" });
 if (!probe.digest.startsWith("sha256:")) throw new Error("sealDocument did not return a sha256 digest");
@@ -132,9 +140,9 @@ if (
   throw new Error("packed evaluation exact-subject verifier returned the wrong view");
 }
 
-// The two sealed-document assets, resolved by subpath export — each matches its own
+// The four sealed task-profile assets, resolved by subpath export — each matches its own
 // profile.sha256 (program §7.1: profile.json is the exact raw sealed bytes on disk).
-for (const profile of ["repository-work", "evaluation-task"]) {
+for (const profile of ["repository-work", "prediction-forecast", "evaluation-task", "binary-judgment"]) {
   const jsonUrl = import.meta.resolve(
     \`@jinn-network/task-execution-profiles/profiles/task-profiles/\${profile}/1.0/profile.json\`,
   );
@@ -147,6 +155,25 @@ for (const profile of ["repository-work", "evaluation-task"]) {
   if (actual !== pinned) {
     throw new Error(\`\${profile}/1.0/profile.json does not match its profile.sha256: \${actual} !== \${pinned}\`);
   }
+}
+
+for (const parser of ["binary-accept-reject", "binary-judgment-evaluation"]) {
+  const root = \`@jinn-network/task-execution-profiles/profiles/binary-judgment/parsers/\${parser}/1.0.0\`;
+  const bytes = await readFile(fileURLToPath(import.meta.resolve(\`\${root}/semantics.json\`)));
+  const pinned = (await readFile(fileURLToPath(import.meta.resolve(\`\${root}/semantics.sha256\`)), "utf8")).trim();
+  const actual = \`sha256:\${createHash("sha256").update(bytes).digest("hex")}\`;
+  if (actual !== pinned) throw new Error(\`\${parser} semantics digest mismatch\`);
+}
+const requestOracleUrl = import.meta.resolve(
+  "@jinn-network/task-execution-profiles/fixtures/binary-judgment-request/golden/unicode-line-endings.json",
+);
+const requestOracle = JSON.parse(await readFile(fileURLToPath(requestOracleUrl), "utf8"));
+if (
+  requestOracle.expect?.semanticRequestSha256
+  !== "sha256:9655fa9e54a9e19b9c24d9ea43ee546bd0e57ff1f15474dc80c326b36c65865e"
+  || typeof requestOracle.expect?.canonicalBytesBase64 !== "string"
+) {
+  throw new Error("binary-judgment request oracle did not resolve from the packed fixture export");
 }
 
 // The ./testing subpath + its FIXTURE_FAMILIES manifest.
@@ -169,7 +196,7 @@ if (distFiles.some((name) => name.includes(".test."))) throw new Error("test out
 await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
 
 console.log(
-  "Installed package root import, both sealed-document assets, ./testing + FIXTURE_FAMILIES, "
+  "Installed package root import, sealed profile/parser assets, ./testing + FIXTURE_FAMILIES, "
     + "dependency boundary, and dist packaging verified.",
 );
 `,

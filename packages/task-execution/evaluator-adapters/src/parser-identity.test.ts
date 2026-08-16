@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parserAllowlistKey } from "@jinn-network/task-execution-profiles";
 import { describe, expect, test } from "vitest";
 import {
+  BINARY_JUDGMENT_PARSER,
   evaluatorAdaptersParserAllowlist,
   PREDICTION_PARSER,
   SWE_REBENCH_PARSER,
@@ -31,9 +32,19 @@ describe("parser identities", () => {
     expect(PREDICTION_PARSER.digest).toBe(fileDigest("prediction-market.parser.json"));
   });
 
-  test("the deployment allowlist carries exactly both parser keys", () => {
+  test("the binary-judgment identity is the profiles-owned umbrella oracle", async () => {
+    const { BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY } = await import(
+      "@jinn-network/task-execution-profiles"
+    );
+    expect(BINARY_JUDGMENT_PARSER).toEqual(
+      BINARY_JUDGMENT_EVALUATION_PARSER_IDENTITY,
+    );
+  });
+
+  test("the deployment allowlist carries exactly the three parser keys", () => {
     expect([...evaluatorAdaptersParserAllowlist()].sort()).toEqual(
       [
+        parserAllowlistKey(BINARY_JUDGMENT_PARSER),
         parserAllowlistKey(PREDICTION_PARSER),
         parserAllowlistKey(SWE_REBENCH_PARSER),
       ].sort(),

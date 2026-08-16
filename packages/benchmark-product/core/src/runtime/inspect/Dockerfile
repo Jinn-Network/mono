@@ -21,6 +21,7 @@ RUN python -m pip install --no-deps --no-build-isolation /opt/jinn/sandbox_exten
 
 WORKDIR /jinn/work
 COPY --chmod=0555 worker.py /opt/jinn/worker.py
+COPY --chmod=0555 binary_judge_worker.py /opt/jinn/binary_judge_worker.py
 COPY --chmod=0555 broker.py /opt/jinn/broker.py
 COPY --chmod=0555 model_provider.py /opt/jinn/model_provider.py
 ENTRYPOINT ["python", "/opt/jinn/worker.py"]
