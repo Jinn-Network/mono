@@ -273,7 +273,7 @@ describe('explicit v2 mint environment verifier', () => {
               workspace: '/testbed',
               image: fixture.environment.image,
               parser: fixture.environment.parser,
-              testCommands: [{ bin: 'yarn', args: ['vitest', 'run', '--reporter=json', '--outputFile=/tmp/vitest-results.json'], cwd: 'client' }],
+              testCommands: [{ bin: 'yarn', args: ['vitest', 'run', '--reporter=json', '--outputFile=/tmp/vitest-results.json'], cwd: 'operator' }],
             },
             attestation: { environmentHash: fixture.environment.environmentHash },
           }) as unknown as TaskEnvironmentSpecV1,

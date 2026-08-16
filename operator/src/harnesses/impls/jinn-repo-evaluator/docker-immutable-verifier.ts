@@ -132,14 +132,14 @@ function downstreamScopes(changedFiles: readonly string[]): PackageScope[] {
       'packages/plugin',
       'packages/core',
       'packages/layer',
-      'client',
+      'operator',
     ],
-    'packages/core': ['packages/core', 'packages/layer', 'client'],
+    'packages/core': ['packages/core', 'packages/layer', 'operator'],
     'packages/sdk': [
       'packages/sdk',
       'packages/indexer',
       'packages/indexer-enrichment',
-      'client',
+      'operator',
       'packages/autopilot',
     ],
     'packages/indexer': [
@@ -147,8 +147,8 @@ function downstreamScopes(changedFiles: readonly string[]): PackageScope[] {
       'packages/indexer-enrichment',
     ],
     'packages/indexer-enrichment': ['packages/indexer-enrichment'],
-    'packages/layer': ['packages/layer', 'client'],
-    client: ['client'],
+    'packages/layer': ['packages/layer', 'operator'],
+    operator: ['operator'],
     contracts: ['contracts'],
     'packages/autopilot': ['packages/autopilot'],
     'apps/broadcast-bot': ['apps/broadcast-bot'],
@@ -366,24 +366,24 @@ export function makeDockerImmutableMechanicalVerifier(options: {
         if (
           requiredRoots.has('packages/indexer')
           || requiredRoots.has('packages/indexer-enrichment')
-          || requiredRoots.has('client')
+          || requiredRoots.has('operator')
         ) {
           requiredRoots.add('packages/sdk');
         }
         if (
           requiredRoots.has('packages/core')
           || requiredRoots.has('packages/layer')
-          || requiredRoots.has('client')
+          || requiredRoots.has('operator')
         ) {
           requiredRoots.add('packages/plugin');
         }
         if (
           requiredRoots.has('packages/layer')
-          || requiredRoots.has('client')
+          || requiredRoots.has('operator')
         ) {
           requiredRoots.add('packages/core');
         }
-        if (requiredRoots.has('client')) {
+        if (requiredRoots.has('operator')) {
           requiredRoots.add('packages/layer');
         }
         if (requiredRoots.has('packages/indexer-enrichment')) {
@@ -396,7 +396,7 @@ export function makeDockerImmutableMechanicalVerifier(options: {
           'packages/layer',
           'packages/indexer',
           'packages/indexer-enrichment',
-          'client',
+          'operator',
           'contracts',
           'packages/autopilot',
           'apps/broadcast-bot',
@@ -432,7 +432,7 @@ export function makeDockerImmutableMechanicalVerifier(options: {
         for (const root of installRoots.filter((value) =>
           value === 'packages/core'
           || value === 'packages/layer'
-          || value === 'client')) {
+          || value === 'operator')) {
           const label = `${root}:trusted-native-rebuild`;
           const rebuilt = await run([
             'exec',

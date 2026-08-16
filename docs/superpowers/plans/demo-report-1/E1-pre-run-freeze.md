@@ -1,12 +1,22 @@
-# E1 pre-run source and selection freeze
+# E1 pre-run source, task-evidence, and selection freeze
 
-**Date:** 2026-08-13
+**Original source freeze:** 2026-08-13
 
-**Status:** **STOP — no content candidate selected; no preview permitted**
+**Task-evidence recovery:** 2026-08-14
+**Status:** **STOP — static domain capacity is insufficient; no Docker or preview permitted**
 
-**Machine inventory:** `E1-pre-run-freeze.stop.v2.json`
+## Authenticated machine artifacts
 
-**Canonical inventory digest:** `sha256:31443f825b77d35967530a0f2c881a8e6effb93ba2a6b2d7b71061b437d68b04`
+| Artifact | Schema | SHA-256 | Disposition |
+|---|---|---|---|
+| `E1-pre-run-freeze.stop.v2.json` | `jinn.demo1.pre-run-freeze.v2` | `08b7e7d0a17d8a4c1ff876111a2e0cb49056b3e5bfe313e8684f46d2b85ae58a` | Preserved byte-for-byte; historical STOP |
+| `E1-task-evidence.v1.json` | `jinn.demo1.task-evidence.v1` | `b136f80342e5d6e7179267590c72d6bcde9c6922ecd61841faf18905daada8e1` | Complete static scan of the authorized task universe |
+| `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Current independently recomputable STOP |
+
+The v3 artifact names and authenticates v2 rather than replacing its bytes. It embeds the exact
+task-evidence artifact, rebuilds every candidate disposition, derives the selection basis
+`0e3bae591902ee7efd38848ebeeee858dabbbc1efb2e5c9d86bbbce2bd80f1d3`, and resolves the
+task-selection seed to `486786042`. The seed authorizes no execution while the status is `stop`.
 
 ## Frozen source
 
@@ -14,82 +24,124 @@
 - Commit: `f17010c9bb483898c1d9c9f42dde2b3a98889434`
 - Commit tree: `0fe4c0c8372b239b13062036d08d05f79d4055a1`
 - `skills/` tree: `491339fffffe73a52f638f09747dddd8ae2cf154`
-- Upstream commit date: 2026-08-07T13:14:14-04:00
-- Candidate count: 17 folders, all inventoried in lexical repository-path order.
+- Candidate count: 17 folders, inventoried in lexical repository-path order.
 
-The product-owned source manifest binds every folder tree, `SKILL.md` path, Git blob,
-byte count, and SHA-256 to that exact commit tree. It likewise binds the exact folder-license
-path/blob/byte digest and the compatibility decision; callers cannot substitute labels for
-either identity. The canonical artifact records the exact upstream description, the complete
-standalone assessment and evidence reference, every task input and evidence reference, and
-every derived count and rejection reason. The four fixed document skills — `docx`, `pdf`, `pptx`, and `xlsx` —
-are rejected independently of every other criterion. `doc-coauthoring` is rejected because
-its folder contains no license file. Skills whose instructions require sibling files are
-rejected by the one-frozen-`source.md` contract.
+The product-owned source manifest still binds every folder tree, `SKILL.md` path, Git blob, byte
+count, SHA-256, description, and folder-license identity. The four source-available document
+skills remain excluded. Only `brand-guidelines` and `frontend-design` clear the source,
+folder-license, description, and standalone-instruction checks. The recovery generator fetched
+both candidates from the pinned commit and proved their exact Git blob, SHA-256, and byte count
+before scanning tasks; a caller cannot substitute content or labels.
 
-Only `brand-guidelines` and `frontend-design` clear the source, folder-license,
-description, and standalone-instruction checks. Neither is selected because the repository
-contains zero task rows with the complete candidate-specific evidence required by the
-approved outcome-blind rule.
+## Authorized task universe
 
-## Why this is a STOP rather than a winner
+The scan consumes two exact local snapshots and refuses any byte drift:
 
-The tracked SWE-rebench slate evidence is insufficient for this experiment. The screening
-report records a `rowHash`, `gold-patch-resolves`, and a quality code for selected tasks, but
-does not bind all of the following candidate-specific proofs:
+| Snapshot | Bytes | SHA-256 | Bound meaning |
+|---|---:|---|---|
+| `pool-cache.json` | 7,751,413 | `3af257961dfc662a44227438f7ce211278a13a6d44a84a75c96870564779e64d` | Private problem, patch, test patch, repository, and base-commit inputs |
+| `validated-pool.json` | 309,558 | `91af6499668c471820caeb06a6c1abcc4439983802e6fe86a34f5ead8a827032` | Evaluation-semantics version 4, row hashes, and exact image digests |
 
-1. verified task-image digest;
-2. real-grader gold-patch pass;
-3. real-grader empty-patch fail;
-4. compatible task/repository license;
-5. absence of instruction leakage;
-6. absence of a pre-existing conflicting instruction file; and
-7. absence of a content/gold-patch collision.
+Their intersection contains **197 gold-validated, digest-pinned tasks across 123 repositories**.
+The canonical private-universe digest is
+`9c898f40e724869cae7934d52f8e60aee2416bc48f0e4a354ff0fbb5c26e65d9`.
+The artifact retains task and evidence identities but does not publish raw private problem or gold
+patch bytes. It does not consume the older Haiku-generated quality screen.
 
-No missing proof is treated as a pass. Consequently every candidate has an eligible-task
-count of zero, the survivor ranking is empty, and there is no winner whose license or source
-body can truthfully be frozen.
+## Frozen outcome-blind policy
 
-Exact official sizing is intentionally **not** a pre-E2 readiness input. Before E2, a candidate
-must support the fixed six-repository suitability pool, the ten-task/five-repository rehearsal
-pool, and an objective official feasibility floor of five tasks across at least two repositories.
-That floor is the minimum admissibility boundary of `paired-delta@1`; it does not claim the
-eventual official design is adequately powered. E2 later selects the exact official task and
-replicate capacity under the 600-cell ceiling from the already frozen winner and task order.
-If the selected E2 design exceeds that winner's frozen pool, the program stops with evidence;
-it does not switch candidates using rehearsal outcomes.
+Each candidate/task pair has seven fail-closed checks:
 
-The program must not preview a candidate, run the Haiku suitability gate, start E2, or switch
-content sources while this STOP inventory is current. Resumption requires a complete,
-pre-model task-evidence manifest meeting those three fixed feasibility requirements. Those
-inputs produce a new canonical freeze, one pre-E2 winner and new SHA-256-derived integer seeds
-before the first preview; exact official capacity remains pending until E2.
+1. candidate-specific domain compatibility;
+2. real OCI-grader gold-patch PASS;
+3. real OCI-grader empty-patch FAIL;
+4. exact-base-commit permissive SPDX license;
+5. no instruction leakage in the task statement;
+6. no pre-existing `CLAUDE.md`, `AGENTS.md`, `SKILL.md`, or `.cursorrules`; and
+7. no problem/gold leakage or eight-character candidate/gold token collision.
 
-## Deterministic method contract
+`frontend-design` requires a frontend-presentation path and a user-interface term in the problem.
+`brand-guidelines` additionally requires a branding term. These literal rules were applied to all
+197 tasks before any container work.
 
-`@jinn-network/benchmark-product-core` now owns the pure freeze boundary:
+The resulting static ceiling is:
 
-- source URL is fixed to `anthropics/skills`; commit/tree/path/blob/byte digests and
-  folder-license identities must match the product-owned manifest exactly;
-- the machine artifact is one canonical `inputs`/`derived` schema and independently rebuilds
-  candidate status, task status, ranking, selection basis, and resolved seeds from its inputs;
-- candidates are inventoried and rejected fail-closed;
-- only matching evidence counts toward task eligibility;
-- candidate ranking is eligible-task count descending, then repository path lexical;
-- suitability, rehearsal, and official task pools must be disjoint by repository;
-- pre-E2 readiness uses the objective five-task/two-repository official feasibility floor;
-  E2 freezes exact official capacity later without reopening candidate choice;
-- task selection, replicate scheduling, interleaving, and paired-bootstrap seeds are
-  domain-separated SHA-256 first-word integers in `[1, 4294967295]`;
-- the winner's authenticated license identity, literal `source.md`, deterministic transform digest,
-  materialized `SKILL.md`, and byte-identical `CLAUDE.md` body are included only in a
-  `ready` freeze; and
-- lack of a suitable candidate emits `stop`, never fallback content.
+| Candidate | Domain-compatible tasks | Repositories | Minimum required before dynamic checks |
+|---|---:|---:|---:|
+| `brand-guidelines` | 0 | 0 | 21 tasks / 13 repositories |
+| `frontend-design` | 3 | 3 | 21 tasks / 13 repositories |
 
-The stopped inventory resolves seeds because they are part of its canonical selection basis:
-task selection `2618989006`, replicate scheduling `3361499064`, interleaving `1475670040`,
-and paired bootstrap `3322963037`. They authorize no execution and change if any source,
-eligibility evidence, pool requirement, or candidate assessment changes.
+The three `frontend-design` matches are `ImperialCollegeLondon__proCAT-503`,
+`avaiga__taipy-2797`, and `biopragmatics__bioregistry-1644`. Even if every unrun license,
+gold, and empty control passed, three tasks cannot fill a six-task/six-repository
+suitability pool, a ten-task/five-repository rehearsal pool, and a five-task/two-repository
+official feasibility pool without repository overlap. `brand-guidelines` cannot fill any pool.
 
-No model arm, Docker cell, preview, rehearsal, or official run was executed to produce this
-packet.
+For completeness, the recovery also queried each surviving repository at its exact base commit.
+All three recursive trees are free of the four conflicting instruction filenames, and the detected licenses
+are BSD-3-Clause (`proCAT`), Apache-2.0 (`taipy`), and MIT (`bioregistry`). Their exact API
+projections and evidence digests are retained in the machine artifact. No repository checkout or
+container was needed for this static evidence.
+
+Therefore the method stops at the static ceiling. Dynamic checks are recorded `unverifiable` with
+the exact reason “not run after the deterministic domain-capacity screen”; no missing proof is
+treated as a pass.
+
+## Deterministic partition and resumable recovery
+
+V3 removes caller-selected pool labels. If a later, authenticated task snapshot is statically
+viable, the product owns a deterministic, repository-indivisible partition:
+
+- one official pair meeting five tasks across two repositories;
+- five different rehearsal repositories supplying ten tasks;
+- six further suitability repositories supplying one task each; and
+- SHA-256 ranking within the selected repositories.
+
+Only a candidate with all seven checks at `match` can become the pre-E2 winner. The existing E2
+implementation is exposed only through the verified v3-to-v2 adapter after v3 earns `ready`; a
+`stop` artifact throws before E2.
+
+The fixed six-task/six-repository suitability, ten-task/five-repository rehearsal, and
+five-task/two-repository official-feasibility floors are product-owned constants. Both the v2
+normalizer and the v3 verifier reject any caller attempt to weaken them.
+
+The dynamic control coordinator is sequential and crash-resumable. It checkpoints before and
+after image and grader operations, allows one recorded infrastructure retry, requires the current
+OCI path to run with the pinned image, `--pull never`, and networking disabled, and requires gold
+PASS plus empty FAIL before sealing evidence. Docker does not provide exclusive cache ownership
+from before/after image inventories: another process can pull or begin using the same digest during
+the run. The coordinator therefore performs no automatic image cleanup at all. Any image or cache
+removal is a separate operator action after inspecting the sealed evidence and current Docker use;
+the coordinator cannot delete pre-existing images, the completed P5 images, build cache, volumes,
+the Core Desktop VM, or user data. The current STOP never entered Docker.
+
+## Execution accounting and resumption boundary
+
+- Model arms: **0**
+- Claude previews: **0**
+- Docker controls: **0**
+- Haiku suitability cells: **0**
+- E2 rehearsal cells: **0**
+- Official cells: **0**
+
+Demo-1 remains blocked at the pre-run content boundary. Resumption requires a new authenticated
+task snapshot from the same pinned content source (or an explicit, separately reviewed source
+change) whose static domain ceiling can satisfy all three disjoint pools. It must regenerate both
+machine artifacts and receive independent review before any Docker control or preview. There is
+no automatic content fallback, candidate switch, task replacement, Haiku run, E2 run, official
+run, or publication claim from this packet.
+
+## Reproduction
+
+With Node 22 and the documented portal dependency graph built:
+
+```bash
+cd packages/benchmark-product/core
+yarn build
+yarn demo1:task-evidence:check
+yarn demo1:task-evidence:test
+yarn vitest run src/method/demo1-task-evidence.test.ts src/method/demo1-prerun.test.ts
+```
+
+The check command fetches only the two exact pinned candidate files, authenticates both, rebuilds
+the 197-task evidence and v3 freeze, and requires byte-identical output.

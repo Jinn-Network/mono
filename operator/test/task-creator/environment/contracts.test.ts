@@ -29,7 +29,7 @@ function request() {
     repoUrl: 'https://github.com/Jinn-Network/mono.git',
     baseCommit: 'c'.repeat(40),
     language: 'typescript',
-    workspaceHint: 'client',
+    workspaceHint: 'operator',
     testPathHints: ['operator/test/solver-types/example.test.ts'],
     commandHints: ['yarn vitest run operator/test/solver-types/example.test.ts'],
   };
@@ -63,7 +63,7 @@ function environmentSpec() {
       testCommands: [{
         bin: 'yarn',
         args: ['vitest', 'run', '--reporter=json'],
-        cwd: 'client',
+        cwd: 'operator',
       }],
       parser: {
         id: 'vitest-json.v1',

@@ -38,7 +38,7 @@ function receiptInput(overrides: Record<string, unknown> = {}) {
     environment: environmentFixture(),
     evalSemanticsVersion: '4',
     testPaths: [{
-      testPath: 'operator/test/widget.test.ts',
+      testPath: 'client/test/widget.test.ts',
       broken: [broken, broken],
       fixed: [fixed, fixed],
     }],
@@ -51,7 +51,7 @@ describe('DifferentialAdmissionReceiptV2', () => {
     const receipt = createDifferentialAdmissionReceiptV2(receiptInput());
 
     expect(receipt.testPaths).toEqual([expect.objectContaining({
-      testPath: 'operator/test/widget.test.ts',
+      testPath: 'client/test/widget.test.ts',
       commandHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       FAIL_TO_PASS: ['regression'],
       PASS_TO_PASS: ['unaffected'],
@@ -66,7 +66,7 @@ describe('DifferentialAdmissionReceiptV2', () => {
   it('rejects unstable parser output within one side', () => {
     expect(() => createDifferentialAdmissionReceiptV2(receiptInput({
       testPaths: [{
-        testPath: 'operator/test/widget.test.ts',
+        testPath: 'client/test/widget.test.ts',
         broken: [broken, { ...broken, failed: ['different'] }],
         fixed: [fixed, fixed],
       }],
@@ -77,7 +77,7 @@ describe('DifferentialAdmissionReceiptV2', () => {
     const noF2p = { passed: ['unaffected'], failed: [], passed_match: true };
     expect(() => createDifferentialAdmissionReceiptV2(receiptInput({
       testPaths: [{
-        testPath: 'operator/test/widget.test.ts',
+        testPath: 'client/test/widget.test.ts',
         broken: [noF2p, noF2p],
         fixed: [noF2p, noF2p],
       }],
@@ -87,8 +87,8 @@ describe('DifferentialAdmissionReceiptV2', () => {
   it('rejects a raw assertion identifier used by more than one test path', () => {
     expect(() => createDifferentialAdmissionReceiptV2(receiptInput({
       testPaths: [
-        { testPath: 'operator/test/one.test.ts', broken: [broken, broken], fixed: [fixed, fixed] },
-        { testPath: 'operator/test/two.test.ts', broken: [broken, broken], fixed: [fixed, fixed] },
+        { testPath: 'client/test/one.test.ts', broken: [broken, broken], fixed: [fixed, fixed] },
+        { testPath: 'client/test/two.test.ts', broken: [broken, broken], fixed: [fixed, fixed] },
       ],
     }))).toThrow(/duplicate raw assertion/i);
   });
@@ -96,7 +96,7 @@ describe('DifferentialAdmissionReceiptV2', () => {
 
 describe('targetRecipeCommandForTestPath', () => {
   it('strips the command workspace prefix and appends exactly one repo-safe target path', () => {
-    expect(targetRecipeCommandForTestPath(environmentFixture(), 'operator/test/widget.test.ts')).toEqual({
+    expect(targetRecipeCommandForTestPath(environmentFixture(), 'client/test/widget.test.ts')).toEqual({
       bin: 'yarn',
       args: ['vitest', 'run', '--reporter=json', 'test/widget.test.ts'],
       cwd: 'client',
@@ -111,7 +111,7 @@ describe('targetRecipeCommandForTestPath', () => {
     ['traversal', environmentFixture(), '../test/widget.test.ts'],
     ['absolute', environmentFixture(), '/test/widget.test.ts'],
     ['outside command workspace', environmentFixture(), 'test/widget.test.ts'],
-    ['workspace-escaping command cwd', environmentFixture('../outside'), 'operator/test/widget.test.ts'],
+    ['workspace-escaping command cwd', environmentFixture('../outside'), 'client/test/widget.test.ts'],
   ])('rejects an unsafe %s target', (_name, environment, testPath) => {
     expect(() => targetRecipeCommandForTestPath(environment, testPath)).toThrow(/safe|workspace|absolute|traversal/i);
   });

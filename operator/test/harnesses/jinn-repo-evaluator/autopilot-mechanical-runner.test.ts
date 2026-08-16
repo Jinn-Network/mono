@@ -122,14 +122,14 @@ function commandRunner(overrides: {
       }
       return {
         stdout: overrides.changedFiles
-          ?? 'packages/sdk/src/autopilot-session.ts\0client/src/harnesses/engine/engine.ts\0',
+          ?? 'packages/sdk/src/autopilot-session.ts\0operator/src/harnesses/engine/engine.ts\0',
         stderr: '',
       };
     }
     if (args.includes('--binary')) {
       return {
         stdout: overrides.reviewDiff
-          ?? 'diff --git a/client/src/a.ts b/client/src/a.ts\n+trusted change\n',
+          ?? 'diff --git a/operator/src/a.ts b/operator/src/a.ts\n+trusted change\n',
         stderr: '',
       };
     }
@@ -170,7 +170,7 @@ describe('ExactHeadMechanicalRunner', () => {
         'packages/sdk/src/autopilot-session.ts',
         'operator/src/harnesses/engine/engine.ts',
       ],
-      reviewDiff: 'diff --git a/client/src/a.ts b/client/src/a.ts\n+trusted change\n',
+      reviewDiff: 'diff --git a/operator/src/a.ts b/operator/src/a.ts\n+trusted change\n',
       checks: ['repository', 'exact-head', 'policy', 'trusted-verifier'],
     });
     expect(command).toHaveBeenCalledWith('git', [

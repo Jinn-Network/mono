@@ -450,7 +450,7 @@ async function signedEnvironmentSpec(args: {
       platform: 'linux/amd64',
       workspace: '/testbed',
       image: { reference: `ghcr.io/jinn-network/task-environment/jinn-mono@${sha('b')}`, digest: sha('b') },
-      testCommands: args.testCommands ?? [{ bin: 'yarn', args: ['vitest', 'run', '--reporter=json', '--outputFile=/tmp/vitest-results.json'], cwd: 'client' }],
+      testCommands: args.testCommands ?? [{ bin: 'yarn', args: ['vitest', 'run', '--reporter=json', '--outputFile=/tmp/vitest-results.json'], cwd: 'operator' }],
       parser: TRUSTED_VITEST_JSON_PARSER_V1,
       timeoutSeconds: 300,
       environment: { CI: '1' },

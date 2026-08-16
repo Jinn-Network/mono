@@ -4,7 +4,7 @@ export interface PrSummary {
   closingIssues: number[];
 }
 
-const TEST_PATH = /(^|\/)client\/test\/.+\.test\.ts$/;
+const TEST_PATH = /(^|\/)(?:operator|client)\/test\/.+\.test\.ts$/;
 
 export function selectCandidatePRs(prs: PrSummary[]): PrSummary[] {
   return prs.filter(
@@ -28,7 +28,7 @@ export async function extractPoolItem(pr: PrSummary, deps: ExtractDeps): Promise
     gold_tests[f] = await deps.exec('git', ['show', `${deps.mergeCommit}:${f}`]);
   }
   const solution_patch = await deps.exec('git', [
-    'diff', base, deps.mergeCommit, '--', '.', ':(exclude)operator/test/**',
+    'diff', base, deps.mergeCommit, '--', '.', ':(exclude)operator/test/**', ':(exclude)client/test/**',
   ]);
   const issue = await deps.fetchIssue(pr.closingIssues[0]!);
   const item: JinnRepoPoolItem = {

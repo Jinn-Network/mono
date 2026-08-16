@@ -491,7 +491,7 @@ export function releaseGateSteps(skipAcceptance = false) {
     ['gate-contracts-install', 'contracts: yarn install --immutable', 'yarn', ['install', '--immutable'], 'contractsRoot'],
     ['gate-operator', 'yarn release:operator-gate', 'yarn', ['release:operator-gate'], 'clientRoot'],
     ['gate-contracts-test', 'contracts: yarn test', 'yarn', ['test'], 'contractsRoot'],
-    ['gate-contracts-foundry-install', 'contracts: ensure forge-std', 'node', ['../client/scripts/ensure-forge-std.mjs'], 'contractsRoot'],
+    ['gate-contracts-foundry-install', 'contracts: ensure forge-std', 'node', ['../operator/scripts/ensure-forge-std.mjs'], 'contractsRoot'],
     ['gate-contracts-foundry-invariants', 'contracts: forge test --match-contract Invariant', 'forge', ['test', '--match-contract', 'Invariant'], 'contractsRoot'],
   ];
   if (!skipAcceptance) {
@@ -533,7 +533,7 @@ export function runGateSequence(context) {
       cwd: step.cwdKey === 'contractsRoot' ? context.contractsRoot : context.clientRoot,
     });
     if (step.id === 'gate-acceptance' && result.result?.stdout) {
-      const match = result.result.stdout.match(/client\/acceptance-runs\/[^\s"'`]+/);
+      const match = result.result.stdout.match(/operator\/acceptance-runs\/[^\s"'`]+/);
       if (match) {
         context.report.acceptanceEvidenceDir = match[0];
         saveReport(context.report);

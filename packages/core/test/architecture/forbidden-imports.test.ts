@@ -17,7 +17,7 @@ const FORBIDDEN = [
   /^viem($|\/)/,
   /^@jinn-network\/client($|\/)/,
   /^@modelcontextprotocol\/sdk($|\/)/,
-  /client\/src/,
+  /operator\/src/,
   /wallet/i,
 ];
 

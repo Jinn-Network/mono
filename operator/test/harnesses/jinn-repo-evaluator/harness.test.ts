@@ -217,7 +217,7 @@ function autopilotHarnessFixtures() {
       prNumber: 2101,
       expectedHead: '2'.repeat(40),
     },
-    patch: 'diff --git a/client/src/a.ts b/client/src/a.ts\n',
+    patch: 'diff --git a/operator/src/a.ts b/operator/src/a.ts\n',
     summary: 'Implemented the exact session.',
     evidence: {
       commands: ['yarn typecheck'],
@@ -490,7 +490,7 @@ describe('JinnRepoEvaluatorHarness — Autopilot semantic evaluation', () => {
         kind: 'passed',
         checkoutDir: '/tmp/exact-head',
         changedFiles: ['operator/src/a.ts'],
-        reviewDiff: 'diff --git a/client/src/a.ts b/client/src/a.ts\n+fixed\n',
+        reviewDiff: 'diff --git a/operator/src/a.ts b/operator/src/a.ts\n+fixed\n',
         checks: ['exact-head', 'typecheck', 'tests'],
         cleanup,
       }),

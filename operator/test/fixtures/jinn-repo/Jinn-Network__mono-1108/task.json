@@ -7,7 +7,7 @@
   "language": "typescript",
   "problem_statement": "fix: refresh mech safe nonce on retry\n\nWhen Safe execTransaction hits a nonce-too-low error on the EOA nonce, the adapter does not refresh the pinned nonce before the next retry attempt. This causes the retry to use the same stale nonce and fail again.",
   "test_files": [
-    "operator/test/adapters/mech/safe.test.ts"
+    "client/test/adapters/mech/safe.test.ts"
   ],
-  "test_cmd": "yarn vitest run operator/test/adapters/mech/safe.test.ts"
+  "test_cmd": "yarn vitest run client/test/adapters/mech/safe.test.ts"
 }
