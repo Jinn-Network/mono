@@ -115,10 +115,13 @@ import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
 import { createClients, type VenueBroadcaster } from './adapters/mech/safe.js';
 import {
-  findJoinedByName,
   loadSolverNets,
-  solverTypeFromJoinedContract,
 } from './solver-nets/registry.js';
+import {
+  contractRefFromWorkKind,
+  discoveryDigestsFromWiring,
+  wiringParticipationKey,
+} from './config/participation.js';
 import { createCorpus } from './corpus/index.js';
 import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from './corpus/onchain-query.js';
 import { createHttpCorpusDiscovery } from '@jinn-network/core/corpus-read';
@@ -807,7 +810,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
                 actualChainId: p.actualChainId,
               },
           ),
-          joinedSolverNets: config.joinedSolverNets as Record<string, unknown> | undefined,
+          executionWiring: config.executionWiring,
           onboardingComplete: config.onboardingComplete,
         }),
       },
@@ -1011,11 +1014,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // TODO(jinn-mono launcher Task 8): real `getReservedBudgetWei`
       // (sum of unconsumed claim payments across open Tasks).
       launcher: {
-        getConfig: () => ({ joinedSolverNets: config.joinedSolverNets }),
+        getConfig: () => ({
+          executionWiring: config.executionWiring,
+          posting: config.posting,
+        }),
         configPath: CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
-        // Issue #421 retired the legacy `solverNets` write target. The hook
-        // only needs to invalidate the prediction-operator status cache when
-        // operator mode mutates joinedSolverNets via setup endpoints.
         onSolverNetsUpdated: () => {
           invalidatePredictionOperatorStatusCache(config);
         },
@@ -1027,8 +1030,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         getGeneratorState: () => undefined,
         getOpenTaskCount: (netName) => {
           if (!safeAddressForLauncher) return 0;
-          const joined = findJoinedByName(config.joinedSolverNets, netName);
-          const solverType = joined ? solverTypeFromJoinedContract(joined) : undefined;
+          const solverType = (config.posting ?? []).some((entry) => entry.workKind === netName)
+            || (config.executionWiring ?? []).some((entry) => entry.workKind === netName)
+            ? netName
+            : undefined;
           if (!solverType) return 0;
           return sharedStore.countPostedTasksByCreatorAndSolverType({
             creatorSafeAddress: safeAddressForLauncher,
@@ -1593,9 +1598,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         }
       : undefined;
 
-  const taskDiscoveryManifestCids = Object.values(config.joinedSolverNets ?? {})
-    .filter((entry) => entry.roles.includes('solver'))
-    .map((entry) => entry.manifestCid);
+  const taskDiscoveryManifestCids = discoveryDigestsFromWiring(config.executionWiring);
 
   // One-swap R3 (#2461): populate the carved plugin-publication reader over the
   // IdentityRegistry log source. Reuses the already-built `publicClient` and the
@@ -1748,9 +1751,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // than either everything (the retired default) or nothing (a silent stall).
   const joinedSolverTypes = [
     ...new Set(
-      Object.values(config.joinedSolverNets ?? {})
-        .filter((joined) => joined.roles.includes('solver') && joined.contract)
-        .map((joined) => `${joined.contract!.id}.${joined.contract!.version}`),
+      (config.executionWiring ?? [])
+        .map((entry) => contractRefFromWorkKind(entry.workKind))
+        .filter((ref): ref is { id: string; version: string } => ref !== undefined)
+        .map((ref) => `${ref.id}.${ref.version}`),
     ),
   ].sort();
   // The array is deliberately mutable and shared by reference: both
@@ -1804,7 +1808,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     codexDoctorTimeoutMs: config.codexDoctorTimeoutMs,
     semanticEvaluatorRunnerResolver:
       makeConfiguredSemanticEvaluatorRunnerResolver({
-        getJoinedSolverNets: () => config.joinedSolverNets,
+        getExecutionWiring: () => config.executionWiring,
         getClaudePath: () => activeClaudePath,
       }),
     immutableMechanicalVerifier: makeDockerImmutableMechanicalVerifier(),
@@ -2839,25 +2843,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
 /**
  * Builds a HarnessReadinessRegistry from the harness list returned by
- * buildHarnesses() and the operator's joinedSolverNets config block.
+ * buildHarnesses() and the operator's executionWiring.
  *
  * Per A2 carry-over: start() only schedules the background tick; callers that
  * need the snapshot populated immediately must call refreshNow() after start().
  */
 export function buildHarnessReadinessRegistry(args: {
   harnesses: Harness[];
-  config: Pick<JinnConfig, 'joinedSolverNets'>;
+  config: Pick<JinnConfig, 'executionWiring'>;
 }): HarnessReadinessRegistry {
   const harnessesByName: Record<string, Harness> = {};
   for (const h of args.harnesses) {
     harnessesByName[h.name] = h;
   }
   const joinedHarnessesByCid: Record<string, { harnessName: string; roles: Array<'solver' | 'evaluator'> }> = {};
-  for (const [cid, entry] of Object.entries(args.config.joinedSolverNets ?? {})) {
+  for (const entry of args.config.executionWiring ?? []) {
     if (entry.harness) {
-      joinedHarnessesByCid[cid] = {
+      joinedHarnessesByCid[wiringParticipationKey(entry)] = {
         harnessName: entry.harness,
-        roles: entry.roles,
+        roles: ['solver'],
       };
     }
   }

@@ -5,6 +5,7 @@ import {
   PredictionV1RestorationPayloadSchema,
 } from '@jinn-network/sdk/solvernets/prediction-v1';
 import type { JinnConfig } from '../config.js';
+import type { ExecutionWiringConfigEntry } from '../config/shape-v2.js';
 import { DEFAULT_DISABLED_HARNESSES } from '../harnesses/engine/registry.js';
 import {
   loadExternalImpl as defaultLoadExternalImpl,
@@ -19,8 +20,6 @@ import { PredictionV1TaskSchema, type PredictionV1Task } from '../types/predicti
 import type { SolverPluginEntry } from '../plugins/types.js';
 import {
   loadSolverNets as defaultLoadSolverNets,
-  rolesFromJoinedConfig,
-  type JoinedSolverNetConfig,
   type LoadedSolverNet,
   type SolverNetConfig,
   type SolverNetOperatorRole,
@@ -190,10 +189,10 @@ function missingSolverNetStatus(
       code: 'prediction_solvernet_missing',
       severity: 'error',
       message: 'No active SolverNet configured.',
-      configField: 'joinedSolverNets',
+      configField: 'executionWiring',
       nextAction: {
-        description: 'Open Operator > SolverNets to join or configure a SolverNet.',
-        url: '/operator#solvernets',
+        description: 'Add a prediction.v1 executionWiring row in Settings > Claim policy.',
+        url: '/operator/claim-policy',
       },
     },
   ];
@@ -220,41 +219,20 @@ function missingSolverNetStatus(
  * `undefined` when the operator has joined no prediction-contract SolverNet —
  * the common case now that prediction is deprecated.
  */
-function findPredictionJoined(
-  joinedSolverNets: Record<string, JoinedSolverNetConfig> | undefined,
-): JoinedSolverNetConfig | undefined {
-  if (!joinedSolverNets) return undefined;
-  return Object.values(joinedSolverNets).find(
-    (entry) => entry.contract?.id === 'prediction',
-  );
+function findPredictionWiring(
+  wiring: readonly ExecutionWiringConfigEntry[] | undefined,
+): ExecutionWiringConfigEntry | undefined {
+  return (wiring ?? []).find((entry) => entry.workKind.startsWith('prediction.'));
 }
 
-/**
- * Build a synthetic SolverNetConfig from a prediction-contract joinedSolverNets
- * entry. This lets the diagnostic loop run unchanged when an operator has joined
- * the Prediction SolverNet via the manifest-keyed flow but has no legacy
- * solverNets[name] entry.
- */
-function synthesizeFromJoined(
-  joined: JoinedSolverNetConfig,
-  defaultSolverType = 'prediction.v1',
-): SolverNetConfig {
-  const roles = rolesFromJoinedConfig(joined);
-  // Derive solverType from the joined contract when available so the
-  // operator-status diagnostic can surface contract-version mismatches
-  // (e.g. legacy `solverType: 'prediction.v2'` migrated into a joined
-  // entry — the synthesized net's solverType is then 'prediction.v2',
-  // which the prediction.v1 mismatch check catches downstream).
-  const solverType = joined.contract
-    ? `${joined.contract.id}.${joined.contract.version}`
-    : defaultSolverType;
+function synthesizeFromWiring(entry: ExecutionWiringConfigEntry): SolverNetConfig {
   return {
     enabled: true,
-    solverType,
-    roles: roles.length > 0 ? roles : ['solving'],
-    harness: joined.harness ?? '',
-    model: joined.model,
-    plugins: (joined.plugins ?? []) as SolverNetConfig['plugins'],
+    solverType: entry.workKind,
+    roles: ['solving'],
+    harness: entry.harness,
+    model: entry.model,
+    plugins: [...entry.plugins] as SolverNetConfig['plugins'],
     taskGenerator: { enabled: false },
   };
 }
@@ -275,13 +253,13 @@ export async function buildPredictionOperatorStatus({
   // diagnostics — synthesizing a prediction net from a non-prediction
   // joined entry would mislabel its harness and raise a spurious ATTENTION
   // (dogfood finding #9, issue #328).
-  const predictionJoined = findPredictionJoined(config.joinedSolverNets);
-  if (!predictionJoined) {
+  const predictionWiring = findPredictionWiring(config.executionWiring);
+  if (!predictionWiring) {
     return missingSolverNetStatus(configPath, daemonRunning);
   }
-  const net: SolverNetConfig = synthesizeFromJoined(predictionJoined, 'prediction.v1');
-  const manifestCid = predictionJoined.manifestCid;
-  const displayName = predictionJoined.name ?? manifestCid;
+  const net: SolverNetConfig = synthesizeFromWiring(predictionWiring);
+  const manifestCid = predictionWiring.legacyManifestDigest ?? predictionWiring.workKind;
+  const displayName = predictionWiring.workKind;
 
   const diagnostics: PredictionOperatorDiagnostic[] = [];
   let loadedNet: LoadedSolverNet | undefined;
@@ -292,7 +270,7 @@ export async function buildPredictionOperatorStatus({
       code: 'prediction_solvernet_disabled',
       severity: 'error',
       message: 'Prediction SolverNet is disabled.',
-      configField: `joinedSolverNets.${manifestCid}.roles`,
+      configField: `executionWiring.${manifestCid}.roles`,
       nextAction: {
         description: 'Re-join the Prediction SolverNet to enable participation.',
         url: '/operator#solvernets',
@@ -305,7 +283,7 @@ export async function buildPredictionOperatorStatus({
       code: 'prediction_solver_type_mismatch',
       severity: 'error',
       message: `SolverNet '${displayName}' is configured for ${net.solverType}, not prediction.v1.`,
-      configField: `joinedSolverNets.${manifestCid}.contract`,
+      configField: `executionWiring.${manifestCid}.workKind`,
       nextAction: {
         description: 'Set the SolverNet contract to prediction.v1.',
       },
@@ -315,9 +293,7 @@ export async function buildPredictionOperatorStatus({
   if (net.enabled) {
     try {
       const registry = await loadSolverNets({
-        joinedSolverNets: {
-          [manifestCid]: predictionJoined,
-        },
+        executionWiring: [predictionWiring],
       });
       loadedNet = registry.get(displayName);
     } catch (error) {
@@ -326,7 +302,7 @@ export async function buildPredictionOperatorStatus({
         code: 'prediction_plugin_unavailable',
         severity: 'error',
         message: pluginLoadError,
-        configField: `joinedSolverNets.${manifestCid}.plugins`,
+        configField: `executionWiring.${manifestCid}.plugins`,
         nextAction: {
           description: 'Fix the Prediction runtime plugin source or restore the bundled plugin.',
           url: '/operator#solvernets',
@@ -400,7 +376,7 @@ export async function buildPredictionOperatorStatus({
         code: 'prediction_harness_missing',
         severity: 'error',
         message: 'No Harness is selected for the Prediction SolverNet.',
-        configField: `joinedSolverNets.${manifestCid}.harness`,
+        configField: `executionWiring.${manifestCid}.harness`,
         nextAction: {
           description: 'Select a Harness for prediction.v1 Tasks via Operator > SolverNets.',
           url: '/operator#solvernets',
@@ -424,7 +400,7 @@ export async function buildPredictionOperatorStatus({
         message: selectedExternalEntry
           ? `Selected external Harness '${net.harness}' is configured but not available.`
           : `Selected Harness '${net.harness}' is not installed.`,
-        configField: `joinedSolverNets.${manifestCid}.harness`,
+        configField: `executionWiring.${manifestCid}.harness`,
         nextAction: {
           description: 'Select an installed Harness.',
           cli: `jinn harnesses list`,
@@ -435,7 +411,7 @@ export async function buildPredictionOperatorStatus({
         code: 'prediction_harness_unsupported',
         severity: 'error',
         message: `Selected Harness '${selectedHarness.name}' does not support prediction.v1 restoration Tasks.`,
-        configField: `joinedSolverNets.${manifestCid}.harness`,
+        configField: `executionWiring.${manifestCid}.harness`,
         nextAction: {
           description: 'Select a Harness that supports prediction.v1 via Operator > SolverNets.',
           url: '/operator#solvernets',
@@ -446,7 +422,7 @@ export async function buildPredictionOperatorStatus({
         code: 'prediction_harness_not_ready',
         severity: 'warning',
         message: harnessStatus.readiness.reason ?? `Selected Harness '${selectedHarness.name}' is not ready.`,
-        configField: `joinedSolverNets.${manifestCid}.harness`,
+        configField: `executionWiring.${manifestCid}.harness`,
         nextAction: harnessStatus.readiness.nextStep ?? {
           description: 'Start the daemon with a configured operator fleet.',
           cli: 'jinn run',
@@ -465,7 +441,7 @@ export async function buildPredictionOperatorStatus({
       code: 'prediction_task_generator_disabled',
       severity: 'info',
       message: 'Prediction Task generator runs on the launcher, not on this operator. This node will solve shared Tasks; the launcher posts new rounds.',
-      configField: `joinedSolverNets.${manifestCid}`,
+      configField: `executionWiring.${manifestCid}`,
       nextAction: {
         description: 'Operator config no longer carries the task-generator flag; nothing to change.',
       },

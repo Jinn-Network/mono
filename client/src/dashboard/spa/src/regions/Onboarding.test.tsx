@@ -279,7 +279,7 @@ describe('Onboarding step 4 — harness readiness (Wave-4 D1)', () => {
     mode: 'running',
     currentStep: 'complete',
     steps: ['complete'],
-    joinedSolverNets: {},
+    executionWiring: [],
   };
 
   it('mounts the readiness card once terminal and offers no harness or model choice', async () => {

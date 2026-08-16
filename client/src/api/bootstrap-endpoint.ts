@@ -44,7 +44,7 @@ export interface BootstrapEndpointConfig {
     rpcUrls?: readonly string[];
     publicDefaults?: readonly string[];
     rpcSlotHealth?: readonly RpcSlotHealthEntry[];
-    joinedSolverNets?: Record<string, unknown>;
+    executionWiring?: readonly unknown[];
     onboardingComplete?: boolean;
   };
 }
@@ -260,7 +260,7 @@ export function addBootstrapRoutes(app: Hono, config: BootstrapEndpointConfig): 
       ...(cfg.rpcUrls !== undefined ? { rpcUrls: cfg.rpcUrls } : {}),
       ...(cfg.publicDefaults !== undefined ? { publicDefaults: cfg.publicDefaults } : {}),
       ...(cfg.rpcSlotHealth !== undefined ? { rpcSlotHealth: cfg.rpcSlotHealth } : {}),
-      ...(cfg.joinedSolverNets !== undefined ? { joinedSolverNets: cfg.joinedSolverNets } : {}),
+      ...(cfg.executionWiring !== undefined ? { executionWiring: cfg.executionWiring } : {}),
       ...(cfg.onboardingComplete !== undefined ? { onboardingComplete: cfg.onboardingComplete } : {}),
       ...(fundingGateActive && fundingGate ? { funding: fundingResponse(fundingGate) } : {}),
       ...(error ? { error } : {}),

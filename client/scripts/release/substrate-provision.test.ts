@@ -96,16 +96,16 @@ async function setupHome(root: string, opName: string, o: SetupOpts = {}): Promi
       {
         apiPort: 7331,
         rpcUrl: o.rpcUrl ?? DEFAULT_TESTNET_RPC_URLS[0], // single endpoint = drift by default
-        joinedSolverNets: {
-          QmManifestCidA: {
-            manifestCid: 'QmManifestCidA',
-            name: 'swe-net',
-            roles: o.roles ?? ['solver'],
-            harness: o.harness ?? 'hermes-agent', // drift from claude-code-learner by default
-            model: o.model ?? 'deepseek/deepseek-v4-flash',
-            plugins: [],
-          },
-        },
+        executionWiring: [{
+          workKind: 'swe-rebench-v2.v1',
+          harness: o.harness ?? 'hermes-agent',
+          model: o.model ?? 'deepseek/deepseek-v4-flash',
+          plugins: [],
+          credentialRef: `${o.harness ?? 'hermes-agent'}-default`,
+          isolationPolicy: 'process',
+          legacyManifestDigest: 'QmManifestCidA',
+        }],
+        ...(o.roles?.includes('evaluator') ? { evaluator: { enabled: true } } : {}),
       },
       null,
       2,
@@ -212,13 +212,12 @@ describe('substrate-provision doctor', () => {
     const cfg = JSON.parse(await fs.readFile(path.join(opDir, '.jinn-client', 'config.json'), 'utf-8'));
     expect(Array.isArray(cfg.rpcUrl)).toBe(true);
     expect(cfg.rpcUrl).toEqual(DEFAULT_TESTNET_RPC_URLS);
-    const entry = cfg.joinedSolverNets.QmManifestCidA;
+    const entry = cfg.executionWiring[0];
     // HarnessNameSchema is not applied here (raw config rewrite) — the doctor
     // writes the configured alias verbatim; the daemon canonicalises on load.
     expect(entry.harness).toBe(DEFAULT_SOLVE_HARNESS);
     expect(entry.model).toBe(DEFAULT_SOLVE_MODEL);
-    expect(entry.roles).toContain('evaluator');
-    expect(entry.roles).toContain('solver');
+    expect(cfg.evaluator.enabled).toBe(true);
 
     const stateDir = path.join(opDir, '.jinn-client', 'engine', 'impl-state', EVALUATOR_STATE_DIR_NAME);
     const state = JSON.parse(await fs.readFile(path.join(stateDir, 'state.json'), 'utf-8'));

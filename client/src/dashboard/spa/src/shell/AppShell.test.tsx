@@ -6,7 +6,7 @@ import { AppShell } from './AppShell.js';
 
 vi.mock('../notifications/useNotifications.js', () => ({
   useNotifications: vi.fn(() => [
-    { kind: 'harness_not_ready', severity: 'blocking', message: 'X', jumpTo: '/operator/memberships' },
+    { kind: 'harness_not_ready', severity: 'blocking', message: 'X', jumpTo: '/operator/claim-policy' },
   ]),
 }));
 

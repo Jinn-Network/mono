@@ -425,35 +425,9 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
     'jinn_solver_nets_show',
     'Detailed status for one SolverNet. Read-only. Fast (<2s).',
     {
-      name: z.string().describe('SolverNet name, e.g. prediction'),
+      name: z.string().describe('SolverNet name, e.g. prediction.v1'),
     },
     async ({ name }) => runToolCommand(solverNetsCommand, ['show', name, '--json'], process.env),
-  );
-
-  server.tool(
-    'jinn_solver_nets_enable',
-    [
-      'MUTATING: Enable a SolverNet. Idempotent.',
-      'Optionally selects the restoration Harness for that SolverNet.',
-    ].join(' '),
-    {
-      name: z.string().describe('SolverNet name, e.g. prediction'),
-      harness: z.string().optional().describe('Optional Harness name to select for restoration Tasks'),
-    },
-    async ({ name, harness }) => {
-      const argv = ['enable', name, '--json'];
-      if (harness) argv.push('--harness', harness);
-      return runToolCommand(solverNetsCommand, argv, process.env);
-    },
-  );
-
-  server.tool(
-    'jinn_solver_nets_disable',
-    'MUTATING: Disable a SolverNet. Writes config. Idempotent. Fast (<1s).',
-    {
-      name: z.string().describe('SolverNet name'),
-    },
-    async ({ name }) => runToolCommand(solverNetsCommand, ['disable', name, '--json'], process.env),
   );
 
   // ━━ Write (mutating) tools ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

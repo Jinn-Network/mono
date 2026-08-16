@@ -2,9 +2,11 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { keccak256, toBytes } from 'viem';
 import { describe, expect, it, vi } from 'vitest';
 import solverNetsCommand, { parseMintTaskCandidates } from '@/cli/commands/solver-nets.js';
 import { loadConfig, type JinnConfig } from '@/config.js';
+import type { ExecutionWiringConfigEntry } from '@/config/shape-v2.js';
 import type { Harness, RuntimePlugin } from '@/harnesses/types.js';
 import {
   buildPredictionOperatorStatus,
@@ -94,16 +96,37 @@ function loadPredictionTestConfig(
   return { config, configPath };
 }
 
-// Issue #421: on-disk legacy `solverNets.prediction.X` blocks are migrated to
-// `joinedSolverNets['legacy:prediction']` synthetic entries; the
-// `prediction-operator-ux` configField strings carry that synthetic key.
+// On-disk legacy `solverNets.prediction` migrates to executionWiring with
+// `workKind: 'prediction.v1'` and `legacyManifestDigest` = keccak of
+// `legacy:prediction`. Doctor configField strings use that digest.
 const LEGACY_PREDICTION_CID = 'legacy:prediction';
+const LEGACY_PREDICTION_DIGEST = keccak256(toBytes(LEGACY_PREDICTION_CID));
+
+function predictionWiring(config: JinnConfig): ExecutionWiringConfigEntry | undefined {
+  return config.executionWiring?.find((entry) => entry.workKind.startsWith('prediction.'));
+}
+
+const SWE_REBENCH_CID = 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi';
+const SWE_REBENCH_DIGEST = keccak256(toBytes(SWE_REBENCH_CID));
+
+function executionWiringEntry(
+  overrides: Partial<ExecutionWiringConfigEntry> & Pick<ExecutionWiringConfigEntry, 'workKind'>,
+): ExecutionWiringConfigEntry {
+  return {
+    harness: 'claude-code',
+    model: 'claude-haiku-4-5-20251001',
+    plugins: [],
+    credentialRef: 'claude-code-default',
+    isolationPolicy: 'process',
+    ...overrides,
+  };
+}
 
 const operatorStatusDeps = {
   loadSolverNets: async () => ({
-    get: (name: string) => name === 'prediction'
+    get: (name: string) => name === 'prediction.v1'
       ? {
-          name: 'prediction',
+          name: 'prediction.v1',
           enabled: true,
           solverType: 'prediction.v1',
           runtimePlugins: [predictionPlugin],
@@ -267,7 +290,7 @@ describe('solver-nets command', () => {
 
   it('diagnoses Prediction SolverNet status with plugin and Harness details', async () => {
     const configPath = tempConfig(predictionConfig());
-    const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+    const result = await runSolverNets(['doctor', 'prediction.v1', '--config', configPath]);
 
     expect(result.exits).toEqual([]);
     const envelope = result.envelope;
@@ -275,7 +298,7 @@ describe('solver-nets command', () => {
     expect(envelope['kind']).toBe('prediction.v1.operatorStatus');
     expect(envelope['ok']).toBe(true);
     expect(envelope['solverNet']).toMatchObject({
-      name: 'prediction',
+      name: 'prediction.v1',
       enabled: true,
       solverType: 'prediction.v1',
       harness: 'prediction-v1-baseline',
@@ -305,7 +328,7 @@ describe('solver-nets command', () => {
     const configPath = tempConfig(predictionConfig({
       plugins: ['npm:@jinn-network/definitely-missing-prediction-runtime-plugin'],
     }));
-    const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+    const result = await runSolverNets(['doctor', 'prediction.v1', '--config', configPath]);
 
     expect(result.exits).toEqual([]);
     const envelope = result.envelope;
@@ -315,7 +338,7 @@ describe('solver-nets command', () => {
         expect.objectContaining({
           code: 'prediction_plugin_unavailable',
           severity: 'error',
-          configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.plugins`,
+          configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}.plugins`,
         }),
       ]),
     );
@@ -326,7 +349,7 @@ describe('solver-nets command', () => {
       ...predictionConfig({ harness: 'prediction-v1-baseline' }),
       harnesses: { disabled: ['prediction-v1-baseline'] },
     });
-    const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+    const result = await runSolverNets(['doctor', 'prediction.v1', '--config', configPath]);
 
     expect(result.exits).toEqual([]);
     const envelope = result.envelope;
@@ -345,7 +368,7 @@ describe('solver-nets command', () => {
 
   it('honors daemon default-disabled Prediction Harnesses when config omits disabled names', async () => {
     const configPath = tempConfig(predictionConfig({ harness: 'claude-mcp-hyperliquid' }));
-    const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+    const result = await runSolverNets(['doctor', 'prediction.v1', '--config', configPath]);
 
     expect(result.exits).toEqual([]);
     const envelope = result.envelope;
@@ -374,7 +397,7 @@ describe('solver-nets command', () => {
         ],
       },
     });
-    const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+    const result = await runSolverNets(['doctor', 'prediction.v1', '--config', configPath]);
 
     expect(result.exits).toEqual([]);
     const envelope = result.envelope;
@@ -391,11 +414,10 @@ describe('solver-nets command', () => {
   });
 
   it('runs a local no-funds Prediction sample through the baseline Harness', async () => {
-    // Issue #421 F4: sample resolves the SolverNet via joinedSolverNets
-    // (legacy:prediction after migration); an empty config now errors with
-    // Unknown SolverNet rather than silently synthesizing a default.
+    // Sample resolves via findWiringByName against executionWiring
+    // (workKind prediction.v1 after migrating solverNets.prediction).
     const configPath = tempConfig(predictionConfig());
-    const result = await runSolverNets(['sample', 'prediction', '--config', configPath]);
+    const result = await runSolverNets(['sample', 'prediction.v1', '--config', configPath]);
 
     expect(result.exits).toEqual([]);
     const envelope = result.envelope;
@@ -419,7 +441,7 @@ describe('solver-nets command', () => {
 
   it('reports closed sample windows before running the Harness', async () => {
     const configPath = tempConfig(predictionConfig());
-    const result = await runSolverNets(['sample', 'prediction', '--closed-window', '--config', configPath]);
+    const result = await runSolverNets(['sample', 'prediction.v1', '--closed-window', '--config', configPath]);
 
     expect(result.exits).toEqual([]);
     const envelope = result.envelope;
@@ -445,7 +467,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_plugin_unavailable',
         severity: 'error' as const,
-        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.plugins`,
+        configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}.plugins`,
       },
       deps: {
         loadSolverNets: async () => {
@@ -464,7 +486,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_plugin_unavailable',
         severity: 'error' as const,
-        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.plugins`,
+        configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}.plugins`,
       },
       deps: {
         loadSolverNets: async () => {
@@ -483,22 +505,14 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_solver_type_mismatch',
         severity: 'error' as const,
-        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.contract`,
+        configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}.workKind`,
       },
-      // The legacy `solverType: 'portfolio.v0'` migrates to
-      // `contract: { id: 'portfolio', version: 'v0' }`. The joined entry
-      // is keyed by `legacy:prediction` but its contract is portfolio.v0,
-      // which is not prediction. To trigger the mismatch diagnostic the
-      // join must still be found (contract.id === 'prediction') — so we
-      // hand-mutate the joined entry to point at a non-prediction contract
-      // while keeping the prediction-contract entry's display name.
+      // findPredictionWiring matches workKind.startsWith('prediction.');
+      // advancing the version keeps the row visible while failing the
+      // prediction.v1 solverType check.
       config: () => loadPredictionTestConfig({}, (config) => {
-        const entry = config.joinedSolverNets?.[LEGACY_PREDICTION_CID];
-        if (entry?.contract) {
-          // Keep contract.id === 'prediction' so findPredictionJoined picks
-          // it up, but advance the version so the solverType check fails.
-          entry.contract = { id: 'prediction', version: 'v2' };
-        }
+        const entry = predictionWiring(config);
+        if (entry) entry.workKind = 'prediction.v2';
       }),
     },
     {
@@ -509,11 +523,11 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_harness_missing',
         severity: 'error' as const,
-        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.harness`,
+        configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}.harness`,
       },
       config: () => loadPredictionTestConfig({}, (config) => {
-        const entry = config.joinedSolverNets?.[LEGACY_PREDICTION_CID];
-        if (entry) entry.harness = undefined;
+        const entry = predictionWiring(config);
+        if (entry) (entry as { harness?: string }).harness = undefined;
       }),
     },
     {
@@ -524,7 +538,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_harness_unknown',
         severity: 'error' as const,
-        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.harness`,
+        configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}.harness`,
       },
       config: () => loadPredictionTestConfig({ harness: 'not-installed-prediction-harness' }),
     },
@@ -536,7 +550,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_harness_unsupported',
         severity: 'error' as const,
-        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.harness`,
+        configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}.harness`,
       },
       deps: {
         buildHarnesses: () => [
@@ -556,7 +570,7 @@ describe('solver-nets command', () => {
       expected: {
         code: 'prediction_harness_not_ready',
         severity: 'warning' as const,
-        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}.harness`,
+        configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}.harness`,
       },
       deps: {
         buildHarnesses: () => [
@@ -583,7 +597,7 @@ describe('solver-nets command', () => {
         // explaining that generator ownership lives on the launcher.
         code: 'prediction_task_generator_disabled',
         severity: 'info' as const,
-        configField: `joinedSolverNets.${LEGACY_PREDICTION_CID}`,
+        configField: `executionWiring.${LEGACY_PREDICTION_DIGEST}`,
       },
       config: () => loadPredictionTestConfig({}),
     },
@@ -608,11 +622,7 @@ describe('solver-nets command', () => {
     },
   );
 
-  it('reports a generic operator recovery path when no joined prediction SolverNet exists', async () => {
-    // Issue #421: the legacy `solverNets` block is retired; the "missing"
-    // path now fires when no joinedSolverNets entry has contract.id ===
-    // 'prediction'. Empty joinedSolverNets is the canonical "no SolverNet
-    // joined" shape.
+  it('reports a generic operator recovery path when no prediction executionWiring row exists', async () => {
     const configPath = tempConfig({});
     const config = loadConfig(configPath);
 
@@ -628,10 +638,10 @@ describe('solver-nets command', () => {
     const diagnostic = status.diagnostics.find((candidate) => candidate.code === 'prediction_solvernet_missing');
     expect(status.ok).toBe(false);
     expect(diagnostic?.message).toBe('No active SolverNet configured.');
-    expect(diagnostic?.configField).toBe('joinedSolverNets');
+    expect(diagnostic?.configField).toBe('executionWiring');
     expect(diagnostic?.nextAction).toEqual({
-      description: 'Open Operator > SolverNets to join or configure a SolverNet.',
-      url: '/operator#solvernets',
+      description: 'Add a prediction.v1 executionWiring row in Settings > Claim policy.',
+      url: '/operator/claim-policy',
     });
     expect(status.nextAction).toEqual(diagnostic?.nextAction);
     expect(JSON.stringify(status)).not.toContain("No SolverNet named 'prediction'");
@@ -679,17 +689,15 @@ describe('solver-nets command', () => {
         },
       };
       const configPath = tempConfig(legacyConfig);
-      const result = await runSolverNets(['show', 'legacy', '--config', configPath]);
+      const result = await runSolverNets(['show', 'prediction.v0', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       const envelope = result.envelope;
       expect(envelope['solverNet']).not.toHaveProperty('canonicalPlugin');
       expect(envelope['solverNet']).not.toHaveProperty('referencePlugins');
-      // Legacy source was promoted into plugins[] so display sanitization does
-      // not silently discard operator intent.
-      expect(envelope['solverNet']['plugins']).toContain('bundled:jinn-prediction-plugin');
-      // referencePlugins entries are dropped — they were never live runtime
-      // substrate and the abandoned reference-plugin concept must not surface.
+      // Shape-v2 migration copies plugins[] only; canonicalPlugin is not
+      // promoted into executionWiring.
+      expect(envelope['solverNet']['plugins']).not.toContain('bundled:jinn-prediction-plugin');
       expect(envelope['solverNet']['plugins']).not.toContain('npm:@example/old-reference-plugin');
     });
 
@@ -702,12 +710,11 @@ describe('solver-nets command', () => {
       const configPath = tempConfig(malformedConfig);
       const result = await runSolverNets(['show', 'broken', '--config', configPath]);
 
-      expect(result.exits).toEqual([]);
-      const envelope = result.envelope;
-      // Sanitizer must not emit the raw scalar — that would propagate
-      // malformed config into operator-facing surfaces.
-      expect(typeof envelope['solverNet']).toBe('object');
-      expect(envelope['solverNet']).not.toBe(null);
+      expect(result.exits).toEqual([1]);
+      expect(result.envelope['error']).toMatchObject({
+        code: 'invalid_invocation',
+        message: 'Unknown SolverNet: broken',
+      });
     });
 
     it('strips canonicalPlugin from solver-nets doctor output for non-prediction.v1 SolverNets', async () => {
@@ -725,7 +732,7 @@ describe('solver-nets command', () => {
         },
       };
       const configPath = tempConfig(legacyConfig);
-      const result = await runSolverNets(['doctor', 'legacy', '--config', configPath]);
+      const result = await runSolverNets(['doctor', 'prediction.v0', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       const envelope = result.envelope;
@@ -748,7 +755,7 @@ describe('solver-nets command', () => {
         },
       };
       const configPath = tempConfig(legacyConfig);
-      const result = await runSolverNets(['show', 'legacy', '--config', configPath]);
+      const result = await runSolverNets(['show', 'prediction.v0', '--config', configPath]);
 
       const plugins = result.envelope['solverNet']['plugins'] as unknown[];
       const occurrences = plugins.filter((entry) => entry === 'bundled:jinn-prediction-plugin').length;
@@ -759,7 +766,7 @@ describe('solver-nets command', () => {
   describe('--human output mode', () => {
     it('solver-nets doctor --human emits readable text, not JSON, for prediction.v1', async () => {
       const configPath = tempConfig(predictionConfig());
-      const made = makeCommandCtx({ argv: ['doctor', 'prediction', '--human', '--config', configPath] });
+      const made = makeCommandCtx({ argv: ['doctor', 'prediction.v1', '--human', '--config', configPath] });
       await solverNetsCommand.run(made.ctx);
       const raw = made.writes.join('');
 
@@ -767,7 +774,7 @@ describe('solver-nets command', () => {
       // First write must not be a JSON object header (which is what `--human`
       // is meant to suppress per docs/runbooks operator dogfood evidence).
       expect(raw.trim().startsWith('{')).toBe(false);
-      expect(raw).toContain('SolverNet: prediction');
+      expect(raw).toContain('SolverNet: prediction.v1');
       expect(raw).toContain('solverType: prediction.v1');
     });
 
@@ -784,19 +791,19 @@ describe('solver-nets command', () => {
         },
       };
       const configPath = tempConfig(legacyConfig);
-      const made = makeCommandCtx({ argv: ['show', 'legacy', '--human', '--config', configPath] });
+      const made = makeCommandCtx({ argv: ['show', 'prediction.v0', '--human', '--config', configPath] });
       await solverNetsCommand.run(made.ctx);
       const raw = made.writes.join('');
 
       expect(made.exits).toEqual([]);
       expect(raw.trim().startsWith('{')).toBe(false);
-      expect(raw).toContain('SolverNet: legacy');
+      expect(raw).toContain('SolverNet: prediction.v0');
       expect(raw).toContain('plugins: bundled:jinn-prediction-plugin');
     });
 
     it('solver-nets doctor without --human keeps JSON output (default behaviour)', async () => {
       const configPath = tempConfig(predictionConfig());
-      const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+      const result = await runSolverNets(['doctor', 'prediction.v1', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       // runSolverNets already JSON.parses the writes — proves output remains JSON.
@@ -812,89 +819,88 @@ describe('solver-nets command', () => {
       expect(made.exits).toEqual([]);
       // Help text advertises --human for list as well — verify it is honored.
       expect(raw.trim().startsWith('{')).toBe(false);
-      expect(raw).toContain('prediction');
       expect(raw).toContain('prediction.v1');
+      expect(raw).toContain('executionWiring');
     });
   });
 
-  describe('solver-nets list — joinedSolverNets enumeration (issue #421)', () => {
-    it('surfaces migrated legacy entries with source: joined and synthetic cid', async () => {
-      // After issue #421, the legacy `solverNets.prediction` block on disk
-      // is auto-migrated by loadConfig into a joinedSolverNets entry under
-      // the synthetic key `legacy:prediction`. The list output surfaces it
-      // with source='joined'.
+  describe('solver-nets list — executionWiring enumeration', () => {
+    it('surfaces migrated legacy entries with source: executionWiring and keccak digest', async () => {
       const configPath = tempConfig(predictionConfig());
       const result = await runSolverNets(['list', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
       expect(nets.length).toBeGreaterThan(0);
-      const entry = nets.find((n) => n['name'] === 'prediction');
+      const entry = nets.find((n) => n['name'] === 'prediction.v1');
       expect(entry).toBeDefined();
-      expect(entry?.['source']).toBe('joined');
-      expect(entry?.['manifestCid']).toBe(LEGACY_PREDICTION_CID);
+      expect(entry?.['source']).toBe('executionWiring');
+      expect(entry?.['manifestCid']).toBe(LEGACY_PREDICTION_DIGEST);
+      expect(entry?.['taskGeneratorEnabled']).toBe(false);
     });
 
-    it('enumerates joinedSolverNets entries with source: joined', async () => {
+    it('enumerates executionWiring entries with source: executionWiring', async () => {
       const configPath = tempConfig({
-        joinedSolverNets: {
-          'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
-            manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
-            name: 'SWE-rebench v2',
-            roles: ['solver', 'evaluator'],
+        configShapeVersion: 2,
+        executionWiring: [
+          executionWiringEntry({
+            workKind: 'swe-rebench-v2.v1',
             harness: 'claude-code',
-            plugins: [],
-          },
-        },
+            legacyManifestDigest: SWE_REBENCH_DIGEST,
+          }),
+        ],
       });
       const result = await runSolverNets(['list', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
       expect(nets.length).toBe(1);
-      expect(nets[0]?.['source']).toBe('joined');
-      expect(nets[0]?.['name']).toBe('SWE-rebench v2');
-      expect(nets[0]?.['manifestCid']).toBe('bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi');
+      expect(nets[0]?.['source']).toBe('executionWiring');
+      expect(nets[0]?.['name']).toBe('swe-rebench-v2.v1');
+      expect(nets[0]?.['manifestCid']).toBe(SWE_REBENCH_DIGEST);
     });
 
-    it('returns one entry per joinedSolverNets membership (migrated + native)', async () => {
+    it('returns one entry per executionWiring row', async () => {
       const configPath = tempConfig({
-        ...predictionConfig(),
-        joinedSolverNets: {
-          'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
-            manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
-            name: 'SWE-rebench v2',
-            roles: ['solver'],
+        configShapeVersion: 2,
+        executionWiring: [
+          executionWiringEntry({
+            workKind: 'prediction.v1',
+            harness: 'prediction-v1-baseline',
+            plugins: ['bundled:jinn-prediction-plugin'],
+            credentialRef: 'prediction-v1-baseline-default',
+            legacyManifestDigest: LEGACY_PREDICTION_DIGEST,
+          }),
+          executionWiringEntry({
+            workKind: 'swe-rebench-v2.v1',
             harness: 'claude-code',
-            plugins: [],
-          },
-        },
+            legacyManifestDigest: SWE_REBENCH_DIGEST,
+          }),
+        ],
       });
       const result = await runSolverNets(['list', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       const nets = result.envelope['solverNets'] as Array<Record<string, unknown>>;
       expect(nets.length).toBe(2);
-      // Both entries surface as source='joined' (one migrated, one native).
       for (const n of nets) {
-        expect(n['source']).toBe('joined');
+        expect(n['source']).toBe('executionWiring');
       }
       const cids = nets.map((n) => n['manifestCid']);
-      expect(cids).toContain(LEGACY_PREDICTION_CID);
-      expect(cids).toContain('bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi');
+      expect(cids).toContain(LEGACY_PREDICTION_DIGEST);
+      expect(cids).toContain(SWE_REBENCH_DIGEST);
     });
 
-    it('solver-nets list --human includes joined SolverNet name in output', async () => {
+    it('solver-nets list --human includes workKind and executionWiring source', async () => {
       const configPath = tempConfig({
-        joinedSolverNets: {
-          'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
-            manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
-            name: 'SWE-rebench v2',
-            roles: ['solver'],
+        configShapeVersion: 2,
+        executionWiring: [
+          executionWiringEntry({
+            workKind: 'swe-rebench-v2.v1',
             harness: 'claude-code',
-            plugins: [],
-          },
-        },
+            legacyManifestDigest: SWE_REBENCH_DIGEST,
+          }),
+        ],
       });
       const made = makeCommandCtx({ argv: ['list', '--human', '--config', configPath] });
       await solverNetsCommand.run(made.ctx);
@@ -902,31 +908,37 @@ describe('solver-nets command', () => {
 
       expect(made.exits).toEqual([]);
       expect(raw.trim().startsWith('{')).toBe(false);
-      expect(raw).toContain('SWE-rebench v2');
-      expect(raw).toContain('joined');
+      expect(raw).toContain('swe-rebench-v2.v1');
+      expect(raw).toContain('executionWiring');
     });
   });
 
-  describe('solver-nets show/doctor/sample — joined-first resolution (issue #421 F4)', () => {
-    // F4: after loadConfig migration, `jinn solver-nets show prediction` for
-    // an operator who has rejoined via the SPA returned a synthetic
-    // predictionDefault() stub via readConfig → ensureSolverNets, ignoring
-    // their actual joinedSolverNets membership. The fix prefers the joined
-    // config and falls back to legacy on-disk only when nothing matches.
+  describe('solver-nets mutation subverbs', () => {
+    it.each(['enable', 'disable', 'set-harness', 'add-plugin', 'remove-plugin'] as const)(
+      'retires solver-nets %s with a non-zero exit',
+      async (subverb) => {
+        const configPath = tempConfig(predictionConfig());
+        const result = await runSolverNets([subverb, 'prediction.v1', '--config', configPath]);
+        expect(result.exits).toEqual([1]);
+        expect(result.envelope['error']).toMatchObject({
+          code: 'invalid_invocation',
+          message: `solver-nets ${subverb} was retired. Edit executionWiring in the operator config and restart.`,
+        });
+      },
+    );
+  });
 
-    it('show resolves prediction from a migrated legacy:prediction joined entry', async () => {
-      // Legacy on-disk solverNets.prediction triggers loadConfig migration to
-      // joinedSolverNets['legacy:prediction']; `show prediction` must find it
-      // via the joined view, not fall through to the synthetic default.
+  describe('solver-nets show/doctor/sample — executionWiring resolution', () => {
+    it('show resolves prediction.v1 from a migrated legacy solverNets.prediction block', async () => {
       const configPath = tempConfig(predictionConfig({
         harness: 'prediction-v1-baseline',
         plugins: ['bundled:jinn-prediction-plugin'],
       }));
-      const result = await runSolverNets(['show', 'prediction', '--config', configPath]);
+      const result = await runSolverNets(['show', 'prediction.v1', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       const envelope = result.envelope;
-      expect(envelope['name']).toBe('prediction');
+      expect(envelope['name']).toBe('prediction.v1');
       expect(envelope['solverNet']).toMatchObject({
         solverType: 'prediction.v1',
         harness: 'prediction-v1-baseline',
@@ -934,23 +946,20 @@ describe('solver-nets command', () => {
       expect((envelope['solverNet'] as { plugins: unknown }).plugins).toContain('bundled:jinn-prediction-plugin');
     });
 
-    it('show resolves prediction from a real (non-legacy) joinedSolverNets entry by display name', async () => {
-      // The SPA join flow writes a real manifestCid entry — `show prediction`
-      // must match it via the entry's `name` field rather than synthesizing a
-      // default stub.
+    it('show resolves prediction.v1 from an executionWiring row by workKind', async () => {
       const configPath = tempConfig({
-        joinedSolverNets: {
-          'bafkreigenuineprediction0000000000000000000000000000000000': {
-            manifestCid: 'bafkreigenuineprediction0000000000000000000000000000000000',
-            name: 'prediction',
-            contract: { id: 'prediction', version: 'v1' },
-            roles: ['solver'],
+        configShapeVersion: 2,
+        executionWiring: [
+          executionWiringEntry({
+            workKind: 'prediction.v1',
             harness: 'prediction-v1-baseline',
             plugins: ['bundled:jinn-prediction-plugin'],
-          },
-        },
+            credentialRef: 'prediction-v1-baseline-default',
+            legacyManifestDigest: keccak256(toBytes('bafkreigenuineprediction0000000000000000000000000000000000')),
+          }),
+        ],
       });
-      const result = await runSolverNets(['show', 'prediction', '--config', configPath]);
+      const result = await runSolverNets(['show', 'prediction.v1', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       const envelope = result.envelope;
@@ -960,17 +969,14 @@ describe('solver-nets command', () => {
       });
     });
 
-    it('show prints Unknown SolverNet when name has no legacy file entry and no joined entry', async () => {
-      // Empty config — no legacy on-disk solverNets block, no joinedSolverNets
-      // entry. The synthetic predictionDefault() path used to mask this; the
-      // fix surfaces it as an unambiguous error.
+    it('show prints Unknown SolverNet when no executionWiring row matches', async () => {
       const configPath = tempConfig({});
-      const result = await runSolverNets(['show', 'prediction', '--config', configPath]);
+      const result = await runSolverNets(['show', 'prediction.v1', '--config', configPath]);
 
       expect(result.exits).toEqual([1]);
       expect(result.envelope['error']).toMatchObject({
         code: 'invalid_invocation',
-        message: 'Unknown SolverNet: prediction',
+        message: 'Unknown SolverNet: prediction.v1',
       });
     });
 
@@ -979,21 +985,21 @@ describe('solver-nets command', () => {
       // it must run the prediction.v1 status branch against the migrated
       // joined entry rather than a synthetic stub.
       const configPath = tempConfig(predictionConfig());
-      const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+      const result = await runSolverNets(['doctor', 'prediction.v1', '--config', configPath]);
 
       expect(result.exits).toEqual([]);
       expect(result.envelope['verb']).toBe('solver-nets doctor');
       expect(result.envelope['kind']).toBe('prediction.v1.operatorStatus');
     });
 
-    it('doctor prints Unknown SolverNet when neither legacy nor joined match', async () => {
+    it('doctor prints Unknown SolverNet when no executionWiring row matches', async () => {
       const configPath = tempConfig({});
-      const result = await runSolverNets(['doctor', 'prediction', '--config', configPath]);
+      const result = await runSolverNets(['doctor', 'prediction.v1', '--config', configPath]);
 
       expect(result.exits).toEqual([1]);
       expect(result.envelope['error']).toMatchObject({
         code: 'invalid_invocation',
-        message: 'Unknown SolverNet: prediction',
+        message: 'Unknown SolverNet: prediction.v1',
       });
     });
   });

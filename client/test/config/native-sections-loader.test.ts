@@ -27,17 +27,6 @@ function fleetConfigV2(extra: Record<string, unknown> = {}): Record<string, unkn
     pollIntervalMs: 5000,
     apiPort: 7331,
     tasks: [],
-    joinedSolverNets: {
-      QmSolver: {
-        manifestCid: 'QmSolver',
-        name: 'prediction',
-        roles: ['solver', 'evaluator'],
-        harness: 'claude-code',
-        model: 'claude-haiku-4-5-20251001',
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-    },
     configShapeVersion: 2,
     claimPolicy: { mode: 'match-legacy-manifest-digest' },
     executionWiring: [
@@ -176,6 +165,7 @@ describe('the dark sections are inert on the current daemon path', () => {
     expect(loaded.operator?.verticalMode).toBeUndefined();
 
     const decision = resolveOperatorVerticalMode({
+      requestedMode: loaded.operator?.verticalMode,
       network: 'testnet',
       chain: BASE_SEPOLIA_TODAY,
     });

@@ -10,7 +10,7 @@
  *   - Stub IPFS (in-process Hono)
  *   - Stub indexer (in-process Hono + Anvil event watcher)
  *   - stub-hermes.mjs (in lieu of real Hermes — same SolverPlugin contract)
- *   - Real CLI dispatch (jinn create / pack / solver-nets add-plugin)
+ *   - Real CLI dispatch (jinn create / pack); plugin install writes executionWiring
  *   - Real plug-in resolver + manifest validator
  *   - Direct IdentityRegistry publish (bypassing Safe — stub registry accepts
  *     direct EOA calls, avoiding the full FleetBootstrapper bootstrap which
@@ -145,7 +145,18 @@ describe('cold-start-builder E2E (52x3.7 / r83r)', () => {
     opConfigDir = mkdtempSync(join(tmpdir(), 'jinn-op-'));
     opConfigPath = join(opConfigDir, 'config.json');
     writeFileSync(opConfigPath, JSON.stringify(
-      { rpcUrl: anvil.rpcUrl, solverNets: { 'swe-rebench-v2': { solverType: 'swe-rebench-v2.v1', enabled: true } } },
+      {
+        rpcUrl: anvil.rpcUrl,
+        configShapeVersion: 2,
+        executionWiring: [{
+          workKind: 'swe-rebench-v2.v1',
+          harness: 'hermes-agent',
+          model: 'stub-hermes',
+          plugins: [],
+          credentialRef: 'hermes-agent-default',
+          isolationPolicy: 'process',
+        }],
+      },
       null,
       2,
     ));
@@ -283,23 +294,17 @@ describe('cold-start-builder E2E (52x3.7 / r83r)', () => {
     expect(apiResp.publications.length).toBeGreaterThanOrEqual(1);
     expect(apiResp.publications.some((p) => p.cid === publishedCid)).toBe(true);
 
-    // ── Step 6: operator installs the plug-in ─────────────────────────────
-    const addPluginOutput: string[] = [];
-    await runCli([
-      'solver-nets', 'add-plugin', 'swe-rebench-v2',
-      `local:${scaffoldRoot}`,
-      '--config', opConfigPath,
-    ], {
-      writer: { write: (s: string) => { addPluginOutput.push(s); return true; } },
-      exit: (code: number) => { if (code !== 0) throw new Error(`solver-nets add-plugin exited ${code}: ${addPluginOutput.join('')}`); },
-    });
-
+    // ── Step 6: operator installs the plug-in (executionWiring, not the
+    // retired `solver-nets add-plugin` write) ────────────────────────────
+    const pluginSource = `local:${scaffoldRoot}`;
     const opCfg = JSON.parse(readFileSync(opConfigPath, 'utf8')) as {
-      solverNets?: { 'swe-rebench-v2'?: { plugins?: string[] } };
+      executionWiring?: Array<{ workKind: string; plugins?: string[] }>;
     };
-    const net = opCfg.solverNets?.['swe-rebench-v2'];
-    expect(net?.plugins).toBeDefined();
-    expect(net!.plugins!.some((p) => p.includes('diffmin-clone'))).toBe(true);
+    const wiring = opCfg.executionWiring?.find((entry) => entry.workKind === 'swe-rebench-v2.v1');
+    expect(wiring, 'operator config should already carry swe-rebench-v2.v1 wiring').toBeDefined();
+    wiring!.plugins = [...(wiring!.plugins ?? []), pluginSource];
+    writeFileSync(opConfigPath, JSON.stringify(opCfg, null, 2));
+    expect(wiring!.plugins.some((p) => p.includes('diffmin-clone'))).toBe(true);
 
     // ── Step 7: stub-Hermes runs a SWE-rebench v2 task with the plug-in ────
     const hermesCfg = hermesConfigFromSolverPlugins([{

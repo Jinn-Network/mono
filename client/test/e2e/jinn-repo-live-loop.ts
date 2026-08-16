@@ -186,15 +186,15 @@ async function main(): Promise<void> {
     console.log(`mock mech: ${v3Env.mockMechAddress}`);
 
     const solverNetRegistry = await loadSolverNets({
-      joinedSolverNets: {
-        'jinn-repo.v1': {
-          manifestCid: 'jinn-repo.v1',
-          name: 'jinn-repo-live-loop',
-          contract: { id: 'jinn-repo', version: 'v1' },
-          roles: ['solver', 'evaluator'],
-          harness: 'claude-code',
-        },
-      },
+      executionWiring: [{
+        workKind: 'jinn-repo.v1',
+        harness: 'claude-code',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'claude-code-default',
+        isolationPolicy: 'process',
+        legacyManifestDigest: 'jinn-repo.v1',
+      }],
     });
 
     const syntheticSolver = new SyntheticJinnRepoSolver();

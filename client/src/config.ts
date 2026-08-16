@@ -22,7 +22,6 @@ import { NativeOperatorConfigSchema } from './daemon/native-product-config.js';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
-import { isOpenRouterModelId } from './harnesses/provider-ref.js';
 import { parseRpcUrls } from './rpc/transport.js';
 import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
 import {
@@ -44,7 +43,7 @@ import {
   NativeTrustRootsPathSchema,
 } from './config/native-sections.js';
 import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
-import { recordPhaseDTransitionUse } from './compatibility/phase-d-transition-usage.js';
+import { pruneMigrationBackups } from './config/atomic-write.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -476,64 +475,10 @@ export const JinnConfigSchema = z.object({
     .default({ share: false }),
 
   /**
-   * Manifest-keyed joined SolverNets.
-   *
-   * Spec: spec/2026-05-05-solvernet-creation-and-launch.md §12.
-   *
-   * Legacy key. Its claim gate retired in Wave-4 D1 (DR-2026-08-05); the key
-   * itself stays parseable until stage 5 (composition program contract 4) and
-   * is still read by status, launcher, spend-cap and `jinn eval` surfaces.
-   * Historically populated by the retired `POST /v1/operator/join/:cid` when an operator joined a
-   * launched SolverNet from the registry catalog. Keys are `manifestCid`
-   * (CIDv0 / CIDv1) — the only stable identifier that maps back to a
-   * launched-instance authority across launchers.
-   *
-   * The daemon narrows this block into runtime SolverNet registry entries on
-   * restart. Legacy short-name-keyed `solverNets` blocks on operator config
-   * files are auto-migrated into synthetic `legacy:<short-name>`-keyed
-   * entries at load time (see `migrateLegacySolverNets`).
-   */
-  joinedSolverNets: z
-    .record(
-      z.string(),
-      z.object({
-        manifestCid: z.string().min(1),
-        name: z.string().optional(),
-        contract: z
-          .object({
-            id: z.string().min(1),
-            version: z.string().min(1),
-          })
-          .optional(),
-        roles: z
-          .array(z.enum(['solver', 'evaluator']))
-          .min(1, 'each joined SolverNet must enable at least one role'),
-        harness: HarnessNameSchema.optional(),
-        model: z.string().optional(),
-        // Provider route (issue #1243): a named provider (string) or a custom
-        // OpenAI-compatible endpoint object. Optional — legacy `{model}`-only
-        // entries are backfilled at load time (see `backfillJoinedProviders`).
-        provider: z
-          .union([
-            z.string().trim().min(1),
-            z.object({
-              name: z.string().trim().min(1),
-              baseUrl: z.string().trim().min(1).optional(),
-              authVar: z.string().trim().min(1).optional(),
-            }),
-          ])
-          .optional(),
-        plugins: z.array(z.string()).default([]),
-        disabledDefaultPlugins: z.array(z.string()).default([]),
-      }),
-    )
-    .optional(),
-
-  /**
    * Config shape v2 (stage-1 cutover, `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md`
-   * Task 1). Additive keys written *beside* `joinedSolverNets` by the boot
-   * migration (Task 3) — legacy keys survive until stage 5. All three are
-   * optional so an unmigrated config file still parses.
+   * Task 1). Claim policy, execution wiring, and posting are the only
+   * participation shape the daemon reads. A stale `joinedSolverNets` /
+   * `solverNets` key on disk is stripped by Zod, not a boot failure.
    */
   configShapeVersion: z.literal(CONFIG_SHAPE_VERSION).optional(),
   claimPolicy: ClaimPolicyConfigSchema.optional(),
@@ -973,139 +918,7 @@ export class ConfigLoadError extends Error {
 
 // ── Loader ──────────────────────────────────────────────────────────────────
 
-interface LegacySolverNetEntry {
-  enabled?: boolean;
-  solverType?: string;
-  roles?: Array<'solving' | 'evaluating' | 'launching' | string>;
-  harness?: string;
-  model?: string;
-  plugins?: unknown[];
-  taskGenerator?: unknown;
-}
-
-/**
- * Parse a legacy `<id>.<version>` solverType string into `{id, version}`.
- * Falls back to `{ id: fallbackId, version: 'v1' }` when the string lacks a
- * dot or terminates in one — this happens only on hand-edited operator
- * configs and keeps the migration loud-but-non-fatal.
- */
-function parseSolverTypeRef(
-  solverType: string | undefined,
-  fallbackId: string,
-): { id: string; version: string } {
-  if (typeof solverType !== 'string') {
-    return { id: fallbackId, version: 'v1' };
-  }
-  const dot = solverType.lastIndexOf('.');
-  if (dot <= 0 || dot === solverType.length - 1) {
-    return { id: fallbackId, version: 'v1' };
-  }
-  return { id: solverType.slice(0, dot), version: solverType.slice(dot + 1) };
-}
-
-/**
- * Translate any legacy short-name-keyed `solverNets` block on the raw parsed
- * config into manifest-keyed `joinedSolverNets` entries with synthetic
- * `legacy:<short-name>` keys.
- *
- * This is the auto-migration path for operators upgrading past issue #421.
- * The runtime claim filter remains manifest-digest gated, so synthetic-keyed
- * entries don't change task eligibility — they exist purely so the diagnostic
- * surfaces (Overview SOLVING-ON eyebrow, prediction-operator-status) keep
- * showing the operator's previous SolverNets until they re-join via the SPA.
- *
- * Returns the number of legacy entries migrated. Idempotent — calling on an
- * already-migrated raw config is a no-op.
- *
- * @param raw — the JSON-parsed config file contents (mutated in place).
- */
-export function migrateLegacySolverNets(raw: Record<string, unknown>): number {
-  const legacy = raw['solverNets'];
-  if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) {
-    return 0;
-  }
-  const entries = Object.entries(legacy as Record<string, unknown>);
-  if (entries.length === 0) {
-    delete raw['solverNets'];
-    return 0;
-  }
-
-  const joined = (typeof raw['joinedSolverNets'] === 'object' && raw['joinedSolverNets'] !== null && !Array.isArray(raw['joinedSolverNets']))
-    ? (raw['joinedSolverNets'] as Record<string, unknown>)
-    : {};
-
-  let migrated = 0;
-  for (const [name, entryRaw] of entries) {
-    if (!entryRaw || typeof entryRaw !== 'object') continue;
-    const entry = entryRaw as LegacySolverNetEntry;
-    const syntheticKey = `legacy:${name}`;
-    // Do not overwrite a pre-existing joinedSolverNets entry under the same key.
-    if (joined[syntheticKey] !== undefined) continue;
-
-    const contract = parseSolverTypeRef(entry.solverType, name);
-    const rolesIn = Array.isArray(entry.roles) && entry.roles.length > 0
-      ? entry.roles
-      : ['solving'];
-    const roles: Array<'solver' | 'evaluator'> = [];
-    for (const r of rolesIn) {
-      if (r === 'solving') roles.push('solver');
-      else if (r === 'evaluating') roles.push('evaluator');
-      // 'launching' (and any other unknown role) is dropped — operator config
-      // no longer carries the launcher role per spec §11.
-    }
-    if (roles.length === 0) roles.push('solver');
-
-    joined[syntheticKey] = {
-      manifestCid: syntheticKey,
-      name,
-      contract,
-      roles: Array.from(new Set(roles)),
-      ...(typeof entry.harness === 'string' ? { harness: entry.harness } : {}),
-      ...(typeof entry.model === 'string' ? { model: entry.model } : {}),
-      // Stamp the OpenRouter provider first-class when the migrated model is
-      // OpenRouter-shaped (issue #1243) so the synthetic entry matches what a
-      // fresh join would persist and the adapter routes without inference.
-      ...(typeof entry.model === 'string' && isOpenRouterModelId(entry.model)
-        ? { provider: 'openrouter' as const }
-        : {}),
-      plugins: Array.isArray(entry.plugins) ? entry.plugins : [],
-      disabledDefaultPlugins: [],
-    };
-    migrated += 1;
-  }
-
-  if (Object.keys(joined).length > 0) {
-    raw['joinedSolverNets'] = joined;
-  }
-  delete raw['solverNets'];
-  return migrated;
-}
-
-/**
- * Backfill `provider: 'openrouter'` onto legacy `joinedSolverNets` entries that
- * carry an OpenRouter-shaped `model` id but no `provider` (issue #1243). A
- * v0.1.6 config only persisted `{ model }` and relied on the adapter inferring
- * the provider from the id shape at runtime; stamping it here makes the route
- * first-class so pre-provider configs migrate silently.
- *
- * Mutates `merged` in place. Idempotent — entries that already carry a
- * `provider`, or whose `model` is absent / not OpenRouter-shaped, are untouched.
- * Returns the number of entries backfilled.
- */
-export function backfillJoinedProviders(merged: Record<string, unknown>): number {
-  const joined = merged['joinedSolverNets'];
-  if (!joined || typeof joined !== 'object' || Array.isArray(joined)) return 0;
-  let backfilled = 0;
-  for (const entry of Object.values(joined as Record<string, unknown>)) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const e = entry as Record<string, unknown>;
-    if (e['provider'] !== undefined) continue;
-    if (!isOpenRouterModelId(e['model'] as string | undefined)) continue;
-    e['provider'] = 'openrouter';
-    backfilled += 1;
-  }
-  return backfilled;
-}
+export { pruneMigrationBackups } from './config/atomic-write.js';
 
 let lastConfigMigrationReport: ConfigMigrationReport | undefined;
 
@@ -1517,30 +1330,6 @@ export function loadConfig(configPath?: string): JinnConfig {
     }
   }
 
-  // Auto-migrate any legacy short-name-keyed `solverNets` block into
-  // `joinedSolverNets` with synthetic `legacy:<name>` keys. Operators upgrade
-  // without an explicit action; the warning surfaces the migration so they
-  // know to re-join via the SPA when they want a real manifest CID. See
-  // spec/2026-05-25-retire-legacy-solvernets-config.md and issue #421.
-  const migratedCount = migrateLegacySolverNets(merged);
-  if (migratedCount > 0) {
-    console.warn(
-      `[config] Migrated ${migratedCount} legacy solverNets ${migratedCount === 1 ? 'entry' : 'entries'} to joinedSolverNets. ` +
-      'Open Operator > SolverNets in the dashboard to re-join via the registry ' +
-      '(replaces the synthetic legacy:* keys with real manifest CIDs).'
-    );
-  }
-  // Persist whenever the on-disk file carried a legacy `solverNets` block, even
-  // when every entry already had a `legacy:*` counterpart (migratedCount === 0):
-  // `migrateLegacySolverNets` deletes the block in-memory unconditionally, so
-  // gating the persist on migratedCount would leave the stale block on disk
-  // forever and re-trigger prediction code paths every boot (issue #445).
-  // Re-reads the raw file (never the env-merged object) so transient env
-  // overrides are not baked in; best-effort, and a no-op on already-clean files.
-  if ('solverNets' in fileValues) {
-    persistLegacySolverNetsMigration(filePath);
-  }
-
   // Migrate legacy `mineableTraces.{consent,publishConsent}` → single `share`
   // (mono#1714, one release). Only the old publish bit ever meant "a task may
   // leave the machine"; the tier-1 retention bit is discarded (retention is now
@@ -1554,18 +1343,10 @@ export function loadConfig(configPath?: string): JinnConfig {
     // the schema's non-strict parse — no explicit reshape needed.
   }
 
-  // Backfill `provider: 'openrouter'` onto legacy `{model}`-only joined entries
-  // whose model id is OpenRouter-shaped (issue #1243). Runs after the legacy
-  // migration so synthetic `legacy:*` entries are covered too. In-memory only —
-  // the on-disk config re-persists provider first-class on the operator's next
-  // join via the SPA; a load-time-only backfill keeps existing files loading.
-  backfillJoinedProviders(merged);
-
   // Auto-migrate joined SolverNets / launched records into the stage-1
   // shape-v2 keys (`claimPolicy`, `executionWiring`, `posting`). Additive,
   // atomic, idempotent (stage-1 contract 4) — safe to call on every boot. A
-  // read-only mount degrades to a warning, matching
-  // `persistLegacySolverNetsMigration` above. See
+  // read-only mount degrades to a warning. See
   // docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md Task 3.
   try {
     const report = migrateConfigShapeV2({ configPath: filePath });
@@ -1610,14 +1391,14 @@ export function loadConfig(configPath?: string): JinnConfig {
   // this keeps the two L1/L2 defaults symmetric. Both chains ship ≥5 free
   // providers per issue #911.
   const parsed = result.data;
-  const usesLegacyWiring = (parsed.executionWiring ?? []).some((entry) => (
-    entry.harness.length > 0
-    || entry.model.length > 0
-    || entry.plugins.length > 0
-    || entry.credentialRef.length > 0
-    || entry.legacyManifestDigest !== undefined
-  ));
-  if (usesLegacyWiring) recordPhaseDTransitionUse('legacy-wiring-config-field');
+  if (parsed.configShapeVersion === CONFIG_SHAPE_VERSION) {
+    const pruned = pruneMigrationBackups(dirname(filePath));
+    if (pruned.removed.length > 0) {
+      console.log(
+        `[config] Pruned ${pruned.removed.length} pre-v2 migration ${pruned.removed.length === 1 ? 'backup' : 'backups'}.`,
+      );
+    }
+  }
   const defaultRpcUrls: readonly string[] = parsed.network === 'testnet'
     ? DEFAULT_TESTNET_RPC_URLS
     : DEFAULT_MAINNET_RPC_URLS;
@@ -1660,29 +1441,6 @@ export function loadConfig(configPath?: string): JinnConfig {
 export function getConfigPathFromArgs(argv: string[] = process.argv): string | undefined {
   const idx = argv.indexOf('--config');
   return idx >= 0 && argv[idx + 1] ? argv[idx + 1] : undefined;
-}
-
-/**
- * Persist the legacy-solverNets migration to disk. Re-reads the RAW config file
- * — never the env-merged object, which would bake transient env overrides such
- * as JINN_RPC_URL into the file — runs migrateLegacySolverNets on that copy, and
- * writes the pruned shape back. Best-effort. See issue #445.
- */
-function persistLegacySolverNetsMigration(filePath: string): void {
-  if (!existsSync(filePath)) return; // pure-env config, no on-disk file → nothing to prune
-  try {
-    const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
-    if (raw['solverNets'] === undefined) return; // already pruned → no write, keeps restarts byte-stable
-    migrateLegacySolverNets(raw); // mutates raw in place (deletes solverNets, sets joinedSolverNets)
-    writeFileSync(filePath, `${JSON.stringify(raw, null, 2)}\n`, 'utf-8');
-  } catch (err) {
-    // A read-only config mount degrades to in-memory-only migration rather than
-    // crashing boot.
-    console.warn(
-      `[config] Could not persist legacy solverNets migration to ${filePath} ` +
-      `(${err instanceof Error ? err.message : String(err)}); continuing with in-memory migration only.`,
-    );
-  }
 }
 
 /**

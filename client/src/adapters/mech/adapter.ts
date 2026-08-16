@@ -52,7 +52,7 @@ import {
 } from './contracts.js';
 import { type MechAdapterConfig } from './types.js';
 import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
-import { manifestDigestForCid } from './digest.js';
+import { manifestDigestForCid, manifestDigestForCidOrDigest } from './digest.js';
 import type { Store } from '../../store/store.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
@@ -292,7 +292,7 @@ export class MechAdapter implements ExecutionAdapter {
     return new Set(
       cids
         .filter(Boolean)
-        .map((cid) => manifestDigestForCid(cid).toLowerCase()),
+        .map((cid) => manifestDigestForCidOrDigest(cid).toLowerCase()),
     );
   }
 

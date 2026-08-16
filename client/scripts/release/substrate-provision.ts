@@ -127,16 +127,16 @@ export interface ProvisionOptions {
 interface OperatorConfig {
   rpcUrl?: string | string[];
   apiPort?: number;
-  joinedSolverNets?: Record<string, JoinedSolverNetEntry>;
+  evaluator?: { enabled?: boolean };
+  executionWiring?: ExecutionWiringRow[];
   [k: string]: unknown;
 }
 
-interface JoinedSolverNetEntry {
-  manifestCid?: string;
-  name?: string;
-  roles?: string[];
+interface ExecutionWiringRow {
+  workKind?: string;
   harness?: string;
   model?: string;
+  legacyManifestDigest?: string;
   [k: string]: unknown;
 }
 
@@ -277,18 +277,15 @@ export async function provisionSubstrate(opName: string, opts: ProvisionOptions 
   // ── 2. fleet_safe consistency (on-chain reconcile) ─────────────────────
   await checkFleetSafe(opName, manifest, earningPath, opDir, checks, { repair, skipOnChain: opts.skipOnChain ?? false });
 
-  // ── 3 + 4. Harness config + evaluator role across joinedSolverNets ─────
+  // ── 3 + 4. Harness config + evaluator enablement across executionWiring ─────
   {
-    const joined = cfg.joinedSolverNets ?? {};
-    const entries = Object.entries(joined);
-    if (entries.length === 0) {
-      checks.push({ id: 'harness-config', status: 'skipped', detail: 'no joinedSolverNets entries' });
+    const wiring = cfg.executionWiring ?? [];
+    if (wiring.length === 0) {
+      checks.push({ id: 'harness-config', status: 'skipped', detail: 'no executionWiring entries' });
     } else {
       let harnessDrift = 0;
       let harnessRepaired = 0;
-      let roleDrift = 0;
-      let roleRepaired = 0;
-      for (const [, entry] of entries) {
+      for (const entry of wiring) {
         const wantCanonical = canonicalHarnessName(harness);
         const haveCanonical = entry.harness ? canonicalHarnessName(entry.harness) : undefined;
         if (haveCanonical !== wantCanonical || entry.model !== model) {
@@ -301,23 +298,21 @@ export async function provisionSubstrate(opName: string, opts: ProvisionOptions 
             harnessDrift++;
           }
         }
-        if (opts.isEvaluator) {
-          const roles = Array.isArray(entry.roles) ? entry.roles : [];
-          if (!roles.includes('evaluator')) {
-            if (repair) {
-              entry.roles = Array.from(new Set([...roles, 'evaluator']));
-              if (entry.roles.length === 1) entry.roles = ['solver', 'evaluator'];
-              cfgDirty = true;
-              roleRepaired++;
-            } else {
-              roleDrift++;
-            }
-          }
-        }
       }
-      checks.push(summarize('harness-config', entries.length, harnessDrift, harnessRepaired, `harness=${harness} model=${model}`));
-      if (opts.isEvaluator) {
-        checks.push(summarize('evaluator-role', entries.length, roleDrift, roleRepaired, 'evaluator role on entry'));
+      checks.push(summarize('harness-config', wiring.length, harnessDrift, harnessRepaired, `harness=${harness} model=${model}`));
+    }
+    if (opts.isEvaluator) {
+      const evaluatorOn =
+        cfg.evaluator?.enabled === true
+        || wiring.some((entry) => typeof entry.harness === 'string' && entry.harness.includes('evaluator'));
+      if (evaluatorOn) {
+        checks.push({ id: 'evaluator-role', status: 'ok', detail: 'evaluator enabled' });
+      } else if (repair) {
+        cfg.evaluator = { ...(typeof cfg.evaluator === 'object' && cfg.evaluator !== null ? cfg.evaluator : {}), enabled: true };
+        cfgDirty = true;
+        checks.push({ id: 'evaluator-role', status: 'repaired', detail: 'evaluator.enabled → true' });
+      } else {
+        checks.push({ id: 'evaluator-role', status: 'drift', detail: 'evaluator not enabled' });
       }
     }
   }

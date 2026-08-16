@@ -2,13 +2,21 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { wiringFromJoined } from '../../src/config/migrate-shape-v2.js';
 import {
   JINN_NETWORK_TOOLS_PLUGIN,
   loadSolverNets,
   taskRoleForOperatorRole,
+  type JoinedSolverNetConfig,
 } from '../../src/solver-nets/registry.js';
 import { SOLVER_NET_CONTRACTS } from '../../src/solver-nets/contracts.js';
 import { makePredictionV1Task } from '../harnesses/impls/prediction-v1-test-helpers.js';
+
+function loadFromJoined(joined: Record<string, JoinedSolverNetConfig>) {
+  return loadSolverNets({
+    executionWiring: wiringFromJoined(joined, 'claude-haiku-4-5-20251001'),
+  });
+}
 
 function makeLocalPlugin(supports: string[]): string {
   const root = mkdtempSync(join(tmpdir(), 'jinn-runtime-plugin-'));
@@ -48,7 +56,7 @@ describe('SolverNet contracts', () => {
     contract?.schemas.task.zod.parse(makePredictionV1Task());
   });
 
-  it('loads enabled SolverNets with operator-configured runtime plugins', async () => {
+  it('does not migrate evaluator-only joined entries onto executionWiring', async () => {
     // Per `spec/2026-05-05-solvernet-creation-and-launch.md` §8/§9:
     // Runtime plugins are operator-configured. The bundled
     // `jinn-prediction-plugin` is no longer auto-loaded by the contract; it is
@@ -56,88 +64,64 @@ describe('SolverNet contracts', () => {
     // joined config's `plugins` array (provenance: 'configured').
     // Network Tools remains auto-loaded as a runtime-scoped default
     // (`provenance: 'default'`, `supports: ['jinn.runtime']`).
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['evaluator'],
-          harness: 'prediction-v1-baseline',
-          model: 'claude-opus-test',
-          plugins: ['bundled:jinn-prediction-plugin'],
-        },
+    // `wiringFromJoined` drops evaluator-only entries (`roles` must include
+    // `'solver'`), so this joined block never reaches the registry.
+    const registry = await loadFromJoined({
+      'legacy:prediction': {
+        manifestCid: 'legacy:prediction',
+        name: 'prediction',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['evaluator'],
+        harness: 'prediction-v1-baseline',
+        model: 'claude-opus-test',
+        plugins: ['bundled:jinn-prediction-plugin'],
       },
     });
-    const net = registry.forSolverType('prediction.v1', 'evaluation');
-    // Evaluator-only nets must NOT be returned for restoration tasks —
-    // the daemon's task acceptance gate relies on this filter.
+    expect(registry.list()).toEqual([]);
     expect(registry.forSolverType('prediction.v1', 'restoration')).toBeUndefined();
-    expect(net).toMatchObject({
-      roles: ['evaluating'],
-      model: 'claude-opus-test',
-    });
-    expect(net?.contract.evaluationFunction.id).toBe('prediction.brier-loss.v1');
-    expect(net?.runtimePlugins.map((plugin) => plugin.name)).toEqual([
-      '@jinn-network/network-tools',
-      '@jinn-network/prediction-plugin',
-    ]);
-    expect(net?.runtimePlugins[0]).toMatchObject({
-      provenance: 'default',
-      supports: ['jinn.runtime'],
-    });
-    expect(net?.runtimePlugins[0]?.root).toContain('network-tools');
-    expect(net?.runtimePlugins[1]).toMatchObject({
-      provenance: 'configured',
-      supports: ['prediction.v1'],
-    });
+    expect(registry.forSolverType('prediction.v1', 'evaluation')).toBeUndefined();
   });
 
-  it('returns the SolverNet for both restoration and evaluation when both roles are active', async () => {
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver', 'evaluator'],
-          harness: 'prediction-v1-baseline',
-          plugins: ['bundled:jinn-prediction-plugin'],
-        },
+  it('keeps only solving when a joined entry has both solver and evaluator roles', async () => {
+    const registry = await loadFromJoined({
+      'legacy:prediction': {
+        manifestCid: 'legacy:prediction',
+        name: 'prediction',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver', 'evaluator'],
+        harness: 'prediction-v1-baseline',
+        plugins: ['bundled:jinn-prediction-plugin'],
       },
     });
     const restoreNet = registry.forSolverType('prediction.v1', 'restoration');
     const evalNet = registry.forSolverType('prediction.v1', 'evaluation');
-    expect(restoreNet?.name).toBe('prediction');
-    expect(evalNet?.name).toBe('prediction');
-    expect(restoreNet?.roles).toEqual(['solving', 'evaluating']);
-    expect(evalNet?.roles).toEqual(['solving', 'evaluating']);
+    expect(restoreNet?.name).toBe('prediction.v1');
+    expect(evalNet).toBeUndefined();
+    expect(restoreNet?.roles).toEqual(['solving']);
   });
 
   it('loads manifest-joined SolverNets into the runtime registry', async () => {
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        bafyfixture: {
-          manifestCid: 'bafyfixture',
-          name: 'SWE-rebench v2',
-          contract: { id: 'swe-rebench-v2', version: 'v1' },
-          roles: ['solver', 'evaluator'],
-          harness: 'claude-code-learner',
-          model: 'claude-haiku-4-5-20251001',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
+    const registry = await loadFromJoined({
+      bafyfixture: {
+        manifestCid: 'bafyfixture',
+        name: 'SWE-rebench v2',
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['solver', 'evaluator'],
+        harness: 'claude-code-learner',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        disabledDefaultPlugins: [],
       },
     });
 
     const restoreNet = registry.forSolverType('swe-rebench-v2.v1', 'restoration');
     const evalNet = registry.forSolverType('swe-rebench-v2.v1', 'evaluation');
 
-    expect(restoreNet?.name).toBe('SWE-rebench v2');
+    expect(restoreNet?.name).toBe('swe-rebench-v2.v1');
     expect(restoreNet?.harness).toBe('claude-code');
     expect(restoreNet?.model).toBe('claude-haiku-4-5-20251001');
-    expect(restoreNet?.roles).toEqual(['solving', 'evaluating']);
-    expect(evalNet?.roles).toEqual(['solving', 'evaluating']);
+    expect(restoreNet?.roles).toEqual(['solving']);
+    expect(evalNet).toBeUndefined();
     expect(restoreNet?.runtimePlugins.map((plugin) => plugin.name)).toEqual([
       '@jinn-network/network-tools',
       'swe-rebench-v2-runtime',
@@ -149,16 +133,14 @@ describe('SolverNet contracts', () => {
     // legacy short-name-keyed `solverNets` entry of the same display name.
     // With the legacy block retired, only the joined entry remains; the
     // assertion is that the joined block alone resolves the SolverNet.
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        bafyfixture: {
-          manifestCid: 'bafyfixture',
-          name: 'SWE-rebench v2',
-          contract: { id: 'swe-rebench-v2', version: 'v1' },
-          roles: ['solver'],
-          harness: 'claude-code-learner',
-          model: 'claude-haiku-4-5-20251001',
-        },
+    const registry = await loadFromJoined({
+      bafyfixture: {
+        manifestCid: 'bafyfixture',
+        name: 'SWE-rebench v2',
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['solver'],
+        harness: 'claude-code-learner',
+        model: 'claude-haiku-4-5-20251001',
       },
     });
 
@@ -169,36 +151,34 @@ describe('SolverNet contracts', () => {
     expect(registry.claudeModelSelections()['swe-rebench-v2.v1']).toBe(
       'claude-haiku-4-5-20251001',
     );
-    expect(registry.list().filter((entry) => entry.name === 'SWE-rebench v2')).toHaveLength(1);
+    expect(registry.list().filter((entry) => entry.name === 'swe-rebench-v2.v1')).toHaveLength(1);
   });
 
-  it('derives evaluator-only harnesses from the joined SolverNet contract', async () => {
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        bafyfixture: {
-          manifestCid: 'bafyfixture',
-          name: 'SWE-rebench v2',
-          contract: { id: 'swe-rebench-v2', version: 'v1' },
-          roles: ['evaluator'],
-        },
+  it('does not migrate evaluator-only SWE-rebench joined entries onto executionWiring', async () => {
+    const registry = await loadFromJoined({
+      bafyfixture: {
+        manifestCid: 'bafyfixture',
+        name: 'SWE-rebench v2',
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['evaluator'],
       },
     });
 
+    expect(registry.list()).toEqual([]);
     expect(registry.forSolverType('swe-rebench-v2.v1', 'restoration')).toBeUndefined();
-    const evalNet = registry.forSolverType('swe-rebench-v2.v1', 'evaluation');
-    expect(evalNet?.harness).toBe('swe-rebench-v2-evaluator');
-    expect(registry.harnessSelections()['swe-rebench-v2.v1']).toBe('swe-rebench-v2-evaluator');
+    expect(registry.forSolverType('swe-rebench-v2.v1', 'evaluation')).toBeUndefined();
   });
 
   it('lets joined operators opt out of default SolverNet runtime plugins', async () => {
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        bafyfixture: {
-          manifestCid: 'bafyfixture',
-          contract: { id: 'swe-rebench-v2', version: 'v1' },
-          roles: ['solver'],
-          disabledDefaultPlugins: ['swe-rebench-v2-runtime'],
-        },
+    // `disabledDefaultPlugins` is not on ExecutionWiringConfigEntry.
+    // Empty `plugins` still auto-loads `swe-rebench-v2-runtime` via
+    // `defaultRuntimePluginsForSolverType`.
+    const registry = await loadFromJoined({
+      bafyfixture: {
+        manifestCid: 'bafyfixture',
+        contract: { id: 'swe-rebench-v2', version: 'v1' },
+        roles: ['solver'],
+        plugins: [],
       },
     });
 
@@ -206,37 +186,36 @@ describe('SolverNet contracts', () => {
       registry
         .forSolverType('swe-rebench-v2.v1', 'restoration')
         ?.runtimePlugins.map((plugin) => plugin.name),
-    ).toEqual(['@jinn-network/network-tools']);
+    ).toEqual([
+      '@jinn-network/network-tools',
+      'swe-rebench-v2-runtime',
+    ]);
   });
 
   it('returns the SolverNet only for restoration when only solving is active', async () => {
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: ['bundled:jinn-prediction-plugin'],
-        },
+    const registry = await loadFromJoined({
+      'legacy:prediction': {
+        manifestCid: 'legacy:prediction',
+        name: 'prediction',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'prediction-v1-baseline',
+        plugins: ['bundled:jinn-prediction-plugin'],
       },
     });
-    expect(registry.forSolverType('prediction.v1', 'restoration')?.name).toBe('prediction');
+    expect(registry.forSolverType('prediction.v1', 'restoration')?.name).toBe('prediction.v1');
     expect(registry.forSolverType('prediction.v1', 'evaluation')).toBeUndefined();
   });
 
   it('defaults a joined SolverNet to solver-only when only solver is configured', async () => {
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: ['bundled:jinn-prediction-plugin'],
-        },
+    const registry = await loadFromJoined({
+      'legacy:prediction': {
+        manifestCid: 'legacy:prediction',
+        name: 'prediction',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'prediction-v1-baseline',
+        plugins: ['bundled:jinn-prediction-plugin'],
       },
     });
     const net = registry.forSolverType('prediction.v1', 'restoration');
@@ -245,16 +224,14 @@ describe('SolverNet contracts', () => {
   });
 
   it('does not duplicate Network Tools if it is configured explicitly', async () => {
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: [JINN_NETWORK_TOOLS_PLUGIN],
-        },
+    const registry = await loadFromJoined({
+      'legacy:prediction': {
+        manifestCid: 'legacy:prediction',
+        name: 'prediction',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'prediction-v1-baseline',
+        plugins: [JINN_NETWORK_TOOLS_PLUGIN],
       },
     });
     const net = registry.forSolverType('prediction.v1');
@@ -268,38 +245,32 @@ describe('SolverNet contracts', () => {
   });
 
   it('skips joined SolverNets whose contract is not registered', async () => {
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        'legacy:unknown': {
-          manifestCid: 'legacy:unknown',
-          name: 'unknown',
-          contract: { id: 'unknown', version: 'v0' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: [],
-        },
+    const registry = await loadFromJoined({
+      'legacy:unknown': {
+        manifestCid: 'legacy:unknown',
+        name: 'unknown',
+        contract: { id: 'unknown', version: 'v0' },
+        roles: ['solver'],
+        harness: 'prediction-v1-baseline',
+        plugins: [],
       },
     });
-    // Unknown contracts are silently skipped (the joined-only loader cannot
-    // throw here because the same shape covers in-progress migrations and
-    // mid-rollout fixtures); the registry simply has no entry for the
-    // missing contract.
+    // Unknown contracts are silently skipped (`contractRefFromWorkKind`
+    // fails for `unknown.v0`); the registry simply has no entry.
     expect(registry.list()).toEqual([]);
     expect(registry.forSolverType('unknown.v0')).toBeUndefined();
   });
 
   it('loads operator configured runtime plugins after defaults', async () => {
     const localPlugin = makeLocalPlugin(['prediction.v1']);
-    const registry = await loadSolverNets({
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: [localPlugin],
-        },
+    const registry = await loadFromJoined({
+      'legacy:prediction': {
+        manifestCid: 'legacy:prediction',
+        name: 'prediction',
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'prediction-v1-baseline',
+        plugins: [localPlugin],
       },
     });
     const net = registry.forSolverType('prediction.v1');
@@ -318,16 +289,14 @@ describe('SolverNet contracts', () => {
 
   it('reports a clear error when an operator configured runtime plugin is not available', async () => {
     await expect(
-      loadSolverNets({
-        joinedSolverNets: {
-          'legacy:prediction': {
-            manifestCid: 'legacy:prediction',
-            name: 'prediction',
-            contract: { id: 'prediction', version: 'v1' },
-            roles: ['solver'],
-            harness: 'prediction-v1-baseline',
-            plugins: ['npm:@jinn-network/definitely-missing-prediction-runtime-plugin'],
-          },
+      loadFromJoined({
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
+          harness: 'prediction-v1-baseline',
+          plugins: ['npm:@jinn-network/definitely-missing-prediction-runtime-plugin'],
         },
       }),
     ).rejects.toThrow(
@@ -337,16 +306,14 @@ describe('SolverNet contracts', () => {
 
   it('rejects runtime plugins whose supports list does not include the SolverNet solverType', async () => {
     await expect(
-      loadSolverNets({
-        joinedSolverNets: {
-          'legacy:prediction': {
-            manifestCid: 'legacy:prediction',
-            name: 'prediction',
-            contract: { id: 'prediction', version: 'v1' },
-            roles: ['solver'],
-            harness: 'prediction-v1-baseline',
-            plugins: [makeLocalPlugin(['portfolio.v0'])],
-          },
+      loadFromJoined({
+        'legacy:prediction': {
+          manifestCid: 'legacy:prediction',
+          name: 'prediction',
+          contract: { id: 'prediction', version: 'v1' },
+          roles: ['solver'],
+          harness: 'prediction-v1-baseline',
+          plugins: [makeLocalPlugin(['portfolio.v0'])],
         },
       }),
     ).rejects.toThrow(/runtime plugin .* solverType mismatch/);

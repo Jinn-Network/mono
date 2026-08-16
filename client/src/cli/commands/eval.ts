@@ -39,7 +39,6 @@ import {
   runHarnessForEval,
 } from '../../eval/eval-harness-run.js';
 import { DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from '../../corpus/onchain-query.js';
-import { solverTypeFromJoinedContract } from '../../solver-nets/registry.js';
 import type { RuntimePlugin } from '../../harnesses/types.js';
 import { loadHeldOutSlate } from '../../solver-types/_swe-rebench-v2-held-out-slate.js';
 import { loadSweRebenchV2Pool } from '../../solver-types/swe-rebench-v2.js';
@@ -569,10 +568,10 @@ const PRODUCTION_DEPS: EvalCommandDeps = {
     const dispatchSolverType = `${args.solverType}.v1`;
     const runtimePlugins = await resolveRuntimePluginsForSolverType(
       dispatchSolverType,
-      config.joinedSolverNets,
+      config.executionWiring,
     );
-    const joinedNet = Object.values(config.joinedSolverNets ?? {}).find(
-      (net) => solverTypeFromJoinedContract(net) === dispatchSolverType,
+    const joinedNet = (config.executionWiring ?? []).find(
+      (entry) => entry.workKind === dispatchSolverType,
     );
 
     const harness = buildEvalHarness(implName, config);
@@ -592,7 +591,7 @@ const PRODUCTION_DEPS: EvalCommandDeps = {
           runHarnessOnce: makeEvalRunHarnessOnce({
             solverType: dispatchSolverType,
             runtimePlugins,
-            ...(joinedNet?.name ? { solverNetName: joinedNet.name } : {}),
+            ...(joinedNet?.workKind ? { solverNetName: joinedNet.workKind } : {}),
             ...(config.claudeModel ? { model: config.claudeModel } : {}),
           }),
           store,

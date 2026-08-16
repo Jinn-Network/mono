@@ -14,6 +14,7 @@
  * task on rows that will never sum.
  */
 import type { JinnConfig } from '../config.js';
+import { wiringParticipationKey } from '../config/participation.js';
 import { resolveCredentialId, type CredentialId } from './credential.js';
 import {
   projectAiUnits,
@@ -53,7 +54,7 @@ export interface AiUnitsDaemonConfig {
 }
 
 export function buildAiUnitsConfig(
-  config: Pick<JinnConfig, 'joinedSolverNets'>,
+  config: Pick<JinnConfig, 'executionWiring'>,
   env: NodeJS.ProcessEnv,
   /** Optional home dir override for resolveCredentialId's disk probe — tests only. */
   homeDirOverride?: string,
@@ -66,13 +67,14 @@ export function buildAiUnitsConfig(
   const manifestProjectedUsdMicros: Record<string, number | null> = {};
   const manifestModels: Record<string, string | undefined> = {};
 
-  for (const [manifestCid, entry] of Object.entries(config.joinedSolverNets ?? {})) {
+  for (const entry of config.executionWiring ?? []) {
     const credentialId = resolveCredentialId(entry.harness, env, homeDirOverride);
     if (!credentialId) continue;
-    manifestCredentials[manifestCid] = credentialId;
-    manifestProjectedAiUnits[manifestCid] = projectAiUnits(entry.harness, entry.model, credentialId);
-    manifestProjectedUsdMicros[manifestCid] = projectTaskUsdMicros(entry.harness, entry.model, credentialId);
-    manifestModels[manifestCid] = entry.model;
+    const key = wiringParticipationKey(entry);
+    manifestCredentials[key] = credentialId;
+    manifestProjectedAiUnits[key] = projectAiUnits(entry.harness, entry.model, credentialId);
+    manifestProjectedUsdMicros[key] = projectTaskUsdMicros(entry.harness, entry.model, credentialId);
+    manifestModels[key] = entry.model;
   }
 
   if (Object.keys(manifestCredentials).length === 0) return undefined;

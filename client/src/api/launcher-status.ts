@@ -20,7 +20,6 @@
  * to placeholder accessors with TODO pointers at Task 7.
  */
 import type { JinnConfig } from '../config.js';
-import { joinedDisplayName, solverTypeFromJoinedContract } from '../solver-nets/registry.js';
 
 export interface LauncherStatusGeneratorView {
   state: 'active' | 'paused' | 'errored';
@@ -86,7 +85,7 @@ export interface LauncherGeneratorStateSnapshot {
 }
 
 export interface GatherLauncherStatusDeps {
-  config: Pick<JinnConfig, 'joinedSolverNets'>;
+  config: Pick<JinnConfig, 'posting'>;
   /** Returns the generator's live state, or `undefined` if the SolverNet has no generator. */
   getGeneratorState: (netName: string) => LauncherGeneratorStateSnapshot | undefined;
   /** Count of Tasks created by the operator that are still in flight for the named SolverNet. */
@@ -149,12 +148,9 @@ export async function gatherLauncherStatus(
   const now = deps.now?.() ?? Date.now();
   const nets: LauncherStatusNetEntry[] = [];
 
-  for (const [cid, joined] of Object.entries(deps.config.joinedSolverNets ?? {})) {
-    // Issue #421 removed the legacy `solverNets` config block; iterate the
-    // operator's joined SolverNets keyed by manifestCid. Launched-record
-    // ownership filters happen at the launched-record surface, not here.
-    const displayName = joinedDisplayName(cid, joined);
-    const solverType = solverTypeFromJoinedContract(joined);
+  for (const entry of deps.config.posting ?? []) {
+    const displayName = entry.workKind;
+    const solverType = entry.workKind;
     const snapshot = deps.getGeneratorState(displayName);
     const generatorState = deriveGeneratorState(snapshot);
     const stale = isStalePoll(snapshot, now);

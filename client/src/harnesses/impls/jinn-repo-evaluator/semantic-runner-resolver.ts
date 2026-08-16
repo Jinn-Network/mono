@@ -1,4 +1,5 @@
-import type { JoinedSolverNetConfig } from '../../../solver-nets/registry.js';
+import type { ExecutionWiringConfigEntry } from '../../../config/shape-v2.js';
+import { digestMatchesCid } from '../../../config/participation.js';
 import type {
   SemanticAgentRunner,
   SemanticAgentRunnerResolver,
@@ -11,9 +12,7 @@ import {
 const SEMANTIC_EVALUATOR_HARNESS = 'jinn-repo-evaluator';
 
 export function makeConfiguredSemanticEvaluatorRunnerResolver(options: {
-  readonly getJoinedSolverNets: () =>
-    | Readonly<Record<string, JoinedSolverNetConfig>>
-    | undefined;
+  readonly getExecutionWiring: () => readonly ExecutionWiringConfigEntry[] | undefined;
   readonly getClaudePath: () => string;
   readonly createClaudeRunner?: (
     options: ClaudeSemanticAgentRunnerOptions,
@@ -23,15 +22,15 @@ export function makeConfiguredSemanticEvaluatorRunnerResolver(options: {
   return {
     resolve({ manifestCid }) {
       if (manifestCid === undefined) return undefined;
-      const joined = options.getJoinedSolverNets()?.[manifestCid];
-      if (
-        joined === undefined
-        || joined.manifestCid !== manifestCid
-        || !joined.roles.includes('evaluator')
-        || joined.harness !== SEMANTIC_EVALUATOR_HARNESS
-      ) {
-        return undefined;
-      }
+      const entry = (options.getExecutionWiring() ?? []).find(
+        (candidate) =>
+          candidate.harness === SEMANTIC_EVALUATOR_HARNESS
+          && (
+            candidate.workKind === manifestCid
+            || digestMatchesCid(candidate.legacyManifestDigest, manifestCid)
+          ),
+      );
+      if (entry === undefined) return undefined;
       const claudePath = options.getClaudePath();
       let runner = runners.get(claudePath);
       runner ??= (options.createClaudeRunner ?? (
@@ -43,7 +42,7 @@ export function makeConfiguredSemanticEvaluatorRunnerResolver(options: {
       return {
         provider: 'anthropic',
         runner,
-        ...(joined.model === undefined ? {} : { model: joined.model }),
+        ...(entry.model === undefined ? {} : { model: entry.model }),
       };
     },
   };

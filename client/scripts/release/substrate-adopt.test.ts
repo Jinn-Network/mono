@@ -26,9 +26,15 @@ describe('substrate-adopt', () => {
         {
           apiPort: 7777,
           rpcUrl: 'https://base-sepolia.publicnode.com',
-          joinedSolverNets: {
-            QmManifestCidA: {},
-          },
+          executionWiring: [{
+            workKind: 'swe-rebench-v2.v1',
+            harness: 'claude-code',
+            model: 'claude-haiku-4-5-20251001',
+            plugins: [],
+            credentialRef: 'claude-code-default',
+            isolationPolicy: 'process',
+            legacyManifestDigest: 'QmManifestCidA',
+          }],
         },
         null,
         2,

@@ -1,6 +1,6 @@
 /**
  * buildAiUnitsConfig — assembles the daemon's AI-units gate config from
- * operator config (joinedSolverNets — gives us the model per manifest)
+ * operator config (executionWiring — gives us the model per workKind)
  * + env (override + provider credentials). Returns undefined only when
  * nothing maps to a known credential at all; otherwise the gate always
  * runs (the ceiling is hard-coded, not opt-in).
@@ -13,32 +13,28 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildAiUnitsConfig } from '../../src/spend/ai-units-config.js';
 import { REFERENCE_CEILING } from '../../src/spend/ai-units.js';
+import type { ExecutionWiringConfigEntry } from '../../src/config/shape-v2.js';
 
-const joined = {
-  bafycid1: {
-    manifestCid: 'bafycid1',
-    name: 'net-1',
-    roles: ['solver'],
-    harness: 'hermes-agent',
+function wiringEntry(
+  workKind: string,
+  harness: string,
+  model = 'claude-haiku-4-5-20251001',
+): ExecutionWiringConfigEntry {
+  return {
+    workKind,
+    harness,
+    model,
     plugins: [],
-    model: 'anthropic/claude-opus-4.7',
-  },
-  bafycid2: {
-    manifestCid: 'bafycid2',
-    name: 'net-2',
-    roles: ['solver'],
-    harness: 'claude-code',
-    plugins: [],
-    model: 'claude-opus-4-7',
-  },
-  bafycid3: {
-    manifestCid: 'bafycid3',
-    name: 'net-3',
-    roles: ['solver'],
-    harness: 'prediction-v1-baseline',
-    plugins: [],
-  },
-} as never;
+    credentialRef: `${harness}-default`,
+    isolationPolicy: 'process',
+  };
+}
+
+const executionWiring: ExecutionWiringConfigEntry[] = [
+  wiringEntry('bafycid1', 'hermes-agent', 'anthropic/claude-opus-4.7'),
+  wiringEntry('bafycid2', 'claude-code', 'claude-opus-4-7'),
+  wiringEntry('bafycid3', 'prediction-v1-baseline'),
+];
 
 describe('buildAiUnitsConfig', () => {
   let home: string;
@@ -52,17 +48,15 @@ describe('buildAiUnitsConfig', () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it('returns undefined when no joined SolverNets resolve to a credential', () => {
-    const noLlmJoined = {
-      bafycid3: { manifestCid: 'bafycid3', name: 'net-3', roles: ['solver'], harness: 'prediction-v1-baseline', plugins: [] },
-    } as never;
+  it('returns undefined when no wiring entries resolve to a credential', () => {
+    const noLlm = [wiringEntry('bafycid3', 'prediction-v1-baseline')];
     expect(
-      buildAiUnitsConfig({ joinedSolverNets: noLlmJoined }, {}, home),
+      buildAiUnitsConfig({ executionWiring: noLlm }, {}, home),
     ).toBeUndefined();
   });
 
   it('maps each manifest CID to its credential + projected per-task AI units', () => {
-    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
+    const out = buildAiUnitsConfig({ executionWiring }, {}, home);
     // bafycid1 — hermes-agent → "hermes:api-key" (default provider)
     expect(out?.manifestCredentials['bafycid1']).toBe('hermes:api-key');
     // bafycid2 — claude-code with no env var AND no ~/.claude/ on isolated home → null
@@ -74,14 +68,14 @@ describe('buildAiUnitsConfig', () => {
   });
 
   it('applies the baked-in REFERENCE_CEILING by default', () => {
-    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
+    const out = buildAiUnitsConfig({ executionWiring }, {}, home);
     expect(out?.capPerBlock).toBe(REFERENCE_CEILING.units_per_block);
     expect(out?.capPerWeek).toBe(REFERENCE_CEILING.units_per_week);
   });
 
   it('honours JINN_AI_UNITS_CEILING_OVERRIDE', () => {
     const out = buildAiUnitsConfig(
-      { joinedSolverNets: joined },
+      { executionWiring },
       { JINN_AI_UNITS_CEILING_OVERRIDE: '10' },
       home,
     );
@@ -91,7 +85,7 @@ describe('buildAiUnitsConfig', () => {
 
   it('claude-code on a stock subscription install (~/.claude/ present, no env) projects model cost (#901)', () => {
     mkdirSync(join(home, '.claude'));
-    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
+    const out = buildAiUnitsConfig({ executionWiring }, {}, home);
     expect(out?.manifestCredentials['bafycid2']).toBe('anthropic:subscription');
     // Opus 4.7 projects ~450 units/task at the GPT-5.4-mini peg.
     expect(out?.manifestProjectedAiUnits['bafycid2']).toBeGreaterThan(100);
@@ -103,7 +97,7 @@ describe('buildAiUnitsConfig', () => {
     // resolveCredentialId; this asserts it survives through buildAiUnitsConfig
     // so /v1/status enrols the credential and projects a non-zero USD cost.
     mkdirSync(join(home, '.claude'));
-    const out = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
+    const out = buildAiUnitsConfig({ executionWiring }, {}, home);
     expect(out?.manifestCredentials['bafycid2']).toBe('anthropic:subscription');
     expect(out?.manifestProjectedUsdMicros['bafycid2']).toBeGreaterThan(0);
   });
@@ -116,19 +110,10 @@ describe('buildAiUnitsConfig', () => {
       OPENAI_API_KEY: null,
       tokens: { refresh_token: 'refresh-token' },
     }));
-    const codexJoined = {
-      bafycodex: {
-        manifestCid: 'bafycodex',
-        name: 'codex-net',
-        roles: ['solver'],
-        harness: 'codex-code-learner',
-        plugins: [],
-        model: 'gpt-5.4-mini',
-      },
-    } as never;
+    const codexWiring = [wiringEntry('bafycodex', 'codex-code-learner', 'gpt-5.4-mini')];
 
     const out = buildAiUnitsConfig(
-      { joinedSolverNets: codexJoined },
+      { executionWiring: codexWiring },
       { CODEX_HOME: codexHome },
       home,
     );
@@ -142,7 +127,7 @@ describe('buildAiUnitsConfig', () => {
       // bafycid2 (claude-code) only resolves to a credential when ~/.claude/
       // is present on the isolated home — mirror the #901 test's setup.
       mkdirSync(join(home, '.claude'));
-      const cfg = buildAiUnitsConfig({ joinedSolverNets: joined }, {}, home);
+      const cfg = buildAiUnitsConfig({ executionWiring }, {}, home);
       expect(cfg).toBeDefined();
       // Unit caps retained for the legacy (SPA-facing) surface.
       expect(cfg!.capPerBlock).toBe(REFERENCE_CEILING.units_per_block);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildPredictionOperatorStatus } from '../../src/solver-nets/prediction-operator-ux.js';
 import type { JinnConfig } from '../../src/config.js';
+import { wiringFromJoined } from '../../src/config/migrate-shape-v2.js';
 import type { JoinedSolverNetConfig } from '../../src/solver-nets/registry.js';
 
 // Minimal stub deps: no harnesses needed for the missing-solvernet path.
@@ -13,7 +14,7 @@ const minimalDeps = {
 /** A minimal JinnConfig-shaped stub that satisfies the diagnostic loop. */
 function minimalConfig(overrides: Partial<JinnConfig> = {}): JinnConfig {
   return {
-    joinedSolverNets: undefined,
+    executionWiring: undefined,
     engine: {
       workingDirRoot: '/tmp',
       implStateDirRoot: '/tmp',
@@ -44,10 +45,19 @@ const predictionJoined: JoinedSolverNetConfig = {
   plugins: [],
 };
 
-describe('buildPredictionOperatorStatus — joinedSolverNets awareness (jinn-mono-hjex.2)', () => {
-  it('emits prediction_solvernet_missing when joinedSolverNets is empty', async () => {
+const sweRebenchWiring = wiringFromJoined(
+  { [sweRebenchJoined.manifestCid]: sweRebenchJoined },
+  undefined,
+);
+const predictionWiring = wiringFromJoined(
+  { [predictionJoined.manifestCid]: predictionJoined },
+  undefined,
+);
+
+describe('buildPredictionOperatorStatus — executionWiring awareness (jinn-mono-hjex.2)', () => {
+  it('emits prediction_solvernet_missing when executionWiring is empty', async () => {
     const status = await buildPredictionOperatorStatus({
-      config: minimalConfig({ joinedSolverNets: undefined }),
+      config: minimalConfig({ executionWiring: undefined }),
       configPath: '/tmp/config.json',
       daemonRunning: true,
       ...minimalDeps,
@@ -55,18 +65,18 @@ describe('buildPredictionOperatorStatus — joinedSolverNets awareness (jinn-mon
 
     const codes = status.diagnostics.map((d) => d.code);
     expect(codes).toContain('prediction_solvernet_missing');
+    const missing = status.diagnostics.find((d) => d.code === 'prediction_solvernet_missing');
+    expect(missing?.configField).toBe('executionWiring');
   });
 });
 
 describe('buildPredictionOperatorStatus — gate on real prediction participation', () => {
-  it('returns the benign missing status when the operator joined ONLY a non-prediction SolverNet', async () => {
+  it('returns the benign missing status when the operator wired ONLY a non-prediction workKind', async () => {
     // An operator on SWE-rebench v2 (hermes-agent) must not see prediction
     // diagnostics. Prediction is a deprecated SolverNet.
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        joinedSolverNets: {
-          [sweRebenchJoined.manifestCid]: sweRebenchJoined,
-        },
+        executionWiring: sweRebenchWiring,
       }),
       configPath: '/tmp/config.json',
       daemonRunning: true,
@@ -81,14 +91,12 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
     expect(status.ok).toBe(false);
   });
 
-  it('does not synthesize a prediction net from a non-prediction joined entry', async () => {
+  it('does not synthesize a prediction net from a non-prediction wiring entry', async () => {
     // The synthesized net would otherwise stamp prediction.v1 on the SWE-rebench
     // harness and run the prediction-harness-compat check against it.
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        joinedSolverNets: {
-          [sweRebenchJoined.manifestCid]: sweRebenchJoined,
-        },
+        executionWiring: sweRebenchWiring,
       }),
       configPath: '/tmp/config.json',
       daemonRunning: true,
@@ -104,9 +112,7 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
   it('still produces real diagnostics for an operator genuinely on a prediction SolverNet', async () => {
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        joinedSolverNets: {
-          [predictionJoined.manifestCid]: predictionJoined,
-        },
+        executionWiring: predictionWiring,
       }),
       configPath: '/tmp/config.json',
       daemonRunning: true,
@@ -114,7 +120,7 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
     });
 
     const codes = status.diagnostics.map((d) => d.code);
-    // The prediction-contract joined net IS synthesized — the diagnostic loop
+    // The prediction-contract wiring IS synthesized — the diagnostic loop
     // runs past the missing-solvernet guard.
     expect(codes).not.toContain('prediction_solvernet_missing');
     // With an empty harness list the synthesized net hits prediction_harness_unknown
@@ -124,14 +130,10 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
     expect(status.kind).toBe('prediction.v1.operatorStatus');
   });
 
-  it('picks the prediction-contract entry when joinedSolverNets mixes prediction and non-prediction nets', async () => {
+  it('picks the prediction workKind when executionWiring mixes prediction and non-prediction rows', async () => {
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        joinedSolverNets: {
-          // Non-prediction entry first — must NOT be the one synthesized.
-          [sweRebenchJoined.manifestCid]: sweRebenchJoined,
-          [predictionJoined.manifestCid]: predictionJoined,
-        },
+        executionWiring: [...sweRebenchWiring, ...predictionWiring],
       }),
       configPath: '/tmp/config.json',
       daemonRunning: true,
@@ -144,27 +146,23 @@ describe('buildPredictionOperatorStatus — gate on real prediction participatio
   });
 });
 
-describe('buildPredictionOperatorStatus — joined-only resolution (issue #421)', () => {
-  it('uses the joined entry display name on the operator-status payload', async () => {
+describe('buildPredictionOperatorStatus — wiring-only resolution (issue #421)', () => {
+  it('uses the workKind as the operator-status display name', async () => {
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        joinedSolverNets: {
-          [predictionJoined.manifestCid]: predictionJoined,
-        },
+        executionWiring: predictionWiring,
       }),
       configPath: '/tmp/config.json',
       daemonRunning: true,
       ...minimalDeps,
     });
-    expect(status.solverNet.name).toBe('Prediction v1');
+    expect(status.solverNet.name).toBe('prediction.v1');
   });
 
-  it('emits configField strings keyed by manifestCid (joinedSolverNets.<cid>.*)', async () => {
+  it('emits configField strings keyed by executionWiring digest', async () => {
     const status = await buildPredictionOperatorStatus({
       config: minimalConfig({
-        joinedSolverNets: {
-          [predictionJoined.manifestCid]: predictionJoined,
-        },
+        executionWiring: predictionWiring,
       }),
       configPath: '/tmp/config.json',
       daemonRunning: true,
@@ -175,9 +173,8 @@ describe('buildPredictionOperatorStatus — joined-only resolution (issue #421)'
       .filter((f): f is string => typeof f === 'string');
     expect(fields.length).toBeGreaterThan(0);
     for (const field of fields) {
-      // Every diagnostic that references config must use the joinedSolverNets
-      // path, never the retired legacy `solverNets.<name>.X` shape.
       expect(field).not.toMatch(/^solverNets\./);
+      expect(field).not.toMatch(/^joinedSolverNets\./);
     }
   });
 });

@@ -14,7 +14,7 @@ import { LauncherCreatePage } from './pages/LauncherCreate.js';
 import { LauncherLaunchedPage } from './pages/LauncherLaunched.js';
 import { getFeatures } from './lib/features.js';
 import { OperatorShell } from './pages/operator/OperatorShell.js';
-import { MembershipsTab } from './pages/operator/MembershipsTab.js';
+import { ClaimPolicyTab } from './pages/operator/ClaimPolicyTab.js';
 import { RegistryTab } from './pages/operator/RegistryTab.js';
 import { NetworkTab } from './pages/operator/NetworkTab.js';
 import { SecurityTab } from './pages/operator/SecurityTab.js';
@@ -90,9 +90,10 @@ vi.mock('./api/client.js', () => ({
         artifacts: [],
       }),
       updatePricing: async () => ({ ok: true, restartRequired: true }),
-      // `join` / `leave` are gone with Wave-4 D1; `listJoined` is the surviving
-      // read that MembershipsTab renders.
-      listJoined: async () => ({ joinedSolverNets: {} }),
+      getClaimPolicy: async () => ({
+        claimPolicy: { mode: 'match-legacy-manifest-digest' },
+        executionWiring: [],
+      }),
     },
     solvernets: {
       listDrafts: async () => ({ drafts: [] }),
@@ -295,16 +296,17 @@ describe('App routes', () => {
   // ── Operator sub-routes (Task 5.1) ──
   // The sub-routes resolve to their tabs wrapped in OperatorShell. Bare
   // /operator redirects to /operator/claim-policy, which has been the claim
-  // authority since the stage-1 cutover. Memberships stays routed: Wave-4 D1
-  // retired its join/leave lifecycle, but OPERATOR-APP-SPEC §2.4 keeps the tab
-  // as a read-only view until cutover stage 5, and OperatorSubNav still links
-  // to it.
+  // authority since the stage-1 cutover. Stage 5 retires Memberships: the
+  // live route redirects to claim-policy.
 
   function OperatorSubSwitch(): JSX.Element {
     return (
       <Switch>
+        <Route path="/operator/claim-policy">
+          <OperatorShell><ClaimPolicyTab /></OperatorShell>
+        </Route>
         <Route path="/operator/memberships">
-          <OperatorShell><MembershipsTab /></OperatorShell>
+          <Redirect to="/operator/claim-policy" />
         </Route>
         <Route path="/operator/registry">
           <OperatorShell><RegistryTab /></OperatorShell>
@@ -323,9 +325,11 @@ describe('App routes', () => {
     );
   }
 
-  it('renders MembershipsTab on /operator/memberships', () => {
+  it('redirects /operator/memberships to /operator/claim-policy', async () => {
     render(withProviders(<OperatorSubSwitch />, '/operator/memberships'));
-    expect(screen.getByTestId('memberships-tab')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByTestId('claim-policy-tab')).toBeTruthy(),
+    );
     expect(screen.getByTestId('operator-shell')).toBeTruthy();
   });
 
@@ -387,7 +391,14 @@ describe('App routes', () => {
       // #983: the running-mode → <Operating> gate now requires onboarding to be
       // complete (else App holds the onboarding takeover). Set the flag so this
       // routing test reaches the operator Switch.
-      joinedSolverNets: { 'bafkreich-x': { manifestCid: 'bafkreich-x', roles: ['solver'] } },
+      executionWiring: [{
+        workKind: 'prediction.v1',
+        harness: 'claude-code',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'claude-code-default',
+        isolationPolicy: 'process',
+      }],
       onboardingComplete: true,
     } as unknown as BootstrapState);
     render(withProviders(<App />, '/operator/network'));
@@ -413,7 +424,14 @@ describe('App routes', () => {
       schemaVersion: 1,
       // A mid-onboarding node may already have a membership (first join populates
       // it) yet not have finished — onboardingComplete is still false/absent.
-      joinedSolverNets: { 'bafkreich-x': { manifestCid: 'bafkreich-x', roles: ['solver'] } },
+      executionWiring: [{
+        workKind: 'prediction.v1',
+        harness: 'claude-code',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'claude-code-default',
+        isolationPolicy: 'process',
+      }],
     } as unknown as BootstrapState);
     render(withProviders(<App />, '/overview'));
     await waitFor(() => expect(screen.getByTestId('onboarding-progress')).toBeTruthy());
@@ -424,7 +442,14 @@ describe('App routes', () => {
     vi.mocked(api.getBootstrap).mockResolvedValue({
       mode: 'running',
       chain: 'base-sepolia',
-      joinedSolverNets: { 'bafkreich-x': { manifestCid: 'bafkreich-x', roles: ['solver'] } },
+      executionWiring: [{
+        workKind: 'prediction.v1',
+        harness: 'claude-code',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'claude-code-default',
+        isolationPolicy: 'process',
+      }],
       onboardingComplete: true,
     } as unknown as BootstrapState);
     render(withProviders(<App />, '/operator/network'));

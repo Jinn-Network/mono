@@ -8,126 +8,94 @@ import {
 } from '../../src/cli/task-native-readiness.js';
 import type { JinnConfig } from '../../src/config.js';
 
+const SOLVER_WIRING = {
+  workKind: 'prediction.v1',
+  harness: 'claude-code',
+  model: 'claude-haiku-4-5-20251001',
+  plugins: [],
+  credentialRef: 'claude-code-default',
+  isolationPolicy: 'process' as const,
+};
+
+const EVALUATOR_WIRING = {
+  workKind: 'swe-rebench-v2.v1',
+  harness: 'swe-rebench-v2-evaluator',
+  model: 'claude-haiku-4-5-20251001',
+  plugins: [],
+  credentialRef: 'swe-rebench-v2-evaluator-default',
+  isolationPolicy: 'process' as const,
+};
+
 describe('resolveTaskNativeReadiness — evaluator-role gate (issue #421)', () => {
-  it('detects evaluator role from joinedSolverNets only', () => {
+  it('does not treat evaluator config as ready when mainnet short-circuits first', () => {
     // Use mainnet so the deployment-artifact gate short-circuits before we
-    // try to load fleet state; we only need to assert that the evaluator-role
-    // helper consults joinedSolverNets and not the retired solverNets block.
+    // try to load fleet state; we only need to assert that the helper does
+    // not reach for retired solverNets / joinedSolverNets fields.
     const config = {
       network: 'mainnet',
       earningDir: '/tmp',
-      joinedSolverNets: {
-        cid1: {
-          manifestCid: 'cid1',
-          roles: ['evaluator'],
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      evaluator: { enabled: true },
+      executionWiring: [EVALUATOR_WIRING],
     } as unknown as JinnConfig;
     // The mainnet path short-circuits before we even look at evaluator-role —
-    // assert the helper compiles + doesn't reach for `config.solverNets`. The
     // structural readiness on this branch is `ok: false` (no testnet artifact
     // bundle), but evaluator-role detection runs further downstream when
     // solverReady is true; we only need to assert the surface shape here.
     const readiness = resolveTaskNativeReadiness(config);
     expect(readiness.evaluatorRoleReady).toBe(false);
-    // Sanity: the source string carries the chain name we passed.
     expect(typeof readiness.detail).toBe('string');
   });
 
-  it('does not throw when joinedSolverNets is undefined (legacy config drained)', () => {
+  it('does not throw when executionWiring is undefined (legacy config drained)', () => {
     const config = {
       network: 'mainnet',
       earningDir: '/tmp',
-      // No solverNets, no joinedSolverNets — the legacy block is gone (issue #421).
     } as unknown as JinnConfig;
     expect(() => resolveTaskNativeReadiness(config)).not.toThrow();
   });
 });
 
-describe('hasConfiguredEvaluatorRole — joined-only resolution (issue #421)', () => {
-  // The wider `resolveTaskNativeReadiness` surface short-circuits on mainnet
-  // before reaching the helper, so these tests exercise the joined-only branch
-  // directly. They are the regression coverage for the refactor away from the
-  // retired short-name-keyed `solverNets` block.
-
-  function makeConfig(
-    joinedSolverNets: NonNullable<JinnConfig['joinedSolverNets']>,
-  ): JinnConfig {
-    return { joinedSolverNets } as unknown as JinnConfig;
+describe('hasConfiguredEvaluatorRole', () => {
+  function makeConfig(partial: {
+    evaluator?: { enabled?: boolean };
+    executionWiring?: JinnConfig['executionWiring'];
+  }): JinnConfig {
+    return partial as unknown as JinnConfig;
   }
 
-  it('returns false when joinedSolverNets is empty', () => {
-    expect(hasConfiguredEvaluatorRole(makeConfig({}))).toBe(false);
+  it('returns false when executionWiring is empty', () => {
+    expect(hasConfiguredEvaluatorRole(makeConfig({ executionWiring: [] }))).toBe(false);
   });
 
-  it('returns false when joinedSolverNets is undefined', () => {
+  it('returns false when executionWiring is undefined', () => {
     expect(hasConfiguredEvaluatorRole({} as unknown as JinnConfig)).toBe(false);
   });
 
-  it('returns false when the only joined entry has no evaluator role', () => {
-    const config = makeConfig({
-      cid1: {
-        manifestCid: 'cid1',
-        roles: ['solver'],
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-    });
-    expect(hasConfiguredEvaluatorRole(config)).toBe(false);
+  it('returns false when the only wiring harness is solver-only', () => {
+    expect(hasConfiguredEvaluatorRole(makeConfig({ executionWiring: [SOLVER_WIRING] }))).toBe(false);
   });
 
-  it('returns true when the only joined entry has the evaluator role', () => {
+  it('returns true when evaluator.enabled is true', () => {
+    expect(hasConfiguredEvaluatorRole(makeConfig({ evaluator: { enabled: true } }))).toBe(true);
+  });
+
+  it('returns true when a wiring harness includes evaluator', () => {
+    expect(hasConfiguredEvaluatorRole(makeConfig({ executionWiring: [EVALUATOR_WIRING] }))).toBe(true);
+  });
+
+  it('returns true when at least one of several wiring entries has an evaluator harness', () => {
     const config = makeConfig({
-      cid1: {
-        manifestCid: 'cid1',
-        roles: ['evaluator'],
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
+      executionWiring: [SOLVER_WIRING, EVALUATOR_WIRING, { ...SOLVER_WIRING, workKind: 'other.v1' }],
     });
     expect(hasConfiguredEvaluatorRole(config)).toBe(true);
   });
 
-  it('returns true when at least one of several joined entries carries the evaluator role', () => {
+  it('returns false when none of several wiring harnesses include evaluator', () => {
     const config = makeConfig({
-      cid1: {
-        manifestCid: 'cid1',
-        roles: ['solver'],
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-      cid2: {
-        manifestCid: 'cid2',
-        roles: ['solver', 'evaluator'],
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-      cid3: {
-        manifestCid: 'cid3',
-        roles: ['solver'],
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-    });
-    expect(hasConfiguredEvaluatorRole(config)).toBe(true);
-  });
-
-  it('returns false when none of several joined entries carries the evaluator role', () => {
-    const config = makeConfig({
-      cid1: {
-        manifestCid: 'cid1',
-        roles: ['solver'],
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-      cid2: {
-        manifestCid: 'cid2',
-        roles: ['solver'],
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
+      executionWiring: [
+        SOLVER_WIRING,
+        { ...SOLVER_WIRING, workKind: 'other.v1' },
+      ],
     });
     expect(hasConfiguredEvaluatorRole(config)).toBe(false);
   });

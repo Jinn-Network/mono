@@ -20,7 +20,7 @@ describe('NotificationItem', () => {
       severity: 'blocking',
       title: 'Harness not ready',
       message: 'Claude not authenticated',
-      jumpTo: '/operator/memberships',
+      jumpTo: '/operator/claim-policy',
     };
     const { container } = render(wrap(<NotificationItem notice={notice} />));
     const li = container.querySelector('li');

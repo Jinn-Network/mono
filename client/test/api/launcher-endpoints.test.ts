@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { addLauncherRoutes } from '../../src/api/launcher-endpoints.js';
 import { requireUiToken } from '../../src/api/handshake.js';
-import { migrateLegacySolverNets, type JinnConfig } from '../../src/config.js';
+import type { JinnConfig } from '../../src/config.js';
 import type { LauncherGeneratorStateSnapshot } from '../../src/api/launcher-status.js';
 import type {
   PostedTaskRecord,
@@ -24,20 +24,34 @@ import { seedNativeRun } from '@test/seed-native-run.js';
 const UI_TOKEN = 'ui-token-test';
 const SAFE_ADDRESS = '0x0000000000000000000000000000000000000abc';
 
+const PREDICTION_WIRING = {
+  workKind: 'prediction.v1',
+  harness: 'prediction-v1-baseline',
+  model: 'claude-haiku-4-5-20251001',
+  plugins: [],
+  credentialRef: 'prediction-v1-baseline-default',
+  isolationPolicy: 'process',
+} as const;
+
+const PREDICTION_POSTING = {
+  workKind: 'prediction.v1',
+  launchedRecordPath: '/tmp/prediction.json',
+  generatorEnabled: true,
+  legacyManifestDigest: 'legacy:prediction',
+};
+
+const SWE_WIRING = {
+  workKind: 'swe-rebench-v2.v1',
+  harness: 'claude-code',
+  model: 'claude-haiku-4-5-20251001',
+  plugins: [],
+  credentialRef: 'claude-code-default',
+  isolationPolicy: 'process',
+} as const;
+
 interface BuildArgs {
-  /**
-   * Legacy `solverNets` block (issue #421 retired). For test ergonomics
-   * the fixture continues to accept this shape; the harness translates it
-   * into the manifest-keyed `joinedSolverNets` block the launcher reads now.
-   */
-  solverNets?: JinnConfig['solverNets'] | Record<string, {
-    enabled?: boolean;
-    solverType?: string;
-    roles?: readonly string[];
-    harness?: string;
-    plugins?: unknown[];
-    taskGenerator?: { enabled?: boolean };
-  }>;
+  executionWiring?: JinnConfig['executionWiring'];
+  posting?: JinnConfig['posting'];
   generatorStates?: Record<string, LauncherGeneratorStateSnapshot | undefined>;
   openTaskCount?: (netName: string) => number;
   reservedBudgetWei?: (netName: string) => string;
@@ -54,21 +68,6 @@ interface BuildArgs {
     | PostedTaskRecord[]
     | ((opts: FetchPostedTasksOptions) => PostedTaskRecord[]);
   fetchTaskStatuses?: (manifestCid: string) => Promise<Map<string, TaskStatusSnapshot>>;
-}
-
-/**
- * Map a legacy-shaped solverNets fixture into the manifest-keyed
- * joinedSolverNets shape the launcher reads. Delegates to the
- * production `migrateLegacySolverNets` helper so test fixtures stay in
- * lockstep with the loader's migration semantics.
- */
-function legacyToJoined(
-  legacy: BuildArgs['solverNets'] | undefined,
-): JinnConfig['joinedSolverNets'] | undefined {
-  if (!legacy || Object.keys(legacy).length === 0) return undefined;
-  const raw: Record<string, unknown> = { solverNets: legacy };
-  migrateLegacySolverNets(raw);
-  return raw['joinedSolverNets'] as JinnConfig['joinedSolverNets'] | undefined;
 }
 
 /**
@@ -128,16 +127,13 @@ function buildTestApp(args: BuildArgs): {
           return (args.postedTasks as (o: FetchPostedTasksOptions) => PostedTaskRecord[])(opts);
         }
       : defaultFetchPostedTasks(args.postedTasks, fetchSpy);
-  // Issue #421: the launcher now reads joinedSolverNets exclusively.
-  // Translate the legacy-shaped fixture into joined entries for the
-  // launcher routes; keep the persistShim semantics for tests that assert
-  // on PATCH writes.
-  const liveJoinedSolverNets: JinnConfig['joinedSolverNets'] | undefined =
-    legacyToJoined(args.solverNets);
   const persistShim = buildPersistShim();
   let lastNotified: Record<string, Record<string, unknown>> | undefined;
   addLauncherRoutes(app, {
-    getConfig: () => ({ joinedSolverNets: liveJoinedSolverNets } as Pick<JinnConfig, 'joinedSolverNets'>),
+    getConfig: () => ({
+      executionWiring: args.executionWiring,
+      posting: args.posting,
+    }),
     getGeneratorState: (name) => args.generatorStates?.[name],
     getOpenTaskCount: (name) => args.openTaskCount?.(name) ?? 0,
     getReservedBudgetWei: (name) => args.reservedBudgetWei?.(name) ?? '0',
@@ -164,30 +160,13 @@ function buildTestApp(args: BuildArgs): {
   };
 }
 
-const launchingNet = {
-  enabled: true,
-  solverType: 'prediction.v1',
-  roles: ['launching'] as const,
-  harness: 'claude-code-learner',
-  plugins: [],
-  taskGenerator: { enabled: true },
-} as never;
-
-const solvingNet = {
-  enabled: true,
-  solverType: 'prediction.v1',
-  roles: ['solving'] as const,
-  harness: 'claude-code-learner',
-  plugins: [],
-  taskGenerator: { enabled: true },
-} as never;
-
 describe('GET /v1/launcher/status', () => {
   it('returns per-net launcher status for nets with launching role', async () => {
     const { app, token } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
       generatorStates: {
-        prediction: {
+        'prediction.v1': {
           lastPollAt: '2026-05-05T10:00:00.000Z',
           lastPollSummary: { evaluated: 12, posted: 3, skipped: 9 },
           cadenceMs: 6 * 60 * 60 * 1000,
@@ -215,7 +194,7 @@ describe('GET /v1/launcher/status', () => {
     expect(body.schemaVersion).toBe(1);
     expect(body.nets).toHaveLength(1);
     expect(body.nets[0]).toMatchObject({
-      name: 'prediction',
+      name: 'prediction.v1',
       generator: {
         state: 'active',
         cadenceMs: 6 * 60 * 60 * 1000,
@@ -238,23 +217,25 @@ describe('GET /v1/launcher/status', () => {
     // now surfaces every SolverNet entry regardless of operator role
     // selection. Launched-record ownership is the new launcher-mode signal.
     const { app, token } = buildTestApp({
-      solverNets: { prediction: solvingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
     });
     const res = await app.request('/v1/launcher/status', {
       headers: { 'x-jinn-ui-token': token },
     });
     expect(res.status).toBe(200);
     const body = await res.json() as { nets: Array<{ name: string }> };
-    expect(body.nets.map((n) => n.name)).toEqual(['prediction']);
+    expect(body.nets.map((n) => n.name)).toEqual(['prediction.v1']);
   });
 
   it('reports stale=true when lastPollAt is older than 2x cadence', async () => {
     const cadenceMs = 60_000;
     const now = Date.parse('2026-05-05T12:00:00.000Z');
     const { app, token } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
       generatorStates: {
-        prediction: {
+        'prediction.v1': {
           lastPollAt: new Date(now - 3 * cadenceMs).toISOString(),
           cadenceMs,
         },
@@ -274,9 +255,10 @@ describe('GET /v1/launcher/status', () => {
 
   it('reports state=errored when the generator surfaced lastError', async () => {
     const { app, token } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
       generatorStates: {
-        prediction: {
+        'prediction.v1': {
           lastPollAt: '2026-05-05T10:00:00.000Z',
           lastError: { message: 'polymarket 503', at: '2026-05-05T10:00:01.000Z' },
           cadenceMs: 60_000,
@@ -296,8 +278,9 @@ describe('GET /v1/launcher/status', () => {
 
   it('reports state=paused when no generator state has been recorded yet', async () => {
     const { app, token } = buildTestApp({
-      solverNets: { prediction: launchingNet },
-      generatorStates: { prediction: undefined },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
+      generatorStates: { 'prediction.v1': undefined },
     });
     const res = await app.request('/v1/launcher/status', {
       headers: { 'x-jinn-ui-token': token },
@@ -312,7 +295,8 @@ describe('GET /v1/launcher/status', () => {
 
   it('requires auth', async () => {
     const { app } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
     });
     const res = await app.request('/v1/launcher/status');
     expect(res.status).toBe(401);
@@ -339,7 +323,8 @@ interface TasksResponseBody {
 describe('GET /v1/launcher/tasks', () => {
   it('returns tasks posted by this daemon creator, most recent first', async () => {
     const { app, token } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
       postedTasks: [
         {
           taskId: '0xa',
@@ -364,7 +349,7 @@ describe('GET /v1/launcher/tasks', () => {
     expect(body.tasks).toHaveLength(2);
     expect(body.tasks[0]?.taskId).toBe('0xb');
     expect(body.tasks[1]?.taskId).toBe('0xa');
-    expect(body.tasks[0]?.solverNet).toBe('prediction');
+    expect(body.tasks[0]?.solverNet).toBe('prediction.v1');
     // Default state/claims/budget when the daemon doesn't yet track lifecycle.
     expect(body.tasks[0]?.state).toBe('open');
     expect(body.tasks[0]?.claims).toEqual({ current: 0, max: 25 });
@@ -381,7 +366,8 @@ describe('GET /v1/launcher/tasks', () => {
       { taskId: '0xd', taskCid: 'Qmd', solverType: 'prediction.v1', postedAt: '2026-05-05T11:00:00.000Z' },
     ];
     const { app, token, fetchSpy } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
       postedTasks: fixtures,
     });
 
@@ -416,7 +402,8 @@ describe('GET /v1/launcher/tasks', () => {
   it('passes ?manifestCid through so owned launched SolverNets can fetch statuses without membership', async () => {
     const statusCalls: string[] = [];
     const { app, token } = buildTestApp({
-      solverNets: {},
+      posting: [],
+      executionWiring: [],
       postedTasks: [
         {
           taskId: 'display-task',
@@ -446,7 +433,8 @@ describe('GET /v1/launcher/tasks', () => {
 
   it('maps unknown solverType to solverNet="unknown" without dropping the row', async () => {
     const { app, token } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
       postedTasks: [
         {
           taskId: '0xa',
@@ -524,12 +512,7 @@ describe('GET /v1/launcher/tasks', () => {
       });
 
       const { app, token } = buildTestApp({
-        solverNets: {
-          swe: {
-            ...launchingNet,
-            solverType: 'swe-rebench-v2.v1',
-          } as never,
-        },
+        executionWiring: [SWE_WIRING],
         postedTasks: ({ creatorAddress, limit, before }) =>
           store.listPostedTasksByCreator({
             creatorSafeAddress: creatorAddress,
@@ -550,7 +533,7 @@ describe('GET /v1/launcher/tasks', () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as TasksResponseBody;
-      expect(body.tasks[0]?.solverNet).toBe('swe');
+      expect(body.tasks[0]?.solverNet).toBe('swe-rebench-v2.v1');
       expect(body.tasks[0]?.claims).toEqual({ current: 1, max: 50 });
       expect(body.tasks[0]?.state).toBe('claims-in-flight');
     });
@@ -558,12 +541,7 @@ describe('GET /v1/launcher/tasks', () => {
 
   it('uses SolverNet contract claim defaults when a SWE post has no local run payload', async () => {
     const { app, token } = buildTestApp({
-      solverNets: {
-        swe: {
-          ...launchingNet,
-          solverType: 'swe-rebench-v2.v1',
-        } as never,
-      },
+      executionWiring: [SWE_WIRING],
       postedTasks: [
         {
           taskId: 'swe-open-1',
@@ -579,13 +557,14 @@ describe('GET /v1/launcher/tasks', () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as TasksResponseBody;
-    expect(body.tasks[0]?.solverNet).toBe('swe');
+    expect(body.tasks[0]?.solverNet).toBe('swe-rebench-v2.v1');
     expect(body.tasks[0]?.claims).toEqual({ current: 0, max: 5 });
   });
 
   it('clamps limit to [1, 100]', async () => {
     const { app, token, fetchSpy } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
       postedTasks: [],
     });
     await app.request('/v1/launcher/tasks?limit=999', {
@@ -601,7 +580,8 @@ describe('GET /v1/launcher/tasks', () => {
 
   it('requires auth', async () => {
     const { app } = buildTestApp({
-      solverNets: { prediction: launchingNet },
+      posting: [PREDICTION_POSTING],
+      executionWiring: [PREDICTION_WIRING],
       postedTasks: [],
     });
     const res = await app.request('/v1/launcher/tasks');
@@ -615,18 +595,9 @@ describe('PATCH /v1/launcher/solvernets/:name (retired)', () => {
   // `'launching'` role + top-level `predictionV1*` generator-config keys it
   // managed were dropped from the schema. The route now returns 410 Gone so
   // SPA clients on stale builds get a clear signal.
-  const solvingPredictionNet = {
-    enabled: true,
-    solverType: 'prediction.v1',
-    roles: ['solving'],
-    harness: 'claude-code-learner',
-    plugins: [],
-    taskGenerator: { enabled: true },
-  } as never;
-
   it('returns 410 Gone (legacy launcher PATCH retired by Task 22)', async () => {
     const { app, token, readPersistedConfig, readNotifiedSolverNets } = buildTestApp({
-      solverNets: { prediction: solvingPredictionNet },
+      executionWiring: [PREDICTION_WIRING],
     });
     const res = await app.request('/v1/launcher/solvernets/prediction', {
       method: 'PATCH',
@@ -647,7 +618,7 @@ describe('PATCH /v1/launcher/solvernets/:name (retired)', () => {
 
   it('still requires auth', async () => {
     const { app } = buildTestApp({
-      solverNets: { prediction: solvingPredictionNet },
+      executionWiring: [PREDICTION_WIRING],
     });
     const res = await app.request('/v1/launcher/solvernets/prediction', {
       method: 'PATCH',

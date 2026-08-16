@@ -9,6 +9,15 @@ import type { PredictionOperatorStatus } from '../../src/solver-nets/prediction-
 import { withTempStore } from '@test/store.js';
 import { seedNativeRun } from '@test/seed-native-run.js';
 
+const PREDICTION_WIRING = {
+  workKind: 'prediction.v1',
+  harness: 'prediction-v1-baseline',
+  model: 'claude-haiku-4-5-20251001',
+  plugins: [],
+  credentialRef: 'prediction-v1-baseline-default',
+  isolationPolicy: 'process',
+} as const;
+
 describe('gatherStatusForApi', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -98,17 +107,7 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      executionWiring: [PREDICTION_WIRING],
     } as unknown as JinnConfig;
 
     await withTempStore(async (store) => {
@@ -317,17 +316,7 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      executionWiring: [PREDICTION_WIRING],
     } as unknown as JinnConfig;
 
     await withTempStore(async (store) => {
@@ -376,17 +365,7 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      executionWiring: [PREDICTION_WIRING],
     } as unknown as JinnConfig;
 
     await withTempStore(async (store) => {
@@ -428,8 +407,8 @@ describe('gatherStatusForApi', () => {
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
       // Operator config no longer carries the 'launching' role (issue #421);
-      // an empty joinedSolverNets is the modern analogue of "launching-only".
-      joinedSolverNets: {},
+      // empty executionWiring is the modern analogue of "launching-only".
+      executionWiring: [],
     } as unknown as JinnConfig;
 
     await withTempStore(async (store) => {
@@ -447,7 +426,7 @@ describe('gatherStatusForApi', () => {
     });
   });
 
-  it('derives SolverNet name from joinedSolverNets when solverNets is empty (jinn-mono-hjex.2)', async () => {
+  it('derives SolverNet name from executionWiring when no prediction workKind is present (jinn-mono-hjex.2)', async () => {
     mockStatusRpc();
     const buildPredictionOperatorStatus = vi.fn(async (): Promise<PredictionOperatorStatus> => ({
       kind: 'prediction.v1.operatorStatus',
@@ -470,16 +449,14 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      joinedSolverNets: {
-        'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi': {
-          manifestCid: 'bafkreichdzxtjav3rh5boyybgx6wolh7boqedxix4vvw44slfppwppshpi',
-          name: 'SWE-rebench v2',
-          roles: ['solver'],
-          harness: 'claude-code',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      executionWiring: [{
+        workKind: 'swe-rebench-v2.v1',
+        harness: 'claude-code',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'claude-code-default',
+        isolationPolicy: 'process',
+      }],
     } as unknown as JinnConfig;
 
     await withTempStore(async (store) => {
@@ -495,7 +472,7 @@ describe('gatherStatusForApi', () => {
     });
 
     // gather-status must have called buildPredictionOperatorStatus exactly
-    // once (the `name` parameter was retired in issue #421 — joined-only).
+    // once (the `name` parameter was retired in issue #421).
     expect(buildPredictionOperatorStatus).toHaveBeenCalledTimes(1);
     const [callArgs] = buildPredictionOperatorStatus.mock.calls;
     expect((callArgs as [{ name?: string }])[0].name).toBeUndefined();
@@ -613,7 +590,7 @@ describe('gatherStatusForApi', () => {
     });
   });
 
-  it("surfaces joined-entry roles on the unavailable path (joined-only after issue #421)", async () => {
+  it("surfaces wiring roles on the unavailable path", async () => {
     mockStatusRpc();
     const buildPredictionOperatorStatus = vi.fn(async () => {
       throw new Error('plugin hash failed');
@@ -623,17 +600,7 @@ describe('gatherStatusForApi', () => {
     }));
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
     const config = {
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'prediction-v1-baseline',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      executionWiring: [PREDICTION_WIRING],
     } as unknown as JinnConfig;
 
     await withTempStore(async (store) => {
@@ -1230,73 +1197,40 @@ describe('gather-status autoRestake gating (#651)', () => {
 
 describe('derivePredictionSolverNetName (#446)', () => {
   function makeConfig(
-    joinedSolverNets: Record<string, unknown>,
+    executionWiring: JinnConfig['executionWiring'],
   ): JinnConfig {
-    return { joinedSolverNets } as unknown as JinnConfig;
+    return { executionWiring } as unknown as JinnConfig;
   }
 
-  it("returns 'prediction' when the operator has only non-prediction joined entries", async () => {
+  const nonPredictionWiring = {
+    workKind: 'swe-rebench-v2.v1',
+    harness: 'claude-code',
+    model: 'claude-haiku-4-5-20251001',
+    plugins: [],
+    credentialRef: 'claude-code-default',
+    isolationPolicy: 'process' as const,
+  };
+
+  it("returns 'prediction' when the operator has only non-prediction wiring", async () => {
     const { derivePredictionSolverNetName } = await import(
       '../../src/api/gather-status.js'
     );
-    const config = makeConfig({
-      'bafy-restoration': {
-        manifestCid: 'bafy-restoration',
-        name: 'Restoration Net',
-        contract: { id: 'restoration', version: 'v1' },
-        roles: ['solver'],
-      },
-      'bafy-no-contract': {
-        manifestCid: 'bafy-no-contract',
-        name: 'Some Other Net',
-        roles: ['solver'],
-      },
-    });
-
-    expect(derivePredictionSolverNetName(config)).toBe('prediction');
+    expect(derivePredictionSolverNetName(makeConfig([nonPredictionWiring]))).toBe('prediction');
   });
 
-  it("returns the prediction entry's name when a prediction SolverNet is joined", async () => {
+  it("returns the prediction entry's workKind when a prediction SolverNet is wired", async () => {
     const { derivePredictionSolverNetName } = await import(
       '../../src/api/gather-status.js'
     );
-    const config = makeConfig({
-      'bafy-restoration': {
-        manifestCid: 'bafy-restoration',
-        name: 'Restoration Net',
-        contract: { id: 'restoration', version: 'v1' },
-        roles: ['solver'],
-      },
-      'bafy-prediction': {
-        manifestCid: 'bafy-prediction',
-        name: 'SWE-rebench v2',
-        contract: { id: 'prediction', version: 'v1' },
-        roles: ['solver'],
-      },
-    });
+    const config = makeConfig([nonPredictionWiring, PREDICTION_WIRING]);
 
-    expect(derivePredictionSolverNetName(config)).toBe('SWE-rebench v2');
+    expect(derivePredictionSolverNetName(config)).toBe('prediction.v1');
   });
 
-  it('falls back to the manifestCid when the prediction entry has no name', async () => {
+  it("returns 'prediction' when executionWiring is empty", async () => {
     const { derivePredictionSolverNetName } = await import(
       '../../src/api/gather-status.js'
     );
-    const config = makeConfig({
-      'bafy-prediction-cid': {
-        manifestCid: 'bafy-prediction-cid',
-        contract: { id: 'prediction', version: 'v1' },
-        roles: ['solver'],
-      },
-    });
-
-    expect(derivePredictionSolverNetName(config)).toBe('bafy-prediction-cid');
-  });
-
-  it("returns 'prediction' when joinedSolverNets is empty", async () => {
-    const { derivePredictionSolverNetName } = await import(
-      '../../src/api/gather-status.js'
-    );
-    expect(derivePredictionSolverNetName(makeConfig({}))).toBe('prediction');
+    expect(derivePredictionSolverNetName(makeConfig([]))).toBe('prediction');
   });
 });

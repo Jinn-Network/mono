@@ -21,7 +21,6 @@ export const ROUTES: RouteSpec[] = [
   },
   { path: '/operator/execution-data', label: 'operator-execution-data' },
   { path: '/operator/claim-policy', label: 'operator-claim-policy' },
-  { path: '/operator/memberships', label: 'operator-memberships' },
   { path: '/operator/registry', label: 'operator-registry' },
   { path: '/operator/network', label: 'operator-network' },
   { path: '/operator/security', label: 'operator-security' },

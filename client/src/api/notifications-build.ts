@@ -177,7 +177,7 @@ export interface NotificationsBuildInput {
   now?: number;
   bootstrapMode: 'uninitialized' | 'setup' | 'running';
   bootstrapBlockingReason?: string;
-  joinedSolverNets: Record<string, unknown>;
+  executionWiring: readonly unknown[];
   funds: { chains: FundsChain[] };
   harness: { ready: boolean; name: string | null; reason: string | null };
   rpc: { reachable: boolean };
@@ -247,7 +247,7 @@ export function buildNotifications(input: NotificationsBuildInput): Notification
     const suffix = input.harness.reason ? `: ${input.harness.reason}` : '';
     out.push(
       notice('harness_not_ready', 'blocking', `${subject} is not ready${suffix}.`, {
-        jumpTo: '/operator/memberships',
+        jumpTo: '/operator/claim-policy',
       }),
     );
   }
@@ -287,10 +287,10 @@ export function buildNotifications(input: NotificationsBuildInput): Notification
     }
   }
 
-  if (Object.keys(input.joinedSolverNets).length === 0 && input.bootstrapMode === 'running') {
+  if (input.executionWiring.length === 0 && input.bootstrapMode === 'running') {
     out.push(
-      notice('no_solvernets_joined', 'info', 'No SolverNets joined. Browse the registry to start earning.', {
-        jumpTo: '/operator/registry',
+      notice('no_solvernets_joined', 'info', 'No execution wiring configured. Add a work kind in Settings > Claim policy & wiring.', {
+        jumpTo: '/operator/claim-policy',
       }),
     );
   }

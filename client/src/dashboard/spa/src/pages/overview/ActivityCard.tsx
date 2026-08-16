@@ -462,7 +462,7 @@ export function ActivityCard({ joined, tasks }: ActivityCardProps): JSX.Element 
                   variant="link"
                   size="sm"
                   data-testid="activity-settings-edit"
-                  onClick={() => navigate('/operator/memberships')}
+                  onClick={() => navigate('/operator/claim-policy')}
                   className="h-auto gap-1 p-0 text-[11px] uppercase tracking-[0.14em]"
                 >
                   <Pencil className="h-3 w-3" aria-hidden="true" />

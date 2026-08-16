@@ -4,31 +4,27 @@ import {
 } from '../../../src/harnesses/impls/jinn-repo-evaluator/semantic-runner-resolver.js';
 
 describe('configured semantic evaluator runner resolver', () => {
-  it('resolves only an exact joined evaluator manifest using the semantic evaluator harness', async () => {
+  it('resolves only an exact wiring evaluator digest using the semantic evaluator harness', async () => {
     const runner = { run: vi.fn() };
     const createClaudeRunner = vi.fn(() => runner);
     let claudePath = '/trusted/claude';
-    let joinedSolverNets = {
-      'bafy-reviewer': {
-        manifestCid: 'bafy-reviewer',
-        name: 'Autopilot reviewers',
-        roles: ['evaluator'] as const,
+    let executionWiring = [
+      {
+        workKind: 'jinn-repo.v1',
         harness: 'jinn-repo-evaluator',
         model: 'claude-sonnet-4-5',
+        plugins: [],
+        legacyManifestDigest: 'bafy-reviewer',
       },
-      'bafy-solver-only': {
-        manifestCid: 'bafy-solver-only',
-        roles: ['solver'] as const,
-        harness: 'jinn-repo-evaluator',
-      },
-      'bafy-wrong-harness': {
-        manifestCid: 'bafy-wrong-harness',
-        roles: ['evaluator'] as const,
+      {
+        workKind: 'jinn-repo.v1',
         harness: 'codex',
+        plugins: [],
+        legacyManifestDigest: 'bafy-wrong-harness',
       },
-    };
+    ];
     const resolver = makeConfiguredSemanticEvaluatorRunnerResolver({
-      getJoinedSolverNets: () => joinedSolverNets,
+      getExecutionWiring: () => executionWiring,
       getClaudePath: () => claudePath,
       createClaudeRunner,
     });
@@ -39,8 +35,6 @@ describe('configured semantic evaluator runner resolver', () => {
         runner,
         model: 'claude-sonnet-4-5',
       });
-    expect(resolver.resolve({ manifestCid: 'bafy-solver-only' }))
-      .toBeUndefined();
     expect(resolver.resolve({ manifestCid: 'bafy-wrong-harness' }))
       .toBeUndefined();
     expect(resolver.resolve({ manifestCid: 'bafy-unknown' }))
@@ -52,15 +46,16 @@ describe('configured semantic evaluator runner resolver', () => {
       claudePath: '/trusted/claude',
     });
 
-    joinedSolverNets = {
-      ...joinedSolverNets,
-      'bafy-hot-join': {
-        manifestCid: 'bafy-hot-join',
-        roles: ['evaluator'],
+    executionWiring = [
+      ...executionWiring,
+      {
+        workKind: 'jinn-repo.v1',
         harness: 'jinn-repo-evaluator',
         model: 'claude-opus-4-1',
+        plugins: [],
+        legacyManifestDigest: 'bafy-hot-join',
       },
-    };
+    ];
     expect(resolver.resolve({ manifestCid: 'bafy-hot-join' }))
       .toMatchObject({ model: 'claude-opus-4-1' });
     claudePath = '/updated/claude';
@@ -71,21 +66,22 @@ describe('configured semantic evaluator runner resolver', () => {
     });
   });
 
-  it('fails closed when the map key and persisted manifest CID disagree', async () => {
+  it('fails closed when the wiring digest does not match the lookup CID', async () => {
     const resolver = makeConfiguredSemanticEvaluatorRunnerResolver({
-      getJoinedSolverNets: () => ({
-        'bafy-key': {
-          manifestCid: 'bafy-other',
-          roles: ['evaluator'],
+      getExecutionWiring: () => ([
+        {
+          workKind: 'jinn-repo.v1',
           harness: 'jinn-repo-evaluator',
+          plugins: [],
+          legacyManifestDigest: 'bafy-other',
         },
-      }),
+      ]),
       getClaudePath: () => 'claude',
     });
 
     expect(resolver.resolve({ manifestCid: 'bafy-key' }))
       .toBeUndefined();
     expect(resolver.resolve({ manifestCid: 'bafy-other' }))
-      .toBeUndefined();
+      .toMatchObject({ provider: 'anthropic' });
   });
 });

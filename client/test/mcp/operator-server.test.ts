@@ -94,8 +94,6 @@ const EXPECTED_TOOLS = [
   'jinn_solver_nets_list',
   'jinn_solver_nets_show',
   // mutating (require confirm)
-  'jinn_solver_nets_enable',
-  'jinn_solver_nets_disable',
   'jinn_init',
   'jinn_run',
   'jinn_bootstrap',
@@ -305,7 +303,7 @@ describe('jinn_logs tool', () => {
   });
 });
 
-describe('jinn_solver_nets_list / status / enable / disable tools', () => {
+describe('jinn_solver_nets_list / show tools', () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
@@ -323,27 +321,7 @@ describe('jinn_solver_nets_list / status / enable / disable tools', () => {
     const { createOperatorServer } = await import('@/mcp/operator-server.js');
     const server = createOperatorServer();
     const result = await server._registeredTools.jinn_solver_nets_show.handler(
-      { name: 'prediction' },
-      {},
-    );
-    expect(result).toHaveProperty('content');
-  });
-
-  it('jinn_solver_nets_enable requires name arg', async () => {
-    const { createOperatorServer } = await import('@/mcp/operator-server.js');
-    const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_solver_nets_enable.handler(
-      { name: 'prediction', extra_args: undefined },
-      {},
-    );
-    expect(result).toHaveProperty('content');
-  });
-
-  it('jinn_solver_nets_disable requires name arg', async () => {
-    const { createOperatorServer } = await import('@/mcp/operator-server.js');
-    const server = createOperatorServer();
-    const result = await server._registeredTools.jinn_solver_nets_disable.handler(
-      { name: 'prediction' },
+      { name: 'prediction.v1' },
       {},
     );
     expect(result).toHaveProperty('content');

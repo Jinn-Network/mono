@@ -62,8 +62,8 @@ function isTaskNativeService(service: ServiceState): boolean {
  * surface, which short-circuits on mainnet before reaching this helper.
  */
 export function hasConfiguredEvaluatorRole(config: JinnConfig): boolean {
-  const joinedSolverNets = Object.values(config.joinedSolverNets ?? {});
-  return joinedSolverNets.some((entry) => entry.roles.includes('evaluator'));
+  if (config.evaluator?.enabled === true) return true;
+  return (config.executionWiring ?? []).some((entry) => entry.harness.includes('evaluator'));
 }
 
 function loadFleetState(config: JinnConfig): { path: string; state: FleetState | null; error?: string } {

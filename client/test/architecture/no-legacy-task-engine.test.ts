@@ -77,20 +77,11 @@ describe('the legacy TaskEngine is retired', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('serves no join-lifecycle WRITE route, and keeps the read', () => {
+  it('serves no join-lifecycle WRITE route, and no memberships read', () => {
     const setup = source('api/setup-endpoints.ts');
-    // The write pair is gone: nothing may register a handler at
-    // `/v1/operator/join/:cid`, by any verb.
     expect(setup).not.toMatch(/'\/v1\/operator\/join\//u);
-    // The read survives on purpose — OPERATOR-APP-SPEC §2.4 keeps Memberships as a
-    // read-only legacy view until cutover stage 5, so the SPA still needs to ask
-    // which SolverNets the config declares. Asserted positively so a future
-    // deletion has to argue with this test rather than slip past it.
-    expect(setup).toMatch(/app\.get\('\/v1\/operator\/joined'/u);
-    // Likewise the issue-#421 tombstone: 410 Gone (retired) beats a bare 404
-    // (never existed), and headless design §4.2 keeps it until the legacy shape
-    // goes at stage 5.
-    expect(setup).toMatch(/app\.post\('\/v1\/setup\/solvernets\/:name'/u);
+    expect(setup).not.toMatch(/app\.get\('\/v1\/operator\/joined'/u);
+    expect(setup).not.toMatch(/app\.post\('\/v1\/setup\/solvernets\/:name'/u);
   });
 
   it('routes no join flow in the operator SPA', () => {
@@ -100,15 +91,12 @@ describe('the legacy TaskEngine is retired', () => {
     expect(existsSync(join(root, 'dashboard/spa/src/pages/configuration/JoinedNetCard.tsx'))).toBe(false);
   });
 
-  it('leaves the memberships view read-only', () => {
-    // The tab file is restored (see above), so pin what it may NOT do: call the
-    // deleted write client methods, or route at the deleted endpoints.
-    const tab = source('dashboard/spa/src/pages/operator/MembershipsTab.tsx');
-    expect(tab).not.toMatch(/api\.operator\.(join|leave)\b/u);
-    expect(tab).toMatch(/api\.operator\.listJoined/u);
-    // And the SPA client offers no join/leave method to call.
+  it('retires the memberships view', () => {
+    expect(existsSync(join(root, 'dashboard/spa/src/pages/operator/MembershipsTab.tsx'))).toBe(false);
     const client = source('dashboard/spa/src/api/client.ts');
+    expect(client).not.toMatch(/listJoined/u);
     expect(client).not.toMatch(/^\s{4}(join|leave):/mu);
+    expect(source('dashboard/spa/src/App.tsx')).toMatch(/operator\/memberships.*Redirect to="\/operator\/claim-policy"/su);
   });
 
   it('collects no harness or model in the onboarding takeover', () => {

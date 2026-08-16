@@ -8,8 +8,6 @@ import {
   DEFAULT_MAINNET_RPC_URLS,
   loadConfig,
   buildConfigProvenance,
-  migrateLegacySolverNets,
-  backfillJoinedProviders,
 } from '../src/config.js';
 import { phaseDTransitionUsageSnapshot } from '../src/compatibility/phase-d-transition-usage.js';
 
@@ -758,7 +756,7 @@ describe('loadConfig RPC override handling', () => {
     }
   });
 });
-describe('loadConfig legacy solverNets migration via loader', () => {
+describe('loadConfig v1 SolverNet keys migrate into executionWiring', () => {
   const dirs: string[] = [];
 
   afterEach(async () => {
@@ -773,7 +771,7 @@ describe('loadConfig legacy solverNets migration via loader', () => {
     return configPath;
   }
 
-  it('migrates a legacy solverNets entry into joinedSolverNets at load time', async () => {
+  it('migrates a v1 solverNets entry into executionWiring at load time', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       rpcUrl: 'https://example/rpc',
@@ -788,22 +786,12 @@ describe('loadConfig legacy solverNets migration via loader', () => {
       },
     });
     const cfg = loadConfig(configPath);
-    // The validated config has no `solverNets` field at all.
     expect((cfg as unknown as Record<string, unknown>).solverNets).toBeUndefined();
-    expect(cfg.joinedSolverNets).toEqual({
-      'legacy:prediction': {
-        manifestCid: 'legacy:prediction',
-        name: 'prediction',
-        contract: { id: 'prediction', version: 'v1' },
-        roles: ['solver'],
-        harness: 'claude-code',
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-    });
+    expect((cfg as unknown as Record<string, unknown>).joinedSolverNets).toBeUndefined();
+    expect(cfg.executionWiring?.some((entry) => entry.workKind === 'prediction.v1')).toBe(true);
   });
 
-  it('preserves an explicit joinedSolverNets entry when legacy and joined are both present', async () => {
+  it('prefers joinedSolverNets over solverNets when both are present on a v1 file', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       solverNets: { prediction: { solverType: 'prediction.v1', roles: ['solving'] } },
@@ -812,67 +800,24 @@ describe('loadConfig legacy solverNets migration via loader', () => {
           manifestCid: 'bafkreireal',
           name: 'real-net',
           roles: ['solver'],
+          harness: 'claude-code',
+          contract: { id: 'prediction', version: 'v1' },
           plugins: [],
-          disabledDefaultPlugins: [],
         },
       },
     });
     const cfg = loadConfig(configPath);
-    expect(Object.keys(cfg.joinedSolverNets ?? {})).toEqual(
-      expect.arrayContaining(['bafkreireal', 'legacy:prediction']),
-    );
+    expect(cfg.executionWiring?.some((entry) => entry.workKind === 'prediction.v1')).toBe(true);
+    expect((cfg as unknown as Record<string, unknown>).joinedSolverNets).toBeUndefined();
   });
 
-  it('produces an empty joinedSolverNets when no legacy block is on disk', async () => {
+  it('produces empty executionWiring when no v1 SolverNet block is on disk', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
     const cfg = loadConfig(configPath);
-    expect(cfg.joinedSolverNets ?? {}).toEqual({});
+    expect(cfg.executionWiring ?? []).toEqual([]);
   });
 
-  it('migrates the dual-role legacy shape to roles: [solver, evaluator]', async () => {
-    const configPath = await writeConfigFile({
-      network: 'testnet',
-      solverNets: {
-        'swe-rebench-v2': {
-          solverType: 'swe-rebench-v2.v1',
-          roles: ['solving', 'evaluating'],
-          harness: 'hermes-agent',
-          model: 'minimax-m2.7',
-          plugins: ['bundled:swe-rebench-v2-runtime'],
-        },
-      },
-    });
-    const cfg = loadConfig(configPath);
-    expect(cfg.joinedSolverNets?.['legacy:swe-rebench-v2']).toEqual({
-      manifestCid: 'legacy:swe-rebench-v2',
-      name: 'swe-rebench-v2',
-      contract: { id: 'swe-rebench-v2', version: 'v1' },
-      roles: ['solver', 'evaluator'],
-      harness: 'hermes-agent',
-      model: 'minimax-m2.7',
-      plugins: ['bundled:swe-rebench-v2-runtime'],
-      disabledDefaultPlugins: [],
-    });
-  });
-
-  it('strips legacy "launching" role on migration', async () => {
-    const configPath = await writeConfigFile({
-      network: 'testnet',
-      solverNets: {
-        prediction: {
-          solverType: 'prediction.v1',
-          roles: ['solving', 'launching'],
-        },
-      },
-    });
-    const cfg = loadConfig(configPath);
-    expect(cfg.joinedSolverNets?.['legacy:prediction']?.roles).toEqual(['solver']);
-  });
-
-  // Issue #445 — the in-memory migration was never persisted, so the stale
-  // `solverNets.<name>` block lingered on disk forever and kept re-triggering
-  // prediction code paths every boot.
-  it('persists the migration to disk so the legacy block is pruned from the file', async () => {
+  it('persists the v2 rewrite and prunes retired SolverNet keys from disk', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       rpcUrl: 'https://example/rpc',
@@ -889,67 +834,25 @@ describe('loadConfig legacy solverNets migration via loader', () => {
     loadConfig(configPath);
     const onDisk = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
     expect(onDisk.solverNets).toBeUndefined();
-    expect(onDisk.joinedSolverNets).toEqual({
-      'legacy:prediction': {
-        manifestCid: 'legacy:prediction',
-        name: 'prediction',
-        contract: { id: 'prediction', version: 'v1' },
-        roles: ['solver'],
-        harness: 'claude-code',
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-    });
+    expect(onDisk.joinedSolverNets).toBeUndefined();
+    expect(onDisk.configShapeVersion).toBe(2);
+    expect(Array.isArray(onDisk.executionWiring)).toBe(true);
   });
 
-  // Issue #445 — even when every legacy entry already has a `legacy:*`
-  // counterpart in joinedSolverNets (migratedCount === 0), the in-memory
-  // migration still deletes the `solverNets` block. If the persist is gated on
-  // migratedCount the stale block survives on disk forever, so in-memory
-  // (deleted) and on-disk (present) permanently disagree. Persist must run
-  // whenever the on-disk file carried a `solverNets` key.
-  it('prunes the legacy block from disk even when every entry was already migrated', async () => {
-    const configPath = await writeConfigFile({
-      network: 'testnet',
-      rpcUrl: 'https://example/rpc',
-      solverNets: {
-        prediction: {
-          enabled: false,
-          solverType: 'prediction.v1',
-          harness: 'claude-code',
-          plugins: [],
-          taskGenerator: { enabled: true },
-        },
-      },
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'prediction',
-          contract: { id: 'prediction', version: 'v1' },
-          roles: ['solver'],
-          harness: 'claude-code',
-        },
-      },
-    });
-    loadConfig(configPath);
-    const onDisk = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
-    expect(onDisk.solverNets).toBeUndefined();
-  });
-
-  it('does not resurrect the legacy entry on a second load (restart-safe)', async () => {
+  it('does not resurrect retired keys on a second load', async () => {
     const configPath = await writeConfigFile({
       network: 'testnet',
       rpcUrl: 'https://example/rpc',
       solverNets: { prediction: { solverType: 'prediction.v1', roles: ['solving'] } },
     });
-    loadConfig(configPath); // first boot migrates + persists
+    loadConfig(configPath);
     const afterFirst = await readFile(configPath, 'utf-8');
-    loadConfig(configPath); // simulated restart
+    loadConfig(configPath);
     const afterSecond = await readFile(configPath, 'utf-8');
-    expect(afterSecond).toBe(afterFirst); // byte-identical → nothing rewritten
+    expect(afterSecond).toBe(afterFirst);
     const onDisk = JSON.parse(afterSecond) as Record<string, unknown>;
     expect(onDisk.solverNets).toBeUndefined();
-    expect(Object.keys(onDisk.joinedSolverNets as object)).toContain('legacy:prediction');
+    expect(onDisk.joinedSolverNets).toBeUndefined();
   });
 
   it('does not persist transient env overrides into the config file', async () => {
@@ -967,142 +870,11 @@ describe('loadConfig legacy solverNets migration via loader', () => {
       else process.env['JINN_RPC_URL'] = prev;
     }
     const onDisk = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
-    expect(onDisk.rpcUrl).toBe('https://example/rpc'); // original file value, NOT the env override
+    expect(onDisk.rpcUrl).toBe('https://example/rpc');
     expect(onDisk.solverNets).toBeUndefined();
   });
 });
 
-describe('joinedSolverNets provider backfill (issue #1243)', () => {
-  const dirs: string[] = [];
-
-  afterEach(async () => {
-    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-  });
-
-  async function writeConfigFile(contents: Record<string, unknown>): Promise<string> {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'jinn-provider-'));
-    dirs.push(dir);
-    const configPath = path.join(dir, 'config.json');
-    await writeFile(configPath, JSON.stringify(contents, null, 2));
-    return configPath;
-  }
-
-  // Acceptance #2: a v0.1.6 `{ model }`-only joined SolverNet config backfills
-  // to `openrouter` without breaking load.
-  it('backfills provider=openrouter onto a {model}-only OpenRouter-shaped joined entry at load', async () => {
-    const configPath = await writeConfigFile({
-      network: 'testnet',
-      joinedSolverNets: {
-        bafkreireal: {
-          manifestCid: 'bafkreireal',
-          name: 'real-net',
-          roles: ['solver'],
-          harness: 'hermes-agent',
-          model: 'anthropic/claude-opus-4.7',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
-    });
-    const cfg = loadConfig(configPath);
-    expect(cfg.joinedSolverNets?.['bafkreireal']?.provider).toBe('openrouter');
-  });
-
-  it('does not backfill a non-OpenRouter-shaped model id', () => {
-    const merged: Record<string, unknown> = {
-      joinedSolverNets: {
-        x: { manifestCid: 'x', roles: ['solver'], model: 'qwen2.5-coder' },
-      },
-    };
-    expect(backfillJoinedProviders(merged)).toBe(0);
-    const entry = (merged.joinedSolverNets as Record<string, Record<string, unknown>>)['x'];
-    expect(entry['provider']).toBeUndefined();
-  });
-
-  it('leaves an entry with an explicit provider untouched', () => {
-    const merged: Record<string, unknown> = {
-      joinedSolverNets: {
-        x: { manifestCid: 'x', roles: ['solver'], model: 'anthropic/claude-opus-4.7', provider: 'nous-portal' },
-      },
-    };
-    expect(backfillJoinedProviders(merged)).toBe(0);
-    const entry = (merged.joinedSolverNets as Record<string, Record<string, unknown>>)['x'];
-    expect(entry['provider']).toBe('nous-portal');
-  });
-
-  it('is a no-op when the model is absent', () => {
-    const merged: Record<string, unknown> = {
-      joinedSolverNets: { x: { manifestCid: 'x', roles: ['solver'] } },
-    };
-    expect(backfillJoinedProviders(merged)).toBe(0);
-  });
-
-  it('preserves an explicit object-form provider on load (custom endpoint)', async () => {
-    const configPath = await writeConfigFile({
-      network: 'testnet',
-      joinedSolverNets: {
-        bafcustom: {
-          manifestCid: 'bafcustom',
-          name: 'custom-net',
-          roles: ['solver'],
-          harness: 'hermes-agent',
-          model: 'my-model',
-          provider: {
-            name: '  my-endpoint  ',
-            baseUrl: '  http://127.0.0.1:9000/v1  ',
-            authVar: '  MY_CRED  ',
-          },
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
-    });
-    const cfg = loadConfig(configPath);
-    expect(cfg.joinedSolverNets?.['bafcustom']?.provider).toEqual({
-      name: 'my-endpoint',
-      baseUrl: 'http://127.0.0.1:9000/v1',
-      authVar: 'MY_CRED',
-    });
-  });
-
-  it('normalizes an explicit string-form provider on load', async () => {
-    const configPath = await writeConfigFile({
-      network: 'testnet',
-      joinedSolverNets: {
-        bafnamed: {
-          manifestCid: 'bafnamed',
-          roles: ['solver'],
-          model: 'local-model',
-          provider: '  openrouter  ',
-        },
-      },
-    });
-
-    const cfg = loadConfig(configPath);
-    expect(cfg.joinedSolverNets?.['bafnamed']?.provider).toBe('openrouter');
-  });
-
-  it.each([
-    ['', 'empty named provider'],
-    ['   ', 'whitespace named provider'],
-    [{ name: '   ' }, 'whitespace object name'],
-    [{ name: 'custom', baseUrl: '   ' }, 'whitespace object baseUrl'],
-    [{ name: 'custom', authVar: '   ' }, 'whitespace object authVar'],
-  ])('rejects %s (%s)', async (provider) => {
-    const configPath = await writeConfigFile({
-      network: 'testnet',
-      joinedSolverNets: {
-        bafinvalid: {
-          manifestCid: 'bafinvalid',
-          roles: ['solver'],
-          provider,
-        },
-      },
-    });
-
-    expect(() => loadConfig(configPath)).toThrow();
-  });
-});
 
 describe('buildConfigProvenance', () => {
   const dirs: string[] = [];
@@ -1575,121 +1347,6 @@ describe('hermes config keys', () => {
   });
 });
 
-describe('migrateLegacySolverNets', () => {
-  it('migrates a single legacy solverNets entry into joinedSolverNets keyed by `legacy:<name>`', () => {
-    const raw: Record<string, unknown> = {
-      solverNets: {
-        prediction: {
-          enabled: true,
-          solverType: 'prediction.v1',
-          roles: ['solving'],
-          harness: 'claude-code',
-          plugins: [],
-          taskGenerator: { enabled: true },
-        },
-      },
-    };
-    const migrated = migrateLegacySolverNets(raw);
-    expect(migrated).toBe(1);
-    expect(raw.solverNets).toBeUndefined();
-    expect(raw.joinedSolverNets).toEqual({
-      'legacy:prediction': {
-        manifestCid: 'legacy:prediction',
-        name: 'prediction',
-        contract: { id: 'prediction', version: 'v1' },
-        roles: ['solver'],
-        harness: 'claude-code',
-        plugins: [],
-        disabledDefaultPlugins: [],
-      },
-    });
-  });
-
-  it('returns 0 and does not mutate when no legacy block exists', () => {
-    const raw: Record<string, unknown> = { joinedSolverNets: { existing: { manifestCid: 'cid1', roles: ['solver'] } } };
-    const before = JSON.stringify(raw);
-    expect(migrateLegacySolverNets(raw)).toBe(0);
-    expect(JSON.stringify(raw)).toBe(before);
-  });
-
-  it('maps the legacy "evaluating" role to "evaluator"', () => {
-    const raw: Record<string, unknown> = {
-      solverNets: {
-        'swe-rebench-v2': {
-          enabled: true,
-          solverType: 'swe-rebench-v2.v1',
-          roles: ['solving', 'evaluating'],
-          harness: 'hermes-agent',
-          model: 'minimax-m2.7',
-          plugins: ['bundled:swe-rebench-v2-runtime'],
-        },
-      },
-    };
-    expect(migrateLegacySolverNets(raw)).toBe(1);
-    expect(raw.joinedSolverNets).toEqual({
-      'legacy:swe-rebench-v2': {
-        manifestCid: 'legacy:swe-rebench-v2',
-        name: 'swe-rebench-v2',
-        contract: { id: 'swe-rebench-v2', version: 'v1' },
-        roles: ['solver', 'evaluator'],
-        harness: 'hermes-agent',
-        model: 'minimax-m2.7',
-        plugins: ['bundled:swe-rebench-v2-runtime'],
-        disabledDefaultPlugins: [],
-      },
-    });
-  });
-
-  it('preserves a pre-existing joinedSolverNets entry under the same synthetic key (does not overwrite)', () => {
-    const raw: Record<string, unknown> = {
-      solverNets: {
-        prediction: { solverType: 'prediction.v1', roles: ['solving'], harness: 'claude-code' },
-      },
-      joinedSolverNets: {
-        'legacy:prediction': {
-          manifestCid: 'legacy:prediction',
-          name: 'preserved',
-          roles: ['solver'],
-        },
-      },
-    };
-    migrateLegacySolverNets(raw);
-    // The pre-existing entry wins; the legacy block does not clobber it.
-    expect((raw.joinedSolverNets as Record<string, { name: string }>)['legacy:prediction'].name).toBe('preserved');
-  });
-
-  it('handles an empty solverNets object as a no-op migration (no entries to convert)', () => {
-    const raw: Record<string, unknown> = { solverNets: {} };
-    expect(migrateLegacySolverNets(raw)).toBe(0);
-    expect(raw.solverNets).toBeUndefined();
-    expect(raw.joinedSolverNets).toBeUndefined();
-  });
-
-  it('defaults roles to ["solver"] when the legacy entry has no roles field', () => {
-    const raw: Record<string, unknown> = {
-      solverNets: { prediction: { solverType: 'prediction.v1', harness: 'claude-code' } },
-    };
-    migrateLegacySolverNets(raw);
-    expect((raw.joinedSolverNets as Record<string, { roles: string[] }>)['legacy:prediction'].roles).toEqual(['solver']);
-  });
-
-  it('drops legacy "launching" roles during migration (operator config no longer carries them)', () => {
-    const raw: Record<string, unknown> = {
-      solverNets: { prediction: { solverType: 'prediction.v1', roles: ['solving', 'launching'] } },
-    };
-    migrateLegacySolverNets(raw);
-    expect((raw.joinedSolverNets as Record<string, { roles: string[] }>)['legacy:prediction'].roles).toEqual(['solver']);
-  });
-
-  it('falls back to id=<name>, version="v1" when solverType is malformed', () => {
-    const raw: Record<string, unknown> = {
-      solverNets: { 'broken-net': { solverType: 'no-dot-version', roles: ['solving'] } },
-    };
-    migrateLegacySolverNets(raw);
-    expect((raw.joinedSolverNets as Record<string, { contract: unknown }>)['legacy:broken-net'].contract)
-      .toEqual({ id: 'broken-net', version: 'v1' });
-  });
-});
 
 describe('engine.knowledgeAutoload (#1393)', () => {
   const dirs: string[] = [];
@@ -1760,7 +1417,7 @@ describe('Phase D legacy wiring diagnostics', () => {
       loadConfig(configPath);
       const after = phaseDTransitionUsageSnapshot()
         .find((row) => row.signal === 'legacy-wiring-config-field')?.count ?? 0;
-      expect(after).toBe(before + 1);
+      expect(after).toBe(before);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

@@ -132,15 +132,14 @@ export interface BootstrapState {
      */
     targetMet?: boolean;
   };
-  joinedSolverNets?: Record<string, {
-    name?: string;
-    manifestCid?: string;
-    contract?: { id: string; version: string };
-    roles?: string[];
-    harness?: string;
+  executionWiring?: Array<{
+    workKind: string;
+    harness: string;
     model?: string;
-    plugins?: string[];
-    disabledDefaultPlugins?: string[];
+    plugins: string[];
+    credentialRef?: string;
+    isolationPolicy?: string;
+    legacyManifestDigest?: string;
   }>;
   /**
    * #983: true once the operator clicked "Enter dashboard" at the end of the

@@ -233,16 +233,16 @@ describe('jinn harnesses', () => {
     writeFileSync(
       CONFIG_PATH,
       JSON.stringify({
-        joinedSolverNets: {
-          bafyfixture: {
-            manifestCid: 'bafyfixture',
-            name: 'SWE-rebench v2',
-            roles: ['solver', 'evaluator'],
-            harness: 'codex-code-learner',
-            model: 'gpt-5.4-mini',
-            plugins: ['bundled:swe-rebench-v2-runtime'],
-          },
-        },
+        configShapeVersion: 2,
+        executionWiring: [{
+          workKind: 'swe-rebench-v2.v1',
+          harness: 'codex-code-learner',
+          model: 'gpt-5.4-mini',
+          plugins: ['bundled:swe-rebench-v2-runtime'],
+          credentialRef: 'codex-code-learner-default',
+          isolationPolicy: 'process',
+          legacyManifestDigest: 'bafyfixture',
+        }],
         engine: { implStateDirRoot: join(TMP, 'impl-state') },
       }),
     );
@@ -270,7 +270,7 @@ describe('jinn harnesses', () => {
       },
     });
     const cfg = readConfig();
-    expect((cfg.joinedSolverNets as any).bafyfixture.harness).toBe('codex-code-learner');
+    expect((cfg.executionWiring as any)[0].harness).toBe('codex-code-learner');
   });
 
   it('enable: errors for unknown harness names', async () => {

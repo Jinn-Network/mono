@@ -395,8 +395,8 @@ list-feedback / discover / status are READ verbs (no password required):
   • \`status\` summarises publication state + reputation summary +
     local-block flag.
 
-Attach a plug-in to a SolverNet at runtime with:
-  jinn solver-nets add-plugin <solver-net> <source>
+Attach a plug-in by appending its source onto \`executionWiring[].plugins\`
+in the operator config and restarting. \`jinn solver-nets add-plugin\` is retired.
 `;
 
 export function createSolverPluginsCommand(

@@ -1,19 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import { buildSpendCapConfig } from '../../src/spend/daemon-config.js';
+import type { ExecutionWiringConfigEntry } from '../../src/config/shape-v2.js';
 
-const joined = {
-  bafycid1: { manifestCid: 'bafycid1', roles: ['solver'], harness: 'claude-code', plugins: [] },
-  bafycid2: { manifestCid: 'bafycid2', roles: ['solver'], harness: 'hermes-agent', plugins: [] },
-} as never;
+const executionWiring: ExecutionWiringConfigEntry[] = [
+  {
+    workKind: 'bafycid1',
+    harness: 'claude-code',
+    model: 'claude-haiku-4-5-20251001',
+    plugins: [],
+    credentialRef: 'claude-code-default',
+    isolationPolicy: 'process',
+  },
+  {
+    workKind: 'bafycid2',
+    harness: 'hermes-agent',
+    model: 'claude-haiku-4-5-20251001',
+    plugins: [],
+    credentialRef: 'hermes-agent-default',
+    isolationPolicy: 'process',
+  },
+];
 
 describe('buildSpendCapConfig', () => {
   it('returns undefined when no caps are configured', () => {
-    expect(buildSpendCapConfig({ joinedSolverNets: joined, spendCaps: undefined }, {})).toBeUndefined();
+    expect(buildSpendCapConfig({ executionWiring, spendCaps: undefined }, {})).toBeUndefined();
   });
 
-  it('maps manifest cids to resolved credentials and applies explicit caps', () => {
+  it('maps participation keys to resolved credentials and applies explicit caps', () => {
     const out = buildSpendCapConfig(
-      { joinedSolverNets: joined, spendCaps: { 'anthropic:api-key': 20 } },
+      { executionWiring, spendCaps: { 'anthropic:api-key': 20 } },
       { ANTHROPIC_API_KEY: 'sk-ant-x' },
     );
     expect(out?.manifestCredentials['bafycid1']).toBe('anthropic:api-key');
@@ -22,7 +37,7 @@ describe('buildSpendCapConfig', () => {
 
   it('applies JINN_SPEND_CAP_USD as a blanket cap', () => {
     const out = buildSpendCapConfig(
-      { joinedSolverNets: joined, spendCaps: undefined },
+      { executionWiring, spendCaps: undefined },
       { ANTHROPIC_API_KEY: 'sk-ant-x', JINN_HERMES_PROVIDER: 'openrouter', JINN_SPEND_CAP_USD: '15' },
     );
     expect(out?.caps['anthropic:api-key']).toBe(15);
@@ -31,7 +46,7 @@ describe('buildSpendCapConfig', () => {
 
   it('an explicit cap overrides the blanket for that credential', () => {
     const out = buildSpendCapConfig(
-      { joinedSolverNets: joined, spendCaps: { 'anthropic:api-key': 50 } },
+      { executionWiring, spendCaps: { 'anthropic:api-key': 50 } },
       { ANTHROPIC_API_KEY: 'sk-ant-x', JINN_HERMES_PROVIDER: 'openrouter', JINN_SPEND_CAP_USD: '15' },
     );
     expect(out?.caps['anthropic:api-key']).toBe(50);

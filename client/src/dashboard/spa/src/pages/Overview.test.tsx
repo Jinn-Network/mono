@@ -145,14 +145,15 @@ describe('OverviewPage layout', () => {
     });
     getBootstrapMock.mockResolvedValue({
       master_address: '0x53e25264C86db85b6168F7824f5c39abd5281787',
-      joinedSolverNets: {
-        bafkreiswe: {
-          manifestCid: 'bafkreiswe',
-          name: 'SWE-rebench v2',
-          roles: ['solver'],
-          harness: 'hermes-agent',
-        },
-      },
+      executionWiring: [{
+        workKind: 'swe-rebench-v2.v1',
+        harness: 'hermes-agent',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'hermes-agent-default',
+        isolationPolicy: 'process',
+        legacyManifestDigest: 'bafkreiswe',
+      }],
     });
     render(withProviders(<OverviewPage />));
 
@@ -207,21 +208,22 @@ describe('OverviewPage layout', () => {
       predictionV1: { operator: { ok: true, solverNet: { name: 'prediction', enabled: false }, diagnostics: [] } },
     });
     getBootstrapMock.mockResolvedValue({
-      joinedSolverNets: {
-        bafkreiswe: {
-          manifestCid: 'bafkreiswe',
-          name: 'SWE-rebench v2',
-          roles: ['solver', 'evaluator'],
-          harness: 'hermes-agent',
-        },
-      },
+      executionWiring: [{
+        workKind: 'swe-rebench-v2.v1',
+        harness: 'hermes-agent',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'hermes-agent-default',
+        isolationPolicy: 'process',
+        legacyManifestDigest: 'bafkreiswe',
+      }],
     });
     render(withProviders(<OverviewPage />));
 
     // Both queries need to settle — Activity reads status (5s poll) AND
     // bootstrap (30s poll). waitFor gives both a chance to land.
     await waitFor(() =>
-      expect(screen.getByTestId('activity-joined').textContent).toContain('SWE-rebench v2'),
+      expect(screen.getByTestId('activity-joined').textContent).toContain('swe-rebench-v2.v1'),
     );
     const tasks = await screen.findByTestId('activity-tasks-table');
     expect(tasks.textContent).toContain('task-a');
@@ -233,9 +235,9 @@ describe('OverviewPage layout', () => {
 });
 
 describe('OverviewPage wave-2 SOLVING-ON empty-state (issue #421)', () => {
-  it('shows the no-active-SolverNet state when joinedSolverNets is empty', async () => {
+  it('shows the no-active-SolverNet state when executionWiring is empty', async () => {
     getStatusMock.mockResolvedValue({ fleet: { services: [] } });
-    getBootstrapMock.mockResolvedValue({ joinedSolverNets: {} });
+    getBootstrapMock.mockResolvedValue({ executionWiring: [] });
     render(withProviders(<OverviewPage />));
     await waitFor(() => {
       const joined = screen.getByTestId('activity-joined');
@@ -243,15 +245,13 @@ describe('OverviewPage wave-2 SOLVING-ON empty-state (issue #421)', () => {
     });
   });
 
-  it('ignores a stale legacy bootstrap.solverNets when joinedSolverNets is empty', async () => {
+  it('ignores a stale legacy bootstrap.solverNets when executionWiring is empty', async () => {
     getStatusMock.mockResolvedValue({ fleet: { services: [] } });
     // Even if the daemon were to accidentally echo a legacy block (it should
-    // not after issue #421), the SPA must not fall through to it. The wave-2
-    // symptom was "SOLVING ON prediction" persisting after every join was
-    // left; this regression test pins the joined-only behaviour.
+    // not after issue #421), the SPA must not fall through to it.
     getBootstrapMock.mockResolvedValue({
       solverNets: { prediction: { enabled: true, roles: ['solving'] } },
-      joinedSolverNets: {},
+      executionWiring: [],
     });
     render(withProviders(<OverviewPage />));
     await waitFor(() => {

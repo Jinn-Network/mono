@@ -214,21 +214,27 @@ describe('GET /v1/bootstrap', () => {
     expect(body.error).toBeUndefined();
   });
 
-  it('includes rpcUrl, defaultRpcUrl, and joinedSolverNets when configReader is supplied', async () => {
+  it('includes rpcUrl, defaultRpcUrl, and executionWiring when configReader is supplied', async () => {
     const earningDir = makeFixtureEarningDir({
       master_address: '0xabc',
       chain: 'base-sepolia',
       services: [{ index: 1, step: 'complete' }],
     });
     const app = new Hono();
+    const executionWiring = [{
+      workKind: 'swe-rebench-v2.v1',
+      harness: 'claude-code',
+      model: 'claude-haiku-4-5-20251001',
+      plugins: [],
+      credentialRef: 'claude-code-default',
+      isolationPolicy: 'process',
+    }];
     addBootstrapRoutes(app, {
       earningDir,
       configReader: () => ({
         rpcUrl: 'https://my-tenderly.example/abc',
         defaultRpcUrl: 'https://sepolia.base.org',
-        joinedSolverNets: {
-          bafkreiswe: { name: 'SWE-rebench v2', roles: ['solver', 'evaluator'] },
-        },
+        executionWiring,
       }),
     });
     const res = await app.request('/v1/bootstrap');
@@ -238,15 +244,15 @@ describe('GET /v1/bootstrap', () => {
       defaultRpcUrl?: string;
       solverNets?: Record<string, unknown>;
       joinedSolverNets?: Record<string, unknown>;
+      executionWiring?: unknown[];
     };
     expect(body.rpcUrl).toBe('https://my-tenderly.example/abc');
     expect(body.defaultRpcUrl).toBe('https://sepolia.base.org');
     // Issue #421: the response no longer echoes a legacy `solverNets` field
     // even when configReader were to return one accidentally.
     expect(body.solverNets).toBeUndefined();
-    expect(body.joinedSolverNets).toMatchObject({
-      bafkreiswe: { name: 'SWE-rebench v2', roles: ['solver', 'evaluator'] },
-    });
+    expect(body.joinedSolverNets).toBeUndefined();
+    expect(body.executionWiring).toEqual(executionWiring);
   });
 
   it('does not echo a `solverNets` field on /v1/bootstrap (issue #421)', async () => {
@@ -256,18 +262,17 @@ describe('GET /v1/bootstrap', () => {
       services: [{ index: 1, step: 'complete' }],
     });
     const app = new Hono();
-    // configReader returns no solverNets at all; assert the bare-bootstrap
-    // shape never produces the legacy field on the wire.
     addBootstrapRoutes(app, {
       earningDir,
       configReader: () => ({
-        joinedSolverNets: {},
+        executionWiring: [],
       }),
     });
     const res = await app.request('/v1/bootstrap');
     const body = await res.json() as Record<string, unknown>;
     expect(body).not.toHaveProperty('solverNets');
-    expect(body).toHaveProperty('joinedSolverNets');
+    expect(body).toHaveProperty('executionWiring');
+    expect(body.joinedSolverNets).toBeUndefined();
   });
 
   it('surfaces a retire_failed envelope when migration archive has a wipe_suppressed=true entry (jinn-mono-hjex.1)', async () => {

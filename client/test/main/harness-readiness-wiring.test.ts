@@ -3,7 +3,7 @@ import { buildHarnessReadinessRegistry } from '../../src/main.js';
 import type { Harness } from '../../src/harnesses/types.js';
 
 describe('buildHarnessReadinessRegistry', () => {
-  it('composes the registry from buildHarnesses() output + config.joinedSolverNets', async () => {
+  it('composes the registry from buildHarnesses() output + config.executionWiring', async () => {
     const harnesses: Harness[] = [
       {
         name: 'claude-code-learner',
@@ -14,15 +14,15 @@ describe('buildHarnessReadinessRegistry', () => {
       },
     ];
     const config = {
-      joinedSolverNets: {
-        'bafkrei.x': {
-          manifestCid: 'bafkrei.x',
-          roles: ['solver' as const],
-          harness: 'claude-code-learner',
-          plugins: [],
-          disabledDefaultPlugins: [],
-        },
-      },
+      executionWiring: [{
+        workKind: 'bafkrei.x',
+        harness: 'claude-code-learner',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: [],
+        credentialRef: 'claude-code-learner-default',
+        isolationPolicy: 'process',
+        legacyManifestDigest: 'bafkrei.x',
+      }],
     };
     const registry = buildHarnessReadinessRegistry({ harnesses, config });
     await registry.refreshNow();

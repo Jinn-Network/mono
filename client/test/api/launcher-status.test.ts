@@ -4,24 +4,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import { gatherLauncherStatus } from '../../src/api/launcher-status.js';
 
+const PREDICTION_POSTING = [{
+  workKind: 'prediction.v1',
+  launchedRecordPath: '/tmp/prediction.json',
+  generatorEnabled: false,
+  legacyManifestDigest: 'legacy:prediction',
+}];
+
 describe('gatherLauncherStatus', () => {
   it('surfaces the Safe balance returned by launcher deps', async () => {
     const getSafeBalanceWei = vi.fn(() => '123456789');
 
     const status = await gatherLauncherStatus({
-      config: {
-        joinedSolverNets: {
-          'legacy:prediction': {
-            manifestCid: 'legacy:prediction',
-            name: 'prediction',
-            contract: { id: 'prediction', version: 'v1' },
-            roles: ['solver'],
-            harness: 'claude-code-learner',
-            plugins: [],
-            disabledDefaultPlugins: [],
-          },
-        },
-      },
+      config: { posting: PREDICTION_POSTING },
       getGeneratorState: () => ({
         cadenceMs: 60_000,
       }),
@@ -44,19 +39,7 @@ describe('gatherLauncherStatus', () => {
 
   it('preserves unavailable balance as unavailable instead of coercing to zero', async () => {
     const status = await gatherLauncherStatus({
-      config: {
-        joinedSolverNets: {
-          'legacy:prediction': {
-            manifestCid: 'legacy:prediction',
-            name: 'prediction',
-            contract: { id: 'prediction', version: 'v1' },
-            roles: ['solver'],
-            harness: 'claude-code-learner',
-            plugins: [],
-            disabledDefaultPlugins: [],
-          },
-        },
-      },
+      config: { posting: PREDICTION_POSTING },
       getGeneratorState: () => undefined,
       getOpenTaskCount: () => 0,
       getReservedBudgetWei: () => '',
@@ -69,20 +52,9 @@ describe('gatherLauncherStatus', () => {
     expect(status.nets[0]?.budget.reservedBudgetWei).toBe('');
   });
 
-  it('emits one entry per joinedSolverNets membership, keyed by display name', async () => {
+  it('emits one entry per posting work kind', async () => {
     const status = await gatherLauncherStatus({
-      config: {
-        joinedSolverNets: {
-          'legacy:prediction': {
-            manifestCid: 'legacy:prediction',
-            name: 'prediction',
-            contract: { id: 'prediction', version: 'v1' },
-            roles: ['solver'],
-            plugins: [],
-            disabledDefaultPlugins: [],
-          },
-        },
-      },
+      config: { posting: PREDICTION_POSTING },
       getGeneratorState: () => ({ cadenceMs: 60_000 }),
       getOpenTaskCount: () => 0,
       getReservedBudgetWei: () => '',
@@ -91,7 +63,7 @@ describe('gatherLauncherStatus', () => {
       now: () => Date.parse('2026-05-08T12:00:00.000Z'),
     });
     expect(status.nets).toHaveLength(1);
-    expect(status.nets[0]?.name).toBe('prediction');
+    expect(status.nets[0]?.name).toBe('prediction.v1');
     expect(status.nets[0]?.solverType).toBe('prediction.v1');
   });
 });

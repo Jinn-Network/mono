@@ -440,28 +440,9 @@ export const api = {
   },
 
   // ---- Operator surfaces ----
-  // The join/leave lifecycle retired in Wave-4 D1 (DR-2026-08-05) with the
-  // `joinedSolverNets` claim gate; what remains here is read plus the
-  // non-membership operator mutations. `listJoined` is the surviving READ —
-  // OPERATOR-APP-SPEC §2.4 keeps Memberships as a read-only legacy view until
-  // cutover stage 5.
+  // Memberships (`listJoined`) retired at cutover stage 5 with the
+  // `joinedSolverNets` key. Claim authority is claim-policy & wiring.
   operator: {
-    listJoined: () =>
-      jfetch<{
-        joinedSolverNets: Record<
-          string,
-          {
-            manifestCid: string;
-            name?: string;
-            contract?: { id: string; version: string };
-            roles: Array<'solver' | 'evaluator'>;
-            harness?: string;
-            model?: string;
-            plugins?: string[];
-            disabledDefaultPlugins?: string[];
-          }
-        >;
-      }>('/v1/operator/joined'),
     listArtifacts: (opts: { source?: OperatorArtifactSource; artifactType?: string; limit?: number } = {}) => {
       const q = new URLSearchParams();
       if (opts.source) q.set('source', opts.source);
