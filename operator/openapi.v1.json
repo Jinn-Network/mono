@@ -2211,6 +2211,26 @@
                       "type": "number",
                       "const": 1
                     },
+                    "contractVersion": {
+                      "type": "object",
+                      "properties": {
+                        "major": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "minor": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "major",
+                        "minor"
+                      ],
+                      "additionalProperties": {}
+                    },
                     "generatedAt": {
                       "type": "string"
                     },
@@ -2259,6 +2279,7 @@
                   },
                   "required": [
                     "schemaVersion",
+                    "contractVersion",
                     "generatedAt",
                     "notifications"
                   ],

@@ -14,6 +14,7 @@
  */
 import { z } from 'zod/v4';
 import { NOTIFICATION_KINDS } from './notification-kinds.const.js';
+import { contractVersionSchema } from './version.js';
 
 export { NOTIFICATION_KINDS };
 export type { NotificationKind, NotificationSeverity } from './notification-kinds.const.js';
@@ -36,6 +37,7 @@ export type NotificationV1 = z.infer<typeof notificationSchema>;
 
 export const notificationsV1ResponseSchema = z.looseObject({
   schemaVersion: z.literal(1),
+  contractVersion: contractVersionSchema,
   generatedAt: z.string(),
   notifications: z.array(notificationSchema),
 });

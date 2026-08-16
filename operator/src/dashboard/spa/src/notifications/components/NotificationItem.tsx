@@ -45,7 +45,10 @@ export function NotificationItem({ notice }: { notice: OperatorNotification }): 
       >
         {notice.severity}
       </span>
-      <span className="flex-1">{notice.message}</span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span>{notice.title}</span>
+        <span className="text-[11px] text-muted-foreground">{notice.message}</span>
+      </span>
       {notice.jumpTo ? (
         <Link
           href={notice.jumpTo}

@@ -1,10 +1,10 @@
 # Headless Operator Re-derivation — the application tier, the control plane, and the console
 
 - **Date:** 2026-08-04
-- **Version:** 0.2 (proposed; v0.1 revised against the two §12 pre-presentation reviews —
+- **Version:** 0.2 (v0.1 revised against the two §12 pre-presentation reviews —
   architecture and standards/adversarial. Six blocking findings fixed; the review log is §18.)
 - **Author:** Claude (design session with Ritsu)
-- **Status:** Proposed — awaiting operator approval
+- **Status:** Ratified (DR-2026-08-04-b)
 - **Owning documents amended by this spec:** see §15. Per the implementation charter
   (stack design principles §13.1), every ruling here that overturns an approved document
   is recorded as a dated amendment in that document, pointing back here.
