@@ -764,6 +764,14 @@ test('records authority status per governing document', () => {
           path: 'docs/superpowers/specs/2026-08-13-benchmark-publication-interoperability-profile.md',
           status: 'draft',
         }
+      : pkg.name === '@jinn-network/benchmarking-protocol'
+          || pkg.name === '@jinn-network/benchmarking-evidence'
+          || pkg.name === '@jinn-network/benchmarking-evaluation'
+          || pkg.name === '@jinn-network/benchmarking-native-capture'
+        ? {
+            path: 'docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md',
+            status: 'approved',
+          }
       : {
           path: 'docs/superpowers/specs/2026-07-28-benchmarking-application-design.md',
           status: 'proposed',

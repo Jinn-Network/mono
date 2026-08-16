@@ -71,6 +71,7 @@ export class SqliteCatalogWriter implements EvidenceCatalogWriter {
   readonly #insertEntity;
   readonly #insertExecution;
   readonly #insertExecutionResult;
+  readonly #insertExecutionIdentifier;
   readonly #insertEvaluation;
   readonly #insertEvaluationResult;
   readonly #insertVerification;
@@ -106,13 +107,18 @@ export class SqliteCatalogWriter implements EvidenceCatalogWriter {
     this.#insertExecution = database.prepare(`
       INSERT INTO execution_records (
         family, digest, execution_id, task_id, task_digest, executor_id,
-        runtime_id, outcome, started_ms, ended_ms, published_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        runtime_id, runtime_digest, outcome, started_ms, ended_ms, published_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.#insertExecutionResult = database.prepare(`
       INSERT INTO execution_results (
         family, digest, ordinal, result_id, result_digest
       ) VALUES (?, ?, ?, ?, ?)
+    `);
+    this.#insertExecutionIdentifier = database.prepare(`
+      INSERT INTO execution_identifiers (
+        family, digest, ordinal, entity_id, scheme, value
+      ) VALUES (?, ?, ?, ?, ?, ?)
     `);
     this.#insertEvaluation = database.prepare(`
       INSERT INTO evaluation_records (
@@ -212,6 +218,7 @@ export class SqliteCatalogWriter implements EvidenceCatalogWriter {
             row.taskDigest,
             row.executorId,
             row.runtimeId,
+            row.runtimeDigest,
             row.outcome,
             row.startedMs,
             row.endedMs,
@@ -224,6 +231,16 @@ export class SqliteCatalogWriter implements EvidenceCatalogWriter {
               result.ordinal,
               result.resultId,
               result.resultDigest,
+            );
+          }
+          for (const identifier of rows.identifierRows) {
+            this.#insertExecutionIdentifier.run(
+              identifier.family,
+              identifier.digest,
+              identifier.ordinal,
+              identifier.entityId,
+              identifier.scheme,
+              identifier.value,
             );
           }
         } else if (record.family === "result-evaluation") {

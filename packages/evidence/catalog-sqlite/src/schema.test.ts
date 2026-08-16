@@ -33,7 +33,7 @@ afterEach(async () => {
 });
 
 describe("SQLite Evidence Catalog schema", () => {
-  test("creates metadata, applies schema version one, and reopens the generation", async () => {
+  test("creates metadata, applies schema version two, and reopens the generation", async () => {
     const root = await temporaryRoot();
     const databasePath = join(root, "private", "catalog.sqlite");
     const catalog = await createSqliteEvidenceCatalog({
@@ -41,7 +41,7 @@ describe("SQLite Evidence Catalog schema", () => {
       generation,
     });
 
-    expect(SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION).toBe(1);
+    expect(SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION).toBe(2);
     expect(catalog.generation).toEqual(generation);
     expect(catalog.databasePath).toBe(await realpath(databasePath));
     expect(await catalog.integrityCheck()).toEqual({ valid: true, messages: [] });
@@ -60,7 +60,7 @@ describe("SQLite Evidence Catalog schema", () => {
       raw.prepare(
         "SELECT sqlite_schema_version FROM catalog_metadata WHERE singleton = 1",
       ).pluck().get(),
-    ).toBe(1);
+    ).toBe(2);
     expect(raw.pragma("foreign_keys", { simple: true })).toBe(1);
     raw.close();
 

@@ -52,6 +52,13 @@ export interface CatalogArtifactProjection {
   readonly mediaType?: string;
 }
 
+export interface CatalogIdentifierProjection {
+  /** Graph entity carrying the identifier relationship. */
+  readonly entityId: string;
+  readonly scheme: string;
+  readonly value: string;
+}
+
 export interface CatalogResourceSubject {
   readonly name: string;
   readonly digest: Sha256Digest;
@@ -72,6 +79,7 @@ export interface ExecutionEvidenceProjection extends CatalogRecordBase {
   readonly task: CatalogArtifactProjection;
   readonly executorId: string;
   readonly runtime: CatalogArtifactProjection;
+  readonly identifiers?: readonly CatalogIdentifierProjection[];
   readonly results: readonly CatalogArtifactProjection[];
   readonly nativeTrace: CatalogArtifactProjection;
   readonly outcome: "completed" | "failed" | "abandoned";
@@ -124,19 +132,42 @@ export interface ExecutionCatalogQuery extends CatalogPageQuery {
   readonly taskDigest?: Sha256Digest;
   readonly resultId?: string;
   readonly resultDigest?: Sha256Digest;
+  /** Every supplied digest must occur in the same Execution Evidence record. */
+  readonly resultDigestsAll?: readonly Sha256Digest[];
   readonly executorId?: string;
+  readonly runtimeDigest?: Sha256Digest;
+  /** Matches one identifier PropertyValue; when both are supplied they must match the same row. */
+  readonly identifierScheme?: string;
+  readonly identifierValue?: string;
   readonly outcome?: ExecutionEvidenceProjection["outcome"];
   readonly startedAfter?: string;
   readonly startedBefore?: string;
+  readonly publishedAfter?: string;
+  readonly publishedBefore?: string;
 }
 
 export interface EvaluationCatalogQuery extends CatalogPageQuery {
   readonly taskDigest?: Sha256Digest;
   readonly resultDigest?: Sha256Digest;
+  /** Every supplied digest must be subject of the same Result Evaluation. */
+  readonly resultDigestsAll?: readonly Sha256Digest[];
   readonly evaluatorId?: string;
   readonly verdict?: ResultEvaluationProjection["verdict"];
   readonly evaluatedAfter?: string;
   readonly evaluatedBefore?: string;
+}
+
+export interface CatalogSnapshotBoundary {
+  /** Opaque finality/cursor token supplied by the catalog's source. */
+  readonly sourceCursor: string;
+  readonly cutoff: string;
+}
+
+export interface CatalogReferenceSnapshot<Query> {
+  readonly family: EvidenceRecordReference["family"];
+  readonly query: Query;
+  readonly boundary: CatalogSnapshotBoundary;
+  readonly references: readonly EvidenceRecordReference[];
 }
 
 export interface VerificationCatalogQuery extends CatalogPageQuery {

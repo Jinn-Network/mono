@@ -21,7 +21,7 @@ export type {
   InspectRuntimeMethodDisclosure,
   InspectScoringProjectionDisclosure,
 } from "./profile/inspect-disclosure.js";
-export { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
+export { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT, SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
 export type { BundleManifest, VerifiedBundleSnapshot } from "./manifest.js";
 export * from "./admission/index.js";
 export * from "./schema.js";
@@ -37,6 +37,8 @@ export {
   PUBLIC_BUNDLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
+  PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
   PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS,
   PUBLIC_BUNDLE_VERIFIER_MAJOR,
   PUBLIC_BUNDLE_V4_VERIFIER_MAJOR,

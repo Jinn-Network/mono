@@ -185,6 +185,7 @@ describe("verified bundle viewer", () => {
     roots.push(root);
     writeFileSync(join(root, "index.html"), "verified report");
     const base = authenticated({ "index.html": "verified report", "evidence.json": "{}" });
+    if (base.verification.format !== "benchmark-product-public-bundle/2") throw new Error("legacy fixture drifted");
     const { comparison: _comparison, ...snapshot } = base;
     const v4: VerifiedPublicBundleSnapshot = {
       ...snapshot,

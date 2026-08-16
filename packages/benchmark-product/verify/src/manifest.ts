@@ -11,12 +11,14 @@ import {
 } from "node:fs";
 import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
+import { EvidenceNativeBundleManifestV5Schema } from "@jinn-network/benchmarking-protocol";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "./profile/errors.js";
 
 export const BUNDLE_FORMAT = "benchmark-product-public-bundle/2" as const;
 export const BUNDLE_V4_FORMAT = "benchmark-product-public-bundle/4" as const;
-export const SUPPORTED_BUNDLE_FORMATS = [BUNDLE_FORMAT, BUNDLE_V4_FORMAT] as const;
+export const BUNDLE_V5_FORMAT = "benchmark-product-public-bundle/5" as const;
+export const SUPPORTED_BUNDLE_FORMATS = [BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT] as const;
 export const BUNDLE_MANIFEST_FILENAME = "bundle.json" as const;
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -27,10 +29,15 @@ export const BundleManifestFileSchema = z.object({
   bytes: z.number().int().nonnegative(),
 });
 
-export const BundleManifestSchema = z.object({
+const LegacyBundleManifestSchema = z.object({
   format: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_V4_FORMAT)]),
   files: z.array(BundleManifestFileSchema).min(1),
 });
+
+export const BundleManifestSchema = z.union([
+  LegacyBundleManifestSchema,
+  EvidenceNativeBundleManifestV5Schema,
+]);
 
 export type BundleManifest = z.infer<typeof BundleManifestSchema>;
 
@@ -52,7 +59,7 @@ export interface VerifyBundleSnapshotDeps {
 
 export interface BuildBundleManifestOptions {
   /** Defaults to v2 so existing producer and golden bytes remain immutable. */
-  readonly format?: (typeof SUPPORTED_BUNDLE_FORMATS)[number];
+  readonly format?: typeof BUNDLE_FORMAT | typeof BUNDLE_V4_FORMAT;
 }
 
 function sha256(bytes: Uint8Array): string {

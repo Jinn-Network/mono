@@ -46,6 +46,7 @@ jobs:
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)

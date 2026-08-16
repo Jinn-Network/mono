@@ -12,6 +12,7 @@ const dependencyChain = [
   ["@jinn-network/evidence-protocol", join(packageRoot, "..", "..", "evidence", "protocol")],
   ["@jinn-network/evidence-repository", join(packageRoot, "..", "..", "evidence", "repository")],
   ["@jinn-network/evidence-discovery", join(packageRoot, "..", "..", "evidence", "discovery")],
+  ["@jinn-network/execution-evidence-builder", join(packageRoot, "..", "..", "evidence", "execution-evidence-builder")],
   ["@jinn-network/execution-recorder", join(packageRoot, "..", "..", "evidence", "execution-recorder")],
   ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol")],
   ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend")],

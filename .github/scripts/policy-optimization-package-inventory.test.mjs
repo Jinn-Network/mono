@@ -80,6 +80,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     // product's install graph. `benchmarking-run` takes the same medicine for the same reason.
     portalResolutions: [
       '@jinn-network/evidence-discovery',
+      '@jinn-network/execution-evidence-builder',
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
     ],
@@ -93,6 +94,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/execution-evidence-builder', join(root, 'packages', 'evidence', 'execution-evidence-builder')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
