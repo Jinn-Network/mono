@@ -127,7 +127,7 @@ jobs:
           node-version: 22
       - id: inspect-python
         name: Install the pinned optional Inspect runtime
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Verify and install the supported Inspect wheel
