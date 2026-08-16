@@ -8,7 +8,8 @@ const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'evidence');
 const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'repository-ipfs', 'discovery',
-  'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
+  'catalog-sqlite', 'execution-evidence-builder', 'execution-recorder',
+  'attestation-issuer', 'derivation',
   'publication', 'local-runtime', 'execution-recorder-bridge', 'retrieval',
   'contribution', 'trace', 'trace-decode',
 ];
@@ -924,6 +925,29 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   ];
 
   assertBoundary(join(packages, 'protocol', 'src'), ['@jinn-network/']);
+  assertBoundary(
+    join(packages, 'execution-evidence-builder', 'src'),
+    [
+      '@jinn-network/attestation-issuer',
+      '@jinn-network/evidence-catalog-sqlite',
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-local-runtime',
+      '@jinn-network/evidence-publication',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-protocol',
+      'better-sqlite3',
+      'node:child_process',
+      'node:fs',
+      'node:http',
+      'node:https',
+      'node:net',
+      'node:tls',
+    ],
+    evidenceDirectories
+      .filter((directory) => !['protocol', 'execution-evidence-builder'].includes(directory))
+      .map((directory) => join(packages, directory)),
+  );
   assertPackageRootBoundary('repository', ['@jinn-network/evidence-repository/fs'], repositoryFs);
   assert.deepEqual(manifest('repository').exports['./fs'], {
     import: './dist/fs/index.js', types: './dist/fs/index.d.ts',

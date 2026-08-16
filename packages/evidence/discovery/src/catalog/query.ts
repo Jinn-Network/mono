@@ -135,10 +135,16 @@ export function snapshotExecutionCatalogQuery(
     "taskDigest",
     "resultId",
     "resultDigest",
+    "resultDigestsAll",
     "executorId",
+    "runtimeDigest",
+    "identifierScheme",
+    "identifierValue",
     "outcome",
     "startedAfter",
     "startedBefore",
+    "publishedAfter",
+    "publishedBefore",
   ], "Execution query") as unknown as ExecutionCatalogQuery;
 }
 
@@ -151,6 +157,7 @@ export function snapshotEvaluationCatalogQuery(
     "availability",
     "taskDigest",
     "resultDigest",
+    "resultDigestsAll",
     "evaluatorId",
     "verdict",
     "evaluatedAfter",
@@ -207,6 +214,17 @@ function validateBaseQuery(query: CatalogPageQuery): number {
 function validateDigest(value: string | undefined, field: string): void {
   if (value !== undefined && !DIGEST.test(value)) {
     invalid(`${field} must be a canonical lowercase SHA-256 digest.`);
+  }
+}
+
+function validateDigestArray(value: readonly string[] | undefined, field: string): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length === 0) {
+    invalid(`${field} must be a non-empty array of SHA-256 digests.`);
+  }
+  for (const item of value) validateDigest(item, field);
+  if (new Set(value).size !== value.length) {
+    invalid(`${field} must not contain duplicate digests.`);
   }
 }
 
@@ -356,6 +374,8 @@ export function paginateExecutions(
     ["taskId", query.taskId],
     ["resultId", query.resultId],
     ["executorId", query.executorId],
+    ["identifierScheme", query.identifierScheme],
+    ["identifierValue", query.identifierValue],
   ] as const) validateOptionalString(value, field);
   if (
     query.outcome !== undefined &&
@@ -365,8 +385,12 @@ export function paginateExecutions(
   }
   validateDigest(query.taskDigest, "taskDigest");
   validateDigest(query.resultDigest, "resultDigest");
+  validateDigestArray(query.resultDigestsAll, "resultDigestsAll");
+  validateDigest(query.runtimeDigest, "runtimeDigest");
   const after = normalizedTime(query.startedAfter, "startedAfter");
   const before = normalizedTime(query.startedBefore, "startedBefore");
+  const publishedAfter = normalizedTime(query.publishedAfter, "publishedAfter");
+  const publishedBefore = normalizedTime(query.publishedBefore, "publishedBefore");
   const filtered = values.filter(
     (value) =>
       (query.executionId === undefined || value.executionId === query.executionId) &&
@@ -380,12 +404,26 @@ export function paginateExecutions(
             (query.resultDigest === undefined || digest === query.resultDigest),
         )
       ) &&
+      (query.resultDigestsAll === undefined ||
+        query.resultDigestsAll.every((digest) =>
+          value.results.some((result) => result.digest === digest))) &&
       (query.executorId === undefined || value.executorId === query.executorId) &&
+      (query.runtimeDigest === undefined || value.runtime.digest === query.runtimeDigest) &&
+      (
+        (query.identifierScheme === undefined && query.identifierValue === undefined) ||
+        (value.identifiers ?? []).some((identifier) =>
+          (query.identifierScheme === undefined || identifier.scheme === query.identifierScheme) &&
+          (query.identifierValue === undefined || identifier.value === query.identifierValue))
+      ) &&
       (query.outcome === undefined || value.outcome === query.outcome) &&
       (after === undefined ||
         parseCatalogTimestamp(value.startedAt, "startedAt") > after) &&
       (before === undefined ||
-        parseCatalogTimestamp(value.startedAt, "startedAt") < before),
+        parseCatalogTimestamp(value.startedAt, "startedAt") < before) &&
+      (publishedAfter === undefined ||
+        parseCatalogTimestamp(value.publishedAt, "publishedAt") > publishedAfter) &&
+      (publishedBefore === undefined ||
+        parseCatalogTimestamp(value.publishedAt, "publishedAt") < publishedBefore),
   );
   return page(filtered, query, (value) => [
     -parseCatalogTimestamp(value.startedAt, "startedAt"),
@@ -407,6 +445,7 @@ export function paginateEvaluations(
   }
   validateDigest(query.taskDigest, "taskDigest");
   validateDigest(query.resultDigest, "resultDigest");
+  validateDigestArray(query.resultDigestsAll, "resultDigestsAll");
   const after = normalizedTime(query.evaluatedAfter, "evaluatedAfter");
   const before = normalizedTime(query.evaluatedBefore, "evaluatedBefore");
   const filtered = values.filter(
@@ -415,6 +454,9 @@ export function paginateEvaluations(
         value.taskSubject.digest === query.taskDigest) &&
       (query.resultDigest === undefined ||
         value.resultSubjects.some(({ digest }) => digest === query.resultDigest)) &&
+      (query.resultDigestsAll === undefined ||
+        query.resultDigestsAll.every((digest) =>
+          value.resultSubjects.some((result) => result.digest === digest))) &&
       (query.evaluatorId === undefined ||
         value.evaluatorId === query.evaluatorId) &&
       (query.verdict === undefined || value.verdict === query.verdict) &&

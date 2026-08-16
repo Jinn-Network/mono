@@ -248,6 +248,7 @@ function validateProjection(projection: CatalogRecordProjection): void {
         "task",
         "executorId",
         "runtime",
+        "identifiers",
         "results",
         "nativeTrace",
         "outcome",
@@ -261,6 +262,16 @@ function validateProjection(projection: CatalogRecordProjection): void {
     nonEmpty(projection.executorId, "executorId");
     artifact(projection.task, "task");
     artifact(projection.runtime, "runtime");
+    if (projection.identifiers !== undefined) {
+      if (!Array.isArray(projection.identifiers)) invalid("Execution identifiers must be an array.");
+      for (const [index, identifier] of projection.identifiers.entries()) {
+        plainObject(identifier, `identifiers[${index}]`);
+        exactKeys(identifier, ["entityId", "scheme", "value"], `identifiers[${index}]`);
+        nonEmpty(identifier.entityId, `identifiers[${index}].entityId`);
+        nonEmpty(identifier.scheme, `identifiers[${index}].scheme`);
+        stringValue(identifier.value, `identifiers[${index}].value`);
+      }
+    }
     artifact(projection.nativeTrace, "nativeTrace");
     if (!Array.isArray(projection.results)) {
       invalid("Execution results must be an array.");

@@ -18,6 +18,7 @@ export * from "./human-review/contracts.js";
 export * from "./human-review/application.js";
 export * from "./human-review/verification.js";
 export * from "./human-review/verification-workspace.js";
+export * from "./evidence-first.js";
 
 // Typed errors (spec §4.3): callers branch on `code`, never on `message`.
 export { BenchmarkProductError, PRODUCT_ERROR_CODES, toErrorEnvelope } from "./errors.js";
