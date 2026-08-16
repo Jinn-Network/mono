@@ -430,6 +430,23 @@ describe("projectExecutionEvidence", () => {
         mediaType: "text/markdown",
       },
       executorId: "urn:uuid:33333333-3333-4333-8333-333333333333",
+      identifiers: [
+        {
+          entityId: "urn:uuid:33333333-3333-4333-8333-333333333333",
+          scheme: "https://marketplace.example.invalid/schemes/agent-id",
+          value: "operator-agent-3",
+        },
+        {
+          entityId: EXECUTION_ID,
+          scheme: "https://marketplace.example.invalid/schemes/attempt-id",
+          value: "attempt-42",
+        },
+        {
+          entityId: "task/task.md",
+          scheme: "https://marketplace.example.invalid/schemes/task-id",
+          value: "slug-normalization-17",
+        },
+      ],
       runtime: {
         entityId: "runtime/runtime-specification.json",
         digest:
@@ -493,6 +510,38 @@ describe("projectExecutionEvidence", () => {
         document,
       ),
     );
+  });
+
+  it("projects referenced PropertyValue identifiers as well as inline identifiers", async () => {
+    const { bytes, document } = await loadValidated(
+      "execution/ro-crate-metadata.json",
+    );
+    const referenced = mutableDocument(document);
+    const task = referenced["@graph"].find(({ "@id": id }) => id === "task/task.md");
+    if (task === undefined || typeof task.identifier !== "object" ||
+      task.identifier === null || Array.isArray(task.identifier)) {
+      throw new Error("Fixture Task identifier is missing.");
+    }
+    const identifier = structuredClone(task.identifier);
+    Object.assign(identifier, { "@id": "#task-identifier" });
+    referenced["@graph"].push(identifier as ExecutionEvidenceDocument["@graph"][number]);
+    task.identifier = { "@id": "#task-identifier" };
+
+    const report = validateExecutionEvidence(
+      new TextEncoder().encode(JSON.stringify(referenced)),
+    );
+    expect(report.conforms).toBe(true);
+    expect(
+      projectExecutionEvidence(
+        reference(PRIVATE_DIGEST),
+        bytes.byteLength,
+        report.value!,
+      ).identifiers,
+    ).toContainEqual({
+      entityId: "task/task.md",
+      scheme: "https://marketplace.example.invalid/schemes/task-id",
+      value: "slug-normalization-17",
+    });
   });
 
   it("rejects Protocol-conforming timestamps outside the Catalog contract", async () => {

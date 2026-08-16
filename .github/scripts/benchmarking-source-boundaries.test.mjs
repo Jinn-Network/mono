@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'benchmarking');
-const benchmarkingDirectories = ['records', 'testing', 'aggregate', 'run', 'publication', 'interop', 'marketplace', 'local'];
+const benchmarkingDirectories = ['protocol', 'evidence', 'evaluation', 'native-capture', 'records', 'testing', 'aggregate', 'run', 'publication', 'interop', 'marketplace', 'local'];
 
 // The whole benchmarking tree is forbidden to import any evidence-tree package, the two
 // I/O-free evidence producer packages, any record-discovery package, and — critically — every
@@ -26,6 +26,7 @@ const BENCHMARKING_FOREIGN_PACKAGES = [
   '@jinn-network/evidence-local-runtime',
   '@jinn-network/evidence-contribution',
   '@jinn-network/evidence-retrieval',
+  '@jinn-network/execution-evidence-builder',
   '@jinn-network/execution-recorder',
   '@jinn-network/execution-recorder-bridge',
   '@jinn-network/attestation-issuer',
@@ -420,6 +421,120 @@ test('marketplace may import binding and projector; other benchmarking packages 
 });
 
 test('benchmarking source boundaries remain one-way across the approved graph', () => {
+  // The evidence-native protocol is tier 2 and depends only on Evidence Protocol.
+  // It has no TEP, discovery, storage, application, or legacy benchmarking edge.
+  assertBoundary(
+    join(packages, 'protocol', 'src'),
+    [
+      ...BENCHMARKING_FOREIGN_PACKAGES.filter(
+        (pkg) => pkg !== '@jinn-network/evidence-protocol',
+      ),
+      '@jinn-network/benchmarking-*',
+      '@jinn-network/task-execution-*',
+      '@jinn-network/trust-resolve',
+      'node:child_process',
+      'node:fs',
+      'better-sqlite3',
+    ],
+    [
+      ...FORBIDDEN_ROOTS,
+      ...benchmarkingDirectories
+        .filter((directory) => directory !== 'protocol')
+        .map((directory) => join(packages, directory)),
+      join(root, 'packages', 'task-execution'),
+    ],
+  );
+  // Evidence-native verification composes the new records, Evidence Protocol, the
+  // matrix-neutral registered statistics adapter, and DSSE trust primitives. It cannot
+  // reach TEP, discovery, native adapters, or legacy dispatch records.
+  assertBoundary(
+    join(packages, 'evidence', 'src'),
+    [
+      ...BENCHMARKING_FOREIGN_PACKAGES.filter(
+        (pkg) => pkg !== '@jinn-network/evidence-protocol',
+      ),
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-run',
+      '@jinn-network/benchmarking-publication',
+      '@jinn-network/benchmarking-interop',
+      '@jinn-network/benchmarking-marketplace',
+      '@jinn-network/benchmarking-local',
+      '@jinn-network/task-execution-*',
+      '@jinn-network/trust-resolve',
+      'node:child_process',
+      'node:fs',
+      'better-sqlite3',
+    ],
+    [
+      ...FORBIDDEN_ROOTS,
+      ...benchmarkingDirectories
+        .filter((directory) => directory !== 'protocol' && directory !== 'evidence')
+        .map((directory) => join(packages, directory)),
+      join(root, 'packages', 'task-execution'),
+    ],
+  );
+  // Native capture composes only the new record protocol, Evidence Protocol validation,
+  // and the side-effect-free builder. Snapshot, launch, clocks, and persistence are ports.
+  assertBoundary(
+    join(packages, 'native-capture', 'src'),
+    [
+      ...BENCHMARKING_FOREIGN_PACKAGES.filter(
+        (pkg) => pkg !== '@jinn-network/evidence-protocol'
+          && pkg !== '@jinn-network/execution-evidence-builder',
+      ),
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-run',
+      '@jinn-network/benchmarking-aggregate',
+      '@jinn-network/benchmarking-publication',
+      '@jinn-network/benchmarking-interop',
+      '@jinn-network/benchmarking-marketplace',
+      '@jinn-network/benchmarking-local',
+      '@jinn-network/task-execution-*',
+      '@jinn-network/trust-resolve',
+      'node:child_process',
+      'node:fs',
+      'better-sqlite3',
+    ],
+    [
+      ...FORBIDDEN_ROOTS,
+      ...benchmarkingDirectories
+        .filter((directory) => !['protocol', 'native-capture'].includes(directory))
+        .map((directory) => join(packages, directory)),
+      join(root, 'packages', 'task-execution'),
+    ],
+  );
+  // Evaluation issuance is a narrow application over the exact Task/Result issuer and
+  // repository ports plus the DSSE signing primitive used by human label resolution. It
+  // deliberately has no AttemptIdentity or TEP harness dependency.
+  assertBoundary(
+    join(packages, 'evaluation', 'src'),
+    [
+      ...BENCHMARKING_FOREIGN_PACKAGES.filter(
+        (pkg) => pkg !== '@jinn-network/evidence-protocol'
+          && pkg !== '@jinn-network/evidence-repository'
+          && pkg !== '@jinn-network/attestation-issuer',
+      ),
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-run',
+      '@jinn-network/benchmarking-aggregate',
+      '@jinn-network/benchmarking-publication',
+      '@jinn-network/benchmarking-interop',
+      '@jinn-network/benchmarking-marketplace',
+      '@jinn-network/benchmarking-local',
+      '@jinn-network/task-execution-*',
+      '@jinn-network/trust-resolve',
+      'node:child_process',
+      'node:fs',
+      'better-sqlite3',
+    ],
+    [
+      ...FORBIDDEN_ROOTS,
+      ...benchmarkingDirectories
+        .filter((directory) => !['protocol', 'evaluation'].includes(directory))
+        .map((directory) => join(packages, directory)),
+      join(root, 'packages', 'task-execution'),
+    ],
+  );
   // records depends on task-execution-protocol only: every foreign package (including any
   // marketplace package) and every other task-execution sibling are forbidden.
   assertBoundary(

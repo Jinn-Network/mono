@@ -10,6 +10,10 @@ const DEPENDENCY_SECTIONS = [
 ];
 
 const BENCHMARKING_PACKAGES = [
+  ['protocol', '@jinn-network/benchmarking-protocol'],
+  ['evidence', '@jinn-network/benchmarking-evidence'],
+  ['evaluation', '@jinn-network/benchmarking-evaluation'],
+  ['native-capture', '@jinn-network/benchmarking-native-capture'],
   ['records', '@jinn-network/benchmarking-records'],
   ['testing', '@jinn-network/benchmarking-testing'],
   ['aggregate', '@jinn-network/benchmarking-aggregate'],
@@ -23,6 +27,7 @@ const BENCHMARKING_PACKAGES = [
 // Cross-tree Jinn dependencies live outside packages/benchmarking; map name -> absolute dir
 // (record-discovery-package-inventory.test.mjs precedent, program §7.8).
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
@@ -33,6 +38,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/execution-evidence-builder', join(root, 'packages', 'evidence', 'execution-evidence-builder')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
@@ -46,6 +52,42 @@ const SIBLING_TREE_DIRS = new Map([
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
+  ['protocol', {
+    dependencies: ['@jinn-network/evidence-protocol'],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
+  ['evidence', {
+    dependencies: [
+      '@jinn-network/benchmarking-aggregate',
+      '@jinn-network/benchmarking-protocol',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/trust-core',
+    ],
+    devDependencies: ['@jinn-network/execution-evidence-builder'],
+    portalResolutions: [
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/task-execution-protocol',
+    ],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  ['evaluation', {
+    dependencies: [
+      '@jinn-network/attestation-issuer',
+      '@jinn-network/benchmarking-protocol',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/trust-core',
+    ],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
+  ['native-capture', {
+    dependencies: [
+      '@jinn-network/benchmarking-protocol',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/execution-evidence-builder',
+    ],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+  }],
   ['records', {
     dependencies: ['@jinn-network/task-execution-protocol', '@jinn-network/trust-core'],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
@@ -85,7 +127,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-testing',
       '@jinn-network/task-execution-workspace',
     ],
-    portalResolutions: ['@jinn-network/trust-core'],
+    portalResolutions: ['@jinn-network/execution-evidence-builder', '@jinn-network/trust-core'],
     optionalDependencies: [], peerDependencies: [],
   }],
   ['publication', {

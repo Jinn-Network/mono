@@ -128,6 +128,7 @@ export class SqliteCatalogReader implements EvidenceCatalogReader {
         task_digest AS taskDigest,
         executor_id AS executorId,
         runtime_id AS runtimeId,
+        runtime_digest AS runtimeDigest,
         outcome,
         started_ms AS startedMs,
         ended_ms AS endedMs,
@@ -399,6 +400,7 @@ export class SqliteCatalogReader implements EvidenceCatalogReader {
         ["family_row.task_id", query.taskId],
         ["family_row.task_digest", query.taskDigest],
         ["family_row.executor_id", query.executorId],
+        ["family_row.runtime_digest", query.runtimeDigest],
         ["family_row.outcome", query.outcome],
       ] as const) {
         if (value !== undefined) {
@@ -427,6 +429,39 @@ export class SqliteCatalogReader implements EvidenceCatalogReader {
           )
         `);
       }
+      for (const digest of query.resultDigestsAll ?? []) {
+        clauses.push(`
+          EXISTS (
+            SELECT 1
+            FROM execution_results AS complete_result
+            WHERE complete_result.family = records.family
+              AND complete_result.digest = records.digest
+              AND complete_result.result_digest = ?
+          )
+        `);
+        parameters.push(digest);
+      }
+      if (query.identifierScheme !== undefined || query.identifierValue !== undefined) {
+        const identifierClauses = [
+          "identifier.family = records.family",
+          "identifier.digest = records.digest",
+        ];
+        if (query.identifierScheme !== undefined) {
+          identifierClauses.push("identifier.scheme = ?");
+          parameters.push(query.identifierScheme);
+        }
+        if (query.identifierValue !== undefined) {
+          identifierClauses.push("identifier.value = ?");
+          parameters.push(query.identifierValue);
+        }
+        clauses.push(`
+          EXISTS (
+            SELECT 1
+            FROM execution_identifiers AS identifier
+            WHERE ${identifierClauses.join(" AND ")}
+          )
+        `);
+      }
       if (query.startedAfterMs !== undefined) {
         clauses.push("family_row.started_ms > ?");
         parameters.push(query.startedAfterMs);
@@ -434,6 +469,14 @@ export class SqliteCatalogReader implements EvidenceCatalogReader {
       if (query.startedBeforeMs !== undefined) {
         clauses.push("family_row.started_ms < ?");
         parameters.push(query.startedBeforeMs);
+      }
+      if (query.publishedAfterMs !== undefined) {
+        clauses.push("family_row.published_ms > ?");
+        parameters.push(query.publishedAfterMs);
+      }
+      if (query.publishedBeforeMs !== undefined) {
+        clauses.push("family_row.published_ms < ?");
+        parameters.push(query.publishedBeforeMs);
       }
       if (query.availability === "available") {
         clauses.push(activeLocationClause("records.family", "records.digest"));
@@ -506,6 +549,18 @@ export class SqliteCatalogReader implements EvidenceCatalogReader {
           )
         `);
         parameters.push(query.resultDigest);
+      }
+      for (const digest of query.resultDigestsAll ?? []) {
+        clauses.push(`
+          EXISTS (
+            SELECT 1
+            FROM evaluation_results AS complete_result
+            WHERE complete_result.family = records.family
+              AND complete_result.digest = records.digest
+              AND complete_result.result_digest = ?
+          )
+        `);
+        parameters.push(digest);
       }
       if (query.evaluatedAfterMs !== undefined) {
         clauses.push("family_row.evaluated_ms > ?");

@@ -1,0 +1,65 @@
+{
+  "name": "@jinn-network/benchmarking-evaluation",
+  "version": "0.1.0",
+  "description": "TEP-free Result Evaluation issuance over exact Task and Result material.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/benchmarking/evaluation"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/attestation-issuer": "0.1.0",
+    "@jinn-network/benchmarking-protocol": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/evidence-repository": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "resolutions": {
+    "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
+    "@jinn-network/benchmarking-protocol": "portal:../protocol",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/evidence-repository": "portal:../../evidence/repository",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@noble/hashes": "2.3.0"
+  }
+}

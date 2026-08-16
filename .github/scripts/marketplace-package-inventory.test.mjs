@@ -22,6 +22,7 @@ const MARKETPLACE_PACKAGES = [
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/execution-evidence-builder', join(root, 'packages', 'evidence', 'execution-evidence-builder')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
@@ -112,6 +113,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
   }],
   // venue-base is the tier-3 chain-adapter tree (composition design §6.1). It consumes the
   // binding's port surface and the projector's decode/finality/observe machinery; it may NEVER
@@ -168,6 +170,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
   }],
 ]);
 
@@ -234,8 +237,9 @@ test('marketplace package Jinn dependencies and portal resolutions match the app
     const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
     const resolutions = manifest.resolutions ?? {};
     const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();
-    assert.deepEqual(resolved, declared, `${directory} has unmatched Jinn resolutions`);
-    for (const dependencyName of declared) {
+    const transitive = [...(approved.transitivePortalResolutions ?? [])].sort();
+    assert.deepEqual(resolved, [...declared, ...transitive].sort(), `${directory} has unmatched Jinn resolutions`);
+    for (const dependencyName of [...declared, ...transitive]) {
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }

@@ -137,6 +137,9 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
     rmSync(workspaceDir, { recursive: true, force: true });
     const detached = await verifyPublicBundle(detachedBundle);
+    if (detached.format === "benchmark-product-public-bundle/5") {
+      throw new Error(`expected a legacy Inspect bundle, received ${detached.format}`);
+    }
     expect(detached.runtimeMethod).toMatchObject({
       officialEvaluationRelationship: "separate-log-verifier",
       officialEvaluatorCount: expectedVerifiers,
@@ -593,6 +596,9 @@ describe.skipIf(pythonPath === undefined)("real Inspect runtime adapter", () => 
     cpSync(join(workspaceDir, published.result.bundleRelativePath), detachedBundle, { recursive: true });
     rmSync(workspaceDir, { recursive: true, force: true });
     const detachedVerification = await verifyPublicBundle(detachedBundle);
+    if (detachedVerification.format === "benchmark-product-public-bundle/5") {
+      throw new Error(`expected a legacy Inspect bundle, received ${detachedVerification.format}`);
+    }
     expect(detachedVerification.checks).toEqual([
       "manifest",
       "evidence-closure",

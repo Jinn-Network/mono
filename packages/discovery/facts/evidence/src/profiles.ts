@@ -18,3 +18,7 @@ function loadProfile(filename: string): FactsProfileDocument {
 export const executionEvidenceProfile: FactsProfileDocument = loadProfile("execution-evidence.v1.json");
 export const resultEvaluationProfile: FactsProfileDocument = loadProfile("result-evaluation.v1.json");
 export const executionVerificationProfile: FactsProfileDocument = loadProfile("execution-verification.v1.json");
+/** Coexists with v1; consumers select it explicitly and v1 bytes/meaning stay frozen. */
+export const executionEvidenceProfileV2: FactsProfileDocument = loadProfile("execution-evidence.v2.json");
+/** Exposes every Result subject instead of v1's first-result scalar. */
+export const resultEvaluationProfileV2: FactsProfileDocument = loadProfile("result-evaluation.v2.json");

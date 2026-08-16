@@ -24,6 +24,7 @@ export interface ProjectionRows {
   readonly entityIds: readonly string[];
   readonly familyRow: Readonly<Record<string, string | number>>;
   readonly resultRows: readonly Readonly<Record<string, string | number>>[];
+  readonly identifierRows: readonly Readonly<Record<string, string | number>>[];
 }
 
 function invalid(message: string): never {
@@ -303,6 +304,7 @@ export async function buildProjectionRows(
         taskDigest: projection.task.digest,
         executorId: projection.executorId,
         runtimeId: projection.runtime.entityId,
+        runtimeDigest: projection.runtime.digest,
         outcome: projection.outcome,
         startedMs: timestamp(projection.startedAt),
         endedMs: timestamp(projection.endedAt),
@@ -314,6 +316,14 @@ export async function buildProjectionRows(
         ordinal,
         resultId: result.entityId,
         resultDigest: result.digest,
+      })),
+      identifierRows: (projection.identifiers ?? []).map((identifier, ordinal) => ({
+        family,
+        digest,
+        ordinal,
+        entityId: identifier.entityId,
+        scheme: identifier.scheme,
+        value: identifier.value,
       })),
     };
   }
@@ -342,6 +352,7 @@ export async function buildProjectionRows(
         ordinal,
         resultDigest: result.digest,
       })),
+      identifierRows: [],
     };
   }
 
@@ -364,5 +375,6 @@ export async function buildProjectionRows(
       verifiedMs: timestamp(projection.verifiedAt),
     },
     resultRows: [],
+    identifierRows: [],
   };
 }

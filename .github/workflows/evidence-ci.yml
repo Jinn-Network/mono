@@ -96,6 +96,21 @@ jobs:
           path: packages/evidence/protocol/dist
           if-no-files-found: error
           retention-days: 1
+      - name: Verify Execution Evidence Builder
+        working-directory: packages/evidence/execution-evidence-builder
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Execution Evidence Builder distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-execution-evidence-builder-dist
+          path: packages/evidence/execution-evidence-builder/dist
+          if-no-files-found: error
+          retention-days: 1
       - name: Verify Evidence Repository
         working-directory: packages/evidence/repository
         run: |
@@ -155,10 +170,16 @@ jobs:
         with:
           name: evidence-repository-dist
           path: packages/evidence/repository/dist
+      - name: Restore Execution Evidence Builder distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-execution-evidence-builder-dist
+          path: packages/evidence/execution-evidence-builder/dist
       - name: Install packed-smoke dependency toolchains
         run: |
           (cd packages/evidence/protocol && yarn install --immutable)
           (cd packages/evidence/repository && yarn install --immutable)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable)
       - name: Build neutral publication dependencies from source
         if: matrix.component == 'publication'
         run: |
@@ -319,10 +340,16 @@ jobs:
         with:
           name: evidence-execution-recorder-dist
           path: packages/evidence/execution-recorder/dist
+      - name: Restore Execution Evidence Builder distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-execution-evidence-builder-dist
+          path: packages/evidence/execution-evidence-builder/dist
       - name: Install packed-smoke dependency toolchains
         run: |
           (cd packages/evidence/protocol && yarn install --immutable)
           (cd packages/evidence/repository && yarn install --immutable)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable)
           (cd packages/evidence/execution-recorder && yarn install --immutable)
       - name: Verify Execution Recorder Bridge
         working-directory: packages/evidence/execution-recorder-bridge
@@ -682,6 +709,11 @@ jobs:
         with:
           name: evidence-execution-recorder-dist
           path: packages/evidence/execution-recorder/dist
+      - name: Restore Execution Evidence Builder distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence-execution-evidence-builder-dist
+          path: packages/evidence/execution-evidence-builder/dist
       - name: Restore SQLite Evidence Catalog distribution
         uses: actions/download-artifact@v4
         with:
@@ -699,6 +731,7 @@ jobs:
           (cd packages/evidence/repository && yarn install --immutable)
           (cd packages/evidence/discovery && yarn install --immutable)
           (cd packages/evidence/catalog-sqlite && yarn install --immutable)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable)
           (cd packages/evidence/execution-recorder && yarn install --immutable)
       - name: Verify Local Evidence Runtime
         working-directory: packages/evidence/local-runtime
@@ -766,7 +799,7 @@ jobs:
           path: .evidence-dist
       - name: Place package distributions
         run: |
-          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution trace trace-decode; do
+          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-evidence-builder execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution trace trace-decode; do
             mkdir -p "packages/evidence/${package}/dist"
             cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
           done

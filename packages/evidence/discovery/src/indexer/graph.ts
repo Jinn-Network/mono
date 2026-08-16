@@ -2,6 +2,7 @@
 import type { ExecutionEvidenceDocument } from "@jinn-network/evidence-protocol";
 import type {
   CatalogArtifactProjection,
+  CatalogIdentifierProjection,
   DeclaredEntityOccurrence,
   DeclaredRelationshipOccurrence,
   Sha256Digest,
@@ -37,6 +38,18 @@ function isReference(value: unknown): value is { readonly "@id": string } {
     value !== null &&
     typeof (value as { readonly "@id"?: unknown })["@id"] === "string"
   );
+}
+
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasRawType(
+  value: Readonly<Record<string, unknown>>,
+  expected: string,
+): boolean {
+  const declared = value["@type"];
+  return (Array.isArray(declared) ? declared : [declared]).includes(expected);
 }
 
 export function types(entity: ExecutionGraphEntity): readonly string[] {
@@ -97,6 +110,34 @@ export function createEntityMap(
   document: ExecutionEvidenceDocument,
 ): ReadonlyMap<string, ExecutionGraphEntity> {
   return new Map(document["@graph"].map((entity) => [entity["@id"], entity]));
+}
+
+export function projectIdentifiers(
+  document: ExecutionEvidenceDocument,
+  byId: ReadonlyMap<string, ExecutionGraphEntity> = createEntityMap(document),
+): readonly CatalogIdentifierProjection[] {
+  const projected = document["@graph"].flatMap((entity) =>
+    values(entity.identifier).flatMap((declared) => {
+      const identifier = isReference(declared)
+        ? byId.get(declared["@id"])
+        : isObject(declared)
+          ? declared
+          : undefined;
+      return identifier !== undefined && hasRawType(identifier, "PropertyValue") &&
+        typeof identifier.propertyID === "string" && typeof identifier.value === "string"
+        ? [{ entityId: entity["@id"], scheme: identifier.propertyID, value: identifier.value }]
+        : [];
+    }));
+  projected.sort((left, right) =>
+    compareCodeUnits(left.scheme, right.scheme) ||
+    compareCodeUnits(left.value, right.value) ||
+    compareCodeUnits(left.entityId, right.entityId));
+  return projected.filter(
+    (identifier, index) => index === 0 ||
+      identifier.entityId !== projected[index - 1]!.entityId ||
+      identifier.scheme !== projected[index - 1]!.scheme ||
+      identifier.value !== projected[index - 1]!.value,
+  );
 }
 
 export interface DeclaredGraphProjection {

@@ -39,6 +39,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-derivation', join(root, 'packages', 'evidence', 'derivation')],
   ['@jinn-network/evidence-trace', join(root, 'packages', 'evidence', 'trace')],
   ['@jinn-network/evidence-trace-decode', join(root, 'packages', 'evidence', 'trace-decode')],
+  ['@jinn-network/execution-evidence-builder', join(root, 'packages', 'evidence', 'execution-evidence-builder')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
@@ -67,7 +68,10 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     devDependencies: [],
     optionalDependencies: [],
     peerDependencies: [],
-    transitivePortalResolutions: ['@jinn-network/record-discovery-serve'],
+    transitivePortalResolutions: [
+      '@jinn-network/execution-evidence-builder',
+      '@jinn-network/record-discovery-serve',
+    ],
   }],
 ]);
 

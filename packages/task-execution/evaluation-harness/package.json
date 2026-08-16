@@ -62,6 +62,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/execution-evidence-builder": "portal:../../evidence/execution-evidence-builder",
     "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
     "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
     "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",

@@ -359,6 +359,9 @@ describe("binary public-bundle/4 producer closure", () => {
 
     const verification = await verifyPublicBundle(bundleDir);
     expect(verification.format).toBe(BUNDLE_V4_FORMAT);
+    if (verification.format !== BUNDLE_V4_FORMAT) {
+      throw new Error(`expected ${BUNDLE_V4_FORMAT}, received ${verification.format}`);
+    }
     expect(verification.checks).toEqual([
       "manifest",
       "evidence-closure",

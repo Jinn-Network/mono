@@ -61,6 +61,7 @@
     "zod": "4.4.3"
   },
   "resolutions": {
+    "@jinn-network/execution-evidence-builder": "portal:../evidence/execution-evidence-builder",
     "@jinn-network/attestation-issuer": "portal:../evidence/attestation-issuer",
     "@jinn-network/benchmarking-aggregate": "portal:../benchmarking/aggregate",
     "@jinn-network/benchmarking-local": "portal:../benchmarking/local",

@@ -17,6 +17,7 @@ const launchersRoot = join(backendLocalRoot, "launchers");
 const evidenceProtocolRoot = join(packagesRoot, "evidence", "protocol");
 const evidenceRepositoryRoot = join(packagesRoot, "evidence", "repository");
 const evidenceDiscoveryRoot = join(packagesRoot, "evidence", "discovery");
+const executionEvidenceBuilderRoot = join(packagesRoot, "evidence", "execution-evidence-builder");
 const executionRecorderRoot = join(packagesRoot, "evidence", "execution-recorder");
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-task-execution-backend-local-"));
@@ -37,6 +38,7 @@ const packRoots = [
   [evidenceProtocolRoot, "evidence-protocol.tgz"],
   [evidenceRepositoryRoot, "evidence-repository.tgz"],
   [evidenceDiscoveryRoot, "evidence-discovery.tgz"],
+  [executionEvidenceBuilderRoot, "execution-evidence-builder.tgz"],
   [executionRecorderRoot, "execution-recorder.tgz"],
   [packageRoot, "task-execution-backend-local.tgz"],
 ];
@@ -98,6 +100,7 @@ try {
         "@jinn-network/evidence-protocol": `file:${archives.get("evidence-protocol.tgz")}`,
         "@jinn-network/evidence-repository": `file:${archives.get("evidence-repository.tgz")}`,
         "@jinn-network/evidence-discovery": `file:${archives.get("evidence-discovery.tgz")}`,
+        "@jinn-network/execution-evidence-builder": `file:${archives.get("execution-evidence-builder.tgz")}`,
         "@jinn-network/execution-recorder": `file:${archives.get("execution-recorder.tgz")}`,
         "@jinn-network/task-execution-protocol": `file:${archives.get("task-execution-protocol.tgz")}`,
         "@jinn-network/task-execution-backend": `file:${archives.get("task-execution-backend.tgz")}`,
