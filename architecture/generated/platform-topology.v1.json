@@ -2084,7 +2084,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2998,
       "generatedOutputSources": 1349,
-      "generatorSources": 642,
+      "generatorSources": 643,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -2312,6 +2312,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/custody-boundaries.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/demo1-historical-artifacts.test.mjs"
       },
       {
         "categories": [
