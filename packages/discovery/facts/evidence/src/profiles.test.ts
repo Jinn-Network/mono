@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   executionEvidenceProfile,
+  executionEvidenceProfileV2,
   executionVerificationProfile,
   resultEvaluationProfile,
+  resultEvaluationProfileV2,
 } from "./profiles.js";
 
 // Pinned-digest golden documents (plan Task 22 Step 3, mirroring
@@ -57,6 +59,18 @@ describe("facts/evidence profile documents", () => {
     for (const profile of [executionEvidenceProfile, resultEvaluationProfile, executionVerificationProfile]) {
       expect(profile.fields.some((field) => field.class === "substrate")).toBe(false);
     }
+  });
+
+  it("coexists with v2 profiles that expose runtime and complete Result subject sets", () => {
+    expect(executionEvidenceProfileV2.profile).toBe("https://spec.jinn.network/facts/execution-evidence/v2");
+    expect(referenceBearingFields(executionEvidenceProfileV2)).toEqual([
+      "taskDigest",
+      "runtimeDigest",
+      "resultDigests",
+    ]);
+    expect(resultEvaluationProfileV2.profile).toBe("https://spec.jinn.network/facts/result-evaluation/v2");
+    expect(referenceBearingFields(resultEvaluationProfileV2)).toEqual(["taskDigest", "resultDigests"]);
+    expect(resultEvaluationProfile.fields.some(({ name }) => name === "resultDigest")).toBe(true);
   });
 
   it("seals to a stable digest independent of source key order (JCS)", () => {

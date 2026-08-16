@@ -9,7 +9,7 @@ import {
 
 import { catalogIoError } from "./errors.js";
 
-export const SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION = 1 as const;
+export const SQLITE_EVIDENCE_CATALOG_SCHEMA_VERSION = 2 as const;
 
 const SCHEMA_SQL = `
 CREATE TABLE catalog_metadata (
@@ -45,6 +45,7 @@ CREATE TABLE execution_records (
   task_digest TEXT NOT NULL,
   executor_id TEXT NOT NULL,
   runtime_id TEXT NOT NULL,
+  runtime_digest TEXT NOT NULL,
   outcome TEXT NOT NULL,
   started_ms INTEGER NOT NULL,
   ended_ms INTEGER NOT NULL,
@@ -59,6 +60,17 @@ CREATE TABLE execution_results (
   ordinal INTEGER NOT NULL,
   result_id TEXT NOT NULL,
   result_digest TEXT NOT NULL,
+  PRIMARY KEY (family, digest, ordinal),
+  FOREIGN KEY (family, digest) REFERENCES records(family, digest)
+);
+
+CREATE TABLE execution_identifiers (
+  family TEXT NOT NULL CHECK (family = 'execution-evidence'),
+  digest TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  entity_id TEXT NOT NULL,
+  scheme TEXT NOT NULL,
+  value TEXT NOT NULL,
   PRIMARY KEY (family, digest, ordinal),
   FOREIGN KEY (family, digest) REFERENCES records(family, digest)
 );
@@ -140,6 +152,10 @@ CREATE INDEX execution_records_task_digest_idx
   ON execution_records(task_digest, started_ms DESC, digest ASC);
 CREATE INDEX execution_records_executor_idx
   ON execution_records(executor_id, started_ms DESC, digest ASC);
+CREATE INDEX execution_records_runtime_digest_idx
+  ON execution_records(runtime_digest, started_ms DESC, digest ASC);
+CREATE INDEX execution_records_published_idx
+  ON execution_records(published_ms DESC, digest ASC);
 CREATE INDEX execution_records_outcome_idx
   ON execution_records(outcome, started_ms DESC, digest ASC);
 CREATE INDEX execution_results_result_id_idx
@@ -148,6 +164,8 @@ CREATE INDEX execution_results_result_digest_idx
   ON execution_results(result_digest, family, digest);
 CREATE INDEX execution_results_pair_idx
   ON execution_results(result_id, result_digest, family, digest);
+CREATE INDEX execution_identifiers_scheme_value_idx
+  ON execution_identifiers(scheme, value, family, digest);
 CREATE INDEX evaluation_records_order_idx
   ON evaluation_records(evaluated_ms DESC, digest ASC);
 CREATE INDEX evaluation_records_task_idx

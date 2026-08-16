@@ -57,8 +57,12 @@ export {
   BINARY_INSTRUMENT_PARAMETER_SCHEMA,
   validateBinaryInstrumentQualificationProjection,
   validateBinaryInstrumentParameters,
+  projectBinaryInstrumentQualification,
 } from "./binary-instrument-method.js";
-export type { BinaryInstrumentParameters } from "./binary-instrument-method.js";
+export type {
+  BinaryInstrumentParameters,
+  BinaryInstrumentQualificationProjectionInput,
+} from "./binary-instrument-method.js";
 
 // --- the reference statistics library (design §9.2, adopted from the capability-eval seed) ---
 export { wilsonInterval } from "./stats/wilson.js";

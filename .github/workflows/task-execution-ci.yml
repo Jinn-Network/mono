@@ -371,6 +371,7 @@ jobs:
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
       - name: Build Task Execution Backend Local assembly from source (testing imports it at typecheck)
         working-directory: packages/task-execution/backend-local/assembly
@@ -457,6 +458,7 @@ jobs:
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
       - name: Verify Task Execution Backend Local (assembly)
         working-directory: packages/task-execution/backend-local/assembly
@@ -535,6 +537,7 @@ jobs:
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
           (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
       - name: Verify Task Execution Evaluation Harness
@@ -602,6 +605,7 @@ jobs:
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
           (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
       - name: Verify Task Execution Evaluator Adapters
@@ -668,6 +672,7 @@ jobs:
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
           (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
       - name: Verify Task Execution OCI Grader
@@ -758,6 +763,7 @@ jobs:
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
           (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers

@@ -12,9 +12,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   EVIDENCE_FACTS_RECOMPUTE,
+  EVIDENCE_FACTS_RECOMPUTE_V2,
   executionEvidenceRecompute,
+  executionEvidenceRecomputeV2,
   executionVerificationRecompute,
   resultEvaluationRecompute,
+  resultEvaluationRecomputeV2,
 } from "./recompute.js";
 
 const fixtureRoot = new URL(
@@ -75,6 +78,31 @@ describe("facts/evidence recompute functions", () => {
       taskDigest: projection.taskSubject.digest,
       resultDigest: projection.resultSubjects[0].digest,
     });
+  });
+
+  it("recomputes v2 execution and evaluation facts with complete Result subject sets", async () => {
+    const executionBytes = await readFile(new URL("public/ro-crate-metadata.json", fixtureRoot));
+    const evaluationBytes = await readFile(
+      new URL("claims/result-evaluation/result-evaluation.dsse.json", fixtureRoot),
+    );
+    const execution = validateAndProjectEvidenceRecord(
+      { family: "execution-evidence", digest: recordDigest(executionBytes) },
+      executionBytes,
+    );
+    const evaluation = validateAndProjectEvidenceRecord(
+      { family: "result-evaluation", digest: recordDigest(evaluationBytes) },
+      evaluationBytes,
+    );
+    if (!execution.conforms || execution.projection.family !== "execution-evidence") throw new Error("invalid execution fixture");
+    if (!evaluation.conforms || evaluation.projection.family !== "result-evaluation") throw new Error("invalid evaluation fixture");
+    await expect(executionEvidenceRecomputeV2(executionBytes, noReferencedBytes)).resolves.toMatchObject({
+      runtimeDigest: execution.projection.runtime.digest,
+      resultDigests: execution.projection.results.map(({ digest }) => digest),
+    });
+    await expect(resultEvaluationRecomputeV2(evaluationBytes, noReferencedBytes)).resolves.toMatchObject({
+      resultDigests: evaluation.projection.resultSubjects.map(({ digest }) => digest),
+    });
+    expect(EVIDENCE_FACTS_RECOMPUTE_V2.get(RECORD_KINDS.executionEvidence)).toBe(executionEvidenceRecomputeV2);
   });
 
   it("recomputes execution-verification record facts straight from the sealed bytes", async () => {

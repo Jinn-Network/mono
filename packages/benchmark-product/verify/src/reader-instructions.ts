@@ -23,6 +23,10 @@ export const PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
 export const PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND =
   "npx @colophon-claims/verify@2 <bundle-dir>" as const;
+export const PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@2.0.0 <bundle-dir>" as const;
+export const PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND =
+  "npx @colophon-claims/verify@2 <bundle-dir>" as const;
 
 /** Format-scoped commands keep v2 reproduction literals immutable while v4 uses reader2. */
 export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
@@ -34,5 +38,9 @@ export const PUBLIC_BUNDLE_VERIFICATION_INSTRUCTIONS = {
     command: PUBLIC_BUNDLE_V4_VERIFICATION_COMMAND,
     compatibleCommand: PUBLIC_BUNDLE_V4_COMPATIBLE_VERIFICATION_COMMAND,
   },
+  [BUNDLE_V5_FORMAT]: {
+    command: PUBLIC_BUNDLE_V5_VERIFICATION_COMMAND,
+    compatibleCommand: PUBLIC_BUNDLE_V5_COMPATIBLE_VERIFICATION_COMMAND,
+  },
 } as const;
-import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT } from "./manifest.js";
+import { BUNDLE_FORMAT, BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT } from "./manifest.js";

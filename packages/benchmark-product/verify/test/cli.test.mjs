@@ -31,7 +31,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
   assert.deepEqual(JSON.parse(result.stdout), {
     ok: false,
     verifierVersion: "2.0.0",
-    supportedFormats: ["benchmark-product-public-bundle/2", "benchmark-product-public-bundle/4"],
+    supportedFormats: ["benchmark-product-public-bundle/2", "benchmark-product-public-bundle/4", "benchmark-product-public-bundle/5"],
     code: "record-integrity",
     message: "bundle directory is missing",
   });
@@ -78,4 +78,26 @@ test("human summary reports the actual passed count against the fixed six-check 
   });
   assert.match(output, /^Verified: 1 of 6 checks passed/m);
   assert.match(output, /Format: benchmark-product-public-bundle\/2/);
+});
+
+test("human summary names all seven evidence-native checks for bundle v5", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/5",
+    identity: `sha256:${"a".repeat(64)}`,
+    checks: [
+      "manifest", "evidence-closure", "artifact-integrity", "signature-validity",
+      "matrix-rederivation", "report-verification", "claim-consistency",
+    ],
+    benchmarkDigest: `sha256:${"b".repeat(64)}`,
+    manifestDigest: `sha256:${"c".repeat(64)}`,
+    cohortDigest: `sha256:${"d".repeat(64)}`,
+    matrixDigest: `sha256:${"e".repeat(64)}`,
+    reportDigest: `sha256:${"f".repeat(64)}`,
+    evidenceRecords: 336,
+    artifacts: 300,
+  });
+  assert.match(output, /^Verified: 7 of 7 checks passed/m);
+  assert.match(output, new RegExp(`Bundle: sha256:${"a".repeat(64)}`));
+  assert.doesNotMatch(output, /sha256:sha256:/);
 });
