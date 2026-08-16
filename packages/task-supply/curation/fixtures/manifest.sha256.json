@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "observations-bucket.json",
+      "sha256": "ecee6ccaba7115772a02e1ff926b031e225a7bce4dd2ff6fd1c0cccb209df14b"
+    },
+    {
+      "id": "observations-golden.json",
+      "sha256": "aa33c783b4716249ecea4ebe9a319522b04de161f7439dbb301050f2961a0e67"
+    },
+    {
+      "id": "observations-manipulation.json",
+      "sha256": "b8c2239bdecac63df0b86b75fcfd8e2f0a28052803ef6a9338b5001b015fa77d"
+    },
+    {
+      "id": "projection-golden.json",
+      "sha256": "394514838222743f8f73e40f87a77de943fcac21ba3f766c3c324fccc9c78ee0"
+    }
+  ],
+  "errata": []
+}

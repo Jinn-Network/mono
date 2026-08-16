@@ -23,7 +23,8 @@
     "./testing": {
       "import": "./dist/testing.js",
       "types": "./dist/testing.d.ts"
-    }
+    },
+    "./fixtures/*": "./fixtures/*"
   },
   "files": [
     "dist/",

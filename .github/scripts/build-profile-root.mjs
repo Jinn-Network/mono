@@ -23,6 +23,7 @@ import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
   loadPlatformCatalog,
+  resolveRequestedReleaseGroup,
 } from './platform-catalog.mjs';
 import { enumeratePublicSurfaceAssets, jinnIdentifierServedPath } from './public-surface-assets.mjs';
 
@@ -159,7 +160,7 @@ export function buildProfileRoot({
   outDir,
   commit,
   catalogDigest,
-  releaseGroup = 'platform-v1',
+  releaseGroup,
   lane = 'canary',
 }) {
   if (!/^[0-9a-f]{40}$/u.test(String(commit))) {
@@ -175,6 +176,7 @@ export function buildProfileRoot({
       `catalog digest mismatch: expected ${boundCatalogDigest}, checked out catalog is ${actualCatalogDigest}`,
     );
   }
+  releaseGroup = resolveRequestedReleaseGroup(loadPlatformCatalog(repoRoot), releaseGroup);
   const packages = loadCatalogPackages(repoRoot, { releaseGroup });
   if (packages.length === 0) throw new Error(`release group ${releaseGroup} contains no catalog packages`);
   const publicAssets = enumeratePublicSurfaceAssets({
@@ -265,7 +267,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     const repoRoot = args.includes('--root') ? args[args.indexOf('--root') + 1] : process.cwd();
     const releaseGroup = args.includes('--release-group')
       ? args[args.indexOf('--release-group') + 1]
-      : 'platform-v1';
+      : undefined;
     const catalogDigest = args.includes('--catalog-digest')
       ? args[args.indexOf('--catalog-digest') + 1]
       : undefined;
@@ -274,7 +276,9 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     if (!args.includes('--commit') || !/^[0-9a-f]{40}$/u.test(String(commit))) {
       throw new Error('--commit <40-character sha> is required');
     }
-    if (!releaseGroup) throw new Error('--release-group <catalog release group> requires a value');
+    if (args.includes('--release-group') && !releaseGroup) {
+      throw new Error('--release-group <catalog release group> requires a value');
+    }
     if (args.includes('--catalog-digest') && !catalogDigest) {
       throw new Error('--catalog-digest <sha256> requires a value');
     }

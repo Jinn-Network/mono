@@ -753,6 +753,76 @@ export function loadCatalogPackages(repoRoot, { releaseGroup } = {}) {
     .sort((left, right) => (left.directory < right.directory ? -1 : left.directory > right.directory ? 1 : 0));
 }
 
+export function stackPublishedReleaseGroupIds(catalog) {
+  return Object.entries(catalog.releaseGroups)
+    .filter(([, group]) => group.stackPublished === true)
+    .map(([groupId]) => groupId)
+    .sort();
+}
+
+export function requireStackPublishedReleaseGroup(catalog, releaseGroup) {
+  const definition = catalog.releaseGroups?.[releaseGroup];
+  if (!definition || definition.stackPublished !== true) {
+    throw new Error(`release group ${releaseGroup} is not stack-published`);
+  }
+  return definition;
+}
+
+export function defaultStackPublishedReleaseGroup(catalog) {
+  const ids = stackPublishedReleaseGroupIds(catalog);
+  if (ids.length === 1) return ids[0];
+  throw new Error(
+    ids.length === 0
+      ? 'no stack-published release group is cataloged'
+      : `releaseGroup is required when multiple stack-published groups exist (${ids.join(', ')})`,
+  );
+}
+
+export function resolveRequestedReleaseGroup(catalog, releaseGroup) {
+  if (releaseGroup !== undefined && releaseGroup !== null && String(releaseGroup).trim() !== '') {
+    if (!catalog.releaseGroups?.[releaseGroup]) {
+      throw new Error(`unknown release group ${releaseGroup}`);
+    }
+    return releaseGroup;
+  }
+  return defaultStackPublishedReleaseGroup(catalog);
+}
+
+export function stackPublishedRewriteNames(catalog, releaseGroup) {
+  requireStackPublishedReleaseGroup(catalog, releaseGroup);
+  const allowed = new Set(catalog.releaseGroups[releaseGroup].allowedDependencyReleaseGroups);
+  return new Set(
+    catalog.packages
+      .filter((pkg) => allowed.has(pkg.releaseGroup))
+      .map((pkg) => pkg.name),
+  );
+}
+
+export function stackPublishedGroupArtifactPaths(verificationRoot, releaseGroup) {
+  const groupRoot = join(verificationRoot, releaseGroup);
+  return {
+    groupRoot,
+    packRoot: join(groupRoot, 'pack'),
+    packManifest: join(groupRoot, 'pack', 'manifest.json'),
+    publicSurface: join(groupRoot, 'public-surface-manifest.json'),
+    profileRoot: join(groupRoot, 'profile-root'),
+    profileManifest: join(groupRoot, 'profile-root', 'manifest.json'),
+  };
+}
+
+export function loadStackPublishedCatalogPackages(repoRoot, { lane } = {}) {
+  const catalog = loadPlatformCatalog(repoRoot);
+  const groups = stackPublishedReleaseGroupIds(catalog);
+  if (groups.length === 0) {
+    throw new Error('no stack-published release group is cataloged');
+  }
+  return groups.flatMap((releaseGroup) => (
+    lane === undefined
+      ? loadCatalogPackages(repoRoot, { releaseGroup })
+      : loadPublishableCatalogPackages(repoRoot, { releaseGroup, lane })
+  ));
+}
+
 export function loadPublishableCatalogPackages(repoRoot, {
   releaseGroup,
   lane = 'canary',

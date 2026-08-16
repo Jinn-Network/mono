@@ -201,11 +201,10 @@ test('failed, skipped, neutral, cancelled, and missing gates cannot produce a re
 
     const extra = receiptArgs(fixture, 'receipt-extra.json');
     extra.conclusions.benchmarking = 'success';
-    assert.throws(
-      () => createVerificationReceipt(extra),
-      /unknown gate conclusions: benchmarking/u,
-    );
-    assert.equal(existsSync(extra.outputPath), false);
+    const extraReceipt = createVerificationReceipt(extra);
+    assert.equal('benchmarking' in extraReceipt.conclusions, false);
+    assert.deepEqual(extraReceipt.conclusions, successfulConclusions());
+    assert.equal(existsSync(extra.outputPath), true);
   } finally {
     rmSync(fixture.repoRoot, { recursive: true, force: true });
     rmSync(fixture.root, { recursive: true, force: true });

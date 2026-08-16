@@ -25,7 +25,7 @@ function digest(root) {
     .digest('hex');
 }
 
-test('writes a canonical public-surface manifest for the exact platform-v1 set', () => {
+test('writes a canonical public-surface manifest for the exact sealed-platform-v1 set', () => {
   const root = mkdtempSync(join(tmpdir(), 'jinn-public-surface-out-'));
   const outputPath = join(root, 'public-surface-manifest.json');
   try {
@@ -35,7 +35,7 @@ test('writes a canonical public-surface manifest for the exact platform-v1 set',
       outputPath,
       sourceSha: SHA,
       catalogDigest,
-      releaseGroup: 'platform-v1',
+      releaseGroup: 'sealed-platform-v1',
       lane: 'canary',
     });
     assert.equal(manifest.schemaVersion, 1);
@@ -44,9 +44,9 @@ test('writes a canonical public-surface manifest for the exact platform-v1 set',
       path: 'architecture/platform-packages.v1.json',
       sha256: catalogDigest,
     });
-    assert.equal(manifest.releaseGroup, 'platform-v1');
+    assert.equal(manifest.releaseGroup, 'sealed-platform-v1');
     assert.equal(manifest.lane, 'canary');
-    const expectedNames = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+    const expectedNames = loadCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' })
       .map(({ name }) => name);
     assert.deepEqual(manifest.packages.map(({ name }) => name), expectedNames);
     assert.equal(new Set(manifest.packages.map(({ name }) => name)).size, expectedNames.length);
@@ -109,7 +109,7 @@ test('source and catalog identities are validated before writing', () => {
         outputPath,
         sourceSha: 'bad',
         catalogDigest: digest(repoRoot),
-        releaseGroup: 'platform-v1',
+        releaseGroup: 'sealed-platform-v1',
         lane: 'canary',
       }),
       /sourceSha must be a 40-character lowercase commit SHA/u,
@@ -120,7 +120,7 @@ test('source and catalog identities are validated before writing', () => {
         outputPath,
         sourceSha: SHA,
         catalogDigest: '0'.repeat(64),
-        releaseGroup: 'platform-v1',
+        releaseGroup: 'sealed-platform-v1',
         lane: 'canary',
       }),
       /catalog digest mismatch/u,

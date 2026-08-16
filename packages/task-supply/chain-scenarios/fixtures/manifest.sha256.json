@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "environment/approval-chain.sealed.json",
+      "sha256": "3157bdc603e8f66f10a440d12dcad3426913f5e6cbe969a7eb08a5cdda6018c0"
+    },
+    {
+      "id": "environment/approval-record.sealed.json",
+      "sha256": "5e93847772c31d562ec4b3365877c88df0bc918d5cc118dfd0b441360ec2db2e"
+    },
+    {
+      "id": "environment/chain.sealed.json",
+      "sha256": "24eba4f672b52745967122ff328a5be0ac4a5d257eb97588180b2c098e6a03e5"
+    },
+    {
+      "id": "environment/record.sealed.json",
+      "sha256": "cdec7fdebce18eb5d247444ac4f3b41c7019a7265139307ae113c2431b74c2c4"
+    },
+    {
+      "id": "environment/record.source.json",
+      "sha256": "4753f7587f5958650984f7fd31ab5e0bd132ab65b06ce20538a7abfcf8bb2a0d"
+    },
+    {
+      "id": "golden/approval-hygiene/evaluation-spec.bytes",
+      "sha256": "510998bd26e5da508ce88adf9b4d32eb52b8b5d5b09671c36f221138d9d1f683"
+    },
+    {
+      "id": "golden/approval-hygiene/pool-manifest.bytes",
+      "sha256": "3cde4296b2b924bfae76a8df045c3fea72ad1464306771d8673d82a4de5e25d6"
+    },
+    {
+      "id": "golden/approval-hygiene/reference-script.digest",
+      "sha256": "14d6860a47748bcf26368929beaf26ee65ae9a93f3b856ecea2f17d18554de0b"
+    },
+    {
+      "id": "golden/approval-hygiene/task.bytes",
+      "sha256": "3f87da86c3f2fbb356b3dd0db4b549298a657f86a21b669abdf6beff221dc2c0"
+    },
+    {
+      "id": "golden/lending-lifecycle/evaluation-spec.bytes",
+      "sha256": "8fde43daddbd44efd341bc20225d4dd42a4004f7b0e6821175fd61062edc5f3e"
+    },
+    {
+      "id": "golden/lending-lifecycle/pool-manifest.bytes",
+      "sha256": "25cb21aef601a05351a6e09f96a7ef26932f6d79bc364f1efefccd266c1c7620"
+    },
+    {
+      "id": "golden/lending-lifecycle/reference-script.digest",
+      "sha256": "8cbd5b1014d27fc451c0e79a1c93389d0462fc85a712f969a0e198a24f597a1f"
+    },
+    {
+      "id": "golden/lending-lifecycle/task.bytes",
+      "sha256": "0efb00d6a8d6c5acf4ac89fae62671f53ff60dcd966318afa3c31119b79b1cff"
+    }
+  ],
+  "errata": []
+}

@@ -20,7 +20,13 @@ import {
   catalogSha256,
 } from './build-prepublication-bundle.mjs';
 import { createVerificationReceipt } from './platform-verification-receipt.mjs';
-import { loadPublishableCatalogPackages } from './platform-catalog.mjs';
+import {
+  loadPublishableCatalogPackages,
+  loadStackPublishedCatalogPackages,
+  resolveRequestedReleaseGroup,
+  stackPublishedGroupArtifactPaths,
+  loadPlatformCatalog,
+} from './platform-catalog.mjs';
 import { renderRegistrationMarkdown } from './stack-trusted-publishers.mjs';
 
 export const NPM_REGISTRY = 'https://registry.npmjs.org/';
@@ -131,9 +137,10 @@ function reconstructVerificationReceipt({
   lane,
 }) {
   const receipt = readJson(verificationReceiptPath, 'verification receipt');
-  const packManifestPath = join(verificationRoot, 'pack/manifest.json');
-  const publicManifestPath = join(verificationRoot, 'public-surface-manifest.json');
-  const profileManifestPath = join(verificationRoot, 'profile-root/manifest.json');
+  const artifacts = stackPublishedGroupArtifactPaths(verificationRoot, releaseGroup);
+  const packManifestPath = artifacts.packManifest;
+  const publicManifestPath = artifacts.publicSurface;
+  const profileManifestPath = artifacts.profileManifest;
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'jinn-publication-receipt-check-'));
   const expectedPath = join(temporaryRoot, 'verification-receipt.json');
   try {
@@ -155,27 +162,28 @@ function reconstructVerificationReceipt({
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true });
   }
-  validatePackInventory(join(verificationRoot, 'pack'), receipt);
+  validatePackInventory(artifacts.packRoot, receipt);
   return {
     receipt,
     packManifestPath,
     publicManifestPath,
     profileManifestPath,
+    packRoot: artifacts.packRoot,
+    profileRoot: artifacts.profileRoot,
   };
 }
 
 function provenanceSubjects({
   receipt,
-  verificationRoot,
   verificationReceiptPath,
   packManifestPath,
   publicManifestPath,
   profileManifestPath,
+  packRoot,
+  profileRoot,
   trustedPublishersJsonPath,
   trustedPublishersMarkdownPath,
 }) {
-  const packRoot = join(verificationRoot, 'pack');
-  const profileRoot = join(verificationRoot, 'profile-root');
   const subjects = [
     packManifestPath,
     ...receipt.tarballs.map(({ filename }) => tarballPath(packRoot, filename)),
@@ -195,7 +203,7 @@ function provenanceSubjects({
   return subjects;
 }
 
-function validateTrustedPublishers(verificationRoot, receipt, catalogNames) {
+function validateTrustedPublishers(verificationRoot, receipt, catalogNames, repoRoot) {
   const trustedPublishersJsonPath = join(
     verificationRoot,
     'trusted-publishers/trusted-publishers.json',
@@ -209,9 +217,15 @@ function validateTrustedPublishers(verificationRoot, receipt, catalogNames) {
     throw new Error('trusted-publisher registration JSON must be an array');
   }
   const names = registrations.map((registration) => registration?.package);
+  const stackNames = loadStackPublishedCatalogPackages(repoRoot, { lane: receipt.lane })
+    .map((pkg) => pkg.name)
+    .sort();
+  const receiptNames = [...receipt.packageOrder].sort();
+  const catalogSorted = [...catalogNames].sort();
   if (new Set(names).size !== names.length
-    || JSON.stringify([...names].sort()) !== JSON.stringify([...catalogNames].sort())
-    || JSON.stringify([...names].sort()) !== JSON.stringify([...receipt.packageOrder].sort())) {
+    || JSON.stringify([...names].sort()) !== JSON.stringify(stackNames)
+    || JSON.stringify(receiptNames) !== JSON.stringify(catalogSorted)
+    || receiptNames.some((name) => !names.includes(name))) {
     throw new Error('trusted-publisher package set does not exactly match the catalog and verification receipt');
   }
   for (const registration of registrations) {
@@ -362,12 +376,11 @@ function publishMissingTarballs(receipt, missing, {
   exec,
   repoRoot,
   registry,
-  verificationRoot,
+  packRoot,
   registryRetryAttempts,
   registryRetryDelayMs,
   sleep,
 }) {
-  const packRoot = join(verificationRoot, 'pack');
   const tarballs = new Map(receipt.tarballs.map((tarball) => [tarball.name, tarball]));
   const registryContext = { exec, repoRoot, registry };
   for (const wave of receipt.waves) {
@@ -410,9 +423,6 @@ function validateArguments({
   if (!COMMIT_SHA.test(String(sourceSha))) {
     throw new Error('publication source SHA must be a 40-character lowercase commit SHA');
   }
-  if (releaseGroup !== 'platform-v1') {
-    throw new Error(`publication release group must be platform-v1, got ${releaseGroup}`);
-  }
   if (lane !== 'canary') throw new Error(`publication lane must be canary, got ${lane}`);
   if (registry !== NPM_REGISTRY) {
     throw new Error(`publication registry must be exactly ${NPM_REGISTRY}, got ${registry}`);
@@ -451,9 +461,10 @@ export async function publishVerifiedPlatform(options) {
   const artifactRoot = resolve(verificationRoot);
   const receiptPath = resolve(verificationReceiptPath);
   const publicationReceiptPath = resolve(outputPath);
+  const groupId = resolveRequestedReleaseGroup(loadPlatformCatalog(root), releaseGroup);
   validateArguments({
     sourceSha,
-    releaseGroup,
+    releaseGroup: groupId,
     lane,
     registry,
     repository,
@@ -467,17 +478,17 @@ export async function publishVerifiedPlatform(options) {
     verificationRoot: artifactRoot,
     verificationReceiptPath: receiptPath,
     sourceSha,
-    releaseGroup,
+    releaseGroup: groupId,
     lane,
   });
   const { receipt } = validated;
-  const catalogNames = loadPublishableCatalogPackages(root, { releaseGroup, lane })
+  const catalogNames = loadPublishableCatalogPackages(root, { releaseGroup: groupId, lane })
     .map(({ name }) => name);
   if (receipt.packageOrder.length !== receipt.tarballs.length
     || JSON.stringify([...receipt.packageOrder].sort()) !== JSON.stringify([...catalogNames].sort())) {
     throw new Error('verified canary publication package and tarball sets must match the catalog');
   }
-  const trustedPublishers = validateTrustedPublishers(artifactRoot, receipt, catalogNames);
+  const trustedPublishers = validateTrustedPublishers(artifactRoot, receipt, catalogNames, root);
   verifyProvenance(provenanceSubjects({
     ...validated,
     ...trustedPublishers,
@@ -503,7 +514,7 @@ export async function publishVerifiedPlatform(options) {
     exec,
     repoRoot: root,
     registry,
-    verificationRoot: artifactRoot,
+    packRoot: validated.packRoot,
     registryRetryAttempts,
     registryRetryDelayMs,
     sleep,
@@ -538,7 +549,6 @@ export async function publishVerifiedPlatform(options) {
 function parseArgs(argv) {
   const parsed = {
     repoRoot: process.cwd(),
-    releaseGroup: 'platform-v1',
     lane: 'canary',
     registry: NPM_REGISTRY,
   };

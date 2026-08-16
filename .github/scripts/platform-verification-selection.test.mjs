@@ -1,23 +1,23 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
 import {
   GATE_DOMAINS,
   GLOBAL_SELECTORS,
-  RELEASE_GROUP,
   selectVerification,
 } from './platform-verification-selection.mjs';
+import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const select = (changedFiles) => selectVerification({ repoRoot, changedFiles });
 
-test('every required gate of the release group maps to a catalog domain', () => {
-  const catalog = JSON.parse(
-    readFileSync(resolve(repoRoot, 'architecture/platform-packages.v1.json'), 'utf8'),
-  );
-  const declared = [...catalog.releaseGroups[RELEASE_GROUP].requiredGateIds].sort();
+test('every required gate of stack-published groups maps to a catalog domain', () => {
+  const catalog = loadPlatformCatalog(repoRoot);
+  const declared = [...new Set(
+    stackPublishedReleaseGroupIds(catalog)
+      .flatMap((groupId) => catalog.releaseGroups[groupId].requiredGateIds),
+  )].sort();
   assert.deepEqual([...GATE_DOMAINS.keys()].sort(), declared);
 
   const domains = new Set(catalog.packages.map((pkg) => pkg.domain));

@@ -28,10 +28,25 @@ test('the compatibility module exports no physical-root membership authority', (
   assert.equal('STACK_ROOTS' in stackPackageGraph, false);
 });
 
-test('the real repository set is exactly the catalog-selected platform-v1 group', () => {
-  const found = discoverStackPackages(repoRoot);
-  const catalogPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' });
-  assert.equal(found.length, catalogPackages.length);
+test('the real repository refuses an implicit stack set when multiple groups exist', () => {
+  assert.throws(
+    () => discoverStackPackages(repoRoot),
+    /releaseGroup is required when multiple stack-published groups exist/,
+  );
+});
+
+test('the real sealed-platform-v1 set is exactly the catalog-selected group', () => {
+  const found = discoverStackPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' });
+  const catalogPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' });
+  assert.equal(found.length, 13);
+  assert.deepEqual(found.map((pkg) => pkg.name), catalogPackages.map((pkg) => pkg.name));
+  assert.equal(new Set(found.map((pkg) => pkg.name)).size, found.length, 'package names must be unique');
+});
+
+test('the real implementations-v1 set is exactly the catalog-selected group', () => {
+  const found = discoverStackPackages(repoRoot, { releaseGroup: 'implementations-v1' });
+  const catalogPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'implementations-v1' });
+  assert.equal(found.length, 59);
   assert.deepEqual(found.map((pkg) => pkg.name), catalogPackages.map((pkg) => pkg.name));
   assert.equal(new Set(found.map((pkg) => pkg.name)).size, found.length, 'package names must be unique');
 });
@@ -99,8 +114,8 @@ test('a cycle throws and names every member', () => {
   );
 });
 
-test('the real repository graph is runtime-closed and has deterministic topological waves', () => {
-  const packages = discoverStackPackages(repoRoot);
+test('the real sealed-platform-v1 graph is runtime-closed and has deterministic topological waves', () => {
+  const packages = discoverStackPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' });
   const names = new Set(packages.map((pkg) => pkg.name));
   const missingRuntimeDependencies = [];
   for (const pkg of packages) {
@@ -116,7 +131,7 @@ test('the real repository graph is runtime-closed and has deterministic topologi
 
   const graph = buildDependencyGraph(packages);
   const waves = topologicalWaves(graph);
-  assert.deepEqual(waves, topologicalWaves(buildDependencyGraph(discoverStackPackages(repoRoot))));
+  assert.deepEqual(waves, topologicalWaves(buildDependencyGraph(discoverStackPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' }))));
   for (const wave of waves) assert.deepEqual(wave, [...wave].sort());
   const flattened = waves.flat();
   assert.equal(new Set(flattened).size, flattened.length, 'a package must appear in exactly one wave');

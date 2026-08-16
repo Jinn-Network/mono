@@ -1,7 +1,7 @@
 name: Stack npm Publish
 
-# The catalog-selected platform-v1 packages publish as one receipt-bound coherent set. Canary
-# publication consumes only the exact tarballs and immutable receipt produced by
+# The catalog-selected stack-published groups publish as receipt-bound coherent sets. Canary
+# publication consumes only the exact tarballs and immutable receipts produced by
 # the same run's reusable platform verification workflow.
 on:
   push:
@@ -48,6 +48,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment: npm-publish
+    strategy:
+      fail-fast: false
+      matrix:
+        release_group:
+          - implementations-v1
+          - sealed-platform-v1
     permissions:
       contents: read
       id-token: write
@@ -83,22 +89,22 @@ jobs:
         run: |
           node .github/scripts/publish-verified-platform.mjs \
             --verification-root .platform-verification \
-            --verification-receipt .platform-verification-receipt/verification-receipt.json \
+            --verification-receipt ".platform-verification-receipt/${{ matrix.release_group }}/verification-receipt.json" \
             --source-sha "${SOURCE_SHA}" \
-            --release-group platform-v1 \
+            --release-group ${{ matrix.release_group }} \
             --lane canary \
             --registry https://registry.npmjs.org/ \
             --repository "${GITHUB_REPOSITORY}" \
-            --out .platform-publication/publication-receipt.json
+            --out ".platform-publication/${{ matrix.release_group }}/publication-receipt.json"
       - name: Attest final publication receipt
         uses: actions/attest@v4
         with:
-          subject-path: .platform-publication/publication-receipt.json
+          subject-path: .platform-publication/${{ matrix.release_group }}/publication-receipt.json
       - name: Upload final publication receipt
         uses: actions/upload-artifact@v4
         with:
-          name: platform-publication-receipt
-          path: .platform-publication/publication-receipt.json
+          name: platform-publication-receipt-${{ matrix.release_group }}
+          path: .platform-publication/${{ matrix.release_group }}/publication-receipt.json
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 90
@@ -148,15 +154,15 @@ jobs:
           fi
           TAG_VERSION="${RELEASE_TAG#stack-v}"
           PLATFORM_VERSION="$(node --input-type=module <<'NODE'
-          import { loadCatalogPackages } from './.github/scripts/platform-catalog.mjs';
-          const versions = new Set(loadCatalogPackages(process.cwd(), { releaseGroup: 'platform-v1' })
+          import { loadStackPublishedCatalogPackages } from './.github/scripts/platform-catalog.mjs';
+          const versions = new Set(loadStackPublishedCatalogPackages(process.cwd())
             .map(({ manifest }) => manifest.version));
-          if (versions.size !== 1) throw new Error(`platform-v1 package versions disagree: ${[...versions].join(', ')}`);
+          if (versions.size !== 1) throw new Error(`stack-published package versions disagree: ${[...versions].join(', ')}`);
           process.stdout.write([...versions][0]);
           NODE
           )"
           if [ "${PLATFORM_VERSION}" != "${TAG_VERSION}" ]; then
-            echo "::error::Release tag ${RELEASE_TAG} names ${TAG_VERSION}, but platform-v1 is ${PLATFORM_VERSION}"
+            echo "::error::Release tag ${RELEASE_TAG} names ${TAG_VERSION}, but stack-published packages are ${PLATFORM_VERSION}"
             exit 1
           fi
           echo "TAG_VERSION=${TAG_VERSION}" >> "${GITHUB_ENV}"
@@ -237,22 +243,32 @@ jobs:
         env:
           CATALOG_DIGEST: ${{ steps.catalog.outputs.digest }}
         run: |
-          node .github/scripts/verify-live-profile-host.mjs \
-            --root .platform-verification/profile-root \
-            --receipt .platform-verification-receipt/verification-receipt.json \
-            --source-sha "${SOURCE_SHA}" \
-            --catalog-digest "${CATALOG_DIGEST}" \
-            --release-group platform-v1 \
-            --lane stable \
-            --origin "${PROFILE_HOST_ORIGIN}" \
-            --public-key-url "${PUBLIC_KEY_URL}" \
-            --expect-public-key-sha256 "${PUBLIC_KEY_SHA256}" \
-            --out .platform-live-host/live-host-receipt.json
+          groups="$(node --input-type=module <<'NODE'
+          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          NODE
+          )"
+          mkdir -p .platform-live-host
+          while IFS= read -r group; do
+            [ -z "${group}" ] && continue
+            mkdir -p ".platform-live-host/${group}"
+            node .github/scripts/verify-live-profile-host.mjs \
+              --root ".platform-verification/${group}/profile-root" \
+              --receipt ".platform-verification-receipt/${group}/verification-receipt.json" \
+              --source-sha "${SOURCE_SHA}" \
+              --catalog-digest "${CATALOG_DIGEST}" \
+              --release-group "${group}" \
+              --lane stable \
+              --origin "${PROFILE_HOST_ORIGIN}" \
+              --public-key-url "${PUBLIC_KEY_URL}" \
+              --expect-public-key-sha256 "${PUBLIC_KEY_SHA256}" \
+              --out ".platform-live-host/${group}/live-host-receipt.json"
+          done <<< "${groups}"
       - name: Upload live host receipt
         uses: actions/upload-artifact@v4
         with:
           name: platform-live-host-receipt
-          path: .platform-live-host/live-host-receipt.json
+          path: .platform-live-host
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 90
@@ -276,7 +292,7 @@ jobs:
       - name: Attest live host receipt
         uses: actions/attest@v4
         with:
-          subject-path: .platform-live-host-receipt/live-host-receipt.json
+          subject-path: .platform-live-host-receipt/**/live-host-receipt.json
 
   # The single node any future stable publisher depends on. It runs on every stable
   # event and asserts exact success, so a skipped or failed upstream job is a refusal

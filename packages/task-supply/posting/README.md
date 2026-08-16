@@ -1,7 +1,6 @@
 # @jinn-network/task-posting
 
-> Phase C maturity: experimental and publication disabled. Its 0.x policy API may change until a
-> tier-4 host proves the approval and money path through packed external conformance.
+> Candidate in `implementations-v1`. Eligible for receipt-gated canary; that is not independent ratification.
 
 Supply policy for marketplace posting: which pool entries post, when, at what terms, under whose
 identity, with the escrow surfaced before spending.

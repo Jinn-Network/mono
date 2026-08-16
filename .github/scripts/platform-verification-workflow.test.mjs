@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { loadPlatformCatalog } from './platform-catalog.mjs';
+import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './platform-catalog.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const workflowsRoot = resolve(import.meta.dirname, '../workflows');
@@ -19,7 +19,10 @@ function jobBlock(source, jobId) {
   return next === -1 ? rest : rest.slice(0, next + 1);
 }
 
-const platformGateIds = catalog.releaseGroups['platform-v1'].requiredGateIds;
+const platformGateIds = [...new Set(
+  stackPublishedReleaseGroupIds(catalog)
+    .flatMap((groupId) => catalog.releaseGroups[groupId].requiredGateIds),
+)].sort();
 const platformJobIds = [...platform.matchAll(/^  ([a-zA-Z0-9_-]+):$/gmu)]
   .map(([, jobId]) => jobId);
 const domains = new Map(platformGateIds.map((gateId) => {
@@ -167,7 +170,7 @@ test('artifacts build and upload public/profile/pack outputs without OIDC', () =
   const artifacts = jobBlock(platform, 'artifacts');
   assert.match(artifacts, /build-platform-public-surface\.mjs/u);
   assert.match(artifacts, /build-profile-root\.mjs/u);
-  assert.match(artifacts, /sign-profile-manifest\.mjs\n\s+--root \.platform-verification\/profile-root/u);
+  assert.match(artifacts, /sign-profile-manifest\.mjs \\\n\s+--root "\.platform-verification\/\$\{group\}\/profile-root"/u);
   assert.ok(
     artifacts.indexOf('build-profile-root.mjs') < artifacts.indexOf('sign-profile-manifest.mjs'),
     'the manifest must be built before it is signed',
@@ -194,12 +197,12 @@ test('artifact attestation downloads immutable build outputs without executing r
   assert.match(attestation, /needs: artifacts/u);
   assert.match(attestation, /name: platform-verification-artifacts/u);
   for (const subject of [
-    /\.platform-verification\/pack\/manifest\.json/u,
-    /\.platform-verification\/pack\/tarballs\/\*\.tgz/u,
+    /\.platform-verification\/\*\/pack\/manifest\.json/u,
+    /\.platform-verification\/\*\/pack\/tarballs\/\*\.tgz/u,
     /\.platform-verification\/native-role-pack\/manifest\.json/u,
     /\.platform-verification\/native-role-pack\/tarballs\/\*\.tgz/u,
-    /\.platform-verification\/public-surface-manifest\.json/u,
-    /\.platform-verification\/profile-root\/\*\*/u,
+    /\.platform-verification\/\*\/public-surface-manifest\.json/u,
+    /\.platform-verification\/\*\/profile-root\/\*\*/u,
     /\.platform-verification\/trusted-publishers\/trusted-publishers\.json/u,
     /\.platform-verification\/trusted-publishers\/trusted-publishers\.md/u,
   ]) assert.match(attestation, subject);
@@ -211,7 +214,7 @@ test('external consumer accepts only the downloaded same-run tarball bundle', ()
   assert.match(consumer, /needs: artifacts/u);
   assert.match(consumer, /uses: actions\/download-artifact@v4/u);
   assert.match(consumer, /prepublication-external-consumer\.mjs/u);
-  assert.match(consumer, /\.platform-verification\/pack\/manifest\.json/u);
+  assert.match(consumer, /--manifest "\.platform-verification\/\$\{group\}\/pack\/manifest\.json"/u);
   assert.match(consumer, /--native-manifest \.platform-verification\/native-role-pack\/manifest\.json/u);
 });
 
@@ -261,25 +264,30 @@ test('receipt attestation downloads only the completed receipt and executes no r
   const attestation = jobBlock(platform, 'receipt_attestation');
   assert.match(attestation, /needs: verification_receipt/u);
   assert.match(attestation, /name: platform-verification-receipt/u);
-  assert.match(attestation, /subject-path: \.platform-verification-receipt\/verification-receipt\.json/u);
+  assert.match(attestation, /subject-path: \.platform-verification-receipt\/\*\*\/verification-receipt\.json/u);
   assert.doesNotMatch(attestation, /platform-verification-artifacts/u);
   assert.doesNotMatch(attestation, /actions\/checkout|actions\/setup-node|^\s+-?\s*run:/mu);
 });
 
-test('the experimental environment-supply group remains continuously represented and disabled', () => {
-  const group = catalog.releaseGroups['experimental-environment-supply'];
-  assert.deepEqual(group.requiredGateIds, ['environments-ci', 'record-discovery-ci']);
+test('the experimental policy group remains continuously represented and disabled', () => {
+  const group = catalog.releaseGroups['experimental-policy'];
+  assert.deepEqual(group.requiredGateIds, ['policy-ci']);
   assert.deepEqual(group.publishPolicies, ['disabled']);
   assert.equal(group.stackPublished, false);
   assert.equal(group.canary, false);
   assert.equal(group.stable, false);
   assert.ok(catalog.packages
-    .filter(({ releaseGroup }) => releaseGroup === 'experimental-environment-supply')
+    .filter(({ releaseGroup }) => releaseGroup === 'experimental-policy')
     .every(({ publishPolicy }) => publishPolicy === 'disabled'));
 });
 
 test('prepublication verification cannot publish or wait permissively for a registry', () => {
   assert.doesNotMatch(platform, /npm\s+publish|publish-stack\.mjs(?![^\n]*--dry-run)/u);
-  assert.doesNotMatch(platform, /\bsleep\b|\buntil\b|\bwhile\b/u);
+  assert.doesNotMatch(platform, /\bsleep\b|\buntil\b/u);
+  assert.equal(
+    [...platform.matchAll(/\bwhile\b/gu)].length,
+    [...platform.matchAll(/\bwhile IFS= read -r group; do/gu)].length,
+    'the only while loops allowed are per-group artifact iteration',
+  );
   assert.doesNotMatch(platform, /stack-npm-publish\.yml/u);
 });

@@ -1,25 +1,27 @@
 # Hosting the spec.jinn.network profile root
 
-**Scope:** serving the public schemas and profiles declared by the catalog for the exact
-`platform-v1` release set. The current package declarations and self-identifying URI claims are in
-the [generated public-surface view](../../architecture/generated/platform-topology.md#public-surfaces-and-identity-claims).
+**Scope:** serving the public schemas and profiles declared by the catalog for the stack-published
+release groups `sealed-platform-v1` and `implementations-v1`. The current package declarations and
+self-identifying URI claims are in the
+[generated public-surface view](../../architecture/generated/platform-topology.md#public-surfaces-and-identity-claims).
 
 ## What same-run verification produces
 
-`.github/workflows/platform-verification.yml` builds the profile root from catalog-declared
-`publicSurface.schemas`, `publicSurface.profiles`, and `publicSurface.fixtures`. The publication
-surface guard first proves that declarations exist and agree with package `files` and `exports`;
-the profile builder then maps a JSON Schema `$id` or facts-profile `profile` claim under
-`https://spec.jinn.network/` to that exact served path and rejects duplicate claims. That origin
-is the protocol's own, separate from the product site at the apex, and it is the only one a
-hosted identity may name (DR-2026-08-04). A document still naming the apex is rejected by name.
+`.github/workflows/platform-verification.yml` builds one profile root per stack-published group
+from catalog-declared `publicSurface.schemas`, `publicSurface.profiles`, and
+`publicSurface.fixtures`. The publication surface guard first proves that declarations exist and
+agree with package `files` and `exports`; the profile builder then maps a JSON Schema `$id` or
+facts-profile `profile` claim under `https://spec.jinn.network/` to that exact served path and
+rejects duplicate claims. That origin is the protocol's own, separate from the product site at
+the apex, and it is the only one a hosted identity may name (DR-2026-08-04). A document still
+naming the apex is rejected by name.
 
-The core surface includes the cataloged trace schemas. It excludes environment records,
-environment-verification assets, and environment facts profiles because those packages belong to
-the disabled experimental release group, not `platform-v1`. Directory location alone can neither
-include nor exclude a document.
+The sealed surface includes protocol identities and the cataloged environment-record and
+chain-environment-record public surfaces. The implementations surface includes the remaining
+declared schemas, profiles, and fixtures from `implementations-v1`. Directory location alone can
+neither include nor exclude a document. Experimental-policy packages are not hosted.
 
-The same run emits:
+The same run emits, per group:
 
 - the served documents with their declared media types;
 - `manifest.json`, binding every served path to SHA-256, media type, and source package;

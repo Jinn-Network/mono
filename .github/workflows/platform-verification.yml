@@ -94,6 +94,22 @@ jobs:
     with:
       source_sha: ${{ inputs.source_sha }}
 
+  environments:
+    needs: catalog
+    permissions:
+      contents: read
+    uses: ./.github/workflows/environments-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+
+  task_supply:
+    needs: catalog
+    permissions:
+      contents: read
+    uses: ./.github/workflows/task-supply-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+
   artifacts:
     needs: catalog
     runs-on: ubuntu-latest
@@ -118,38 +134,63 @@ jobs:
           CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
           LANE: ${{ inputs.lane }}
         run: |
+          groups="$(node --input-type=module <<'NODE'
+          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          NODE
+          )"
           mkdir -p .platform-verification
-          node .github/scripts/build-platform-public-surface.mjs \
-            --source-sha "${SOURCE_SHA}" \
-            --catalog-digest "${CATALOG_DIGEST}" \
-            --release-group platform-v1 \
-            --lane "${LANE}" \
-            --out .platform-verification/public-surface-manifest.json
-          node .github/scripts/build-profile-root.mjs \
-            --commit "${SOURCE_SHA}" \
-            --catalog-digest "${CATALOG_DIGEST}" \
-            --release-group platform-v1 \
-            --lane "${LANE}" \
-            --out .platform-verification/profile-root
+          while IFS= read -r group; do
+            [ -z "${group}" ] && continue
+            mkdir -p ".platform-verification/${group}"
+            node .github/scripts/build-platform-public-surface.mjs \
+              --source-sha "${SOURCE_SHA}" \
+              --catalog-digest "${CATALOG_DIGEST}" \
+              --release-group "${group}" \
+              --lane "${LANE}" \
+              --out ".platform-verification/${group}/public-surface-manifest.json"
+            node .github/scripts/build-profile-root.mjs \
+              --commit "${SOURCE_SHA}" \
+              --catalog-digest "${CATALOG_DIGEST}" \
+              --release-group "${group}" \
+              --lane "${LANE}" \
+              --out ".platform-verification/${group}/profile-root"
+          done <<< "${groups}"
       - name: Sign the profile manifest
         env:
           JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
           JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
-        run: >-
-          node .github/scripts/sign-profile-manifest.mjs
-          --root .platform-verification/profile-root
+        run: |
+          groups="$(node --input-type=module <<'NODE'
+          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          NODE
+          )"
+          while IFS= read -r group; do
+            [ -z "${group}" ] && continue
+            node .github/scripts/sign-profile-manifest.mjs \
+              --root ".platform-verification/${group}/profile-root"
+          done <<< "${groups}"
       - name: Pack exact prepublication bundle
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
           LANE: ${{ inputs.lane }}
         run: |
-          node .github/scripts/build-prepublication-bundle.mjs \
-            --source-sha "${SOURCE_SHA}" \
-            --catalog-digest "${CATALOG_DIGEST}" \
-            --release-group platform-v1 \
-            --lane "${LANE}" \
-            --out .platform-verification/pack
+          groups="$(node --input-type=module <<'NODE'
+          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          NODE
+          )"
+          while IFS= read -r group; do
+            [ -z "${group}" ] && continue
+            node .github/scripts/build-prepublication-bundle.mjs \
+              --source-sha "${SOURCE_SHA}" \
+              --catalog-digest "${CATALOG_DIGEST}" \
+              --release-group "${group}" \
+              --lane "${LANE}" \
+              --out ".platform-verification/${group}/pack"
+          done <<< "${groups}"
           node .github/scripts/build-prepublication-bundle.mjs \
             --source-sha "${SOURCE_SHA}" \
             --catalog-digest "${CATALOG_DIGEST}" \
@@ -188,12 +229,12 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-path: |
-            .platform-verification/pack/manifest.json
-            .platform-verification/pack/tarballs/*.tgz
+            .platform-verification/*/pack/manifest.json
+            .platform-verification/*/pack/tarballs/*.tgz
             .platform-verification/native-role-pack/manifest.json
             .platform-verification/native-role-pack/tarballs/*.tgz
-            .platform-verification/public-surface-manifest.json
-            .platform-verification/profile-root/**
+            .platform-verification/*/public-surface-manifest.json
+            .platform-verification/*/profile-root/**
             .platform-verification/trusted-publishers/trusted-publishers.json
             .platform-verification/trusted-publishers/trusted-publishers.md
 
@@ -217,10 +258,20 @@ jobs:
           name: platform-verification-artifacts
           path: .platform-verification
       - name: Clean external tarball consumer
-        run: >-
-          node .github/scripts/prepublication-external-consumer.mjs
-          --manifest .platform-verification/pack/manifest.json
-          --native-manifest .platform-verification/native-role-pack/manifest.json
+        run: |
+          groups="$(node --input-type=module <<'NODE'
+          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          NODE
+          )"
+          manifest_args=()
+          while IFS= read -r group; do
+            [ -z "${group}" ] && continue
+            manifest_args+=(--manifest ".platform-verification/${group}/pack/manifest.json")
+          done <<< "${groups}"
+          node .github/scripts/prepublication-external-consumer.mjs \
+            "${manifest_args[@]}" \
+            --native-manifest .platform-verification/native-role-pack/manifest.json
 
   verification_receipt:
     needs:
@@ -231,6 +282,8 @@ jobs:
       - marketplace
       - task_execution
       - trust
+      - environments
+      - task_supply
       - artifacts
       - artifact_attestation
       - external_consumer
@@ -264,35 +317,49 @@ jobs:
           MARKETPLACE_RESULT: ${{ needs.marketplace.result }}
           TASK_EXECUTION_RESULT: ${{ needs.task_execution.result }}
           TRUST_RESULT: ${{ needs.trust.result }}
+          ENVIRONMENTS_RESULT: ${{ needs.environments.result }}
+          TASK_SUPPLY_RESULT: ${{ needs.task_supply.result }}
           ARTIFACTS_RESULT: ${{ needs.artifacts.result }}
           ARTIFACT_ATTESTATION_RESULT: ${{ needs.artifact_attestation.result }}
           EXTERNAL_CONSUMER_RESULT: ${{ needs.external_consumer.result }}
         run: |
-          node .github/scripts/platform-verification-receipt.mjs \
-            --source-sha "${SOURCE_SHA}" \
-            --catalog-digest "${CATALOG_DIGEST}" \
-            --release-group platform-v1 \
-            --lane "${LANE}" \
-            --pack-manifest .platform-verification/pack/manifest.json \
-            --public-manifest .platform-verification/public-surface-manifest.json \
-            --profile-manifest .platform-verification/profile-root/manifest.json \
-            --gate "catalog=${CATALOG_RESULT}" \
-            --gate "benchmarking=${BENCHMARKING_RESULT}" \
-            --gate "record-discovery=${DISCOVERY_RESULT}" \
-            --gate "evidence=${EVIDENCE_RESULT}" \
-            --gate "marketplace=${MARKETPLACE_RESULT}" \
-            --gate "task-execution=${TASK_EXECUTION_RESULT}" \
-            --gate "trust=${TRUST_RESULT}" \
-            --gate "artifacts=${ARTIFACTS_RESULT}" \
-            --gate "artifact-attestation=${ARTIFACT_ATTESTATION_RESULT}" \
-            --gate "external-consumer=${EXTERNAL_CONSUMER_RESULT}" \
-            --out .platform-verification/verification-receipt.json
+          groups="$(node --input-type=module <<'NODE'
+          import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
+          process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));
+          NODE
+          )"
+          mkdir -p .platform-verification-receipt
+          while IFS= read -r group; do
+            [ -z "${group}" ] && continue
+            mkdir -p ".platform-verification-receipt/${group}"
+            node .github/scripts/platform-verification-receipt.mjs \
+              --source-sha "${SOURCE_SHA}" \
+              --catalog-digest "${CATALOG_DIGEST}" \
+              --release-group "${group}" \
+              --lane "${LANE}" \
+              --pack-manifest ".platform-verification/${group}/pack/manifest.json" \
+              --public-manifest ".platform-verification/${group}/public-surface-manifest.json" \
+              --profile-manifest ".platform-verification/${group}/profile-root/manifest.json" \
+              --gate "catalog=${CATALOG_RESULT}" \
+              --gate "benchmarking=${BENCHMARKING_RESULT}" \
+              --gate "record-discovery=${DISCOVERY_RESULT}" \
+              --gate "evidence=${EVIDENCE_RESULT}" \
+              --gate "marketplace=${MARKETPLACE_RESULT}" \
+              --gate "task-execution=${TASK_EXECUTION_RESULT}" \
+              --gate "trust=${TRUST_RESULT}" \
+              --gate "environments=${ENVIRONMENTS_RESULT}" \
+              --gate "task-supply=${TASK_SUPPLY_RESULT}" \
+              --gate "artifacts=${ARTIFACTS_RESULT}" \
+              --gate "artifact-attestation=${ARTIFACT_ATTESTATION_RESULT}" \
+              --gate "external-consumer=${EXTERNAL_CONSUMER_RESULT}" \
+              --out ".platform-verification-receipt/${group}/verification-receipt.json"
+          done <<< "${groups}"
       - name: Upload verification receipt
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: platform-verification-receipt
-          path: .platform-verification/verification-receipt.json
+          path: .platform-verification-receipt
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 90
@@ -315,4 +382,4 @@ jobs:
       - name: Attest verification receipt
         uses: actions/attest@v4
         with:
-          subject-path: .platform-verification-receipt/verification-receipt.json
+          subject-path: .platform-verification-receipt/**/verification-receipt.json

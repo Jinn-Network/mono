@@ -25,7 +25,7 @@ const SHA = 'b'.repeat(40);
 
 test('argument parsing accepts the canary and stable forms', () => {
   assert.deepEqual(parsePublishArgs(['--mode', 'canary', '--sha', SHA, '--dry-run']), {
-    mode: 'canary', sha: SHA, releaseTag: undefined, dryRun: true, repoRoot: process.cwd(), releaseGroup: 'platform-v1',
+    mode: 'canary', sha: SHA, releaseTag: undefined, dryRun: true, repoRoot: process.cwd(), releaseGroup: undefined,
   });
   assert.deepEqual(parsePublishArgs(['--mode', 'stable', '--release-tag', 'stack-v0.1.0', '--root', '/tmp/x', '--release-group', 'other']), {
     mode: 'stable', sha: undefined, releaseTag: 'stack-v0.1.0', dryRun: false, repoRoot: '/tmp/x', releaseGroup: 'other',
@@ -38,11 +38,11 @@ test('argument parsing rejects unknown flags and a missing mode', () => {
 });
 
 test('the plan covers every package exactly once, in wave order', () => {
-  const plan = buildPublishPlan({ repoRoot, mode: 'canary', sha: SHA });
+  const plan = buildPublishPlan({ repoRoot, mode: 'canary', sha: SHA, releaseGroup: 'sealed-platform-v1' });
   assert.equal(plan.distTag, 'canary');
   assert.match(plan.version, new RegExp(`^0\\.1\\.0-canary\\.sha\\.${SHA}$`));
   const flattened = plan.waves.flat();
-  const expectedNames = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+  const expectedNames = loadCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' })
     .map(({ name }) => name);
   assert.deepEqual(new Set(flattened.map(({ name }) => name)), new Set(expectedNames));
   assert.equal(new Set(flattened.map((entry) => entry.name)).size, flattened.length);
@@ -51,7 +51,7 @@ test('the plan covers every package exactly once, in wave order', () => {
 
 test('the plan refuses a package set whose versions disagree', () => {
   assert.throws(
-    () => buildPublishPlan({ repoRoot, mode: 'stable', releaseTag: 'stack-v9.9.9' }),
+    () => buildPublishPlan({ repoRoot, mode: 'stable', releaseTag: 'stack-v9.9.9', releaseGroup: 'sealed-platform-v1' }),
     /release tag stack-v9.9.9 resolves to 9.9.9, but the package set is at 0.1.0/,
   );
 });
@@ -77,14 +77,19 @@ test('--dry-run fails loudly on a genuine planning defect in a catalog-backed pa
 });
 
 test('--dry-run prints the ordered plan and exits 0 without touching the working tree', () => {
-  const result = spawnSync(process.execPath, [script, '--mode', 'canary', '--sha', SHA, '--dry-run', '--root', repoRoot], {
+  const before = spawnSync('git', ['status', '--porcelain', 'packages/'], { cwd: repoRoot, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [script, '--mode', 'canary', '--sha', SHA, '--dry-run', '--root', repoRoot, '--release-group', 'sealed-platform-v1'], {
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /wave 0: @jinn-network\/evidence-protocol/);
+  assert.match(
+    result.stdout,
+    /wave 0: @jinn-network\/chain-environment-record, @jinn-network\/environment-record, @jinn-network\/evidence-protocol, @jinn-network\/task-execution-protocol, @jinn-network\/trust-core/,
+  );
+  assert.match(result.stdout, /13 packages in 3 waves/);
   assert.match(result.stdout, new RegExp(`publish version 0\\.1\\.0-canary\\.sha\\.${SHA} at canary`));
-  const status = spawnSync('git', ['status', '--porcelain', 'packages/'], { cwd: repoRoot, encoding: 'utf8' });
-  assert.equal(status.stdout.trim(), '', 'a dry run must leave the working tree clean');
+  const after = spawnSync('git', ['status', '--porcelain', 'packages/'], { cwd: repoRoot, encoding: 'utf8' });
+  assert.equal(after.stdout, before.stdout, 'a dry run must leave the working tree unchanged');
 });
 
 function runNonDryWithInjectedCommands(mode) {

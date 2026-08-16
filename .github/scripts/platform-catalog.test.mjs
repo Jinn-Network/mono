@@ -8,6 +8,8 @@ import {
   loadCatalogPackages,
   loadPublishableCatalogPackages,
   loadPlatformCatalog,
+  requireStackPublishedReleaseGroup,
+  stackPublishedReleaseGroupIds,
   validatePlatformCatalog,
 } from './platform-catalog.mjs';
 import {
@@ -30,6 +32,16 @@ function manifestExclusion(path, overrides = {}) {
     ...overrides,
   };
 }
+
+test('stackPublishedReleaseGroupIds lists only stack-published groups', () => {
+  const catalog = fixtureCatalog();
+  assert.deepEqual(stackPublishedReleaseGroupIds(catalog), ['platform-v1']);
+  requireStackPublishedReleaseGroup(catalog, 'platform-v1');
+  assert.throws(
+    () => requireStackPublishedReleaseGroup(catalog, 'legacy-product-lines'),
+    /legacy-product-lines is not stack-published/u,
+  );
+});
 
 test('loads a controlled catalog and hydrates package metadata only from manifests', () => {
   const root = fixtureRepo();
@@ -788,10 +800,21 @@ test('records authority status per governing document', () => {
       status: 'ratified',
     });
     assert.equal(pkg.stability, 'candidate');
-    assert.equal(pkg.publishPolicy, 'canary-only');
-    assert.equal(pkg.releaseGroup, 'platform-v1');
+    const sealed = new Set([
+      '@jinn-network/benchmarking-protocol',
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-testing',
+    ]);
+    if (sealed.has(pkg.name)) {
+      assert.equal(pkg.publishPolicy, 'canary-and-stable');
+      assert.equal(pkg.releaseGroup, 'sealed-platform-v1');
+    } else {
+      assert.equal(pkg.publishPolicy, 'canary-and-stable');
+      assert.equal(pkg.releaseGroup, 'implementations-v1');
+    }
   }
-  assert.equal(catalog.releaseGroups['platform-v1'].stable, false);
+  assert.equal(catalog.releaseGroups['sealed-platform-v1'].stable, true);
+  assert.equal(catalog.releaseGroups['implementations-v1'].stable, true);
 });
 
 test('the canonical repository catalog validates its topology without a second membership authority', () => {
@@ -806,15 +829,18 @@ test('the canonical repository catalog validates its topology without a second m
   }
   assert.ok(catalog.packages.some((pkg) => pkg.path.startsWith('packages/')));
   assert.ok(catalog.packages.some((pkg) => !pkg.path.startsWith('packages/')));
-  assert.ok(
-    catalog.packages
-      .filter((pkg) => pkg.releaseGroup === 'experimental-environment-supply')
-      .every((pkg) => pkg.publishPolicy === 'disabled'),
-  );
+  assert.equal(catalog.releaseGroups['platform-v1'], undefined);
+  assert.equal(catalog.releaseGroups['experimental-task-supply'], undefined);
+  assert.equal(catalog.releaseGroups['experimental-environment-supply'], undefined);
   assert.ok(
     catalog.packages
       .filter((pkg) => pkg.releaseGroup === 'legacy-product-lines')
       .every((pkg) => pkg.publishPolicy === 'independent'),
+  );
+  assert.ok(
+    catalog.packages
+      .filter((pkg) => pkg.releaseGroup === 'experimental-policy')
+      .every((pkg) => pkg.publishPolicy === 'disabled'),
   );
   const schema = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.schema.json'), 'utf8'));
   assert.equal(schema.$id, 'https://spec.jinn.network/architecture/platform-packages.schema.json');
@@ -831,28 +857,84 @@ test('the canonical repository catalog validates its topology without a second m
   assert.doesNotThrow(() => validatePlatformCatalog(catalog, { repoRoot }));
 });
 
-test('task-supply and environment packages remain disabled and provisionally classified', () => {
+test('the fixture catalog still exposes one stack-published group', () => {
+  const catalog = fixtureCatalog();
+  assert.deepEqual(stackPublishedReleaseGroupIds(catalog), ['platform-v1']);
+  assert.equal(requireStackPublishedReleaseGroup(catalog, 'platform-v1').stackPublished, true);
+  assert.throws(
+    () => requireStackPublishedReleaseGroup(catalog, 'experimental-environment-supply'),
+    /experimental-environment-supply is not stack-published/u,
+  );
+});
+
+test('the live catalog publishes sealed-platform-v1 and implementations-v1', () => {
   const catalog = loadPlatformCatalog(repoRoot);
-  const promoted = catalog.packages
-    .filter(({ releaseGroup }) => releaseGroup === 'experimental-task-supply')
-    .map(({ name }) => name)
+  assert.deepEqual(stackPublishedReleaseGroupIds(catalog), [
+    'implementations-v1',
+    'sealed-platform-v1',
+  ]);
+  const sealed = catalog.releaseGroups['sealed-platform-v1'];
+  const implementations = catalog.releaseGroups['implementations-v1'];
+  assert.equal(sealed.expectedPackageCount, 13);
+  assert.equal(implementations.expectedPackageCount, 59);
+  assert.deepEqual(sealed.publishPolicies, ['canary-and-stable']);
+  assert.deepEqual(implementations.publishPolicies, ['canary-and-stable']);
+  assert.equal(sealed.stackPublished, true);
+  assert.equal(implementations.stackPublished, true);
+  assert.equal(sealed.canary, true);
+  assert.equal(implementations.canary, true);
+  assert.equal(sealed.stable, true);
+  assert.equal(implementations.stable, true);
+  assert.deepEqual(sealed.allowedDependencyReleaseGroups, ['sealed-platform-v1']);
+  assert.deepEqual(implementations.allowedDependencyReleaseGroups, [
+    'implementations-v1',
+    'sealed-platform-v1',
+  ]);
+
+  const sealedNames = catalog.packages
+    .filter(({ releaseGroup }) => releaseGroup === 'sealed-platform-v1')
+    .map(({ name }) => name.replace('@jinn-network/', ''))
     .sort();
-  assert.deepEqual(promoted, [
+  assert.deepEqual(sealedNames, [
+    'benchmarking-protocol',
+    'benchmarking-records',
+    'benchmarking-testing',
+    'chain-environment-record',
+    'environment-record',
+    'evidence-protocol',
+    'evidence-trace',
+    'record-discovery-protocol',
+    'record-discovery-testing',
+    'task-execution-profiles',
+    'task-execution-protocol',
+    'trust-authoring',
+    'trust-core',
+  ]);
+
+  const formerTaskSupply = [
     '@jinn-network/chain-scenarios',
     '@jinn-network/task-admission',
     '@jinn-network/task-curation',
     '@jinn-network/task-derivation',
     '@jinn-network/task-posting',
-  ]);
-  for (const pkg of catalog.packages.filter(({ name }) => promoted.includes(name))) {
-    assert.equal(pkg.publishPolicy, 'disabled');
+  ];
+  for (const name of formerTaskSupply) {
+    const pkg = catalog.packages.find((entry) => entry.name === name);
+    assert.equal(pkg.releaseGroup, 'implementations-v1');
+    assert.equal(pkg.publishPolicy, 'canary-and-stable');
   }
-  assert.equal(catalog.packages.find(({ name }) => name === '@jinn-network/task-admission')?.stability, 'candidate');
   const environmentRecord = catalog.packages.find(({ name }) => name === '@jinn-network/environment-record');
-  assert.equal(environmentRecord?.releaseGroup, 'experimental-environment-supply');
-  assert.equal(environmentRecord?.publishPolicy, 'disabled');
-  assert.deepEqual(
-    catalog.releaseGroups['experimental-task-supply'].allowedDependencyReleaseGroups,
-    ['experimental-environment-supply', 'experimental-task-supply', 'platform-v1'],
+  assert.equal(environmentRecord.releaseGroup, 'sealed-platform-v1');
+  assert.equal(environmentRecord.publishPolicy, 'canary-and-stable');
+  const chainRecord = catalog.packages.find(({ name }) => name === '@jinn-network/chain-environment-record');
+  assert.equal(chainRecord.releaseGroup, 'sealed-platform-v1');
+  assert.equal(chainRecord.publishPolicy, 'canary-and-stable');
+  assert.equal(
+    loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1', lane: 'stable' }).length,
+    13,
+  );
+  assert.equal(
+    loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'implementations-v1', lane: 'canary' }).length,
+    59,
   );
 });

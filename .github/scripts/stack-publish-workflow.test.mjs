@@ -66,8 +66,10 @@ test('the publisher verifies strict GitHub provenance policy before its receipt-
   assert.match(block, /SOURCE_SHA: \$\{\{ github\.sha \}\}/u);
   assert.match(block, /--source-sha "\$\{SOURCE_SHA\}"/u);
   assert.match(block, /--registry https:\/\/registry\.npmjs\.org\//u);
-  assert.match(block, /--release-group platform-v1/u);
+  assert.ok(block.includes('--release-group ${{ matrix.release_group }}'));
+  assert.ok(block.includes('--verification-receipt ".platform-verification-receipt/${{ matrix.release_group }}/verification-receipt.json"'));
   assert.match(block, /--lane canary/u);
+  assert.match(block, /matrix:\n\s+release_group:\n\s+- implementations-v1\n\s+- sealed-platform-v1/u);
 });
 
 test('the final deterministic publication receipt is attested and uploaded', () => {
@@ -75,9 +77,9 @@ test('the final deterministic publication receipt is attested and uploaded', () 
   const stableAt = workflow.indexOf('resolve-stable-source:');
   const block = workflow.slice(publishAt, stableAt);
   assert.match(block, /uses: actions\/attest@v4/u);
-  assert.match(block, /subject-path: \.platform-publication\/publication-receipt\.json/u);
+  assert.ok(block.includes('subject-path: .platform-publication/${{ matrix.release_group }}/publication-receipt.json'));
   assert.match(block, /uses: actions\/upload-artifact@v4/u);
-  assert.match(block, /name: platform-publication-receipt/u);
+  assert.ok(block.includes('name: platform-publication-receipt-${{ matrix.release_group }}'));
   assert.match(block, /if-no-files-found: error/u);
 });
 
@@ -92,8 +94,8 @@ test('stable resolves an exact tag SHA and shares verification without any publi
   assert.match(resolver, /git rev-parse "\$\{RELEASE_TAG\}\^\{commit\}"/u);
   assert.match(resolver, /git rev-parse HEAD/u);
   assert.match(resolver, /CHECKED_OUT.*RESOLVED/u);
-  assert.match(resolver, /loadCatalogPackages/u);
-  assert.match(resolver, /platform-v1/u);
+  assert.match(resolver, /loadStackPublishedCatalogPackages/u);
+  assert.doesNotMatch(resolver, /platform-v1/u);
   assert.match(resolver, /TAG_VERSION/u);
   assert.match(resolver, /fixture-immutability\.mjs\s+--registry-baseline\s+--version "\$\{TAG_VERSION\}"/u);
   assert.match(resolver, /source_sha=/u);
@@ -130,20 +132,20 @@ test('live-host verification needs the resolved source and the same-run verifica
   assert.doesNotMatch(block, /id-token: write|attestations: write/u);
 
   assert.match(block, /--lane stable/u);
-  assert.match(block, /--release-group platform-v1/u);
+  assert.match(block, /--release-group "\$\{group\}"/u);
   assert.match(block, /--origin "\$\{PROFILE_HOST_ORIGIN\}"/u);
   assert.match(block, /PROFILE_HOST_ORIGIN: https:\/\/spec\.jinn\.network/u);
   assert.match(block, /--public-key-url "\$\{PUBLIC_KEY_URL\}"/u);
   assert.match(block, /--expect-public-key-sha256 "\$\{PUBLIC_KEY_SHA256\}"/u);
-  assert.match(block, /--root \.platform-verification\/profile-root/u);
-  assert.match(block, /--receipt \.platform-verification-receipt\/verification-receipt\.json/u);
+  assert.match(block, /--root "\.platform-verification\/\$\{group\}\/profile-root"/u);
+  assert.match(block, /--receipt "\.platform-verification-receipt\/\$\{group\}\/verification-receipt\.json"/u);
   assert.equal((block.match(/uses: actions\/download-artifact@v4/gu) ?? []).length, 2);
   assert.match(block, /name: platform-live-host-receipt/u);
   assert.match(block, /if-no-files-found: error/u);
 
   const attestation = workflow.slice(attestationAt, gateAt);
   assert.match(attestation, /uses: actions\/attest@v4/u);
-  assert.match(attestation, /subject-path: \.platform-live-host-receipt\/live-host-receipt\.json/u);
+  assert.match(attestation, /subject-path: \.platform-live-host-receipt\/\*\*\/live-host-receipt\.json/u);
   for (const permission of ['id-token: write', 'attestations: write', 'artifact-metadata: write']) {
     assert.ok(attestation.includes(permission), `missing attestation permission ${permission}`);
   }

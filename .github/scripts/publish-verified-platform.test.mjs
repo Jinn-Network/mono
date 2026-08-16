@@ -19,6 +19,7 @@ import {
   fixtureCatalog,
   fixtureRepo,
 } from './platform-catalog-test-fixture.mjs';
+import { stackPublishedGroupArtifactPaths } from './platform-catalog.mjs';
 import {
   createVerificationReceipt,
   verificationGateConclusionIds,
@@ -70,7 +71,8 @@ function publicationFixture({
   const repoRoot = fixtureRepo({ catalog });
   const root = mkdtempSync(join(tmpdir(), 'jinn-verified-publication-'));
   const verificationRoot = join(root, '.platform-verification');
-  const packRoot = join(verificationRoot, 'pack');
+  const artifacts = stackPublishedGroupArtifactPaths(verificationRoot, 'platform-v1');
+  const packRoot = artifacts.packRoot;
   mkdirSync(join(packRoot, 'tarballs'), { recursive: true });
 
   const catalogPath = join(repoRoot, 'architecture/platform-packages.v1.json');
@@ -123,7 +125,7 @@ function publicationFixture({
       publicSurface,
     })),
   };
-  const profileRoot = join(verificationRoot, 'profile-root');
+  const profileRoot = artifacts.profileRoot;
   buildProfileRoot({
     repoRoot,
     outDir: profileRoot,
@@ -133,9 +135,9 @@ function publicationFixture({
     lane: 'canary',
   });
 
-  const packManifestPath = join(packRoot, 'manifest.json');
-  const publicManifestPath = join(verificationRoot, 'public-surface-manifest.json');
-  const profileManifestPath = join(profileRoot, 'manifest.json');
+  const packManifestPath = artifacts.packManifest;
+  const publicManifestPath = artifacts.publicSurface;
+  const profileManifestPath = artifacts.profileManifest;
   const trustedPublishersRoot = join(verificationRoot, 'trusted-publishers');
   const trustedPublishersJsonPath = join(trustedPublishersRoot, 'trusted-publishers.json');
   const trustedPublishersMarkdownPath = join(trustedPublishersRoot, 'trusted-publishers.md');
