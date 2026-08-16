@@ -7,10 +7,9 @@ import { fileURLToPath } from 'node:url';
  * Architecture boundary test for #1584.
  *
  * The API layer (`client/src/api/`) must not depend inward on the daemon
- * layer (`client/src/daemon/`) nor on the task-run persistence internals
- * (`store/task-run-persistence`, and its `harnesses/engine/persistence`
- * re-export shim). The API consumes neutral ports/types (`types/`, `spend/`,
- * `store/` — the read-model port, not the concrete persistence class; see
+ * layer (`client/src/daemon/`) nor on retired task-run persistence internals.
+ * The API consumes neutral ports/types (`types/`, `spend/`, `store/` — the
+ * read-model port, not a concrete persistence class; see
  * `types/task-run-read-model.ts`) instead. This test scans the source text
  * of every module under `src/api/` and fails if any of those forbidden
  * import specifiers are present.

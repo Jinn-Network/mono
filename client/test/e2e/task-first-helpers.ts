@@ -43,8 +43,6 @@ import { decryptMnemonic, walletPrivateKeyAtIndex } from '../../src/earning/wall
 import { canonicalJson } from '../../src/util/canonical-json.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
-import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
-import { TaskRunState } from '../../src/harnesses/engine/state.js';
 import { PredictionV1Evaluator } from '../../src/harnesses/impls/prediction-v1-evaluator/index.js';
 import { SOLUTION_ENVELOPE_CID_CONTEXT_KEY, SOLUTION_TASK_CID_CONTEXT_KEY } from '../../src/harnesses/impls/evaluation-context.js';
 import type { Harness, HarnessContext, Solution } from '../../src/harnesses/types.js';

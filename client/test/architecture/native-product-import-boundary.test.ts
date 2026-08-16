@@ -55,15 +55,13 @@ function matchesForbidden(relativePath: string, pattern: string): boolean {
 const KNOWN_LEAK_ALLOWLIST: Record<string, string> = {
   '/store/store.ts':
     'Constructed directly by daemon/native-evaluator-production.ts and ' +
-    'daemon/native-solver-production.ts. Its constructor runs the legacy ' +
-    '`task_runs` DDL (store.ts:610), creating the legacy table on the ' +
-    'native path. Remove once native evaluator/solver production stop ' +
-    'depending on the legacy Store class for persistence.',
+    'daemon/native-solver-production.ts. Store is the native-owned SQLite ' +
+    'handle (engagements, evaluations, activity). Remaining demolition is ' +
+    'to stop constructing the shared Store class from native production.',
   '/harnesses/engine/state.ts':
-    'Pulled in transitively by store/task-run-persistence.ts, which ' +
-    'imports assertValidTransition and TERMINAL_STATES from it. Remove ' +
-    'once store/task-run-persistence.ts owns its own state vocabulary and ' +
-    'is no longer reaching back into the engine tree.',
+    'Pulled in transitively by store/native-task-run-read-model.ts, which ' +
+    'imports TERMINAL_STATES so the status plane can split in-flight vs ' +
+    'terminal native rows. Remove once the native read model owns that set.',
 };
 
 function resolveModule(from: string, specifier: string): string | undefined {

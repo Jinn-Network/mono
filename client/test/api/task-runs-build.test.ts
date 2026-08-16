@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { gatherTaskRunsStatus, applyOutcomes, type TaskRunSummary } from '../../src/api/task-runs-build.js';
-import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import type { VerdictTallyResult } from '../../src/archive/types.js';
 import { withTempStore } from '@test/store.js';
+import { patchNativeRun, seedNativeRun } from '@test/seed-native-run.js';
 
 function makeSummary(overrides: Partial<TaskRunSummary>): TaskRunSummary {
   return {
@@ -28,36 +28,31 @@ function makeSummary(overrides: Partial<TaskRunSummary>): TaskRunSummary {
 describe('gatherTaskRunsStatus', () => {
   it('splits completed generic task runs into solution and verdict totals', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'restoration-complete',
         taskId: 'task-1',
         taskRole: 'restoration',
       });
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'evaluation-complete',
         taskId: 'task-2',
         taskRole: 'evaluation',
       });
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'restoration-running',
         taskId: 'task-3',
         taskRole: 'restoration',
       });
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'evaluation-failed',
         taskId: 'task-4',
         taskRole: 'evaluation',
       });
 
-      store.db.prepare(`UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`)
-        .run(2_000, 'restoration-complete');
-      store.db.prepare(`UPDATE task_runs SET state = 'COMPLETE', state_updated_at = ? WHERE request_id = ?`)
-        .run(3_000, 'evaluation-complete');
-      store.db.prepare(`UPDATE task_runs SET state = 'RUNNING', state_updated_at = ? WHERE request_id = ?`)
-        .run(4_000, 'restoration-running');
-      store.db.prepare(`UPDATE task_runs SET state = 'FAILED', state_updated_at = ?, failure_reason = ? WHERE request_id = ?`)
-        .run(5_000, 'boom', 'evaluation-failed');
+      patchNativeRun(store, 'restoration-complete', { state: 'COMPLETE', stateUpdatedAt: 2_000 });
+      patchNativeRun(store, 'evaluation-complete', { state: 'COMPLETE', stateUpdatedAt: 3_000 });
+      patchNativeRun(store, 'restoration-running', { state: 'RUNNING', stateUpdatedAt: 4_000 });
+      patchNativeRun(store, 'evaluation-failed', { state: 'FAILED', failureReason: 'boom', stateUpdatedAt: 5_000 });
 
       const status = gatherTaskRunsStatus(store.taskRunReadModel());
 
@@ -77,22 +72,19 @@ describe('gatherTaskRunsStatus', () => {
 
   it('counts RACE_LOST runs separately from FAILED (#896)', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'pruned',
         taskId: 'task-pruned',
         taskRole: 'evaluation',
       });
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'genuine-fail',
         taskId: 'task-fail',
         taskRole: 'evaluation',
       });
 
-      store.db.prepare(`UPDATE task_runs SET state = 'RACE_LOST', state_updated_at = ?, failure_reason = ? WHERE request_id = ?`)
-        .run(1_500, 'TCMaxVerdictsReached', 'pruned');
-      store.db.prepare(`UPDATE task_runs SET state = 'FAILED', state_updated_at = ?, failure_reason = ? WHERE request_id = ?`)
-        .run(1_600, 'runner crashed', 'genuine-fail');
+      patchNativeRun(store, 'pruned', { state: 'RACE_LOST', failureReason: 'TCMaxVerdictsReached', stateUpdatedAt: 1_500 });
+      patchNativeRun(store, 'genuine-fail', { state: 'FAILED', failureReason: 'runner crashed', stateUpdatedAt: 1_600 });
 
       const status = gatherTaskRunsStatus(store.taskRunReadModel());
 
@@ -107,47 +99,35 @@ describe('gatherTaskRunsStatus', () => {
 
   it('splits FAILED runs into on-chain settled failures and local engine errors', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      // local error: failed before reaching the marketplace (no delivery tx).
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'local-error',
         taskId: 'task-local',
         taskRole: 'restoration',
       });
-      // settled failure: delivery tx landed on-chain but the run terminated FAILED.
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'settled-fail',
         taskId: 'task-settled',
         taskRole: 'restoration',
       });
-      // settled failure for an evaluation run — same split logic applies.
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'settled-fail-eval',
         taskId: 'task-settled-eval',
         taskRole: 'evaluation',
       });
 
-      store.db
-        .prepare(
-          `UPDATE task_runs
-             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?
-             WHERE request_id = ?`,
-        )
-        .run(1_100, 'SkippableError', 'local-error');
-      store.db
-        .prepare(
-          `UPDATE task_runs
-             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?, delivery_tx_hash = ?
-             WHERE request_id = ?`,
-        )
-        .run(1_200, 'claimDelivery reverted', '0xdeadbeef', 'settled-fail');
-      store.db
-        .prepare(
-          `UPDATE task_runs
-             SET state = 'FAILED', state_updated_at = ?, failure_reason = ?, delivery_tx_hash = ?
-             WHERE request_id = ?`,
-        )
-        .run(1_300, 'verdict rejected', '0xfeedface', 'settled-fail-eval');
+      patchNativeRun(store, 'local-error', { state: 'FAILED', failureReason: 'SkippableError', stateUpdatedAt: 1_100 });
+      patchNativeRun(store, 'settled-fail', {
+        state: 'FAILED',
+        failureReason: 'claimDelivery reverted',
+        deliveryTxHash: '0xdeadbeef',
+        stateUpdatedAt: 1_200,
+      });
+      patchNativeRun(store, 'settled-fail-eval', {
+        state: 'FAILED',
+        failureReason: 'verdict rejected',
+        deliveryTxHash: '0xfeedface',
+        stateUpdatedAt: 1_300,
+      });
 
       const status = gatherTaskRunsStatus(store.taskRunReadModel());
 
@@ -159,8 +139,7 @@ describe('gatherTaskRunsStatus', () => {
 
   it('includes runStartedAt in task run summaries distinct from windowStartTs', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      insertTask(persistence, {
+      insertTask(store, {
         requestId: 'fresh-claim',
         taskId: 'task-fresh',
         taskRole: 'restoration',
@@ -179,8 +158,7 @@ describe('gatherTaskRunsStatus', () => {
 
   it('seeds outcome to null in toSummary (base shape stays stable)', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      insertTask(persistence, { requestId: 'r', taskId: 'task-r', taskRole: 'restoration' });
+      insertTask(store, { requestId: 'r', taskId: 'task-r', taskRole: 'restoration' });
       const status = gatherTaskRunsStatus(store.taskRunReadModel());
       expect(status.inFlight[0]?.outcome).toBeNull();
     });
@@ -222,7 +200,7 @@ describe('applyOutcomes', () => {
 });
 
 function insertTask(
-  persistence: TaskRunPersistence,
+  store: import('../../src/store/store.js').Store,
   input: {
     requestId: string;
     taskId: string;
@@ -230,12 +208,10 @@ function insertTask(
     runStartedAt?: number;
   },
 ): void {
-  persistence.insertDiscovered({
+  seedNativeRun(store, {
     requestId: input.requestId,
     taskId: input.taskId,
     taskCid: `bafy-${input.requestId}`,
-    onchainCreationTx: '0xabc',
-    onchainCreationBlock: 1,
     solverType: 'swe-rebench-v2.v1',
     taskRole: input.taskRole,
     runStartedAt: input.runStartedAt,

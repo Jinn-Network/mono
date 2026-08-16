@@ -100,8 +100,7 @@ export class PhaseRunStore {
   getRun(runKey: string): PhaseRun | null {
     // Both SELECTs must share one read transaction. Under WAL, a second
     // connection can commit transition() between auto-commit statements and
-    // otherwise tear phase/revision from events (see TaskRunPersistence
-    // getReaperPartition docs for the same multi-statement hazard).
+    // otherwise tear phase/revision from events (WAL multi-statement hazard).
     return this.db.transaction(() => {
       const row = this.db.prepare(
         `SELECT * FROM phase_runs WHERE run_key = ?`

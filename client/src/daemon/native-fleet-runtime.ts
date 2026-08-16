@@ -15,7 +15,7 @@
  *   not M2's.
  * - DOES NOT open its own database. The load-bearing difference from `native-solver-production.ts`
  *   (which opens `stateDir/solver.sqlite`) is that native state here lives in the SHARED
- *   `Store(config.dbPath)` the legacy readers, the projector cursor and `task_runs` already use,
+ *   `Store(config.dbPath)` the legacy readers, the projector cursor and native aggregates already use,
  *   because the R1 read-plane repoint needs the native tables where the API layer already looks.
  *   The caller passes that Store in; this module never constructs one.
  */

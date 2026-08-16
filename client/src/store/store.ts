@@ -15,7 +15,6 @@ import {
   PROJECTOR_CURSOR_SCHEMA,
   PROJECTOR_OBSERVATIONS_SCHEMA,
 } from '../daemon/projector-cursor.js';
-import { TASK_RUNS_SCHEMA, TaskRunPersistence } from './task-run-persistence.js';
 import { NativeTaskRunReadModel } from './native-task-run-read-model.js';
 import { NativeVerdictTallyReadModel } from './native-verdict-tally-read-model.js';
 import { PHASE_RUNS_SCHEMA, PhaseRunStore } from './phase-runs.js';
@@ -263,6 +262,13 @@ interface LocalTaskRunProjectionRow {
   task_payload: string | null;
   delivery_tx_hash: string | null;
   state_updated_at: number;
+}
+
+function nativeEngagementStateToProjection(state: string): string {
+  if (state === 'failed') return 'FAILED';
+  if (state === 'solution-settled') return 'COMPLETE';
+  if (state === 'lost' || state === 'withdrawn') return 'RACE_LOST';
+  return 'RUNNING';
 }
 
 function readClaimPolicyMaxClaims(taskPayload: string | null): number | undefined {
@@ -589,7 +595,7 @@ CREATE TABLE IF NOT EXISTS eval_results (
 `;
 
 export class Store {
-  /** Exposed for engine persistence layer — treat as package-internal. */
+  /** Exposed for native persistence and tests — treat as package-internal. */
   readonly db: Database.Database;
   readonly path: string;
 
@@ -611,7 +617,6 @@ export class Store {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(SCHEMA);
-    this.db.exec(TASK_RUNS_SCHEMA);
     this.db.exec(PHASE_RUNS_SCHEMA);
     this.db.exec(ENGAGEMENT_LEDGER_SCHEMA);
     this.db.exec(NATIVE_DISCOVERY_SCHEMA);
@@ -649,24 +654,34 @@ export class Store {
   }
 
   /**
-   * Read-only task-run view for the status/build endpoints (#1584). Returns a
-   * `TaskRunReadModel` backed by the engine persistence layer, keeping the
-   * concrete `TaskRunPersistence` construction out of `api/`.
-   *
-   * Dual-read (one-swap R1, umbrella #2461, DR-2026-08-05): `compositionMode`
-   * selects the SOURCE behind the SAME port. `'native'` returns a read model
-   * over the native aggregate tables (`native_engagements` / `native_evaluations`)
-   * so the status plane reflects native solver + evaluator work; every other
-   * value (absent / `undefined` / `'legacy'`) returns the byte-unchanged legacy
-   * `TaskRunPersistence` over `task_runs`. Both boots work while the daemon is
-   * dark — a legacy operator reads `task_runs`, a flipped native operator reads
-   * the native tables — because in a single boot only one source is populated.
+   * Read-only task-run view for the status/build endpoints (#1584). Always the
+   * native aggregate tables (`native_engagements` / `native_evaluations`).
+   * The optional argument is accepted for call-site compatibility and ignored.
    */
-  taskRunReadModel(compositionMode?: 'legacy' | 'native'): TaskRunReadModel {
-    if (compositionMode === 'native') {
-      return new NativeTaskRunReadModel(this.db);
+  taskRunReadModel(_compositionMode?: 'legacy' | 'native'): TaskRunReadModel {
+    return new NativeTaskRunReadModel(this.db);
+  }
+
+  /**
+   * Whether this request belongs to a jinn-repo Autopilot session this operator
+   * claimed. Durable lookup for the mech adapter's settlement-ownership gate
+   * after a restart (in-memory Task maps are empty).
+   */
+  engagementIsAutopilotSession(requestId: string): boolean {
+    const ledger = this.db.prepare(
+      `SELECT work_kind FROM engagement_ledger WHERE request_id = ? LIMIT 1`,
+    ).get(requestId) as { work_kind: string } | undefined;
+    if (ledger?.work_kind === 'jinn-repo.v1') return true;
+    const native = this.db.prepare(
+      `SELECT capability_json FROM native_engagements WHERE request_id = ? LIMIT 1`,
+    ).get(requestId) as { capability_json: string } | undefined;
+    if (native === undefined) return false;
+    try {
+      const cap = JSON.parse(native.capability_json) as { workKind?: unknown; solverType?: unknown };
+      return cap.workKind === 'jinn-repo.v1' || cap.solverType === 'jinn-repo.v1';
+    } catch {
+      return false;
     }
-    return new TaskRunPersistence(this.db);
   }
 
   /**
@@ -1212,6 +1227,7 @@ export class Store {
          tp.protocol_task_id,
          tp.request_id,
          tp.last_posted_at,
+         tp.canonical_task_json,
          (
            SELECT ae.solver_type
            FROM activity_events ae
@@ -1231,16 +1247,25 @@ export class Store {
       protocol_task_id: string | null;
       request_id: string;
       last_posted_at: string;
+      canonical_task_json: string | null;
       solver_type: string | null;
     }>;
     const localRunsForPost = this.db.prepare(
-      `SELECT request_id, state, task_role, task_payload, delivery_tx_hash, state_updated_at
-       FROM task_runs
-       WHERE request_id = @requestId
-          OR (@taskId != '' AND task_id = @taskId)
-          OR (@protocolTaskId != '' AND task_id = @protocolTaskId)
-          OR (@taskCid != '' AND task_cid = @taskCid)
-       ORDER BY state_updated_at DESC`,
+      `SELECT
+         COALESCE(e.request_id, e.engagement_id) AS request_id,
+         e.state AS native_state,
+         e.task_id AS native_task_id,
+         e.updated_at AS updated_at,
+         (SELECT o.tx_hash FROM native_operations o
+            WHERE o.engagement_id = e.engagement_id
+              AND o.kind = 'solution-settlement'
+              AND o.tx_hash IS NOT NULL
+            ORDER BY o.updated_at DESC LIMIT 1) AS delivery_tx_hash
+       FROM native_engagements e
+       WHERE COALESCE(e.request_id, '') = @requestId
+          OR (@taskId != '' AND e.task_id = @taskId)
+          OR (@protocolTaskId != '' AND e.task_id = @protocolTaskId)
+       ORDER BY e.updated_at DESC`,
     );
     return rows.map((r) => {
       // task_id was added by an additive migration; the column exists on every
@@ -1250,15 +1275,25 @@ export class Store {
       const taskId = r.task_id ?? r.protocol_task_id ?? r.request_id;
       const protocolTaskId = r.protocol_task_id ?? '';
       const taskCid = r.task_cid ?? '';
-      const runs = localRunsForPost.all({
+      const runs = (localRunsForPost.all({
         requestId: r.request_id,
         taskId,
         protocolTaskId,
-        taskCid,
-      }) as LocalTaskRunProjectionRow[];
-      const maxClaims = runs
-        .map((run) => readClaimPolicyMaxClaims(run.task_payload))
-        .find((value): value is number => value !== undefined);
+      }) as Array<{
+        request_id: string;
+        native_state: string;
+        native_task_id: string;
+        updated_at: string;
+        delivery_tx_hash: string | null;
+      }>).map((run) => ({
+        request_id: run.request_id,
+        state: nativeEngagementStateToProjection(run.native_state),
+        task_role: 'restoration',
+        task_payload: r.canonical_task_json,
+        delivery_tx_hash: run.delivery_tx_hash,
+        state_updated_at: Date.parse(run.updated_at) || 0,
+      })) as LocalTaskRunProjectionRow[];
+      const maxClaims = readClaimPolicyMaxClaims(r.canonical_task_json);
       const localRestorationClaims = new Set(
         runs
           .filter((run) => run.task_role !== 'evaluation')
@@ -2174,11 +2209,8 @@ export class Store {
     tx();
   }
 
-  getTaskEvidenceHash(requestId: string): string | null {
-    const row = this.db.prepare(
-      'SELECT evidence_hash FROM task_runs WHERE request_id = ?',
-    ).get(requestId) as { evidence_hash: string | null } | undefined;
-    return row?.evidence_hash ?? null;
+  getTaskEvidenceHash(_requestId: string): string | null {
+    return null;
   }
 
   getLastProcessedBlock(): bigint | null {

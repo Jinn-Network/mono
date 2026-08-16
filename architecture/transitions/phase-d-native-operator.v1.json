@@ -297,18 +297,11 @@
       "owner": "client native production store coupling",
       "entryPoints": [
         "client/src/store/store.ts",
-        "client/src/store/task-run-persistence.ts",
         "client/src/daemon/native-evaluator-production.ts",
         "client/src/daemon/native-solver-production.ts"
       ],
-      "replacement": "A native-owned store that does not create the legacy task_runs schema.",
-      "consumers": [
-        "client/src/adapters/mech/adapter.ts",
-        "client/src/api/gather-status.ts",
-        "client/src/cli/commands/backfill-failed-deliveries.ts",
-        "client/src/daemon/work-loop-corpus.ts",
-        "client/src/harnesses/engine/backfill-failed-deliveries.ts"
-      ],
+      "replacement": "Store no longer creates the retired engine table. Status and launcher projections read native_engagements / native_evaluations.",
+      "consumers": [],
       "defaultMode": "not-applicable",
       "noNewUseGuard": {
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
@@ -335,8 +328,9 @@
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
-      "targetPullRequest": "Phase D1 native store decoupling",
-      "status": "planned"
+      "targetPullRequest": "Stage 5 PR 3 (retire engine-table persistence)",
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-05-cutover-one-swap-collapse.md"
     }
   ]
 }

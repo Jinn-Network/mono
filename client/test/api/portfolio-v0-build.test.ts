@@ -1,19 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { withTempStore } from '@test/store.js';
-import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { gatherPortfolioV0Status } from '../../src/api/portfolio-v0-build.js';
+import type { Store } from '../../src/store/store.js';
+import { markNativeFailed, patchNativeRun, seedNativeRun } from '@test/seed-native-run.js';
 
 function seedIntent(
-  persistence: TaskRunPersistence,
+  store: Store,
   requestId: string,
   windowStartTs = Date.now(),
   windowEndTs = Date.now() + 3600_000,
 ) {
-  persistence.insertDiscovered({
+  seedNativeRun(store, {
     requestId,
     taskCid: `bafytest${requestId}`,
-    onchainCreationTx: `0xtx${requestId}`,
-    onchainCreationBlock: 1,
     solverType: 'portfolio.v0',
     windowStartTs,
     windowEndTs,
@@ -33,9 +32,8 @@ describe('gatherPortfolioV0Status', () => {
 
   it('lists in-flight tasks in DISCOVERED state', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      seedIntent(persistence, 'req-1');
-      seedIntent(persistence, 'req-2');
+      seedIntent(store, 'req-1');
+      seedIntent(store, 'req-2');
 
       const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.inFlight).toHaveLength(2);
@@ -48,9 +46,8 @@ describe('gatherPortfolioV0Status', () => {
 
   it('moves task to recentVerdicts once FAILED', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      seedIntent(persistence, 'req-fail');
-      persistence.markFailed('req-fail', 'test failure reason');
+      seedIntent(store, 'req-fail');
+      markNativeFailed(store, 'req-fail', 'test failure reason');
 
       const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.inFlight).toHaveLength(0);
@@ -63,14 +60,11 @@ describe('gatherPortfolioV0Status', () => {
 
   it('splits FAILED runs into settled fails and local errors via delivery_tx_hash', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      seedIntent(persistence, 'req-local-error');
-      seedIntent(persistence, 'req-settled-fail');
-      persistence.markFailed('req-local-error', 'SkippableError');
-      persistence.markFailed('req-settled-fail', 'claimDelivery reverted');
-      store.db
-        .prepare('UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?')
-        .run('0xdeadbeef', 'req-settled-fail');
+      seedIntent(store, 'req-local-error');
+      seedIntent(store, 'req-settled-fail');
+      markNativeFailed(store, 'req-local-error', 'SkippableError');
+      markNativeFailed(store, 'req-settled-fail', 'claimDelivery reverted');
+      patchNativeRun(store, 'req-settled-fail', { deliveryTxHash: '0xdeadbeef' });
 
       const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.totals.failed).toBe(2);
@@ -81,53 +75,42 @@ describe('gatherPortfolioV0Status', () => {
 
   it('scopes totals and lists to solverType=portfolio.v0 — other solvers do not leak', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      // portfolio.v0 — should be counted.
-      seedIntent(persistence, 'pv0-failed');
-      persistence.markFailed('pv0-failed', 'portfolio failure');
-      seedIntent(persistence, 'pv0-delivered');
-      store.db.prepare(`UPDATE task_runs SET state = 'COMPLETE' WHERE request_id = ?`).run('pv0-delivered');
-      seedIntent(persistence, 'pv0-running');
-      store.db.prepare(`UPDATE task_runs SET state = 'RUNNING' WHERE request_id = ?`).run('pv0-running');
+      seedIntent(store, 'pv0-failed');
+      markNativeFailed(store, 'pv0-failed', 'portfolio failure');
+      seedIntent(store, 'pv0-delivered');
+      patchNativeRun(store, 'pv0-delivered', { state: 'COMPLETE' });
+      seedIntent(store, 'pv0-running');
+      patchNativeRun(store, 'pv0-running', { state: 'RUNNING' });
 
-      // Foreign solverType — must NOT leak into portfolio.v0 counters.
-      persistence.insertDiscovered({
+      seedNativeRun(store, {
         requestId: 'pred-failed',
         taskCid: 'bafy-pred-failed',
-        onchainCreationTx: '0xpred',
-        onchainCreationBlock: 1,
         solverType: 'prediction.v1',
         windowStartTs: 1_000,
         windowEndTs: 2_000,
         task: { id: 'pred-failed', description: 'prediction task', solverType: 'prediction.v1' },
       });
-      persistence.markFailed('pred-failed', 'prediction failure');
-      store.db
-        .prepare('UPDATE task_runs SET delivery_tx_hash = ? WHERE request_id = ?')
-        .run('0xpredfail', 'pred-failed');
+      markNativeFailed(store, 'pred-failed', 'prediction failure');
+      patchNativeRun(store, 'pred-failed', { deliveryTxHash: '0xpredfail' });
 
-      persistence.insertDiscovered({
+      seedNativeRun(store, {
         requestId: 'swe-failed',
         taskCid: 'bafy-swe-failed',
-        onchainCreationTx: '0xswe',
-        onchainCreationBlock: 1,
         solverType: 'swe-rebench-v2.v1',
         windowStartTs: 1_000,
         windowEndTs: 2_000,
         task: { id: 'swe-failed', description: 'swe task', solverType: 'swe-rebench-v2.v1' },
       });
-      persistence.markFailed('swe-failed', 'swe failure');
+      markNativeFailed(store, 'swe-failed', 'swe failure');
 
       const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
 
-      // Only portfolio.v0 rows are counted.
       expect(result.totals.delivered).toBe(1);
       expect(result.totals.failed).toBe(1);
       expect(result.totals.settledFailed).toBe(0);
       expect(result.totals.localErrors).toBe(1);
       expect(result.totals.active).toBe(1);
 
-      // Foreign-solver requestIds must not appear in the surfaced lists.
       const inFlightIds = result.inFlight.map((row) => row.requestId);
       const verdictIds = result.recentVerdicts.map((row) => row.requestId);
       expect(inFlightIds).toContain('pv0-running');
@@ -140,38 +123,27 @@ describe('gatherPortfolioV0Status', () => {
 
   it('keeps portfolio rows when solver_type is missing but task_payload still identifies the net', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      seedIntent(persistence, 'canonical-pv0');
-      store.db.prepare(
-        `UPDATE task_runs
-         SET solver_type = NULL,
-             task_payload = ?
-         WHERE request_id = ?`,
-      ).run(
-        JSON.stringify({
+      seedIntent(store, 'canonical-pv0');
+      patchNativeRun(store, 'canonical-pv0', {
+        solverType: null,
+        task: {
           id: 'canonical-pv0',
           description: 'test',
           contractId: 'portfolio',
           contractVersion: 'v0',
-        }),
-        'canonical-pv0',
-      );
+        },
+      });
 
-      seedIntent(persistence, 'legacy-pv0');
-      persistence.markFailed('legacy-pv0', 'legacy failure');
-      store.db.prepare(
-        `UPDATE task_runs
-         SET solver_type = NULL,
-             task_payload = ?
-         WHERE request_id = ?`,
-      ).run(
-        JSON.stringify({
+      seedIntent(store, 'legacy-pv0');
+      markNativeFailed(store, 'legacy-pv0', 'legacy failure');
+      patchNativeRun(store, 'legacy-pv0', {
+        solverType: null,
+        task: {
           id: 'legacy-pv0',
           description: 'test',
           solverType: 'portfolio.v0',
-        }),
-        'legacy-pv0',
-      );
+        },
+      });
 
       const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
 
@@ -184,12 +156,11 @@ describe('gatherPortfolioV0Status', () => {
 
   it('includes solverType and implName in in-flight summaries', async () => {
     await withTempStore(async (store) => {
-      const persistence = new TaskRunPersistence(store.db);
-      seedIntent(persistence, 'req-spec');
+      seedIntent(store, 'req-spec');
 
       const result = gatherPortfolioV0Status(store.taskRunReadModel(), store);
       expect(result.inFlight[0].solverType).toBe('portfolio.v0');
-      expect(result.inFlight[0].implName).toBeNull(); // not yet assigned
+      expect(result.inFlight[0].implName).toBeNull();
     });
   });
 

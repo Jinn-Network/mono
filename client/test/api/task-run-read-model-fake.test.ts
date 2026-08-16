@@ -9,7 +9,7 @@ import { gatherLoopCompletion } from '../../src/api/loop-completion-build.js';
 
 /**
  * #1584 — proves the four build fns depend on the neutral `TaskRunReadModel`
- * port, not on the concrete `TaskRunPersistence` engine class. Each fn is
+ * port, not on a concrete persistence class. Each fn is
  * driven against a hand-rolled fake with no database behind it.
  */
 

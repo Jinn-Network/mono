@@ -2,19 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { withTempStore } from '@test/store.js';
 import type { Store } from '@/store/store.js';
 import { NativeTaskRunReadModel } from '@/store/native-task-run-read-model.js';
-import { TaskRunPersistence } from '@/store/task-run-persistence.js';
 import { NATIVE_EVALUATOR_STATE_SCHEMA } from '@/daemon/native-evaluator-state.js';
 import { gatherTaskRunsStatus, type TaskRunsStatus } from '@/api/task-runs-build.js';
 
 /**
- * One-swap R1 (umbrella #2461) — GOLDEN WIRE-SHAPE + LEGACY-UNCHANGED proofs.
+ * One-swap R1 (umbrella #2461) — GOLDEN WIRE-SHAPE proof.
  *
- *  1. Golden: a fixed native seed produces an exact `TaskRunsStatus` wire object
- *     (the shape the SPA's `status.taskRuns` reads). Pinned so a future mapping
- *     change that would move the wire shape fails loudly.
- *  2. Legacy-unchanged: `Store.taskRunReadModel()` with no arg (and with an
- *     explicit `'legacy'`) is the SAME `TaskRunPersistence` over `task_runs` as
- *     before R1 — dark for legacy operators until the deploy flips the mode.
+ * A fixed native seed produces an exact `TaskRunsStatus` wire object (the
+ * shape the SPA's `status.taskRuns` reads). Pinned so a future mapping change
+ * that would move the wire shape fails loudly. Stage 5 deleted the dual-read:
+ * `taskRunReadModel()` is always the native read model.
  */
 
 function seedNative(store: Store): void {
@@ -136,31 +133,12 @@ describe('native read-plane golden wire shape (one-swap R1)', () => {
   });
 });
 
-describe('legacy read plane is byte-unchanged (one-swap R1)', () => {
-  it('taskRunReadModel() and taskRunReadModel("legacy") both return TaskRunPersistence over task_runs', async () => {
+describe('taskRunReadModel is native-only', () => {
+  it('returns NativeTaskRunReadModel for every composition argument', async () => {
     await withTempStore(async (store) => {
-      expect(store.taskRunReadModel()).toBeInstanceOf(TaskRunPersistence);
-      expect(store.taskRunReadModel('legacy')).toBeInstanceOf(TaskRunPersistence);
+      expect(store.taskRunReadModel()).toBeInstanceOf(NativeTaskRunReadModel);
+      expect(store.taskRunReadModel('legacy')).toBeInstanceOf(NativeTaskRunReadModel);
       expect(store.taskRunReadModel('native')).toBeInstanceOf(NativeTaskRunReadModel);
-    });
-  });
-
-  it('legacy read is unaffected by native rows in the same db', async () => {
-    await withTempStore(async (store) => {
-      // A native row present in the db must not leak into the legacy read path.
-      seedNative(store);
-      store.db
-        .prepare(
-          `INSERT INTO task_runs
-            (request_id, task_id, task_cid, onchain_creation_tx, onchain_creation_block,
-             task_role, state, state_updated_at, window_start_ts, window_end_ts, run_started_at)
-           VALUES ('legacy-r1', 'lt-1', 'lc-1', '0xtx', 1, 'restoration', 'COMPLETE', 10, 1, 2, 10)`,
-        )
-        .run();
-
-      const legacy = gatherTaskRunsStatus(store.taskRunReadModel('legacy'));
-      expect(legacy.totals.observedTasks).toBe(1);
-      expect(legacy.recentTasks.map((r) => r.requestId)).toEqual(['legacy-r1']);
     });
   });
 });
