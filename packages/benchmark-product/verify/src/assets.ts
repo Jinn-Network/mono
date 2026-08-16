@@ -1,4 +1,5 @@
 import { BENCHMARKING_METHOD_IDS } from "@jinn-network/benchmarking-records";
+import { validateBinaryInstrumentQualificationProjection } from "@jinn-network/benchmarking-aggregate";
 import type { MatrixRecord, ReportRecord } from "@jinn-network/benchmarking-records";
 import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { readFileSync } from "node:fs";
@@ -20,6 +21,19 @@ export interface PublicAssetInput {
   readonly dissentCellKeys: readonly string[];
   /** Verifier-derived, authenticated human projection. Absent only for legacy bundle assets. */
   readonly comparison?: PublicComparisonView;
+  /** Producer-verified binary admission/instrument facts. Required for claim-package/2 only. */
+  readonly binaryQualification?: {
+    readonly publicationGrade: boolean;
+    readonly truthAdmission: "two-human-unanimous" | "operator-only";
+    readonly sourceManifestSha256: string;
+    readonly admissionManifestSha256: string;
+    readonly exclusions: readonly unknown[];
+    readonly instruments: readonly {
+      armId: string;
+      instrumentSha256: string;
+      promptTemplateSha256: string;
+    }[];
+  };
 }
 
 interface WilsonArmFact {
@@ -54,9 +68,21 @@ interface ComparisonFacts {
   readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
 }
 
+interface BinaryFacts {
+  readonly kind: "binary";
+  readonly qualification: {
+    readonly configuration: Record<string, unknown>;
+    readonly arms: Record<string, Record<string, unknown>>;
+    readonly itemDecisions: readonly unknown[];
+    readonly excluded: { readonly count: number; readonly items: readonly unknown[] };
+    readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
+  };
+  readonly conflicted: { readonly count: number; readonly cellKeys: readonly string[] };
+}
+
 /** What every method branch below must produce for asset rendering. Discriminated by `kind` so
  * the render helpers can narrow rather than re-check shape. */
-type MethodFacts = WilsonFacts | ComparisonFacts;
+type MethodFacts = WilsonFacts | ComparisonFacts | BinaryFacts;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -263,6 +289,12 @@ function methodProjection(
       return wilsonProjection(subjectResults, label);
     case BENCHMARKING_METHOD_IDS.pairedDelta:
       return comparisonProjection(subjectResults, method.parameters, label);
+    case BENCHMARKING_METHOD_IDS.binaryInstrument: {
+      const validation = validateBinaryInstrumentQualificationProjection(subjectResults);
+      if (!validation.ok) throw new Error(`${label}: invalid binary qualification: ${validation.issues.join("; ")}`);
+      const qualification = subjectResults as BinaryFacts["qualification"];
+      return { kind: "binary", qualification, conflicted: qualification.conflicted };
+    }
     default:
       throw new Error(`${label}: method "${method.id}" has no bundle-asset projection`);
   }
@@ -274,13 +306,19 @@ function outcomeLabel(outcome: MatrixRecord["completeness"]["runOutcome"]): stri
   return "Cancelled comparison";
 }
 
+function qualificationOutcomeLabel(outcome: MatrixRecord["completeness"]["runOutcome"]): string {
+  if (outcome === "complete") return "Complete qualification";
+  if (outcome === "partial") return "Partial qualification";
+  return "Cancelled qualification";
+}
+
 function scopeLine(input: PublicAssetInput): string {
   return `${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${input.claim.scope.venue}`;
 }
 
 function adverseFacts(input: PublicAssetInput, reportFacts: MethodFacts): readonly string[] {
   const facts: string[] = [];
-  if (input.matrix.completeness.runOutcome !== "complete") facts.push(`Matrix: ${outcomeLabel(input.matrix.completeness.runOutcome)}; incomplete cells remain accounted below.`);
+  if (input.matrix.completeness.runOutcome !== "complete") facts.push(`Matrix: ${reportFacts.kind === "binary" ? qualificationOutcomeLabel(input.matrix.completeness.runOutcome) : outcomeLabel(input.matrix.completeness.runOutcome)}; incomplete cells remain accounted below.`);
   if (reportFacts.conflicted.count > 0) facts.push(`Report conflicted cells: ${reportFacts.conflicted.count}.`);
   if (input.claim.conflicted.count > 0) facts.push(`Claim conflicted cells: ${input.claim.conflicted.count}.`);
   if (input.dissentCellKeys.length > 0) facts.push(`Verification assembly dissenting cells: ${input.dissentCellKeys.length}.`);
@@ -326,10 +364,24 @@ function comparisonFactsHtml(facts: ComparisonFacts): string {
   return `<p class="paired-estimate">${escapeMarkup(pairedEstimateLine(facts))}</p><dl class="facts"><div><dt>Paired task count</dt><dd>${facts.pairs}</dd></div><div><dt>Candidate minus baseline estimate</dt><dd>${facts.delta === null ? "—" : escapeMarkup(facts.delta)}</dd></div></dl>${intervalHtml}`;
 }
 
+function binaryFactsHtml(facts: BinaryFacts): string {
+  const arms = Object.entries(facts.qualification.arms).map(([armId, arm]) => {
+    const rates = ["agreement", "falseAccept", "falseReject", "instability", "parserInvalid"]
+      .map((name) => `<tr><th scope="row">${escapeMarkup(name)}</th><td><pre>${escapeMarkup(canonicalText(arm[name]))}</pre></td></tr>`)
+      .join("");
+    return `<section class="binary-arm"><h3>${escapeMarkup(armId)}</h3><p>Instrument <span class="digest">${escapeMarkup(String(arm["instrumentSha256"]))}</span></p><h4>Item, call, and confusion denominators</h4><pre>${escapeMarkup(canonicalText({ item: arm["item"], call: arm["call"], confusion: arm["confusion"] }))}</pre><div class="table-scroll" tabindex="0" role="region" aria-label="${escapeMarkup(armId)} qualification rates"><table><caption>Five registered rates with exact denominators and Wilson intervals</caption><thead><tr><th scope="col">Rate</th><th scope="col">Registered result</th></tr></thead><tbody>${rates}</tbody></table></div><h4>Every candidate-class bucket</h4><pre>${escapeMarkup(canonicalText(arm["byCandidateClass"]))}</pre><h4>Core and stress buckets</h4><pre>${escapeMarkup(canonicalText(arm["byStratum"]))}</pre></section>`;
+  }).join("");
+  return `<p class="neutral">Qualification facts are presented per instrument without comparative conclusions.</p><h3>Registered configuration</h3><pre>${escapeMarkup(canonicalText(facts.qualification.configuration))}</pre>${arms}<h3>Per-item decisions and instability</h3><pre>${escapeMarkup(canonicalText(facts.qualification.itemDecisions))}</pre><h3>Parser-invalid, infrastructure, and other exclusions</h3><pre>${escapeMarkup(canonicalText(facts.qualification.excluded))}</pre>`;
+}
+
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6). The wilson branch is
  * byte-identical to before this dispatch existed -- `armResultTable` itself is untouched. */
 function armResultsHtml(facts: MethodFacts, wilsonCaption: string): string {
-  return facts.kind === "wilson" ? armResultTable(facts, wilsonCaption) : comparisonFactsHtml(facts);
+  return facts.kind === "wilson"
+    ? armResultTable(facts, wilsonCaption)
+    : facts.kind === "comparison"
+      ? comparisonFactsHtml(facts)
+      : binaryFactsHtml(facts);
 }
 
 function attritionRows(input: PublicAssetInput): string {
@@ -397,9 +449,27 @@ function comparisonSectionMarkdown(comparison: PublicComparisonView | undefined)
   return `## What happened, task by task\n\n${descriptive}${sample}\n\n${tasks}\n\n`;
 }
 
+function binaryAdmissionHtml(input: PublicAssetInput): string {
+  const admission = input.binaryQualification;
+  if (admission === undefined) return "";
+  return `<section id="qualification-admission" aria-labelledby="qualification-admission-heading"><h2 id="qualification-admission-heading">Authenticated truth admission and instruments</h2><dl class="facts"><div><dt>Publication grade</dt><dd>${admission.publicationGrade ? "Yes — two-human unanimous" : "No — operator-only"}</dd></div><div><dt>Truth admission</dt><dd>${escapeMarkup(admission.truthAdmission)}</dd></div><div><dt>Source manifest</dt><dd class="digest">${escapeMarkup(admission.sourceManifestSha256)}</dd></div><div><dt>Admission manifest</dt><dd class="digest">${escapeMarkup(admission.admissionManifestSha256)}</dd></div><div><dt>Pre-run exclusions</dt><dd>${admission.exclusions.length}</dd></div></dl><h3>Human disagreement and deterministic replacements</h3><pre>${escapeMarkup(canonicalText(admission.exclusions))}</pre><h3>Exact instrument and prompt-template commitments</h3><pre>${escapeMarkup(canonicalText(admission.instruments))}</pre></section>`;
+}
+
+function binaryAdmissionMarkdown(input: PublicAssetInput): string {
+  const admission = input.binaryQualification;
+  if (admission === undefined) return "";
+  return `## Authenticated truth admission and instruments\n\n- Publication grade: ${admission.publicationGrade ? "yes — two-human unanimous" : "no — operator-only"}\n- Truth admission: ${escapeMarkdown(admission.truthAdmission)}\n- Source manifest: ${escapeMarkdown(admission.sourceManifestSha256)}\n- Admission manifest: ${escapeMarkdown(admission.admissionManifestSha256)}\n- Pre-run exclusions: ${admission.exclusions.length}\n\n### Human disagreement and deterministic replacements\n\n    ${escapeMarkdownCode(canonicalText(admission.exclusions))}\n\n### Exact instrument and prompt-template commitments\n\n    ${escapeMarkdownCode(canonicalText(admission.instruments))}\n\n`;
+}
+
+function factsHeading(facts: MethodFacts, source: "report" | "claim"): string {
+  if (facts.kind === "wilson") return source === "report" ? "Sealed Report arm results" : "Stored claim mirror";
+  if (facts.kind === "comparison") return source === "report" ? "Sealed Report paired comparison" : "Stored paired claim mirror";
+  return source === "report" ? "Sealed binary qualification" : "Stored binary qualification";
+}
+
 function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
   const outcome = input.matrix.completeness.runOutcome;
-  const status = outcomeLabel(outcome);
+  const status = reportFacts.kind === "binary" ? qualificationOutcomeLabel(outcome) : outcomeLabel(outcome);
   const adverse = adverseFacts(input, reportFacts);
   const arms = input.claim.scope.arms.map((arm) =>
     `<li><strong>${escapeMarkup(arm.armId)}</strong><pre>${escapeMarkup(canonicalText(arm.pinning))}</pre></li>`
@@ -411,6 +481,7 @@ function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFact
     ["report.json", "Report payload"],
     ["report-envelope.json", "Report signature envelope"],
     ["claim-package.json", "Claim package"],
+    ...(reportFacts.kind === "binary" ? [["qualification.json", "Binary qualification graph"] as [string, string]] : []),
     ["static-bundle.json", "Static-bundle projection"],
     ["evidence.json", "Evidence catalog"],
     ["verdicts.json", "Verdict catalog"],
@@ -422,7 +493,7 @@ function buildIndex(input: PublicAssetInput, reportFacts: MethodFacts, claimFact
   const rehearsalHtml = rehearsal === undefined
     ? "<p>No product rehearsal is recorded in the stored Claim.</p>"
     : `<p>Preview count: ${rehearsal.previewCount}</p>${list(rehearsal.timestamps, "No timestamps recorded.")}`;
-  return `<!doctype html>
+  const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -444,14 +515,14 @@ ${embeddedFontCss()}
 <p class="status" data-run-outcome="${outcome}">${escapeMarkup(status)}</p>
 <h1>Colophon report</h1>
 <p class="lede">${escapeMarkup(scopeLine(input))}</p>
-${reportFacts.kind === "wilson" ? '<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>' : `<p class="neutral">${escapeMarkup(pairedEstimateLine(reportFacts))}</p>`}
+${reportFacts.kind === "wilson" ? '<p class="neutral">No comparative winner is stated; wilson@1 reports neutral per-arm facts only.</p>' : reportFacts.kind === "comparison" ? `<p class="neutral">${escapeMarkup(pairedEstimateLine(reportFacts))}</p>` : '<p class="neutral">Verified binary-instrument qualification. Facts are presented per instrument without comparative conclusions.</p>'}
 </header>
 <main>
 <section class="adverse" aria-labelledby="adverse-heading"><h2 id="adverse-heading">Prominent adverse facts</h2>${list(adverse, "No adverse facts stated.")}</section>${input.comparison === undefined ? "" : `\n${comparisonSectionHtml(input.comparison)}`}
-<section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>
+<section aria-labelledby="scope-heading"><h2 id="scope-heading">Benchmark and configuration scope</h2><dl class="facts"><div><dt>Benchmark digest</dt><dd class="digest">${input.claim.scope.benchmarkSha256}</dd></div><div><dt>Tasks</dt><dd>${input.claim.scope.taskCount}</dd></div><div><dt>Replicates</dt><dd>${input.claim.scope.replicates}</dd></div><div><dt>Venue</dt><dd>${escapeMarkup(input.claim.scope.venue)}</dd></div></dl><h3>Arms and pinned configuration</h3><ul>${arms}</ul></section>${reportFacts.kind === "binary" ? binaryAdmissionHtml(input) : ""}
 <section aria-labelledby="matrix-heading"><h2 id="matrix-heading">Sealed Matrix accounting</h2><p class="source-label">Source: authenticated <a href="matrix.json">matrix.json</a>; values below are copied without reconciliation.</p><pre>${escapeMarkup(canonicalText({ completeness: input.matrix.completeness, attrition: input.matrix.attrition }))}</pre><h3>Completeness and attrition</h3><dl class="facts"><div><dt>Matrix run outcome</dt><dd>${escapeMarkup(outcome)}</dd></div><div><dt>Matrix expected</dt><dd>${input.matrix.completeness.expected}</dd></div><div><dt>Matrix judged</dt><dd>${input.matrix.completeness.judged}</dd></div><div><dt>Matrix floor</dt><dd>${escapeMarkup(input.matrix.completeness.floor)}</dd></div></dl><div class="table-scroll" tabindex="0" role="region" aria-label="Per-arm Matrix attrition"><table><caption>Exact per-arm attrition stored in the Matrix</caption><thead><tr><th scope="col">Arm</th><th scope="col">Expected</th><th scope="col">Judged</th><th scope="col">Unjudged</th><th scope="col">Unscorable</th><th scope="col">Expired</th><th scope="col">Invalidated</th><th scope="col">Excluded</th><th scope="col">Replacements</th></tr></thead><tbody>${attritionRows(input)}</tbody></table></div><h3>Matrix asymmetry flags</h3>${list(input.matrix.attrition.asymmetryFlags, "None recorded in the Matrix.")}</section>
-<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>${reportFacts.kind === "wilson" ? "Sealed Report arm results" : "Sealed Report paired comparison"}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
-<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>${claimFacts.kind === "wilson" ? "Stored claim mirror" : "Stored paired claim mirror"}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
+<section aria-labelledby="report-heading"><h2 id="report-heading">Sealed Report facts</h2><p class="source-label">Source: authenticated <a href="report.json">report.json</a>; values below are copied without reconciliation.</p><h3>${factsHeading(reportFacts, "report")}</h3>${armResultsHtml(reportFacts, "Exact wilson@1 values from the sealed Report")}<h3>Method and assurance facts stored in the Report</h3><dl class="facts"><div><dt>Report method</dt><dd>${escapeMarkup(input.report.method.id)} @ ${escapeMarkup(input.report.method.version)}</dd></div><div><dt>Report preregistered</dt><dd>${input.report.preregistered === true ? "Yes" : "No"}</dd></div></dl><h3>Report parameters</h3><pre>${escapeMarkup(canonicalText(input.report.method.parameters))}</pre><h3>Report conflicts</h3><pre>${escapeMarkup(canonicalText(reportFacts.conflicted))}</pre><h3>Report disclosures</h3><pre>${escapeMarkup(canonicalText(input.report.disclosures))}</pre></section>
+<section aria-labelledby="claim-heading"><h2 id="claim-heading">Stored Claim facts</h2><p class="source-label">Source: authenticated <a href="claim-package.json">claim-package.json</a>; values below are copied without reconciliation.</p><h3>${factsHeading(claimFacts, "claim")}</h3>${armResultsHtml(claimFacts, "Exact arm values stored in the Claim package")}<h3>Claim method and preregistration</h3><dl class="facts"><div><dt>Claim method</dt><dd>${escapeMarkup(input.claim.method.id)} @ ${escapeMarkup(input.claim.method.version)}</dd></div><div><dt>Claim preregistered</dt><dd>${input.claim.method.preregistered ? "Yes" : "No"}</dd></div><div><dt>Assurance preset</dt><dd>${escapeMarkup(input.claim.assurance.preset)}</dd></div></dl><h3>Claim parameters</h3><pre>${escapeMarkup(canonicalText(input.claim.method.parameters))}</pre><h3>Claim completeness</h3><pre>${escapeMarkup(canonicalText(input.claim.completeness))}</pre><h3>Claim attrition</h3><pre>${escapeMarkup(canonicalText(input.claim.attrition))}</pre><h3>Claim conflicts</h3><pre>${escapeMarkup(canonicalText(input.claim.conflicted))}</pre><h3>Claim disclosures</h3><h4>Unverifiable axes, integrity tiers, and per-subject disclosures</h4><pre>${escapeMarkup(canonicalText(input.claim.disclosures))}</pre><h3>Resolved assurance primitives</h3><pre>${escapeMarkup(canonicalText(input.claim.assurance.resolved))}</pre><p>${escapeMarkup(input.claim.assurance.disclosure)}</p><h3>Rehearsal disclosure</h3>${rehearsalHtml}</section>
 <section aria-labelledby="dissent-heading"><h2 id="dissent-heading">Verification assembly dissent</h2><p class="source-label">Source: authenticated <a href="verification/assembly.jsonl">verification assembly</a>.</p><dl class="facts"><div><dt>Dissenting cells</dt><dd>${input.dissentCellKeys.length}</dd></div></dl>${list(input.dissentCellKeys, "None recorded in the verification assembly.")}</section>
 <section id="limitations" aria-labelledby="limitations-heading"><h2 id="limitations-heading">Limitations by stored source</h2><h3>Sealed Report limitations</h3>${list(input.report.limitations ?? [], "None recorded in the sealed Report.")}<h3>Stored Claim limitations</h3>${list(input.claim.limitations, "None recorded in the stored Claim.")}<h3>Local self-run trust boundary stored in the Claim</h3><pre>${escapeMarkup(canonicalText(input.claim.venueHonesty))}</pre></section>
 <section aria-labelledby="records-heading"><h2 id="records-heading">Records and exact identities</h2><dl class="facts"><div><dt>Report SHA-256</dt><dd class="digest">${input.reportSha256}</dd></div><div><dt>Matrix SHA-256</dt><dd class="digest">${input.matrixSha256}</dd></div><div><dt>Run SHA-256</dt><dd class="digest">${input.claim.records.runSha256}</dd></div><div><dt>Report envelope SHA-256</dt><dd class="digest">${input.claim.records.reportEnvelopeSha256}</dd></div></dl><h3>Top-level records and catalogs</h3><ul class="compact-list">${topLevelFiles.map(([path, label]) => `<li><a href="${path}">${escapeMarkup(label)} <span class="digest">(${path})</span></a></li>`).join("")}</ul><h3>Every manifest-listed content-addressed record</h3><ul class="compact-list">${casFiles.map((path) => `<li><a href="${path}">CAS record <span class="digest">(${path})</span></a></li>`).join("")}</ul></section>
@@ -460,6 +531,7 @@ ${reportFacts.kind === "wilson" ? '<p class="neutral">No comparative winner is s
 <footer><nav aria-label="Report references"><a href="index.html#limitations">Read limitations</a> · <a href="index.html#verification">Verify this report</a></nav><p>Report <span class="digest">${input.reportSha256}</span></p><p class="about">${escapeMarkup(PRODUCT_BRANDING.attribution)}</p></footer>
 </body>
 </html>\n`;
+  return html;
 }
 
 function compactStatus(input: PublicAssetInput, reportFacts: MethodFacts): string {
@@ -470,6 +542,7 @@ function compactStatus(input: PublicAssetInput, reportFacts: MethodFacts): strin
  * They disclose the interval state and point to the relative full-report path instead. */
 function pairedCompactFragment(facts: MethodFacts): string {
   if (facts.kind === "wilson") return "";
+  if (facts.kind === "binary") return "Verified qualification signpost · full evidence at index.html";
   if (facts.delta === null) return "Paired estimate unavailable · read full report at index.html";
   if (facts.interval === null) return "Paired estimate reported; interval withheld · index.html";
   return "Paired estimate and interval in full report · index.html";
@@ -477,6 +550,9 @@ function pairedCompactFragment(facts: MethodFacts): string {
 
 function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const scope = scopeLine(input);
+  if (reportFacts.kind === "binary") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 920 150" width="920" height="150"><title id="title">Colophon verified qualification</title><desc id="desc">${escapeMarkup(`Verified. ${scope}. Report SHA-256 ${input.reportSha256}. Full evidence: index.html.`)}</desc><metadata>${escapeMarkup(`verified=true; scope=${scope}; Report SHA-256=${input.reportSha256}`)}</metadata><rect width="920" height="150" fill="#14120e"/><text x="20" y="45" fill="#f7f4ed" font-family="sans-serif" font-size="22">Colophon · verified qualification</text><text x="20" y="82" fill="#d8d1c5" font-family="sans-serif" font-size="14">${escapeMarkup(scope)}</text><a href="index.html"><text x="20" y="118" fill="#9eb9ef" font-family="monospace" font-size="11">Report ${input.reportSha256} · index.html</text></a></svg>\n`;
+  }
   const status = compactStatus(input, reportFacts);
   const digest = input.reportSha256.slice(0, 12);
   const exactArms = input.claim.scope.arms.map((arm) => arm.armId).join(" · ");
@@ -494,6 +570,9 @@ function buildBadge(input: PublicAssetInput, reportFacts: MethodFacts): string {
 
 function buildSocialCard(input: PublicAssetInput, reportFacts: MethodFacts): string {
   const scope = scopeLine(input);
+  if (reportFacts.kind === "binary") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 630" width="1200" height="630"><title id="title">Colophon verified qualification</title><desc id="desc">${escapeMarkup(`Verified. ${scope}. Report SHA-256 ${input.reportSha256}. Full evidence: index.html.`)}</desc><metadata>${escapeMarkup(`verified=true; scope=${scope}; Report SHA-256=${input.reportSha256}`)}</metadata><rect width="1200" height="630" fill="#f7f4ed"/><text x="78" y="180" fill="#c7402a" font-family="sans-serif" font-size="24">COLOPHON · VERIFIED QUALIFICATION</text><text x="78" y="300" fill="#14120e" font-family="serif" font-size="64">Evidence signpost</text><text x="78" y="390" fill="#14120e" font-family="sans-serif" font-size="24">${escapeMarkup(scope)}</text><a href="index.html"><text x="78" y="500" fill="#27406b" font-family="monospace" font-size="17">Report ${input.reportSha256}</text></a><text x="78" y="545" fill="#27406b" font-family="monospace" font-size="17">Full evidence: index.html</text></svg>\n`;
+  }
   const status = compactStatus(input, reportFacts);
   const armIds = input.claim.scope.arms.map((arm) => arm.armId).join(" · ");
   const digest = input.reportSha256.slice(0, 12);
@@ -536,10 +615,42 @@ function comparisonFactsMarkdown(facts: ComparisonFacts): string {
   ].join("\n");
 }
 
+function binaryFactsMarkdown(facts: BinaryFacts): string {
+  return [
+    "Qualification facts are presented per instrument without comparative conclusions.",
+    "",
+    "### Registered configuration",
+    "",
+    `    ${escapeMarkdownCode(canonicalText(facts.qualification.configuration))}`,
+    "",
+    ...Object.entries(facts.qualification.arms).flatMap(([armId, arm]) => [
+      `### ${escapeMarkdown(armId)}`,
+      "",
+      `- Instrument: ${escapeMarkdown(String(arm["instrumentSha256"]))}`,
+      `- Item, call, and confusion denominators: ${escapeMarkdown(canonicalText({ item: arm["item"], call: arm["call"], confusion: arm["confusion"] }))}`,
+      `- Agreement: ${escapeMarkdown(canonicalText(arm["agreement"]))}`,
+      `- False accept: ${escapeMarkdown(canonicalText(arm["falseAccept"]))}`,
+      `- False reject: ${escapeMarkdown(canonicalText(arm["falseReject"]))}`,
+      `- Instability: ${escapeMarkdown(canonicalText(arm["instability"]))}`,
+      `- Parser invalid: ${escapeMarkdown(canonicalText(arm["parserInvalid"]))}`,
+      `- Every candidate-class bucket: ${escapeMarkdown(canonicalText(arm["byCandidateClass"]))}`,
+      `- Core and stress buckets: ${escapeMarkdown(canonicalText(arm["byStratum"]))}`,
+      "",
+    ]),
+    "### Per-item decisions, instability, and exclusions",
+    "",
+    `    ${escapeMarkdownCode(canonicalText({ itemDecisions: facts.qualification.itemDecisions, excluded: facts.qualification.excluded }))}`,
+  ].join("\n");
+}
+
 /** Dispatches the arm/comparison facts block on `facts.kind` (P4b Task 6), markdown counterpart
  * to `armResultsHtml`. The wilson branch is byte-identical to before this dispatch existed. */
 function armResultsMarkdown(facts: MethodFacts): string {
-  return facts.kind === "wilson" ? markdownArmTable(facts) : comparisonFactsMarkdown(facts);
+  return facts.kind === "wilson"
+    ? markdownArmTable(facts)
+    : facts.kind === "comparison"
+      ? comparisonFactsMarkdown(facts)
+      : binaryFactsMarkdown(facts);
 }
 
 function buildReadme(input: PublicAssetInput, reportFacts: MethodFacts, claimFacts: MethodFacts): string {
@@ -553,15 +664,19 @@ function buildReadme(input: PublicAssetInput, reportFacts: MethodFacts, claimFac
     ["benchmark.json", "Benchmark record"], ["run.json", "Run record"],
     ["matrix.json", "Matrix record"], ["report.json", "Report payload"],
     ["report-envelope.json", "Report signature envelope"], ["claim-package.json", "Claim package"],
+    ...(reportFacts.kind === "binary" ? [["qualification.json", "Binary qualification graph"] as [string, string]] : []),
     ["static-bundle.json", "Static-bundle projection"], ["evidence.json", "Evidence catalog"],
     ["verdicts.json", "Verdict catalog"], ["verification/assembly.jsonl", "Verification assembly"],
     ["trust/public-keys.json", "Public trust material"],
   ];
   const topLevelLinks = topLevelFiles.map(([path, label]) => `- [${label} (\`${path}\`)](${path})`).join("\n");
   const casLinks = recordPaths(input).map((path) => `- [CAS record \`${path}\`](${path})`).join("\n");
+  const documentStatus = reportFacts.kind === "binary"
+    ? `${qualificationOutcomeLabel(input.matrix.completeness.runOutcome)}. Verified binary-instrument qualification.`
+    : `${outcomeLabel(input.matrix.completeness.runOutcome)}. No comparative winner is stated.`;
   return `# Colophon report
 
-**${outcomeLabel(input.matrix.completeness.runOutcome)}. No comparative winner is stated.**
+**${documentStatus}**
 
 Scope: ${input.claim.scope.taskCount} tasks · ${input.claim.scope.arms.length} arms · ${input.claim.scope.replicates} replicates · ${escapeMarkdown(input.claim.scope.venue)}.
 
@@ -577,7 +692,7 @@ ${adverse.map((value) => `- ${escapeMarkdown(value)}`).join("\n")}
 
 ## Configurations
 
-${arms}
+${arms}${reportFacts.kind === "binary" ? `\n\n${binaryAdmissionMarkdown(input).trimEnd()}` : ""}
 
 ## Sealed Matrix accounting
 
@@ -589,7 +704,7 @@ Source: authenticated [\`matrix.json\`](matrix.json). These stored values are no
 
 Source: authenticated [\`report.json\`](report.json). These stored values are not reconciled with another source.
 
-### ${reportFacts.kind === "wilson" ? "Sealed Report arm results" : "Sealed Report paired comparison"}
+### ${factsHeading(reportFacts, "report")}
 
 ${armResultsMarkdown(reportFacts)}
 
@@ -615,7 +730,7 @@ ${reportLimitations}
 
 Source: authenticated [\`claim-package.json\`](claim-package.json). These stored values are not reconciled with another source.
 
-### ${claimFacts.kind === "wilson" ? "Stored claim mirror" : "Stored paired claim mirror"}
+### ${factsHeading(claimFacts, "claim")}
 
 ${armResultsMarkdown(claimFacts)}
 
@@ -687,6 +802,9 @@ ${FONT_LICENSES.map(([name, path]) => `## ${name} font license\n\n\`\`\`text\n${
 }
 
 function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): string {
+  if (reportFacts.kind === "binary") {
+    return `Colophon · verified qualification. ${plainText(scopeLine(input))}. Report ${input.reportSha256}. Full evidence: index.html; verify: index.html#verification with ${plainText(input.claim.verification.command)}.\n`;
+  }
   // Paired branch only (P4b Task 6): empty string for wilson keeps this sentence byte-identical
   // to before this dispatch existed.
   const pairedFragment = pairedCompactFragment(reportFacts);
@@ -699,6 +817,9 @@ function buildShareText(input: PublicAssetInput, reportFacts: MethodFacts): stri
 export function buildPublicAssets(input: PublicAssetInput): Readonly<Record<string, Uint8Array>> {
   const reportFacts = methodProjection(input.report.results, input.report.method, "sealed Report");
   const claimFacts = methodProjection(input.claim.results, input.claim.method, "stored claim package");
+  if ((reportFacts.kind === "binary") !== (input.binaryQualification !== undefined)) {
+    throw new Error("binary public assets require exactly one producer-verified admission/instrument projection");
+  }
   return {
     "index.html": encoder.encode(buildIndex(input, reportFacts, claimFacts)),
     "badge.svg": encoder.encode(buildBadge(input, reportFacts)),

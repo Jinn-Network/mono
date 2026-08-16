@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, type KeyObject } from "node:crypto";
+import { createHash, createPublicKey, verify as verifySignature, type KeyObject } from "node:crypto";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import {
@@ -8,11 +8,17 @@ import {
   parseMatrix,
   parseReport,
   parseRun,
+  readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { verifyMatrix, type InScopeCell, type InScopeVerdict } from "@jinn-network/benchmarking-run";
-import { deriveEvaluationTask, parseEvaluationSpec } from "@jinn-network/task-execution-profiles";
+import {
+  BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  deriveEvaluationTask,
+  parseBinaryJudgmentInstrument,
+  parseEvaluationSpec,
+} from "@jinn-network/task-execution-profiles";
 import { DeliveryRecordSchema, SubmissionRecordSchema, TaskSpecificationSchema } from "@jinn-network/task-execution-protocol";
-import { canonicalJsonBytes } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, dssePreAuthEncoding, parseExactDsseEnvelope } from "@jinn-network/trust-core";
 import { refuse } from "./profile/errors.js";
 import { ClaimPackageSchema } from "./profile/claim.js";
 import { buildMethodPortsFromResolver } from "./profile/ports.js";
@@ -29,6 +35,10 @@ import {
   type LocalAdmissionReceiptFact,
 } from "./profile/admission-receipts.js";
 import { EVALUATOR_REQUIREMENT_KEY } from "./profile/venue.js";
+import {
+  INSPECT_SELECTION_CORRELATION_ROLE,
+  InspectBinaryJudgeSelectionManifestSchema,
+} from "./profile/binary-judge-manifest.js";
 import {
   readOrderedVerdictMeasurements,
   readVerdictEnvelope,
@@ -64,17 +74,36 @@ import {
   type VerifiedBundleSnapshot,
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
-import { PUBLIC_BUNDLE_FILES } from "./materialize.js";
+import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
+import { BUNDLE_V4_FORMAT } from "./manifest.js";
+import {
+  verifyBinaryJudgmentAdmissionClosure,
+  type AdmissionAuthorityRole,
+  type AdmissionSha256,
+} from "./admission/verification.js";
+import { readAdmissionVerdictEnvelope } from "./admission/result-evaluation.js";
+import {
+  BINARY_ITEM_BANK_INTAKE_EXTENSION,
+  BinaryAdmissionIndexEntrySchema,
+  BinaryItemBankEntrySchema,
+  BinaryItemBankIntakeExtensionSchema,
+  BinarySourceManifestEntrySchema,
+} from "./admission/intake.js";
 import {
   BundleAssemblyCellSchema,
   BundleAssemblyHeaderSchema,
   BundleCancelMarkerSchema,
   BundleEvidenceCatalogSchema,
+  BundleQualificationSchema,
   BundleTrustSchema,
+  BundleV4EvidenceCatalogSchema,
+  BundleV4TrustSchema,
   BundleVerdictCatalogSchema,
   type BundleAssemblyCell,
   type BundleAssemblyHeader,
   type BundleEvidenceCatalog,
+  type BundleQualification,
+  type BundleV4EvidenceRole,
 } from "./schema.js";
 
 export type PublicBundleVerificationCheck =
@@ -86,6 +115,7 @@ export type PublicBundleVerificationCheck =
   | "claim-consistency";
 
 export interface PublicBundleVerificationResult {
+  readonly format: "benchmark-product-public-bundle/2" | "benchmark-product-public-bundle/4";
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
   readonly benchmarkSha256: string;
@@ -94,6 +124,15 @@ export interface PublicBundleVerificationResult {
   readonly reportSha256: string;
   readonly reportEnvelopeSha256: string;
   readonly runtimeMethod?: InspectRuntimeMethodDisclosure;
+  readonly qualification?: {
+    readonly publicationGrade: boolean;
+    readonly truthAdmission: "two-human-unanimous" | "operator-only";
+    readonly candidateClasses: readonly string[];
+    readonly strata: readonly ["core", "stress"];
+    readonly armCount: 4;
+    readonly itemCount: number;
+    readonly exclusionCount: number;
+  };
 }
 
 export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {}
@@ -105,11 +144,11 @@ export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {}
  */
 export interface VerifiedPublicBundleSnapshot {
   readonly verification: PublicBundleVerificationResult;
-  readonly comparison: PublicComparisonView;
+  readonly comparison?: PublicComparisonView;
   readonly snapshot: VerifiedBundleSnapshot;
 }
 
-type EvidenceRole = BundleEvidenceCatalog["records"][number]["roles"][number];
+type EvidenceRole = BundleV4EvidenceRole;
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -189,6 +228,40 @@ function sorted(values: ReadonlySet<string>): string[] {
   return [...values].sort();
 }
 
+function exactCanonicalJsonl<T>(
+  bytes: Uint8Array,
+  path: string,
+  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+): readonly T[] {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    refuse("record-integrity", path, `${path} is not UTF-8 canonical JSONL`);
+  }
+  if (!text.endsWith("\n") || text.includes("\r")) refuse("record-integrity", path, `${path} must end in one LF and contain no CR`);
+  const lines = text.slice(0, -1).split("\n");
+  if (lines.length === 0 || lines.some((line) => line.length === 0)) refuse("record-integrity", path, `${path} contains an empty JSONL row`);
+  return lines.map((line, index) => {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      refuse("record-integrity", `${path}#${index + 1}`, "JSONL row is not JSON");
+    }
+    const parsed = schema.safeParse(value);
+    if (!parsed.success) refuse("record-integrity", `${path}#${index + 1}`, "JSONL row is outside its strict registered schema");
+    if (!equalBytes(new TextEncoder().encode(line), canonicalJsonBytes(parsed.data))) {
+      refuse("record-integrity", `${path}#${index + 1}`, "JSONL row is not exact canonical JSON");
+    }
+    return parsed.data;
+  });
+}
+
+function sameCanonical(left: unknown, right: unknown): boolean {
+  return equalBytes(canonicalJsonBytes(left as never), canonicalJsonBytes(right as never));
+}
+
 /** Verifies a copied public bundle using one authenticated byte snapshot and only bundle-carried
  * public keys. No pathname is reopened after manifest authentication. */
 export async function verifyPublicBundleSnapshot(
@@ -203,17 +276,21 @@ export async function verifyPublicBundleSnapshot(
   };
   const checks: PublicBundleVerificationCheck[] = ["manifest"];
   const manifestPaths = new Set(checked.manifest.files.map((file) => file.path));
-  for (const path of PUBLIC_BUNDLE_FILES) {
+  const isV4 = checked.manifest.format === BUNDLE_V4_FORMAT;
+  const mandatoryFiles = isV4 ? PUBLIC_BUNDLE_V4_FILES : PUBLIC_BUNDLE_FILES;
+  for (const path of mandatoryFiles) {
     if (!manifestPaths.has(path)) refuse("record-integrity", path, `mandatory public bundle file "${path}" is missing`);
   }
 
   const evidenceBytes = read("evidence.json");
-  const evidence = parseJson(evidenceBytes, BundleEvidenceCatalogSchema, "evidence.json");
+  const evidence = isV4
+    ? parseJson(evidenceBytes, BundleV4EvidenceCatalogSchema, "evidence.json")
+    : parseJson(evidenceBytes, BundleEvidenceCatalogSchema, "evidence.json");
   requireCanonical(evidenceBytes, evidence, "evidence.json");
   unique(evidence.records.map((record) => record.sha256), "evidence.json.records");
   for (const record of evidence.records) unique(record.roles, `evidence.json.records.${record.sha256}.roles`);
   const expectedPaths = new Set<string>([
-    ...PUBLIC_BUNDLE_FILES,
+    ...mandatoryFiles,
     ...evidence.records.map((record) => `records/${record.sha256}.bin`),
   ]);
   if (manifestPaths.has("verification/cancel-requested.json")) expectedPaths.add("verification/cancel-requested.json");
@@ -230,6 +307,24 @@ export async function verifyPublicBundleSnapshot(
     if (sha256(bytes) !== record.sha256) refuse("record-integrity", `records/${record.sha256}.bin`, "evidence record digest mismatch");
     records.set(record.sha256, bytes);
     declaredRoles.set(record.sha256, new Set(record.roles));
+  }
+
+  const trustBytes = read("trust/public-keys.json");
+  const trust = isV4
+    ? parseJson(trustBytes, BundleV4TrustSchema, "trust/public-keys.json")
+    : parseJson(trustBytes, BundleTrustSchema, "trust/public-keys.json");
+  requireCanonical(trustBytes, trust, "trust/public-keys.json");
+  const reportKey = publicKey(trust.report.spkiDerBase64, "trust.report.spkiDerBase64");
+  const carriedEvaluatorKeys = new Map(trust.evaluators.map((entry) => [
+    entry.evaluator,
+    { keyId: entry.keyId, publicKey: publicKey(entry.spkiDerBase64, `trust.evaluators.${entry.evaluator}`) },
+  ] as const));
+
+  let qualification: BundleQualification | undefined;
+  if (isV4) {
+    const qualificationBytes = read("qualification.json");
+    qualification = parseJson(qualificationBytes, BundleQualificationSchema, "qualification.json");
+    requireCanonical(qualificationBytes, qualification, "qualification.json");
   }
 
   const benchmarkBytes = read("benchmark.json");
@@ -299,6 +394,266 @@ export async function verifyPublicBundleSnapshot(
   const taskSpecs = new Map<string, ReturnType<typeof TaskSpecificationSchema.parse>>();
   const inspectSelections = new Map<string, InspectSelectionManifest>();
   const minVerdicts = run.policy.evaluation?.minVerdicts ?? 1;
+
+  let verifiedAdmission: ReturnType<typeof verifyBinaryJudgmentAdmissionClosure> | undefined;
+  let binaryAssetQualification: NonNullable<Parameters<typeof buildPublicAssets>[0]["binaryQualification"]> | undefined;
+  if (qualification !== undefined) {
+    const v4Trust = BundleV4TrustSchema.parse(trust);
+    const ports = {
+      resolveExactRecord: (digest: AdmissionSha256): Uint8Array => {
+        const bytes = records.get(digest.slice("sha256:".length));
+        if (bytes === undefined) throw new Error(`bundle record ${digest} is missing`);
+        return bytes;
+      },
+      verifyReviewerSignature: (input: { envelopeBytes: Uint8Array; evaluatorId: string; keyId: string }): boolean => {
+        const key = carriedEvaluatorKeys.get(input.evaluatorId);
+        if (key === undefined || key.keyId !== input.keyId) return false;
+        try {
+          const envelope = parseExactDsseEnvelope(input.envelopeBytes);
+          const signature = envelope.signatures[0];
+          return envelope.signatures.length === 1 && signature?.keyid === input.keyId
+            && verifySignature(
+              null,
+              Buffer.from(dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes)),
+              key.publicKey,
+              Buffer.from(signature.sig, "base64"),
+            );
+        } catch {
+          return false;
+        }
+      },
+      verifyAuthoritySignature: (input: { envelopeBytes: Uint8Array; keyId: string; role: AdmissionAuthorityRole }): boolean => {
+        const binding = v4Trust.admission.authorities.find((candidate) => candidate.role === input.role);
+        if (binding?.keyId !== input.keyId || input.keyId !== v4Trust.report.keyId) return false;
+        try {
+          const envelope = parseExactDsseEnvelope(input.envelopeBytes);
+          const signature = envelope.signatures[0];
+          return envelope.signatures.length === 1 && signature?.keyid === input.keyId
+            && verifySignature(
+              null,
+              Buffer.from(dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes)),
+              reportKey,
+              Buffer.from(signature.sig, "base64"),
+            );
+        } catch {
+          return false;
+        }
+      },
+    };
+    try {
+      verifiedAdmission = verifyBinaryJudgmentAdmissionClosure({
+        admissionManifestSha256: qualification.admissionManifestSha256 as AdmissionSha256,
+        expectedDraftId: assembly.header.draftId,
+      }, ports);
+    } catch (cause) {
+      refuse("record-integrity", "evidence-closure", `binary admission replay failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+    if (
+      !sameCanonical(verifiedAdmission.reachableSha256s, qualification.reachableSha256s)
+      || !sameCanonical(verifiedAdmission.reachableRecords, qualification.admissionRecords)
+      || verifiedAdmission.publicationGrade !== qualification.publicationGrade
+      || verifiedAdmission.manifest.truthAdmission !== qualification.truthAdmission
+      || !sameCanonical(verifiedAdmission.classes, qualification.candidateClasses)
+      || !sameCanonical(verifiedAdmission.strata, qualification.strata)
+    ) refuse("record-integrity", "qualification.json", "qualification admission projection differs from portable replay");
+    for (const record of verifiedAdmission.reachableRecords) {
+      for (const role of record.roles) addRole(expectedRoles, record.sha256.slice("sha256:".length), role);
+    }
+
+    const intakeParsed = BinaryItemBankIntakeExtensionSchema.safeParse(
+      (benchmark as unknown as Record<string, unknown>)[BINARY_ITEM_BANK_INTAKE_EXTENSION],
+    );
+    if (!intakeParsed.success) refuse("record-integrity", "evidence-closure", "Benchmark binary intake extension is outside its strict schema");
+    const intake = intakeParsed.data;
+    const itemBankSha256 = intake.itemBankSha256;
+    const sourceManifestSha256 = intake.sourceManifestSha256;
+    const admissionIndexSha256 = intake.admissionIndexSha256;
+    if (
+      typeof itemBankSha256 !== "string" || typeof sourceManifestSha256 !== "string"
+      || typeof admissionIndexSha256 !== "string"
+      || sourceManifestSha256 !== qualification.sourceManifestSha256
+      || intake.admissionManifestSha256 !== qualification.admissionManifestSha256
+      || intake.replacementLedgerSha256 !== verifiedAdmission.manifest.replacementLedgerSha256
+    ) refuse("record-integrity", "evidence-closure", "Benchmark binary intake roots differ from qualification/admission replay");
+    const roots = [
+      [itemBankSha256, "item-bank"],
+      [sourceManifestSha256, "source-manifest"],
+      [admissionIndexSha256, "admission-index"],
+    ] as const;
+    for (const [digest, role] of roots) {
+      if (!/^sha256:[a-f0-9]{64}$/u.test(digest) || !records.has(digest.slice("sha256:".length))) {
+        refuse("record-integrity", "evidence-closure", `${role} root ${digest} is missing`);
+      }
+      addRole(expectedRoles, digest.slice("sha256:".length), role);
+    }
+    const itemRows = exactCanonicalJsonl(records.get(itemBankSha256.slice("sha256:".length))!, "item-bank.jsonl", BinaryItemBankEntrySchema);
+    const sourceRows = exactCanonicalJsonl(records.get(sourceManifestSha256.slice("sha256:".length))!, "source-manifest.jsonl", BinarySourceManifestEntrySchema);
+    const admissionRows = exactCanonicalJsonl(records.get(admissionIndexSha256.slice("sha256:".length))!, "admission-index.jsonl", BinaryAdmissionIndexEntrySchema);
+    const strictOrder = (values: readonly string[], path: string): void => {
+      for (let index = 1; index < values.length; index += 1) {
+        if (values[index - 1]! >= values[index]!) refuse("record-integrity", path, `${path} rows are not sorted and unique`);
+      }
+    };
+    strictOrder(itemRows.map((row) => row.item.itemId), "item-bank.jsonl");
+    strictOrder(sourceRows.map((row) => row.provenanceSha256), "source-manifest.jsonl");
+    strictOrder(admissionRows.map((row) => row.itemSha256), "admission-index.jsonl");
+    const admittedByItem = new Map(verifiedAdmission.accepted.map((entry) => [entry.itemSha256, entry]));
+    const itemDigests = new Set<string>();
+    const usedProvenance = new Set<string>();
+    for (const [index, row] of itemRows.entries()) {
+      const item = row.item;
+      const digest = `sha256:${sha256(canonicalJsonBytes(item))}`;
+      if (itemDigests.has(digest)) refuse("record-integrity", "item-bank.jsonl", "item bank contains duplicate payloads");
+      itemDigests.add(digest);
+      const provenance = item.provenance;
+      for (const descriptor of provenance) {
+        const digestHex = descriptor.digest.sha256;
+        usedProvenance.add(`sha256:${digestHex}`);
+      }
+    }
+    const sourceDigests = sourceRows.map((row) => row.provenanceSha256);
+    if (!sameCanonical([...usedProvenance].sort(), [...sourceDigests].sort())) {
+      refuse("record-integrity", "source-manifest.jsonl", "source manifest does not exactly cover item-bank provenance");
+    }
+    const expectedAdmissions = verifiedAdmission.accepted.map((entry) => ({
+      admissionManifestSha256: verifiedAdmission!.manifestSha256,
+      itemSha256: entry.itemSha256,
+      labelResolutionSha256: entry.labelResolutionSha256,
+      analysisContextSha256: entry.analysisContextSha256,
+    })).sort((left, right) => left.itemSha256 < right.itemSha256 ? -1 : left.itemSha256 > right.itemSha256 ? 1 : 0);
+    const actualAdmissions = admissionRows.map((row) => ({
+      admissionManifestSha256: row.admissionManifestSha256,
+      itemSha256: row.itemSha256,
+      labelResolutionSha256: row.labelResolutionSha256,
+      analysisContextSha256: row.analysisContextSha256,
+    }));
+    if (!sameCanonical(actualAdmissions, expectedAdmissions)) refuse("record-integrity", "admission-index.jsonl", "admission index differs from authenticated accepted closure");
+
+    const expectedTasks = new Set(benchmark.items.map((item) => item.task.digest.sha256));
+    if (qualification.items.length !== expectedTasks.size || qualification.items.length !== verifiedAdmission.accepted.length) {
+      refuse("record-integrity", "qualification.items", "qualification Task coverage cardinality differs from Benchmark/admission");
+    }
+    for (const entry of qualification.items) {
+      const taskHex = entry.taskSha256.slice("sha256:".length);
+      const taskBytes = records.get(taskHex);
+      if (!expectedTasks.has(taskHex) || taskBytes === undefined) refuse("record-integrity", "qualification.items", `Task ${entry.taskSha256} is outside Benchmark evidence`);
+      const task = parseRecord(taskBytes, TaskSpecificationSchema, `records/${taskHex}.bin`);
+      if ((task as unknown as Record<string, unknown>)["network.jinn.binary-judgment.item-sha256"] !== entry.itemSha256) {
+        refuse("record-integrity", "qualification.items", `Task ${entry.taskSha256} item commitment differs`);
+      }
+      const admitted = admittedByItem.get(entry.itemSha256 as AdmissionSha256);
+      if (admitted === undefined || admitted.labelResolutionSha256 !== entry.labelResolutionSha256
+        || admitted.analysisContextSha256 !== entry.analysisContextSha256 || !itemDigests.has(entry.itemSha256)) {
+        refuse("record-integrity", "qualification.items", `Task ${entry.taskSha256} admission joins differ`);
+      }
+    }
+
+    const runArms = new Map(run.arms.map((arm) => [arm.armId, arm]));
+    if (!sameCanonical(
+      [...runArms.keys()].sort(),
+      qualification.arms.map((entry) => entry.armId),
+    )) {
+      refuse("record-integrity", "qualification.arms", "qualification does not exactly cover the Run arm set");
+    }
+    const instruments: Array<{
+      armId: string;
+      instrumentSha256: string;
+      promptTemplateSha256: string;
+      model: "gpt-5.6-luna";
+      generation: ReturnType<typeof parseBinaryJudgmentInstrument>["model"]["generation"];
+    }> = [];
+    for (const entry of qualification.arms) {
+      const arm = runArms.get(entry.armId);
+      if (arm?.pinning[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY] !== entry.instrumentSha256) {
+        refuse("record-integrity", "qualification.arms", `Run arm ${entry.armId} instrument pin differs`);
+      }
+      const instrumentHex = entry.instrumentSha256.slice("sha256:".length);
+      const instrumentBytes = records.get(instrumentHex);
+      if (instrumentBytes === undefined) refuse("record-integrity", "qualification.arms", `instrument ${entry.instrumentSha256} is missing`);
+      let instrument: ReturnType<typeof parseBinaryJudgmentInstrument>;
+      try {
+        instrument = parseBinaryJudgmentInstrument(instrumentBytes);
+      } catch (cause) {
+        refuse("record-integrity", "qualification.arms", `instrument ${entry.instrumentSha256} is invalid: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+      if (!equalBytes(instrumentBytes, canonicalJsonBytes(instrument as never))) refuse("record-integrity", "qualification.arms", "instrument is not exact canonical profile bytes");
+      addRole(expectedRoles, instrumentHex, "judge-instrument");
+      instruments.push({
+        armId: entry.armId,
+        instrumentSha256: entry.instrumentSha256,
+        promptTemplateSha256: instrument.promptTemplateSha256,
+        model: instrument.model.requested,
+        generation: instrument.model.generation,
+      });
+    }
+    const registeredSelections = readRunPublicationExtension(run as unknown as Record<string, unknown>)
+      ?.registrationArtifacts.filter((artifact) => artifact.role === INSPECT_SELECTION_CORRELATION_ROLE) ?? [];
+    if (
+      registeredSelections.length !== 1
+      || registeredSelections[0]!.artifact.mediaType !== "application/json"
+    ) {
+      refuse("record-integrity", "evidence-closure", "binary Run must register exactly one JSON Inspect runtime selection");
+    }
+    const registeredSelectionSha256 = registeredSelections[0]!.artifact.digest.sha256;
+    const runtimeSelectionRecords = evidence.records.filter((record) => record.roles.includes("runtime-selection"));
+    if (runtimeSelectionRecords.length !== 1) {
+      refuse("record-integrity", "evidence-closure", "binary qualification requires exactly one runtime-selection record");
+    }
+    const binarySelectionRecord = runtimeSelectionRecords[0]!;
+    if (binarySelectionRecord.sha256 !== registeredSelectionSha256) {
+      refuse("record-integrity", "evidence-closure", "runtime-selection evidence differs from the selection frozen in Run registration");
+    }
+    const binarySelectionBytes = records.get(binarySelectionRecord.sha256)!;
+    const binarySelection = parseRecord(
+      binarySelectionBytes,
+      InspectBinaryJudgeSelectionManifestSchema,
+      `records/${binarySelectionRecord.sha256}.bin`,
+    );
+    requireCanonical(binarySelectionBytes, binarySelection, `records/${binarySelectionRecord.sha256}.bin`);
+    const expectedSelectionArms = instruments.map((entry) => ({
+      armId: entry.armId,
+      instrumentSha256: entry.instrumentSha256,
+      model: entry.model,
+      generation: entry.generation,
+    }));
+    const actualSelectionArms = binarySelection.arms;
+    if (!sameCanonical(actualSelectionArms, expectedSelectionArms)) {
+      refuse("record-integrity", "evidence-closure", "binary runtime selection arms differ from qualification and Run pins");
+    }
+    addRole(expectedRoles, binarySelectionRecord.sha256, "runtime-selection");
+    const reviewerBindingMap = new Map<string, string>();
+    for (const entry of verifiedAdmission.reachableRecords
+      .filter((candidate) => candidate.roles.includes("human-review-verdict"))) {
+        const bytes = records.get(entry.sha256.slice("sha256:".length))!;
+        const view = readAdmissionVerdictEnvelope(bytes);
+        const keyId = parseExactDsseEnvelope(bytes).signatures[0]?.keyid;
+        if (typeof keyId !== "string") {
+          refuse("record-integrity", "trust.admission.reviewers", `reviewer ${view.evaluatorId} has no signer key id`);
+        }
+        const prior = reviewerBindingMap.get(view.evaluatorId);
+        if (prior !== undefined && prior !== keyId) {
+          refuse("record-integrity", "trust.admission.reviewers", `reviewer ${view.evaluatorId} uses more than one key`);
+        }
+        reviewerBindingMap.set(view.evaluatorId, keyId);
+    }
+    const reviewerBindings = [...reviewerBindingMap].map(([evaluator, keyId]) => ({ evaluator, keyId }))
+      .sort((left, right) => left.evaluator < right.evaluator ? -1 : left.evaluator > right.evaluator ? 1 : 0);
+    if (!sameCanonical(reviewerBindings, v4Trust.admission.reviewers)) {
+      refuse("record-integrity", "trust.admission.reviewers", "reviewer registry differs from authenticated signed review closure");
+    }
+    binaryAssetQualification = {
+      publicationGrade: qualification.publicationGrade,
+      truthAdmission: qualification.truthAdmission,
+      sourceManifestSha256: qualification.sourceManifestSha256,
+      admissionManifestSha256: qualification.admissionManifestSha256,
+      exclusions: qualification.exclusions,
+      instruments: instruments.map(({ armId, instrumentSha256, promptTemplateSha256 }) => ({
+        armId,
+        instrumentSha256,
+        promptTemplateSha256,
+      })),
+    };
+  }
 
   for (const cell of assembly.cells) {
     unique(cell.verdicts.map((verdict) => String(verdict.evalIndex)), `${cell.cellKey}.verdicts.evalIndex`);
@@ -598,32 +953,41 @@ export async function verifyPublicBundleSnapshot(
           || edge.evalAttempt !== undefined || edge.evalDeliverySha256 !== undefined
           || edge.evaluationTerminal !== undefined
         ) refuse("record-integrity", "evidence-closure", "same-execution Inspect score carries false separate-evaluator lineage");
-        const closure = inspectClosureByCell.get(cell.cellKey);
-        const summary = closure?.summary;
-        const verdictOutput = closure?.verdictOutput;
-        if (
-          closure === undefined || summary === undefined
-          || verdictOutput?.sha256 !== edge.verdictSha256
-        ) refuse("record-integrity", "evidence-closure", "same-execution score is not bound to one Inspect Task/Delivery/log/summary/verdict closure");
-        if (summary.terminal !== "scored") refuse("record-integrity", "evidence-closure", "Inspect verdict is attached to an unscorable summary");
-        if (summary.schema === "jinn.network/benchmark-product/inspect-cell-summary/2") {
-          const verdictBytes = verdictOutput === undefined ? undefined : records.get(verdictOutput.sha256);
-          if (verdictBytes === undefined) {
-            refuse("record-integrity", "evidence-closure", "Inspect Result Evaluation bytes are absent");
+        if (qualification !== undefined) {
+          // Binary Tasks are deliberately runtime-neutral and carry no generic Inspect summary.
+          // The solve Delivery plus signed verdict are joined here; verifyReport is the sole
+          // authority that replays its exact response/observation/instrument semantics below.
+          if (solveDeliveryByCell.get(cell.cellKey) === undefined) {
+            refuse("record-integrity", "evidence-closure", "binary same-execution verdict has no solve Delivery lineage");
           }
-          const verdictView = readVerdictEnvelope(verdictBytes);
-          const expectedMeasurements = summary.measurements.map((measurement) => ({
-            name: measurement.measurementName,
-            value: measurement.value!,
-          }));
+        } else {
+          const closure = inspectClosureByCell.get(cell.cellKey);
+          const summary = closure?.summary;
+          const verdictOutput = closure?.verdictOutput;
           if (
-            verdictView.verdict !== summary.verdict
-            || !equalBytes(
-              canonicalJsonBytes(readOrderedVerdictMeasurements(verdictBytes)),
-              canonicalJsonBytes(expectedMeasurements),
-            )
-          ) {
-            refuse("record-integrity", "evidence-closure", "Inspect Result Evaluation differs from its projected measurements");
+            closure === undefined || summary === undefined
+            || verdictOutput?.sha256 !== edge.verdictSha256
+          ) refuse("record-integrity", "evidence-closure", "same-execution score is not bound to one Inspect Task/Delivery/log/summary/verdict closure");
+          if (summary.terminal !== "scored") refuse("record-integrity", "evidence-closure", "Inspect verdict is attached to an unscorable summary");
+          if (summary.schema === "jinn.network/benchmark-product/inspect-cell-summary/2") {
+            const verdictBytes = verdictOutput === undefined ? undefined : records.get(verdictOutput.sha256);
+            if (verdictBytes === undefined) {
+              refuse("record-integrity", "evidence-closure", "Inspect Result Evaluation bytes are absent");
+            }
+            const verdictView = readVerdictEnvelope(verdictBytes);
+            const expectedMeasurements = summary.measurements.map((measurement) => ({
+              name: measurement.measurementName,
+              value: measurement.value!,
+            }));
+            if (
+              verdictView.verdict !== summary.verdict
+              || !equalBytes(
+                canonicalJsonBytes(readOrderedVerdictMeasurements(verdictBytes)),
+                canonicalJsonBytes(expectedMeasurements),
+              )
+            ) {
+              refuse("record-integrity", "evidence-closure", "Inspect Result Evaluation differs from its projected measurements");
+            }
           }
         }
       } else if (
@@ -862,7 +1226,7 @@ export async function verifyPublicBundleSnapshot(
       const verdictBytes = records.get(declared.sha256);
       if (verdictBytes === undefined) refuse("record-integrity", "evidence-closure", `verdict ${declared.sha256} bytes are missing`);
       const view = readVerdictEnvelope(verdictBytes);
-      if (declared.relationship === "same-execution-scorer" && (
+      if (qualification === undefined && declared.relationship === "same-execution-scorer" && (
         view.evaluatorExtensions?.["jinn.network/relationship"] !== "same-execution-scorer"
         || !view.limitations?.includes("same-execution-scorer")
       )) {
@@ -971,16 +1335,18 @@ export async function verifyPublicBundleSnapshot(
   }
   checks.push("evidence-closure");
 
-  const trustBytes = read("trust/public-keys.json");
-  const trust = parseJson(trustBytes, BundleTrustSchema, "trust/public-keys.json");
-  requireCanonical(trustBytes, trust, "trust/public-keys.json");
-  const reportKey = publicKey(trust.report.spkiDerBase64, "trust.report.spkiDerBase64");
   const derivedReportDid = didKeyFromEd25519PublicKey(reportKey);
   if (trust.report.author !== report.author || trust.report.keyId !== derivedReportDid || trust.report.didKey !== derivedReportDid) {
     refuse("record-integrity", "trust", "Report author/keyId/didKey are not derived from the bundled Report SPKI");
   }
   unique(trust.evaluators.map((entry) => entry.evaluator), "trust.evaluators.evaluator");
-  const referencedEvaluators = [...new Set(verdictCatalog.verdicts.map((verdict) => verdict.evaluator))].sort();
+  const admissionReviewerEvaluators = qualification === undefined
+    ? []
+    : BundleV4TrustSchema.parse(trust).admission.reviewers.map((entry) => entry.evaluator);
+  const referencedEvaluators = [...new Set([
+    ...verdictCatalog.verdicts.map((verdict) => verdict.evaluator),
+    ...admissionReviewerEvaluators,
+  ])].sort();
   const trustedEvaluators = trust.evaluators.map((entry) => entry.evaluator).sort();
   if (!equalBytes(canonicalJsonBytes(referencedEvaluators), canonicalJsonBytes(trustedEvaluators))) {
     refuse("record-integrity", "trust", "evaluator trust set must exactly equal Matrix-referenced evaluators");
@@ -1058,12 +1424,14 @@ export async function verifyPublicBundleSnapshot(
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
     .sort();
-  const comparison = derivePublicComparison({
-    benchmark,
-    matrix,
-    assemblyCells: assembly.cells,
-    recordBytes: records,
-  });
+  const comparison = qualification === undefined
+    ? derivePublicComparison({
+      benchmark,
+      matrix,
+      assemblyCells: assembly.cells,
+      recordBytes: records,
+    })
+    : undefined;
   const assetFacts = {
     claim,
     matrix,
@@ -1079,11 +1447,14 @@ export async function verifyPublicBundleSnapshot(
   // Reader v1 remains able to authenticate bundles published before the
   // human comparison projection existed. A bundle must match one complete,
   // deterministic presentation profile; individual assets cannot be mixed.
-  const legacyAssets = buildPublicAssets(assetFacts);
-  const isLegacyPresentation = Object.entries(legacyAssets).every(([path, bytes]) => equalBytes(read(path), bytes));
-  const expectedAssets = isLegacyPresentation
-    ? legacyAssets
-    : buildPublicAssets({ ...assetFacts, comparison });
+  const legacyAssets = qualification === undefined ? buildPublicAssets(assetFacts) : undefined;
+  const isLegacyPresentation = legacyAssets !== undefined
+    && Object.entries(legacyAssets).every(([path, bytes]) => equalBytes(read(path), bytes));
+  const expectedAssets = qualification !== undefined
+    ? buildPublicAssets({ ...assetFacts, binaryQualification: binaryAssetQualification })
+    : isLegacyPresentation
+      ? legacyAssets!
+      : buildPublicAssets({ ...assetFacts, comparison });
   for (const [path, bytes] of Object.entries(expectedAssets)) {
     if (!equalBytes(read(path), bytes)) refuse("record-integrity", path, `${path} is not the exact projection of verified public facts`);
   }
@@ -1100,12 +1471,24 @@ export async function verifyPublicBundleSnapshot(
     );
   return {
     verification: {
+      format: checked.manifest.format,
       identity: checked.identity,
       checks,
       ...identities,
       ...(runtimeMethod === undefined ? {} : { runtimeMethod }),
+      ...(qualification === undefined ? {} : {
+        qualification: {
+          publicationGrade: qualification.publicationGrade,
+          truthAdmission: qualification.truthAdmission,
+          candidateClasses: qualification.candidateClasses,
+          strata: qualification.strata,
+          armCount: 4 as const,
+          itemCount: qualification.items.length,
+          exclusionCount: qualification.exclusions.length,
+        },
+      }),
     },
-    comparison,
+    ...(comparison === undefined ? {} : { comparison }),
     snapshot: checked,
   };
 }

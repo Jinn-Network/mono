@@ -1,6 +1,6 @@
 {
   "name": "@colophon-claims/verify",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Standalone public-bundle verifier for Colophon claims.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -19,6 +19,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./admission": {
+      "import": "./dist/admission/index.js",
+      "types": "./dist/admission/index.d.ts"
     }
   },
   "bin": {

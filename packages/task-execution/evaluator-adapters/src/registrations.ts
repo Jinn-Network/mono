@@ -13,6 +13,14 @@ import type {
 import { parserAllowlistKey } from "@jinn-network/task-execution-profiles";
 import { PREDICTION_PARSER, SWE_REBENCH_PARSER } from "./parser-identity.js";
 import {
+  binaryJudgmentEvaluationMethodDescriptor,
+  contextBinaryJudgmentMaterialSource,
+  createBinaryJudgmentEvaluatorAdapter,
+  isBinaryJudgmentEvaluationSpecification,
+  validateBinaryJudgmentCompletedEvaluation,
+  type BinaryJudgmentMaterialSource,
+} from "./binary-judgment/adapter.js";
+import {
   createPredictionEvaluatorAdapter,
   type ResolutionSnapshotSource,
 } from "./prediction/adapter.js";
@@ -23,6 +31,7 @@ import {
 
 export const SWE_REBENCH_REGISTRATION_ID = "swe-rebench-v2";
 export const PREDICTION_REGISTRATION_ID = "prediction-market";
+export const BINARY_JUDGMENT_REGISTRATION_ID = "binary-judgment";
 
 export interface EvaluatorRegistrationOptions {
   readonly evaluatorId: string;
@@ -81,6 +90,27 @@ export function createPredictionEvaluatorRegistration(
     evaluatorIdentity: { id: options.evaluatorId },
     signer: { handle: options.signerHandle },
     outcomeValidator: (evaluation) => evaluation,
+    interruptionBehavior: "repeatable",
+  });
+}
+
+export function createBinaryJudgmentEvaluatorRegistration(
+  options: Pick<EvaluatorRegistrationOptions, "evaluatorId" | "signerHandle"> & {
+    readonly materialSource?: BinaryJudgmentMaterialSource;
+  },
+): EvaluatorRegistration {
+  return defineEvaluatorRegistration({
+    registrationId: BINARY_JUDGMENT_REGISTRATION_ID,
+    adapter: createBinaryJudgmentEvaluatorAdapter({
+      materialSource: options.materialSource ?? contextBinaryJudgmentMaterialSource(),
+    }),
+    // The deterministic scientific method is generated from the profiles-owned,
+    // digest-sealed parser/comparison oracle and cannot be deployment-overridden.
+    evaluationMethod: binaryJudgmentEvaluationMethodDescriptor(),
+    specificationCompatibility: isBinaryJudgmentEvaluationSpecification,
+    evaluatorIdentity: { id: options.evaluatorId },
+    signer: { handle: options.signerHandle },
+    outcomeValidator: validateBinaryJudgmentCompletedEvaluation,
     interruptionBehavior: "repeatable",
   });
 }
