@@ -2084,7 +2084,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2998,
       "generatedOutputSources": 1349,
-      "generatorSources": 643,
+      "generatorSources": 644,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -19756,6 +19756,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/skillsbench-controls.mjs"
       },
       {
         "categories": [

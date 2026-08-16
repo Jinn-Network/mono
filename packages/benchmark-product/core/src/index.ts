@@ -392,6 +392,18 @@ export type {
   FilesystemSnapshotOptions,
   ProcessLauncherOptions,
 } from "./runtime/native-ports.js";
+export {
+  SKILLSBENCH_PLUGIN_DIR,
+  SKILLSBENCH_RESOURCE_ROOT,
+  SKILLSBENCH_WORKSPACE_LAYOUT,
+  materializeSkillsBenchWorkspace,
+  verifySkillsBenchWorkspaceTriple,
+} from "./runtime/skillsbench-workspace.js";
+export type {
+  SkillsBenchWorkspace,
+  SkillsBenchWorkspaceFile,
+  SkillsBenchWorkspaceInput,
+} from "./runtime/skillsbench-workspace.js";
 export type {
   Demo1PreRunFreezeV3,
   Demo1PreRunFreezeV3CandidateInventory,
