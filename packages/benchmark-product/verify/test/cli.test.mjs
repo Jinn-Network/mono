@@ -30,8 +30,8 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
   assert.equal(result.code, 1);
   assert.deepEqual(JSON.parse(result.stdout), {
     ok: false,
-    verifierVersion: "1.0.0",
-    acceptedFormat: "benchmark-product-public-bundle/2",
+    verifierVersion: "2.0.0",
+    supportedFormats: ["benchmark-product-public-bundle/2", "benchmark-product-public-bundle/4"],
     code: "record-integrity",
     message: "bundle directory is missing",
   });
@@ -40,6 +40,7 @@ test("a missing bundle exits 1 with machine-readable invalid-bundle output", asy
 test("human success names all six checks and states the verification limit", async () => {
   const { renderVerifiedBundle } = await import("../dist/index.js");
   const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/4",
     identity: "a".repeat(64),
     checks: [
       "manifest",
@@ -56,9 +57,25 @@ test("human success names all six checks and states the verification limit", asy
     reportEnvelopeSha256: "f".repeat(64),
   });
   assert.match(output, /^Verified: 6 of 6 checks passed/m);
-  for (const check of ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"]) {
+  const orderedChecks = ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"];
+  for (const check of orderedChecks) {
     assert.match(output, new RegExp(`${check}\\s+passed`));
   }
+  assert.deepEqual(orderedChecks.map((check) => output.indexOf(check)), [...orderedChecks.map((check) => output.indexOf(check))].sort((a, b) => a - b));
+  assert.match(output, /Format: benchmark-product-public-bundle\/4/);
   assert.match(output, /does not prove that the machine that produced the/);
   assert.match(output, /No files were uploaded/);
+});
+
+test("human summary reports the actual passed count against the fixed six-check catalog", async () => {
+  const { renderVerifiedBundle } = await import("../dist/index.js");
+  const output = renderVerifiedBundle({
+    format: "benchmark-product-public-bundle/2",
+    identity: "a".repeat(64),
+    checks: ["manifest"],
+    benchmarkSha256: "b".repeat(64), runSha256: "c".repeat(64), matrixSha256: "d".repeat(64),
+    reportSha256: "e".repeat(64), reportEnvelopeSha256: "f".repeat(64),
+  });
+  assert.match(output, /^Verified: 1 of 6 checks passed/m);
+  assert.match(output, /Format: benchmark-product-public-bundle\/2/);
 });

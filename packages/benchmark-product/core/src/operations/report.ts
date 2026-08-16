@@ -69,6 +69,7 @@ import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
 import { buildLocalVenueHonesty, localVenueLimitsForRun } from "./run-results.js";
+import { binaryInstrumentReportLimitations } from "../run/binary-instrument-profile.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -160,6 +161,18 @@ export function runReport(
         && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
         ? INSPECT_SEPARATE_ASSURANCE_LIMITATIONS
         : [];
+      let binaryLimits: readonly string[] = [];
+      if (selected.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
+        try {
+          binaryLimits = binaryInstrumentReportLimitations(selected.parameters);
+        } catch (cause) {
+          refuse(
+            "record-integrity",
+            "run.analysisPlan",
+            cause instanceof Error ? cause.message : String(cause),
+          );
+        }
+      }
       const limitations = selected.method === BENCHMARKING_METHOD_IDS.pairedDelta
         ? [
             ...venueLimits,
@@ -168,8 +181,8 @@ export function runReport(
             ...(previewLimitation === undefined ? [] : [previewLimitation]),
           ]
         : previewLimitation === undefined
-          ? [...venueLimits, ...inspectLimits]
-          : [...venueLimits, ...inspectLimits, previewLimitation];
+          ? [...venueLimits, ...inspectLimits, ...binaryLimits]
+          : [...venueLimits, ...inspectLimits, ...binaryLimits, previewLimitation];
 
       let produced: ProducedReport;
       try {

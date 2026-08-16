@@ -540,6 +540,16 @@ export async function assertInspectOciBrokerReady(
   signal?: AbortSignal,
 ): Promise<void> {
   if (!manifest.arms.some((arm) => arm.provider !== undefined)) return;
+  await assertInspectOciBrokerConnectionReady(binding, hostConnectionDescriptor, signal);
+}
+
+/** Additive readiness seam for other Inspect-backed runtimes that always require the existing
+ * credential broker but intentionally do not implement the generic Inspect selection schema. */
+export async function assertInspectOciBrokerConnectionReady(
+  binding: Pick<InspectOciHostBinding, "dockerPath" | "imageDigest">,
+  hostConnectionDescriptor: string | undefined,
+  signal?: AbortSignal,
+): Promise<void> {
   if (hostConnectionDescriptor === undefined) throw new TypeError("OpenAI connection is not configured");
   const name = `jinn-inspect-preflight-${randomUUID().replaceAll("-", "").slice(0, 20)}`;
   await runBoundedProcess(

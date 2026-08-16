@@ -41,5 +41,6 @@ export function buildMethodPortsFromResolver(
     resolveVerdictBytes: resolveBytes,
     resolveRunBytes: resolveBytes,
     resolveTaskBytes: resolveBytes,
+    resolveRecordBytes: resolveBytes,
   };
 }

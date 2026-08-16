@@ -11,6 +11,11 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { filterByCutoff } from "./clean-subset.js";
 import { selectScorableCells, type CellRef } from "./exclusion.js";
+import {
+  BINARY_INSTRUMENT_PARAMETER_SCHEMA,
+  computeBinaryInstrumentQualification,
+  validateBinaryInstrumentParameters,
+} from "./binary-instrument-method.js";
 import type { Method, MethodComputeInput, MethodRegistry } from "./method.js";
 import {
   MethodInputError,
@@ -271,6 +276,25 @@ const METHOD_METADATA = {
     referenceSet: "registered-non-reference",
     deterministic: true,
     computeAvailability: "unavailable",
+  }),
+  binaryInstrument: metadata({
+    requiredInputs: [
+      "matrix.cells",
+      "referenced-result-evaluations",
+      "exact-run-bytes",
+      "exact-task-bytes",
+      "exact-evaluation-specification-bytes",
+      "exact-analysis-context-bytes",
+      "exact-label-resolution-bytes",
+      "exact-instrument-bytes",
+    ],
+    parameterSchema: BINARY_INSTRUMENT_PARAMETER_SCHEMA,
+    outputShape: "per-arm binary qualification with item-majority confusion counts, Wilson intervals, class/stratum slices, parser-invalid calls, instability, and exclusions",
+    exclusionRule: "exact k-cell Task/arm groups only; transport absence, inconclusive, conflict, or missing evaluation excludes the item-arm with exact cells",
+    clusteringRule: "Task digest plus arm ID; strict majority over registered scientific replicates",
+    referenceSet: "v1-reference",
+    deterministic: true,
+    computeAvailability: "available",
   }),
 } as const;
 
@@ -833,6 +857,9 @@ const cleanSubsetMethod: SingleSubjectMethod = {
       resolveVerdictBytes: input.resolveVerdictBytes,
       resolveRunBytes: input.resolveRunBytes,
       resolveTaskBytes: input.resolveTaskBytes,
+      ...(input.resolveRecordBytes === undefined
+        ? {}
+        : { resolveRecordBytes: input.resolveRecordBytes }),
       registry: input.registry,
       ...(input.resolveAnchoredBenchmarkAnnouncement === undefined
         ? {}
@@ -1199,6 +1226,15 @@ const bradleyTerryMethod: SingleSubjectMethod = {
   versionRobust: false,
 };
 
+const binaryInstrumentMethod: SingleSubjectMethod = {
+  ...METHOD_METADATA.binaryInstrument,
+  id: BENCHMARKING_METHOD_IDS.binaryInstrument,
+  version: BENCHMARKING_METHOD_VERSION,
+  versionRobust: false,
+  validateParameters: validateBinaryInstrumentParameters,
+  compute: computeBinaryInstrumentQualification,
+};
+
 // --- the registry -------------------------------------------------------------------------------
 
 const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
@@ -1210,6 +1246,7 @@ const SINGLE_SUBJECT_METHODS: readonly SingleSubjectMethod[] = [
   nonInferiorityIutMethod,
   pairedDeltaMethod,
   cleanSubsetMethod,
+  binaryInstrumentMethod,
   bradleyTerryMethod,
 ];
 
@@ -1256,8 +1293,8 @@ function subjectScopedMethod(method: SingleSubjectMethod): Method {
 
 const METHODS: readonly Method[] = SINGLE_SUBJECT_METHODS.map(subjectScopedMethod);
 
-/** The method registry: URI + version identification over nine registered methods
- * (eight in the v1 reference set; `bradley-terry@1` registered but not part of it). */
+/** The method registry: URI + version identification over ten registered methods
+ * (nine in the v1 reference set; `bradley-terry@1` registered but not part of it). */
 export function createMethodRegistry(): MethodRegistry {
   const byKey = new Map(METHODS.map((method) => [`${method.id}@${method.version}`, method]));
   return {

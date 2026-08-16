@@ -34,7 +34,11 @@ export type MethodInputErrorCode =
   | "anchored-announcement-unverified"
   | "anchored-announcement-malformed"
   | "incompatible-run-replicates"
-  | "method-incompatible-cost-unit";
+  | "method-incompatible-cost-unit"
+  | "binary-record-unavailable"
+  | "binary-record-digest-mismatch"
+  | "binary-record-malformed"
+  | "binary-binding-mismatch";
 
 /** Typed, stable fail-closed method-input failure. `digest` always names the exact requested
  * record reference whose bytes were unavailable, malformed, mismatched, or incompatible. */
@@ -161,15 +165,21 @@ function requireResolvedBytes(
   return bytes;
 }
 
+/** Exact validated Statement projection shared by generic and profile-specific methods. */
+export interface ResolvedResultEvaluationStatement {
+  readonly statement: Readonly<Record<string, unknown>>;
+  readonly predicate: Readonly<Record<string, unknown>>;
+}
+
 /**
  * Smallest exact Result Evaluation Statement validator needed by aggregation. It intentionally
  * does not recreate the profiles package: only the frozen identity, outcome, evaluator, and
  * effective-time fields consumed at this boundary are accepted, with no normalization.
  */
-export function resolveVerdictOutcome(
+export function resolveResultEvaluationStatement(
   digest: string,
   input: Pick<MethodComputeInput, "resolveVerdictBytes">,
-): VerdictOutcome {
+): ResolvedResultEvaluationStatement {
   const envelopeBytes = requireResolvedBytes(
     digest,
     input.resolveVerdictBytes,
@@ -257,7 +267,15 @@ export function resolveVerdictOutcome(
   if (verdict !== "pass" && verdict !== "fail" && verdict !== "inconclusive") {
     throw new MethodInputError("verdict-record-malformed", digest, "verdict is invalid");
   }
-  return { verdict };
+  return { statement, predicate };
+}
+
+export function resolveVerdictOutcome(
+  digest: string,
+  input: Pick<MethodComputeInput, "resolveVerdictBytes">,
+): VerdictOutcome {
+  const { predicate } = resolveResultEvaluationStatement(digest, input);
+  return { verdict: predicate["verdict"] as VerdictOutcome["verdict"] };
 }
 
 export function resolveRun(

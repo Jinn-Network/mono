@@ -35,15 +35,18 @@ import {
   type WorkspaceKind,
   type WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
-import { canonicalJsonBytes, type DsseSigner } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, recordDigest, type DsseSigner } from "@jinn-network/trust-core";
 import {
+  BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  BINARY_JUDGMENT_PROFILE_URI,
+  BinaryJudgmentObservationSchema,
   EVALUATION_TASK_PROFILE_URI,
   PREDICTION_FORECAST_PROFILE_URI,
   REPOSITORY_WORK_PROFILE_URI,
 } from "@jinn-network/task-execution-profiles";
 import type { LocalProvisionerInput } from "@jinn-network/task-execution-backend-local";
 import type { ResourceDescriptor, TaskSpecification } from "@jinn-network/task-execution-protocol";
-import { putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { artifactsDir } from "../workspace/layout.js";
 import {
   INSPECT_EMBEDDED_EVALUATOR_ID,
@@ -56,6 +59,19 @@ import {
 import type { InspectHostBinding } from "../runtime/inspect/host.js";
 import { resolveHarborMaterial, type HarborHostBinding } from "../runtime/harbor/host.js";
 import type { InspectSelectionManifest } from "../runtime/inspect/manifest.js";
+import {
+  INSPECT_BINARY_JUDGE_CONFIG_FILENAME,
+  INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME,
+  INSPECT_BINARY_JUDGE_OCI_OUTPUT_DIR,
+  INSPECT_BINARY_JUDGE_OUTPUT_FILES,
+  INSPECT_BINARY_JUDGE_SELECTION_FILENAME,
+  buildInspectBinaryJudgeWorkerInput,
+  type InspectBinaryJudgeWorkerInput,
+} from "../runtime/inspect/binary-judge.js";
+import type {
+  InspectBinaryJudgeHostBinding,
+  InspectBinaryJudgeSelectionManifest,
+} from "../runtime/inspect/binary-judge-manifest.js";
 import { assertSingleHarborTrial, HarborJobConfigSchema, harborJobSource, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { harborJobName } from "../runtime/harbor/launcher.js";
 import {
@@ -616,6 +632,13 @@ export interface InspectProvisionerOptions {
   readonly embeddedEvaluator?: VenueEvaluatorSigner;
 }
 
+export interface InspectBinaryJudgeProvisionerOptions {
+  readonly workspaceDir: string;
+  readonly selectionManifestSha256: string;
+  readonly manifest: InspectBinaryJudgeSelectionManifest;
+  readonly host: InspectBinaryJudgeHostBinding;
+}
+
 export interface HarborProvisionerOptions {
   readonly workspaceDir: string;
   readonly selectionManifestSha256: string;
@@ -988,6 +1011,96 @@ function inspectProvisionerContract(
   };
 }
 
+function inspectBinaryJudgeProvisionerContract(
+  input: LocalProvisionerInput,
+  options: InspectBinaryJudgeProvisionerOptions,
+): ProvisionerContract {
+  let expected: InspectBinaryJudgeWorkerInput | undefined;
+  return {
+    workspaceKind: (): WorkspaceKind => "dir",
+    async setup(view, paths) {
+      await ensureWorkspaceDirectories(paths);
+      const nonceParts = input.submission.nonce.split(":");
+      const annotatedCellKey = input.submission.annotations?.cellKey;
+      const cellKey = typeof annotatedCellKey === "string" ? annotatedCellKey : nonceParts.at(-2);
+      if (cellKey === undefined) throw new Error("binary-judgment Submission carries no cell key");
+      const coordinate = parseCellKey(cellKey);
+      const requirement = (view.effectiveRequirements as Record<string, unknown>)[
+        BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY
+      ];
+      if (typeof requirement !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(requirement)) {
+        throw new Error("binary-judgment Submission carries no exact instrument requirement");
+      }
+      const instrumentBytes = getSealedBytes(
+        options.workspaceDir,
+        requirement.slice("sha256:".length),
+      );
+      expected = buildInspectBinaryJudgeWorkerInput({
+        view,
+        sealedTaskBytes: input.sealedTaskBytes,
+        manifest: options.manifest,
+        selectionManifestSha256: options.selectionManifestSha256,
+        instrumentBytes,
+        cellKey,
+        armId: coordinate.armId,
+        replicate: coordinate.replicate,
+        outputDir: INSPECT_BINARY_JUDGE_OCI_OUTPUT_DIR,
+      });
+      await Promise.all([
+        writeFile(join(paths.input, STAGED_SEALED_TASK_FILENAME), input.sealedTaskBytes, { mode: 0o400 }),
+        writeFile(join(paths.input, INSPECT_BINARY_JUDGE_INSTRUMENT_FILENAME), instrumentBytes, { mode: 0o400 }),
+        writeFile(
+          join(paths.input, INSPECT_BINARY_JUDGE_SELECTION_FILENAME),
+          canonicalJsonBytes(options.manifest),
+          { mode: 0o400 },
+        ),
+        writeFile(
+          join(paths.input, INSPECT_BINARY_JUDGE_CONFIG_FILENAME),
+          canonicalJsonBytes(expected as never),
+          { mode: 0o400 },
+        ),
+      ]);
+    },
+    executionEnv: ({ env }) => ({ ...env }),
+    async harvest(paths, declaredOutputs): Promise<HarvestResult> {
+      if (expected === undefined) {
+        throw new Error("Inspect binary-judge harvest ran before exact input staging");
+      }
+      const responseBytes = new Uint8Array(await readFile(
+        join(paths.out, INSPECT_BINARY_JUDGE_OUTPUT_FILES.response),
+      ));
+      const observationBytes = new Uint8Array(await readFile(
+        join(paths.out, INSPECT_BINARY_JUDGE_OUTPUT_FILES.observation),
+      ));
+      const observation = BinaryJudgmentObservationSchema.parse(JSON.parse(
+        new TextDecoder("utf-8", { fatal: true }).decode(observationBytes),
+      ));
+      if (!Buffer.from(observationBytes).equals(Buffer.from(canonicalJsonBytes(observation)))) {
+        throw new Error("binary-judgment observation is not canonical JSON");
+      }
+      if (
+        observation.taskDigest !== expected.taskDigest
+        || observation.armId !== expected.armId
+        || observation.replicate !== expected.replicate
+        || observation.instrumentSha256 !== expected.instrumentSha256
+        || observation.requestSha256 !== expected.requestSha256
+        || observation.response.digest !== recordDigest(responseBytes)
+      ) {
+        throw new Error("binary-judgment outputs differ from the exact staged cell binding");
+      }
+      const result = await workspaceHarvest(paths, declaredOutputs);
+      const allowed = new Set<string>(Object.values(INSPECT_BINARY_JUDGE_OUTPUT_FILES));
+      const manifest = result.manifest.filter((entry) => allowed.has(entry.path));
+      await wipeScratch(paths);
+      return {
+        manifest,
+        omissions: result.omissions,
+        integrityViolations: result.integrityViolations,
+      };
+    },
+  };
+}
+
 // ── selector ──────────────────────────────────────────────────────────────────────────────────
 
 export interface CreateLocalProvisionerOptions {
@@ -1003,6 +1116,7 @@ export interface CreateLocalProvisionerOptions {
    */
   readonly evaluationContextVariationForTesting?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
   readonly inspect?: InspectProvisionerOptions;
+  readonly inspectBinaryJudge?: InspectBinaryJudgeProvisionerOptions;
   readonly harbor?: HarborProvisionerOptions;
   /** Resolves a repository-work Task's `repository-state` descriptor to a local bare mirror.
    * Absent on venues that serve no repository-work cells; a repository-work cell then refuses
@@ -1017,6 +1131,15 @@ export function createLocalProvisioner(
 ): (input: LocalProvisionerInput) => SelectedProvisioner {
   return (input: LocalProvisionerInput): SelectedProvisioner => {
     const profileUri = input.task.profile.uri;
+    if (
+      profileUri === BINARY_JUDGMENT_PROFILE_URI
+      && options.inspectBinaryJudge !== undefined
+    ) {
+      return {
+        id: "benchmark-product-inspect-binary-judge-dir-v1",
+        contract: inspectBinaryJudgeProvisionerContract(input, options.inspectBinaryJudge),
+      };
+    }
     if ((input.submission.requirements?.harness as { id?: unknown } | undefined)?.id === "harbor" && options.harbor !== undefined) {
       return { id: "benchmark-product-harbor-dir-v1", contract: harborProvisionerContract(input, options.harbor) };
     }

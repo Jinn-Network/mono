@@ -9,6 +9,7 @@ import {
 import { contextResolutionSnapshotSource } from "./prediction/adapter.js";
 import { evaluatorAdaptersParserAllowlist } from "./parser-identity.js";
 import {
+  createBinaryJudgmentEvaluatorRegistration,
   createPredictionEvaluatorRegistration,
   createSweRebenchEvaluatorRegistration,
 } from "./registrations.js";
@@ -22,7 +23,10 @@ export interface EvaluatorDeploymentOptions {
   readonly evaluatorId: string;
   /** Deployment-owned signing handle, resolved by later host-owned composition. */
   readonly signerHandle: string;
-  /** Explicit immutable evaluator method descriptor supplied by trusted deployment configuration. */
+  /**
+   * Explicit immutable method descriptor for the legacy swe-rebench and prediction adapters.
+   * Binary judgment instead generates its method from the profiles-owned sealed semantics.
+   */
   readonly evaluationMethod: ResourceDescriptor;
   /** Host-owned evidence writer; adapters never open a repository or manufacture evidence. */
   readonly evidenceWriter: EvidenceRepositoryWriter;
@@ -54,6 +58,10 @@ export function createEvaluatorDeployment(
   requireNonEmpty(options.signerHandle, "signerHandle");
   requirePositiveSafeInteger(options.maxClaimEvidenceBytes, "maxClaimEvidenceBytes");
   const registrations = validateEvaluatorRegistrationSet([
+    createBinaryJudgmentEvaluatorRegistration({
+      evaluatorId: options.evaluatorId,
+      signerHandle: options.signerHandle,
+    }),
     createSweRebenchEvaluatorRegistration({
       evaluatorId: options.evaluatorId,
       signerHandle: options.signerHandle,

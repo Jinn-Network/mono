@@ -1,12 +1,7 @@
 /**
- * The CLI's dispatch table (spec §5.2) — the complete agent surface through
- * BP-51. Twenty-seven parity operations over the operations facade (`init`,
- * `draft create`, `draft update`, `draft show`, `draft list`, `inspect`,
- * `sample init`, `import swebench`, `arm add`, `arm update`, `arm remove`,
- * `arm list`, `authority grant`, `authority revoke`, `authority show`,
- * `quote`, `lock`, `launch`, `resume`, `status`, `collect`, `results`,
- * `cancel`, `report`, `verify`, `publish`), plus the path-oriented standalone
- * `bundle verify` and Demo-1 preregistration-verifier exclusions, plus `help`.
+ * The CLI's dispatch table (spec §5.2) is the complete generated agent surface:
+ * 40 parity operations over the operations facade, plus the path-oriented
+ * standalone verifiers, documented exclusions, and `help`.
  * Every verb takes `--json` for a machine-readable envelope; every failure is a
  * typed error envelope with a distinct exit code (§4.3). `runCli` never throws and never touches
  * `process` — `bin.ts` is the only file in this package that does.
@@ -25,8 +20,8 @@
  * only the final rendered result.
  *
  * `CLI_VERB_NAMES` is the dispatch inventory. The generated parity artifact
- * checks the 27 workspace operations against the facade and records the two
- * read-only standalone verifiers separately.
+ * checks every workspace operation against the facade and records read-only
+ * standalone verifiers separately.
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
@@ -40,9 +35,14 @@ import {
   authorityGrant,
   authorityRevoke,
   authorityShow,
+  bindInspectBinaryJudge,
   createDraft,
   getDraft,
+  importBinaryItemBank,
   importSweBenchRows,
+  admitHumanTruth,
+  createHumanReviewPackets,
+  signHumanReviewResponse,
   initWorkspace,
   inspectDraft,
   listDrafts,
@@ -70,6 +70,7 @@ import {
   migrateTerminalBenchLegacyTask,
   updateDraft,
   type ArmWarning,
+  type BindInspectBinaryJudgeInput,
   type OperationContext,
   type OperationResult,
   type QuotePresentation,
@@ -78,13 +79,17 @@ import {
   type SelectHarborRuntimeInput,
   type SelectTerminalBench2RuntimeInput,
   type MigrateTerminalBenchLegacyTaskInput,
+  type AdmitHumanTruthInput,
+  type CreateHumanReviewPacketsInput,
+  type ImportBinaryItemBankInput,
+  type SignHumanReviewResponseInput,
 } from "../operations/index.js";
 import { verifyPublicBundle } from "../bundle/verify.js";
 import { verifyDemo1PreregistrationPreDispatch } from "../method/demo1-preregistration.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { readDraftDocument } from "../operations/drafts.js";
-import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
+import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, readTextFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
 export const USAGE = `${PRODUCT_BRANDING.displayName} — ${PRODUCT_BRANDING.tagline}
@@ -102,8 +107,20 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   import swebench  --workspace <dir> --principal <id> --draft <draftId> --file <rows.json>
                    [--name <name>] [--description <text>] [--version <ver>]
                    [--provenance-timestamp <rfc3339>]
+  import item-bank --workspace <dir> --principal <id> --profile binary-judgment@1
+                   --draft <draftId> --items <items.jsonl> --sources <sources.jsonl>
+                   --admissions <admissions.jsonl>
+                   [--name <name>] [--description <text>] [--version <ver>]
+  human-review packet create --workspace <dir> --principal <id> --draft <draftId>
+                   --file <packet-request.json>
+  human-review response sign --workspace <dir> --principal <id> --draft <draftId>
+                   --file <response.json> --signer <configured-signer.json>
+  human-review admit --workspace <dir> --principal <id> --draft <draftId>
+                   --file <admission-manifest.json>
   runtime inspect select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
+  runtime inspect bind-judge --workspace <dir> --principal <id> --draft <draftId>
+                   --file <binding.json>
   runtime harbor select --workspace <dir> --principal <id> --draft <draftId>
                    --file <selection.json>
   runtime terminal-bench-2 select --workspace <dir> --principal <id> --draft <draftId>
@@ -166,7 +183,15 @@ const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const IMPORT_SWEBENCH_FLAGS = [
   "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
 ] as const;
+const IMPORT_ITEM_BANK_FLAGS = [
+  "workspace", "principal", "json", "profile", "draft", "items", "sources", "admissions",
+  "name", "description", "version",
+] as const;
+const HUMAN_REVIEW_PACKET_CREATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const HUMAN_REVIEW_RESPONSE_SIGN_FLAGS = ["workspace", "principal", "json", "draft", "file", "signer"] as const;
+const HUMAN_REVIEW_ADMIT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_INSPECT_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
+const RUNTIME_INSPECT_BIND_JUDGE_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_HARBOR_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_2_SELECT_FLAGS = ["workspace", "principal", "json", "draft", "file"] as const;
 const RUNTIME_TERMINAL_BENCH_MIGRATE_FLAGS = ["workspace", "principal", "json", "file"] as const;
@@ -430,6 +455,107 @@ function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: b
   );
 }
 
+function handleImportItemBank(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, IMPORT_ITEM_BANK_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const profile = required(args, "profile");
+  if (profile !== "binary-judgment@1") {
+    refuse("invalid-invocation", "--profile", "--profile must be binary-judgment@1");
+  }
+  const name = optional(args, "name");
+  const description = optional(args, "description");
+  const version = optional(args, "version");
+  const input: ImportBinaryItemBankInput = {
+    profile,
+    draftId: required(args, "draft"),
+    itemBankJsonl: readTextFile(pathFrom(context.cwd, required(args, "items"))),
+    sourceManifestJsonl: readTextFile(pathFrom(context.cwd, required(args, "sources"))),
+    admissionIndexJsonl: readTextFile(pathFrom(context.cwd, required(args, "admissions"))),
+    ...(name === undefined ? {} : { name }),
+    ...(description === undefined ? {} : { description }),
+    ...(version === undefined ? {} : { version }),
+  };
+  const operation = importBinaryItemBank(opContext, input);
+  return renderResult(
+    operation,
+    jsonMode,
+    (value) => `imported ${value.taskSha256s.length} admitted binary item(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}; excluded ${value.excludedItemSha256s.length}, held back ${value.nonAdmittedItemSha256s.length}\n`,
+  );
+}
+
+function handleHumanReviewPacketCreate(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, HUMAN_REVIEW_PACKET_CREATE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    CreateHumanReviewPacketsInput,
+    "draftId"
+  >;
+  const result = createHumanReviewPackets(opContext, {
+    draftId: required(args, "draft"),
+    item: request.item,
+    evaluatorIds: request.evaluatorIds,
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `created ${value.packets.length} blind review packets for ${value.itemSha256}\n`,
+  );
+}
+
+async function handleHumanReviewResponseSign(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): Promise<CliResult> {
+  assertKnownFlags(args, HUMAN_REVIEW_RESPONSE_SIGN_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const response = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    SignHumanReviewResponseInput,
+    "draftId" | "configuredEvaluatorIds" | "activeEvaluatorId"
+  >;
+  const signer = readJsonFile(pathFrom(context.cwd, required(args, "signer"))) as Pick<
+    SignHumanReviewResponseInput,
+    "configuredEvaluatorIds" | "activeEvaluatorId"
+  >;
+  const result = await signHumanReviewResponse(opContext, {
+    draftId: required(args, "draft"),
+    configuredEvaluatorIds: signer.configuredEvaluatorIds,
+    activeEvaluatorId: signer.activeEvaluatorId,
+    packetSha256: response.packetSha256,
+    visibilityReceiptSha256: response.visibilityReceiptSha256,
+    label: response.label,
+    complete: response.complete,
+    completedAt: response.completedAt,
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `signed human review ${value.verdictSha256} as configured evaluator ${value.evaluatorId}\n`,
+  );
+}
+
+function handleHumanReviewAdmit(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, HUMAN_REVIEW_ADMIT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const request = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as Omit<
+    AdmitHumanTruthInput,
+    "draftId"
+  >;
+  const result = admitHumanTruth(opContext, {
+    draftId: required(args, "draft"),
+    truthAdmission: request.truthAdmission,
+    candidates: request.candidates,
+    ...(request.evidenceEnvelopesBase64 === undefined
+      ? {}
+      : { evidenceEnvelopesBase64: request.evidenceEnvelopesBase64 }),
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `admitted ${value.resolutions.length} truth resolution(s); publication-grade=${value.publicationGrade}\n`,
+  );
+}
+
 async function handleInspectRuntimeSelect(
   args: ParsedArgs,
   context: CliContext,
@@ -447,6 +573,23 @@ async function handleInspectRuntimeSelect(
     result,
     jsonMode,
     (value) => `selected Inspect evaluation ${value.selectionManifestSha256} for draft ${draftId}\n`,
+  );
+}
+
+function handleInspectRuntimeBindJudge(
+  args: ParsedArgs,
+  context: CliContext,
+  jsonMode: boolean,
+): CliResult {
+  assertKnownFlags(args, RUNTIME_INSPECT_BIND_JUDGE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const binding = readJsonFile(pathFrom(context.cwd, required(args, "file"))) as BindInspectBinaryJudgeInput["binding"];
+  const result = bindInspectBinaryJudge(opContext, { draftId, binding });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `bound Inspect binary judge ${value.selectionManifestSha256} to draft ${draftId}\n`,
   );
 }
 
@@ -975,7 +1118,12 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["inspect", handleInspect],
   ["sample init", handleSampleInit],
   ["import swebench", handleImportSweBench],
+  ["import item-bank", handleImportItemBank],
+  ["human-review packet create", handleHumanReviewPacketCreate],
+  ["human-review response sign", handleHumanReviewResponseSign],
+  ["human-review admit", handleHumanReviewAdmit],
   ["runtime inspect select", handleInspectRuntimeSelect],
+  ["runtime inspect bind-judge", handleInspectRuntimeBindJudge],
   ["runtime harbor select", handleHarborRuntimeSelect],
   ["runtime terminal-bench-2 select", handleTerminalBench2RuntimeSelect],
   ["runtime terminal-bench migrate", handleTerminalBenchMigration],
