@@ -120,6 +120,8 @@ export interface SkillsBenchUnit {
   readonly environment: {
     readonly dockerfile: SkillsBenchEntry;
     readonly nonSkillFiles: readonly SkillsBenchEntry[];
+    /** Files sitting directly under environment/skills/ that belong to no skill folder. */
+    readonly strayBundleFiles: readonly string[];
   };
   readonly skills: readonly SkillsBenchSkill[];
   readonly oracle: readonly SkillsBenchEntry[];
@@ -230,12 +232,20 @@ export function buildSkillsBenchUnit(input: SkillsBenchUnitBuildInput): SkillsBe
     throw new TypeError(`${task} declares an unknown network mode "${networkMode}"`);
   }
 
+  // A skill folder is a directory, so it must have something beneath it. Several packages keep a
+  // stray file directly under environment/skills/ — lean4-proof has INSTALLATION.md, three
+  // manufacturing tasks have reference.md — and reading those as folders would invent skills that
+  // do not exist. They are recorded as bundle-adjacent files instead.
+  const skillPaths = input.entries
+    .filter((entry) => entry.path.startsWith("environment/skills/"))
+    .map((entry) => ({ entry, segments: entry.path.split("/") }));
   const skillFolders = [...new Set(
-    input.entries
-      .filter((entry) => entry.path.startsWith("environment/skills/"))
-      .map((entry) => entry.path.split("/")[2])
-      .filter((folder): folder is string => folder !== undefined),
+    skillPaths.filter(({ segments }) => segments.length > 3).map(({ segments }) => segments[2]!),
   )].sort(compareCodeUnitStrings);
+  const strayBundleFiles = skillPaths
+    .filter(({ segments }) => segments.length === 3)
+    .map(({ entry }) => entry.path)
+    .sort(compareCodeUnitStrings);
 
   const declared = new Map(input.skills.map((skill) => [skill.folder, skill.skillMd]));
   for (const folder of skillFolders) {
@@ -312,6 +322,7 @@ export function buildSkillsBenchUnit(input: SkillsBenchUnitBuildInput): SkillsBe
             && !entry.path.startsWith("environment/skills/"),
         ).map((entry) => ({ ...entry })),
       ),
+      strayBundleFiles,
     },
     skills,
     oracle: byPath(input.entries.filter((entry) => entry.path.startsWith("oracle/")).map((entry) => ({ ...entry }))),

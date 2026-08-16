@@ -257,6 +257,63 @@ export {
   demo1PreRunFreezeV3Digest,
   verifyDemo1PreRunFreezeV3,
 } from "./method/demo1-prerun-v3.js";
+export {
+  SKILLSBENCH_V1_1_SOURCE,
+} from "./method/skillsbench-source.js";
+export type { SkillsBenchPinnedTask } from "./method/skillsbench-source.js";
+export {
+  SKILLSBENCH_RESOURCE_CLASSES,
+  SKILLSBENCH_NETWORK_MODES,
+  SKILLSBENCH_TASK_BUNDLE_UNIT_SCHEMA,
+  buildSkillsBenchUnit,
+  canonicalSkillsBenchUnitBytes,
+  classifySkillsBenchResource,
+  skillsBenchUnitDigest,
+  verifySkillsBenchUnit,
+  verifySkillsBenchUnitBodies,
+} from "./method/skillsbench-unit.js";
+export type {
+  SkillsBenchEntry,
+  SkillsBenchNetworkMode,
+  SkillsBenchResource,
+  SkillsBenchResourceClass,
+  SkillsBenchSkill,
+  SkillsBenchUnit,
+  SkillsBenchUnitBuildInput,
+} from "./method/skillsbench-unit.js";
+export {
+  SKILLSBENCH_CLUSTER_EDGE_CLASSES,
+  SKILLSBENCH_CLUSTER_POLICY,
+  deriveSkillsBenchClusters,
+  skillsBenchClusterId,
+  skillsBenchClusterOf,
+  verifySkillsBenchClusterGraph,
+} from "./method/skillsbench-clusters.js";
+export type {
+  SkillsBenchCluster,
+  SkillsBenchClusterEdge,
+  SkillsBenchClusterEdgeClass,
+  SkillsBenchClusterGraph,
+  SkillsBenchClusterInput,
+} from "./method/skillsbench-clusters.js";
+export {
+  SKILLSBENCH_ADMISSION_CHECKS,
+  SKILLSBENCH_ADMISSION_POLICY,
+  SKILLSBENCH_CONFLICTING_INSTRUCTION_PATHS,
+  SKILLSBENCH_REQUIRED_CLUSTERS,
+  SKILLSBENCH_REQUIRED_UNITS,
+  SKILLSBENCH_STATIC_CHECKS,
+  assessSkillsBenchStaticAdmission,
+} from "./method/skillsbench-admission.js";
+export type {
+  SkillsBenchAdmissionCheck,
+  SkillsBenchAdmissionInput,
+  SkillsBenchCapacity,
+  SkillsBenchCheckResult,
+  SkillsBenchCheckStatus,
+  SkillsBenchStaticAdmission,
+  SkillsBenchUnitVerdict,
+} from "./method/skillsbench-admission.js";
 export type {
   Demo1PreRunFreezeV3,
   Demo1PreRunFreezeV3CandidateInventory,

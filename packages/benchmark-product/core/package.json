@@ -1,7 +1,7 @@
 {
   "name": "@colophon-claims/core",
   "version": "1.0.0",
-  "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product domain — workspace, draft model, lifecycle, audit journal, principals/authority, the operations-library facade, and the CLI agent surface.",
+  "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product domain \u2014 workspace, draft model, lifecycle, audit journal, principals/authority, the operations-library facade, and the CLI agent surface.",
   "publishConfig": {
     "access": "public"
   },
@@ -53,6 +53,7 @@
     "demo1:task-evidence:test": "node --test scripts/demo1-task-evidence-runner.test.mjs",
     "demo1:task-evidence:freeze": "node scripts/demo1-task-evidence-freeze.mjs",
     "demo1:task-evidence:check": "node scripts/demo1-task-evidence-freeze.mjs --check",
+    "skillsbench:inventory": "SKILLSBENCH_INVENTORY=1 vitest run src/method/skillsbench-inventory.external.test.ts --reporter=verbose --silent=false",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
