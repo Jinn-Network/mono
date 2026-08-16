@@ -1,4 +1,5 @@
 import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
+import { EVIDENCE_NATIVE_BUNDLE_V5_CHECKS } from "@jinn-network/benchmarking-evidence";
 import { PUBLIC_BUNDLE_VERIFICATION_CHECKS } from "./reader-instructions.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult } from "./verify.js";
 import { VERIFIER_VERSION } from "./version.js";
@@ -21,8 +22,12 @@ function usage(): string {
 
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
   const checks = result.checks.map((check) => `${check.padEnd(24)}passed`).join("\n");
-  return `Verified: ${result.checks.length} of ${PUBLIC_BUNDLE_VERIFICATION_CHECKS.length} checks passed
-Bundle: sha256:${result.identity}
+  const totalChecks = result.format === "benchmark-product-public-bundle/5"
+    ? EVIDENCE_NATIVE_BUNDLE_V5_CHECKS.length
+    : PUBLIC_BUNDLE_VERIFICATION_CHECKS.length;
+  const identity = result.identity.startsWith("sha256:") ? result.identity : `sha256:${result.identity}`;
+  return `Verified: ${result.checks.length} of ${totalChecks} checks passed
+Bundle: ${identity}
 Format: ${result.format}
 
 ${checks}

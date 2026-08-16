@@ -45,13 +45,18 @@
     "react-dom": "19.2.8"
   },
   "resolutions": {
+    "@jinn-network/execution-evidence-builder": "portal:../../evidence/execution-evidence-builder",
     "@noble/hashes": "2.2.0",
     "@colophon-claims/core": "portal:../core",
     "@colophon-claims/verify": "portal:../verify",
     "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
     "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
+    "@jinn-network/benchmarking-evaluation": "portal:../../benchmarking/evaluation",
+    "@jinn-network/benchmarking-evidence": "portal:../../benchmarking/evidence",
     "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
     "@jinn-network/benchmarking-local": "portal:../../benchmarking/local",
+    "@jinn-network/benchmarking-native-capture": "portal:../../benchmarking/native-capture",
+    "@jinn-network/benchmarking-protocol": "portal:../../benchmarking/protocol",
     "@jinn-network/benchmarking-publication": "portal:../../benchmarking/publication",
     "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
     "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",

@@ -16,6 +16,7 @@ const EVIDENCE_PACKAGES = [
   ['repository-ipfs', '@jinn-network/evidence-repository-ipfs'],
   ['discovery', '@jinn-network/evidence-discovery'],
   ['catalog-sqlite', '@jinn-network/evidence-catalog-sqlite'],
+  ['execution-evidence-builder', '@jinn-network/execution-evidence-builder'],
   ['execution-recorder', '@jinn-network/execution-recorder'],
   ['attestation-issuer', '@jinn-network/attestation-issuer'],
   ['derivation', '@jinn-network/evidence-derivation'],
@@ -35,7 +36,8 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['repository-ipfs', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['discovery', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['catalog-sqlite', { dependencies: ['@jinn-network/evidence-discovery', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
-  ['execution-recorder', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  ['execution-evidence-builder', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
+  ['execution-recorder', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/execution-evidence-builder'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['attestation-issuer', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['derivation', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['publication', {
@@ -67,9 +69,14 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [],
     peerDependencies: [],
-    transitivePortalResolutions: ['@jinn-network/trust-core'],
+    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder', '@jinn-network/trust-core'],
   }],
-  ['execution-recorder-bridge', { dependencies: ['@jinn-network/evidence-repository', '@jinn-network/execution-recorder'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
+  ['execution-recorder-bridge', {
+    dependencies: ['@jinn-network/evidence-repository', '@jinn-network/execution-recorder'],
+    devDependencies: ['@jinn-network/evidence-protocol'],
+    optionalDependencies: [], peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
+  }],
   ['retrieval', {
     dependencies: [
       '@jinn-network/evidence-discovery',
@@ -161,8 +168,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(packageRoot, target[0])) || '.'}`;
 }
 
-test('the evidence package inventory is explicit and has sixteen manifests', () => {
-  assert.equal(EVIDENCE_PACKAGES.length, 16);
+test('the evidence package inventory is explicit and has seventeen manifests', () => {
+  assert.equal(EVIDENCE_PACKAGES.length, 17);
   for (const [directory, expectedName] of EVIDENCE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);
@@ -176,6 +183,7 @@ test('the evidence package inventory is explicit and has sixteen manifests', () 
     .flatMap((packageJson) => {
       const { name } = JSON.parse(readFileSync(packageJson, 'utf8'));
       return /^@jinn-network\/evidence-/.test(name)
+        || name === '@jinn-network/execution-evidence-builder'
         || name === '@jinn-network/execution-recorder'
         || name === '@jinn-network/attestation-issuer'
         || name === '@jinn-network/execution-recorder-bridge'

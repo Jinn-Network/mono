@@ -43,6 +43,7 @@ export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
   '@jinn-network/evidence-catalog-sqlite': 'portal:../../packages/evidence/catalog-sqlite',
   '@jinn-network/evidence-derivation': 'portal:../../packages/evidence/derivation',
   '@jinn-network/evidence-discovery': 'portal:../../packages/evidence/discovery',
+  '@jinn-network/execution-evidence-builder': 'portal:../../packages/evidence/execution-evidence-builder',
   '@jinn-network/evidence-local-runtime': 'portal:../../packages/evidence/local-runtime',
   '@jinn-network/evidence-protocol': 'portal:../../packages/evidence/protocol',
   '@jinn-network/evidence-repository': 'portal:../../packages/evidence/repository',
