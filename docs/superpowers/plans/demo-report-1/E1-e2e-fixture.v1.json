@@ -1,0 +1,48 @@
+{
+  "schema": "jinn.demo1.e2e-fixture.v1",
+  "status": "NON-MODEL PLUMBING FIXTURE — NOT AN OFFICIAL DEMO-1 RUN",
+  "taskId": "3d-scan-calc",
+  "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+  "skills": [
+    {
+      "folder": "mesh-analysis",
+      "bodySha256": "2179de46890fa06dfb2bffd25c0a7b975630922bef1a4515480bcdf552954ae8"
+    }
+  ],
+  "claudeMdSha256": "8ee05e73132e5ae74e54e1872910412452c4f573f7d204ec22527153d38a3670",
+  "arms": {
+    "A-native-skill": {
+      "reward": "0",
+      "outcome": "fail",
+      "files": 5,
+      "resourceParityDigest": "8ffca339d5344bec9ce971e9b6a9a3a5c9ca2f22aae94b474bad26e2278dff60",
+      "argv": 2
+    },
+    "B-flat-claude-md": {
+      "reward": "0",
+      "outcome": "fail",
+      "files": 4,
+      "resourceParityDigest": "8ffca339d5344bec9ce971e9b6a9a3a5c9ca2f22aae94b474bad26e2278dff60",
+      "argv": 0
+    },
+    "C-no-instructions": {
+      "reward": "0",
+      "outcome": "fail",
+      "files": 3,
+      "resourceParityDigest": "8ffca339d5344bec9ce971e9b6a9a3a5c9ca2f22aae94b474bad26e2278dff60",
+      "argv": 0
+    }
+  },
+  "assertions": {
+    "resourceParityAcrossArms": true,
+    "noArmPassedWithoutAnAgent": true,
+    "armBExposesNoSkillMd": true,
+    "armCExposesNoInstructionPath": true
+  },
+  "execution": {
+    "modelArms": 0,
+    "previews": 0,
+    "agentRuns": 0,
+    "containerRuns": 3
+  }
+}

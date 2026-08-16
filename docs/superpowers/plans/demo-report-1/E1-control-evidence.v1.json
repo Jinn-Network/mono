@@ -27,6 +27,24 @@
       "oracleReward": "1",
       "noOpReward": "0",
       "eligible": true
+    },
+    "bike-rebalance": {
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "dapt-intrusion-detection": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
+    },
+    "data-to-d3": {
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+      "oracleReward": "1",
+      "noOpReward": "0",
+      "eligible": true
     }
   }
 }
