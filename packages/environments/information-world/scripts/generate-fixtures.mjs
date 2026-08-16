@@ -411,7 +411,9 @@ if (write) {
       for (const item of await readdir(directory, { withFileTypes: true })) {
         const relativePath = prefix === "" ? item.name : `${prefix}/${item.name}`;
         if (item.isDirectory()) await walk(join(directory, item.name), relativePath);
-        else if (!seen.has(relativePath)) drift.push(`unexpected: ${relativePath}`);
+        else if (relativePath !== "manifest.sha256.json" && !seen.has(relativePath)) {
+          drift.push(`unexpected: ${relativePath}`);
+        }
       }
     };
     await walk(fixturesRoot);
