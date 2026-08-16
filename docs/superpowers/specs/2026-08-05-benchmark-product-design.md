@@ -1349,6 +1349,14 @@ semantics reopened):**
   Reuse-looking code inside this adapter is not by itself authority to promote or generalize
   it, and no such promotion occurs in this addendum.
 
+**Addendum — 2026-08-17, runtime engine direct-mode pointer ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md);
+no lifecycle, record, venue, or orchestration procedure reopened):** §3's
+"the product implements **no orchestration of its own**" means Colophon does
+not add a second driver beside `@jinn-network/benchmarking-run`. It does not
+mean Harbor's Job or Inspect's eval-set is the claim. Jinn owns lock, cells,
+retry, accounting, and Report; the engine owns the trial. Direct-mode batching
+must not merge evidence.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

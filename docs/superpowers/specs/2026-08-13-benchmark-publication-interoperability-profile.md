@@ -2,10 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
+| **Version** | 0.3 |
 | **Date** | 2026-08-13 |
+| **Amended** | 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); no §8.4 marketplace rewrite |
 | **Shape** | interoperability profile and design amendment |
-| **Status** | draft; revised after independent design review |
+| **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17 |
 | **Applies to** | any benchmarking product publishing through Jinn, including Colophon |
 | **Depends on** | [stack design principles](./2026-07-30-stack-design-principles.md), [benchmarking application](./2026-07-28-benchmarking-application-design.md), [record discovery](./2026-07-27-record-discovery-protocol-design.md), [evidence publication](./2026-07-25-evidence-publication-design.md), and [execution evidence](./2026-07-23-jinn-execution-evidence-protocol-design.md) |
 | **Companion research** | [Colophon, Harbor, and marketplace publication spike](../../spikes/2026-08-13-colophon-harbor-marketplace-publication.md) |
@@ -530,6 +531,10 @@ The product publication flow consumes contributions through this contract. It do
 Adapters contribute artifact role URIs under namespaces they own. Unknown roles are preserved and
 shown to verifiers; they do not override common semantics.
 
+Inspect has no separate contribution-profile section in this document. Direct-mode job grain for
+Inspect follows the same atoms as Harbor (one sample × arm → one dispatch) and the exclusive
+native-log rule in [`packages/benchmark-product/INSPECT-RUNTIME.md`](../../../packages/benchmark-product/INSPECT-RUNTIME.md).
+
 ### 8.3 Harbor profile
 
 A Harbor contribution should preserve, when produced:
@@ -564,6 +569,17 @@ A completed Harbor Job can be published without rerun only when a Jinn-aware ada
 Submission, Attempt engagement, observation streams, and native correlation during execution.
 Importing an arbitrary historical Job may preserve Harbor-native evidence, but it cannot claim to
 be the original Jinn dispatch under this profile.
+
+**Direct-mode job grain** (amended 2026-08-17, [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)):
+
+- **Allowed.** One Harbor Job (or equivalent engine eval) spanning the Run; each Trial or sample
+  binds 1:1 to a Jinn dispatch; the adapter observes the trial **as it starts** into Submission /
+  Attempt / Execution Evidence; engine retries and Inspect epochs stay pinned off; a replacement
+  is a new Submission, filled by a tiny follow-up job if needed.
+- **Shipped.** One engine invocation per cell. That grain is an adapter constraint, not Jinn
+  identity, and is not doctrine for the next adapter.
+- **Forbidden.** Two retry authorities over the same cells; synthesizing TEP after a foreign
+  completed job; folding a Job or eval-set into one Execution Evidence record.
 
 ### 8.4 Jinn marketplace composition
 

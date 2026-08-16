@@ -2,7 +2,7 @@
 
 - **Version:** 0.6
 - **Date:** 2026-08-13
-- **Updated:** 2026-08-14
+- **Updated:** 2026-08-17 — §5.5 engine-wrap vs Harbor campaign ([DR-2026-08-17](../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); 2026-08-14 qualification notes retained
 - **Status:** Accepted; implementation authorized 2026-08-13
 - **Decision owner:** Operator
 - **Design scope:** From a cold product-site visitor to a locally published, independently verified benchmark bundle
@@ -315,6 +315,8 @@ Harbor's primary surface is one `harbor run` command. It writes a durable job di
 Colophon does not copy Harbor's hosted Hub, account/upload path, usage statistics, cloud-sandbox posture, or product record model. Its distinct aha continues past inspection: a comparison becomes a locally published bundle that a reader can verify independently.
 
 Harbor is a later **runtime adapter**, not a new Colophon importer or canonical record kind. A Harbor Trial can contribute attempt evidence and a managed Job can be published post-hoc through the product-neutral accounting/publication profile. A Harbor Job is not a Colophon Run, arbitrary historical Jobs do not earn synthesized provenance, and Harbor-internal retries stay disabled beneath Jinn dispatch. The first UI can borrow Harbor's interaction model before the adapter ships; it must not advertise Harbor execution until that conformance path exists.
+
+Borrowing Harbor's interaction model is not "you run Harbor." When the Harbor adapter is advertised, it is a **trial engine under a Jinn lock** ([DR-2026-08-17](../log/decisions/2026-08-17-runtime-engine-direct-mode.md)). Do not promise Harbor Hub, one `harbor run` as the Colophon Run, or import of last week's job. The shipped Harbor grain is one engine invocation per cell; a Job spanning the Run is an allowed later direct-mode shape, not v1.
 
 ### 5.6 From the sample to “my tasks, my arms”
 
