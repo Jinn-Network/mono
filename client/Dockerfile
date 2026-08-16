@@ -38,6 +38,7 @@ COPY packages/evidence/repository/package.json packages/evidence/repository/yarn
 COPY packages/evidence/discovery/package.json packages/evidence/discovery/yarn.lock packages/evidence/discovery/.yarnrc.yml ./packages/evidence/discovery/
 COPY packages/evidence/catalog-sqlite/package.json packages/evidence/catalog-sqlite/yarn.lock packages/evidence/catalog-sqlite/.yarnrc.yml ./packages/evidence/catalog-sqlite/
 COPY packages/evidence/local-runtime/package.json packages/evidence/local-runtime/yarn.lock packages/evidence/local-runtime/.yarnrc.yml ./packages/evidence/local-runtime/
+COPY packages/evidence/execution-evidence-builder/package.json packages/evidence/execution-evidence-builder/yarn.lock packages/evidence/execution-evidence-builder/.yarnrc.yml ./packages/evidence/execution-evidence-builder/
 COPY packages/evidence/execution-recorder/package.json packages/evidence/execution-recorder/yarn.lock packages/evidence/execution-recorder/.yarnrc.yml ./packages/evidence/execution-recorder/
 COPY packages/evidence/attestation-issuer/package.json packages/evidence/attestation-issuer/yarn.lock packages/evidence/attestation-issuer/.yarnrc.yml ./packages/evidence/attestation-issuer/
 COPY packages/task-execution/protocol/package.json packages/task-execution/protocol/yarn.lock packages/task-execution/protocol/.yarnrc.yml ./packages/task-execution/protocol/
@@ -86,6 +87,7 @@ COPY packages/evidence/repository/tsconfig.json ./packages/evidence/repository/
 COPY packages/evidence/discovery/tsconfig.json ./packages/evidence/discovery/
 COPY packages/evidence/catalog-sqlite/tsconfig.json ./packages/evidence/catalog-sqlite/
 COPY packages/evidence/local-runtime/tsconfig.json ./packages/evidence/local-runtime/
+COPY packages/evidence/execution-evidence-builder/tsconfig.json packages/evidence/execution-evidence-builder/tsconfig.build.json ./packages/evidence/execution-evidence-builder/
 COPY packages/evidence/execution-recorder/tsconfig.json ./packages/evidence/execution-recorder/
 COPY packages/evidence/attestation-issuer/tsconfig.json ./packages/evidence/attestation-issuer/
 COPY packages/task-execution/protocol/tsconfig.json ./packages/task-execution/protocol/
@@ -119,6 +121,7 @@ COPY packages/evidence/repository/src/ ./packages/evidence/repository/src/
 COPY packages/evidence/discovery/src/ ./packages/evidence/discovery/src/
 COPY packages/evidence/catalog-sqlite/src/ ./packages/evidence/catalog-sqlite/src/
 COPY packages/evidence/local-runtime/src/ ./packages/evidence/local-runtime/src/
+COPY packages/evidence/execution-evidence-builder/src/ ./packages/evidence/execution-evidence-builder/src/
 COPY packages/evidence/execution-recorder/src/ ./packages/evidence/execution-recorder/src/
 COPY packages/evidence/attestation-issuer/src/ ./packages/evidence/attestation-issuer/src/
 COPY packages/task-execution/protocol/src/ ./packages/task-execution/protocol/src/
@@ -155,6 +158,7 @@ COPY packages/evidence/protocol/fixtures/ ./packages/evidence/protocol/fixtures/
 COPY packages/evidence/protocol/README.md ./packages/evidence/protocol/README.md
 COPY packages/evidence/repository/README.md ./packages/evidence/repository/README.md
 COPY packages/evidence/repository/specification.md ./packages/evidence/repository/specification.md
+COPY packages/evidence/execution-evidence-builder/README.md ./packages/evidence/execution-evidence-builder/README.md
 COPY packages/evidence/execution-recorder/fixtures/ ./packages/evidence/execution-recorder/fixtures/
 COPY packages/evidence/execution-recorder/README.md ./packages/evidence/execution-recorder/README.md
 COPY packages/evidence/attestation-issuer/fixtures/ ./packages/evidence/attestation-issuer/fixtures/

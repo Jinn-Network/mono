@@ -1070,6 +1070,7 @@ __metadata:
     "@jinn-network/evidence-local-runtime": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/execution-evidence-builder": "npm:0.1.0"
     "@jinn-network/execution-recorder": "npm:0.1.0"
     "@jinn-network/jinn-layer": "portal:../packages/layer"
     "@jinn-network/marketplace-binding": "npm:0.1.0"
