@@ -11,8 +11,7 @@
  * an expected, not exceptional, outcome for a CLI verb that may run with
  * the daemon up or down.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { defaultTokenPath } from '../api/ui-token.js';
+import { defaultTokenPath, resolveStoredUiToken } from '../api/ui-token.js';
 
 /**
  * Resolve the on-disk UI token (`~/.jinn-client/ui-token` by default). Shared by every CLI
@@ -21,7 +20,7 @@ import { defaultTokenPath } from '../api/ui-token.js';
  * issue #2404) — so there is exactly one token-resolution path, not one per caller.
  */
 export function resolveUiToken(tokenPath: string = defaultTokenPath()): string | undefined {
-  return existsSync(tokenPath) ? readFileSync(tokenPath, 'utf-8').trim() : undefined;
+  return resolveStoredUiToken(tokenPath);
 }
 
 export interface DaemonPostResult<T> {
@@ -31,9 +30,11 @@ export interface DaemonPostResult<T> {
   error?: string;
 }
 
-export async function postToDaemon<T = unknown>(opts: {
+export async function requestDaemon<T = unknown>(opts: {
   apiPort: number;
   path: string;
+  method?: string;
+  body?: unknown;
   timeoutMs?: number;
   /** Overridable for tests; defaults to the real `~/.jinn-client/ui-token`. */
   tokenPath?: string;
@@ -43,10 +44,14 @@ export async function postToDaemon<T = unknown>(opts: {
   const ac = new AbortController();
   const timeout = setTimeout(() => ac.abort(), opts.timeoutMs ?? 2000);
   try {
+    const headers: Record<string, string> = {};
+    if (token) headers['x-jinn-ui-token'] = token;
+    if (opts.body !== undefined) headers['content-type'] = 'application/json';
     const res = await fetch(`http://127.0.0.1:${opts.apiPort}${opts.path}`, {
-      method: 'POST',
+      method: opts.method ?? 'POST',
       signal: ac.signal,
-      headers: token ? { 'x-jinn-ui-token': token } : {},
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
     const body = (await res.json().catch(() => undefined)) as T | undefined;
     return { reachable: true, status: res.status, body };
@@ -55,4 +60,13 @@ export async function postToDaemon<T = unknown>(opts: {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function postToDaemon<T = unknown>(opts: {
+  apiPort: number;
+  path: string;
+  timeoutMs?: number;
+  tokenPath?: string;
+}): Promise<DaemonPostResult<T>> {
+  return requestDaemon<T>(opts);
 }

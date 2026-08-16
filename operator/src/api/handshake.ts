@@ -10,6 +10,7 @@
  */
 import type { Hono, MiddlewareHandler } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
+import { tokensEqual } from './ui-token.js';
 
 export interface HandshakeConfig {
   token: string;
@@ -27,17 +28,31 @@ export function addHandshakeRoutes(app: Hono, cfg: HandshakeConfig): void {
       sameSite: 'Strict',
       path: '/',
       maxAge: 60 * 60 * 24 * 30,
+      secure: (c.req.header('x-forwarded-proto') ?? '').toLowerCase() === 'https',
     });
     return c.json({ ok: true });
   });
 }
 
-export function requireUiToken(expected: string): MiddlewareHandler {
+export interface UiTokenExpectation {
+  token: string;
+  expiresAt?: string;
+}
+
+export function requireUiToken(expected: string | UiTokenExpectation): MiddlewareHandler {
+  const token = typeof expected === 'string' ? expected : expected.token;
+  const expiresAt = typeof expected === 'string' ? undefined : expected.expiresAt;
   return async (c, next) => {
+    if (expiresAt !== undefined) {
+      const expires = Date.parse(expiresAt);
+      if (!Number.isFinite(expires) || Date.now() >= expires) {
+        return c.json({ error: 'unauthorized' }, 401);
+      }
+    }
     const cookie = getCookie(c, 'jinn_ui_token');
     const header = c.req.header('x-jinn-ui-token');
     const supplied = cookie ?? header;
-    if (!supplied || supplied !== expected) {
+    if (!supplied || !tokensEqual(supplied, token)) {
       return c.json({ error: 'unauthorized' }, 401);
     }
     await next();

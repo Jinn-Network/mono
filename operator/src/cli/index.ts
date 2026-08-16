@@ -56,6 +56,7 @@ import bootstrapRetryCommand from './commands/bootstrap-retry.js';
 import onboardingCompleteCommand from './commands/onboarding-complete.js';
 import policyCommand from './commands/policy.js';
 import wiringCommand from './commands/wiring.js';
+import restartCommand from './commands/restart.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -100,6 +101,7 @@ const COMMANDS: CommandModule[] = [
   ceremonyCommand,
   policyCommand,
   wiringCommand,
+  restartCommand,
 ];
 
 /**

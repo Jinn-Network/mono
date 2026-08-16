@@ -14,6 +14,7 @@ import {
   type AuthContext,
 } from '../../preflight/claude-auth.js';
 import { ConfigLoadError, loadConfig } from '../../config.js';
+import { defaultTokenPath, ensureUiToken, rotateUiToken } from '../../api/ui-token.js';
 
 const CONTEXT_LABELS: Record<string, string> = {
   container: 'inside this container',
@@ -79,6 +80,68 @@ async function promptRuntimeMode(): Promise<AuthContext | null> {
 }
 
 async function run(ctx: CommandContext): Promise<void> {
+  const pairingVerb = ctx.argv[0];
+  if (pairingVerb === 'rotate' || pairingVerb === 'token') {
+    const rest = ctx.argv.slice(1);
+    let json = false;
+    let human = false;
+    let configPath: string | undefined;
+    try {
+      const parsed = parseArgs({
+        args: rest,
+        options: {
+          json: { type: 'boolean' },
+          human: { type: 'boolean' },
+          config: { type: 'string' },
+        },
+        allowPositionals: false,
+      });
+      json = Boolean(parsed.values.json);
+      human = Boolean(parsed.values.human);
+      configPath =
+        typeof parsed.values.config === 'string' && parsed.values.config.length > 0
+          ? parsed.values.config
+          : undefined;
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err instanceof Error ? err.message : String(err),
+          exampleCli: `jinn auth ${pairingVerb}`,
+          details: { field: 'flags' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    let stateDir: string | undefined;
+    try {
+      stateDir = loadConfig(configPath).stateDir;
+    } catch {
+      stateDir = undefined;
+    }
+    const path = defaultTokenPath(stateDir);
+    const token = pairingVerb === 'rotate' ? rotateUiToken(path) : ensureUiToken(path);
+    emitResult(
+      {
+        schemaVersion: 1 as const,
+        generatedAt: new Date().toISOString(),
+        verb: `auth ${pairingVerb}` as const,
+        token,
+      },
+      () => token,
+      {
+        json,
+        human,
+        writer: ctx.writer,
+        stdoutIsTty: ctx.stdoutIsTty,
+        noColor: Boolean(ctx.env['NO_COLOR']),
+      },
+    );
+    ctx.exit(0);
+    return;
+  }
+
   let parsed;
   try {
     parsed = parseArgs({
@@ -261,42 +324,22 @@ async function run(ctx: CommandContext): Promise<void> {
 
 const command: CommandModule = {
   name: 'auth',
-  summary: 'Legacy compatibility: check Claude authentication and persist daemon runtime mode',
-  helpText: `Usage: jinn auth [--mode <bare|docker-compose|container>] [--human] [--json] [--config <path>]
+  summary: 'Pairing and legacy Claude-auth: `jinn auth rotate` / `jinn auth token`, plus runtime mode',
+  helpText: `Usage:
+  jinn auth rotate [--json] [--human] [--config <path>]
+  jinn auth token [--json] [--human] [--config <path>]
+  jinn auth [--mode <bare|docker-compose|container>] [--human] [--json] [--config <path>]
 
-Compatibility command. New operators should install the client and run \`jinn run\`;
-the operator app handles Claude auth and runtime setup if needed.
+Pairing (daemon-down OK):
+  rotate   Replace the UI token and print it once.
+  token    Print the current UI token, creating one if missing.
 
-This command still supports two legacy/scripted concerns:
-
-1. Runtime mode — how the operator wants to run the daemon. Persisted to
-   config once (so downstream commands don't re-detect by cwd heuristics).
-2. Claude authentication — verified; in a TTY this command can still launch
-   the legacy interactive login flow if missing.
-
-Runtime-mode resolution order:
-  --mode flag          > scripted / CI
-  config.runtimeMode   > persisted from app setup or legacy \`jinn auth\`
-  interactive prompt   > TTY fallback — asks the operator to pick
-  filesystem heuristic > last-resort: container (/.dockerenv) → docker-compose (cwd jinn-daemon compose) → bare
-
-Behaviour:
-  - If runtime mode is unset and you're in a TTY, you'll be prompted. The
-    answer persists to ~/.jinn-client/config.json (or the --config path).
-  - If authenticated → emits JSON result with authenticated:true, context, detail.
-  - If not authenticated in non-TTY → emits invalid_invocation (exit 11).
-  - If not authenticated in a TTY → runs the appropriate login command.
-
-Flags:
-  --mode <m>   Set runtime mode non-interactively (bare | docker-compose | container).
-  --config <p> Path to config file (default: ~/.jinn-client/config.json).
-  --json       Force JSON output.
-  --human      Force human-readable output.
+Legacy compatibility still supports runtime-mode persistence and Claude login.
 
 Examples:
-  jinn run                           # public first-run path
-  jinn auth --mode bare --json       # compatibility: set mode and report auth status
-  jinn auth --mode docker-compose --json
+  jinn auth rotate --json
+  jinn auth token
+  jinn auth --mode bare --json
 `,
   run,
 };
