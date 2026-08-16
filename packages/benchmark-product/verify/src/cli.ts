@@ -1,4 +1,5 @@
-import { BUNDLE_FORMAT } from "./manifest.js";
+import { SUPPORTED_BUNDLE_FORMATS } from "./manifest.js";
+import { PUBLIC_BUNDLE_VERIFICATION_CHECKS } from "./reader-instructions.js";
 import { verifyPublicBundle, type PublicBundleVerificationResult } from "./verify.js";
 import { VERIFIER_VERSION } from "./version.js";
 
@@ -20,9 +21,9 @@ function usage(): string {
 
 export function renderVerifiedBundle(result: PublicBundleVerificationResult): string {
   const checks = result.checks.map((check) => `${check.padEnd(24)}passed`).join("\n");
-  return `Verified: ${result.checks.length} of 6 checks passed
+  return `Verified: ${result.checks.length} of ${PUBLIC_BUNDLE_VERIFICATION_CHECKS.length} checks passed
 Bundle: sha256:${result.identity}
-Format: ${BUNDLE_FORMAT}
+Format: ${result.format}
 
 ${checks}
 
@@ -46,7 +47,7 @@ export async function runVerifierCli(
   try {
     const result = await (deps.verify ?? verifyPublicBundle)(positional[0]!);
     const stdout = json
-      ? `${JSON.stringify({ ok: true, verifierVersion: VERIFIER_VERSION, acceptedFormat: BUNDLE_FORMAT, ...result })}\n`
+      ? `${JSON.stringify({ ok: true, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, ...result })}\n`
       : renderVerifiedBundle(result);
     return { exitCode: 0, stdout, stderr: "" };
   } catch (cause) {
@@ -54,7 +55,7 @@ export async function runVerifierCli(
     const code = (cause !== null && typeof cause === "object" && "code" in cause)
       ? String((cause as { code?: unknown }).code) : "environment";
     const stdout = json
-      ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, acceptedFormat: BUNDLE_FORMAT, code, message: error.message })}\n`
+      ? `${JSON.stringify({ ok: false, verifierVersion: VERIFIER_VERSION, supportedFormats: SUPPORTED_BUNDLE_FORMATS, code, message: error.message })}\n`
       : "";
     const stderr = json ? "" : `colophon-verify: ${error.message}\n`;
     return { exitCode: code === "record-integrity" ? 1 : 2, stdout, stderr };

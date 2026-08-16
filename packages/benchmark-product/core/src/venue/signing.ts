@@ -98,6 +98,17 @@ interface EvaluatorSigningKeySidecar extends SigningKeySidecar {
   readonly evaluatorId: string;
 }
 
+interface PersistedEvaluatorSigningKey extends EvaluatorSigningKeySidecar {
+  readonly slot: number;
+  readonly privateKey: KeyObject;
+}
+
+interface IncompleteEvaluatorSigningKey {
+  readonly slot: number;
+  readonly privateKey: KeyObject;
+  readonly keyId: string;
+}
+
 /** The one genuine evaluator key-id derivation, shared by key minting and portable verification. */
 export function verdictKeyIdFromEd25519PublicKey(publicKey: KeyObject): string {
   const spkiDer = publicKey.export({ type: "spki", format: "der" });
@@ -177,9 +188,10 @@ export function loadOrCreateVerdictSigningKey(workspaceDir: string): VerdictSign
  * Loads the workspace's per-evaluator Ed25519 verdict-signing keys, minting each on first use
  * (BP-21 multi-evaluator venue). One key per evaluator, at
  * `<workspaceDir>/venue/evaluators/<i>/verdict-signing-key.pem` (PKCS8 PEM, mode 0600, `i`
- * 1-based) with a JSON sidecar carrying `{ keyId, evaluatorId }`. Idempotent: re-loading with the
- * same evaluator list returns the same keys; a persisted slot whose sidecar names a different
- * evaluator id is refused rather than silently re-bound.
+ * 1-based) with a JSON sidecar carrying `{ keyId, evaluatorId }`. Slots are an append-only storage
+ * detail, never the evaluator's identity: callers may request a subset or a different order and
+ * receive the already-bound key for each id. A new identity is appended at `max(existing slots) +
+ * 1`; an existing slot is never re-bound.
  *
  * HONESTY (product design spec §6): these distinct keys prove AGENT-DISTINCTNESS only — that N
  * separately-keyed evaluator agents each signed their own verdict. The same operator mints and
@@ -190,58 +202,165 @@ export function loadOrCreateEvaluatorSigningKeys(
   workspaceDir: string,
   evaluators: readonly { readonly id: string }[],
 ): { readonly id: string; readonly key: VerdictSigningKey }[] {
-  return evaluators.map((evaluator, index) => {
-    const slotDir = join(workspaceDir, "venue", EVALUATORS_DIR_NAME, String(index + 1));
-    mkdirSync(slotDir, { recursive: true });
-    const pemPath = join(slotDir, PEM_FILE_NAME);
-    const sidecarPath = join(slotDir, SIDECAR_FILE_NAME);
+  const requestedIds = evaluators.map((evaluator) => evaluator.id);
+  const duplicateRequestedId = requestedIds.find((id, index) => requestedIds.indexOf(id) !== index);
+  if (duplicateRequestedId !== undefined) {
+    refuse(
+      "execution",
+      "evaluators",
+      `evaluator signing key request repeats evaluator id "${duplicateRequestedId}"`,
+    );
+  }
 
-    if (existsSync(pemPath)) {
-      const privateKey = createPrivateKey({ key: readFileSync(pemPath, "utf8"), format: "pem", type: "pkcs8" });
-      if (existsSync(sidecarPath)) {
-        const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as EvaluatorSigningKeySidecar;
-        if (sidecar.evaluatorId !== evaluator.id) {
-          refuse(
-            "execution",
-            `venue/evaluators/${index + 1}/verdict-signing-key.json`,
-            `persisted evaluator signing key ${index + 1} belongs to "${sidecar.evaluatorId}", not "${evaluator.id}"`,
-          );
-        }
-        return { id: evaluator.id, key: toVerdictSigningKey(privateKey, sidecar.keyId) };
-      }
-      // Crash recovery: the PEM landed but the sidecar write never did (the mint below writes
-      // the PEM first). No binding was ever recorded for this slot, so completing the
-      // interrupted mint — same key, this slot's requested evaluator id — is exactly what the
-      // crashed call was doing; the key material is never silently replaced.
-      const keyId = verdictKeyIdFromEd25519PublicKey(createPublicKey(privateKey));
-      writeKeyFileAtomicSync(
-        sidecarPath,
-        `${JSON.stringify({ keyId, evaluatorId: evaluator.id } satisfies EvaluatorSigningKeySidecar, null, 2)}\n`,
-      );
-      return { id: evaluator.id, key: toVerdictSigningKey(privateKey, keyId) };
-    }
-    if (existsSync(sidecarPath)) {
-      // The PEM is the key material; without it there is nothing to recover, and minting a
-      // fresh key under an already-recorded binding would be a silent key replacement — refuse.
+  const scanned = scanEvaluatorSigningKeySlots(workspaceDir);
+  const byEvaluatorId = new Map(scanned.complete.map((entry) => [entry.evaluatorId, entry]));
+  let maxSlot = scanned.maxSlot;
+
+  if (scanned.incomplete.length > 0) {
+    const unmatchedIds = requestedIds.filter((id) => !byEvaluatorId.has(id));
+    const [incomplete] = scanned.incomplete;
+    // A PEM-only residue has the key but has lost the identity binding. Recover only the one
+    // unambiguous interrupted-append shape: exactly one residue, it is the highest slot, and the
+    // retry supplies exactly one identity not already bound. Multiple possible bindings refuse
+    // rather than guessing. This retains the old single-slot recovery and the new append path.
+    if (scanned.incomplete.length !== 1 || unmatchedIds.length !== 1 || incomplete!.slot !== maxSlot) {
       refuse(
         "execution",
-        `venue/evaluators/${index + 1}/verdict-signing-key.pem`,
-        `evaluator signing key ${index + 1} PEM is missing but its sidecar exists — key material lost; refusing to silently mint a replacement key`,
+        `venue/evaluators/${incomplete!.slot}/${SIDECAR_FILE_NAME}`,
+        "evaluator signing key PEM is missing its identity sidecar and the interrupted binding cannot be recovered unambiguously",
       );
     }
+    const evaluatorId = unmatchedIds[0]!;
+    const sidecar = { keyId: incomplete!.keyId, evaluatorId } satisfies EvaluatorSigningKeySidecar;
+    writeKeyFileAtomicSync(
+      join(workspaceDir, "venue", EVALUATORS_DIR_NAME, String(incomplete!.slot), SIDECAR_FILE_NAME),
+      `${JSON.stringify(sidecar, null, 2)}\n`,
+    );
+    byEvaluatorId.set(evaluatorId, { ...sidecar, slot: incomplete!.slot, privateKey: incomplete!.privateKey });
+  }
 
+  for (const evaluatorId of requestedIds) {
+    if (byEvaluatorId.has(evaluatorId)) continue;
+    if (maxSlot >= Number.MAX_SAFE_INTEGER) {
+      refuse("execution", "venue/evaluators", "evaluator signing key slot range is exhausted");
+    }
+    const slot = maxSlot + 1;
+    const slotDir = join(workspaceDir, "venue", EVALUATORS_DIR_NAME, String(slot));
+    mkdirSync(slotDir, { recursive: true });
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
     const keyId = verdictKeyIdFromEd25519PublicKey(publicKey);
     const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
-    // Each file lands atomically (temp + rename), PEM before sidecar — the recovery branch
-    // above understands exactly this order's one possible crash residue (PEM without sidecar).
-    writeKeyFileAtomicSync(pemPath, pem);
+    // PEM before sidecar: the scan/recovery branch above understands this one possible crash
+    // residue and never replaces the key material.
+    writeKeyFileAtomicSync(join(slotDir, PEM_FILE_NAME), pem);
     writeKeyFileAtomicSync(
-      sidecarPath,
-      `${JSON.stringify({ keyId, evaluatorId: evaluator.id } satisfies EvaluatorSigningKeySidecar, null, 2)}\n`,
+      join(slotDir, SIDECAR_FILE_NAME),
+      `${JSON.stringify({ keyId, evaluatorId } satisfies EvaluatorSigningKeySidecar, null, 2)}\n`,
     );
-    return { id: evaluator.id, key: toVerdictSigningKey(privateKey, keyId) };
+    byEvaluatorId.set(evaluatorId, { keyId, evaluatorId, slot, privateKey });
+    maxSlot = slot;
+  }
+
+  return requestedIds.map((id) => {
+    const persisted = byEvaluatorId.get(id)!;
+    return { id, key: toVerdictSigningKey(persisted.privateKey, persisted.keyId) };
   });
+}
+
+function scanEvaluatorSigningKeySlots(workspaceDir: string): {
+  readonly complete: readonly PersistedEvaluatorSigningKey[];
+  readonly incomplete: readonly IncompleteEvaluatorSigningKey[];
+  readonly maxSlot: number;
+} {
+  const evaluatorsDir = join(workspaceDir, "venue", EVALUATORS_DIR_NAME);
+  if (!existsSync(evaluatorsDir)) return { complete: [], incomplete: [], maxSlot: 0 };
+
+  const numericEntries = readdirSync(evaluatorsDir, { withFileTypes: true }).map((entry) => {
+    if (!/^[1-9][0-9]*$/u.test(entry.name)) {
+      refuse(
+        "execution",
+        `venue/evaluators/${entry.name}`,
+        `evaluator signing key slot "${entry.name}" is not a canonical positive integer`,
+      );
+    }
+    const slot = Number(entry.name);
+    if (!Number.isSafeInteger(slot) || !entry.isDirectory()) {
+      refuse(
+        "execution",
+        `venue/evaluators/${entry.name}`,
+        `evaluator signing key slot "${entry.name}" is not a safe numeric directory`,
+      );
+    }
+    return { entry, slot };
+  }).sort((left, right) => left.slot - right.slot);
+
+  const complete: PersistedEvaluatorSigningKey[] = [];
+  const incomplete: IncompleteEvaluatorSigningKey[] = [];
+  const evaluatorIds = new Set<string>();
+  const keyIds = new Set<string>();
+  for (const { entry, slot } of numericEntries) {
+    const slotDir = join(evaluatorsDir, entry.name);
+    const pemPath = join(slotDir, PEM_FILE_NAME);
+    const sidecarPath = join(slotDir, SIDECAR_FILE_NAME);
+    const hasPem = existsSync(pemPath);
+    const hasSidecar = existsSync(sidecarPath);
+    if (!hasPem && hasSidecar) {
+      refuse(
+        "execution",
+        `venue/evaluators/${slot}/${PEM_FILE_NAME}`,
+        `evaluator signing key ${slot} PEM is missing but its sidecar exists — key material lost; refusing to silently mint a replacement key`,
+      );
+    }
+    if (!hasPem) {
+      refuse("execution", `venue/evaluators/${slot}`, `evaluator signing key slot ${slot} has no PEM or sidecar`);
+    }
+
+    let privateKey: KeyObject;
+    try {
+      privateKey = createPrivateKey({ key: readFileSync(pemPath, "utf8"), format: "pem", type: "pkcs8" });
+    } catch {
+      refuse("execution", `venue/evaluators/${slot}/${PEM_FILE_NAME}`, `evaluator signing key slot ${slot} PEM is malformed`);
+    }
+    if (privateKey.asymmetricKeyType !== "ed25519") {
+      refuse("execution", `venue/evaluators/${slot}/${PEM_FILE_NAME}`, `evaluator signing key slot ${slot} is not Ed25519`);
+    }
+    const keyId = verdictKeyIdFromEd25519PublicKey(createPublicKey(privateKey));
+    if (keyIds.has(keyId)) {
+      refuse("execution", `venue/evaluators/${slot}/${PEM_FILE_NAME}`, `evaluator key id "${keyId}" is persisted in more than one signing key slot`);
+    }
+    keyIds.add(keyId);
+    if (!hasSidecar) {
+      incomplete.push({ slot, privateKey, keyId });
+      continue;
+    }
+
+    let sidecar: unknown;
+    try {
+      sidecar = JSON.parse(readFileSync(sidecarPath, "utf8"));
+    } catch {
+      refuse("execution", `venue/evaluators/${slot}/${SIDECAR_FILE_NAME}`, `evaluator signing key slot ${slot} sidecar is malformed JSON`);
+    }
+    if (
+      typeof sidecar !== "object"
+      || sidecar === null
+      || typeof (sidecar as Record<string, unknown>)["keyId"] !== "string"
+      || typeof (sidecar as Record<string, unknown>)["evaluatorId"] !== "string"
+      || (sidecar as Record<string, unknown>)["keyId"] === ""
+      || (sidecar as Record<string, unknown>)["evaluatorId"] === ""
+    ) {
+      refuse("execution", `venue/evaluators/${slot}/${SIDECAR_FILE_NAME}`, `evaluator signing key slot ${slot} sidecar is malformed`);
+    }
+    const parsedSidecar = sidecar as EvaluatorSigningKeySidecar;
+    if (parsedSidecar.keyId !== keyId) {
+      refuse("execution", `venue/evaluators/${slot}/${SIDECAR_FILE_NAME}`, `evaluator signing key slot ${slot} sidecar key id does not match its PEM`);
+    }
+    if (evaluatorIds.has(parsedSidecar.evaluatorId)) {
+      refuse("execution", `venue/evaluators/${slot}/${SIDECAR_FILE_NAME}`, `evaluator id "${parsedSidecar.evaluatorId}" is persisted in more than one signing key slot`);
+    }
+    evaluatorIds.add(parsedSidecar.evaluatorId);
+    complete.push({ ...parsedSidecar, slot, privateKey });
+  }
+  return { complete, incomplete, maxSlot: numericEntries.at(-1)?.slot ?? 0 };
 }
 
 /**

@@ -22,6 +22,8 @@ export interface MethodComputeInput {
   readonly resolveVerdictBytes: (verdictDigest: string) => Uint8Array | undefined;
   readonly resolveRunBytes: (runDigest: string) => Uint8Array | undefined;
   readonly resolveTaskBytes: (taskDigest: string) => Uint8Array | undefined;
+  /** Additional exact records used only by methods whose profile closes over sealed material. */
+  readonly resolveRecordBytes?: (recordDigest: string) => Uint8Array | undefined;
   readonly resolveAnchoredBenchmarkAnnouncement?: (benchmarkDigest: string) => Uint8Array | undefined;
   readonly verifyAnchoredBenchmarkAnnouncement?: AnchoredBenchmarkAnnouncementVerifier;
   readonly registry?: MethodRegistry;

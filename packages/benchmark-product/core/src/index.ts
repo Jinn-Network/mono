@@ -14,6 +14,10 @@ export * from "./agent/index.js";
 export { BENCHMARKING_PROTOCOL } from "./platform.js";
 export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js";
 export type { GuiCapability } from "./cli/parity-map.js";
+export * from "./human-review/contracts.js";
+export * from "./human-review/application.js";
+export * from "./human-review/verification.js";
+export * from "./human-review/verification-workspace.js";
 
 // Typed errors (spec §4.3): callers branch on `code`, never on `message`.
 export { BenchmarkProductError, PRODUCT_ERROR_CODES, toErrorEnvelope } from "./errors.js";
@@ -157,6 +161,34 @@ export type {
   InspectScoringProjectionDisclosure,
 } from "./runtime/inspect/disclosure.js";
 export type { InspectScoringRequest, InspectScoreProjection } from "./runtime/inspect/manifest.js";
+export {
+  INSPECT_BINARY_JUDGE_ADAPTER_ID,
+  INSPECT_BINARY_JUDGE_LAUNCHER_ID,
+  INSPECT_BINARY_JUDGE_LAUNCHER_VERSION,
+  INSPECT_BINARY_JUDGE_SELECTION_SCHEMA,
+  InspectBinaryJudgeBindingRequestSchema,
+  InspectBinaryJudgeHostBindingSchema,
+  InspectBinaryJudgeSelectionManifestSchema,
+} from "./runtime/inspect/binary-judge-manifest.js";
+export type {
+  InspectBinaryJudgeArm,
+  InspectBinaryJudgeBindingRequest,
+  InspectBinaryJudgeHostBinding,
+  InspectBinaryJudgeSelectionManifest,
+} from "./runtime/inspect/binary-judge-manifest.js";
+export {
+  INSPECT_BINARY_JUDGE_CONFIG_FILENAME,
+  INSPECT_BINARY_JUDGE_OCI_CONFIG_PATH,
+  INSPECT_BINARY_JUDGE_OCI_OUTPUT_DIR,
+  INSPECT_BINARY_JUDGE_OUTPUT_FILES,
+  buildInspectBinaryJudgeOciRunArgs,
+  buildInspectBinaryJudgeWorkerInput,
+  inspectBinaryJudgeWorkerPath,
+  inspectBinaryJudgeWorkerSha256,
+  makeInspectBinaryJudgeLauncher,
+  validateInspectBinaryJudgePinning,
+} from "./runtime/inspect/binary-judge.js";
+export type { InspectBinaryJudgeWorkerInput } from "./runtime/inspect/binary-judge.js";
 
 // Demo-1's explicit real-Claude runtime and byte-preserving arm construction. The product does
 // not discover executables or source content ambiently; callers bind both before lock.
@@ -401,9 +433,15 @@ export {
   authorityGrant,
   authorityRevoke,
   authorityShow,
+  BINARY_ITEM_BANK_PROFILE,
+  bindInspectBinaryJudge,
   createDraft,
   getDraft,
+  importBinaryItemBank,
   importSweBenchRows,
+  admitHumanTruth,
+  createHumanReviewPackets,
+  signHumanReviewResponse,
   initWorkspace,
   inspectDraft,
   listDrafts,
@@ -439,13 +477,27 @@ export type {
   ArmWarning,
   AuthorityGrantInput,
   AuthorityRevokeInput,
+  BindInspectBinaryJudgeInput,
+  BindInspectBinaryJudgeResult,
   BenchmarkInspection,
   BenchmarkInspectionItem,
   CreateDraftInput,
   DraftInspection,
   DraftSummary,
+  ImportBinaryItemBankInput,
+  ImportBinaryItemBankResult,
   ImportSweBenchRowsInput,
   ImportSweBenchRowsResult,
+  AdmitHumanTruthInput,
+  AdmitHumanTruthResult,
+  CreateHumanReviewPacketsInput,
+  CreateHumanReviewPacketsResult,
+  HumanAdmissionCandidateInput,
+  HumanAdmissionExclusionSummary,
+  HumanAdmissionResolutionSummary,
+  HumanReviewPacketSummary,
+  SignHumanReviewResponseInput,
+  SignHumanReviewResponseResult,
   OperationContext,
   OperationResult,
   MigrateTerminalBenchLegacyTaskInput,
@@ -539,6 +591,28 @@ export { buildSampleBenchmark, SAMPLE_ISSUER } from "./intake/sample.js";
 export type { SampleBenchmark, SampleBenchmarkTask } from "./intake/sample.js";
 export { convertSweBenchRows } from "./intake/swebench.js";
 export type { ConvertSweBenchRowsOptions } from "./intake/swebench.js";
+export {
+  BINARY_ADMISSION_INDEX_ENTRY_PROTOCOL,
+  BINARY_ITEM_BANK_ENTRY_PROTOCOL,
+  BINARY_ITEM_BANK_INTAKE_EXTENSION,
+  BINARY_SOURCE_MANIFEST_ENTRY_PROTOCOL,
+  BinaryAdmissionIndexEntrySchema,
+  BinaryItemBankEntrySchema,
+  BinaryItemBankIntakeExtensionSchema,
+  BinarySourceManifestEntrySchema,
+  convertBinaryItemBank,
+  parseBinaryItemBankIntakeExtension,
+  renderCanonicalJsonl,
+} from "./intake/binary-item-bank.js";
+export type {
+  BinaryAdmissionIndexEntry,
+  BinaryItemBankEntry,
+  BinaryItemBankIntakeExtension,
+  BinarySourceManifestEntry,
+  ConvertBinaryItemBankInput,
+  ConvertedBinaryItem,
+  ConvertedBinaryItemBank,
+} from "./intake/binary-item-bank.js";
 
 // The CLI as a library (spec §5.2): `runCli` is a pure function of argv and its context;
 // only dist/cli/bin.js touches the process.

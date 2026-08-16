@@ -57,6 +57,7 @@ export const BENCHMARKING_METHOD_IDS = {
   noninferiorityIut: "jinn.benchmarking.method/noninferiority-iut",
   pairedDelta: "jinn.benchmarking.method/paired-delta",
   cleanSubset: "jinn.benchmarking.method/clean-subset",
+  binaryInstrument: "jinn.benchmarking.method/binary-instrument",
   bradleyTerry: "jinn.benchmarking.method/bradley-terry",
 } as const;
 

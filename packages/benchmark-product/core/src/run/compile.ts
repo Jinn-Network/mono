@@ -34,7 +34,10 @@
  * is reused for a rehearsal without ever letting the rehearsal's own subset Benchmark become one.
  */
 
-import { BENCHMARKING_METHOD_REGISTRY } from "@jinn-network/benchmarking-aggregate";
+import {
+  BENCHMARKING_METHOD_REGISTRY,
+  type BinaryInstrumentParameters,
+} from "@jinn-network/benchmarking-aggregate";
 import {
   BENCHMARKING_METHOD_IDS,
   BENCHMARKING_METHOD_VERSION,
@@ -50,6 +53,10 @@ import { resolveAssurance, type DraftDocument, type DraftSpec, type ResolvedAssu
 import { refuse, refuseWithIssues } from "../errors.js";
 import { runtimeSubmissionBaseline } from "../runtime/adapter.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import {
+  compileBinaryInstrumentProfile,
+  isBinaryInstrumentSpec,
+} from "./binary-instrument-profile.js";
 
 /** The sealed Run record's own analysisPlan entry shape — reused rather than invented so this
  * module can never drift from what `planRun`/`sealRun` actually accept. */
@@ -72,7 +79,11 @@ const RESERVED_ANALYSIS_PARAMETER_KEYS = ["verdictRule", "baseline", "candidate"
  * would otherwise seal into an immutable Run and only fail at `report` time — after the run has
  * been executed and paid for.
  */
-function buildAnalysisPlan(spec: DraftSpec, verdictRule: ResolvedAssurance["verdictRule"]): RunAnalysisPlanEntry[] {
+function buildAnalysisPlan(
+  spec: DraftSpec,
+  verdictRule: ResolvedAssurance["verdictRule"],
+  binaryParameters?: BinaryInstrumentParameters,
+): RunAnalysisPlanEntry[] {
   const wilson: RunAnalysisPlanEntry = {
     method: BENCHMARKING_METHOD_IDS.wilson,
     version: BENCHMARKING_METHOD_VERSION,
@@ -99,6 +110,17 @@ function buildAnalysisPlan(spec: DraftSpec, verdictRule: ResolvedAssurance["verd
       );
     }
     return [wilson];
+  }
+
+  if (analysis.method === BENCHMARKING_METHOD_IDS.binaryInstrument) {
+    if (binaryParameters === undefined) {
+      refuse("validation", "spec.analysis", "binary-instrument composition was not derived from the sealed Benchmark closure");
+    }
+    return [wilson, {
+      method: BENCHMARKING_METHOD_IDS.binaryInstrument,
+      version: BENCHMARKING_METHOD_VERSION,
+      parameters: binaryParameters as unknown as Record<string, unknown>,
+    }];
   }
 
   const method = BENCHMARKING_METHOD_REGISTRY.get(analysis.method, analysis.version);
@@ -176,7 +198,13 @@ function detailFromCause(cause: unknown): string {
  * (rather than reading `spec.taskSet.benchmarkSha256` itself) so a caller can plan against a
  * digest other than the draft's own official one — exactly what `compilePreviewRun` needs.
  */
-function planFromSpec(spec: DraftSpec, benchmarkDigestHex: string, owner: string, closeAt: string): PlannedRun {
+function planFromSpec(
+  spec: DraftSpec,
+  benchmarkDigestHex: string,
+  owner: string,
+  closeAt: string,
+  binaryParameters?: BinaryInstrumentParameters,
+): PlannedRun {
   const arms: RunArm[] = spec.arms.map((arm) => ({
     armId: arm.armId,
     pinning: arm.pinning as Record<string, unknown>,
@@ -206,7 +234,7 @@ function planFromSpec(spec: DraftSpec, benchmarkDigestHex: string, owner: string
         },
         submissionBaseline: runtimeSubmissionBaseline(spec.evaluationRuntime),
       },
-      analysisPlan: buildAnalysisPlan(spec, resolvedAssurance.verdictRule),
+      analysisPlan: buildAnalysisPlan(spec, resolvedAssurance.verdictRule, binaryParameters),
       ...(spec.budget !== undefined ? { budget: spec.budget } : {}),
       venue: { kind: "self-run" },
       closeAt,
@@ -241,7 +269,11 @@ export function compileDraft(input: CompileDraftInput): CompiledRun {
   const benchmarkSha256 = spec.taskSet.benchmarkSha256;
   const benchmarkRecord = parseBenchmark(getSealedBytes(workspaceDir, benchmarkSha256));
 
-  const plannedRun = planFromSpec(spec, benchmarkSha256, owner, closeAt);
+  const binaryParameters = isBinaryInstrumentSpec(spec)
+    ? compileBinaryInstrumentProfile({ workspaceDir, draft, benchmark: benchmarkRecord })
+    : undefined;
+
+  const plannedRun = planFromSpec(spec, benchmarkSha256, owner, closeAt, binaryParameters);
 
   return { plannedRun, benchmarkRecord, benchmarkSha256 };
 }
@@ -296,6 +328,9 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
   }
 
   const fullRecord = parseBenchmark(getSealedBytes(workspaceDir, spec.taskSet.benchmarkSha256));
+  const binaryParameters = isBinaryInstrumentSpec(spec)
+    ? compileBinaryInstrumentProfile({ workspaceDir, draft, benchmark: fullRecord })
+    : undefined;
   const itemCount = itemLimit === undefined ? fullRecord.items.length : Math.min(itemLimit, fullRecord.items.length);
   const subsetItems = fullRecord.items.slice(0, itemCount);
 
@@ -310,6 +345,12 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
     ...(fullRecord.license !== undefined ? { license: fullRecord.license } : {}),
     ...(fullRecord.citation !== undefined ? { citation: fullRecord.citation } : {}),
     ...(fullRecord.supersedes !== undefined ? { supersedes: fullRecord.supersedes } : {}),
+    ...(binaryParameters === undefined
+      ? {}
+      : {
+          ["https://product.jinn.network/extensions/binary-judgment-intake/v1"]:
+            (fullRecord as unknown as Record<string, unknown>)["https://product.jinn.network/extensions/binary-judgment-intake/v1"],
+        }),
   };
 
   let previewBenchmarkBytes: Uint8Array;
@@ -322,7 +363,7 @@ export function compilePreviewRun(input: CompilePreviewRunInput): CompiledPrevie
   const previewBenchmarkSha256 = sha256Hex(previewBenchmarkBytes);
   const previewBenchmarkRecord = parseBenchmark(previewBenchmarkBytes);
 
-  const plannedRun = planFromSpec(spec, previewBenchmarkSha256, owner, closeAt);
+  const plannedRun = planFromSpec(spec, previewBenchmarkSha256, owner, closeAt, binaryParameters);
 
   return { plannedRun, previewBenchmarkRecord, previewBenchmarkSha256, itemCount: subsetItems.length };
 }

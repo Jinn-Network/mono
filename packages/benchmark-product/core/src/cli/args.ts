@@ -120,3 +120,21 @@ export function readJsonFile(path: string): unknown {
     refuse("validation", path, `${path} is not valid JSON`);
   }
 }
+
+/** Reads an exact UTF-8 text manifest; semantic/canonical validation belongs to the operation. */
+export function readTextFile(path: string): string {
+  let bytes: Uint8Array;
+  try {
+    bytes = readFileSync(path);
+  } catch {
+    refuse("validation", path, `cannot read ${path}`);
+  }
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    refuse("validation", path, `${path} must not begin with a UTF-8 BOM`);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    refuse("validation", path, `${path} is not valid UTF-8`);
+  }
+}

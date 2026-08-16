@@ -284,14 +284,14 @@ const EVALUATION_HARNESS_TEST_FORBIDDEN = TASK_EXECUTION_FOREIGN_PACKAGES
   .filter((name) => !EVALUATION_HARNESS_TEST_ALLOWED_EVIDENCE.includes(name));
 
 // evaluator-adapters (composition design §6.3) is a leaf: it consumes the adapter
-// contract, the EvaluationSpec vocabulary, and the Attempt identity, and imports no
-// evidence/trust/discovery package and no chain or network client in production.
+// contract, the EvaluationSpec vocabulary, the Task document contract, and the Attempt
+// identity, and imports no evidence/trust/discovery package and no chain or network client
+// in production.
 const EVALUATOR_ADAPTERS_PRODUCTION_FORBIDDEN = [
   ...TASK_EXECUTION_FOREIGN_PACKAGES,
   '@jinn-network/task-execution-backend',
   '@jinn-network/task-execution-backend-local',
   '@jinn-network/task-execution-launchers',
-  '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-workspace',
 ];

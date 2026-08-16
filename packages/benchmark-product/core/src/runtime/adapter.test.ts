@@ -48,6 +48,7 @@ describe("runtime adapter registry", () => {
     expect(listRuntimeAdapters()).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: NATIVE_RUNTIME_ADAPTER_ID, available: true }),
       expect.objectContaining({ id: "inspect", available: true, selectionRequired: true }),
+      expect.objectContaining({ id: "inspect-binary-judge", available: true, selectionRequired: true }),
     ]));
   });
 
@@ -57,11 +58,15 @@ describe("runtime adapter registry", () => {
       adapterId: "inspect",
       selectionManifestSha256: "a".repeat(64),
     })).toBe("explicit-consent");
+    expect(runtimeNativeArtifactPublicationPolicy({
+      adapterId: "inspect-binary-judge",
+      selectionManifestSha256: "a".repeat(64),
+    })).toBe("explicit-consent");
   });
 
   test("keeps OCI isolation as a runtime-neutral sealed submission fact", () => {
     expect(runtimeSubmissionBaseline({
-      adapterId: "inspect",
+      adapterId: "inspect-binary-judge",
       selectionManifestSha256: "a".repeat(64),
       isolationPolicy: "oci-container",
     })).toEqual({ isolationPolicy: "oci-container" });

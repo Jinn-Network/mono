@@ -25,6 +25,7 @@ import {
 } from "../venue/venue.js";
 import { createDefaultBenchmarkRuntimeHost, type BenchmarkRuntimeHost } from "./host-port.js";
 import { INSPECT_ADAPTER_ID } from "./inspect/manifest.js";
+import { INSPECT_BINARY_JUDGE_ADAPTER_ID } from "./inspect/binary-judge-manifest.js";
 import {
   HARBOR_ADAPTER_ID,
   HARBOR_RUNTIME_EXECUTABLE_ROLE,
@@ -67,13 +68,14 @@ import {
   terminalBenchMigrationBytes,
   type TerminalBenchMaterial,
 } from "./terminal-bench-2/manifest.js";
+import { INSPECT_SELECTION_CORRELATION_ROLE } from "@colophon-claims/verify";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
 export const NATIVE_RUNTIME_EVIDENCE_PROFILE = "https://runtime.jinn.network/profiles/native-evidence/v1";
 export const INSPECT_RUNTIME_EVIDENCE_PROFILE = "https://product.jinn.network/profiles/inspect-evidence/v1";
 export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./harbor/manifest.js";
 export const INSPECT_EVAL_LOG_ARTIFACT_ROLE = "https://product.jinn.network/artifact-roles/inspect/eval-log/v1";
-export const INSPECT_SELECTION_CORRELATION_ROLE = "https://product.jinn.network/artifact-roles/inspect/selection-manifest/v1";
+export { INSPECT_SELECTION_CORRELATION_ROLE };
 export const INSPECT_RUNTIME_PROVENANCE_ROLE = "https://product.jinn.network/artifact-roles/inspect/runtime-provenance/v1";
 
 type RuntimeRegistrationArtifact = Awaited<ReturnType<RuntimeEvidenceContributor["registration"]>>[number];
@@ -160,6 +162,21 @@ const inspectDefinition: AdapterDefinition = {
   nativeArtifactPublication: "explicit-consent",
   profile: INSPECT_RUNTIME_EVIDENCE_PROFILE,
 };
+
+const inspectBinaryJudgeDefinition: AdapterDefinition = {
+  summary: {
+    id: INSPECT_BINARY_JUDGE_ADAPTER_ID,
+    label: "Inspect binary judge",
+    available: true,
+    selectionRequired: true,
+  },
+  nativeArtifactPublication: "explicit-consent",
+  profile: INSPECT_RUNTIME_EVIDENCE_PROFILE,
+};
+
+function isInspectRuntimeAdapterId(adapterId: string): boolean {
+  return adapterId === INSPECT_ADAPTER_ID || adapterId === INSPECT_BINARY_JUDGE_ADAPTER_ID;
+}
 
 const harborDefinition: AdapterDefinition = {
   summary: {
@@ -473,7 +490,7 @@ export function runtimeRegistrationPublicationClosure(
 export function runtimeRegistrationArtifacts(workspaceDir: string, binding: EvaluationRuntimeBinding | undefined): readonly RegistrationArtifact[] {
   if (binding === undefined) return [];
   const selectionBytes = getSealedBytes(workspaceDir, binding.selectionManifestSha256);
-  if (binding.adapterId === INSPECT_ADAPTER_ID) return [{ role: INSPECT_SELECTION_CORRELATION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } }];
+  if (isInspectRuntimeAdapterId(binding.adapterId)) return [{ role: INSPECT_SELECTION_CORRELATION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } }];
   if (binding.adapterId !== HARBOR_ADAPTER_ID) refuse("venue-unavailable", "spec.evaluationRuntime.adapterId", `evaluation runtime adapter "${binding.adapterId}" is not installed`);
   const manifest = HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(selectionBytes)));
   const result: RegistrationArtifact[] = [{ role: HARBOR_SELECTION_ROLE, artifact: { digest: { sha256: binding.selectionManifestSha256 }, mediaType: "application/json" } }];
@@ -573,9 +590,9 @@ function createPublicationAdapter(
   options: RuntimeEvidenceAdapterOptions = {},
 ): RuntimePublicationAdapter {
   const adapterId = binding?.adapterId ?? NATIVE_RUNTIME_ADAPTER_ID;
-  const selectedRuntime = adapterId === INSPECT_ADAPTER_ID || adapterId === HARBOR_ADAPTER_ID;
+  const selectedRuntime = isInspectRuntimeAdapterId(adapterId) || adapterId === HARBOR_ADAPTER_ID;
   const expectedSelectionManifestSha256 = selectedRuntime ? binding?.selectionManifestSha256 : undefined;
-  const expectedProfile = adapterId === INSPECT_ADAPTER_ID ? INSPECT_RUNTIME_EVIDENCE_PROFILE : adapterId === HARBOR_ADAPTER_ID ? HARBOR_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE;
+  const expectedProfile = isInspectRuntimeAdapterId(adapterId) ? INSPECT_RUNTIME_EVIDENCE_PROFILE : adapterId === HARBOR_ADAPTER_ID ? HARBOR_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE;
   const adapter: RuntimePublicationAdapter = {
     adapterId,
     profile: definition.profile,
@@ -586,7 +603,7 @@ function createPublicationAdapter(
         if (selection === undefined) return [];
         const role = adapterId === HARBOR_ADAPTER_ID
           ? HARBOR_SELECTION_ROLE
-          : adapterId === INSPECT_ADAPTER_ID
+          : isInspectRuntimeAdapterId(adapterId)
             ? INSPECT_SELECTION_CORRELATION_ROLE
             : undefined;
         return role === undefined ? [] : [{
@@ -598,7 +615,7 @@ function createPublicationAdapter(
           actions: ["store"] as const,
         }];
       })();
-      if (adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertInspectRegistration(expectedSelectionManifestSha256, artifacts);
+      if (isInspectRuntimeAdapterId(adapterId) && expectedSelectionManifestSha256 !== undefined) assertInspectRegistration(expectedSelectionManifestSha256, artifacts);
       if (adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined) assertHarborRegistration(expectedSelectionManifestSha256, artifacts);
       return artifacts;
     },
@@ -612,7 +629,7 @@ function createPublicationAdapter(
       return { correlations, nativeArtifacts: input.nativeArtifacts ?? [] };
     },
     async verify(input) {
-      const prefix = adapterId === INSPECT_ADAPTER_ID ? "inspect" : adapterId === HARBOR_ADAPTER_ID ? "harbor" : "native";
+      const prefix = isInspectRuntimeAdapterId(adapterId) ? "inspect" : adapterId === HARBOR_ADAPTER_ID ? "harbor" : "native";
       const correlations = input.dispatch.correlations;
       const nativeArtifacts = input.dispatch.nativeArtifacts;
       return [
@@ -624,7 +641,7 @@ function createPublicationAdapter(
         // ATIF and log files under the same semantic role, each retained by exact descriptor.
         roleCheck(correlations, nativeArtifacts, adapterId === HARBOR_ADAPTER_ID),
         disclosureCheck(nativeArtifacts),
-        ...(adapterId === INSPECT_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? inspectRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
+        ...(isInspectRuntimeAdapterId(adapterId) && expectedSelectionManifestSha256 !== undefined ? inspectRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
         ...(adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? harborRoleChecks(expectedSelectionManifestSha256, correlations, nativeArtifacts) : []),
         ...(adapterId === HARBOR_ADAPTER_ID && expectedSelectionManifestSha256 !== undefined ? [await harborStructureCheck(expectedSelectionManifestSha256, correlations, nativeArtifacts, input.references)] : []),
         await exactEvidenceCheck(`${prefix}-exact-native-evidence`, correlations, nativeArtifacts, input.references),
@@ -636,6 +653,7 @@ function createPublicationAdapter(
 
 const nativeAdapter = legacyAdapter(nativeDefinition);
 const inspectAdapter = legacyAdapter(inspectDefinition);
+const inspectBinaryJudgeAdapter = legacyAdapter(inspectBinaryJudgeDefinition);
 const harborAdapter = legacyAdapter(harborDefinition);
 
 /**
@@ -651,13 +669,14 @@ export function createRuntimeEvidenceAdapter(
   return createPublicationAdapter({
     summary: adapter.summary,
     nativeArtifactPublication: adapter.nativeArtifactPublication,
-    profile: adapter.summary.id === INSPECT_ADAPTER_ID ? INSPECT_RUNTIME_EVIDENCE_PROFILE : adapter.summary.id === HARBOR_ADAPTER_ID ? HARBOR_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE,
+    profile: isInspectRuntimeAdapterId(adapter.summary.id) ? INSPECT_RUNTIME_EVIDENCE_PROFILE : adapter.summary.id === HARBOR_ADAPTER_ID ? HARBOR_RUNTIME_EVIDENCE_PROFILE : NATIVE_RUNTIME_EVIDENCE_PROFILE,
   }, binding, options);
 }
 
 const ADAPTERS = new Map<string, EvaluationRuntimeAdapter>([
   [nativeAdapter.summary.id, nativeAdapter],
   [inspectAdapter.summary.id, inspectAdapter],
+  [inspectBinaryJudgeAdapter.summary.id, inspectBinaryJudgeAdapter],
   [harborAdapter.summary.id, harborAdapter],
 ]);
 

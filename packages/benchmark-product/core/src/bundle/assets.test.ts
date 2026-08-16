@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import type { PublicAssetInput } from "./assets.js";
 import { buildPublicAssets } from "./assets.js";
@@ -178,6 +179,95 @@ function fixture(overrides: {
         previewCount: 1,
         timestamps: ["2026-08-07T10:00:00.000Z"],
       },
+    },
+  } as unknown as PublicAssetInput;
+}
+
+function binaryZeroRate() {
+  return { numerator: 0, denominator: 0, estimate: null, wilsonInterval: null, withheldReason: "zero-denominator" };
+}
+
+function binaryZeroProjection() {
+  return {
+    item: { expected: 0, complete: 0, excluded: 0, unstable: 0 },
+    call: { expected: 0, evaluated: 0, parseInvalid: 0 },
+    confusion: { correctAccepted: 0, correctRejected: 0, wrongAccepted: 0, wrongRejected: 0 },
+    agreement: binaryZeroRate(), falseAccept: binaryZeroRate(), falseReject: binaryZeroRate(),
+    instability: binaryZeroRate(), parserInvalid: binaryZeroRate(),
+  };
+}
+
+function binaryAssetFixture(): PublicAssetInput {
+  const base = fixture();
+  const armIds = ["arm-a", "arm-b", "arm-c", "arm-d"];
+  const qualification = {
+    configuration: {
+      verdictRule: "sole", k: 1, reduction: "strict-majority", measurementProfile: "binary-instrument@1",
+      candidateClasses: ["factuality"], strata: ["core", "stress"], parserInvalidPolicy: "reject",
+      truthAdmission: "two-human-unanimous", intervalAlpha: "0.05",
+    },
+    arms: Object.fromEntries(armIds.map((armId, index) => [armId, {
+      instrumentSha256: `sha256:${String(index + 1).repeat(64)}`,
+      ...binaryZeroProjection(),
+      byCandidateClass: { factuality: binaryZeroProjection() },
+      byStratum: { core: binaryZeroProjection(), stress: binaryZeroProjection() },
+    }])),
+    itemDecisions: [],
+    excluded: { count: 0, items: [] },
+    conflicted: { count: 0, cellKeys: [] },
+  };
+  return {
+    ...base,
+    matrix: {
+      ...base.matrix,
+      attrition: {
+        perArm: Object.fromEntries(armIds.map((armId) => [armId, {
+          expected: 0, judged: 0, unjudged: 0, unscorable: 0, expired: 0,
+          invalidated: 0, excluded: 0, replacements: 0,
+        }])),
+        asymmetryFlags: [],
+      },
+      completeness: { expected: 0, judged: 0, floor: "1", runOutcome: "complete" },
+    },
+    report: {
+      ...base.report,
+      method: { id: "jinn.benchmarking.method/binary-instrument", version: "1", parameters: qualification.configuration },
+      results: { perSubject: [{ subjectSha256: SHA.matrix, results: qualification }] },
+    },
+    claim: {
+      ...base.claim,
+      claimSchema: "benchmark-product.claim-package/2",
+      scope: {
+        ...base.claim.scope,
+        taskCount: 0,
+        arms: armIds.map((armId) => ({ armId, pinning: { instrument: qualification.arms[armId]!.instrumentSha256 } })),
+      },
+      method: {
+        id: "jinn.benchmarking.method/binary-instrument", version: "1",
+        parameters: qualification.configuration, preregistered: true,
+      },
+      results: { perSubject: [{ subjectSha256: SHA.matrix, results: qualification }] },
+      headline: undefined,
+      comparison: undefined,
+      qualification,
+      conflicted: qualification.conflicted,
+      verification: {
+        ...base.claim.verification,
+        command: "npx @colophon-claims/verify@2.0.0 <bundle-dir>",
+        compatibleCommand: "npx @colophon-claims/verify@2 <bundle-dir>",
+      },
+    },
+    binaryQualification: {
+      publicationGrade: true,
+      truthAdmission: "two-human-unanimous",
+      sourceManifestSha256: `sha256:${"8".repeat(64)}`,
+      admissionManifestSha256: `sha256:${"9".repeat(64)}`,
+      exclusions: [{ itemSha256: `sha256:${"a".repeat(64)}`, replacementItemSha256: `sha256:${"b".repeat(64)}`, reason: "review-disagreement" }],
+      instruments: armIds.map((armId, index) => ({
+        armId,
+        instrumentSha256: `sha256:${String(index + 1).repeat(64)}`,
+        promptTemplateSha256: `sha256:${["c", "d", "e", "f"][index]!.repeat(64)}`,
+      })),
     },
   } as unknown as PublicAssetInput;
 }
@@ -421,6 +511,42 @@ describe("Task 4 golden guard: wilson bundle asset byte-equality", () => {
   });
 });
 
+describe("binary qualification public assets", () => {
+  test("renders complete method/admission facts and the qualification graph without comparative copy", () => {
+    const assets = buildPublicAssets(binaryAssetFixture());
+    for (const name of ["index.html", "README.md"] as const) {
+      const full = text(assets[name]);
+      expect(full).toContain("qualification.json");
+      expect(full).toContain("factuality");
+      expect(full).toContain("parserInvalid");
+      expect(full).toContain("falseAccept");
+      expect(full).toContain("promptTemplateSha256");
+      expect(full).toContain(`sha256:${"8".repeat(64)}`);
+      expect(full).toContain("review-disagreement");
+      expect(full.toLowerCase()).not.toMatch(/\b(?:winner|loser|ranking|preferred|selected)\b/u);
+    }
+  });
+
+  test("keeps compact surfaces to a verified scope/report signpost", () => {
+    const assets = buildPublicAssets(binaryAssetFixture());
+    for (const name of ["badge.svg", "social-card.svg", "share.txt"] as const) {
+      const compact = text(assets[name]);
+      expect(compact.toLowerCase()).toContain("verified");
+      expect(compact).toContain(SHA.report);
+      expect(compact).toContain("index.html");
+      expect(compact).not.toMatch(/arm-[abcd]/u);
+      expect(compact).not.toContain("0.0000");
+      expect(compact.toLowerCase()).not.toMatch(/\b(?:rate|winner|loser|ranking|preferred|selected)\b/u);
+    }
+  });
+
+  test("fails closed when replay-verified admission/instrument facts are absent or attached to a legacy method", () => {
+    const binary = binaryAssetFixture();
+    expect(() => buildPublicAssets({ ...binary, binaryQualification: undefined })).toThrow(/require exactly one/u);
+    expect(() => buildPublicAssets({ ...fixture(), binaryQualification: binary.binaryQualification })).toThrow(/require exactly one/u);
+  });
+});
+
 /**
  * P4b Task 6 (`docs/superpowers/plans/demo-report-1/2026-08-12-P4b-implementation-plan.md`):
  * `buildPublicAssets` must dispatch on the produced method instead of hard-requiring wilson@1's
@@ -515,6 +641,20 @@ function markdownEscaped(value: string): string {
 }
 
 describe("Task 6: paired-delta@1 bundle asset dispatch", () => {
+  test("paired-delta assets retain their frozen byte digests", () => {
+    const assets = buildPublicAssets(pairedFixture(INTERVAL_PRESENT));
+    expect(Object.fromEntries(Object.entries(assets).map(([name, bytes]) => [
+      name,
+      createHash("sha256").update(bytes).digest("hex"),
+    ]))).toEqual({
+      "README.md": "c84a462355d8443fcf549bfa092dc9ca08a4f6395b96b683aea5dcab573a79ef",
+      "badge.svg": "cdeb0f812c99cd727165e522d1c59770b3a7c89241d08f139ea954390902f8d6",
+      "index.html": "8df4a0b57d63df324dacf452ddfd90c81466e852137ee44e2a93ff4fd9c76bab",
+      "share.txt": "e93ec44415ee76899b198fe3cdd174fb410c876c48e0835f6f28118fb8200056",
+      "social-card.svg": "813c2bfb2760cab5370f56883b71be44041120831cf4b736f07156337c8e26f5",
+    });
+  });
+
   test("interval-present: renders the approved direction, estimate, interval, exact alpha, and paired task count", () => {
     const assets = buildPublicAssets(pairedFixture(INTERVAL_PRESENT));
     const html = text(assets["index.html"]);

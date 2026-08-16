@@ -8,20 +8,35 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import {
+  BENCHMARKING_METHOD_IDS,
+  BENCHMARKING_METHOD_VERSION,
+  compareCodeUnitStrings,
   expectedCellSet,
   itemTaskDigest,
   parseBenchmark,
   parseMatrix,
   parseReport,
   parseRun,
+  readRunPublicationExtension,
 } from "@jinn-network/benchmarking-records";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import { SubmissionRecordSchema } from "@jinn-network/task-execution-protocol";
+import {
+  BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY,
+  parseBinaryJudgmentInstrument,
+} from "@jinn-network/task-execution-profiles";
 import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { parseDraftDocument } from "../domain/draft.js";
 import { atomicWriteFileSync, fsyncDirectorySync } from "../fs/atomic.js";
-import { ClaimPackageSchema } from "../report/claim.js";
+import {
+  BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+  ClaimPackageSchema,
+} from "../report/claim.js";
+import { verifyBinaryJudgmentAdmissionClosureInWorkspace } from "../human-review/verification-workspace.js";
+import {
+  parseBinaryItemBankIntakeExtension,
+} from "../intake/binary-item-bank.js";
 import { loadOrCreateReportSigningKey } from "../report/signing.js";
 import {
   scanPredictionSnapshotAdmissionReceiptRecords,
@@ -35,28 +50,43 @@ import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/sig
 import { claimPackageArtifactPath, draftPath, publicBundlePath, publicBundlesDir, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { assertWorkspace } from "../workspace/workspace.js";
-import { buildBundleManifest, verifyBundleManifest } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, buildBundleManifest, verifyBundleManifest } from "./manifest.js";
 import { buildPublicAssets } from "./assets.js";
 import {
   BUNDLE_ASSEMBLY_FORMAT,
   BUNDLE_EVIDENCE_FORMAT,
   BUNDLE_TRUST_FORMAT,
   BUNDLE_VERDICTS_FORMAT,
+  BUNDLE_QUALIFICATION_FORMAT,
+  BUNDLE_V4_EVIDENCE_FORMAT,
+  BUNDLE_V4_EVIDENCE_ROLES,
+  BUNDLE_V4_TRUST_FORMAT,
   BundleAssemblyCellSchema,
   BundleAssemblyHeaderSchema,
   BundleEvidenceCatalogSchema,
+  BundleQualificationSchema,
   BundleTrustSchema,
+  BundleV4EvidenceCatalogSchema,
+  BundleV4TrustSchema,
   BundleVerdictCatalogSchema,
   type BundleAssemblyCell,
   type BundleAssemblyHeader,
   type BundleEvidenceCatalog,
   type BundleTrust,
+  type BundleV4EvidenceCatalog,
+  type BundleV4EvidenceRole,
+  type BundleV4Trust,
   type BundleVerdictCatalog,
 } from "./schema.js";
 import { EVALUATOR_REQUIREMENT_KEY } from "../venue/venue.js";
 import { INSPECT_EMBEDDED_EVALUATOR_ID } from "../runtime/inspect/artifacts.js";
 import { INSPECT_ADAPTER_ID, InspectSelectionManifestSchema } from "../runtime/inspect/manifest.js";
+import {
+  INSPECT_BINARY_JUDGE_ADAPTER_ID,
+  InspectBinaryJudgeSelectionManifestSchema,
+} from "../runtime/inspect/binary-judge-manifest.js";
 import { deriveInspectEvaluationStrategy } from "../runtime/inspect/assurance.js";
+import { INSPECT_SELECTION_CORRELATION_ROLE } from "../runtime/adapter.js";
 import { derivePublicComparison } from "@colophon-claims/verify";
 
 export const PUBLIC_BUNDLE_FILES = [
@@ -78,20 +108,13 @@ export const PUBLIC_BUNDLE_FILES = [
   "share.txt",
 ] as const;
 
-const ROLE_ORDER: readonly BundleEvidenceCatalog["records"][number]["roles"][number][] = [
-  "task",
-  "runtime-selection",
-  "evaluation-spec",
-  "admission-receipt",
-  "solve-submission",
-  "run-pinning-evidence",
-  "evaluation-submission",
-  "solve-delivery",
-  "solve-output",
-  "evaluation-task",
-  "evaluation-delivery",
-  "verdict",
-];
+export const PUBLIC_BUNDLE_V4_FILES = [
+  ...PUBLIC_BUNDLE_FILES.slice(0, 7),
+  "qualification.json",
+  ...PUBLIC_BUNDLE_FILES.slice(7),
+] as const;
+
+const ROLE_ORDER: readonly BundleV4EvidenceRole[] = BUNDLE_V4_EVIDENCE_ROLES;
 
 export interface MaterializeBundleInput {
   readonly workspaceDir: string;
@@ -113,9 +136,9 @@ export interface MaterializedBundle {
 }
 
 function addRole(
-  records: Map<string, Set<BundleEvidenceCatalog["records"][number]["roles"][number]>>,
+  records: Map<string, Set<BundleV4EvidenceRole>>,
   sha256: string,
-  role: BundleEvidenceCatalog["records"][number]["roles"][number],
+  role: BundleV4EvidenceRole,
 ): void {
   const roles = records.get(sha256) ?? new Set();
   roles.add(role);
@@ -151,7 +174,8 @@ function exactJson<T>(bytes: Uint8Array, schema: { parse(value: unknown): T }, l
 
 function recordClosure(input: MaterializeBundleInput): {
   readonly files: Map<string, Uint8Array>;
-  readonly evidenceRecords: Map<string, Set<BundleEvidenceCatalog["records"][number]["roles"][number]>>;
+  readonly evidenceRecords: Map<string, Set<BundleV4EvidenceRole>>;
+  readonly format: "benchmark-product-public-bundle/2" | typeof BUNDLE_V4_FORMAT;
 } {
   const { workspaceDir, draftId, benchmarkSha256, runState } = input;
   if (
@@ -174,8 +198,10 @@ function recordClosure(input: MaterializeBundleInput): {
   const matrix = parseMatrix(matrixBytes);
   const report = parseReport(reportBytes);
   const draft = parseDraftDocument(JSON.parse(readFileSync(draftPath(workspaceDir, draftId), "utf8")));
-  const inspectRuntime = draft.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID;
-  const separateInspectVerifier = inspectRuntime
+  const genericInspectRuntime = draft.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID;
+  const binaryInspectRuntime = draft.spec.evaluationRuntime?.adapterId === INSPECT_BINARY_JUDGE_ADAPTER_ID;
+  const inspectRuntime = genericInspectRuntime || binaryInspectRuntime;
+  const separateInspectVerifier = genericInspectRuntime
     && deriveInspectEvaluationStrategy(run.policy.evaluation) === "separate-log-verification";
   const inspectSelectionSha256 = inspectRuntime
     ? draft.spec.evaluationRuntime?.selectionManifestSha256
@@ -184,12 +210,52 @@ function recordClosure(input: MaterializeBundleInput): {
     if (inspectSelectionSha256 === undefined) {
       refuse("record-integrity", "evidence-closure", "Inspect draft has no sealed runtime selection identity");
     }
+    const registeredSelections = readRunPublicationExtension(run as unknown as Record<string, unknown>)
+      ?.registrationArtifacts.filter((artifact) => artifact.role === INSPECT_SELECTION_CORRELATION_ROLE) ?? [];
+    if (
+      registeredSelections.length !== 1
+      || registeredSelections[0]!.artifact.mediaType !== "application/json"
+      || registeredSelections[0]!.artifact.digest.sha256 !== inspectSelectionSha256
+    ) {
+      refuse("record-integrity", "evidence-closure", "draft Inspect selection differs from the selection frozen in Run registration");
+    }
     const selectionBytes = getSealedBytes(workspaceDir, inspectSelectionSha256);
-    exactJson(selectionBytes, InspectSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+    if (binaryInspectRuntime) {
+      exactJson(selectionBytes, InspectBinaryJudgeSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+    } else {
+      exactJson(selectionBytes, InspectSelectionManifestSchema, `records/${inspectSelectionSha256}.bin`);
+    }
   }
 
   const claimBytes = new Uint8Array(readFileSync(claimPackageArtifactPath(workspaceDir, draftId)));
   const claim = exactJson(claimBytes, ClaimPackageSchema, "claim-package.json");
+  if (!Buffer.from(canonicalJsonBytes(claim)).equals(Buffer.from(claimBytes))) {
+    refuse("record-integrity", "claim-package.json", "claim package is not in exact canonical JSON encoding");
+  }
+  const binaryQualification = claim.claimSchema === BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID;
+  if (binaryQualification !== (report.method.id === BENCHMARKING_METHOD_IDS.binaryInstrument)) {
+    refuse("record-integrity", "claim-package.json", "claim schema and sealed Report method disagree on binary qualification");
+  }
+  if (binaryQualification) {
+    const reportSubjects = (report.results as { readonly perSubject?: readonly { readonly subjectSha256?: unknown; readonly results?: unknown }[] }).perSubject;
+    if (
+      report.method.version !== BENCHMARKING_METHOD_VERSION
+      || claim.method.id !== report.method.id
+      || claim.method.version !== report.method.version
+      || claim.records.benchmarkSha256 !== benchmarkSha256
+      || claim.records.runSha256 !== runState.runSha256
+      || claim.records.matrixSha256 !== runState.matrixSha256
+      || claim.records.reportSha256 !== runState.reportSha256
+      || claim.records.reportEnvelopeSha256 !== runState.reportEnvelopeSha256
+      || reportSubjects?.length !== 1
+      || reportSubjects[0]?.subjectSha256 !== runState.matrixSha256
+      || !Buffer.from(canonicalJsonBytes(reportSubjects[0]?.results as never)).equals(
+        Buffer.from(canonicalJsonBytes(claim.qualification as never)),
+      )
+    ) {
+      refuse("record-integrity", "claim-package.json", "claim-package/2 must exactly project the sealed binary-instrument@1 Report result");
+    }
+  }
   const files = new Map<string, Uint8Array>([
     ["benchmark.json", benchmarkBytes],
     ["run.json", runBytes],
@@ -200,7 +266,143 @@ function recordClosure(input: MaterializeBundleInput): {
     ["static-bundle.json", canonicalJsonBytes(exportStaticBundle(matrix, [report]))],
   ]);
 
-  const evidenceRecords = new Map<string, Set<BundleEvidenceCatalog["records"][number]["roles"][number]>>();
+  const evidenceRecords = new Map<string, Set<BundleV4EvidenceRole>>();
+  const admissionReviewerBindings = new Map<string, string>();
+  const admissionAuthorityBindings = new Map<"roster-attestor" | "truth-reveal-attestor" | "operator-truth-attestor", string>();
+  let binaryAssetQualification: {
+    publicationGrade: boolean;
+    truthAdmission: "two-human-unanimous" | "operator-only";
+    sourceManifestSha256: string;
+    admissionManifestSha256: string;
+    exclusions: readonly unknown[];
+    instruments: readonly { armId: string; instrumentSha256: string; promptTemplateSha256: string }[];
+  } | undefined;
+  if (binaryQualification) {
+    const extension = parseBinaryItemBankIntakeExtension(benchmark);
+    let admission: ReturnType<typeof verifyBinaryJudgmentAdmissionClosureInWorkspace>;
+    try {
+      admission = verifyBinaryJudgmentAdmissionClosureInWorkspace({
+        workspaceDir,
+        admissionManifestSha256: extension.admissionManifestSha256,
+        expectedDraftId: draftId,
+      });
+    } catch (cause) {
+      refuse(
+        "record-integrity",
+        "qualification.admission",
+        `binary admission closure does not replay before publication: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
+    if (extension.replacementLedgerSha256 !== admission.manifest.replacementLedgerSha256) {
+      refuse(
+        "record-integrity",
+        "qualification.admission",
+        "Benchmark intake extension and authenticated admission manifest bind different replacement ledgers",
+      );
+    }
+
+    for (const [digest, role] of [
+      [extension.itemBankSha256, "item-bank"],
+      [extension.sourceManifestSha256, "source-manifest"],
+      [extension.admissionIndexSha256, "admission-index"],
+    ] as const) addRole(evidenceRecords, digest.slice("sha256:".length), role);
+
+    for (const reachable of admission.reachableRecords) {
+      const prefixed = reachable.sha256;
+      const digest = prefixed.slice("sha256:".length);
+      const bytes = getSealedBytes(workspaceDir, digest);
+      for (const role of reachable.roles) addRole(evidenceRecords, digest, role);
+      if (reachable.roles.includes("human-review-verdict")) {
+        const view = readVerdictEnvelope(bytes);
+        const envelope = parseDsseEnvelope(bytes);
+        const keyId = envelope.signatures[0]?.keyid;
+        if (typeof keyId !== "string") refuse("record-integrity", "qualification.trust", `review ${prefixed} has no signer key id`);
+        const prior = admissionReviewerBindings.get(view.evaluatorId);
+        if (prior !== undefined && prior !== keyId) refuse("record-integrity", "qualification.trust", `reviewer ${view.evaluatorId} uses multiple keys`);
+        admissionReviewerBindings.set(view.evaluatorId, keyId);
+      } else {
+        const role = reachable.roles.find((candidate) => candidate === "reviewer-roster" || candidate === "review-reveal-receipt" || candidate === "operator-assertion");
+        if (role === undefined) continue;
+        const envelope = parseDsseEnvelope(bytes);
+        const keyId = envelope.signatures[0]?.keyid;
+        if (typeof keyId !== "string") refuse("record-integrity", "qualification.trust", `${role} has no signer key id`);
+        const authorityRole = role === "reviewer-roster"
+          ? "roster-attestor" as const
+          : role === "review-reveal-receipt"
+            ? "truth-reveal-attestor" as const
+            : "operator-truth-attestor" as const;
+        const prior = admissionAuthorityBindings.get(authorityRole);
+        if (prior !== undefined && prior !== keyId) refuse("record-integrity", "qualification.trust", `${authorityRole} uses multiple keys`);
+        admissionAuthorityBindings.set(authorityRole, keyId);
+      }
+    }
+
+    const acceptedByItem = new Map(admission.accepted.map((entry) => [entry.itemSha256, entry] as const));
+    const qualificationItems = benchmark.items.map((item) => {
+      const taskSha256 = itemTaskDigest(item);
+      const taskBytes = getSealedBytes(workspaceDir, taskSha256);
+      const task = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(taskBytes)) as Record<string, unknown>;
+      const itemSha256 = task["network.jinn.binary-judgment.item-sha256"];
+      if (typeof itemSha256 !== "string") refuse("record-integrity", "qualification.items", `Task ${taskSha256} has no item commitment`);
+      const admitted = acceptedByItem.get(itemSha256 as `sha256:${string}`);
+      if (admitted === undefined) refuse("record-integrity", "qualification.items", `Task ${taskSha256} is not in the authenticated admission manifest`);
+      return {
+        taskSha256: `sha256:${taskSha256}`,
+        itemSha256: admitted.itemSha256,
+        labelResolutionSha256: admitted.labelResolutionSha256,
+        analysisContextSha256: admitted.analysisContextSha256,
+      };
+    }).sort((left, right) => compareCodeUnitStrings(left.taskSha256, right.taskSha256));
+    if (
+      qualificationItems.length !== admission.accepted.length
+      || new Set(qualificationItems.map((entry) => entry.itemSha256)).size !== admission.accepted.length
+    ) {
+      refuse("record-integrity", "qualification.items", "Benchmark Tasks do not exactly cover the authenticated accepted admission set");
+    }
+    const instrumentAssets: { armId: string; instrumentSha256: string; promptTemplateSha256: string }[] = [];
+    const arms = run.arms.map((arm) => {
+      const instrumentSha256 = arm.pinning[BINARY_JUDGMENT_INSTRUMENT_REQUIREMENT_KEY];
+      if (typeof instrumentSha256 !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(instrumentSha256)) {
+        refuse("record-integrity", "qualification.arms", `Run arm ${arm.armId} has no exact judge-instrument pin`);
+      }
+      addRole(evidenceRecords, instrumentSha256.slice("sha256:".length), "judge-instrument");
+      const instrumentBytes = getSealedBytes(workspaceDir, instrumentSha256.slice("sha256:".length));
+      const instrument = parseBinaryJudgmentInstrument(instrumentBytes);
+      if (!Buffer.from(canonicalJsonBytes(instrument)).equals(Buffer.from(instrumentBytes))) {
+        refuse("record-integrity", "qualification.arms", `Run arm ${arm.armId} instrument bytes are not exact canonical profile bytes`);
+      }
+      instrumentAssets.push({ armId: arm.armId, instrumentSha256, promptTemplateSha256: instrument.promptTemplateSha256 });
+      return { armId: arm.armId, instrumentSha256 };
+    }).sort((left, right) => compareCodeUnitStrings(left.armId, right.armId));
+    const qualification = BundleQualificationSchema.parse({
+      format: BUNDLE_QUALIFICATION_FORMAT,
+      claimSchema: BINARY_QUALIFICATION_CLAIM_PACKAGE_SCHEMA_ID,
+      sourceManifestSha256: extension.sourceManifestSha256,
+      admissionManifestSha256: extension.admissionManifestSha256,
+      publicationGrade: admission.publicationGrade,
+      truthAdmission: admission.manifest.truthAdmission,
+      candidateClasses: admission.classes,
+      strata: admission.strata,
+      arms,
+      items: qualificationItems,
+      exclusions: admission.excluded.map((entry) => ({
+        itemSha256: entry.itemSha256,
+        replacementItemSha256: entry.replacementItemSha256,
+        reason: entry.reason,
+      })),
+      admissionRecords: admission.reachableRecords,
+      reachableSha256s: admission.reachableSha256s,
+    });
+    files.set("qualification.json", canonicalJsonBytes(qualification));
+    binaryAssetQualification = {
+      publicationGrade: admission.publicationGrade,
+      truthAdmission: admission.manifest.truthAdmission,
+      sourceManifestSha256: extension.sourceManifestSha256,
+      admissionManifestSha256: extension.admissionManifestSha256,
+      exclusions: qualification.exclusions,
+      instruments: instrumentAssets.sort((left, right) => compareCodeUnitStrings(left.armId, right.armId)),
+    };
+  }
   const receipts = scanPredictionSnapshotAdmissionReceiptRecords(workspaceDir);
   const benchmarkTaskDigests = new Set(benchmark.items.map((item) => itemTaskDigest(item)));
   for (const item of benchmark.items) {
@@ -210,7 +412,7 @@ function recordClosure(input: MaterializeBundleInput): {
       evaluation?: { digest?: { sha256?: string } };
       payload?: { selectionManifestSha256?: unknown };
     };
-    if (inspectRuntime) {
+    if (genericInspectRuntime) {
       if (task.payload?.selectionManifestSha256 !== inspectSelectionSha256) {
         refuse("record-integrity", "evidence-closure", `Inspect Task ${taskSha256} does not bind the draft's sealed runtime selection`);
       }
@@ -221,6 +423,7 @@ function recordClosure(input: MaterializeBundleInput): {
     const receipt = receipts.get(taskSha256);
     if (receipt !== undefined) addRole(evidenceRecords, receipt.sha256, "admission-receipt");
   }
+  if (binaryInspectRuntime) addRole(evidenceRecords, inspectSelectionSha256!, "runtime-selection");
 
   const journal = readRunJournalEntries(workspaceDir, draftId);
   const graph: BundleAssemblyHeader["graph"] = {
@@ -228,7 +431,7 @@ function recordClosure(input: MaterializeBundleInput): {
     // this bundle's exact graph; unrelated valid receipts must not leak into its public closure.
     admissions: [...receipts]
       .filter(([taskSha256]) => benchmarkTaskDigests.has(taskSha256))
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodeUnitStrings(left, right))
       .map(([taskSha256, receipt]) => ({ taskSha256, receiptSha256: receipt.sha256 })),
     solveSubmissions: [],
     evaluationSubmissions: [],
@@ -415,19 +618,19 @@ function recordClosure(input: MaterializeBundleInput): {
   // Journal append order is not a public ordering authority. Canonicalize every edge list by
   // its stable graph coordinates so equivalent workspaces always emit identical assembly bytes.
   graph.solveSubmissions.sort((left, right) =>
-    left.cellKey.localeCompare(right.cellKey) || left.dispatch - right.dispatch || left.sha256.localeCompare(right.sha256));
+    compareCodeUnitStrings(left.cellKey, right.cellKey) || left.dispatch - right.dispatch || compareCodeUnitStrings(left.sha256, right.sha256));
   graph.evaluationSubmissions.sort((left, right) =>
-    left.cellKey.localeCompare(right.cellKey) || left.evalIndex - right.evalIndex
+    compareCodeUnitStrings(left.cellKey, right.cellKey) || left.evalIndex - right.evalIndex
     || (left.evaluationAttempt ?? 1) - (right.evaluationAttempt ?? 1)
-    || left.dispatch - right.dispatch || left.sha256.localeCompare(right.sha256));
+    || left.dispatch - right.dispatch || compareCodeUnitStrings(left.sha256, right.sha256));
   graph.solveDeliveries.sort((left, right) =>
-    left.cellKey.localeCompare(right.cellKey) || left.dispatch - right.dispatch || left.sha256.localeCompare(right.sha256));
+    compareCodeUnitStrings(left.cellKey, right.cellKey) || left.dispatch - right.dispatch || compareCodeUnitStrings(left.sha256, right.sha256));
   graph.evaluations.sort((left, right) =>
-    left.cellKey.localeCompare(right.cellKey) || left.evalIndex - right.evalIndex
+    compareCodeUnitStrings(left.cellKey, right.cellKey) || left.evalIndex - right.evalIndex
     || (left.evaluationAttempt ?? 1) - (right.evaluationAttempt ?? 1)
-    || (left.verdictSha256 ?? "").localeCompare(right.verdictSha256 ?? ""));
+    || compareCodeUnitStrings(left.verdictSha256 ?? "", right.verdictSha256 ?? ""));
   graph.evaluationRetries?.sort((left, right) =>
-    left.cellKey.localeCompare(right.cellKey) || left.evalIndex - right.evalIndex
+    compareCodeUnitStrings(left.cellKey, right.cellKey) || left.evalIndex - right.evalIndex
     || left.evaluationAttempt - right.evaluationAttempt);
 
   const fold = foldRunJournal(journal);
@@ -523,23 +726,30 @@ function recordClosure(input: MaterializeBundleInput): {
   const verdictCatalog: BundleVerdictCatalog = BundleVerdictCatalogSchema.parse({
     format: BUNDLE_VERDICTS_FORMAT,
     verdicts: [...verdictByDigest]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodeUnitStrings(left, right))
       .map(([sha256, value]) => ({
         sha256,
         evaluator: value.evaluator,
         keyId: value.keyId,
-        cellKeys: [...value.cellKeys].sort(),
+        cellKeys: [...value.cellKeys].sort(compareCodeUnitStrings),
       })),
   });
   files.set("verdicts.json", canonicalJsonBytes(verdictCatalog));
 
-  const evidenceCatalog: BundleEvidenceCatalog = BundleEvidenceCatalogSchema.parse({
+  const evidenceCatalog: BundleEvidenceCatalog | BundleV4EvidenceCatalog = binaryQualification
+    ? BundleV4EvidenceCatalogSchema.parse({
+      format: BUNDLE_V4_EVIDENCE_FORMAT,
+      records: [...evidenceRecords]
+        .sort(([left], [right]) => compareCodeUnitStrings(left, right))
+        .map(([sha256, roles]) => ({ sha256, roles: ROLE_ORDER.filter((role) => roles.has(role)) })),
+    })
+    : BundleEvidenceCatalogSchema.parse({
     format: BUNDLE_EVIDENCE_FORMAT,
     records: [...evidenceRecords]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodeUnitStrings(left, right))
       .map(([sha256, roles]) => ({
         sha256,
-        roles: ROLE_ORDER.filter((role) => roles.has(role)),
+        roles: ROLE_ORDER.slice(0, 12).filter((role) => roles.has(role)),
       })),
   });
   files.set("evidence.json", canonicalJsonBytes(evidenceCatalog));
@@ -549,9 +759,11 @@ function recordClosure(input: MaterializeBundleInput): {
 
   const reportKey = loadOrCreateReportSigningKey(workspaceDir);
   const workspace = assertWorkspace(workspaceDir);
-  const usedEvaluators = [...new Set(verdictCatalog.verdicts.map((verdict) => verdict.evaluator))].sort();
-  const trust: BundleTrust = BundleTrustSchema.parse({
-    format: BUNDLE_TRUST_FORMAT,
+  const usedEvaluators = [...new Set([
+    ...verdictCatalog.verdicts.map((verdict) => verdict.evaluator),
+    ...admissionReviewerBindings.keys(),
+  ])].sort(compareCodeUnitStrings);
+  const trustBase = {
     selfRun: {
       custody: "workspace-minted",
       evaluatorDistinctness: "agent-distinctness-only",
@@ -575,13 +787,27 @@ function recordClosure(input: MaterializeBundleInput): {
         spkiDerBase64: Buffer.from(key.publicKey.export({ type: "spki", format: "der" })).toString("base64"),
       };
     }),
-  });
+  };
+  const trust: BundleTrust | BundleV4Trust = binaryQualification
+    ? BundleV4TrustSchema.parse({
+      format: BUNDLE_V4_TRUST_FORMAT,
+      ...trustBase,
+      admission: {
+        reviewers: [...admissionReviewerBindings]
+          .sort(([left], [right]) => compareCodeUnitStrings(left, right))
+          .map(([evaluator, keyId]) => ({ evaluator, keyId })),
+        authorities: [...admissionAuthorityBindings]
+          .sort(([left], [right]) => compareCodeUnitStrings(left, right))
+          .map(([role, keyId]) => ({ role, keyId })),
+      },
+    })
+    : BundleTrustSchema.parse({ format: BUNDLE_TRUST_FORMAT, ...trustBase });
   files.set("trust/public-keys.json", canonicalJsonBytes(trust));
   const dissentCellKeys = assemblyCells
     .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
     .map((cell) => cell.cellKey)
-    .sort();
-  const comparison = derivePublicComparison({
+    .sort(compareCodeUnitStrings);
+  const comparison = binaryQualification ? undefined : derivePublicComparison({
     benchmark,
     matrix,
     assemblyCells,
@@ -599,10 +825,15 @@ function recordClosure(input: MaterializeBundleInput): {
     recordSha256s: evidenceCatalog.records.map((record) => record.sha256),
     dissentCellKeys,
     comparison,
+    ...(binaryAssetQualification === undefined ? {} : { binaryQualification: binaryAssetQualification }),
   }))) {
     files.set(path, bytes);
   }
-  return { files, evidenceRecords };
+  return {
+    files,
+    evidenceRecords,
+    format: binaryQualification ? BUNDLE_V4_FORMAT : "benchmark-product-public-bundle/2",
+  };
 }
 
 export function materializePublicBundle(
@@ -617,7 +848,7 @@ export function materializePublicBundle(
   try {
     const closure = recordClosure(input);
     const needle = new TextEncoder().encode(input.workspaceDir);
-    const paths = [...closure.files.keys()].sort();
+    const paths = [...closure.files.keys()].sort(compareCodeUnitStrings);
     for (const path of paths) {
       const bytes = closure.files.get(path)!;
       if (byteIndexOf(bytes, needle) !== -1) {
@@ -625,7 +856,7 @@ export function materializePublicBundle(
       }
       atomicWriteFileSync(join(stage, ...path.split("/")), bytes);
     }
-    const built = buildBundleManifest(stage, paths);
+    const built = buildBundleManifest(stage, paths, { format: closure.format });
     atomicWriteFileSync(join(stage, "bundle.json"), built.bytes);
     fsyncDirectorySync(stage);
     const target = publicBundlePath(input.workspaceDir, input.draftId, built.identity);

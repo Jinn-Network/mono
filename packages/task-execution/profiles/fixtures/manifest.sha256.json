@@ -22,6 +22,10 @@
       "sha256": "f850ac8d075510f8a5003dab352795fa9fcaa4c9b8d286eae9eaa3a8f00b8a9d"
     },
     {
+      "id": "binary-judgment-request/golden/unicode-line-endings.json",
+      "sha256": "1b6829723ff13df7138158b5bfe101529b9a6d6b34b686f7434d008abeef22a5"
+    },
+    {
       "id": "composite/adversarial/composite-depth-3.json",
       "sha256": "3515f206c49bf7ec2af7ae4589e36c2792184264387a6ca696809b317c4a5dee"
     },

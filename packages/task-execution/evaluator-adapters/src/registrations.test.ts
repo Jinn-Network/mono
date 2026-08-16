@@ -20,7 +20,10 @@ import {
 } from "./parser-identity.js";
 import { contextGraderReportSource } from "./swe-rebench/adapter.js";
 import { contextResolutionSnapshotSource } from "./prediction/adapter.js";
+import { buildBinaryJudgmentEvaluationSpecification } from "./binary-judgment/adapter.js";
 import {
+  BINARY_JUDGMENT_REGISTRATION_ID,
+  createBinaryJudgmentEvaluatorRegistration,
   createPredictionEvaluatorRegistration,
   createSweRebenchEvaluatorRegistration,
   PREDICTION_REGISTRATION_ID,
@@ -35,6 +38,10 @@ const method = {
 
 function registrations() {
   return [
+    createBinaryJudgmentEvaluatorRegistration({
+      evaluatorId: "did:key:z6MkhzYwRj8TvZEp41ApnVVDN5a5hBCk8tQYp4w7vGkVn5F8",
+      signerHandle: "evaluator-agent-key.pem",
+    }),
     createSweRebenchEvaluatorRegistration({
       evaluatorId: "did:key:z6MkhzYwRj8TvZEp41ApnVVDN5a5hBCk8tQYp4w7vGkVn5F8",
       signerHandle: "evaluator-agent-key.pem",
@@ -48,6 +55,10 @@ function registrations() {
       resolutionSnapshotSource: contextResolutionSnapshotSource(),
     }),
   ];
+}
+
+function binaryJudgmentSpec(): EvaluationSpec {
+  return buildBinaryJudgmentEvaluationSpecification(`sha256:${"2".repeat(64)}`);
 }
 
 function specFor(parser: ParserIdentity): EvaluationSpec {
@@ -106,7 +117,7 @@ const deployment = {
 
 describe("deployment registrations", () => {
   test("the set validates and has unique ids", () => {
-    expect(validateEvaluatorRegistrationSet(deployment.registrations)).toHaveLength(2);
+    expect(validateEvaluatorRegistrationSet(deployment.registrations)).toHaveLength(3);
   });
 
   test("the swe-rebench parser identity resolves the swe-rebench registration", () => {
@@ -117,6 +128,11 @@ describe("deployment registrations", () => {
   test("the prediction parser identity resolves the prediction registration", () => {
     expect(resolve(deployment, specFor(PREDICTION_PARSER)))
       .toBe(PREDICTION_REGISTRATION_ID);
+  });
+
+  test("the exact binary judgment contract resolves its generated registration", () => {
+    expect(resolve(deployment, binaryJudgmentSpec()))
+      .toBe(BINARY_JUDGMENT_REGISTRATION_ID);
   });
 
   test("an unlisted parser identity matches no registration", () => {
@@ -153,8 +169,11 @@ describe("deployment registrations", () => {
   });
 
   test("the two registrations never both claim one specification", () => {
-    for (const parser of [SWE_REBENCH_PARSER, PREDICTION_PARSER]) {
-      const spec = specFor(parser);
+    for (const spec of [
+      specFor(SWE_REBENCH_PARSER),
+      specFor(PREDICTION_PARSER),
+      binaryJudgmentSpec(),
+    ]) {
       const claimed = deployment.registrations
         .filter((registration) => registration.specificationCompatibility(spec));
       expect(claimed).toHaveLength(1);

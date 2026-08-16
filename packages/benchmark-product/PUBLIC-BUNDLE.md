@@ -59,6 +59,36 @@ same-execution scorer relationships. Version 1 remains a historical native-only
 format; this implementation emits and verifies version 2 rather than changing
 version 1's closed schema in place.
 
+### Binary qualification bundle v4
+
+`binary-instrument@1` emits the additive
+`benchmark-product-public-bundle/4`; the v2 grammar and bytes above remain
+unchanged, and the unrelated accounting-only v3 is not reused. V4 retains the
+complete v2 Run/Matrix/Report graph and adds the fixed `qualification.json`
+derived index. That index is not a new signed statement or truth authority: it
+joins the exact claim-package/2 F6 projection to the already authenticated item
+bank admission graph, its four judge instruments, and their prompt-template
+commitments.
+
+The v4 evidence catalog assigns closed semantic roles to every reachable
+admission record, including the source manifest, admission manifest and ledger,
+source items, label resolutions, analysis contexts, the frozen human-review
+specification and form when applicable, signed review records and receipts, and
+operator assertions when applicable. Publication first replays the canonical
+portable admission verifier, then requires exact accepted-Task coverage and
+exact digest/role closure. Missing, extra, dangling, duplicate, reordered, or
+role-swapped evidence fails closed. The v4 trust file carries the exact Ed25519
+SPKI material for Run evaluators and admission reviewers, plus the closed
+reviewer and report-authority role mappings needed by a copied bundle.
+
+V4 full HTML and Markdown present all four instruments, item/call/confusion
+counts, five registered rates with denominators and intervals, every declared
+candidate-class and core/stress slice, parser-invalid and instability facts,
+truth-admission status, exclusions/replacements, and stored limitations. Its
+badge, social card, and share text are narrower signposts: verified state, exact
+scope, full Report digest, and relative links only. They carry no rate,
+instrument conclusion, preference, selection, or ordering.
+
 ## Portable verification
 
 Use the smaller reader package, without the product or source workspace:
@@ -66,6 +96,18 @@ Use the smaller reader package, without the product or source workspace:
 ```bash
 npx @colophon-claims/verify@1 <bundle-dir>
 ```
+
+Binary qualification v4 pins the new verifier contract instead:
+
+```bash
+npx @colophon-claims/verify@2 <bundle-dir>
+```
+
+Claim-package/1 and public-bundle/2 continue to carry the literal
+`@1.0.0`/`@1` commands. Claim-package/2 and public-bundle/4 carry the literal
+`@2.0.0`/`@2` commands. Both lines return the same six top-level check names in
+the order below; v4 expands those checks internally rather than adding a seventh
+top-level result.
 
 The full installed product exposes the same implementation through:
 
