@@ -43,7 +43,8 @@
   },
   "dependencies": {
     "@jinn-network/evidence-protocol": "0.1.0",
-    "@jinn-network/evidence-repository": "0.1.0"
+    "@jinn-network/evidence-repository": "0.1.0",
+    "@jinn-network/execution-evidence-builder": "0.1.0"
   },
   "peerDependencies": {
     "vitest": "^4.1.8"
@@ -59,6 +60,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/execution-evidence-builder": "portal:../execution-evidence-builder",
     "@jinn-network/evidence-protocol": "portal:../protocol",
     "@jinn-network/evidence-repository": "portal:../repository"
   }

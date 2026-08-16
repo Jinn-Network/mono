@@ -208,8 +208,12 @@ __metadata:
     "@fontsource/ibm-plex-mono": "npm:5.3.0"
     "@jinn-network/attestation-issuer": "npm:0.1.0"
     "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
+    "@jinn-network/benchmarking-evaluation": "npm:0.1.0"
+    "@jinn-network/benchmarking-evidence": "npm:0.1.0"
     "@jinn-network/benchmarking-interop": "npm:0.1.0"
     "@jinn-network/benchmarking-local": "npm:0.1.0"
+    "@jinn-network/benchmarking-native-capture": "npm:0.1.0"
+    "@jinn-network/benchmarking-protocol": "npm:0.1.0"
     "@jinn-network/benchmarking-publication": "npm:0.1.0"
     "@jinn-network/benchmarking-records": "npm:0.1.0"
     "@jinn-network/benchmarking-run": "npm:0.1.0"
@@ -241,8 +245,10 @@ __metadata:
     "@fontsource-variable/public-sans": "npm:5.3.0"
     "@fontsource/ibm-plex-mono": "npm:5.3.0"
     "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
+    "@jinn-network/benchmarking-evidence": "npm:0.1.0"
     "@jinn-network/benchmarking-interop": "npm:0.1.0"
     "@jinn-network/benchmarking-local": "npm:0.1.0"
+    "@jinn-network/benchmarking-protocol": "npm:0.1.0"
     "@jinn-network/benchmarking-records": "npm:0.1.0"
     "@jinn-network/benchmarking-run": "npm:0.1.0"
     "@jinn-network/task-admission": "npm:0.1.0"
@@ -821,6 +827,39 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/benchmarking-evaluation@portal:../../benchmarking/evaluation::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-evaluation@portal:../../benchmarking/evaluation::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/attestation-issuer": "npm:0.1.0"
+    "@jinn-network/benchmarking-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/benchmarking-evidence@portal:../../benchmarking/evidence::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-evidence@portal:../../benchmarking/evidence::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
+    "@jinn-network/benchmarking-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/benchmarking-interop@portal:../../benchmarking/interop::locator=%40colophon-claims%2Fweb%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/benchmarking-interop@portal:../../benchmarking/interop::locator=%40colophon-claims%2Fweb%40workspace%3A."
@@ -837,6 +876,36 @@ __metadata:
   dependencies:
     "@jinn-network/benchmarking-records": "npm:0.1.0"
     "@jinn-network/benchmarking-run": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/benchmarking-native-capture@portal:../../benchmarking/native-capture::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-native-capture@portal:../../benchmarking/native-capture::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/benchmarking-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/execution-evidence-builder": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/benchmarking-protocol@portal:../../benchmarking/protocol::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-protocol@portal:../../benchmarking/protocol::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
   languageName: node
   linkType: soft
 
@@ -921,12 +990,26 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/execution-evidence-builder@portal:../../evidence/execution-evidence-builder::locator=%40colophon-claims%2Fweb%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/execution-evidence-builder@portal:../../evidence/execution-evidence-builder::locator=%40colophon-claims%2Fweb%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/execution-recorder@portal:../../evidence/execution-recorder::locator=%40colophon-claims%2Fweb%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/execution-recorder@portal:../../evidence/execution-recorder::locator=%40colophon-claims%2Fweb%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/execution-evidence-builder": "npm:0.1.0"
   peerDependencies:
     vitest: ^4.1.8
   peerDependenciesMeta:

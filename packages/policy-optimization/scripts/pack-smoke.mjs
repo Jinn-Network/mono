@@ -17,6 +17,7 @@ const PORTAL_PACKAGES = [
   ["@jinn-network/evidence-protocol", join(packagesRoot, "evidence", "protocol"), "evidence-protocol.tgz"],
   ["@jinn-network/evidence-repository", join(packagesRoot, "evidence", "repository"), "evidence-repository.tgz"],
   ["@jinn-network/evidence-discovery", join(packagesRoot, "evidence", "discovery"), "evidence-discovery.tgz"],
+  ["@jinn-network/execution-evidence-builder", join(packagesRoot, "evidence", "execution-evidence-builder"), "execution-evidence-builder.tgz"],
   ["@jinn-network/execution-recorder", join(packagesRoot, "evidence", "execution-recorder"), "execution-recorder.tgz"],
   ["@jinn-network/attestation-issuer", join(packagesRoot, "evidence", "attestation-issuer"), "attestation-issuer.tgz"],
   ["@jinn-network/task-execution-protocol", join(packagesRoot, "task-execution", "protocol"), "task-execution-protocol.tgz"],

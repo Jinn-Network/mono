@@ -133,7 +133,7 @@
   },
   "releaseGroups": {
     "platform-v1": {
-      "expectedPackageCount": 54,
+      "expectedPackageCount": 59,
       "publishPolicies": [
         "canary-only"
       ],
@@ -1176,6 +1176,178 @@
       "replacedBy": []
     },
     {
+      "name": "@jinn-network/benchmarking-protocol",
+      "path": "packages/benchmarking/protocol",
+      "domain": "benchmarking",
+      "role": "evidence-native benchmarking record protocol",
+      "tier": 2,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-evidence",
+      "path": "packages/benchmarking/evidence",
+      "domain": "benchmarking",
+      "role": "evidence-native cohort verification and matrix assembly",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-evaluation",
+      "path": "packages/benchmarking/evaluation",
+      "domain": "benchmarking",
+      "role": "TEP-free exact subject evaluation issuance",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-native-capture",
+      "path": "packages/benchmarking/native-capture",
+      "domain": "benchmarking",
+      "role": "resumable native execution capture coordinator",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
       "name": "@jinn-network/benchmarking-publication",
       "path": "packages/benchmarking/publication",
       "domain": "benchmarking",
@@ -2194,6 +2366,49 @@
         "conformance": [
           "./testing"
         ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/execution-evidence-builder",
+      "path": "packages/evidence/execution-evidence-builder",
+      "domain": "evidence",
+      "role": "pure execution-evidence construction capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
       },
       "supersedes": [],
       "replacedBy": []

@@ -45,6 +45,18 @@ export function createCatalogContractFixtures(): CatalogContractFixtures {
     executionId,
     task,
     executorId: "urn:uuid:22222222-2222-4222-8222-222222222222",
+    identifiers: [
+      {
+        entityId: task.entityId,
+        scheme: "urn:jinn:test:task-id",
+        value: "fixture-task",
+      },
+      {
+        entityId: "urn:uuid:22222222-2222-4222-8222-222222222222",
+        scheme: "urn:jinn:test:agent-id",
+        value: "fixture-agent",
+      },
+    ],
     runtime: {
       entityId: "runtime/runtime-specification.json",
       digest: digest("c"),
@@ -239,6 +251,22 @@ export function describeEvidenceCatalogContract(
       ).toHaveLength(1);
       expect(
         (
+          await context!.reader.findExecutions({
+            identifierScheme: "urn:jinn:test:task-id",
+            identifierValue: "fixture-task",
+          })
+        ).items,
+      ).toHaveLength(1);
+      expect(
+        (
+          await context!.reader.findExecutions({
+            identifierScheme: "urn:jinn:test:task-id",
+            identifierValue: "fixture-agent",
+          })
+        ).items,
+      ).toEqual([]);
+      expect(
+        (
           await context!.reader.findEvaluations({
             evaluatorId: fixtures.evaluation.evaluatorId,
             verdict: "pass",
@@ -260,6 +288,49 @@ export function describeEvidenceCatalogContract(
           )
         ).items.map(({ family }) => family),
       ).toEqual(["execution-evidence", "execution-verification"]);
+    });
+
+    test("matches runtime, publication windows, and conjunctive multi-result subjects", async () => {
+      const secondResult = {
+        entityId: "results/second.json",
+        digest: digest("e"),
+        name: "Second result",
+        mediaType: "application/json",
+      } as const;
+      const execution = {
+        ...fixtures.privateExecution,
+        reference: { family: "execution-evidence" as const, digest: digest("5") },
+        results: [...fixtures.privateExecution.results, secondResult],
+      };
+      const evaluation = {
+        ...fixtures.evaluation,
+        reference: { family: "result-evaluation" as const, digest: digest("6") },
+        resultSubjects: [
+          ...fixtures.evaluation.resultSubjects,
+          { name: secondResult.entityId, digest: secondResult.digest },
+        ] as const,
+      };
+      await putAvailable(context!, execution, "multi-execution");
+      await putAvailable(context!, evaluation, "multi-evaluation");
+
+      await expect(context!.reader.findExecutions({
+        runtimeDigest: execution.runtime.digest,
+        resultDigestsAll: execution.results.map(({ digest }) => digest),
+        publishedAfter: "2026-07-24T10:01:00Z",
+        publishedBefore: "2026-07-24T10:01:02Z",
+      })).resolves.toMatchObject({ items: [execution] });
+      await expect(context!.reader.findExecutions({
+        resultDigestsAll: [execution.results[0]!.digest, digest("f")],
+      })).resolves.toMatchObject({ items: [] });
+      await expect(context!.reader.findEvaluations({
+        resultDigestsAll: evaluation.resultSubjects.map(({ digest }) => digest),
+      })).resolves.toMatchObject({ items: [evaluation] });
+      await expect(context!.reader.findEvaluations({
+        resultDigestsAll: [evaluation.resultSubjects[0].digest, digest("f")],
+      })).resolves.toMatchObject({ items: [] });
+      await expect(context!.reader.findExecutions({
+        resultDigestsAll: [execution.results[0]!.digest, execution.results[0]!.digest],
+      })).rejects.toMatchObject({ code: "INVALID_QUERY" });
     });
 
     test("implements every Execution filter and exclusive time boundary", async () => {

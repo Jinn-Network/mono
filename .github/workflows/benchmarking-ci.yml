@@ -12,6 +12,7 @@ on:
       - ".github/scripts/benchmarking-*.test.mjs"
       - ".github/workflows/benchmarking-ci.yml"
       - "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md"
+      - "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md"
   push:
     branches: [next]
     paths:
@@ -19,6 +20,7 @@ on:
       - ".github/scripts/benchmarking-*.test.mjs"
       - ".github/workflows/benchmarking-ci.yml"
       - "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md"
+      - "docs/superpowers/specs/2026-08-16-evidence-first-benchmarking-design-amendment.md"
 
 permissions:
   contents: read
@@ -56,8 +58,23 @@ jobs:
           corepack prepare yarn@4.13.0 --activate
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
           (cd packages/trust/core && yarn install --immutable && yarn build)
+      - name: Verify Evidence-Native Benchmarking Protocol
+        working-directory: packages/benchmarking/protocol
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+      - name: Upload Evidence-Native Benchmarking Protocol distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-protocol-dist
+          path: packages/benchmarking/protocol/dist
+          if-no-files-found: error
+          retention-days: 1
       - name: Verify Benchmarking Records
         working-directory: packages/benchmarking/records
         run: |
@@ -73,6 +90,74 @@ jobs:
         with:
           name: benchmarking-records-dist
           path: packages/benchmarking/records/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  evidence:
+    needs: [records]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build evidence-native dependencies from source
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/protocol && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+      - name: Verify Evidence-Native Benchmarking Assembly
+        working-directory: packages/benchmarking/evidence
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+      - name: Upload Evidence-Native Benchmarking Assembly distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-evidence-dist
+          path: packages/benchmarking/evidence/dist
+          if-no-files-found: error
+          retention-days: 1
+      - name: Verify Native Capture Coordinator
+        working-directory: packages/benchmarking/native-capture
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+      - name: Upload Native Capture Coordinator distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-native-capture-dist
+          path: packages/benchmarking/native-capture/dist
+          if-no-files-found: error
+          retention-days: 1
+      - name: Verify TEP-Free Evaluation Issuance
+        working-directory: packages/benchmarking/evaluation
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+      - name: Upload TEP-Free Evaluation Issuance distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-evaluation-dist
+          path: packages/benchmarking/evaluation/dist
           if-no-files-found: error
           retention-days: 1
 
@@ -128,6 +213,7 @@ jobs:
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
@@ -359,7 +445,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, records, testing, aggregate, run, publication, interop, marketplace, local]
+    needs: [architecture, records, evidence, testing, aggregate, run, publication, interop, marketplace, local]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -367,6 +453,7 @@ jobs:
         env:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           RECORDS_RESULT: ${{ needs.records.result }}
+          EVIDENCE_RESULT: ${{ needs.evidence.result }}
           TESTING_RESULT: ${{ needs.testing.result }}
           AGGREGATE_RESULT: ${{ needs.aggregate.result }}
           RUN_RESULT: ${{ needs.run.result }}
@@ -378,6 +465,7 @@ jobs:
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$RECORDS_RESULT" \
+            "$EVIDENCE_RESULT" \
             "$TESTING_RESULT" \
             "$AGGREGATE_RESULT" \
             "$RUN_RESULT" \
@@ -404,6 +492,14 @@ jobs:
           path: .benchmarking-dist
       - name: Place package distributions
         run: |
+          mkdir -p packages/benchmarking/protocol/dist
+          cp -R .benchmarking-dist/benchmarking-protocol-dist/. packages/benchmarking/protocol/dist/
+          mkdir -p packages/benchmarking/evidence/dist
+          cp -R .benchmarking-dist/benchmarking-evidence-dist/. packages/benchmarking/evidence/dist/
+          mkdir -p packages/benchmarking/evaluation/dist
+          cp -R .benchmarking-dist/benchmarking-evaluation-dist/. packages/benchmarking/evaluation/dist/
+          mkdir -p packages/benchmarking/native-capture/dist
+          cp -R .benchmarking-dist/benchmarking-native-capture-dist/. packages/benchmarking/native-capture/dist/
           mkdir -p packages/benchmarking/records/dist
           cp -R .benchmarking-dist/benchmarking-records-dist/. packages/benchmarking/records/dist/
           mkdir -p packages/benchmarking/testing/dist

@@ -63,8 +63,12 @@
     "@fontsource/ibm-plex-mono": "5.3.0",
     "@jinn-network/attestation-issuer": "0.1.0",
     "@jinn-network/benchmarking-aggregate": "0.1.0",
+    "@jinn-network/benchmarking-evaluation": "0.1.0",
+    "@jinn-network/benchmarking-evidence": "0.1.0",
     "@jinn-network/benchmarking-interop": "0.1.0",
     "@jinn-network/benchmarking-local": "0.1.0",
+    "@jinn-network/benchmarking-native-capture": "0.1.0",
+    "@jinn-network/benchmarking-protocol": "0.1.0",
     "@jinn-network/benchmarking-publication": "0.1.0",
     "@jinn-network/benchmarking-records": "0.1.0",
     "@jinn-network/benchmarking-run": "0.1.0",
@@ -87,12 +91,17 @@
     "zod": "4.4.3"
   },
   "resolutions": {
+    "@jinn-network/execution-evidence-builder": "portal:../../evidence/execution-evidence-builder",
     "@colophon-claims/verify": "portal:../verify",
     "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
     "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
+    "@jinn-network/benchmarking-evaluation": "portal:../../benchmarking/evaluation",
+    "@jinn-network/benchmarking-evidence": "portal:../../benchmarking/evidence",
     "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
     "@jinn-network/benchmarking-local": "portal:../../benchmarking/local",
     "@jinn-network/benchmarking-publication": "portal:../../benchmarking/publication",
+    "@jinn-network/benchmarking-native-capture": "portal:../../benchmarking/native-capture",
+    "@jinn-network/benchmarking-protocol": "portal:../../benchmarking/protocol",
     "@jinn-network/record-publication": "portal:../../discovery/publication",
     "@jinn-network/record-discovery-protocol": "portal:../../discovery/protocol",
     "@jinn-network/record-discovery-client": "portal:../../discovery/client",
@@ -119,6 +128,7 @@
     "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {
+    "@jinn-network/execution-evidence-builder": "0.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"

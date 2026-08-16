@@ -31,6 +31,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/execution-evidence-builder', join(root, 'packages', 'evidence', 'execution-evidence-builder')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
