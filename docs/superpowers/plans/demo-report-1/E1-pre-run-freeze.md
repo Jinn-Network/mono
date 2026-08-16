@@ -145,3 +145,63 @@ yarn vitest run src/method/demo1-task-evidence.test.ts src/method/demo1-prerun.t
 
 The check command fetches only the two exact pinned candidate files, authenticates both, rebuilds
 the 197-task evidence and v3 freeze, and requires byte-identical output.
+
+Note that this reproduction is **not third-party recomputable**: the generator reads two
+operator-private snapshots under `~/.jinn-client/swe-rebench-v2/`. That limitation is inherent to
+the superseded source and is one of the reasons the amendment below moves to a fully public one.
+
+---
+
+## Source-method amendment (2026-08-16)
+
+**Everything above this line is preserved exactly and continues to describe the superseded method:
+one `anthropics/skills` candidate against an unrelated SWE-rebench slate.** The three artifacts in
+the table at the top of this document are unchanged, and their digests are pinned by
+`.github/scripts/demo1-historical-artifacts.test.mjs` (build-free, runs on every pull request) and
+by `packages/benchmark-product/core/src/method/demo1-task-evidence.test.ts` (real verifier
+round-trips). **Nothing below rewrites the STOP; it records why the next attempt uses a different
+source.**
+
+Ratified by [DR-2026-08-16](../../../../log/decisions/2026-08-16-demo1-skillsbench-source-amendment.md).
+Frame-level detail is in [`E1-comparison-frame.md`](E1-comparison-frame.md) §2.3.1.
+
+**The resumption condition, met.** This document's resumption boundary required "a newly
+authenticated task snapshot from the same pinned content source (or an explicit, separately
+reviewed source change) whose static domain ceiling can satisfy all three disjoint pools." The
+source change is now explicit and separately reviewed. The *ceiling* is not yet established — that
+is the work the amendment authorizes, and it authorizes nothing else.
+
+**New source identity.**
+
+| Property | Value |
+|---|---|
+| Repository | `benchflow-ai/skillsbench` |
+| Release | `v1.1`, annotated tag `a30b2ac88c8f1fd1c77385be6b4dea204ca9eb69` |
+| Commit | `b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af` |
+| Active roster | 87 task packages under `tasks/`; 14 excluded under `tasks-extra/` |
+| Runner | BenchFlow `>=0.6.3,<0.7`, pinned at v0.6.3 commit `99baefb602674bbd31139fd2f1a22c3ed45752f9` |
+| Root license | Apache-2.0 |
+
+**New experimental unit.** One exact upstream task package plus its complete curated Skill bundle.
+Multi-Skill bundles are in scope (66 of 87 tasks carry more than one Skill). No candidate ranking,
+no winner, no domain classifier.
+
+**New independence rule.** Transitive clusters over four fixed edge classes replace repository
+disjointness. Pool floors are unchanged: 6/6, 10/5, 5/2 — combined **21 units across 13 clusters**,
+cluster-disjoint.
+
+**Execution accounting is still zero.** This amendment authorizes no Docker control, no model arm,
+no preview, no Haiku cell, no E2 rehearsal, no official cell, and no publication claim. The
+successor freeze (`jinn.demo1.pre-run-freeze.v4`) supersedes v3 by digest exactly as v3 supersedes
+v2, and a `stop` v4 cannot authorize E2 — the same guard shape as
+`demo1PreRunFreezeV3AsV2`'s "a STOP freeze cannot authorize E2".
+
+**The open question, stated plainly.** 86 of the 87 active tasks declare
+`environment.network_mode: public`; exactly one (`bike-rebalance`) declares `no-network`. The
+verifiers are non-hermetic too — `verifier/test.sh` runs `apt-get update` and
+`curl https://astral.sh/uv/…`. Against a 21-unit floor, and under a contamination rule that makes
+unrestricted public networking ineligible without a separately reviewed mechanism, **this source
+may not be viable either.** DR-2026-08-16 Decision 6 gates the ruling on the static admission
+count, which costs no execution to obtain. **On present evidence a second STOP is the more likely
+outcome.** It is written here before the work starts so that, if it happens, it reads as the method
+holding rather than the method failing.

@@ -24,6 +24,7 @@ Two things this document does not do. It does not design engineering (that is R1
 | **Public pre-registration (E4)** | **Committed**, conditional on the P5 e2e gate being green (§2.10). |
 | **Flat-file mechanism (2026-08-13)** | **Native root `CLAUDE.md`.** P2 stopped after proving Claude Code does not load `AGENTS.md`; the operator chose the runtime-native file rather than an import shim or prompt injection. The motivating public debate is retained, but the measured and reported comparison is Skill minus CLAUDE.md. |
 | **Report framing (2026-08-13)** | **Name the Vercel comparison and Hacker News objection directly and respectfully.** Attribute only source-supported facts, describe Demo-1 as a controlled follow-up rather than a correction or takedown, and require the independent arithmetic/source fact-check in E3 J7. |
+| **Content source (2026-08-16) — supersedes the row above** | **SkillsBench v1.1**, per [DR-2026-08-16](../../../../log/decisions/2026-08-16-demo1-skillsbench-source-amendment.md). See §2.3.1. |
 
 No comparison-frame operator question remains open. Arm C is the true no-file control and therefore has an intentionally unverifiable loadout axis. P2 owns verification of the resolved product-side placement and exclusion path. Publication topology, author-source identity, report origin, discovery, mirrors, Explorer ingestion, key custody, and errata policy remain decisions for the separate publication program.
 
@@ -172,6 +173,63 @@ Requirements the content must satisfy:
 | **C3 (not recommended) — content derived from the target repositories' own public docs** | Per-repository OSS licenses; heterogeneous. | Highest ecological validity — this is what real AGENTS.md files contain — but the worst risk profile. Leakage risk is highest (a repo's own docs may touch the very issue under test), licensing is per-repo rather than uniform, and if we generate or summarize the content ourselves we inherit exactly the confound the ETH Zurich study identified with LLM-generated context files, while losing "public and licensed." |
 
 **Approved: C2** — a skill from `anthropics/skills`, Apache-2.0, with the four source-available document skills excluded. **C1 is formally withdrawn for Demo-1.** Its artifact repository returned 404 at verification (§1.7), and the operator has fixed C2 as this report's source rather than retaining a late content-switching path. The specific C2 artifact, its upstream URL, its commit or version, its per-folder license, and its sha256 go into the Benchmark record before lock.
+
+## 2.3.1 Source-method amendment (2026-08-16) — SkillsBench task-bundle units
+
+**This section supersedes §2.3's "Approved: C2" for the active method.** §2.3 is preserved above
+exactly as written, because it records the reasoning that produced the historical STOP and must
+keep doing so. Ratified by
+[DR-2026-08-16](../../../../log/decisions/2026-08-16-demo1-skillsbench-source-amendment.md).
+
+**What changed and why.** §2.3's C2 path paired one `anthropics/skills` candidate with an unrelated
+SWE-rebench slate, which forced a candidate-specific domain classifier to invent the relevance
+hypothesis. That classifier is where the method stopped: `brand-guidelines` matched 0 of 197
+authenticated tasks and `frontend-design` matched 3, against a 21-task/13-repository floor. The
+replacement source ships the pairing instead of synthesising it — every SkillsBench task package
+contains its own curated Skill bundle, environment, oracle, and verifier.
+
+**The new source.** `benchflow-ai/skillsbench`, release `v1.1`, commit
+`b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af`, 87 active task packages, runner line
+`benchflow>=0.6.3,<0.7`, root license Apache-2.0. SkillsBench is a task corpus, not an eval
+framework; BenchFlow is the runtime.
+
+**The new experimental unit.** One exact upstream task package together with its complete curated
+Skill bundle. Multi-Skill bundles are in scope and are the common case — 66 of the 87 active tasks
+carry more than one Skill. There is therefore **no candidate ranking, no winning Skill, and no
+domain classifier** on the active path.
+
+**Effect on §2.4 (content identity).** The construction generalizes from one body to N. Arm A
+receives the complete bundle with original folder boundaries, names, routing descriptions, and
+frontmatter. Arm B receives the same authenticated bodies concatenated into a deterministic root
+`CLAUDE.md` under the versioned, content-neutral transform `jinn.demo1.claude-md-flatten@1`,
+ordered lexically by upstream skill folder path, with no native-discoverable `SKILL.md`. Arm C
+receives no curated `SKILL.md` and no experiment-created instruction path. All three arms receive
+byte-identical non-instruction resources and the same base environment; a unit whose relative-path
+or resource semantics cannot be reproduced symmetrically is `unverifiable` and is rejected rather
+than hand-repaired. §2.4's audit path is unchanged in kind: a reader still reconstructs each arm
+from the authenticated source and checks digests, now per body rather than once.
+
+**Effect on §2.5 (held constant) and E2.** Repository disjointness is replaced by transitive
+independence clusters over four fixed edge classes (shared Skill content digest; shared underlying
+project/dataset/input family; shared task-family template lineage; shared task-specific
+oracle/verifier lineage). The pool floors are unchanged: 6/6 suitability, 10/5 rehearsal, 5/2
+official feasibility, combined 21 units across 13 clusters, cluster-disjoint.
+
+**Unchanged by this amendment.** The substantive claim, the three arms, the primary A-versus-B
+contrast paired by unit, the manipulation contrast against arm C, the pre-declared rule that a
+failed manipulation check makes A-versus-B uninformative about delivery mechanism, §2.2.1's ~21 pp
+MDE anchor, the outcome firewall, and every must-not-imply line in §2.7. **Anthropic authorship
+leaves the substantive claim** — §2.3's "removes the strongest objection to a negative result for
+arm A" no longer applies, and §2.7's "Not a judgment of any authored skill's quality" now carries
+that weight alone.
+
+**Open and gated.** 86 of the 87 active tasks declare `environment.network_mode: public`; exactly
+one declares `no-network`. Under §2.7's contamination discipline that is a live contradiction with
+the 21-unit floor, and DR-2026-08-16 Decision 6 leaves it deliberately open: the static admission
+stage produces the count of units surviving every check except network, at zero execution cost, and
+that number decides between a reviewed per-unit egress broker and an honest second STOP. Nothing
+may assume either outcome. **On present evidence a second STOP is the more likely outcome, and that
+is recorded before implementation rather than discovered after it.**
 
 ## 2.4 Content identity: how it is guaranteed and how a reader audits it
 
