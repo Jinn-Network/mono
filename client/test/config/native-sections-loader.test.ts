@@ -158,8 +158,6 @@ describe('the dark sections are inert on the current daemon path', () => {
     expect(rest).toEqual(withoutNative);
   });
 
-  // The product boundary is `operator.verticalMode`, not these keys. An
-  // enabled evaluator block does not author a vertical-mode request.
   // After D5 (deleted native-v1 parallel entry), omitted requestedMode on
   // testnet + BASE_SEPOLIA_TODAY resolves to native-v1, not legacy.
   it('does not move the vertical-mode decision off the resolver default', () => {
