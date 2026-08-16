@@ -1,5 +1,21 @@
 # Cutover Stage 5 — Rename and Closure Implementation Plan
 
+> **Addendum 2026-08-16** (leftover-row census at PR 6, against this train's
+> HEAD after the `operator/` rename):
+>
+> - `marketplace-pipeline` stays **`migrating`**. DR-2026-08-05 decision 7
+>   flips it to `deleted` only if the native claim path fully replaces
+>   `runPipeline` and the pipeline package has zero remaining operator
+>   imports. `operator/src/daemon/work-loop.ts` still imports and drives
+>   `runPipeline`; `composition-root.ts` and `work-loop.test.ts` still
+>   import `@jinn-network/marketplace-pipeline`.
+> - `legacy-task-submission-synthesis` stays **`planned`**. Decision 7
+>   requires splitting synthesis out of `operator/src/daemon/projector-enrich.ts`
+>   before the deleted-arm assertion can hold; that file is still present
+>   and still an entry point. Do not flip.
+> - Extraction gate runs against this train's HEAD (`claude/stage5-pr6-gate`),
+>   not `integration/evidence-v1`.
+>
 > **Addendum 2026-08-15** (execution train after [#2688](https://github.com/Jinn-Network/mono/pull/2688)
 > landed the one-swap onto `next` at `6a09c9d36`):
 >
