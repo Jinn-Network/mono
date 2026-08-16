@@ -7,13 +7,14 @@ import { test } from 'node:test';
 /**
  * Byte pin for Demo-1's sealed pre-run artifacts.
  *
- * These three files are the historical evidence that Demo-1 stopped at the pre-run content-supply
- * boundary (PR #2687): zero model arms, zero Docker controls, zero cells. They record the OLD
- * method — one `anthropics/skills` candidate against an unrelated SWE-rebench slate — and a later
- * source-method amendment supersedes that decision without rewriting these bytes.
+ * v2, the task evidence, and v3 are the historical record of Demo-1 stopping at the pre-run
+ * content-supply boundary (PR #2687): zero model arms, zero Docker controls, zero cells. They
+ * describe the OLD method — one `anthropics/skills` candidate against an unrelated SWE-rebench
+ * slate — and DR-2026-08-16 supersedes that source decision without rewriting these bytes. v4 is
+ * the current freeze on the SkillsBench source and is a STOP for a different, measured reason.
  *
- * `packages/benchmark-product/core/src/method/demo1-task-evidence.test.ts` already pins the same
- * three digests and round-trips them through the real verifiers. That suite runs under
+ * `packages/benchmark-product/core/src/method/demo1-task-evidence.test.ts` already pins the three
+ * historical digests and round-trips them through the real verifiers. That suite runs under
  * `.github/workflows/benchmark-product-ci.yml`, whose path filter covers package source and a
  * hand-listed set of docs — but NOT `docs/superpowers/plans/demo-report-1/`. A pull request that
  * edited only these artifacts therefore triggered no test at all. This file is the build-free
@@ -40,6 +41,14 @@ const SEALED_ARTIFACTS = [
     file: 'E1-pre-run-freeze.stop.v3.json',
     schema: 'jinn.demo1.pre-run-freeze.v3',
     sha256: 'd439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c',
+  },
+  // The current freeze, on the SkillsBench source. Unlike v2 and v3 this one is still live: if the
+  // admission logic changes, this digest SHOULD break, because the freeze has to be regenerated
+  // and re-reviewed rather than silently drifting under the code that produced it.
+  {
+    file: 'E1-pre-run-freeze.stop.v4.json',
+    schema: 'jinn.demo1.pre-run-freeze.v4',
+    sha256: '6c14442b71ff711ad37045f2f9295a3f1d11b433b99bf9122ba7da81ac06772e',
   },
 ];
 
@@ -78,6 +87,9 @@ test('the v2 and v3 freezes both record a STOP with no winner', () => {
     assert.equal(parsed.derived.winner, null, `${file} must name no winner`);
     assert.ok(parsed.derived.stopReasons.length > 0, `${file} must keep its stop reasons`);
   }
+  const v4 = JSON.parse(readArtifact('E1-pre-run-freeze.stop.v4.json').toString('utf8'));
+  assert.equal(v4.derived.status, 'stop', 'v4 must remain a STOP');
+  assert.ok(v4.derived.stopReasons.length > 0, 'v4 must keep its stop reasons');
 });
 
 test('every artifact accounts zero model execution', () => {
@@ -86,11 +98,24 @@ test('every artifact accounts zero model execution', () => {
     assert.equal(execution.modelArms, 0, `${artifact.file} modelArms`);
     assert.equal(execution.previews, 0, `${artifact.file} previews`);
   }
-  for (const file of ['E1-pre-run-freeze.stop.v2.json', 'E1-pre-run-freeze.stop.v3.json']) {
+  for (const file of ['E1-pre-run-freeze.stop.v2.json', 'E1-pre-run-freeze.stop.v3.json', 'E1-pre-run-freeze.stop.v4.json']) {
     const { execution } = JSON.parse(readArtifact(file).toString('utf8'));
     assert.equal(execution.rehearsalCells, 0, `${file} rehearsalCells`);
     assert.equal(execution.officialCells, 0, `${file} officialCells`);
   }
+});
+
+test('v4 supersedes the exact v3 bytes, continuing the v2 <- v3 <- v4 chain', () => {
+  const v4 = JSON.parse(readArtifact('E1-pre-run-freeze.stop.v4.json').toString('utf8'));
+  assert.equal(v4.inputs.supersedes.schema, 'jinn.demo1.pre-run-freeze.v3');
+  assert.equal(
+    v4.inputs.supersedes.sha256,
+    sha256(readArtifact('E1-pre-run-freeze.stop.v3.json')),
+    'v4 must supersede the exact on-disk v3 bytes',
+  );
+  assert.equal(v4.inputs.source.commit, 'b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af');
+  assert.equal(v4.derived.capacity.requiredUnits, 21);
+  assert.equal(v4.derived.capacity.requiredClusters, 13);
 });
 
 test('v3 supersedes the exact v2 bytes and keeps its derived selection basis', () => {
@@ -114,7 +139,7 @@ test('v3 binds the pinned anthropics/skills source it was frozen against', () =>
   assert.equal(source.commit, 'f17010c9bb483898c1d9c9f42dde2b3a98889434');
 });
 
-test('E1-pre-run-freeze.md still publishes the same three digests', () => {
+test('E1-pre-run-freeze.md still publishes every sealed digest', () => {
   const prose = readFileSync(join(artifactDir, 'E1-pre-run-freeze.md'), 'utf8');
   for (const artifact of SEALED_ARTIFACTS) {
     assert.ok(

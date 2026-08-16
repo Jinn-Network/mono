@@ -11,7 +11,8 @@
 |---|---|---|---|
 | `E1-pre-run-freeze.stop.v2.json` | `jinn.demo1.pre-run-freeze.v2` | `08b7e7d0a17d8a4c1ff876111a2e0cb49056b3e5bfe313e8684f46d2b85ae58a` | Preserved byte-for-byte; historical STOP |
 | `E1-task-evidence.v1.json` | `jinn.demo1.task-evidence.v1` | `b136f80342e5d6e7179267590c72d6bcde9c6922ecd61841faf18905daada8e1` | Complete static scan of the authorized task universe |
-| `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Current independently recomputable STOP |
+| `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Historical STOP on the superseded `anthropics/skills` source |
+| `E1-pre-run-freeze.stop.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `6c14442b71ff711ad37045f2f9295a3f1d11b433b99bf9122ba7da81ac06772e` | **Current STOP**, on SkillsBench v1.1; supersedes v3 by digest |
 
 The v3 artifact names and authenticates v2 rather than replacing its bytes. It embeds the exact
 task-evidence artifact, rebuilds every candidate disposition, derives the selection basis

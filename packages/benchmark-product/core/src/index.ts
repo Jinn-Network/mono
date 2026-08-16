@@ -314,6 +314,36 @@ export type {
   SkillsBenchStaticAdmission,
   SkillsBenchUnitVerdict,
 } from "./method/skillsbench-admission.js";
+export {
+  SKILLSBENCH_CLAUDE_MD_TRANSFORM,
+  SKILLSBENCH_ARMS,
+  SKILLSBENCH_TREATMENT_SCHEMA,
+  buildSkillsBenchClaudeMd,
+  buildSkillsBenchTreatment,
+  canonicalSkillsBenchTreatmentBytes,
+  skillsBenchFlattenSpan,
+  verifySkillsBenchClaudeMdBodies,
+  verifySkillsBenchTreatment,
+} from "./method/skillsbench-treatment.js";
+export type {
+  SkillsBenchArm,
+  SkillsBenchArmFile,
+  SkillsBenchArmPlan,
+  SkillsBenchTreatment,
+  SkillsBenchTreatmentInput,
+} from "./method/skillsbench-treatment.js";
+export {
+  DEMO1_PRE_RUN_FREEZE_V4_SCHEMA,
+  buildDemo1PreRunFreezeV4,
+  canonicalDemo1PreRunFreezeV4Bytes,
+  demo1PreRunFreezeV4AsE2Input,
+  demo1PreRunFreezeV4Digest,
+  verifyDemo1PreRunFreezeV4,
+} from "./method/skillsbench-prerun-v4.js";
+export type {
+  Demo1PreRunFreezeV4,
+  Demo1PreRunFreezeV4Input,
+} from "./method/skillsbench-prerun-v4.js";
 export type {
   Demo1PreRunFreezeV3,
   Demo1PreRunFreezeV3CandidateInventory,
