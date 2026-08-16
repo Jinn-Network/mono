@@ -31,6 +31,7 @@ const EXTERNAL_JINN_PACKAGES = [
   ['packages/evidence/protocol', '@jinn-network/evidence-protocol'],
   ['packages/evidence/repository', '@jinn-network/evidence-repository'],
   ['packages/evidence/discovery', '@jinn-network/evidence-discovery'],
+  ['packages/evidence/execution-evidence-builder', '@jinn-network/execution-evidence-builder'],
   ['packages/evidence/execution-recorder', '@jinn-network/execution-recorder'],
   ['packages/evidence/attestation-issuer', '@jinn-network/attestation-issuer'],
 ];
@@ -64,6 +65,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-profiles',
     ],
     optionalDependencies: [], peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
   }],
   ['profiles', {
     dependencies: ['@jinn-network/task-execution-protocol'],
@@ -103,6 +105,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     devDependencies: ['@jinn-network/evidence-protocol'],
     optionalDependencies: [], peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
   }],
   ['evaluation-harness', {
     dependencies: [
@@ -116,6 +119,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-backend-local', '@jinn-network/task-execution-protocol',
     ],
     optionalDependencies: [], peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
   }],
   // evaluator-adapters (composition design §6.3): concrete result parsers plugged into
   // the evaluation harness's deployment allowlist. Production surface is the adapter
@@ -164,6 +168,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-workspace',
     ],
     optionalDependencies: [], peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/execution-evidence-builder'],
   }],
 ]);
 
@@ -237,8 +242,9 @@ test('task-execution package Jinn dependencies and portal resolutions match the 
     const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
     const resolutions = manifest.resolutions ?? {};
     const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();
-    assert.deepEqual(resolved, declared, `${directory} has unmatched Jinn resolutions`);
-    for (const dependencyName of declared) {
+    const transitive = [...(approved.transitivePortalResolutions ?? [])].sort();
+    assert.deepEqual(resolved, [...declared, ...transitive].sort(), `${directory} has unmatched Jinn resolutions`);
+    for (const dependencyName of [...declared, ...transitive]) {
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }

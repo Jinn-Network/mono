@@ -1,5 +1,10 @@
 import { createHash, createPublicKey, verify as verifySignature, type KeyObject } from "node:crypto";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
+import {
+  verifyEvidenceNativePortableBundle,
+  type EvidenceNativePortableBundleVerification,
+  type EvidenceNativeSignatureVerificationInput,
+} from "@jinn-network/benchmarking-evidence";
 import { exportStaticBundle } from "@jinn-network/benchmarking-interop";
 import {
   cellIdempotencyKey,
@@ -75,7 +80,7 @@ import {
   type VerifyBundleSnapshotDeps,
 } from "./manifest.js";
 import { PUBLIC_BUNDLE_FILES, PUBLIC_BUNDLE_V4_FILES } from "./materialize.js";
-import { BUNDLE_V4_FORMAT } from "./manifest.js";
+import { BUNDLE_V4_FORMAT, BUNDLE_V5_FORMAT } from "./manifest.js";
 import {
   verifyBinaryJudgmentAdmissionClosure,
   type AdmissionAuthorityRole,
@@ -114,7 +119,7 @@ export type PublicBundleVerificationCheck =
   | "report-verification"
   | "claim-consistency";
 
-export interface PublicBundleVerificationResult {
+export interface LegacyPublicBundleVerificationResult {
   readonly format: "benchmark-product-public-bundle/2" | "benchmark-product-public-bundle/4";
   readonly identity: string;
   readonly checks: readonly PublicBundleVerificationCheck[];
@@ -134,6 +139,10 @@ export interface PublicBundleVerificationResult {
     readonly exclusionCount: number;
   };
 }
+
+export type PublicBundleVerificationResult =
+  | LegacyPublicBundleVerificationResult
+  | EvidenceNativePortableBundleVerification;
 
 export interface VerifyPublicBundleDeps extends VerifyBundleSnapshotDeps {}
 
@@ -262,6 +271,20 @@ function sameCanonical(left: unknown, right: unknown): boolean {
   return equalBytes(canonicalJsonBytes(left as never), canonicalJsonBytes(right as never));
 }
 
+function verifyEvidenceNativeSignature(input: EvidenceNativeSignatureVerificationInput): boolean {
+  try {
+    const key = createPublicKey({ key: Buffer.from(input.publicKeyBytes), format: "der", type: "spki" });
+    return key.asymmetricKeyType === "ed25519" && verifySignature(
+      null,
+      Buffer.from(input.preAuthEncoding),
+      key,
+      Buffer.from(input.signature),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Verifies a copied public bundle using one authenticated byte snapshot and only bundle-carried
  * public keys. No pathname is reopened after manifest authentication. */
 export async function verifyPublicBundleSnapshot(
@@ -269,6 +292,23 @@ export async function verifyPublicBundleSnapshot(
   deps: VerifyPublicBundleDeps = {},
 ): Promise<VerifiedPublicBundleSnapshot> {
   const checked = verifyBundleSnapshot(bundleDir, deps);
+  if (checked.manifest.format === BUNDLE_V5_FORMAT) {
+    try {
+      return {
+        verification: await verifyEvidenceNativePortableBundle({
+          files: checked.fileBytes,
+          verifySignature: verifyEvidenceNativeSignature,
+        }),
+        snapshot: checked,
+      };
+    } catch (cause) {
+      refuse(
+        "record-integrity",
+        "evidence-native-bundle",
+        cause instanceof Error ? cause.message : "evidence-native bundle verification failed",
+      );
+    }
+  }
   const read = (path: string): Uint8Array => {
     const bytes = checked.fileBytes.get(path);
     if (bytes === undefined) refuse("record-integrity", path, `authenticated bundle snapshot is missing "${path}"`);

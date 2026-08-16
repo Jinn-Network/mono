@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { validateExecutionEvidence } from "@jinn-network/evidence-protocol";
+import { buildExecutionEvidence as buildPureExecutionEvidence } from "@jinn-network/execution-evidence-builder";
 import { describe, expect, test } from "vitest";
 
 import { ExecutionRecorderError } from "./errors.js";
@@ -134,6 +135,14 @@ function entity(
 }
 
 describe("execution evidence graph", () => {
+  test("delegates without changing the recorder's exact bytes", () => {
+    const input = minimalInput();
+
+    expect(buildExecutionEvidence(input)).toEqual(
+      buildPureExecutionEvidence(input),
+    );
+  });
+
   test("maps a completed recording to the exact protocol roles", () => {
     const bytes = buildExecutionEvidence(minimalInput());
     const entities = graph(bytes);

@@ -49,6 +49,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
+    "@jinn-network/execution-evidence-builder": "portal:../execution-evidence-builder",
     "@jinn-network/evidence-protocol": "portal:../protocol",
     "@jinn-network/evidence-repository": "portal:../repository",
     "@jinn-network/execution-recorder": "portal:../execution-recorder"

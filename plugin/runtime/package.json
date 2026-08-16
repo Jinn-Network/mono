@@ -65,6 +65,7 @@
     "vitest": "4.1.10"
   },
   "resolutions": {
+    "@jinn-network/execution-evidence-builder": "portal:../../packages/evidence/execution-evidence-builder",
     "@jinn-network/evidence-catalog-sqlite": "portal:../../packages/evidence/catalog-sqlite",
     "@jinn-network/evidence-derivation": "portal:../../packages/evidence/derivation",
     "@jinn-network/evidence-discovery": "portal:../../packages/evidence/discovery",

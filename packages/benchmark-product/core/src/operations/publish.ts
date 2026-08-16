@@ -65,6 +65,9 @@ export function runPublish(
         const bundleRelativePath = relativeBundlePath(input.draftId, runState.bundleIdentity);
         if (runState.bundleRelativePath !== bundleRelativePath) refuse("conflict", `runs.${input.draftId}`, "published draft has a non-canonical bundle target");
         const verified = await verifyPublicBundle(publicBundlePath(clockedContext.workspaceDir, input.draftId, runState.bundleIdentity));
+        if (verified.format === "benchmark-product-public-bundle/5") {
+          refuse("conflict", "bundle.json", "managed publication cannot adopt an evidence-native bundle identity");
+        }
         if (verified.identity !== runState.bundleIdentity) {
           refuse("record-integrity", "bundle.json", "published bundle identity disagrees with RunState");
         }
@@ -114,6 +117,9 @@ export function runPublish(
         runState,
       }, deps);
       const verified = await verifyPublicBundle(materialized.bundleDir);
+      if (verified.format === "benchmark-product-public-bundle/5") {
+        refuse("conflict", "bundle.json", "managed publication must materialize its frozen legacy bundle profile");
+      }
       if (verified.identity !== materialized.identity) {
         refuse("record-integrity", "bundle.json", "materialized bundle identity changed before publication completed");
       }

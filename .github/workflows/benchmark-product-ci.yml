@@ -5,8 +5,12 @@ on:
     paths:
       - "packages/benchmark-product/**"
       - "packages/benchmarking/aggregate/**"
+      - "packages/benchmarking/evaluation/**"
+      - "packages/benchmarking/evidence/**"
       - "packages/benchmarking/interop/**"
       - "packages/benchmarking/local/**"
+      - "packages/benchmarking/native-capture/**"
+      - "packages/benchmarking/protocol/**"
       - "packages/benchmarking/publication/**"
       - "packages/benchmarking/records/**"
       - "packages/benchmarking/run/**"
@@ -18,6 +22,7 @@ on:
       - "packages/environments/record/**"
       - "packages/evidence/attestation-issuer/**"
       - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-evidence-builder/**"
       - "packages/evidence/execution-recorder/**"
       - "packages/evidence/protocol/**"
       - "packages/evidence/repository/**"
@@ -50,8 +55,12 @@ on:
     paths:
       - "packages/benchmark-product/**"
       - "packages/benchmarking/aggregate/**"
+      - "packages/benchmarking/evaluation/**"
+      - "packages/benchmarking/evidence/**"
       - "packages/benchmarking/interop/**"
       - "packages/benchmarking/local/**"
+      - "packages/benchmarking/native-capture/**"
+      - "packages/benchmarking/protocol/**"
       - "packages/benchmarking/publication/**"
       - "packages/benchmarking/records/**"
       - "packages/benchmarking/run/**"
@@ -63,6 +72,7 @@ on:
       - "packages/environments/record/**"
       - "packages/evidence/attestation-issuer/**"
       - "packages/evidence/discovery/**"
+      - "packages/evidence/execution-evidence-builder/**"
       - "packages/evidence/execution-recorder/**"
       - "packages/evidence/protocol/**"
       - "packages/evidence/repository/**"
@@ -162,8 +172,13 @@ jobs:
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-evidence-builder && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
           (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/protocol && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/evidence && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/native-capture && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/evaluation && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
           (cd packages/task-execution/oci-grader && yarn install --immutable && yarn build)

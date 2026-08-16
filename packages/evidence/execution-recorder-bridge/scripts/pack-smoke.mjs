@@ -16,6 +16,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packagesRoot = join(packageRoot, "..");
 const protocolRoot = join(packagesRoot, "protocol");
 const repositoryRoot = join(packagesRoot, "repository");
+const builderRoot = join(packagesRoot, "execution-evidence-builder");
 const recorderRoot = join(packagesRoot, "execution-recorder");
 // The Recorder rejects a workspace path with a symlinked ancestor directory
 // as UNSAFE_PATH; macOS's tmpdir() has one (/var -> /private/var), so this
@@ -25,6 +26,7 @@ const temporaryRoot = await realpath(
 );
 const protocolArchive = join(temporaryRoot, "evidence-protocol.tgz");
 const repositoryArchive = join(temporaryRoot, "evidence-repository.tgz");
+const builderArchive = join(temporaryRoot, "execution-evidence-builder.tgz");
 const recorderArchive = join(temporaryRoot, "execution-recorder.tgz");
 const bridgeArchive = join(temporaryRoot, "execution-recorder-bridge.tgz");
 const consumer = join(temporaryRoot, "consumer");
@@ -205,6 +207,7 @@ function runBridgeBinary(binaryPath, executionId) {
 try {
   await run("yarn", ["pack", "--out", protocolArchive], { cwd: protocolRoot });
   await run("yarn", ["pack", "--out", repositoryArchive], { cwd: repositoryRoot });
+  await run("yarn", ["pack", "--out", builderArchive], { cwd: builderRoot });
   await run("yarn", ["pack", "--out", recorderArchive], { cwd: recorderRoot });
   await run("yarn", ["pack", "--out", bridgeArchive], { cwd: packageRoot });
 
@@ -222,6 +225,7 @@ try {
       dependencies: {
         "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
         "@jinn-network/evidence-repository": `file:${repositoryArchive}`,
+        "@jinn-network/execution-evidence-builder": `file:${builderArchive}`,
         "@jinn-network/execution-recorder": `file:${recorderArchive}`,
         "@jinn-network/execution-recorder-bridge": `file:${bridgeArchive}`,
       },

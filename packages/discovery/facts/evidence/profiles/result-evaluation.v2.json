@@ -1,0 +1,12 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/result-evaluation/v1",
+  "profile": "https://spec.jinn.network/facts/result-evaluation/v2",
+  "fields": [
+    { "name": "evaluatorId", "class": "record" },
+    { "name": "verdict", "class": "record", "cloudEvents": { "attribute": "verdict", "scalar": "string" } },
+    { "name": "evaluatedAt", "class": "record" },
+    { "name": "taskDigest", "class": "record", "referenceBearing": true },
+    { "name": "resultDigests", "class": "record", "referenceBearing": true }
+  ]
+}
