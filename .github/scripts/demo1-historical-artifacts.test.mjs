@@ -44,11 +44,12 @@ const SEALED_ARTIFACTS = [
   },
   // The current freeze, on the SkillsBench source. Unlike v2 and v3 this one is still live: if the
   // admission logic changes, this digest SHOULD break, because the freeze has to be regenerated
-  // and re-reviewed rather than silently drifting under the code that produced it.
+  // and re-reviewed rather than silently drifting under the code that produced it. It is NOT named
+  // `.stop.` — static admission passes, and the filename has to keep telling the truth.
   {
-    file: 'E1-pre-run-freeze.stop.v4.json',
+    file: 'E1-pre-run-freeze.v4.json',
     schema: 'jinn.demo1.pre-run-freeze.v4',
-    sha256: 'bdd8148e258fca6aabf2b6675324659c3f3ba69d12d224ecf7fe6efae5ebc259',
+    sha256: 'de15726a3baeaec8d59c10aa8cfced00a20a27bd8ec100c83a4430be935cc0c3',
   },
 ];
 
@@ -87,9 +88,17 @@ test('the v2 and v3 freezes both record a STOP with no winner', () => {
     assert.equal(parsed.derived.winner, null, `${file} must name no winner`);
     assert.ok(parsed.derived.stopReasons.length > 0, `${file} must keep its stop reasons`);
   }
-  const v4 = JSON.parse(readArtifact('E1-pre-run-freeze.stop.v4.json').toString('utf8'));
-  assert.equal(v4.derived.status, 'stop', 'v4 must remain a STOP');
-  assert.ok(v4.derived.stopReasons.length > 0, 'v4 must keep its stop reasons');
+});
+
+test('v4 passes static admission but authorizes only the no-model controls', () => {
+  // The load-bearing distinction. Static capacity clearing the floor authorizes the oracle and
+  // no-op controls; it is not permission to spend inference. Collapsing the two is how a screening
+  // step silently becomes a green light.
+  const v4 = JSON.parse(readArtifact('E1-pre-run-freeze.v4.json').toString('utf8'));
+  assert.equal(v4.derived.status, 'ready');
+  assert.equal(v4.derived.authorizes, 'dynamic-controls');
+  assert.equal(v4.derived.dynamicEvidence.withOracleEvidence, 0);
+  assert.equal(v4.derived.dynamicEvidence.withNoOpEvidence, 0);
 });
 
 test('every artifact accounts zero model execution', () => {
@@ -98,7 +107,7 @@ test('every artifact accounts zero model execution', () => {
     assert.equal(execution.modelArms, 0, `${artifact.file} modelArms`);
     assert.equal(execution.previews, 0, `${artifact.file} previews`);
   }
-  for (const file of ['E1-pre-run-freeze.stop.v2.json', 'E1-pre-run-freeze.stop.v3.json', 'E1-pre-run-freeze.stop.v4.json']) {
+  for (const file of ['E1-pre-run-freeze.stop.v2.json', 'E1-pre-run-freeze.stop.v3.json', 'E1-pre-run-freeze.v4.json']) {
     const { execution } = JSON.parse(readArtifact(file).toString('utf8'));
     assert.equal(execution.rehearsalCells, 0, `${file} rehearsalCells`);
     assert.equal(execution.officialCells, 0, `${file} officialCells`);
@@ -106,7 +115,7 @@ test('every artifact accounts zero model execution', () => {
 });
 
 test('v4 supersedes the exact v3 bytes, continuing the v2 <- v3 <- v4 chain', () => {
-  const v4 = JSON.parse(readArtifact('E1-pre-run-freeze.stop.v4.json').toString('utf8'));
+  const v4 = JSON.parse(readArtifact('E1-pre-run-freeze.v4.json').toString('utf8'));
   assert.equal(v4.inputs.supersedes.schema, 'jinn.demo1.pre-run-freeze.v3');
   assert.equal(
     v4.inputs.supersedes.sha256,

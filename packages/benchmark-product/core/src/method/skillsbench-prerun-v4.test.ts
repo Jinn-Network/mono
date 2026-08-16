@@ -12,6 +12,7 @@ import {
   type Demo1PreRunFreezeV4Input,
 } from "./skillsbench-prerun-v4.js";
 import { SKILLSBENCH_V1_1_SOURCE } from "./skillsbench-source.js";
+import { readSkillsBenchReward } from "./skillsbench-reward.js";
 import { buildSkillsBenchUnit, type SkillsBenchUnitBuildInput } from "./skillsbench-unit.js";
 
 const V3_PATH = new URL(
@@ -151,12 +152,44 @@ describe("pre-run freeze v4", () => {
       expect(() => demo1PreRunFreezeV4AsE2Input(forged)).toThrow(/do not recompute/u);
     });
 
-    it("hands off only from a genuinely READY freeze", () => {
+    it("refuses E2 from a statically-READY freeze that has no dynamic evidence", () => {
+      // The dangerous case. Static capacity clearing the floor must authorize the no-model
+      // controls and nothing more; treating it as permission to spend inference is exactly how a
+      // screening step silently becomes a green light.
       const freeze = buildDemo1PreRunFreezeV4(freezeInput(Array.from({ length: 21 }, (_, i) => admissionInput(`t${String(i).padStart(2, "0")}`))));
+      expect(freeze.derived.status).toBe("ready");
+      expect(freeze.derived.authorizes).toBe("dynamic-controls");
+      expect(() => demo1PreRunFreezeV4AsE2Input(freeze))
+        .toThrow(/authorizes the no-model dynamic controls, not E2/u);
+    });
+
+    it("hands off to E2 only once every admitted unit carries oracle and no-op evidence", () => {
+      const controls = {
+        oracle: readSkillsBenchReward({ rewardTxt: "1" }),
+        noOp: readSkillsBenchReward({ rewardTxt: "0" }),
+      };
+      const units = Array.from({ length: 21 }, (_, i) => ({
+        ...admissionInput(`t${String(i).padStart(2, "0")}`),
+        dynamicControls: controls,
+      }));
+      const freeze = buildDemo1PreRunFreezeV4(freezeInput(units));
+      expect(freeze.derived.authorizes).toBe("e2");
+      expect(freeze.derived.dynamicEvidence).toEqual({ admitted: 21, withOracleEvidence: 21, withNoOpEvidence: 21 });
       const handoff = demo1PreRunFreezeV4AsE2Input(freeze);
       expect(handoff.taskIds).toHaveLength(21);
-      expect(handoff.clusters).toHaveLength(21);
       expect(handoff.seed).toBeGreaterThan(0);
+    });
+
+    it("refuses E2 when even one admitted unit lacks a passing oracle", () => {
+      const good = { oracle: readSkillsBenchReward({ rewardTxt: "1" }), noOp: readSkillsBenchReward({ rewardTxt: "0" }) };
+      const bad = { oracle: readSkillsBenchReward({ rewardTxt: "0" }), noOp: readSkillsBenchReward({ rewardTxt: "0" }) };
+      const units = Array.from({ length: 21 }, (_, i) => ({
+        ...admissionInput(`t${String(i).padStart(2, "0")}`),
+        dynamicControls: i === 7 ? bad : good,
+      }));
+      const freeze = buildDemo1PreRunFreezeV4(freezeInput(units));
+      expect(freeze.derived.authorizes).not.toBe("e2");
+      expect(() => demo1PreRunFreezeV4AsE2Input(freeze)).toThrow(/not E2/u);
     });
   });
 

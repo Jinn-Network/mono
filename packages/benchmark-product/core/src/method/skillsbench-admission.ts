@@ -11,6 +11,7 @@ import {
   type SkillsBenchClusterInput,
 } from "./skillsbench-clusters.js";
 import type { SkillsBenchEgressPlan } from "./skillsbench-egress.js";
+import { judgeSkillsBenchControls, type SkillsBenchRewardReading } from "./skillsbench-reward.js";
 import type { SkillsBenchUnit } from "./skillsbench-unit.js";
 
 /**
@@ -116,6 +117,34 @@ export const SKILLSBENCH_REQUIRED_CLUSTERS =
   + DEMO1_REHEARSAL_POOL_REQUIREMENT.repositories
   + DEMO1_PRE_E2_OFFICIAL_FEASIBILITY_FLOOR.repositories;
 
+/**
+ * Turns sealed control readings into the two dynamic checks. Absent readings stay `unverifiable`
+ * with an exact reason: a control that has not run is not a control that passed.
+ */
+function dynamicControlChecks(
+  controls: SkillsBenchAdmissionInput["dynamicControls"],
+): Pick<Record<SkillsBenchAdmissionCheck, SkillsBenchCheckResult>, "oracleReachesFullSuccess" | "noOpSubmissionFails"> {
+  if (controls === undefined) {
+    return {
+      oracleReachesFullSuccess: unverifiable("not run before the static capacity screen"),
+      noOpSubmissionFails: unverifiable("not run before the static capacity screen"),
+    };
+  }
+  const judged = judgeSkillsBenchControls(controls.oracle, controls.noOp);
+  const oracleOk = controls.oracle.outcome === "full-pass";
+  const noOpOk = controls.noOp.outcome !== "full-pass" && controls.noOp.outcome !== "unscorable";
+  return {
+    oracleReachesFullSuccess: oracleOk
+      ? match(`oracle reached full success: ${controls.oracle.detail}`)
+      : mismatch(`oracle outcome ${controls.oracle.outcome}: ${controls.oracle.detail}`),
+    // Both halves are judged together, so a no-op that "fails" while the oracle also failed does
+    // not read as evidence — it is only meaningful once the task is known to be solvable.
+    noOpSubmissionFails: noOpOk && judged.eligible
+      ? match(`blank submission did not reach full success: ${controls.noOp.detail}`)
+      : mismatch(judged.reasons.join(", ") || `no-op outcome ${controls.noOp.outcome}`),
+  };
+}
+
 function match(detail: string): SkillsBenchCheckResult {
   return { status: "match", detail };
 }
@@ -194,6 +223,14 @@ export interface SkillsBenchAdmissionInput {
   readonly answerCollision: null | string;
   /** The unit's derived per-unit egress plan, when one has been computed. */
   readonly egress?: SkillsBenchEgressPlan;
+  /**
+   * Sealed no-model control readings, when the dynamic stage has run them. Absent means not run —
+   * which resolves the two dynamic checks `unverifiable`, never `match`.
+   */
+  readonly dynamicControls?: {
+    readonly oracle: SkillsBenchRewardReading;
+    readonly noOp: SkillsBenchRewardReading;
+  };
 }
 
 export function assessSkillsBenchStaticAdmission(
@@ -222,8 +259,7 @@ export function assessSkillsBenchStaticAdmission(
         "environment/Dockerfile starts from a mutable base tag and the package carries no image "
         + "digest; resolution and build pinning are dynamic-stage work",
       ),
-      oracleReachesFullSuccess: unverifiable("not run before the static capacity screen"),
-      noOpSubmissionFails: unverifiable("not run before the static capacity screen"),
+      ...dynamicControlChecks(input.dynamicControls),
       treatmentTransformFeasible: unverifiable("arm materialization feasibility is resolved with the treatment manifest"),
     };
     const rejectionReasons = SKILLSBENCH_STATIC_CHECKS

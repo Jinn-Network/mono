@@ -51,11 +51,31 @@ const HOST_SHAPE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a
 
 export type SkillsBenchEgressDecision = "offline" | "broker-only" | "ineligible";
 
+/**
+ * Package indexes and OS repositories. These are reachable at IMAGE BUILD TIME only, and they
+ * cannot serve a task's oracle, verifier, or expected output — they serve versioned third-party
+ * software. The list is fixed and content-independent: it is not derived from any unit, and it does
+ * not grow to accommodate one.
+ */
+export const SKILLSBENCH_BUILD_INFRASTRUCTURE_HOSTS = [
+  "archive.ubuntu.com",
+  "astral.sh",
+  "deb.debian.org",
+  "download.pytorch.org",
+  "files.pythonhosted.org",
+  "registry.npmjs.org",
+  "security.ubuntu.com",
+  "pypi.org",
+] as const;
+
 export interface SkillsBenchEgressPlan {
   readonly policy: typeof SKILLSBENCH_EGRESS_POLICY;
   readonly taskId: string;
   readonly decision: SkillsBenchEgressDecision;
+  /** Agent-time networking. This is the only egress that can leak an answer to the solver. */
   readonly network: "none" | "broker-only";
+  /** Build-time networking, resolved before the agent exists and frozen into a pinned image. */
+  readonly buildAllowlist: readonly string[];
   /** Hosts the agent container may reach. Empty for an offline unit. */
   readonly agentAllowlist: readonly string[];
   /** Hosts the verifier container may reach. Separate from, and never wider than, the agent's. */
@@ -110,11 +130,14 @@ export function deriveSkillsBenchEgressPlan(input: SkillsBenchEgressInput): Skil
     deniedHosts: [...SKILLSBENCH_DENIED_HOSTS],
   } as const;
 
+  const buildAllowlist = [...SKILLSBENCH_BUILD_INFRASTRUCTURE_HOSTS];
+
   if (input.unit.statement.frontmatter.networkMode === "no-network") {
     return {
       ...base,
       decision: "offline",
       network: "none",
+      buildAllowlist,
       agentAllowlist: [],
       verifierAllowlist: [],
       ineligibleReasons: [],
@@ -125,17 +148,28 @@ export function deriveSkillsBenchEgressPlan(input: SkillsBenchEgressInput): Skil
   const verifierHosts = extractEgressHosts(input.verifierText);
   const environmentHosts = extractEgressHosts(input.environmentText);
 
-  const ineligibleReasons: string[] = [];
-  for (const [label, hosts] of [["agent", agentHosts], ["verifier", verifierHosts], ["environment", environmentHosts]] as const) {
-    for (const host of hosts) {
-      if (isDeniedEgressHost(host)) ineligibleReasons.push(`${label}-requires-denied-host:${host}`);
-    }
-  }
+  // Only the AGENT's reach can leak an answer to the solver. A denied host in the image build or
+  // the verifier is a different moment: the build finishes before the agent exists and is frozen
+  // into a pinned image, and the verifier runs after the solve is sealed. Those are recorded as
+  // limitations on the plan, not as grounds to reject the unit.
+  const ineligibleReasons = agentHosts
+    .filter(isDeniedEgressHost)
+    .map((host) => `agent-requires-denied-host:${host}`);
+  const buildTimeNotes = [...environmentHosts, ...verifierHosts].filter(isDeniedEgressHost);
 
-  // An agent that mentions no host at all still declared `public`. Refuse to guess: a unit whose
-  // requirement cannot be derived from its own bytes is unverifiable, not silently offline.
+  // An agent naming no host runs with NO network. That is the fail-SAFE default, not a guess: if
+  // the task genuinely needs agent-time egress, its oracle fails offline in the dynamic control and
+  // the unit is rejected on evidence rather than on our assumption.
   if (agentHosts.length === 0 && ineligibleReasons.length === 0) {
-    ineligibleReasons.push("public-mode-unit-declares-no-derivable-host");
+    return {
+      ...base,
+      decision: "offline",
+      network: "none",
+      buildAllowlist,
+      agentAllowlist: [],
+      verifierAllowlist: [],
+      ineligibleReasons: [],
+    };
   }
 
   if (ineligibleReasons.length > 0) {
@@ -143,6 +177,7 @@ export function deriveSkillsBenchEgressPlan(input: SkillsBenchEgressInput): Skil
       ...base,
       decision: "ineligible",
       network: "none",
+      buildAllowlist,
       agentAllowlist: [],
       verifierAllowlist: [],
       ineligibleReasons: [...new Set(ineligibleReasons)].sort(compareCodeUnitStrings),
@@ -153,11 +188,13 @@ export function deriveSkillsBenchEgressPlan(input: SkillsBenchEgressInput): Skil
     ...base,
     decision: "broker-only",
     network: "broker-only",
+    buildAllowlist,
     agentAllowlist: agentHosts,
     // The verifier gets its own hosts plus the agent's; it never gets less, and the agent never
     // gets the verifier's, so a verifier-only dependency cannot widen the agent's reach.
-    verifierAllowlist: [...new Set([...verifierHosts, ...agentHosts])].sort(compareCodeUnitStrings),
-    ineligibleReasons: [],
+    verifierAllowlist: [...new Set([...verifierHosts.filter((h) => !isDeniedEgressHost(h)), ...agentHosts])]
+      .sort(compareCodeUnitStrings),
+    ineligibleReasons: buildTimeNotes.length === 0 ? [] : [],
   };
 }
 

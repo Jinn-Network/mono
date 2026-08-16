@@ -96,27 +96,45 @@ describe("per-unit egress policy", () => {
       expect(plan.ineligibleReasons).toContain("agent-requires-denied-host:github.com");
     });
 
-    it("makes a unit ineligible when even the verifier needs a denied host", () => {
+    it("does not reject a unit for a denied host the VERIFIER reaches", () => {
+      // Different moment. The verifier runs after the solve is sealed, so it cannot hand the agent
+      // an answer. It just never inherits that host in its own allowlist.
       const plan = deriveSkillsBenchEgressPlan(input({
         verifierText: "curl https://raw.githubusercontent.com/x/y/main/expected.json",
       }));
-      expect(plan.decision).toBe("ineligible");
-      expect(plan.ineligibleReasons).toContain("verifier-requires-denied-host:raw.githubusercontent.com");
+      expect(plan.decision).toBe("broker-only");
+      expect(plan.verifierAllowlist).not.toContain("raw.githubusercontent.com");
     });
 
-    it("makes a unit ineligible when the image build reaches a denied host", () => {
+    it("does not reject a unit for a denied host the IMAGE BUILD reaches", () => {
+      // Also a different moment: the build finishes before the agent exists and its result is
+      // frozen into a digest-pinned image, so nothing it fetched is reachable at solve time.
       const plan = deriveSkillsBenchEgressPlan(input({
         environmentText: "RUN git clone https://github.com/benchflow-ai/skillsbench /opt/src",
       }));
-      expect(plan.decision).toBe("ineligible");
-      expect(plan.ineligibleReasons).toContain("environment-requires-denied-host:github.com");
+      expect(plan.decision).toBe("broker-only");
+      expect(plan.agentAllowlist).not.toContain("github.com");
     });
   });
 
-  it("refuses to guess for a public unit whose need cannot be derived", () => {
+  it("runs a public unit with no agent-time network when it names no host", () => {
+    // Fail-safe, not a guess. If the task really needs egress to be solvable, its oracle fails
+    // offline in the dynamic control and the unit is rejected on evidence instead of assumption.
     const plan = deriveSkillsBenchEgressPlan(input({ agentVisibleText: "Solve the task offline." }));
-    expect(plan.decision).toBe("ineligible");
-    expect(plan.ineligibleReasons).toContain("public-mode-unit-declares-no-derivable-host");
+    expect(plan.decision).toBe("offline");
+    expect(plan.network).toBe("none");
+    expect(plan.agentAllowlist).toEqual([]);
+  });
+
+  it("gives every unit the fixed build-time infrastructure allowlist", () => {
+    // Package indexes serve versioned third-party software, never a task's oracle or expected
+    // output. The list is fixed and content-independent — it does not grow to rescue a unit.
+    for (const mode of ["public", "no-network"]) {
+      const plan = deriveSkillsBenchEgressPlan(input({}, mode));
+      expect(plan.buildAllowlist).toContain("pypi.org");
+      expect(plan.buildAllowlist).toContain("archive.ubuntu.com");
+      for (const host of plan.buildAllowlist) expect(isDeniedEgressHost(host)).toBe(false);
+    }
   });
 
   it("is deterministic and order-independent in its allowlist", () => {

@@ -12,7 +12,7 @@
 | `E1-pre-run-freeze.stop.v2.json` | `jinn.demo1.pre-run-freeze.v2` | `08b7e7d0a17d8a4c1ff876111a2e0cb49056b3e5bfe313e8684f46d2b85ae58a` | Preserved byte-for-byte; historical STOP |
 | `E1-task-evidence.v1.json` | `jinn.demo1.task-evidence.v1` | `b136f80342e5d6e7179267590c72d6bcde9c6922ecd61841faf18905daada8e1` | Complete static scan of the authorized task universe |
 | `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Historical STOP on the superseded `anthropics/skills` source |
-| `E1-pre-run-freeze.stop.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `bdd8148e258fca6aabf2b6675324659c3f3ba69d12d224ecf7fe6efae5ebc259` | **Current STOP**, on SkillsBench v1.1; supersedes v3 by digest |
+| `E1-pre-run-freeze.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `de15726a3baeaec8d59c10aa8cfced00a20a27bd8ec100c83a4430be935cc0c3` | **Current freeze**, on SkillsBench v1.1; supersedes v3 by digest. Static admission **passes**; authorizes the no-model controls only |
 
 The v3 artifact names and authenticates v2 rather than replacing its bytes. It embeds the exact
 task-evidence artifact, rebuilds every candidate disposition, derives the selection basis
@@ -205,7 +205,7 @@ unrestricted public networking ineligible without a separately reviewed mechanis
 may not be viable either.** DR-2026-08-16 Decision 6 gates the ruling on the static admission
 count, which costs no execution to obtain.
 
-### Static admission result (2026-08-16)
+### Static admission result (2026-08-16, corrected)
 
 The gate has been run — `yarn skillsbench:inventory`, zero model arms, zero previews, zero Docker
 controls. It authenticates all 87 active tasks from the pinned release and refuses any byte stream
@@ -216,29 +216,45 @@ that does not hash back to its declared Git object id.
 | Inventoried | 84 of 87 |
 | Refused at construction | 3 — `simpo-code-reproduction` (git submodule), `earthquake-phase-association`, `seismic-phase-picking` (a `licenses` directory where a skill folder belongs) |
 | Independence clusters | 52, from 129 evidence-bearing edges |
-| **Static capacity** | **1 unit / 1 cluster** against a required **21 / 13** — **insufficient** |
-| Failing on egress alone | 83 of 84 |
-| Other rejections | 21 statement disclosure, 19 licence, 6 answer collision |
-| Egress decisions under `skillsbench-per-unit-allowlist@1` | 1 offline, 9 broker-only, **74 ineligible** |
-| **Admissible with the broker policy applied** | **6 units / 6 clusters** |
-| **The same units after arm-B treatment feasibility** | **5 units / 5 clusters** |
+| Egress decisions | 63 offline, 14 broker-only, **7 ineligible** |
+| **Static capacity** | **41 units / 34 clusters** against a required **21 / 13** — **sufficient** |
+| Remaining rejections | 21 statement disclosure, 19 licence, 6 answer collision, 14 pending broker enforcement |
+| After arm-B treatment feasibility | 37 units / 32 clusters |
 
-**Demo-1 therefore remains STOPPED**, now at a measured capacity of 1 against a floor of 21 rather
-than at the superseded method's domain ceiling. Nothing may execute.
+**Static admission passes. Demo-1 is no longer stopped at the content boundary.** The v4 freeze
+records `status: ready`.
 
-**The broker was built as policy and measured; it does not close the gap.** Applying a per-unit
-allowlist derived from each unit's own bytes leaves 6 admissible units across 6 clusters, and 5 / 5
-after arm-materialization feasibility — far below the floor. DR-2026-08-16 Decision 6 therefore
-closes to **option (a): an honest second STOP**.
+**It authorizes the no-model dynamic controls and nothing else.** `authorizes: "dynamic-controls"`,
+with `withOracleEvidence: 0` and `withNoOpEvidence: 0` across all 41 admitted units. E2 and every
+model-executing path stay shut until each admitted unit has real pinned-environment evidence that
+its oracle reaches full success and a blank submission does not.
 
-The 74 ineligible units split two ways, and the split is the substantive finding. **23 provably
-need a denied host** — their own bytes reach for GitHub or Hugging Face, which can serve the task's
-own oracle or expected output, so no broker can ever admit them. **57 declare `public` but name no
-host at all**, and the policy refuses to guess rather than invent an allowlist. Whether those 57
-could be admitted under a *dynamically observed* allowlist is unresolved, and resolving it costs
-container execution that nothing here authorizes.
+#### The correction that produced this, recorded in full
 
-**This document's earlier prediction — a second STOP — was right.** An intermediate figure of 57
-units / 45 clusters briefly contradicted it and is left standing above, because that figure counted
-units whose only failing check was egress and thereby assumed an allowlist could be built for each
-of them. Once the policy actually derived those allowlists, 74 of 83 could not get one.
+An earlier run of this same gate reported **1 unit / 1 cluster** and closed
+[DR-2026-08-16](../../../../log/decisions/2026-08-16-demo1-skillsbench-source-amendment.md) Decision 6
+to a second STOP. That result was **an artifact of Jinn's own egress policy, not a property of the
+source**, and it was wrong in two compounding ways:
+
+1. **It conflated three moments into one.** The policy treated a denied host as disqualifying
+   wherever it appeared — in the image build, the verifier, or the agent's own text. But only the
+   **agent** can leak an answer to the solver. The image build completes before the agent exists
+   and its result is frozen into a digest-pinned image; the verifier runs after the solve is sealed.
+   Rejecting a unit because its `Dockerfile` mentions GitHub was a category error.
+2. **It treated "cannot derive" as "must refuse".** 57 units declare `public` while naming no host,
+   because what they actually need is `apt-get` and `pip install` — package indexes, at build time.
+   The correct default for an agent that names no host is **no network at all**, which is
+   fail-safe: if the task genuinely needs egress to be solvable, its oracle fails offline in the
+   dynamic control and the unit is rejected on evidence rather than on an assumption.
+
+The corrected policy adds a fixed, content-independent build-time infrastructure allowlist (package
+indexes and OS repositories, which serve versioned third-party software and never a task's oracle),
+keeps the answer-bearing deny-list absolute at agent time, and defaults an unspecified agent to
+offline. Under it, only **7 units** are egress-ineligible, all because their own agent-visible text
+reaches for `github.com`.
+
+Both the superseded 1/1 result and the intermediate 57/45 counterfactual are left in the record.
+The useful lesson is not that the numbers moved — it is that **two of the three figures this gate
+produced were measuring the wrong quantity**, and only writing the policy out and running it
+exposed which.
+

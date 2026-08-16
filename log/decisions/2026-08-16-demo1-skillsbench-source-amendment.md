@@ -167,69 +167,68 @@ count of units surviving every static check *except* network. That number decide
 Until that number exists, no implementation may assume either outcome. The freeze STOPs by default
 and the broker is additive, so the gate is reversible in both directions.
 
-### Decision 6 — closed 2026-08-16, resolved to option (a)
+### Decision 6 — closed 2026-08-16, resolved to option (b): the broker works
 
-The gate has been run. `yarn skillsbench:inventory` authenticates all 87 active tasks from the
-pinned release, executing no model and pulling no image
-(`execution: {modelArms: 0, previews: 0, dockerControls: 0}`).
+**Two superseded closures precede this one and are recorded below rather than deleted.**
+
+`yarn skillsbench:inventory` authenticates all 87 active tasks from the pinned release, executing no
+model and pulling no image (`execution: {modelArms: 0, previews: 0, dockerControls: 0}`).
 
 | Measure | Result |
 |---|---|
 | Inventoried | 84 of 87 |
-| Refused at construction | 3 — `simpo-code-reproduction` (git submodule; package not self-contained), `earthquake-phase-association` and `seismic-phase-picking` (a `licenses` directory where a skill folder belongs) |
-| Independence clusters over all inventoried units | 52, from 129 evidence-bearing edges |
-| **Static capacity** | **1 unit / 1 cluster** — against a required 21 / 13. **Insufficient.** |
-| Other rejections | 21 statement disclosure, 19 licence, 6 answer collision |
+| Refused at construction | 3 — `simpo-code-reproduction` (git submodule), `earthquake-phase-association`, `seismic-phase-picking` |
+| Independence clusters | 52, from 129 evidence-bearing edges |
+| Egress decisions | 63 offline, 14 broker-only, 7 ineligible |
+| **Static capacity** | **41 units / 34 clusters** against a required **21 / 13** — **sufficient** |
+| After arm-B treatment feasibility | 37 units / 32 clusters |
 
-**The broker was specified, built as policy, and measured. It does not close the gap.**
-`skillsbench-per-unit-allowlist@1` derives each unit's minimum allowlist from that unit's own bytes
-and refuses any allowlist reaching an answer-bearing host. Applied to the real roster:
+**Decision 6 resolves to option (b).** The reviewed per-unit egress mechanism is built, and under it
+SkillsBench clears the floor with margin. Demo-1 is no longer blocked at the content-supply
+boundary.
 
-| Egress decision | Units |
-|---|---:|
-| `offline` (declares `no-network`) | 1 |
-| `broker-only` (derivable, clean allowlist) | 9 |
-| `ineligible` | 74 |
+Only **7 units** are egress-ineligible, every one because its own agent-visible text reaches for
+`github.com` — the case the policy exists for, and one no mechanism should ever admit.
 
-Admissible capacity **with the broker policy applied is 6 units / 6 clusters**, and 5 / 5 after
-arm-materialization feasibility — far below the 21 / 13 floor. **Decision 6 therefore resolves to
-option (a): an honest, evidence-backed second STOP.**
+#### The two wrong closures, and why they were wrong
 
-The 74 ineligible units split into two very different groups, and the distinction matters:
+This section was closed twice before, to option (b) on a bad number and then to option (a) on a bad
+policy. Both are left standing above this heading. The failures are worth more than the final
+answer:
 
-| Reason | Units |
-|---|---:|
-| `public-mode-unit-declares-no-derivable-host` | 57 |
-| requires `github.com` (agent, environment, or verifier) | 19 |
-| requires `raw.githubusercontent.com` | 2 |
-| requires `api.github.com` | 1 |
-| requires `huggingface.co` | 1 |
+- **First closure — 57 units / 45 clusters, "build the broker".** That figure counted units whose
+  *only* failing check was egress, which silently assumed a safe allowlist could be constructed for
+  each. It never tested that assumption.
+- **Second closure — 6 units / 6 clusters, "accept a STOP".** The policy that produced it was
+  wrong in two compounding ways. It treated a denied host as disqualifying **wherever** it
+  appeared, when only the **agent** can leak an answer — an image build finishes before the agent
+  exists and is frozen into a pinned image, and a verifier runs after the solve is sealed. And it
+  treated *cannot derive* as *must refuse*, rejecting 57 units that declare `public` because their
+  Dockerfiles run `apt-get` and `pip install`, which need package indexes at build time and often
+  nothing at all at solve time.
 
-- **23 units provably need a denied host.** Their own bytes reach for GitHub or Hugging Face —
-  hosts that can serve the task's own oracle, verifier, or expected output. No broker can admit
-  these, and no further evidence will change that.
-- **57 units are underdetermined, not disqualified.** They declare `public` but name no host in
-  their statement, skills, Dockerfile, or oracle. The policy refuses to guess, because inventing an
-  allowlist is exactly the kind of silent weakening this decision exists to prevent. Many of them
-  probably need only a package index; some may need nothing at all. **Static derivation cannot tell
-  which**, and resolving them needs observed egress during a real no-model control run — which is
-  container work, and therefore operator-gated.
+The corrected policy separates the three moments, adds a fixed content-independent build-time
+infrastructure allowlist, keeps the answer-bearing deny-list absolute at agent time, and defaults an
+agent that names no host to **no network** — which is fail-safe rather than a guess, because a task
+that truly needs egress will fail its own oracle control offline and be rejected on evidence.
 
-So the accurate statement is narrower than either earlier draft of this section: *the broker, as a
-statically-derived per-unit allowlist, yields 6 admissible units.* Whether SkillsBench could clear
-the floor under a dynamically-observed allowlist is **unresolved**, and resolving it costs container
-execution that this decision does not authorize.
+**None of this weakened the method.** The floors are untouched at 21 / 13. The deny-list is
+unchanged. What changed is that a policy which had been rejecting units for reasons the principle
+does not actually support was corrected to match the principle.
 
-**Two corrections, both recorded rather than edited away.**
+#### What READY does and does not authorize
 
-1. The amendment predicted a second STOP. That prediction was briefly overturned by an intermediate
-   figure of 57 units / 45 clusters and then restored by this measurement. The prediction was right;
-   the intermediate figure was wrong.
-2. **The 57/45 figure was measuring the wrong thing, and it was mine.** It counted units whose only
-   failing check was egress — which silently assumed an allowlist could be built for each of them.
-   Once the policy actually derives allowlists from the units' own bytes, 74 of 83 cannot get one.
-   A number that looks measured is not the same as a number that measures the right quantity, and
-   the gap between those two is exactly where a method quietly becomes wrong.
+The v4 freeze records `status: ready` and `authorizes: "dynamic-controls"`, with
+`withOracleEvidence: 0` and `withNoOpEvidence: 0` across all 41 admitted units.
+
+Static capacity authorizes the **no-model oracle and no-op controls** and nothing further. E2 and
+every model-executing path remain shut until each admitted unit carries real pinned-environment
+evidence that its oracle reaches full success and a blank submission does not.
+`demo1PreRunFreezeV4AsE2Input` throws while `authorizes` is anything other than `"e2"` — including
+on a freeze whose `status` was hand-edited, because verification rebuilds every derived field first.
+
+Collapsing "the screening step passed" into "spend inference" is precisely how a fail-closed method
+stops being one, so the two are separate fields with separate derivations.
 
 ## What this decision does not do
 
