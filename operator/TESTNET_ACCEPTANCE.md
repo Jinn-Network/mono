@@ -5,7 +5,7 @@ a canary for `@jinn-network/client`.
 
 The canonical gate is app-first. CLI and Docker commands are still useful for
 setup and diagnostics, but they are not sufficient by themselves: the release
-must be proven through the dashboard flow documented in
+must be proven through the operator console flow documented in
 [`docs/runbooks/swe-rebench-v2-public-testnet.md`](../docs/runbooks/swe-rebench-v2-public-testnet.md).
 
 ## Required Local Gates
@@ -15,14 +15,6 @@ Run from `client/` on the exact release branch:
 ```bash
 yarn typecheck
 yarn vitest run \
-  src/dashboard/spa/src/pages/Launcher.test.tsx \
-  src/dashboard/spa/src/pages/LauncherCreate.test.tsx \
-  src/dashboard/spa/src/pages/LauncherLaunched.test.tsx \
-  src/dashboard/spa/src/pages/launcher-create \
-  src/dashboard/spa/src/pages/launcher-launched \
-  src/dashboard/spa/src/pages/operator-catalog \
-  src/dashboard/spa/src/pages/operator/OperatorDataMarket.test.tsx \
-  src/dashboard/spa/src/captures/CapturesTab.test.tsx \
   test/config.test.ts \
   test/api/operator-artifacts-endpoint.test.ts \
   test/harnesses/engine/packaging-donation.test.ts \

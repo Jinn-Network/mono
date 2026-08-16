@@ -208,7 +208,7 @@ jobs:
             "conclusion": "success",
             "scenarios": [
               { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery and exact solution settlement on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
-              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon SPA journeys (solvernet-flow create→launch + join discover→join→observe) green (#1014)" },
+              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon console journeys (claim-policy + posting-status) green" },
               { "id": "operator-console-unit", "verdict": "pass", "failClass": null, "notes": "apps/operator-console handshake + surface-state unit tests green" }
             ],
             "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."

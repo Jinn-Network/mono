@@ -19,9 +19,9 @@ describe('scopeTestsForChangedFiles — mirror convention', () => {
   });
 
   it('mirrors a .tsx file to a .test.tsx path', () => {
-    const scopes = scopeTestsForChangedFiles(['operator/src/dashboard/spa/src/Widget.tsx']);
+    const scopes = scopeTestsForChangedFiles(['operator/src/api/Widget.tsx']);
     expect(scopeFor(scopes, 'operator')?.candidateTestFiles).toEqual([
-      'operator/test/dashboard/spa/src/Widget.test.tsx',
+      'operator/test/api/Widget.test.tsx',
     ]);
   });
 
@@ -32,12 +32,12 @@ describe('scopeTestsForChangedFiles — mirror convention', () => {
     ]);
   });
 
-  it('passes a co-located src/ test file through as-is (dashboard SPA does not use the src<->test split)', () => {
+  it('passes a co-located src/ test file through as-is', () => {
     const scopes = scopeTestsForChangedFiles([
-      'operator/src/dashboard/spa/src/App.routing.test.tsx',
+      'operator/src/api/server.test.ts',
     ]);
     expect(scopeFor(scopes, 'operator')?.candidateTestFiles).toEqual([
-      'operator/src/dashboard/spa/src/App.routing.test.tsx',
+      'operator/src/api/server.test.ts',
     ]);
   });
 

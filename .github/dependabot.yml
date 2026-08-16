@@ -94,7 +94,7 @@ updates:
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
-    directory: "/operator/src/dashboard/spa"
+    directory: "/apps/operator-console"
     schedule:
       interval: weekly
     groups:

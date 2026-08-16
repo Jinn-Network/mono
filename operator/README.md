@@ -5,32 +5,28 @@ Jinn protocol client. Runs a headless daemon that participates in the Jinn train
 **New operator?** Start with the full testnet runbook:
 <https://github.com/Jinn-Network/mono/blob/main/docs/operator-testnet.md>
 
-## Operator panel (local web UI)
+## Operator console (separate app)
 
-Running `jinn run` opens a browser to `http://127.0.0.1:7331`
-with the operator panel — Status, Visibility (live event stream), Setup
-(bootstrap state machine), and an embedded Claude Code session in Auto Mode
-(when available). Auto-open only happens on the first-ever launch (tracked
-by a marker file), so restarting the daemon doesn't accumulate fresh
-browser tabs.
+The daemon is headless. Running `jinn run` starts the API on
+`http://127.0.0.1:7331` (`GET /` returns `{ "error": "no_human_surface" }`).
+The operator console lives at `apps/operator-console` and talks to the daemon
+with `x-jinn-ui-token` (see [`DEPLOY.md`](../DEPLOY.md) and headless §9).
 
-To force the panel open on a later launch: `jinn run --ui`.
+On first launch `jinn run` may open `http://127.0.0.1:3000`. Use `jinn ui`
+later. Use `jinn run --no-ui` to suppress auto-open.
 
-To suppress auto-open entirely: `jinn run --no-ui` (wins over `--ui`).
+Mint a token with `jinn auth token` (or `jinn auth rotate`). Start the console:
 
-To open the panel manually for an already-running daemon: `jinn ui`.
+```bash
+cd apps/operator-console
+NEXT_PUBLIC_JINN_OPERATOR_URL=http://127.0.0.1:7331 \
+NEXT_PUBLIC_JINN_UI_TOKEN=<token> \
+yarn dev
+```
 
-The panel uses a localhost-only session token written to `~/.jinn-client/ui-token`
-(mode 0600). Browser auth happens via a one-shot handshake URL the daemon prints
-on startup (`[api] UI handshake URL: http://127.0.0.1:<port>/auth/handshake?k=<key>`).
-The launcher automatically opens this URL; subsequent loads reuse the cookie.
-
-Setup-mode behaviour: while the fleet bootstrap is incomplete, the API surface
-and SPA come up immediately, and the daemon's intent loops are gated until
-bootstrap reaches `complete`. The Setup region of the SPA renders the 11-step
-state machine and an "awaiting funding" card with the address to fund.
-
-For SPA development, see [`src/dashboard/spa/README.md`](src/dashboard/spa/README.md).
+While fleet bootstrap is incomplete, the API surface comes up immediately and
+the daemon's intent loops are gated until bootstrap reaches `complete`. The
+console Overview page renders that 11-step machine and funding as projections.
 
 ## Install
 

@@ -84,27 +84,7 @@ describe('the legacy TaskEngine is retired', () => {
     expect(setup).not.toMatch(/app\.post\('\/v1\/setup\/solvernets\/:name'/u);
   });
 
-  it('routes no join flow in the operator SPA', () => {
-    expect(source('dashboard/spa/src/App.tsx')).not.toMatch(/JoinFlow|operator\/join\//u);
-    expect(source('dashboard/spa/src/routes.ts')).not.toMatch(/operator\/join\//u);
-    expect(existsSync(join(root, 'dashboard/spa/src/pages/operator-catalog/JoinFlow.tsx'))).toBe(false);
-    expect(existsSync(join(root, 'dashboard/spa/src/pages/configuration/JoinedNetCard.tsx'))).toBe(false);
-  });
-
-  it('retires the memberships view', () => {
-    expect(existsSync(join(root, 'dashboard/spa/src/pages/operator/MembershipsTab.tsx'))).toBe(false);
-    const client = source('dashboard/spa/src/api/client.ts');
-    expect(client).not.toMatch(/listJoined/u);
-    expect(client).not.toMatch(/^\s{4}(join|leave):/mu);
-    expect(source('dashboard/spa/src/App.tsx')).toMatch(/operator\/memberships.*Redirect to="\/operator\/claim-policy"/su);
-  });
-
-  it('collects no harness or model in the onboarding takeover', () => {
-    // The picker's selection was persisted by re-joining; with the join route
-    // gone it collected an answer and discarded it (PR #2655 review, B4).
-    expect(existsSync(join(root, 'dashboard/spa/src/regions/onboarding/HarnessSelectStep.tsx'))).toBe(false);
-    expect(source('dashboard/spa/src/regions/Onboarding.tsx')).not.toMatch(
-      /HarnessSelection|harnessSel|completionReady/u,
-    );
+  it('has no daemon-served operator SPA', () => {
+    expect(existsSync(join(root, 'dashboard/spa'))).toBe(false);
   });
 });

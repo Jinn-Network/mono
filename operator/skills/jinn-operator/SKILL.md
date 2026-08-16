@@ -78,7 +78,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn conformance` | Run the envelope + trajectory conformance suite against a signed envelope CID |
 | `jinn evidence` | Read delivered evidence — resolve a task id to an envelope, and an envelope to its result |
 | `jinn create` | Scaffold a new Jinn external harness or SolverPlugin package |
-| `jinn ui` | Open the operator panel in your browser (assumes daemon is running) |
+| `jinn ui` | Open the operator console in your browser (default http://127.0.0.1:3000) |
 | `jinn tasks` | Submit and inspect Tasks |
 | `jinn solver-nets` | Manage SolverNet activation, Harness selection, and SolverNet-scoped plugins |
 | `jinn prediction-scoreboard` | Render the Prediction SolverNet Brier scoreboard Markdown report |
