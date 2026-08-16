@@ -344,6 +344,32 @@ export type {
   Demo1PreRunFreezeV4,
   Demo1PreRunFreezeV4Input,
 } from "./method/skillsbench-prerun-v4.js";
+export {
+  SKILLSBENCH_DENIED_HOSTS,
+  SKILLSBENCH_EGRESS_POLICY,
+  deriveSkillsBenchEgressPlan,
+  extractEgressHosts,
+  isDeniedEgressHost,
+  verifySkillsBenchEgressPlan,
+} from "./method/skillsbench-egress.js";
+export type {
+  SkillsBenchEgressDecision,
+  SkillsBenchEgressInput,
+  SkillsBenchEgressPlan,
+} from "./method/skillsbench-egress.js";
+export {
+  SKILLSBENCH_DEFAULT_FULL_SUCCESS,
+  SKILLSBENCH_REWARD_CONTRACT,
+  judgeSkillsBenchControls,
+  parseSkillsBenchCtrf,
+  readSkillsBenchReward,
+} from "./method/skillsbench-reward.js";
+export type {
+  SkillsBenchCtrfSummary,
+  SkillsBenchOutcome,
+  SkillsBenchRewardInput,
+  SkillsBenchRewardReading,
+} from "./method/skillsbench-reward.js";
 export type {
   Demo1PreRunFreezeV3,
   Demo1PreRunFreezeV3CandidateInventory,

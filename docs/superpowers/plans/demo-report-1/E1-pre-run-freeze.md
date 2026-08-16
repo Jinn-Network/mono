@@ -12,7 +12,7 @@
 | `E1-pre-run-freeze.stop.v2.json` | `jinn.demo1.pre-run-freeze.v2` | `08b7e7d0a17d8a4c1ff876111a2e0cb49056b3e5bfe313e8684f46d2b85ae58a` | Preserved byte-for-byte; historical STOP |
 | `E1-task-evidence.v1.json` | `jinn.demo1.task-evidence.v1` | `b136f80342e5d6e7179267590c72d6bcde9c6922ecd61841faf18905daada8e1` | Complete static scan of the authorized task universe |
 | `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Historical STOP on the superseded `anthropics/skills` source |
-| `E1-pre-run-freeze.stop.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `6c14442b71ff711ad37045f2f9295a3f1d11b433b99bf9122ba7da81ac06772e` | **Current STOP**, on SkillsBench v1.1; supersedes v3 by digest |
+| `E1-pre-run-freeze.stop.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `bdd8148e258fca6aabf2b6675324659c3f3ba69d12d224ecf7fe6efae5ebc259` | **Current STOP**, on SkillsBench v1.1; supersedes v3 by digest |
 
 The v3 artifact names and authenticates v2 rather than replacing its bytes. It embeds the exact
 task-evidence artifact, rebuilds every candidate disposition, derives the selection basis
@@ -219,18 +219,26 @@ that does not hash back to its declared Git object id.
 | **Static capacity** | **1 unit / 1 cluster** against a required **21 / 13** — **insufficient** |
 | Failing on egress alone | 83 of 84 |
 | Other rejections | 21 statement disclosure, 19 licence, 6 answer collision |
-| **Clearing every static check but egress** | **57 units / 45 clusters** |
-| **The same units after arm-B treatment feasibility** | **39 units / 33 clusters** |
+| Egress decisions under `skillsbench-per-unit-allowlist@1` | 1 offline, 9 broker-only, **74 ineligible** |
+| **Admissible with the broker policy applied** | **6 units / 6 clusters** |
+| **The same units after arm-B treatment feasibility** | **5 units / 5 clusters** |
 
 **Demo-1 therefore remains STOPPED**, now at a measured capacity of 1 against a floor of 21 rather
 than at the superseded method's domain ceiling. Nothing may execute.
 
-**But the source is not disqualified.** 57 units across 45 clusters clear everything except egress,
-and 39 units across 33 clusters survive the arm-B relative-path feasibility filter on top of that —
-comfortably above the floor, with room left to lose units to the dynamic oracle and no-op
-controls. DR-2026-08-16 Decision 6 is therefore closed in favour of building the reviewed per-unit
-egress broker. That is a decision to build, not a finding that the source has passed.
+**The broker was built as policy and measured; it does not close the gap.** Applying a per-unit
+allowlist derived from each unit's own bytes leaves 6 admissible units across 6 clusters, and 5 / 5
+after arm-materialization feasibility — far below the floor. DR-2026-08-16 Decision 6 therefore
+closes to **option (a): an honest second STOP**.
 
-**This document's earlier prediction — that a second STOP was the more likely outcome — was wrong,
-and is left standing above rather than edited out.** Gating the ruling on a number was worth doing
-precisely because the guess would have been the wrong answer.
+The 74 ineligible units split two ways, and the split is the substantive finding. **23 provably
+need a denied host** — their own bytes reach for GitHub or Hugging Face, which can serve the task's
+own oracle or expected output, so no broker can ever admit them. **57 declare `public` but name no
+host at all**, and the policy refuses to guess rather than invent an allowlist. Whether those 57
+could be admitted under a *dynamically observed* allowlist is unresolved, and resolving it costs
+container execution that nothing here authorizes.
+
+**This document's earlier prediction — a second STOP — was right.** An intermediate figure of 57
+units / 45 clusters briefly contradicted it and is left standing above, because that figure counted
+units whose only failing check was egress and thereby assumed an allowlist could be built for each
+of them. Once the policy actually derived those allowlists, 74 of 83 could not get one.

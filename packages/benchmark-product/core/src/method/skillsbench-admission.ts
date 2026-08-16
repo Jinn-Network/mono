@@ -10,6 +10,7 @@ import {
   type SkillsBenchClusterGraph,
   type SkillsBenchClusterInput,
 } from "./skillsbench-clusters.js";
+import type { SkillsBenchEgressPlan } from "./skillsbench-egress.js";
 import type { SkillsBenchUnit } from "./skillsbench-unit.js";
 
 /**
@@ -136,14 +137,28 @@ function unverifiable(detail: string): SkillsBenchCheckResult {
  * egress broker which does not exist yet, so the check resolves `unverifiable` — never `match`,
  * and never a silent pass.
  */
-function runtimeIsolation(unit: SkillsBenchUnit): SkillsBenchCheckResult {
+function runtimeIsolation(unit: SkillsBenchUnit, egress: SkillsBenchEgressPlan | undefined): SkillsBenchCheckResult {
   if (unit.statement.frontmatter.networkMode === "no-network") {
     return match("task declares no-network; all required execution completes offline");
   }
+  if (egress === undefined) {
+    return unverifiable(
+      "task declares network_mode public and no per-unit egress plan was derived; admissible only "
+      + "through a separately reviewed broker that cannot reach source, oracle, verifier, or answer "
+      + "material (DR-2026-08-16 Decision 6)",
+    );
+  }
+  if (egress.decision === "offline") return match("derived egress plan requires no network at all");
+  if (egress.decision === "ineligible") {
+    // Now provable rather than merely unproven: this unit's own bytes say it needs a host that
+    // could serve its own oracle, verifier, or expected output.
+    return mismatch(`egress is unsatisfiable: ${egress.ineligibleReasons.join(", ")}`);
+  }
+  // The policy layer clears it, but a policy is not enforcement. Until the broker is built and its
+  // evidence sealed, this stays unverifiable — a derived allowlist is not a proof of isolation.
   return unverifiable(
-    "task declares network_mode public and SkillsBench provides no allowlist; admissible only "
-    + "through a separately reviewed per-unit egress broker that cannot reach source, oracle, "
-    + "verifier, or answer material (DR-2026-08-16 Decision 6, not yet built)",
+    `broker-only egress derived (agent: ${egress.agentAllowlist.join(", ")}); pending broker `
+    + "enforcement evidence, which does not exist yet",
   );
 }
 
@@ -177,6 +192,8 @@ export interface SkillsBenchAdmissionInput {
   readonly cluster: Omit<SkillsBenchClusterInput, "taskId">;
   /** True when a token-level collision was found between statement/skills and oracle/verifier. */
   readonly answerCollision: null | string;
+  /** The unit's derived per-unit egress plan, when one has been computed. */
+  readonly egress?: SkillsBenchEgressPlan;
 }
 
 export function assessSkillsBenchStaticAdmission(
@@ -200,7 +217,7 @@ export function assessSkillsBenchStaticAdmission(
       answerCollisionAbsent: input.answerCollision === null
         ? match("no token collision between statement/skills and oracle/verifier")
         : mismatch(input.answerCollision),
-      runtimeIsolationSatisfiable: runtimeIsolation(unit),
+      runtimeIsolationSatisfiable: runtimeIsolation(unit, input.egress),
       immutableRuntimeIdentity: unverifiable(
         "environment/Dockerfile starts from a mutable base tag and the package carries no image "
         + "digest; resolution and build pinning are dynamic-stage work",

@@ -167,7 +167,7 @@ count of units surviving every static check *except* network. That number decide
 Until that number exists, no implementation may assume either outcome. The freeze STOPs by default
 and the broker is additive, so the gate is reversible in both directions.
 
-### Decision 6 — closed 2026-08-16, resolved to option (b)
+### Decision 6 — closed 2026-08-16, resolved to option (a)
 
 The gate has been run. `yarn skillsbench:inventory` authenticates all 87 active tasks from the
 pinned release, executing no model and pulling no image
@@ -178,40 +178,58 @@ pinned release, executing no model and pulling no image
 | Inventoried | 84 of 87 |
 | Refused at construction | 3 — `simpo-code-reproduction` (git submodule; package not self-contained), `earthquake-phase-association` and `seismic-phase-picking` (a `licenses` directory where a skill folder belongs) |
 | Independence clusters over all inventoried units | 52, from 129 evidence-bearing edges |
-| **Static capacity as things stand** | **1 unit / 1 cluster** — against a required 21 / 13. **Insufficient.** |
-| Units failing on egress alone | 83 of 84 |
+| **Static capacity** | **1 unit / 1 cluster** — against a required 21 / 13. **Insufficient.** |
 | Other rejections | 21 statement disclosure, 19 licence, 6 answer collision |
-| **Counterfactual: units clearing every static check but egress** | **57 units / 45 clusters** |
-| **The same units after treatment feasibility** | **39 units / 33 clusters** — 18 lost to bodies that reference a sibling resource by relative path |
 
-**39 units across 33 clusters is comfortably above the 21/13 floor**, after both the egress
-counterfactual and the arm-B relative-path filter, with room left to lose units to the dynamic
-oracle and no-op controls. The per-unit egress broker is therefore worth building, and **Decision 6
-resolves to option (b)**.
+**The broker was specified, built as policy, and measured. It does not close the gap.**
+`skillsbench-per-unit-allowlist@1` derives each unit's minimum allowlist from that unit's own bytes
+and refuses any allowlist reaching an answer-bearing host. Applied to the real roster:
 
-The 18 losses are the relative-path rule doing real work: a body that says `run scripts/x.py`
-cannot move to the repository root without changing what that path resolves to, so arms A and B
-would not be receiving the same instructions in practice. Those units are `unverifiable` and are
-never hand-repaired, because repairing one would edit the instruction bytes the experiment holds
-fixed.
+| Egress decision | Units |
+|---|---:|
+| `offline` (declares `no-network`) | 1 |
+| `broker-only` (derivable, clean allowlist) | 9 |
+| `ineligible` | 74 |
 
-**The amendment's own prediction was wrong, and that is recorded rather than quietly dropped.** The
-section below still says a second STOP was the more likely outcome. It was written before the
-number existed and it is left standing, because the point of gating the ruling on evidence was
-precisely that a guess — including this document's own — should not decide it.
+Admissible capacity **with the broker policy applied is 6 units / 6 clusters**, and 5 / 5 after
+arm-materialization feasibility — far below the 21 / 13 floor. **Decision 6 therefore resolves to
+option (a): an honest, evidence-backed second STOP.**
 
-Two things follow, and neither is optional:
+The 74 ineligible units split into two very different groups, and the distinction matters:
 
-1. **Today's honest state is still STOP.** Capacity is 1/21. The broker does not exist, so no
-   freeze may report `ready` and nothing may execute. Option (b) is a decision to build, not a
-   decision that the source has passed.
-2. **The broker is its own reviewed packet** with its own acceptance criteria: a per-unit allowlist
-   derived statically from the unit's own source; hard denial of `github.com`,
-   `raw.githubusercontent.com`, `codeload.github.com`, every SkillsBench mirror, and the benchmark
-   website; enforcement through the existing `network: "none" | "broker-only"` seam in
-   `packages/benchmark-product/core/src/runtime/inspect/oci.ts`; and a unit whose declared need
-   cannot be met by such an allowlist staying `unverifiable`. Until it lands and its evidence is
-   sealed, `runtimeIsolationSatisfiable` stays `unverifiable` for all 83 public-mode units.
+| Reason | Units |
+|---|---:|
+| `public-mode-unit-declares-no-derivable-host` | 57 |
+| requires `github.com` (agent, environment, or verifier) | 19 |
+| requires `raw.githubusercontent.com` | 2 |
+| requires `api.github.com` | 1 |
+| requires `huggingface.co` | 1 |
+
+- **23 units provably need a denied host.** Their own bytes reach for GitHub or Hugging Face —
+  hosts that can serve the task's own oracle, verifier, or expected output. No broker can admit
+  these, and no further evidence will change that.
+- **57 units are underdetermined, not disqualified.** They declare `public` but name no host in
+  their statement, skills, Dockerfile, or oracle. The policy refuses to guess, because inventing an
+  allowlist is exactly the kind of silent weakening this decision exists to prevent. Many of them
+  probably need only a package index; some may need nothing at all. **Static derivation cannot tell
+  which**, and resolving them needs observed egress during a real no-model control run — which is
+  container work, and therefore operator-gated.
+
+So the accurate statement is narrower than either earlier draft of this section: *the broker, as a
+statically-derived per-unit allowlist, yields 6 admissible units.* Whether SkillsBench could clear
+the floor under a dynamically-observed allowlist is **unresolved**, and resolving it costs container
+execution that this decision does not authorize.
+
+**Two corrections, both recorded rather than edited away.**
+
+1. The amendment predicted a second STOP. That prediction was briefly overturned by an intermediate
+   figure of 57 units / 45 clusters and then restored by this measurement. The prediction was right;
+   the intermediate figure was wrong.
+2. **The 57/45 figure was measuring the wrong thing, and it was mine.** It counted units whose only
+   failing check was egress — which silently assumed an allowlist could be built for each of them.
+   Once the policy actually derives allowlists from the units' own bytes, 74 of 83 cannot get one.
+   A number that looks measured is not the same as a number that measures the right quantity, and
+   the gap between those two is exactly where a method quietly becomes wrong.
 
 ## What this decision does not do
 
@@ -291,10 +309,11 @@ outcome firewall, and every must-not-imply line in E1 §2.7.
 
 ## Honest statement of the likely outcome
 
-> **Superseded 2026-08-16 by the measured result in Decision 6.** The paragraph below is left
-> exactly as written. The counterfactual capacity is 57 units across 45 clusters, so the broker
-> path is viable and the prediction was wrong. Keeping a wrong prediction visible is the point:
-> the ruling was gated on a number so that no guess — including this one — would decide it.
+> **Confirmed 2026-08-16 by the measured result in Decision 6.** With the per-unit allowlist policy
+> actually applied, admissible capacity is 6 units / 6 clusters against a floor of 21 / 13. The
+> prediction below was right. It is left as written, and so is the intermediate 57/45 figure that
+> briefly contradicted it, because the useful record is not that the guess happened to land — it is
+> that the ruling was gated on a measurement rather than on this paragraph.
 
 On the static evidence available when this DR was written, the most probable terminal state of a
 correct implementation is **a second, SkillsBench-backed STOP** — because 86 of 87 active tasks

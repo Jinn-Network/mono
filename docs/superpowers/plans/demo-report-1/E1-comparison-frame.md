@@ -229,13 +229,15 @@ contradiction with the 21-unit floor, and DR-2026-08-16 Decision 6 gated the rul
 rather than a guess: the count of units surviving every static check except network, obtainable at
 zero execution cost.
 
-That count is now measured. Static capacity is **1 unit / 1 cluster** against a required 21 / 13,
-so **Demo-1 remains stopped and nothing may execute**. But **57 units across 45 clusters** clear
-every static check except egress, which is comfortably above the floor. Decision 6 therefore closes
-in favour of building the reviewed per-unit egress broker as its own packet. This amendment's
-original prediction — that a second STOP was more likely — was wrong; it is left standing in
-DR-2026-08-16 rather than edited out, because gating the ruling on evidence was worth doing exactly
-because the guess would have decided it wrongly.
+That count is now measured, and the broker itself has been built as policy and applied. Static
+capacity is **1 unit / 1 cluster**; with a per-unit allowlist derived from each unit's own bytes it
+is **6 units / 6 clusters**, and 5 / 5 after arm-materialization feasibility — against a required
+21 / 13. **Decision 6 closes to option (a): an honest second STOP, and Demo-1 remains stopped.**
+
+The reason is specific rather than general: 23 units provably require a host that could serve their
+own oracle or expected output, and 57 more declare `public` while naming no host at all, which the
+policy refuses to resolve by guessing. Whether a dynamically observed allowlist could admit those 57
+is unresolved and would cost container execution.
 
 ## 2.4 Content identity: how it is guaranteed and how a reader audits it
 
