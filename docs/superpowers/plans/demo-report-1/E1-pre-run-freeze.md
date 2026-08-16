@@ -12,7 +12,7 @@
 | `E1-pre-run-freeze.stop.v2.json` | `jinn.demo1.pre-run-freeze.v2` | `08b7e7d0a17d8a4c1ff876111a2e0cb49056b3e5bfe313e8684f46d2b85ae58a` | Preserved byte-for-byte; historical STOP |
 | `E1-task-evidence.v1.json` | `jinn.demo1.task-evidence.v1` | `b136f80342e5d6e7179267590c72d6bcde9c6922ecd61841faf18905daada8e1` | Complete static scan of the authorized task universe |
 | `E1-pre-run-freeze.stop.v3.json` | `jinn.demo1.pre-run-freeze.v3` | `d439e6729144a74c84f124c058a3c1e01e557091085b9e2c26740884e24b2f3c` | Historical STOP on the superseded `anthropics/skills` source |
-| `E1-pre-run-freeze.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `de15726a3baeaec8d59c10aa8cfced00a20a27bd8ec100c83a4430be935cc0c3` | **Current freeze**, on SkillsBench v1.1; supersedes v3 by digest. Static admission **passes**; authorizes the no-model controls only |
+| `E1-pre-run-freeze.v4.json` | `jinn.demo1.pre-run-freeze.v4` | `404b3c8ad00330a9ff09a7dbb415a44498173979ad965fe13bcf9ca659dc0ca0` | **Current freeze**, on SkillsBench v1.1; supersedes v3 by digest. Static admission **passes**; authorizes the no-model controls only |
 
 The v3 artifact names and authenticates v2 rather than replacing its bytes. It embeds the exact
 task-evidence artifact, rebuilds every candidate disposition, derives the selection basis
@@ -220,6 +220,7 @@ that does not hash back to its declared Git object id.
 | **Static capacity** | **41 units / 34 clusters** against a required **21 / 13** — **sufficient** |
 | Remaining rejections | 21 statement disclosure, 19 licence, 6 answer collision, 14 pending broker enforcement |
 | After arm-B treatment feasibility | 37 units / 32 clusters |
+| **Pool partition** | suitability 6 units / 6 clusters · rehearsal 10 / 5 · official-feasibility 5 / 5 · 23 further units in frozen official order — all three pools cluster-disjoint |
 
 **Static admission passes. Demo-1 is no longer stopped at the content boundary.** The v4 freeze
 records `status: ready`.

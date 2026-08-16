@@ -49,7 +49,7 @@ const SEALED_ARTIFACTS = [
   {
     file: 'E1-pre-run-freeze.v4.json',
     schema: 'jinn.demo1.pre-run-freeze.v4',
-    sha256: 'de15726a3baeaec8d59c10aa8cfced00a20a27bd8ec100c83a4430be935cc0c3',
+    sha256: '404b3c8ad00330a9ff09a7dbb415a44498173979ad965fe13bcf9ca659dc0ca0',
   },
 ];
 

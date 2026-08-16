@@ -371,6 +371,16 @@ export type {
   SkillsBenchRewardReading,
 } from "./method/skillsbench-reward.js";
 export {
+  SKILLSBENCH_PARTITION_POLICY,
+  partitionSkillsBenchPools,
+  verifySkillsBenchPartition,
+} from "./method/skillsbench-partition.js";
+export type {
+  SkillsBenchPartition,
+  SkillsBenchPartitionUnit,
+  SkillsBenchSelectedUnit,
+} from "./method/skillsbench-partition.js";
+export {
   NATIVE_SNAPSHOT_ALGORITHM,
   NativeSnapshotRefusedError,
   NativeSourceMutatedError,

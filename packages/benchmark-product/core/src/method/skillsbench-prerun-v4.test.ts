@@ -46,7 +46,9 @@ function admissionInput(name: string, networkMode = "no-network"): SkillsBenchAd
   return {
     unit: buildSkillsBenchUnit(built),
     statementBody: built.statement.body,
-    cluster: { skillContentDigests: [`s-${name}`], inputFamilyDigests: [], taskLineageIds: [], verificationDigests: [] },
+    // Cluster depth matters: pools need 6 + 10 + 5 units across disjoint clusters, so an inventory
+    // of singleton clusters cannot fill them however many units it has.
+    cluster: { skillContentDigests: [`s-${name.replace(/-u\d+$/u, "")}`], inputFamilyDigests: [], taskLineageIds: [], verificationDigests: [] },
     answerCollision: null,
   };
 }
@@ -65,6 +67,17 @@ function freezeInput(units: readonly SkillsBenchAdmissionInput[], refused: reado
     admission: assessSkillsBenchStaticAdmission(units),
     treatment: units.map((entry) => ({ taskId: entry.unit.task.name, feasible: true, unverifiableReasons: [] })),
   };
+}
+
+/** `clusters` independence groups, `perCluster` units in each. */
+function deepInventory(clusters: number, perCluster = 3, networkMode = "no-network"): SkillsBenchAdmissionInput[] {
+  const rows: SkillsBenchAdmissionInput[] = [];
+  for (let c = 0; c < clusters; c += 1) {
+    for (let u = 0; u < perCluster; u += 1) {
+      rows.push(admissionInput(`c${String(c).padStart(2, "0")}-u${u}`, networkMode));
+    }
+  }
+  return rows;
 }
 
 describe("pre-run freeze v4", () => {
@@ -100,6 +113,16 @@ describe("pre-run freeze v4", () => {
   });
 
   describe("status derivation", () => {
+    it("STOPs when the pools cannot be filled cluster-disjointly", () => {
+      // 21 units in 21 singleton clusters clears the unit and cluster counts but cannot supply a
+      // ten-unit rehearsal pool from five clusters. Counting units alone would have missed this.
+      const freeze = buildDemo1PreRunFreezeV4(freezeInput(Array.from({ length: 21 }, (_, i) => admissionInput(`solo${i}`))));
+      expect(freeze.derived.capacity.admissible.units).toBe(21);
+      expect(freeze.derived.status).toBe("stop");
+      expect(freeze.derived.stopReasons).toContain("pools-cannot-be-filled-cluster-disjointly");
+      expect(freeze.derived.partition).toBeNull();
+    });
+
     it("STOPs below the unit floor and names the shortfall exactly", () => {
       const freeze = buildDemo1PreRunFreezeV4(freezeInput(Array.from({ length: 20 }, (_, i) => admissionInput(`t${i}`))));
       expect(freeze.derived.status).toBe("stop");
@@ -107,9 +130,10 @@ describe("pre-run freeze v4", () => {
     });
 
     it("is READY at 21 admissible units across 21 clusters", () => {
-      const freeze = buildDemo1PreRunFreezeV4(freezeInput(Array.from({ length: 21 }, (_, i) => admissionInput(`t${i}`))));
+      const freeze = buildDemo1PreRunFreezeV4(freezeInput(deepInventory(13, 3)));
       expect(freeze.derived.status).toBe("ready");
       expect(freeze.derived.stopReasons).toEqual([]);
+      expect(freeze.derived.partition).not.toBeNull();
     });
 
     it("derives READY from measured admissible capacity, never from the broker counterfactual", () => {
@@ -156,7 +180,7 @@ describe("pre-run freeze v4", () => {
       // The dangerous case. Static capacity clearing the floor must authorize the no-model
       // controls and nothing more; treating it as permission to spend inference is exactly how a
       // screening step silently becomes a green light.
-      const freeze = buildDemo1PreRunFreezeV4(freezeInput(Array.from({ length: 21 }, (_, i) => admissionInput(`t${String(i).padStart(2, "0")}`))));
+      const freeze = buildDemo1PreRunFreezeV4(freezeInput(deepInventory(13, 3)));
       expect(freeze.derived.status).toBe("ready");
       expect(freeze.derived.authorizes).toBe("dynamic-controls");
       expect(() => demo1PreRunFreezeV4AsE2Input(freeze))
@@ -168,25 +192,19 @@ describe("pre-run freeze v4", () => {
         oracle: readSkillsBenchReward({ rewardTxt: "1" }),
         noOp: readSkillsBenchReward({ rewardTxt: "0" }),
       };
-      const units = Array.from({ length: 21 }, (_, i) => ({
-        ...admissionInput(`t${String(i).padStart(2, "0")}`),
-        dynamicControls: controls,
-      }));
+      const units = deepInventory(13, 3).map((entry) => ({ ...entry, dynamicControls: controls }));
       const freeze = buildDemo1PreRunFreezeV4(freezeInput(units));
       expect(freeze.derived.authorizes).toBe("e2");
-      expect(freeze.derived.dynamicEvidence).toEqual({ admitted: 21, withOracleEvidence: 21, withNoOpEvidence: 21 });
+      expect(freeze.derived.dynamicEvidence).toEqual({ admitted: 39, withOracleEvidence: 39, withNoOpEvidence: 39 });
       const handoff = demo1PreRunFreezeV4AsE2Input(freeze);
-      expect(handoff.taskIds).toHaveLength(21);
+      expect(handoff.taskIds).toHaveLength(39);
       expect(handoff.seed).toBeGreaterThan(0);
     });
 
     it("refuses E2 when even one admitted unit lacks a passing oracle", () => {
       const good = { oracle: readSkillsBenchReward({ rewardTxt: "1" }), noOp: readSkillsBenchReward({ rewardTxt: "0" }) };
       const bad = { oracle: readSkillsBenchReward({ rewardTxt: "0" }), noOp: readSkillsBenchReward({ rewardTxt: "0" }) };
-      const units = Array.from({ length: 21 }, (_, i) => ({
-        ...admissionInput(`t${String(i).padStart(2, "0")}`),
-        dynamicControls: i === 7 ? bad : good,
-      }));
+      const units = deepInventory(13, 3).map((entry, i) => ({ ...entry, dynamicControls: i === 7 ? bad : good }));
       const freeze = buildDemo1PreRunFreezeV4(freezeInput(units));
       expect(freeze.derived.authorizes).not.toBe("e2");
       expect(() => demo1PreRunFreezeV4AsE2Input(freeze)).toThrow(/not E2/u);
