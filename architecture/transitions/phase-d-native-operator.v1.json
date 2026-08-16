@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "phase": "phase-d-native-operator",
-  "defaultPolicy": "The operator default remains legacy until an exact-head live closure proves both settlements, native operations are resolved, and measured legacy use is zero for the approved observation window.",
+  "defaultPolicy": "Retirement is stage-driven under the composition cutover (DR-2026-08-04-b): a row flips to `deleted` in the PR train that deletes its machinery, citing Class A evidence; there is no default flip",
   "transitions": [
     {
       "id": "legacy-operator-composition",
@@ -11,13 +11,8 @@
         "client/src/daemon/native-vertical-mode.ts",
         "client/src/daemon/operator-host-factory.ts"
       ],
-      "replacement": "The native production deployment selected by the explicit native-v1 operator mode.",
-      "consumers": [
-        "client/src/daemon/native-vertical-config.ts",
-        "client/src/index.ts",
-        "client/src/main.ts",
-        "client/src/native-main.ts"
-      ],
+      "replacement": "The single jinn run entry (client/src/main.ts) with compositionMode native fleet composition.",
+      "consumers": [],
       "defaultMode": "legacy",
       "noNewUseGuard": {
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
@@ -26,7 +21,7 @@
       "usageSignal": {
         "name": "legacy-operator-composition",
         "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
-        "sourceDescription": "durable counters exposed by GET /v1/status, incremented at client/src/daemon/daemon.ts:336 when the daemon selects legacy vertical mode",
+        "sourceDescription": "durable counters exposed by GET /v1/status; the increment at daemon construction retired with the native-v1 parallel entry (Stage 5 PR 2 / D5)",
         "zeroDefinition": "No production instance selects the legacy graph during the approved observation window."
       },
       "migration": {
@@ -45,8 +40,9 @@
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
-      "targetPullRequest": "Phase D1 default flip",
-      "status": "planned"
+      "targetPullRequest": "Stage 5 PR 2 (D5 native-v1 parallel entry)",
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-05-cutover-one-swap-collapse.md"
     },
     {
       "id": "marketplace-pipeline",

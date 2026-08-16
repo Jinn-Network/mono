@@ -237,12 +237,10 @@ if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') 
   config.network = 'testnet';
   config.rpcUrl = 'https://base-sepolia-rpc.publicnode.com';
 }
-// #2380: same resolver `cli/commands/run.ts` used to route between this legacy entry and
-// native-main.ts. Recomputed here (not threaded through argv) so /v1/status and daemon_started
-// report the real resolved mode rather than assuming 'legacy'. `jinn run` only ever reaches this
-// entry when the resolver already chose legacy — but `jinn quickstart` imports main.ts directly,
-// unrouted (review #2380), so the reported mode is clamped to 'legacy' (what this entry actually
-// runs) with a loud warning on disagreement, rather than trusting the raw decision.
+// #2380 / D5: recomputed here (not threaded through argv) so /v1/status and daemon_started
+// report the resolved vertical mode. After D5 every `jinn run` reaches this file; leftover
+// `operator.verticalMode: "native-v1"` is clamped to 'legacy' with a loud warning rather than
+// implying a second entry still exists.
 const verticalDecision = resolveConfiguredOperatorVerticalMode(config);
 const { effectiveMode: reportedEffectiveMode, warning: verticalModeWarning } =
   resolveMainEntryEffectiveMode(verticalDecision);
@@ -257,8 +255,8 @@ if (verticalModeWarning !== undefined) {
  *
  * Resolved HERE, at the top of boot, deliberately: `assertNativeDeployment` throws on native +
  * mainnet, and that refusal must happen before a wallet is unlocked or a loop is built, not
- * halfway through composition. Distinct from `verticalDecision` above, which selects an ENTRY
- * POINT (this file vs. the retiring `native-main.ts`); this selects a COMPOSITION inside this one.
+ * halfway through composition. Distinct from `verticalDecision` above (retired axis 1);
+ * this selects a COMPOSITION inside the single remaining entry.
  */
 const COMPOSITION_MODE = resolveFleetCompositionMode({
   compositionMode: config.compositionMode,

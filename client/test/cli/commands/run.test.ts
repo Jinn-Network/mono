@@ -15,9 +15,6 @@ function makeFakeDeps(overrides: Partial<RunDeps> = {}): RunDeps {
       apiPort: 7331,
     })) as unknown as RunDeps['loadConfig'],
     getConfigPathFromArgs: vi.fn(() => undefined) as unknown as RunDeps['getConfigPathFromArgs'],
-    loadNativeConfig: vi.fn(() => {
-      throw new Error('loadNativeConfig should not be called: no native-config.json exists in these fixtures');
-    }) as unknown as RunDeps['loadNativeConfig'],
     checkRpcNetwork: vi.fn(async () => ({ ok: true as const })) as unknown as RunDeps['checkRpcNetwork'],
     rpcNetworkFailureHint: vi.fn(() => 'fix rpc') as unknown as RunDeps['rpcNetworkFailureHint'],
     checkApiPortAvailable: vi.fn(async () => ({ ok: true as const, port: 7331 })) as unknown as RunDeps['checkApiPortAvailable'],
@@ -84,10 +81,7 @@ describe('run command', () => {
     expect(parsed.kind).toBe('daemon_started');
   });
 
-  it('selects the separate native entry without importing or falling back to legacy main', async () => {
-    const nativeMainFn = vi.fn(async () => ({
-      schemaVersion: 1, kind: 'native_daemon_started', mode: 'native-v1', readiness: 'explicit-native-unvalidated',
-    }));
+  it('always uses the single main entry even when operator.verticalMode is native-v1', async () => {
     fakeDeps = makeFakeDeps({
       loadConfig: vi.fn(() => ({
         network: 'testnet', rpcUrl: 'https://sepolia.base.org', apiPort: 7331,
@@ -99,12 +93,23 @@ describe('run command', () => {
           },
         },
       })) as never,
-      nativeMainFn,
     });
     const run = createRunCommand(fakeDeps);
     const { ctx } = makeCommandCtx({ env: { JINN_PASSWORD: 'test', HOME: fakeHome } });
     await run.run(ctx);
-    expect(nativeMainFn).toHaveBeenCalledOnce();
+    expect(fakeDeps.mainFn).toHaveBeenCalledOnce();
+  });
+
+  it('treats leftover --native-config as invalid_invocation', async () => {
+    const run = createRunCommand(fakeDeps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      env: { JINN_PASSWORD: 'test', HOME: fakeHome },
+      argv: ['--native-config', '/tmp/native-config.json'],
+    });
+    await run.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits[exits.length - 1]).not.toBe(0);
     expect(fakeDeps.mainFn).not.toHaveBeenCalled();
   });
 

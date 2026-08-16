@@ -132,10 +132,10 @@ describe('native product recursive mutation gate', () => {
   it('keeps the real native product graph clean while the explicit legacy estate remains available', () => {
     const result = inspectNativeProductBoundary({
       sourceRoot: CLIENT_SRC,
-      entries: [join(CLIENT_SRC, 'native-main.ts')],
+      entries: [join(CLIENT_SRC, 'daemon/native-production-deployment.ts')],
     });
     expect(result.violations).toEqual([]);
-    expect(result.files).toContain(join(CLIENT_SRC, 'native-main.ts'));
+    expect(result.files).toContain(join(CLIENT_SRC, 'daemon/native-production-deployment.ts'));
     expect(result.files).toContain(join(CLIENT_SRC, 'daemon/native-operator-host.ts'));
     expect(result.files).not.toContain(join(CLIENT_SRC, 'daemon/composition-root.ts'));
     expect(result.files).not.toContain(join(CLIENT_SRC, 'daemon/bridge-legacy-delivery.ts'));
