@@ -234,7 +234,7 @@ function autopilotEvaluationFixtures() {
       prNumber: 2101,
       expectedHead: '2'.repeat(40),
     },
-    patch: 'diff --git a/client/src/a.ts b/client/src/a.ts\n',
+    patch: 'diff --git a/operator/src/a.ts b/operator/src/a.ts\n',
     summary: 'Implemented the exact session.',
     evidence: {
       commands: ['yarn typecheck'],

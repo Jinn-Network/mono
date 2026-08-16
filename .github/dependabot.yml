@@ -43,7 +43,7 @@ updates:
   # a shared &anchor / *alias silently invalidates the whole config — which
   # disables grouping AND the ignore list — so keep these blocks in sync by hand.
   - package-ecosystem: npm
-    directory: "/client"
+    directory: "/operator"
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
@@ -94,7 +94,7 @@ updates:
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
-    directory: "/client/src/dashboard/spa"
+    directory: "/operator/src/dashboard/spa"
     schedule:
       interval: weekly
     groups:

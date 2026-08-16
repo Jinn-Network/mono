@@ -258,7 +258,7 @@ test('the CLI exits non-zero and names the DR when an enforced scope regresses',
       (error) => {
         assert.equal(error.status, 1);
         assert.match(error.stderr, /DR-2026-08-04 re-seal/u);
-        assert.match(error.stderr, /client\/src\/regressed\.ts:1/u);
+        assert.match(error.stderr, /operator\/src\/regressed\.ts:1/u);
         return true;
       },
     );

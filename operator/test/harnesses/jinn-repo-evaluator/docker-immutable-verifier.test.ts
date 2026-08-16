@@ -45,7 +45,7 @@ describe('Docker immutable mechanical verifier', () => {
     const verifier = makeDockerImmutableMechanicalVerifier({
       containerName: () => 'jinn-evaluator-verify-test',
       pathExists: async (path) =>
-        path.endsWith('/client/test/harnesses/engine/engine.test.ts'),
+        path.endsWith('/operator/test/harnesses/engine/engine.test.ts'),
       runDocker: async (args, label) => {
         calls.push({ args, label });
         return { status: 'passed' };
@@ -59,8 +59,8 @@ describe('Docker immutable mechanical verifier', () => {
     })).resolves.toEqual({
       kind: 'passed',
       checks: [
-        'client:typecheck',
-        'client:test',
+        'operator:typecheck',
+        'operator:test',
       ],
     });
 
@@ -96,8 +96,8 @@ describe('Docker immutable mechanical verifier', () => {
     const candidate = calls.filter(({ label }) =>
       label.endsWith(':typecheck') || label.endsWith(':test'));
     expect(candidate.map(({ label }) => label)).toEqual([
-      'client:typecheck',
-      'client:test',
+      'operator:typecheck',
+      'operator:test',
     ]);
     for (const call of candidate) {
       expect(call.args[0]).toBe('exec');
@@ -115,12 +115,12 @@ describe('Docker immutable mechanical verifier', () => {
     const disconnectIndex = calls.findIndex(({ label }) =>
       label === 'sandbox-network-disconnect');
     expect(disconnectIndex).toBeLessThan(
-      calls.findIndex(({ label }) => label === 'client:typecheck'),
+      calls.findIndex(({ label }) => label === 'operator:typecheck'),
     );
     expect(calls.map(({ label }) => label)).toEqual(
       expect.arrayContaining([
         'packages/core:trusted-native-rebuild',
-        'client:trusted-native-rebuild',
+        'operator:trusted-native-rebuild',
       ]),
     );
     for (const rebuild of calls.filter(({ label }) =>
@@ -136,7 +136,7 @@ describe('Docker immutable mechanical verifier', () => {
     expect(labels.indexOf('packages/core:trusted-bootstrap-build'))
       .toBeLessThan(labels.indexOf('packages/layer:trusted-bootstrap-build'));
     expect(labels.indexOf('packages/layer:trusted-bootstrap-build'))
-      .toBeLessThan(labels.indexOf('client:typecheck'));
+      .toBeLessThan(labels.indexOf('operator:typecheck'));
     expect(calls.at(-1)?.label).toBe('sandbox-container-remove');
   });
 
@@ -151,7 +151,7 @@ describe('Docker immutable mechanical verifier', () => {
       pathExists: async () => false,
       runDocker: async (_args, label, abort) => {
         calls.push({ label, aborted: abort?.aborted });
-        if (label === 'client:test') controller.abort();
+        if (label === 'operator:test') controller.abort();
         return { status: 'passed' };
       },
     });

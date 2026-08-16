@@ -119,7 +119,7 @@ describe('environment publication', () => {
     expect(dockerfile).toContain(`git -C /testbed fetch --depth=1 origin '${BASE_COMMIT}'`);
     expect(dockerfile).toContain(`git -C /testbed checkout --detach '${BASE_COMMIT}'`);
     expect(dockerfile).toContain("cd '/testbed' && 'corepack' 'enable'");
-    expect(dockerfile).toContain("cd '/testbed/client' && 'yarn' 'vitest' '--version'");
+    expect(dockerfile).toContain("cd '/testbed/operator' && 'yarn' 'vitest' '--version'");
     expect(dockerfile).toContain(`test \"$(git -C /testbed rev-parse HEAD)\" = '${BASE_COMMIT}'`);
     expect(dockerfile).toContain('git -C /testbed status --porcelain)');
     expect(dockerfile).not.toContain('--untracked-files=no');

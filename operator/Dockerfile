@@ -61,7 +61,7 @@ COPY packages/policy/identity/package.json packages/policy/identity/yarn.lock pa
 COPY packages/discovery/serve/package.json packages/discovery/serve/yarn.lock packages/discovery/serve/.yarnrc.yml ./packages/discovery/serve/
 COPY packages/marketplace/projector/package.json packages/marketplace/projector/yarn.lock packages/marketplace/projector/.yarnrc.yml ./packages/marketplace/projector/
 COPY packages/marketplace/venue-base/package.json packages/marketplace/venue-base/yarn.lock packages/marketplace/venue-base/.yarnrc.yml ./packages/marketplace/venue-base/
-COPY packages/discovery/operator/package.json packages/discovery/operator/yarn.lock packages/discovery/operator/.yarnrc.yml ./packages/discovery/operator/
+COPY packages/discovery/client/package.json packages/discovery/client/yarn.lock packages/discovery/client/.yarnrc.yml ./packages/discovery/client/
 COPY packages/discovery/facts/task-execution/package.json packages/discovery/facts/task-execution/yarn.lock packages/discovery/facts/task-execution/.yarnrc.yml ./packages/discovery/facts/task-execution/
 COPY packages/discovery/transport-http/package.json packages/discovery/transport-http/yarn.lock packages/discovery/transport-http/.yarnrc.yml ./packages/discovery/transport-http/
 COPY packages/discovery/testing/package.json packages/discovery/testing/yarn.lock packages/discovery/testing/.yarnrc.yml ./packages/discovery/testing/
@@ -110,7 +110,7 @@ COPY packages/discovery/protocol/tsconfig.json ./packages/discovery/protocol/
 COPY packages/discovery/serve/tsconfig.json ./packages/discovery/serve/
 COPY packages/marketplace/projector/tsconfig.json ./packages/marketplace/projector/
 COPY packages/marketplace/venue-base/tsconfig.json ./packages/marketplace/venue-base/
-COPY packages/discovery/operator/tsconfig.json ./packages/discovery/operator/
+COPY packages/discovery/client/tsconfig.json ./packages/discovery/client/
 COPY packages/discovery/facts/task-execution/tsconfig.json ./packages/discovery/facts/task-execution/
 COPY packages/discovery/transport-http/tsconfig.json ./packages/discovery/transport-http/
 COPY packages/discovery/testing/tsconfig.json ./packages/discovery/testing/
@@ -142,7 +142,7 @@ COPY packages/discovery/protocol/src/ ./packages/discovery/protocol/src/
 COPY packages/discovery/serve/src/ ./packages/discovery/serve/src/
 COPY packages/marketplace/projector/src/ ./packages/marketplace/projector/src/
 COPY packages/marketplace/venue-base/src/ ./packages/marketplace/venue-base/src/
-COPY packages/discovery/operator/src/ ./packages/discovery/operator/src/
+COPY packages/discovery/client/src/ ./packages/discovery/client/src/
 COPY packages/discovery/facts/task-execution/src/ ./packages/discovery/facts/task-execution/src/
 COPY packages/discovery/transport-http/src/ ./packages/discovery/transport-http/src/
 COPY packages/discovery/testing/src/ ./packages/discovery/testing/src/
@@ -159,7 +159,7 @@ COPY packages/evidence/execution-recorder/fixtures/ ./packages/evidence/executio
 COPY packages/evidence/execution-recorder/README.md ./packages/evidence/execution-recorder/README.md
 COPY packages/evidence/attestation-issuer/fixtures/ ./packages/evidence/attestation-issuer/fixtures/
 COPY packages/evidence/attestation-issuer/README.md ./packages/evidence/attestation-issuer/README.md
-COPY packages/discovery/operator/README.md ./packages/discovery/operator/README.md
+COPY packages/discovery/client/README.md ./packages/discovery/client/README.md
 COPY packages/task-execution/backend/README.md ./packages/task-execution/backend/README.md
 COPY packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c ./packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c
 COPY packages/task-execution/backend-local/supervisor/README.md ./packages/task-execution/backend-local/supervisor/README.md

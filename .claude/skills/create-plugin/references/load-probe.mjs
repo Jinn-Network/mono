@@ -43,10 +43,10 @@ if (!absPath || !target) {
 // Resolve the built loader. This file lives at
 //   <repo>/.claude/skills/create-plugin/references/load-probe.mjs
 // so four levels up is the repo root; the loader is at
-//   <repo>/client/dist/plugins/index.js
+//   <repo>/operator/dist/plugins/index.js
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../../../');
-const loaderPath = join(repoRoot, 'client', 'dist', 'plugins', 'index.js');
+const loaderPath = join(repoRoot, 'operator', 'dist', 'plugins', 'index.js');
 
 if (!existsSync(loaderPath)) {
   fail(

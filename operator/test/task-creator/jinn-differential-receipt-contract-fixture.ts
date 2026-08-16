@@ -18,7 +18,7 @@ export function jinnDifferentialReceiptContractFixture() {
         digest: `sha256:${'a'.repeat(64)}`,
       },
       parser: TRUSTED_VITEST_JSON_PARSER_V1,
-      testCommands: [{ bin: 'yarn', args: ['vitest', 'run', '--reporter=json', '--outputFile=/tmp/vitest-results.json'], cwd: 'client' }],
+      testCommands: [{ bin: 'yarn', args: ['vitest', 'run', '--reporter=json', '--outputFile=/tmp/vitest-results.json'], cwd: 'operator' }],
       timeoutSeconds: 300,
       environment: { CI: '1' },
     },

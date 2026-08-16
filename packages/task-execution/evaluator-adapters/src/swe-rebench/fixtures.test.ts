@@ -7,7 +7,7 @@ describe("swe-rebench fixtures", () => {
   test("every fixture names its legacy provenance", () => {
     expect(SWE_REBENCH_FIXTURES.length).toBeGreaterThanOrEqual(12);
     for (const fixture of SWE_REBENCH_FIXTURES) {
-      expect(fixture.provenance).toMatch(/^client\/(src|test)\/.+:\d+/u);
+      expect(fixture.provenance).toMatch(/^operator\/(src|test)\/.+:\d+/u);
     }
   });
 
