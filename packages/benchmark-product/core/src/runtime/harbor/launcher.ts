@@ -34,6 +34,50 @@ function requirePinnedHarbor(view: TaskView, manifest: HarborSelectionManifest):
   if (arm === undefined) throw new TypeError("Harbor Submission does not carry an exact selected arm AgentConfig/model pin");
 }
 
+function closedHarborEnv(paths: WorkspacePaths): Record<string, string> {
+  return { PATH: process.env.PATH ?? "/usr/bin:/bin", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1", TMPDIR: paths.tmp };
+}
+
+function harborInvocationPlan(argv: readonly string[], paths: WorkspacePaths): LaunchPlan {
+  return {
+    argv: [...argv], cwd: paths.work,
+    // The backend spawns with exactly this environment. Keep the surface closed while
+    // retaining PATH so an already byte-pinned executable with an `/usr/bin/env` shebang can
+    // resolve its interpreter and installed dependencies. No credentials or arbitrary
+    // ambient variables cross the boundary.
+    env: closedHarborEnv(paths), validExitCodes: [0],
+    blameExitCodes: [{ match: { signal: "SIGTERM" }, blame: "infrastructure", reasonCode: "cancelled" }],
+    resultContract: { envelopeFormat: "harbor-job-directory-v1", correlationFields: ["harnessVersion"] }, interruptionBehavior: "nonrepeatable",
+  };
+}
+
+function harborArmDispatchPlan(executable: string, paths: WorkspacePaths): LaunchPlan {
+  const rolePath = join(paths.meta, "harbor-arm-role");
+  const jobPath = join(paths.input, "harbor-job.json");
+  const script = `const { existsSync, readFileSync } = require("fs");
+const { join } = require("path");
+const { spawnSync } = require("child_process");
+const rolePath = ${JSON.stringify(rolePath)};
+const jobPath = ${JSON.stringify(jobPath)};
+const role = existsSync(rolePath) ? readFileSync(rolePath, "utf8").trim() : "leader";
+const job = JSON.parse(readFileSync(jobPath, "utf8"));
+const resultPath = join(job.jobs_dir, job.job_name, "result.json");
+if (role !== "leader" || existsSync(resultPath)) {
+  const deadline = Date.now() + 120000;
+  const tick = () => {
+    if (existsSync(resultPath)) process.exit(0);
+    if (Date.now() >= deadline) { console.error("timed out waiting for Harbor Job"); process.exit(1); }
+    setTimeout(tick, 25);
+  };
+  tick();
+} else {
+  const result = spawnSync(${JSON.stringify(executable)}, ["run", "-c", jobPath], { stdio: "inherit", env: process.env, cwd: process.cwd() });
+  process.exit(result.status === null ? 1 : result.status);
+}
+`;
+  return harborInvocationPlan([process.execPath, "-e", script], paths);
+}
+
 export function makeHarborLauncher(input: { readonly manifest: HarborSelectionManifest; readonly host: HarborHostBinding }): LauncherContract {
   const executable = input.host.executable;
   const executableDigest = createHash("sha256").update(readFileSync(executable)).digest("hex");
@@ -62,18 +106,11 @@ export function makeHarborLauncher(input: { readonly manifest: HarborSelectionMa
         : { ready: false, detail: `Harbor version drifted: expected ${input.manifest.harbor.version}, got ${version}` };
     },
     plan(view: TaskView, paths: WorkspacePaths, attempt: AttemptIdentity): LaunchPlan {
+      void attempt;
       requirePinnedHarbor(view, input.manifest);
-      return {
-        // The product deliberately invokes the official CLI only; no synthetic JSON stdout protocol exists.
-        argv: [executable, "run", "-c", join(paths.input, "harbor-job.json")], cwd: paths.work,
-        // The backend spawns with exactly this environment. Keep the surface closed while
-        // retaining PATH so an already byte-pinned executable with an `/usr/bin/env` shebang can
-        // resolve its interpreter and installed dependencies. No credentials or arbitrary
-        // ambient variables cross the boundary.
-        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HARBOR_TELEMETRY: "0", DO_NOT_TRACK: "1", TMPDIR: paths.tmp }, validExitCodes: [0],
-        blameExitCodes: [{ match: { signal: "SIGTERM" }, blame: "infrastructure", reasonCode: "cancelled" }],
-        resultContract: { envelopeFormat: "harbor-job-directory-v1", correlationFields: ["harnessVersion"] }, interruptionBehavior: "nonrepeatable",
-      };
+      const grain = input.manifest.jobGrain ?? "per-dispatch";
+      if (grain === "per-arm") return harborArmDispatchPlan(executable, paths);
+      return harborInvocationPlan([executable, "run", "-c", join(paths.input, "harbor-job.json")], paths);
     },
   };
 }

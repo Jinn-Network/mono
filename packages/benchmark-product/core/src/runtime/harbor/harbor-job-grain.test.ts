@@ -102,6 +102,7 @@ describe("Harbor planned-trial grain", () => {
       await recordHarborDispatchMapping(workspaceDir, "dispatch-a", "job-shared", "trial-1");
       await recordHarborDispatchMapping(workspaceDir, "dispatch-b", "job-shared", "trial-2");
       await expect(recordHarborDispatchMapping(workspaceDir, "dispatch-c", "job-shared", "trial-1")).rejects.toThrow(/cannot be remapped/);
+      await recordHarborDispatchMapping(workspaceDir, "dispatch-d", "job-other", "trial-1");
     } finally {
       await rm(workspaceDir, { recursive: true, force: true });
     }
