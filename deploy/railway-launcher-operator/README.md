@@ -12,8 +12,7 @@ Run locally with `jinn run`; this directory is only for the headless hosted depl
 ## Shape: thin overlay on the container-native base
 
 `Dockerfile` is a ~4-line overlay on `ghcr.io/jinn-network/operator` (the
-container-native base, #988; `ghcr.io/jinn-network/client` remains a dual-push
-alias during the F1 window):
+container-native base, #988):
 
 ```dockerfile
 ARG BASE_TAG=latest

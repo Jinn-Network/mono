@@ -14,8 +14,7 @@ function manifest() {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
-// The published identity is @jinn-network/operator (F1). @jinn-network/client
-// remains a dual-publish alias during the compat window.
+// The published identity is @jinn-network/operator.
 test('operator package keeps its published identity', () => {
   const pkg = manifest();
   assert.equal(pkg.name, '@jinn-network/operator');

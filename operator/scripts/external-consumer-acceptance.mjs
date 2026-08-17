@@ -39,18 +39,11 @@ function exactPackageSpec(packageName, spec) {
 }
 
 function exactProductSpec(spec) {
-  try {
-    return exactPackageSpec('@jinn-network/operator', spec);
-  } catch {
-    return exactPackageSpec('@jinn-network/client', spec);
-  }
+  return exactPackageSpec('@jinn-network/operator', spec);
 }
 
-function productNameFromSpec(spec) {
-  if (typeof spec === 'string' && spec.startsWith('@jinn-network/operator@')) {
-    return '@jinn-network/operator';
-  }
-  return '@jinn-network/client';
+function productNameFromSpec(_spec) {
+  return '@jinn-network/operator';
 }
 
 export function parseAcceptanceArgs(argv) {

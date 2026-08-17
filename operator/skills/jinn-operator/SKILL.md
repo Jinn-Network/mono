@@ -36,7 +36,7 @@ jinn --help
 If not installed:
 
 ```bash
-npm install -g @jinn-network/client
+npm install -g @jinn-network/operator
 ```
 
 This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `jinn mcp` (see Phase 2).
@@ -117,7 +117,7 @@ If the user wants their agent (Claude Code, Cursor, etc.) to operate jinn progra
   "mcpServers": {
     "jinn": {
       "command": "npx",
-      "args": ["-y", "-p", "@jinn-network/client", "jinn", "mcp"]
+      "args": ["-y", "-p", "@jinn-network/operator", "jinn", "mcp"]
     }
   }
 }
@@ -144,7 +144,7 @@ Once configured, these MCP tools become available:
 | `jinn_bootstrap` | MUTATING. Advance the fleet state machine. Idempotent. May take several minutes; can post on-chain transactions and request testnet faucet funds. Returns funding_required if a wallet needs ETH. Requires confirm: true; default is preview (no chain or filesystem mutation). |
 | `jinn_tasks_submit` | MUTATING. Post a Task to the protocol. Idempotent by id. Sends an on-chain transaction and pays gas when confirmed. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
 | `jinn_claim_rewards` | MUTATING. Pull pending protocol rewards to the fleet multisigs. Idempotent: zero-delta exits 0. Requires confirm: true; default is preview (uses CLI --dry-run, no on-chain action). |
-| `jinn_update` | MUTATING: Update the client package and refresh host integrations. Step 1: npm update -g @jinn-network/client Step 2: jinn integrations install (refreshes skills in all configured AI tools). May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version. |
+| `jinn_update` | MUTATING: Update the operator package and refresh host integrations. Step 1: npm update -g @jinn-network/operator Step 2: jinn integrations install (refreshes skills in all configured AI tools). May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version. |
 | `jinn_start_daemon` | MUTATING. Start the jinn daemon as a detached background process. Spawns a long-lived child process and writes a pidfile. Requires confirm: true; default is preview (does not spawn a process). |
 | `jinn_stop_daemon` | MUTATING. Stop the running jinn daemon. Idempotent: returns success even if already stopped. Requires confirm: true; default is preview (does not signal any process). |
 | `activity_list` | List recent structured daemon events. Filter by kinds: intent, reward, fleet, system, error, log. |

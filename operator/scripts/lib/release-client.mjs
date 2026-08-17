@@ -718,23 +718,23 @@ export function runPublishVerifications(context) {
     id: 'verify-npx-version',
     label: `verify npx ${PACKAGE_NAME}@${version}`,
     command: 'npx',
-    args: ['--yes', `${PACKAGE_NAME}@${version}`, 'version', '--json'],
+    args: ['--yes', '--package', `${PACKAGE_NAME}@${version}`, '--', 'jinn', 'version', '--json'],
   });
 
   runStep(context, {
     id: 'verify-docker-version',
     label: `verify GHCR image ${version} version`,
     command: 'docker',
-    args: ['run', '--rm', `ghcr.io/jinn-network/client:${version}`, 'version', '--json'],
+    args: ['run', '--rm', `ghcr.io/jinn-network/operator:${version}`, 'version', '--json'],
   });
   runStep(context, {
     id: 'verify-docker-doctor',
     label: `verify GHCR image ${version} doctor`,
     command: 'docker',
-    args: ['run', '--rm', `ghcr.io/jinn-network/client:${version}`, 'doctor', '--json'],
+    args: ['run', '--rm', `ghcr.io/jinn-network/operator:${version}`, 'doctor', '--json'],
   });
   context.report.dockerVerification = {
-    image: `ghcr.io/jinn-network/client:${version}`,
+    image: `ghcr.io/jinn-network/operator:${version}`,
     version,
   };
   saveReport(context.report);

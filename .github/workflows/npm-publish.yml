@@ -22,8 +22,7 @@ on:
         type: string
 
 # Trusted publishing (OIDC): register this single workflow on npmjs for
-# @jinn-network/operator and, during the F1 compat window, @jinn-network/client.
-# npm allows one trusted publisher config per package.
+# @jinn-network/operator. npm allows one trusted publisher config per package.
 permissions:
   # contents: write is required for the dual-tag step (jinn-mono-2cl.6) which creates
   # and pushes the v2026.MM.DD date tag alongside the v<semver> tag. id-token: write
@@ -309,41 +308,6 @@ jobs:
           unset NODE_AUTH_TOKEN
           npm publish --access public --tag canary
 
-      - name: Dual-publish canary alias @jinn-network/client
-        if: steps.meta.outputs.dist_tag == 'canary'
-        shell: bash
-        env:
-          ALIAS_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
-        run: |
-          VIEW_ERROR="${RUNNER_TEMP}/client-alias-canary-view.stderr"
-          if npm view "${ALIAS_SPEC}" version >/dev/null 2>"${VIEW_ERROR}"; then
-            EXISTING_HEAD="$(npm view "${ALIAS_SPEC}" gitHead)"
-            if [ "${EXISTING_HEAD}" != "${JINN_BUILD_COMMIT}" ]; then
-              echo "::error::${ALIAS_SPEC} exists with gitHead ${EXISTING_HEAD}, expected ${JINN_BUILD_COMMIT}"
-              exit 1
-            fi
-            echo "::notice::${ALIAS_SPEC} already exists at the expected immutable commit"
-            exit 0
-          elif ! grep -Eq 'E404|404 Not Found' "${VIEW_ERROR}"; then
-            cat "${VIEW_ERROR}" >&2
-            echo "::error::Could not determine whether ${ALIAS_SPEC} already exists"
-            exit 1
-          fi
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.name = '@jinn-network/client';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-          unset NODE_AUTH_TOKEN
-          npm publish --access public --tag canary
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.name = '@jinn-network/operator';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
       - name: Validate client canary gitHead
         if: steps.meta.outputs.dist_tag == 'canary'
         shell: bash
@@ -544,41 +508,6 @@ jobs:
         run: |
           unset NODE_AUTH_TOKEN
           npm publish --access public
-
-      - name: Dual-publish stable alias @jinn-network/client
-        if: steps.meta.outputs.dist_tag == 'latest'
-        shell: bash
-        env:
-          ALIAS_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
-        run: |
-          VIEW_ERROR="${RUNNER_TEMP}/client-alias-stable-view.stderr"
-          if npm view "${ALIAS_SPEC}" version >/dev/null 2>"${VIEW_ERROR}"; then
-            EXISTING_HEAD="$(npm view "${ALIAS_SPEC}" gitHead)"
-            if [ "${EXISTING_HEAD}" != "${JINN_BUILD_COMMIT}" ]; then
-              echo "::error::${ALIAS_SPEC} exists with gitHead ${EXISTING_HEAD}, expected ${JINN_BUILD_COMMIT}"
-              exit 1
-            fi
-            echo "::notice::${ALIAS_SPEC} already exists at the expected immutable commit"
-            exit 0
-          elif ! grep -Eq 'E404|404 Not Found' "${VIEW_ERROR}"; then
-            cat "${VIEW_ERROR}" >&2
-            echo "::error::Could not determine whether ${ALIAS_SPEC} already exists"
-            exit 1
-          fi
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.name = '@jinn-network/client';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-          unset NODE_AUTH_TOKEN
-          npm publish --access public
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.name = '@jinn-network/operator';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
 
       - name: Validate stable client gitHead
         if: steps.meta.outputs.dist_tag == 'latest'

@@ -40,8 +40,6 @@ Or with Yarn:
 yarn global add @jinn-network/operator@latest
 ```
 
-`@jinn-network/client` remains a dual-published alias during the F1 compat window.
-
 ## Quick start
 
 The fast path for a new operator on Base Sepolia:
@@ -52,7 +50,8 @@ jinn run
 ```
 
 On first run, `jinn run` generates a random keystore password, saves
-it to `~/.jinn-client/keystore-password` (mode 0600), and prints a summary
+it to `~/.jinn-operator/keystore-password` (mode 0600; read-fallback from
+`~/.jinn-client` when the new directory is empty), and prints a summary
 with the master address and a pointer to back up your mnemonic. Subsequent
 verbs (`jinn run`, `jinn bootstrap`, `jinn claim-rewards`, …) pick up the
 password from that file automatically — no env var needed.
@@ -312,14 +311,14 @@ All action verbs support `--dry-run` and `--yes`.
 - Add `--human` for readable terminal output.
 - `stderr` is reserved for progress, warnings, and runtime logs.
 - Non-zero exits emit a structured error envelope on stdout with `schemaVersion`, `code`, `exitCode`, `message`, `hint`, and `exampleCli`.
-- Without a global install, use `npx @jinn-network/operator@latest <verb> ...`.
-- The previous package name still works during the F1 window: `npx @jinn-network/client@latest <verb> ...`.
+- Without a global install, use `npx -p @jinn-network/operator@latest jinn <verb> ...`.
 
 See the [client surface spec](https://github.com/Jinn-Network/mono/blob/main/spec/2026-04-14-client-surface.md) for the full CLI reference.
 
 ## Configuration
 
-Config file first, env var override. Default location: `~/.jinn-client/config.json`.
+Config file first, env var override. Default location: `~/.jinn-operator/config.json`
+(read-fallback from `~/.jinn-client` when the new directory is empty).
 
 ```bash
 JINN_PASSWORD=secret jinn run --config ./my-config.json
@@ -334,8 +333,8 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | pollIntervalMs | JINN_POLL_INTERVAL_MS | 5000 |
 | apiPort | JINN_API_PORT | 7331 |
 | apiBindHost | JINN_API_BIND_HOST | `127.0.0.1` (loopback only; set to `0.0.0.0` for LAN access — pairs with bearer-token auth on cost-mutating routes) |
-| dbPath | JINN_DB_PATH | ~/.jinn-client/jinn.db |
-| earningDir | JINN_EARNING_DIR | ~/.jinn-client/earning |
+| dbPath | JINN_DB_PATH | ~/.jinn-operator/jinn.db |
+| earningDir | JINN_EARNING_DIR | ~/.jinn-operator/earning |
 | peers | JINN_PEERS | [] |
 | tasks | JINN_TASKS | [] (testnet auto-task generator posts `prediction.v0`) |
 

@@ -7,8 +7,7 @@ Operators who want to run locally should use `jinn run` directly (see `operator/
 ## Shape: thin overlay on the container-native base
 
 `Dockerfile` is a ~4-line overlay on `ghcr.io/jinn-network/operator` (the
-container-native base, #988; `ghcr.io/jinn-network/client` remains a dual-push
-alias during the F1 window):
+container-native base, #988):
 
 ```dockerfile
 ARG BASE_TAG=latest

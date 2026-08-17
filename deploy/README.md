@@ -25,8 +25,7 @@ dotfile skip (#954), and state-dir derivation under `JINN_STATE_DIR` (#956).
 
 ### Pulling the base
 
-The `ghcr.io/jinn-network/operator` package is **public** (the F1 dual-push
-alias `ghcr.io/jinn-network/client` remains pullable during the compat window).
+The `ghcr.io/jinn-network/operator` package is **public**.
 An unauthenticated `docker pull ghcr.io/jinn-network/operator:latest` is the
 default path. So the overlays `FROM` it with **no registry auth** — nothing to
 wire on Railway/CI/local. This is the default path, and it matches the

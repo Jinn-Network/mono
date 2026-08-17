@@ -3,9 +3,8 @@
 This package is published from the monorepo, but operators consume it as a standalone artifact:
 
 - installed CLI: `npm install -g @jinn-network/operator@latest`
-- no-install trial: `npx @jinn-network/operator@latest <verb>`
-- legacy package name (compat window): `npm install -g @jinn-network/client@latest`
-- container: `ghcr.io/jinn-network/operator:<version>` (dual-tagged `ghcr.io/jinn-network/client:<version>` during the F1 window)
+- no-install trial: `npx -p @jinn-network/operator@latest jinn <verb>`
+- container: `ghcr.io/jinn-network/operator:<version>`
 
 The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `v<semver>` (new, produced by the Monday scaffold workflow) or `client-v<semver>` (legacy). The engineering handbook ([`docs/engineering/handbook.md`](../docs/engineering/handbook.md)) is the canonical reference for the cadence.
 
@@ -52,16 +51,16 @@ Do this once because the package did not exist on npm initially.
    ```
 4. Verify the registry artifact:
    ```bash
-   npm view @jinn-network/client version
-   npx @jinn-network/client@latest version --json
-   npx @jinn-network/client@latest --help
+   npm view @jinn-network/operator version
+   npx -p @jinn-network/operator@latest jinn version --json
+   npx -p @jinn-network/operator@latest jinn --help
    ```
 
 ## Configure trusted publishing
 
 After the bootstrap publish succeeds:
 
-1. On npm, register a trusted publisher for `@jinn-network/client`.
+1. On npm, register a trusted publisher for `@jinn-network/operator`.
 2. Bind it to:
    - GitHub repo: `Jinn-Network/mono`
    - workflow file: `npm-publish.yml`
@@ -70,7 +69,7 @@ After the bootstrap publish succeeds:
 
 ## Canary releases
 
-Every push to `main` that touches `client/**` triggers [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml).
+Every push to `next` that touches `operator/**` triggers [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml).
 
 - The workflow builds and tests the package.
 - It rewrites the package version in CI to `<package.json version>-canary.<shortsha>`.
@@ -79,8 +78,8 @@ Every push to `main` that touches `client/**` triggers [`.github/workflows/npm-p
 Post-publish verification:
 
 ```bash
-npx @jinn-network/client@canary version --json
-npx @jinn-network/client@canary --help
+npx -p @jinn-network/operator@canary jinn version --json
+npx -p @jinn-network/operator@canary jinn --help
 ```
 
 ## Stable releases
@@ -135,9 +134,9 @@ itself. The current app-first testnet acceptance gate is documented in
 Release workflow contract:
 
 - `client-vX.Y.Z` must match `operator/package.json` version exactly.
-- npm publishes `@jinn-network/operator@X.Y.Z` as `latest` (and dual-publishes `@jinn-network/client@X.Y.Z` during the F1 window).
+- npm publishes `@jinn-network/operator@X.Y.Z` as `latest`.
 - Docker publishes:
-  - `ghcr.io/jinn-network/operator:X.Y.Z` (and dual-tags `ghcr.io/jinn-network/client:…`)
+  - `ghcr.io/jinn-network/operator:X.Y.Z`
   - `ghcr.io/jinn-network/operator:sha-<shortsha>`
   - `ghcr.io/jinn-network/operator:latest`
 

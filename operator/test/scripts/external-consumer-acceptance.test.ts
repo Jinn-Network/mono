@@ -16,21 +16,12 @@ describe('external consumer acceptance helpers', () => {
       sdkSpec: '@jinn-network/sdk@0.1.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
       clientSpec: '@jinn-network/operator@0.2.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
     });
-    expect(acceptance.parseAcceptanceArgs!([
-      '--registry',
-      '--sdk-spec',
-      '@jinn-network/sdk@0.1.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
-      '--client-spec',
-      '@jinn-network/client@0.2.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
-    ]).clientSpec).toBe(
-      '@jinn-network/client@0.2.1-canary.sha.0123456789abcdef0123456789abcdef01234567',
-    );
     expect(() => acceptance.parseAcceptanceArgs!([
       '--registry',
       '--sdk-spec',
       '@jinn-network/sdk@canary',
       '--client-spec',
-      '@jinn-network/client@^0.2.1',
+      '@jinn-network/operator@^0.2.1',
     ])).toThrow(/exact version/);
   });
 

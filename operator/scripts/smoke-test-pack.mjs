@@ -5,7 +5,7 @@
  * 1) private runtime packages are bundled and their public modules import
  * 2) the exact installed CLI loads through both package-manager layouts
  * 3) local bin execution via `npm exec jinn ...`
- * 4) no-install package execution via package-name bin alias (`npm exec --package <tarball> -- client ...`)
+ * 4) no-install package execution (`npm exec --package <tarball> -- jinn ...`)
  * 5) legacy `npx -p <tarball> jinn ...`
  * Expects cwd to be operator/ (see package.json pack:smoke).
  */
@@ -289,7 +289,7 @@ try {
 
     runOrExit(process.execPath, [nodePtyFix, '--verify'], 'node-pty verification');
 
-    const npxDirect = runOrExit('npm', ['exec', '--yes', '--package', tarball, '--', 'client', 'version', '--json'], 'npx direct');
+    const npxDirect = runOrExit('npm', ['exec', '--yes', '--package', tarball, '--', 'jinn', 'version', '--json'], 'npx direct');
     assertVersionPayload(parseJsonOrExit(npxDirect.stdout, 'npx direct'), 'npx direct');
 
     const npxLegacy = runOrExit('npx', ['-p', tarball, 'jinn', 'version', '--json'], 'npx -p');

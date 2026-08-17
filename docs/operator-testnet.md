@@ -302,7 +302,7 @@ Safe — no on-chain state is lost; `jinn bootstrap` reconciles any existing ser
 
 - Protocol repo: <https://github.com/Jinn-Network/mono>
 - Rotating harness API keys (per-harness auth stores): [`docs/operator/rotating-harness-keys.md`](operator/rotating-harness-keys.md)
-- Client npm: `@jinn-network/operator` (`@jinn-network/client` remains an alias during the F1 window)
+- Operator npm: `@jinn-network/operator`
 - CDP faucet (manual): <https://portal.cdp.coinbase.com/products/faucet>
 - HL testnet: <https://app.hyperliquid-testnet.xyz>
 - Phase 1a design spec: `spec/2026-04-06-phase-1a-design.md`

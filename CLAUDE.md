@@ -195,8 +195,7 @@ The e2e script spawns Anvil, bootstraps from scratch, runs create → restore �
 
 ### How the daemon is meant to be launched
 
-The operator daemon is published as `@jinn-network/operator` (`@jinn-network/client`
-remains a dual-published alias during the F1 compat window). The intended operator
+The operator daemon is published as `@jinn-network/operator`. The intended operator
 flow is:
 
 1. `npm install -g @jinn-network/operator@latest` (or `yarn global add …`).
