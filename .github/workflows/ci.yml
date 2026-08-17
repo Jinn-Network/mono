@@ -196,6 +196,11 @@ jobs:
       - name: Enable Yarn 4.13.0
         run: |
           corepack prepare yarn@4.13.0 --activate
+      - name: Build lifecycle-notifications
+        working-directory: packages/lifecycle-notifications
+        run: |
+          yarn install --immutable
+          yarn build
       - run: yarn install --immutable
       - run: yarn playwright install --with-deps chromium
       - run: yarn e2e

@@ -6,7 +6,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-CLIENT="$REPO_ROOT/client"
+CLIENT="$REPO_ROOT/operator"
 PLUGIN="$REPO_ROOT/packages/plugin"
 CORE="$REPO_ROOT/packages/core"
 LAYER="$REPO_ROOT/packages/layer"

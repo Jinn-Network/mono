@@ -39,6 +39,16 @@ describe('resolveDefaultStateDir', () => {
     );
   });
 
+  it('uses env.HOME when home is omitted (MCP/stop-hook env bags)', () => {
+    dir = mkdtempSync(join(tmpdir(), 'jinn-state-dir-'));
+    expect(
+      resolveDefaultStateDir({
+        env: { HOME: dir },
+        log: () => undefined,
+      }),
+    ).toBe(join(dir, '.jinn-operator'));
+  });
+
   it('reads ~/.jinn-client when ~/.jinn-operator is empty and logs the copy-forward', () => {
     dir = mkdtempSync(join(tmpdir(), 'jinn-state-dir-'));
     mkdirSync(join(dir, '.jinn-operator'), { recursive: true });

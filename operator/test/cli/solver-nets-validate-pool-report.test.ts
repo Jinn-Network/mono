@@ -25,7 +25,7 @@ function seedValidatedPool(dir: string, entries: Record<string, { scorable: bool
 }
 
 /**
- * `solver-nets` falls back to `~/.jinn-client/config.json` when no `--config` is passed, and
+ * `solver-nets` falls back to `~/.jinn-operator/config.json` when no `--config` is passed, and
  * hands that path to `loadConfig` as an EXPLICIT path — which throws when the file is absent.
  * These tests exercise that fallback, so they used to pass only because the developer running
  * them happened to have a real operator config in their home directory; on a clean machine
@@ -33,9 +33,9 @@ function seedValidatedPool(dir: string, entries: Record<string, { scorable: bool
  * fallback config is seeded there deterministically instead.
  */
 beforeAll(() => {
-  mkdirSync(join(homedir(), '.jinn-client'), { recursive: true });
+  mkdirSync(join(homedir(), '.jinn-operator'), { recursive: true });
   writeFileSync(
-    join(homedir(), '.jinn-client', 'config.json'),
+    join(homedir(), '.jinn-operator', 'config.json'),
     JSON.stringify({ network: 'testnet' }),
   );
 });
