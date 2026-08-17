@@ -52,7 +52,7 @@
 // Once read (at import), this value is not re-read for the lifetime of the process --
 // editing the sidecar file requires restarting the daemon (and any in-flight spawned
 // attempts pick up the edit on their own next process, since they import fresh). It is
-// also NOT upgrade-safe on its own: `npm install -g @jinn-network/client@latest`
+// also NOT upgrade-safe on its own: `npm install -g @jinn-network/operator@latest`
 // replaces this whole directory, deleting the sidecar with it. See
 // docs/operator/native-evaluator-deployment.md's upgrade callout -- re-run the
 // create-sidecar step after every version bump.

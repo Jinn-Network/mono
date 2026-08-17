@@ -11,6 +11,7 @@ export interface DerivedNotice {
   message: string;
   jumpTo?: string;
   details?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 const KIND_TITLES: Record<NotificationKind, string> = {

@@ -15,7 +15,6 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod/v3';
 import { NativeOperatorConfigSchema } from './daemon/native-product-config.js';
@@ -23,6 +22,7 @@ import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
 import { parseRpcUrls } from './rpc/transport.js';
+import { defaultConfigPath, resolveDefaultStateDir } from './state-dir.js';
 import { canonicalLocalHttpBaseUrl } from './local-provider-url.js';
 import {
   CONFIG_SHAPE_VERSION,
@@ -44,6 +44,8 @@ import {
 } from './config/native-sections.js';
 import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
 import { pruneMigrationBackups } from './config/atomic-write.js';
+
+const DEFAULT_STATE_DIR = resolveDefaultStateDir();
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -78,7 +80,8 @@ export const JinnConfigSchema = z.object({
    * `sweRebenchV2StateDir` derive from it as `<stateDir>/<subdir>` —
    * UNLESS each is individually overridden, in which case the per-key value
    * wins (derive-don't-collapse). With `stateDir` unset, every default is
-   * byte-identical to the legacy `~/.jinn-client/<subdir>` paths. Hosted
+   * under `~/.jinn-operator/<subdir>`, with a read-fallback to a populated
+   * `~/.jinn-client` when the new directory is empty. Hosted
    * deploys collapse four ENV lines to one `JINN_STATE_DIR=/data`.
    * `engine.workingDirRoot` is deliberately NOT derived — it stays ephemeral
    * (reaped per-task).
@@ -86,10 +89,10 @@ export const JinnConfigSchema = z.object({
   stateDir: z.string().optional(),
 
   /** Earning state directory */
-  earningDir: z.string().default(join(homedir(), '.jinn-client', 'earning')),
+  earningDir: z.string().default(join(DEFAULT_STATE_DIR, 'earning')),
 
   /** SQLite database path */
-  dbPath: z.string().default(join(homedir(), '.jinn-client', 'jinn.db')),
+  dbPath: z.string().default(join(DEFAULT_STATE_DIR, 'jinn.db')),
 
   /**
    * SWE-rebench v2 durable state (validated pool, generator ledger, harvest).
@@ -98,7 +101,7 @@ export const JinnConfigSchema = z.object({
    */
   sweRebenchV2StateDir: z
     .string()
-    .default(join(homedir(), '.jinn-client', 'swe-rebench-v2')),
+    .default(join(DEFAULT_STATE_DIR, 'swe-rebench-v2')),
 
   /** Chain poll interval in ms */
   pollIntervalMs: z.number().int().positive().default(5000),
@@ -836,8 +839,8 @@ export const JinnConfigSchema = z.object({
 });
 
 const DEFAULT_ENGINE = {
-  workingDirRoot: join(homedir(), '.jinn-client', 'engine', 'work'),
-  implStateDirRoot: join(homedir(), '.jinn-client', 'engine', 'impl-state'),
+  workingDirRoot: join(DEFAULT_STATE_DIR, 'engine', 'work'),
+  implStateDirRoot: join(DEFAULT_STATE_DIR, 'engine', 'impl-state'),
 } as const;
 
 /**
@@ -868,7 +871,7 @@ export type JinnConfig = Omit<
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
-const DEFAULT_DIR = join(homedir(), '.jinn-client');
+const DEFAULT_DIR = DEFAULT_STATE_DIR;
 export const DEFAULT_CONFIG_PATH = join(DEFAULT_DIR, 'config.json');
 
 /**
@@ -953,11 +956,12 @@ export function getLastConfigMigrationReport(): ConfigMigrationReport | undefine
  * Load config with resolution: env > config file > defaults.
  *
  * @param configPath — explicit config file path (e.g. from --config flag).
- *   Falls back to ~/.jinn-client/config.json if it exists.
+ *   Falls back to ~/.jinn-operator/config.json, or a populated
+ *   ~/.jinn-client/config.json during the F1 read-fallback window.
  */
 export function loadConfig(configPath?: string): JinnConfig {
   // 1. Load config file (if any)
-  const filePath = configPath ?? DEFAULT_CONFIG_PATH;
+  const filePath = configPath ?? defaultConfigPath();
   let fileValues: Record<string, unknown> = {};
 
   if (existsSync(filePath)) {
@@ -1484,7 +1488,7 @@ export function persistTopLevelConfigValue(
   value: unknown,
   configPath?: string,
 ): string {
-  const filePath = configPath ?? DEFAULT_CONFIG_PATH;
+  const filePath = configPath ?? defaultConfigPath();
   let current: Record<string, unknown> = {};
   if (existsSync(filePath)) {
     current = JSON.parse(readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
@@ -1610,7 +1614,7 @@ export function buildConfigProvenance(
   config: JinnConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): ConfigProvenance {
-  const filePath = configPath ?? DEFAULT_CONFIG_PATH;
+  const filePath = configPath ?? defaultConfigPath({ env });
   const configLoaded = existsSync(filePath);
 
   const envOverrides: Record<string, 'set'> = {};

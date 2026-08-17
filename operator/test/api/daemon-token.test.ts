@@ -75,7 +75,7 @@ describe('resolveEarningDirFromEnv', () => {
     expect(resolveEarningDirFromEnv({ JINN_EARNING_DIR: '/custom/earning' })).toBe('/custom/earning');
   });
 
-  it('falls back to the ~/.jinn-client/earning default', () => {
-    expect(resolveEarningDirFromEnv({})).toBe(join(homedir(), '.jinn-client', 'earning'));
+  it('falls back to the ~/.jinn-operator/earning default on a fresh home', () => {
+    expect(resolveEarningDirFromEnv({})).toBe(join(homedir(), '.jinn-operator', 'earning'));
   });
 });

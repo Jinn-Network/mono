@@ -77,6 +77,7 @@ const EXPLICITLY_DENIED = [
   '@jinn-network/task-execution-protocol',
   '@jinn-network/autopilot',
   '@jinn-network/client',
+  '@jinn-network/operator',
   '@jinn-network/operator-console',
   '@jinn-network/explorer-spa',
   '@jinn-network/indexer',

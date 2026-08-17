@@ -724,7 +724,7 @@
       },
       "supersedes": [],
       "replacedBy": [],
-      "name": "@jinn-network/client",
+      "name": "@jinn-network/operator",
       "path": "operator",
       "domain": "operator",
       "role": "operator daemon and application",

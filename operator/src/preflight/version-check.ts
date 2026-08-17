@@ -1,7 +1,7 @@
 /**
  * Start-time npm-registry version check (issue #641).
  *
- * The daemon does not surface that a newer `@jinn-network/client` has been
+ * The daemon does not surface that a newer `@jinn-network/operator` has been
  * published, so operators run stale dashboards. This module supplies the pure,
  * unit-testable pieces main.ts composes into a fire-and-forget check.
  *
@@ -12,9 +12,9 @@
 import semver from 'semver';
 import { buildInfo } from '../build-info.js';
 
-/** npm `latest` dist-tag endpoint for the published client package. */
+/** npm `latest` dist-tag endpoint for the published operator package. */
 const REGISTRY_LATEST_URL =
-  'https://registry.npmjs.org/@jinn-network/client/latest';
+  'https://registry.npmjs.org/@jinn-network/operator/latest';
 
 /** Default abort timeout for the registry fetch (ms). */
 const DEFAULT_TIMEOUT_MS = 2500;
@@ -91,5 +91,5 @@ export function isNewerVersion(running: string, latest: string): boolean {
 
 /** One-line "update available" log message. */
 export function formatUpdateLogLine(latest: string): string {
-  return `[version] v${latest} of @jinn-network/client is available — run \`jinn update\` and restart to pick it up`;
+  return `[version] v${latest} of @jinn-network/operator is available — run \`jinn update\` and restart to pick it up`;
 }

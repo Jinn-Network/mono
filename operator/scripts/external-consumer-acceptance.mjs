@@ -26,7 +26,7 @@ export function renderHelp() {
   node scripts/external-consumer-acceptance.mjs
   node scripts/external-consumer-acceptance.mjs --registry \\
     --sdk-spec @jinn-network/sdk@<exact-version> \\
-    --client-spec @jinn-network/client@<exact-version>
+    --client-spec @jinn-network/operator@<exact-version>
 `;
 }
 
@@ -36,6 +36,14 @@ function exactPackageSpec(packageName, spec) {
     throw new Error(`${packageName} registry spec must use an exact version`);
   }
   return spec;
+}
+
+function exactProductSpec(spec) {
+  return exactPackageSpec('@jinn-network/operator', spec);
+}
+
+function productNameFromSpec(_spec) {
+  return '@jinn-network/operator';
 }
 
 export function parseAcceptanceArgs(argv) {
@@ -53,7 +61,7 @@ export function parseAcceptanceArgs(argv) {
   const sdkIndex = argv.indexOf('--sdk-spec');
   const clientIndex = argv.indexOf('--client-spec');
   const sdkSpec = exactPackageSpec('@jinn-network/sdk', argv[sdkIndex + 1]);
-  const clientSpec = exactPackageSpec('@jinn-network/client', argv[clientIndex + 1]);
+  const clientSpec = exactProductSpec(argv[clientIndex + 1]);
   return { mode: 'registry', sdkSpec, clientSpec };
 }
 
@@ -257,7 +265,7 @@ function runRegistryYarnConsumerAcceptance(options, consumerRoot) {
       packageManager: 'yarn@4.13.0',
       dependencies: {
         '@jinn-network/sdk': options.sdkSpec,
-        '@jinn-network/client': options.clientSpec,
+        [productNameFromSpec(options.clientSpec)]: options.clientSpec,
       },
     }, null, 2)}\n`,
   );

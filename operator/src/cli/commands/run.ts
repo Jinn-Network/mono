@@ -7,9 +7,8 @@ import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.
 import { COMMON_FLAGS } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
-import {
-  resolveCliPassword as defaultResolveCliPassword,
-} from '../password.js';
+import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 import type { JinnConfig } from '../../config.js';
 import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
@@ -215,7 +214,7 @@ Failure example (funding gate):
         resolvedPassword = probe.password;
       } else {
         const home = ctx.env['HOME'] ?? homedir();
-        const pwFilePath = join(home, '.jinn-client', 'keystore-password');
+        const pwFilePath = join(resolveDefaultStateDir({ home, env: ctx.env }), 'keystore-password');
         // Defensive: probe.ok=false means neither env, fd, nor a non-empty
         // file existed. Generate, persist, and continue.
         const generated = randomBytes(32).toString('hex');

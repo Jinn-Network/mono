@@ -21,6 +21,7 @@ import {
   apiPortFailureMessage as defaultApiPortFailureMessage,
   checkApiPortAvailable as defaultCheckApiPortAvailable,
 } from '../../preflight/api-port.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
 // ── Structured progress envelope ─────────────────────────────────────────────
 
@@ -226,7 +227,7 @@ Examples:
         typeof parsed.values.config === 'string' && parsed.values.config.length > 0
           ? parsed.values.config
           : undefined;
-      const jinnDir = join(ctx.env['HOME'] ?? homedir(), '.jinn-client');
+      const jinnDir = resolveDefaultStateDir({ home: ctx.env['HOME'] ?? homedir(), env: ctx.env });
       const passwordFilePath = join(jinnDir, 'keystore-password');
       const keystoreFilePath = join(jinnDir, 'earning', 'master_keystore.json');
       const bootstrapArgv = ['--json', ...(configPath ? ['--config', configPath] : [])];

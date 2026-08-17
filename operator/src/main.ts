@@ -163,6 +163,7 @@ import {
   VERSION_CHECK_INTERVAL_MS,
 } from './preflight/version-check.js';
 import { openBrowser } from './cli/open-browser.js';
+import { resolveDefaultStateDir } from './state-dir.js';
 
 if (process.env['JINN_LOAD_DEV_ENV'] === '1' || process.env['NODE_ENV'] === 'development') {
   dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
@@ -192,7 +193,7 @@ function resolveOrGenerateKeystorePassword(): {
   }
 
   const home = process.env['HOME'] ?? homedir();
-  const pwFilePath = join(home, '.jinn-client', 'keystore-password');
+  const pwFilePath = join(resolveDefaultStateDir({ home }), 'keystore-password');
   if (existsSync(pwFilePath)) {
     const fromDisk = readFileSync(pwFilePath, 'utf-8').trim();
     if (fromDisk.length > 0) {
@@ -300,7 +301,7 @@ const RPC_PUBLIC_DEFAULTS: readonly string[] =
 let lastL2Probe: ProbeResult[] = [];
 
 function configFileHasTopLevelKey(configPath: string | undefined, key: string): boolean {
-  const filePath = configPath ?? join(process.env['HOME'] ?? '', '.jinn-client', 'config.json');
+  const filePath = configPath ?? join(resolveDefaultStateDir(), 'config.json');
   if (!filePath || !existsSync(filePath)) return false;
   try {
     const raw = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
@@ -613,7 +614,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: undefined,
   };
 
-  // #641: latest published `@jinn-network/client` version, back-filled by the
+  // #641: latest published `@jinn-network/operator` version, back-filled by the
   // start-time npm-registry check below. `/v1/status.latestVersion` reads this
   // via the `latestVersion` getter threaded into the ApiServer status config.
   const latestVersionHolder: { current: string | null } = { current: null };

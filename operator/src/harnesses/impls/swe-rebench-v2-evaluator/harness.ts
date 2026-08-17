@@ -20,7 +20,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawn, spawnSync, type SpawnOptions } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
@@ -100,6 +99,7 @@ import {
   PoolCacheStore,
   loadPoolWithCacheFallback,
 } from '../../../solver-types/_swe-rebench-v2-pool-cache.js';
+import { resolveDefaultStateDir } from '../../../state-dir.js';
 
 const DEFAULT_IPFS_REGISTRY_URL = 'https://registry.autonolas.tech';
 const DEFAULT_IPFS_GATEWAY_URL = 'https://gateway.autonolas.tech';
@@ -144,7 +144,7 @@ function patchBundlePath(): string {
   ];
   const path = candidates.find(existsSync);
   if (!path) {
-    throw new Error(`missing ${PATCH_BUNDLE_FILE}; reinstall @jinn-network/client`);
+    throw new Error(`missing ${PATCH_BUNDLE_FILE}; reinstall @jinn-network/operator`);
   }
   return path;
 }
@@ -369,7 +369,7 @@ export function inspectCurrentSweRebenchV2EvaluatorEnableContract(
     return {
       ok: false,
       reason: `cannot load durable evaluator patch bundle: ${err instanceof Error ? err.message : String(err)}`,
-      nextStep: `Reinstall @jinn-network/client, then run \`${ENABLE_CLI}\`.`,
+      nextStep: `Reinstall @jinn-network/operator, then run \`${ENABLE_CLI}\`.`,
     };
   }
   return validateCurrentSweRebenchV2EvaluatorEnableContract({
@@ -1558,7 +1558,7 @@ export function applyUpstreamPatches(upstreamRepoDir: string): void {
  * without going through the daemon use this default.
  */
 export function defaultSweRebenchV2EvaluatorImplStateDir(): string {
-  return join(process.env['HOME'] ?? homedir(), '.jinn-client', 'engine', 'impl-state', 'swe-rebench-v2-evaluator');
+  return join(resolveDefaultStateDir(), 'engine', 'impl-state', 'swe-rebench-v2-evaluator');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

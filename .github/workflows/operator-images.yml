@@ -44,7 +44,7 @@ jobs:
           OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-8)"
           {
-            echo "base_repo=ghcr.io/${OWNER}/client"
+            echo "base_repo=ghcr.io/${OWNER}/operator"
             echo "launcher_repo=ghcr.io/${OWNER}/operator-launcher"
             echo "codex_repo=ghcr.io/${OWNER}/operator-codex"
             echo "sha=${SHORT_SHA}"

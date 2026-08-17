@@ -48,6 +48,7 @@ import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
 import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -158,7 +159,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   const resolveEarningDir = (): string =>
     config.earningDir ??
     process.env['JINN_EARNING_DIR'] ??
-    join(process.env['HOME'] ?? homedir(), '.jinn-client', 'earning');
+    join(resolveDefaultStateDir(), 'earning');
 
   // Issue #560 batched-topup defaults. Resolved once so the POST /drip batch
   // branch and GET /drip/quota route can't drift. Production callers always
@@ -721,7 +722,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
 
     const earningDir =
       process.env['JINN_EARNING_DIR'] ??
-      join(process.env['HOME'] ?? homedir(), '.jinn-client', 'earning');
+      join(resolveDefaultStateDir(), 'earning');
     const store = new FleetStateStore(earningDir);
 
     if (!store.hasMnemonicKeystore() && !store.hasLegacyKeystore()) {
@@ -743,7 +744,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // Also update the persisted password file so subsequent `jinn run`
       // invocations pick up the new password seamlessly.
       const home = process.env['HOME'] ?? homedir();
-      const pwFilePath = join(home, '.jinn-client', 'keystore-password');
+      const pwFilePath = join(resolveDefaultStateDir({ home }), 'keystore-password');
       mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
       writeFileSync(pwFilePath, parsed.data.next + '\n', { mode: 0o600 });
 

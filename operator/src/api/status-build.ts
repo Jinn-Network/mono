@@ -58,7 +58,7 @@ export interface GatheredStatusRaw {
    */
   version?: string;
   /**
-   * Latest published `@jinn-network/client` version from the npm registry, or
+   * Latest published `@jinn-network/operator` version from the npm registry, or
    * `null` when the check hasn't resolved / is disabled (issue #641).
    */
   latestVersion?: string | null;

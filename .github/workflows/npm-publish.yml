@@ -22,7 +22,7 @@ on:
         type: string
 
 # Trusted publishing (OIDC): register this single workflow on npmjs for
-# @jinn-network/client. npm allows one trusted publisher config per package.
+# @jinn-network/operator. npm allows one trusted publisher config per package.
 permissions:
   # contents: write is required for the dual-tag step (jinn-mono-2cl.6) which creates
   # and pushes the v2026.MM.DD date tag alongside the v<semver> tag. id-token: write
@@ -251,7 +251,7 @@ jobs:
         id: existing
         shell: bash
         env:
-          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+          PACKAGE_SPEC: '@jinn-network/operator@${{ steps.meta.outputs.publish_version }}'
         run: |
           VIEW_ERROR="${RUNNER_TEMP}/client-canary-view.stderr"
           if npm view "${PACKAGE_SPEC}" version >/dev/null 2>"${VIEW_ERROR}"; then
@@ -312,7 +312,7 @@ jobs:
         if: steps.meta.outputs.dist_tag == 'canary'
         shell: bash
         env:
-          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+          PACKAGE_SPEC: '@jinn-network/operator@${{ steps.meta.outputs.publish_version }}'
         run: |
           for _ in $(seq 1 30); do
             PUBLISHED_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead 2>/dev/null || true)"
@@ -328,7 +328,7 @@ jobs:
         if: steps.meta.outputs.dist_tag == 'canary'
         shell: bash
         env:
-          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+          CLIENT_SPEC: '@jinn-network/operator@${{ steps.meta.outputs.publish_version }}'
         run: |
           PROBE_DIR="${RUNNER_TEMP}/client-canary-probe"
           mkdir -p "${PROBE_DIR}"
@@ -346,7 +346,7 @@ jobs:
         shell: bash
         env:
           SDK_SPEC: ${{ steps.meta.outputs.sdk_spec }}
-          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+          CLIENT_SPEC: '@jinn-network/operator@${{ steps.meta.outputs.publish_version }}'
         run: node scripts/external-consumer-acceptance.mjs --registry --sdk-spec "${SDK_SPEC}" --client-spec "${CLIENT_SPEC}"
 
       # Two-gate publish guard — verify, don't re-run (spec
@@ -484,7 +484,7 @@ jobs:
         if: steps.meta.outputs.dist_tag == 'latest'
         shell: bash
         env:
-          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+          PACKAGE_SPEC: '@jinn-network/operator@${{ steps.meta.outputs.publish_version }}'
         run: |
           VIEW_ERROR="${RUNNER_TEMP}/client-stable-view.stderr"
           if npm view "${PACKAGE_SPEC}" version >/dev/null 2>"${VIEW_ERROR}"; then
@@ -513,7 +513,7 @@ jobs:
         if: steps.meta.outputs.dist_tag == 'latest'
         shell: bash
         env:
-          PACKAGE_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+          PACKAGE_SPEC: '@jinn-network/operator@${{ steps.meta.outputs.publish_version }}'
         run: |
           for _ in $(seq 1 30); do
             PUBLISHED_HEAD="$(npm view "${PACKAGE_SPEC}" gitHead 2>/dev/null || true)"
@@ -529,7 +529,7 @@ jobs:
         if: steps.meta.outputs.dist_tag == 'latest'
         shell: bash
         env:
-          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+          CLIENT_SPEC: '@jinn-network/operator@${{ steps.meta.outputs.publish_version }}'
         run: |
           PROBE_DIR="${RUNNER_TEMP}/client-stable-probe"
           mkdir -p "${PROBE_DIR}"
@@ -547,7 +547,7 @@ jobs:
         shell: bash
         env:
           SDK_SPEC: '@jinn-network/sdk@${{ steps.meta.outputs.sdk_version }}'
-          CLIENT_SPEC: '@jinn-network/client@${{ steps.meta.outputs.publish_version }}'
+          CLIENT_SPEC: '@jinn-network/operator@${{ steps.meta.outputs.publish_version }}'
         run: node scripts/external-consumer-acceptance.mjs --registry --sdk-spec "${SDK_SPEC}" --client-spec "${CLIENT_SPEC}"
 
       # Dual-tag policy (jinn-mono-2cl.6, per the engineering handbook §Cadence): the published

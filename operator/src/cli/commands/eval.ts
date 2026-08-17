@@ -14,7 +14,6 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import type { CommandContext, CommandModule } from '../command.js';
 import { parseCommandArgs, COMMON_FLAGS } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
@@ -63,6 +62,7 @@ import {
 } from '../../solver-types/_jinn-repo-pool.js';
 import type { Task } from '../../types/task.js';
 import type { Harness } from '../../harnesses/types.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
 /**
  * Which evaluation backend a solverType dispatches to. `jinn-repo` grades
@@ -241,11 +241,11 @@ function renderHuman(result: EvalRunResult): string {
   );
 }
 
-const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
+const DEFAULT_CONFIG_PATH = join(resolveDefaultStateDir(), 'config.json');
 
 /** Default impl-state root when config does not set `engine.implStateDirRoot`. */
 function implStateDirRoot(config: ReturnType<typeof loadConfig>): string {
-  return config.engine?.implStateDirRoot ?? join(homedir(), '.jinn-client', 'engine', 'impl-state');
+  return config.engine?.implStateDirRoot ?? join(resolveDefaultStateDir(), 'engine', 'impl-state');
 }
 
 /**

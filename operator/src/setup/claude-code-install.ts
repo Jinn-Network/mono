@@ -1,8 +1,8 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -24,7 +24,7 @@ export interface LocalClaudeCodeInstallOptions {
 }
 
 export function defaultClaudeCodeInstallRoot(): string {
-  return join(homedir(), '.jinn-client', 'tools', 'claude-code');
+  return join(resolveDefaultStateDir(), 'tools', 'claude-code');
 }
 
 export function claudeBinaryPathForInstallRoot(installRoot: string): string {

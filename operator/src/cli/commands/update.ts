@@ -365,7 +365,7 @@ export function createUpdateCommand(overrides: Partial<UpdateDeps> = {}): Comman
     helpText: `Usage: jinn update [--human] [--skip-npm] [--skip-plugins]
 
 Steps:
-  1. npm update -g @jinn-network/client  (updates binary + MCP server + skill source)
+  1. npm update -g @jinn-network/operator  (updates binary + MCP server + skill source)
   2. local Task-native preflight          (migrates local SQLite schema and validates earning state)
   3. jinn integrations install            (refreshes skills in all configured tools)
 
@@ -418,9 +418,9 @@ Examples:
 
       // ── Step 1: Update the npm package ──
       if (!skipNpm) {
-        console.error('[update] Updating @jinn-network/client...');
+        console.error('[update] Updating @jinn-network/operator...');
         try {
-          const output = execSync('npm update -g @jinn-network/client 2>&1', {
+          const output = execSync('npm update -g @jinn-network/operator 2>&1', {
             encoding: 'utf-8',
             timeout: 120_000,
           });

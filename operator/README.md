@@ -1,6 +1,6 @@
-# @jinn-network/client
+# @jinn-network/operator
 
-Jinn protocol client. Runs a headless daemon that participates in the Jinn training loop: create Tasks, solve them through Harnesses, evaluate Solutions, and earn rewards for measured work.
+Jinn operator daemon. Runs a headless daemon that participates in the Jinn training loop: create Tasks, solve them through Harnesses, evaluate Solutions, and earn rewards for measured work.
 
 **New operator?** Start with the full testnet runbook:
 <https://github.com/Jinn-Network/mono/blob/main/docs/operator-testnet.md>
@@ -31,13 +31,13 @@ console Overview page renders that 11-step machine and funding as projections.
 ## Install
 
 ```bash
-npm install -g @jinn-network/client@latest
+npm install -g @jinn-network/operator@latest
 ```
 
 Or with Yarn:
 
 ```bash
-yarn global add @jinn-network/client@latest
+yarn global add @jinn-network/operator@latest
 ```
 
 ## Quick start
@@ -50,7 +50,8 @@ jinn run
 ```
 
 On first run, `jinn run` generates a random keystore password, saves
-it to `~/.jinn-client/keystore-password` (mode 0600), and prints a summary
+it to `~/.jinn-operator/keystore-password` (mode 0600; read-fallback from
+`~/.jinn-client` when the new directory is empty), and prints a summary
 with the master address and a pointer to back up your mnemonic. Subsequent
 verbs (`jinn run`, `jinn bootstrap`, `jinn claim-rewards`, …) pick up the
 password from that file automatically — no env var needed.
@@ -126,7 +127,7 @@ treat the wallet as hot and keep funds to the gas + rewards minimum.
 ## Try without installing
 
 ```bash
-npx @jinn-network/client@latest doctor
+npx @jinn-network/operator@latest doctor
 ```
 
 ## Let your agent do it
@@ -234,11 +235,11 @@ boundary.
    ```
 
 The compose file lives at `client/docker-compose.yml` if you cloned the
-repo. If you installed via `npm install -g @jinn-network/client@latest`,
+repo. If you installed via `npm install -g @jinn-network/operator@latest`,
 copy it out first:
 
 ```bash
-cp "$(npm root -g)/@jinn-network/client/docker-compose.yml" .
+cp "$(npm root -g)/@jinn-network/operator/docker-compose.yml" .
 ```
 
 ### Fallback: interactive OAuth inside the container
@@ -256,7 +257,7 @@ docker compose up -d
 ### Quick test
 
 ```bash
-docker run --rm ghcr.io/jinn-network/client:latest version --json
+docker run --rm ghcr.io/jinn-network/operator:latest version --json
 ```
 
 ## Operator commands
@@ -310,14 +311,14 @@ All action verbs support `--dry-run` and `--yes`.
 - Add `--human` for readable terminal output.
 - `stderr` is reserved for progress, warnings, and runtime logs.
 - Non-zero exits emit a structured error envelope on stdout with `schemaVersion`, `code`, `exitCode`, `message`, `hint`, and `exampleCli`.
-- Without a global install, use `npx @jinn-network/client@latest <verb> ...`.
-- Backward-compatible legacy form still works: `npx -p @jinn-network/client@latest jinn <verb> ...`.
+- Without a global install, use `npx -p @jinn-network/operator@latest jinn <verb> ...`.
 
 See the [client surface spec](https://github.com/Jinn-Network/mono/blob/main/spec/2026-04-14-client-surface.md) for the full CLI reference.
 
 ## Configuration
 
-Config file first, env var override. Default location: `~/.jinn-client/config.json`.
+Config file first, env var override. Default location: `~/.jinn-operator/config.json`
+(read-fallback from `~/.jinn-client` when the new directory is empty).
 
 ```bash
 JINN_PASSWORD=secret jinn run --config ./my-config.json
@@ -332,8 +333,8 @@ JINN_PASSWORD=secret jinn run --config ./my-config.json
 | pollIntervalMs | JINN_POLL_INTERVAL_MS | 5000 |
 | apiPort | JINN_API_PORT | 7331 |
 | apiBindHost | JINN_API_BIND_HOST | `127.0.0.1` (loopback only; set to `0.0.0.0` for LAN access — pairs with bearer-token auth on cost-mutating routes) |
-| dbPath | JINN_DB_PATH | ~/.jinn-client/jinn.db |
-| earningDir | JINN_EARNING_DIR | ~/.jinn-client/earning |
+| dbPath | JINN_DB_PATH | ~/.jinn-operator/jinn.db |
+| earningDir | JINN_EARNING_DIR | ~/.jinn-operator/earning |
 | peers | JINN_PEERS | [] |
 | tasks | JINN_TASKS | [] (testnet auto-task generator posts `prediction.v0`) |
 
@@ -448,7 +449,7 @@ Quick answers to the things that typically surprise new operators:
 - **Claude session exits in ~18 seconds with no trades** — usually means
   the daemon ran from source (via `tsx`) instead of the compiled `dist/`,
   so the MCP wrapper couldn't load `mcp-tools.js`. Run `yarn build && yarn
-  dev` (dev) or reinstall via `npm install -g @jinn-network/client@latest`
+  dev` (dev) or reinstall via `npm install -g @jinn-network/operator@latest`
   (operator). `jinn doctor` flags this as `daemon_runtime_ready`.
 - **Bootstrap fails with `Overflow(20, 0)` at `distributor.stake()`** —
   the testnet stOLAS distributor pool is drained. Operators cannot fix

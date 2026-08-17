@@ -261,12 +261,12 @@ try {
   }
   assertNoPersistedLocalSpecs(consumerRoot);
 
-  copyPackage(clientRoot, productRoot, '@jinn-network/client');
+  copyPackage(clientRoot, productRoot, '@jinn-network/operator');
   const tsc = join(consumerRoot, 'node_modules', '.bin', 'tsc');
   run(tsc, ['--project', 'tsconfig.json'], 'compile client against clean packed closure', {
     cwd: productRoot,
   });
-  const clientArchive = stageAndPack(productRoot, '@jinn-network/client');
+  const clientArchive = stageAndPack(productRoot, '@jinn-network/operator');
   assertArchiveContains(clientArchive, 'package/dist/bin/jinn.js', 'packed client');
   assertArchiveContains(
     clientArchive,
@@ -277,10 +277,10 @@ try {
   writeConsumerManifest({
     ...runtimeExternalDependencies,
     ...closureDependencies,
-    '@jinn-network/client': clientManifest.version,
+    '@jinn-network/operator': clientManifest.version,
   }, compilerDependencies);
   installPackedArchives([clientArchive], 'install packed client into clean closure', true);
-  assertInstalledUnderConsumer('@jinn-network/client');
+  assertInstalledUnderConsumer('@jinn-network/operator');
   assertNoPersistedLocalSpecs(consumerRoot);
   const resolved = run(
     process.execPath,
@@ -301,7 +301,7 @@ try {
     consumerRoot,
     'node_modules',
     '@jinn-network',
-    'client',
+    'operator',
     'dist',
     'daemon',
     'bridge-legacy-delivery.js',
@@ -314,7 +314,7 @@ try {
   );
   run(
     'npm',
-    ['ls', '--all', '@jinn-network/client', '@jinn-network/marketplace-pipeline'],
+    ['ls', '--all', '@jinn-network/operator', '@jinn-network/marketplace-pipeline'],
     'inspect packed client dependency graph',
     { cwd: consumerRoot },
   );

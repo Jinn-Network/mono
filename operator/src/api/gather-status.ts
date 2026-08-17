@@ -202,7 +202,7 @@ export interface StatusGatherConfig {
    */
   passwordRotation?: PasswordRotationConfig;
   /**
-   * Optional getter for the latest published `@jinn-network/client` version
+   * Optional getter for the latest published `@jinn-network/operator` version
    * (issue #641). Threaded by `main.ts` as a holder deref so the start-time
    * npm-registry check can back-fill `/v1/status.latestVersion` once it
    * resolves. Best-effort: returning `null` (or throwing) leaves

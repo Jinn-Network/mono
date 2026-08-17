@@ -36,7 +36,7 @@ import { readRunWindowArtifactProgress } from './lib/acceptance-artifacts.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
-const DEFAULT_PACKAGE_SPEC = '@jinn-network/client@canary';
+const DEFAULT_PACKAGE_SPEC = '@jinn-network/operator@canary';
 const DEFAULT_TARBALL = join(clientRoot, 'jinn-client.tgz');
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 const DEFAULT_POLL_MS = 15_000;

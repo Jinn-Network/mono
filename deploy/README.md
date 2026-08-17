@@ -4,13 +4,13 @@ This is **the one documented deploy path** for a headless, hosted `jinn run`
 daemon. Per-harness recipes are thin overlays on a single container-native base
 image; everything they share lives here.
 
-> Local operators do not need any of this — `npm install -g @jinn-network/client@latest && jinn run` (see the root `CLAUDE.md`). This directory is only for headless, hosted (Railway) deployments.
+> Local operators do not need any of this — `npm install -g @jinn-network/operator@latest && jinn run` (see the root `CLAUDE.md`). This directory is only for headless, hosted (Railway) deployments.
 
 > To mirror the reference frontend (the operator dashboard SPA) specifically, see [../DEPLOY.md](../DEPLOY.md).
 
 ## The base image
 
-`ghcr.io/jinn-network/client` is the container-native base, built from
+`ghcr.io/jinn-network/operator` is the container-native base, built from
 `operator/Dockerfile` by [`.github/workflows/docker.yml`](../.github/workflows/docker.yml)
 on every published GitHub Release (tag `vX.Y.Z` or `client-vX.Y.Z`). The workflow
 pushes three tags: `:<version>`, `:sha-<short>`, and `:latest` (linux/amd64 +
@@ -25,9 +25,9 @@ dotfile skip (#954), and state-dir derivation under `JINN_STATE_DIR` (#956).
 
 ### Pulling the base
 
-The `ghcr.io/jinn-network/client` package is **public** (set 2026-06-03;
-verified — an unauthenticated `docker pull ghcr.io/jinn-network/client:latest`
-succeeds). So the overlays `FROM` it with **no registry auth** — nothing to
+The `ghcr.io/jinn-network/operator` package is **public**.
+An unauthenticated `docker pull ghcr.io/jinn-network/operator:latest` is the
+default path. So the overlays `FROM` it with **no registry auth** — nothing to
 wire on Railway/CI/local. This is the default path, and it matches the
 "anyone can run an operator" posture (the base bakes no secrets — auth is
 env-only at runtime).
@@ -45,7 +45,7 @@ Each per-harness recipe is a ~4-line overlay:
 
 ```dockerfile
 ARG BASE_TAG=latest
-ARG BASE_IMAGE=ghcr.io/jinn-network/client:${BASE_TAG}
+ARG BASE_IMAGE=ghcr.io/jinn-network/operator:${BASE_TAG}
 FROM ${BASE_IMAGE}
 RUN npm install -g <agent-cli>@<pinned-version>   # claude-code is already in the base
 ENV <seed env...>
@@ -63,7 +63,7 @@ reaches the daemon.
 `BASE_TAG` must point to a base release that includes #988. Default is `latest`;
 pin it via a `BASE_TAG` Railway service variable or `[build.args]` in the
 recipe's `railway.toml`. CI also pins the base by **immutable digest** through the
-`BASE_IMAGE` build-arg (`--build-arg BASE_IMAGE=ghcr.io/jinn-network/client@sha256:…`),
+`BASE_IMAGE` build-arg (`--build-arg BASE_IMAGE=ghcr.io/jinn-network/operator@sha256:…`),
 welding overlay+base to one commit — see the canary lane below.
 
 > **Architecture:** the base + overlay images must be **`linux/amd64`** to run on

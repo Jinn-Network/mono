@@ -10,15 +10,15 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Store } from '../store/store.js';
 import type { PersistedTaskRun } from '../types/task-run.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import { taskRunRoutingKey } from './task-run-routing.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 /** Default per-task engine work root; kept in sync with `config.engine.workingDirRoot`. */
-export const DEFAULT_ENGINE_WORKING_DIR_ROOT = join(homedir(), '.jinn-client', 'engine', 'work');
+export const DEFAULT_ENGINE_WORKING_DIR_ROOT = join(resolveDefaultStateDir(), 'engine', 'work');
 const RECENT_CLAUDE_OUTCOMES_LIMIT = 10;
 
 // ── Public types ──────────────────────────────────────────────────────────────

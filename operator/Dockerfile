@@ -1,7 +1,7 @@
-# @jinn-network/client — OCI image
+# @jinn-network/operator — OCI image
 #
 # Build from the repository root:
-#   docker build -f operator/Dockerfile -t jinn-client .
+#   docker build -f operator/Dockerfile -t jinn-operator .
 #
 # Run:
 #   docker run -e JINN_PASSWORD=secret jinn-client run
@@ -235,7 +235,7 @@ RUN yarn build
 
 # Remove development-only portals (including the extracted layer) and their
 # generated .bin shims before node_modules leaves the repository layout.
-RUN yarn workspaces focus @jinn-network/client --production
+RUN yarn workspaces focus @jinn-network/operator --production
 
 # Replace the remaining production core/plugin portals with their
 # publish-shaped runtime directories before node_modules crosses into the
