@@ -4,8 +4,8 @@
  * Operator-class responses to a non-loopback peer require attested TLS from a
  * declared trusted proxy (`X-Forwarded-Proto: https` + last XFF hop in
  * `apiTrustedProxies`) or an explicit `apiInsecureRemote: true`. Loopback is
- * always allowed. Public liveness/readiness/metrics, handshake, SPA assets,
- * and CORS preflight are not operator-class.
+ * always allowed. Public liveness/readiness/metrics, handshake, GET `/`
+ * (no-human-surface 404), and CORS preflight are not operator-class.
  */
 import type { Context, MiddlewareHandler } from 'hono';
 

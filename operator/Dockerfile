@@ -25,7 +25,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # mono checkout's SDK, core, plugin, and layer packages through Yarn portals,
 # so Docker builds use the repository root as their build context.
 COPY operator/package.json operator/yarn.lock operator/.yarnrc.yml ./operator/
-COPY operator/src/dashboard/spa/package.json ./operator/src/dashboard/spa/package.json
 COPY packages/sdk/package.json packages/sdk/yarn.lock packages/sdk/.yarnrc.yml packages/sdk/README.md ./packages/sdk/
 COPY packages/core/package.json packages/core/yarn.lock packages/core/.yarnrc.yml ./packages/core/
 COPY packages/plugin/package.json packages/plugin/yarn.lock packages/plugin/.yarnrc.yml packages/plugin/process-contract.json ./packages/plugin/
@@ -209,11 +208,7 @@ COPY packages/task-execution/protocol/README.md ./packages/task-execution/protoc
 COPY packages/task-execution/backend-local/workspace/README.md ./packages/task-execution/backend-local/workspace/README.md
 COPY packages/trust/resolve/README.md ./packages/trust/resolve/README.md
 
-# Copy source and bundled deployment artifacts. `operator/docs/` is needed at
-# build time because the /build SPA page (hfmf) embeds `quickstart.md` via a
-# Vite `?raw` import — `operator/src/dashboard/spa/src/pages/build/IntroCard.tsx`
-# resolves `../../../../../../docs/build/quickstart.md` relative to itself,
-# which lands at `/app/operator/docs/build/quickstart.md` inside the build stage.
+# Copy source and bundled deployment artifacts.
 COPY operator/src/ ./operator/src/
 COPY operator/deployments/ ./operator/deployments/
 COPY operator/docs/ ./operator/docs/

@@ -15,16 +15,8 @@
 # Render dirs only — logic (api/ hooks/ lib/ notifications/) is agent-reviewable.
 # A NEW render directory must be added here by hand; the glob does not infer it.
 
-# Operator app (operator/src/dashboard/spa) — present until Stage 6 SPA departure
-/operator/src/dashboard/spa/src/App.tsx     @oaksprout @ritsukai
-/operator/src/dashboard/spa/src/routes.ts   @oaksprout @ritsukai
-/operator/src/dashboard/spa/src/pages/      @oaksprout @ritsukai
-/operator/src/dashboard/spa/src/components/ @oaksprout @ritsukai
-/operator/src/dashboard/spa/src/regions/    @oaksprout @ritsukai
-/operator/src/dashboard/spa/src/shell/      @oaksprout @ritsukai
-/operator/src/dashboard/spa/src/styles/     @oaksprout @ritsukai
-
 # Operator console (apps/operator-console)
+/apps/operator-console/OPERATOR-APP-SPEC.md @oaksprout @ritsukai
 /apps/operator-console/app/        @oaksprout @ritsukai
 /apps/operator-console/components/ @oaksprout @ritsukai
 
@@ -59,6 +51,7 @@
 /.github/scripts/       @oaksprout @ritsukai
 /.github/workflows/     @oaksprout @ritsukai
 /apps/broadcast-bot/    @oaksprout @ritsukai
+/apps/operator-console/ @oaksprout @ritsukai
 /apps/website/          @oaksprout @ritsukai
 /operator/                @oaksprout @ritsukai
 /packages/              @oaksprout @ritsukai

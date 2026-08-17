@@ -490,9 +490,9 @@ export interface OperatorArtifactsResponse {
 //   `GeneratorConfig`          — `PredictionV1GeneratorRuntimeConfig` from
 //                                `operator/src/solver-types/prediction-v1-auto.ts`
 //
-// Mirrored here (rather than imported) because the SPA's tsconfig only
-// includes `src/dashboard/spa/src` — we keep the SPA build unconditional on
-// the daemon-side / SDK type graph, matching the predecessor pattern for
+// Mirrored here (rather than imported) so the console and daemon share a
+// contract module that does not pull the daemon-side / SDK type graph into
+// the browser bundle, matching the predecessor pattern for
 // `LauncherStatusResponse` etc. Drift is checked by daemon-side tests that
 // keep these shapes stable.
 

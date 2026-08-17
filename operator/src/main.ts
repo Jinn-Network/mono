@@ -1145,11 +1145,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     markerExists: existsSync(uiOpenedMarkerPath),
   });
   if (uiAutoOpenDecision.shouldOpen) {
-    openBrowser(process.env['JINN_UI_HANDSHAKE_URL']!);
+    const consoleUrl = process.env['JINN_CONSOLE_URL'] ?? 'http://127.0.0.1:3000';
+    openBrowser(consoleUrl);
   } else if (!noUi) {
     console.log(
-      `[main] Dashboard ready at http://127.0.0.1:${setupApiServer.port} — ` +
-        `run 'jinn ui' to open it (auto-open suppressed after first launch; use --ui to force)`,
+      `[main] Operator console is a separate app (default http://127.0.0.1:3000). ` +
+        `The daemon origin has no human surface. Run 'jinn ui' to open the console ` +
+        `(auto-open suppressed after first launch; use --ui to force)`,
     );
   }
   if (uiAutoOpenDecision.shouldWriteMarker) {
@@ -1165,7 +1167,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   }
   console.log(
     `[main] Setup-mode API up (mode=${setupController.mode()}). ` +
-      `Dashboard: http://127.0.0.1:${setupApiServer.port}`,
+      `API: http://127.0.0.1:${setupApiServer.port} (no human surface)`,
   );
 
   // ── Operator agent WebSocket bridge ──────────────────────────────────────
@@ -2794,7 +2796,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
     throw error;
   }
-  console.log(`[main] Daemon running. Dashboard: http://127.0.0.1:${config.apiPort}`);
+  console.log(`[main] Daemon running. API: http://127.0.0.1:${config.apiPort} (no human surface)`);
 
   // #641: start-time (and recurring) npm-registry version check. Fire-and-forget
   // — never awaited, never rejects into boot. When a newer client is published

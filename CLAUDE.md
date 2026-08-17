@@ -220,19 +220,24 @@ The daemon will:
 ### Repo contributors only
 
 When iterating inside this repo, run the *built* binary so you get the same
-dashboard the published package serves:
+headless daemon the published package ships. The human surface is the operator
+console (`apps/operator-console`), not a bundle served from the daemon:
 
 ```bash
 cd operator
-yarn build           # compiles tsc + bundles SPA into dist/dashboard
+yarn build
 node dist/bin/jinn.js run
 ```
 
-`yarn jinn run` (tsx + src) works for daemon-side iteration but only renders
-the SPA after at least one `yarn build:spa` — the dev path resolves the
-dashboard from `src/dashboard/spa/dist/` once that directory exists. If you
-have no SPA bundle on disk the daemon serves a clear "dashboard bundle
-missing" page instead of silently falling back to anything stale.
+In another terminal:
+
+```bash
+cd apps/operator-console
+yarn dev
+```
+
+`yarn jinn run` (tsx + src) works for daemon-side iteration. The daemon origin
+has no human surface (`GET /` returns `{ "error": "no_human_surface" }`).
 
 ### Running against Anvil fork (local dev)
 

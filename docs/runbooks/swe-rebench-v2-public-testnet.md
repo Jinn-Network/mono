@@ -157,14 +157,6 @@ Run these on the release branch before PR or canary:
 cd operator
 yarn typecheck
 yarn vitest run \
-  src/dashboard/spa/src/pages/Launcher.test.tsx \
-  src/dashboard/spa/src/pages/LauncherCreate.test.tsx \
-  src/dashboard/spa/src/pages/LauncherLaunched.test.tsx \
-  src/dashboard/spa/src/pages/launcher-create \
-  src/dashboard/spa/src/pages/launcher-launched \
-  src/dashboard/spa/src/pages/operator-catalog \
-  src/dashboard/spa/src/pages/operator/OperatorDataMarket.test.tsx \
-  src/dashboard/spa/src/captures/CapturesTab.test.tsx \
   test/config.test.ts \
   test/api/operator-artifacts-endpoint.test.ts \
   test/harnesses/engine/packaging-donation.test.ts \

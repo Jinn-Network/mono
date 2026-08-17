@@ -18,10 +18,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
-import { dirname, extname, join, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Store } from '../store/store.js';
 import {
   verifyRequestWithErc8128,
@@ -259,47 +256,13 @@ export interface ApiServer {
   setStatusConfig(status: StatusGatherConfig | undefined): void;
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/**
- * Resolve the operator dashboard directory.
- *
- * jinn-client is meant to be installed as a package and run via the `jinn`
- * binary, which executes the compiled `dist/` tree — there `__dirname` is
- * `dist/api/` and the SPA lives at `dist/dashboard/`.
- *
- * Repo contributors running `yarn jinn run` (tsx + src/) do not have
- * `dist/dashboard/` next to `src/api/`. They build the SPA into
- * `src/dashboard/spa/dist/` via `yarn build:spa`. We try both so the dev
- * loop produces the same UI as production after a single SPA build.
- *
- * If neither candidate has an `index.html`, the daemon emits a clear error
- * page rather than silently serving stale or missing assets.
- */
-function resolveDashboardDir(): string | null {
-  const candidates = [
-    join(__dirname, '..', 'dashboard'),                  // packaged: dist/api/.. = dist/dashboard
-    join(__dirname, '..', 'dashboard', 'spa', 'dist'),   // dev: src/api/.. = src/dashboard/spa/dist
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'index.html'))) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-const dashboardDir = resolveDashboardDir() ?? join(__dirname, '..', 'dashboard');
-const assetsDir = join(dashboardDir, 'assets');
-
 /**
  * Resolve the `JINN_ENABLE_EMBEDDED_AGENT` env var. Default off. Anything
  * other than `1` / `true` (case-insensitive) is treated as off so a stray
  * value can't accidentally re-enable the surface.
  *
  * Issue #367: this also has a daemon-side consumer (`main.ts` gates the
- * `/api/agent/ws` bridge on it), so it stays a standalone helper rather than
- * being inlined into `resolveFeatureFlags`.
+ * `/api/agent/ws` bridge on it), so it stays a standalone helper.
  */
 export function isEmbeddedAgentEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env['JINN_ENABLE_EMBEDDED_AGENT'];
@@ -307,95 +270,6 @@ export function isEmbeddedAgentEnabled(env: NodeJS.ProcessEnv = process.env): bo
   const normalized = raw.trim().toLowerCase();
   return normalized === '1' || normalized === 'true';
 }
-
-/**
- * Resolve the operator-app feature flags from the daemon environment.
- *
- * Each flag is derived from a `JINN_ENABLE_*` env var ("1" enables). The SPA
- * reads the injected `window.__JINN_FEATURES__` via `lib/features.ts`; absent
- * or partial injection is treated as all-off there, so this can stay a flat
- * boolean record.
- *
- * Issue #327: `pluginBuilderUi` gates the operator-app builder surfaces
- * (`/build` route + Build top-tab). Default-off until the first-run UX is
- * solid; the plug-in substrate (CLI verbs, indexer, Discovery API, docs)
- * stays live regardless.
- *
- * Issue #326 / #367: `embeddedAgent` gates the embedded Claude agent chat
- * surface (operating-shell rail + onboarding "Ask Claude" panel). Migrated
- * here from the `/v1/bootstrap` JSON response so the operator app has a single
- * feature-flag channel — see #367.
- */
-function resolveFeatureFlags(): Record<string, boolean> {
-  return {
-    pluginBuilderUi: process.env['JINN_ENABLE_PLUGIN_BUILDER_UI'] === '1',
-    embeddedAgent: isEmbeddedAgentEnabled(),
-  };
-}
-
-/**
- * Inject the feature-flag bootstrap script into the SPA `index.html`.
- *
- * The script sets `window.__JINN_FEATURES__` before the SPA module loads, so
- * the first render already sees the flags. Inserted immediately before the
- * SPA's `<script type="module">` tag; if that tag is missing the script is
- * appended before `</head>` (or `</body>`) so the SPA still gets it.
- *
- * Exported for unit testing — the runtime call lives in `readSpaIndex`.
- */
-export function injectFeatureFlags(html: string, features: Record<string, boolean>): string {
-  const script = `<script>window.__JINN_FEATURES__=${JSON.stringify(features)};</script>`;
-  const moduleTagMatch = html.match(/<script\b[^>]*type=["']module["'][^>]*>/i);
-  if (moduleTagMatch?.index !== undefined) {
-    return html.slice(0, moduleTagMatch.index) + script + html.slice(moduleTagMatch.index);
-  }
-  if (html.includes('</head>')) {
-    return html.replace('</head>', `${script}</head>`);
-  }
-  if (html.includes('</body>')) {
-    return html.replace('</body>', `${script}</body>`);
-  }
-  return html + script;
-}
-
-function readSpaIndex(): string {
-  try {
-    const html = readFileSync(join(dashboardDir, 'index.html'), 'utf-8');
-    return injectFeatureFlags(html, resolveFeatureFlags());
-  } catch {
-    return [
-      '<!doctype html><html><body style="font-family:system-ui;padding:2rem;max-width:48rem;line-height:1.5">',
-      '<h1>jinn dashboard bundle missing</h1>',
-      '<p>jinn-client is meant to be installed as a published package and launched via the <code>jinn</code> binary. ',
-      'On a healthy install, the operator dashboard ships inside the package.</p>',
-      '<p>If you installed jinn from npm and are seeing this page, the package is corrupted — re-install it.</p>',
-      '<p>If you are running from a checkout of this repo (e.g. <code>yarn jinn run</code>), build the SPA first:</p>',
-      '<pre>yarn build         # full build (recommended)\nyarn build:spa     # SPA only</pre>',
-      '<p>Then re-run <code>jinn run</code>.</p>',
-      '</body></html>',
-    ].join('');
-  }
-}
-
-const ASSET_MIME: Record<string, string> = {
-  '.js': 'application/javascript; charset=utf-8',
-  '.mjs': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.json': 'application/json; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.html': 'text/html; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8',
-};
 
 function parseArtifactSources(value: unknown): ArtifactSource[] | undefined {
   if (value === undefined) return undefined;
@@ -532,23 +406,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       )
     : requireBearer;
 
-  // SPA index at /
-  app.get('/', (c) => c.html(readSpaIndex()));
-
-  // Static SPA assets emitted by Vite into dist/dashboard/assets/.
-  app.get('/assets/:filename', (c) => {
-    const filename = c.req.param('filename');
-    // Prevent path traversal: filename must not contain separators.
-    if (!filename || filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
-      return c.notFound();
-    }
-    const filePath = normalize(join(assetsDir, filename));
-    if (!filePath.startsWith(assetsDir)) return c.notFound();
-    if (!existsSync(filePath)) return c.notFound();
-    const data = readFileSync(filePath);
-    const mime = ASSET_MIME[extname(filename).toLowerCase()] ?? 'application/octet-stream';
-    return new Response(new Uint8Array(data), { headers: { 'content-type': mime } });
-  });
+  // Headless §9: the daemon origin has no human surface. GET / names that.
+  app.get('/', (c) => c.json({ error: 'no_human_surface' }, 404));
 
   // Single shared resolver for the enriched `StatusGatherConfig` (issue #2424 review round 2,
   // findings B1/B2). Before this, `/v1/status`'s handler built its OWN enriched wrapper
@@ -1064,21 +923,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     });
   }
 
-  // SPA fallback: any unmatched non-API GET path returns the SPA index.
-  // Lets the SPA own client-side routing without 404s on deep links.
-  app.get('*', (c) => {
-    const path = c.req.path;
-    if (
-      path.startsWith('/v1') ||
-      path.startsWith('/artifacts') ||
-      path.startsWith('/auth') ||
-      path.startsWith('/api') ||
-      path.startsWith('/assets')
-    ) {
-      return c.notFound();
-    }
-    return c.html(readSpaIndex());
-  });
+  // Unmatched GETs are not a human surface.
+  app.get('*', (c) => c.json({ error: 'no_human_surface' }, 404));
 
   return new Promise((resolve, reject) => {
     const server = serve({

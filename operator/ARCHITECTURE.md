@@ -88,7 +88,7 @@ The CLI is the substrate the app drives and the contract external automation wri
 | Monitoring | `status`, `fleet`, `balance`, `history`, `rewards`, `logs` | Read-only. Default to JSON; `--human` for terminal pretty-print. |
 | Action | `tasks submit`, `claim-rewards`, `fleet scale`, `fleet retire`, `withdraw`, `keys backup`, `keys change-password` | Tx-emitting; require `--yes` or TTY confirmation, support `--dry-run`. |
 | Extension | `solver-nets`, `harnesses`, `solver-plugins`, `integrations` | Manage the SolverNet/Harness/Plugin surface and AI-host wiring. |
-| Surface | `mcp`, `ui` | `jinn mcp` runs the operator MCP over stdio; `jinn ui` opens a panel for an already-running daemon. |
+| Surface | `mcp`, `ui` | `jinn mcp` runs the operator MCP over stdio; `jinn ui` opens the operator console (default `http://127.0.0.1:3000`). |
 
 The CLI dispatcher is `src/cli/index.ts`; each verb is a `CommandModule` under `src/cli/commands/<verb>.ts`. New operators only need three: `jinn auth`, `jinn run`, and (when something is wrong) `jinn doctor`.
 
@@ -99,8 +99,8 @@ A `jinn run` process is layered top-to-bottom roughly like this:
 ```
   ┌────────────────────────────────────────────────────────────┐
   │ Operator surfaces                                          │
-  │   SPA · CLI dispatcher · Operator MCP · Agent WS bridge    │
-  │   src/dashboard/spa  src/cli  src/mcp/operator-server      │
+  │   Console (apps/operator-console) · CLI · Operator MCP     │
+  │   src/cli  src/mcp/operator-server                         │
   ├────────────────────────────────────────────────────────────┤
   │ HTTP API + setup-mode controller                           │
   │   Hono server · /v1/* · /auth/* · /artifacts/*             │

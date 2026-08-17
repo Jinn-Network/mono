@@ -8,7 +8,10 @@
     "build": "next build",
     "start": "next start --port 3000",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "node --import tsx --test lib/*.test.ts test/*.test.mjs"
+    "test": "node --import tsx --test lib/*.test.ts test/*.test.mjs",
+    "e2e": "playwright test --config=playwright.config.ts",
+    "e2e:app-flow": "playwright test --config=playwright.config.ts e2e/claim-policy-flow.e2e.ts e2e/posting-status.e2e.ts",
+    "e2e:funding-sequence": "playwright test --config=playwright.config.ts e2e/funding-sequence.e2e.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -21,6 +24,7 @@
     "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.17",

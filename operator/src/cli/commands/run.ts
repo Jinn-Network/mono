@@ -139,17 +139,15 @@ By default, stdout emits a single machine-readable startup record and
 all progress / runtime logs go to stderr. Use \`--human\` for a concise
 terminal summary instead.
 
-The operator panel is only auto-opened in your default browser on the
-first-ever launch (tracked by a marker file), so restarting the daemon
-doesn't accumulate fresh browser tabs. Use \`jinn ui\` to reopen it any
-time. Pass \`--ui\` to force a browser open on this launch even after the
-first; pass \`--no-ui\` to suppress auto-open entirely — \`--no-ui\` wins
-if both are given.
+The operator console is a separate Next.js app (default
+http://127.0.0.1:3000). \`jinn run\` may auto-open that URL on the
+first-ever launch (tracked by a marker file). Use \`jinn ui\` to reopen
+it. Pass \`--ui\` to force a browser open; \`--no-ui\` suppresses it.
 
 Flags:
   --human                Print a concise terminal summary instead of JSON.
   --no-ui                Suppress automatic browser open. Overrides --ui.
-  --ui                   Force the operator panel open even after the first
+  --ui                   Force the operator console open even after the first
                          launch (normally auto-open only happens once).
   --no-daemon            Stop after bootstrap completes; do not start daemon
                          loops. Emits a JSON summary on stdout and exits 0.

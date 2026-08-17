@@ -24,8 +24,8 @@ test('operator package keeps its published identity', () => {
   assert.equal(pkg.packageManager, 'yarn@4.13.0');
 });
 
-test('operator workspaces are exactly the two declared nested projects', () => {
-  assert.deepEqual(manifest().workspaces, ['src/dashboard/spa', 'packages/*']);
+test('operator workspaces are exactly the nested packages glob', () => {
+  assert.deepEqual(manifest().workspaces, ['packages/*']);
 });
 
 // Runtime deps are versioned (the tarball must resolve them from the
@@ -42,6 +42,7 @@ const EXPECTED_JINN_DEPENDENCIES = {
   "@jinn-network/evidence-local-runtime": "0.1.0",
   "@jinn-network/evidence-protocol": "0.1.0",
   "@jinn-network/evidence-repository": "0.1.0",
+  "@jinn-network/execution-evidence-builder": "0.1.0",
   "@jinn-network/execution-recorder": "0.1.0",
   "@jinn-network/marketplace-binding": "0.1.0",
   "@jinn-network/marketplace-pipeline": "0.1.0",
@@ -82,6 +83,7 @@ const EXPECTED_JINN_RESOLUTIONS = {
   "@jinn-network/evidence-local-runtime": "portal:../packages/evidence/local-runtime",
   "@jinn-network/evidence-protocol": "portal:../packages/evidence/protocol",
   "@jinn-network/evidence-repository": "portal:../packages/evidence/repository",
+  "@jinn-network/execution-evidence-builder": "portal:../packages/evidence/execution-evidence-builder",
   "@jinn-network/execution-recorder": "portal:../packages/evidence/execution-recorder",
   "@jinn-network/jinn-layer": "portal:../packages/layer",
   "@jinn-network/marketplace-binding": "portal:../packages/marketplace/binding",

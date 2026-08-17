@@ -22,7 +22,7 @@
       "mode": "package"
     },
     {
-      "path": "operator/src/dashboard/spa",
+      "path": "apps/operator-console",
       "mode": "package"
     },
     {
@@ -129,6 +129,10 @@
     "website-ci": {
       "kind": "workflow",
       "path": ".github/workflows/website-ci.yml"
+    },
+    "operator-console-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/operator-console-ci.yml"
     }
   },
   "releaseGroups": {
@@ -255,10 +259,10 @@
         "autopilot-ci",
         "benchmark-product-ci",
         "broadcast-bot-ci",
-        "client-ci",
         "environments-ci",
         "indexer-ci",
         "indexer-enrichment-ci",
+        "operator-console-ci",
         "plugin-tree-ci",
         "policy-optimization-ci",
         "task-supply-ci",
@@ -718,33 +722,33 @@
       },
       "supersedes": [],
       "replacedBy": [],
-      "name": "@jinn-network/operator-spa",
-      "path": "operator/src/dashboard/spa",
+      "name": "@jinn-network/operator-console",
+      "path": "apps/operator-console",
       "domain": "operator",
-      "role": "operator dashboard product",
+      "role": "operator console product",
       "tier": 4,
       "classification": "product",
       "stability": "candidate",
       "authority": {
         "documents": [
           {
-            "path": "operator/OPERATOR-APP-SPEC.md",
+            "path": "apps/operator-console/OPERATOR-APP-SPEC.md",
             "status": "current"
           }
         ],
         "decisionRecord": {
-          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "path": "log/decisions/2026-08-04-headless-operator-reconciliation.md",
           "status": "ratified"
         }
       },
       "releaseGroup": "transitional-or-private",
       "publishPolicy": "private",
       "requiredGateIds": [
-        "client-ci"
+        "operator-console-ci"
       ],
       "boundaryPolicy": {
         "kind": "workflow",
-        "path": ".github/workflows/ci.yml"
+        "path": ".github/workflows/operator-console-ci.yml"
       }
     },
     {
