@@ -2023,9 +2023,9 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 5,
-      "discoveredFirstPartySurfaces": 2981,
+      "discoveredFirstPartySurfaces": 2982,
       "generatedOutputSources": 1378,
-      "generatorSources": 661,
+      "generatorSources": 662,
       "marketplaceControl": 2,
       "requiredGates": 25,
       "staticControl": 6
@@ -19382,6 +19382,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/demo1-verify.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/generate-parity-matrix.mjs"
       },
       {
@@ -19653,6 +19663,16 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/core/src/conformance/skillsbench-calibration-report.external.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/src/conformance/skillsbench-demo1-report.external.test.ts"
       },
       {
         "categories": [

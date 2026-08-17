@@ -56,7 +56,9 @@
     "demo1:task-evidence:check": "node scripts/demo1-task-evidence-freeze.mjs --check",
     "skillsbench:inventory": "SKILLSBENCH_INVENTORY=1 vitest run src/method/skillsbench-inventory.external.test.ts --reporter=verbose --silent=false",
     "pack:smoke": "node scripts/pack-smoke.mjs",
-    "prepack": "yarn build"
+    "prepack": "yarn build",
+    "demo1:report": "vitest run src/conformance/skillsbench-demo1-report.external.test.ts",
+    "demo1:verify": "yarn build && node scripts/demo1-verify.mjs"
   },
   "dependencies": {
     "@colophon-claims/verify": "2.0.0",

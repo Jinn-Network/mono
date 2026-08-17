@@ -1,0 +1,214 @@
+{
+  "schema": "jinn.demo1.report.v1",
+  "title": "Demo-1: Skill delivery A/B on SkillsBench v1.1",
+  "stage": "pilot",
+  "pilotScale": "PILOT SCALE — 7 informative tasks against the official floor of 21 units / 13 clusters, which is unreachable for this model on this corpus.",
+  "slateSelection": "Uplift-selected from upstream coverage data, then symmetrically screened with Jinn's own arm-A and arm-B rescue screens.",
+  "hostAgentDeviation": "Agent on host; grading in the pinned container.",
+  "model": "claude-haiku-4-5-20251001",
+  "source": {
+    "benchmark": "skillsbench",
+    "release": "v1.1",
+    "commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af"
+  },
+  "cells": 63,
+  "undeclaredCellsInFile": 149,
+  "results": {
+    "pairedDelta": {
+      "n": 7,
+      "mean": -0.09523809523809525,
+      "sd": 0.25197631533948484,
+      "se": 0.09523809523809525,
+      "tCritical": 2.447,
+      "ci95": {
+        "lower": -0.32828571428571435,
+        "upper": 0.13780952380952383
+      },
+      "perTask": [
+        {
+          "taskId": "dapt-intrusion-detection",
+          "meanA": 1,
+          "meanB": 1,
+          "delta": 0,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariance": 0
+        },
+        {
+          "taskId": "grid-dispatch-operator",
+          "meanA": 0.3333333333333333,
+          "meanB": 0.3333333333333333,
+          "delta": 0,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariance": 0.22222222222222224
+        },
+        {
+          "taskId": "lake-warming-attribution",
+          "meanA": 0,
+          "meanB": 0.3333333333333333,
+          "delta": -0.3333333333333333,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariance": 0.11111111111111112
+        },
+        {
+          "taskId": "llm-prefix-cache-replay",
+          "meanA": 0.6666666666666666,
+          "meanB": 1,
+          "delta": -0.33333333333333337,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariance": 0.11111111111111112
+        },
+        {
+          "taskId": "mario-coin-counting",
+          "meanA": 0.3333333333333333,
+          "meanB": 0,
+          "delta": 0.3333333333333333,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariance": 0.11111111111111112
+        },
+        {
+          "taskId": "radar-vital-signs",
+          "meanA": 0.3333333333333333,
+          "meanB": 0.6666666666666666,
+          "delta": -0.3333333333333333,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariance": 0.22222222222222224
+        },
+        {
+          "taskId": "threejs-structure-parser",
+          "meanA": 0.3333333333333333,
+          "meanB": 0.3333333333333333,
+          "delta": 0,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariance": 0.22222222222222224
+        }
+      ]
+    },
+    "varianceDecomposition": {
+      "betweenTaskVariance": 0.0634920634920635,
+      "meanSamplingVariance": 0.14285714285714285,
+      "taskHeterogeneity": 0,
+      "heterogeneityShare": 0
+    },
+    "manipulationCheck": {
+      "cCells": 21,
+      "cFullPass": 0,
+      "cMean": 0,
+      "abMean": 0.47619047619047616,
+      "uplift": 0.47619047619047616
+    }
+  },
+  "resultsSealedPpm": {
+    "stage": "skillsbench-v1.1-demo1-pilot",
+    "unit": "ppm-of-reward",
+    "pairedDelta": {
+      "n": 7,
+      "meanPpm": -95238,
+      "sdPpm": 251976,
+      "sePpm": 95238,
+      "tCriticalPpm": 2447000,
+      "ci95Ppm": {
+        "lower": -328286,
+        "upper": 137810
+      },
+      "perTask": [
+        {
+          "taskId": "dapt-intrusion-detection",
+          "meanAPpm": 1000000,
+          "meanBPpm": 1000000,
+          "deltaPpm": 0,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariancePpm": 0
+        },
+        {
+          "taskId": "grid-dispatch-operator",
+          "meanAPpm": 333333,
+          "meanBPpm": 333333,
+          "deltaPpm": 0,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariancePpm": 222222
+        },
+        {
+          "taskId": "lake-warming-attribution",
+          "meanAPpm": 0,
+          "meanBPpm": 333333,
+          "deltaPpm": -333333,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariancePpm": 111111
+        },
+        {
+          "taskId": "llm-prefix-cache-replay",
+          "meanAPpm": 666667,
+          "meanBPpm": 1000000,
+          "deltaPpm": -333333,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariancePpm": 111111
+        },
+        {
+          "taskId": "mario-coin-counting",
+          "meanAPpm": 333333,
+          "meanBPpm": 0,
+          "deltaPpm": 333333,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariancePpm": 111111
+        },
+        {
+          "taskId": "radar-vital-signs",
+          "meanAPpm": 333333,
+          "meanBPpm": 666667,
+          "deltaPpm": -333333,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariancePpm": 222222
+        },
+        {
+          "taskId": "threejs-structure-parser",
+          "meanAPpm": 333333,
+          "meanBPpm": 333333,
+          "deltaPpm": 0,
+          "replicatesA": 3,
+          "replicatesB": 3,
+          "samplingVariancePpm": 222222
+        }
+      ]
+    },
+    "varianceDecomposition": {
+      "betweenTaskVariancePpm": 63492,
+      "meanSamplingVariancePpm": 142857,
+      "taskHeterogeneityPpm": 0,
+      "heterogeneitySharePpm": 0
+    },
+    "manipulationCheck": {
+      "cCells": 21,
+      "cFullPass": 0,
+      "cMeanPpm": 0,
+      "abMeanPpm": 476190,
+      "upliftPpm": 476190
+    }
+  },
+  "digests": {
+    "declaration": "sha256:56bb1521f762a13e126fee63868717e7496fa569634924d3589b9e4b16d666b2",
+    "benchmark": "sha256:e9694d24e9f269a58bcd5c0b09f79416304993173d408ee274e7675817130e2b",
+    "analysisManifest": "sha256:ce3d3fac150646a486930b39b7b72faa6b2b4fdd26d45b7ecab5a6aefe4d2c77",
+    "cohort": "sha256:860e60471023fb85ec1e909531cc97f6c12431b9d2a7470c512a81a4742f7d1d",
+    "matrix": "sha256:68f0974e94482ff4f245281515be8e8221f275eab899f959401fdffba0a26343",
+    "report": "sha256:eda039de4d6f7573d463055967fccffbaddc3c0587a19b093a628a1a2c733aa6"
+  },
+  "verify": "cd packages/benchmark-product/core && yarn demo1:verify",
+  "verified": {
+    "cohort": true,
+    "matrix": true,
+    "report": true
+  }
+}
