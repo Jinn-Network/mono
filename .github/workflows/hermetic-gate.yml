@@ -167,36 +167,30 @@ jobs:
         working-directory: operator
         run: yarn test:hermetic
 
-      # App-flow determinism (#1014, DR-2026-06-03): the deterministic
-      # mocked-daemon Playwright journeys run in THIS gate per the redesign's
-      # taxonomy (deterministic → hermetic). create→launch (solvernet-flow) +
-      # discover→join→observe (join) drive the real SPA bundle with every /v1/*
-      # call intercepted at the page.route() boundary — no fork, no live daemon
-      # data path — so they are deterministic by construction and cannot
-      # reintroduce the T2.3 live-fork flake. Chromium is the only browser
-      # playwright.config.ts targets.
-      - name: Install Playwright Chromium for app-flow tests
-        working-directory: operator
-        run: yarn playwright install --with-deps chromium
+      # App-flow determinism: mocked-daemon Playwright against the operator
+      # console (Stage 6). Chromium only.
+      - name: Install operator console
+        working-directory: apps/operator-console
+        run: |
+          corepack prepare yarn@4.13.0 --activate
+          yarn install --immutable
+          yarn playwright install --with-deps chromium
 
-      # Scoped allowlist (solvernet-flow + join) — deliberately NOT the whole
-      # dashboard suite. This gate's remit is the determinism verdict on the
-      # two mocked-daemon journeys above, not dashboard coverage; the full
-      # top-level dashboard surface is gated by ci.yml's `dashboard-e2e` job
-      # (`yarn e2e:dashboard-app`). A failure here short-circuits the job into
-      # the product-red verdict below, same as any other deterministic
-      # regression.
       - name: App-flow determinism (Playwright, mocked daemon)
         id: appflow
         working-directory: operator
         run: yarn e2e:app-flow
+
+      - name: Operator console unit tests
+        working-directory: apps/operator-console
+        run: yarn test
 
       - name: Upload app-flow traces on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: app-flow-traces
-          path: operator/test-results/
+          path: apps/operator-console/test-results/
           retention-days: 7
 
       # Write the verdict JSON. Reaching this step means every prior step
@@ -214,7 +208,8 @@ jobs:
             "conclusion": "success",
             "scenarios": [
               { "id": "hermetic-suite", "verdict": "pass", "failClass": null, "notes": "test/hermetic/** (adversarial claim/delivery and exact solution settlement on snapshot bytecode + deterministic RPC fallback + indexer round-trip (local Ponder vs snapshot chain)) green" },
-              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon SPA journeys (solvernet-flow create→launch + join discover→join→observe) green (#1014)" }
+              { "id": "app-flow-determinism", "verdict": "pass", "failClass": null, "notes": "mocked-daemon console journeys (claim-policy + posting-status) green" },
+              { "id": "operator-console-unit", "verdict": "pass", "failClass": null, "notes": "apps/operator-console handshake + surface-state unit tests green" }
             ],
             "summary": "Hermetic gate green on ${HEAD_SHA} — deterministic loop + adversarial conditions on real snapshot bytecode + indexer round-trip + mocked-daemon app-flow journeys."
           }

@@ -1,6 +1,6 @@
 name: release-tier-1
 
-# Release Tier 1 scenarios T1.1 + T1.2 (operator/test/release/tier-1/).
+# Release Tier 1 scenarios T1.1 + T1.2 + T1.3 (operator/test/release/tier-1/).
 #
 # These are excluded from `vitest.config.ts` because they need prerequisites a
 # clean-checkout `yarn test` cannot assume — T1.1 forks live Base mainnet and
@@ -45,7 +45,7 @@ env:
 
 jobs:
   tier-1:
-    name: Release Tier 1 (T1.1 fresh-Anvil bootstrap, T1.2 harness readiness)
+    name: Release Tier 1 (T1.3 contract conformance, T1.2 harness readiness, T1.1 fresh-Anvil bootstrap)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -64,8 +64,15 @@ jobs:
       # T1.2 spawns dist/bin/jinn.js and probes /v1/harnesses/readiness.
       - run: yarn build
 
-      # Run T1.2 first: it is the cheap, deterministic one, so its verdict is
-      # not hidden behind T1.1's ~4 minutes of fork traffic.
+      # T1.3 is boot-less (no daemon, no Anvil) but imports assembleStatusV1,
+      # which needs portal dist from yarn build. Run it before T1.2 so a
+      # contract-schema regression is visible without spawning a daemon.
+      - name: T1.3 — read-contract conformance
+        run: yarn release:tier-1:T1.3
+
+      # Run T1.2 first among the daemon-spawning scenarios: it is the cheap,
+      # deterministic one, so its verdict is not hidden behind T1.1's ~4
+      # minutes of fork traffic.
       - name: T1.2 — harness readiness contract
         run: yarn release:tier-1:T1.2
 

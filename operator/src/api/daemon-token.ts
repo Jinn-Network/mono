@@ -18,7 +18,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 export const DAEMON_API_TOKEN_FILENAME = 'daemon-api-token';
 
@@ -35,7 +35,7 @@ export function daemonApiTokenPath(earningDir: string): string {
  * would be a heavier dependency than a hook binary should carry.
  */
 export function resolveEarningDirFromEnv(env: NodeJS.ProcessEnv = process.env): string {
-  return env['JINN_EARNING_DIR'] ?? join(homedir(), '.jinn-client', 'earning');
+  return env['JINN_EARNING_DIR'] ?? join(resolveDefaultStateDir({ env }), 'earning');
 }
 
 /**

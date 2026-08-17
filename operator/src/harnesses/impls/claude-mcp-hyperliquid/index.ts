@@ -20,8 +20,8 @@
  */
 
 import { writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveDefaultStateDir } from '../../../state-dir.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
@@ -91,8 +91,7 @@ export interface ClaudeMcpHyperliquidConfig {
 }
 
 const DEFAULT_IMPL_STATE_DIR = join(
-  homedir(),
-  '.jinn-client',
+  resolveDefaultStateDir(),
   'engine',
   'impl-state',
   'claude-mcp-hyperliquid',
@@ -869,7 +868,7 @@ export function _writeHlMcpServerScript(outPath: string, hlConfig: HlServerConfi
       `not directly via tsx/ts-node against src/. ` +
       `If you're developing, run \`yarn dev\` (build + run alias) instead of \`yarn jinn run\`. ` +
       `If you installed via npm, the compiled artifact ships in the package — reinstall with ` +
-      `\`npm install -g @jinn-network/client@latest\` and use the \`jinn\` binary directly.`,
+      `\`npm install -g @jinn-network/operator@latest\` and use the \`jinn\` binary directly.`,
     );
   }
 

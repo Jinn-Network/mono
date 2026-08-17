@@ -1,4 +1,4 @@
-# Contributing to @jinn-network/client
+# Contributing to @jinn-network/operator
 
 Development happens in the [jinn-mono](https://github.com/Jinn-Network/mono) monorepo. This guide covers running the client from source.
 

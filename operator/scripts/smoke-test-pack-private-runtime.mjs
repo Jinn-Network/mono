@@ -54,7 +54,7 @@ try {
     smokeDir,
     'node_modules',
     '@jinn-network',
-    'client',
+    'operator',
     'dist',
     'solver-types',
     '_swe-rebench-v2-mineable-store.js',
@@ -62,7 +62,7 @@ try {
   run(process.execPath, [mineableStore], 'compiled mineable store import');
 
   writeFileSync(join(smokeDir, 'consumer.mts'), `
-import type { DaemonConfig } from '@jinn-network/client';
+import type { DaemonConfig } from '@jinn-network/operator';
 
 type HarvestConfig = NonNullable<DaemonConfig['harvest']>;
 type RestorationEngineRetired = 'restorationEngine' extends keyof DaemonConfig ? false : true;

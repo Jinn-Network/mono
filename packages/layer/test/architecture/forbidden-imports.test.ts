@@ -32,6 +32,8 @@ describe('layer architecture boundary', () => {
           || imported.includes('operator/packages')
           || imported === '@jinn-network/client'
           || imported.startsWith('@jinn-network/client/')
+          || imported === '@jinn-network/operator'
+          || imported.startsWith('@jinn-network/operator/')
         ) {
           offenders.push(
             `${relative(layerRoot, file).split(sep).join('/')} -> ${imported}`,

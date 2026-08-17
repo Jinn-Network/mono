@@ -46,7 +46,7 @@ test('the real sealed-platform-v1 set is exactly the catalog-selected group', ()
 test('the real implementations-v1 set is exactly the catalog-selected group', () => {
   const found = discoverStackPackages(repoRoot, { releaseGroup: 'implementations-v1' });
   const catalogPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'implementations-v1' });
-  assert.equal(found.length, 59);
+  assert.equal(found.length, 60);
   assert.deepEqual(found.map((pkg) => pkg.name), catalogPackages.map((pkg) => pkg.name));
   assert.equal(new Set(found.map((pkg) => pkg.name)).size, found.length, 'package names must be unique');
 });

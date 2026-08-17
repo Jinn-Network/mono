@@ -14,6 +14,7 @@
  * `daemon/loop-heartbeat.ts`'s own default for every caller that never touches the holder.
  */
 import type { Hono } from 'hono';
+import { healthResponse, readyResponse } from '@jinn-network/read-plane';
 import { readBootstrapError } from '../errors/persisted-bootstrap-error.js';
 import type { HealthResponse, ReadyResponse } from './contract/health.js';
 
@@ -35,28 +36,17 @@ export function addHealthRoutes(app: Hono, config: HealthRoutesConfig = {}): voi
   const getDaemonReadiness = config.getDaemonReadiness ?? ((): HealthDaemonReadiness => 'ready');
 
   app.get('/health', (c) => {
-    const body: HealthResponse = { ok: true };
+    const body: HealthResponse = healthResponse();
     return c.json(body);
   });
 
   app.get('/ready', (c) => {
     const reason = getDaemonReadiness();
-    // §6.1's exact mapping: 200 for `ready` AND `degraded` (both mean "do not restart me" —
-    // a 503 here would restart-loop a daemon correctly waiting for funding, the exact
-    // absorbing state §5 prevents); 503 for `bootstrapping`. The readiness union has no
-    // fourth "integrity-failed" member today — an integrity-class halt calls `emitEnvelope`
-    // and `process.exit`s before the API server ever binds (spec §5) — so the `else` branch
-    // below is reserved for that case if one is ever added to the union.
-    const status = reason === 'ready' || reason === 'degraded' ? 200 : 503;
     const cause =
       reason === 'degraded' && config.earningDir
         ? (readBootstrapError(config.earningDir)?.code ?? undefined)
         : undefined;
-    const body: ReadyResponse = {
-      reason,
-      ...(cause ? { cause } : {}),
-      accepting_work: reason === 'ready',
-    };
-    return c.json(body, status);
+    const { status, body } = readyResponse({ reason, cause });
+    return c.json(body as ReadyResponse, status);
   });
 }

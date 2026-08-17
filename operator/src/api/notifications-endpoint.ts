@@ -51,6 +51,7 @@
  * for the full 16-kind table.
  */
 import type { Hono } from 'hono';
+import { cachePolicyHeaders } from '@jinn-network/read-plane';
 import type { Store } from '../store/store.js';
 import { getCachedGatheredStatus } from './gathered-status-cache.js';
 import type { gatherGatheredStatusRaw, StatusGatherConfig } from './gather-status.js';
@@ -61,6 +62,7 @@ import { getEventBuffer } from '../events/emitter.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { isRestartRequired } from './restart-required-state.js';
 import type { NotificationsV1Response, NotificationV1 } from './contract/notifications.js';
+import { CURRENT_CONTRACT_VERSION } from './contract/version.js';
 import {
   buildNotifications,
   countRecentClaimFailures,
@@ -170,14 +172,24 @@ export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfi
 
       const body: NotificationsV1Response = {
         schemaVersion: 1,
+        contractVersion: CURRENT_CONTRACT_VERSION,
         generatedAt: new Date(nowMs).toISOString(),
         notifications,
       };
+      for (const [name, value] of Object.entries(cachePolicyHeaders({ generatedAt: body.generatedAt }))) {
+        c.header(name, value);
+      }
       return c.json(body);
     } catch (err) {
       const message = maskUrlsInMessage(err instanceof Error ? err.message : String(err));
       return c.json(
-        { schemaVersion: 1, generatedAt: new Date().toISOString(), notifications: [], error: message },
+        {
+          schemaVersion: 1,
+          contractVersion: CURRENT_CONTRACT_VERSION,
+          generatedAt: new Date().toISOString(),
+          notifications: [],
+          error: message,
+        },
         500,
       );
     }

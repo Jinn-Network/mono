@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { homedir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -21,8 +20,9 @@ import {
 } from '../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { parseMintedEnvironmentBindingV1 } from '../../solver-types/_swe-rebench-v2-minted-pool.js';
 import type { MintTasksInput } from '../../solver-types/_swe-rebench-v2-mint-cli.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
-const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
+const DEFAULT_CONFIG_PATH = join(resolveDefaultStateDir(), 'config.json');
 
 /**
  * Keeps the public-repository v2 environment binding intact at the CLI edge.

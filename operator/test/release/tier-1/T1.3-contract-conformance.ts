@@ -85,6 +85,28 @@ export async function runT13ContractConformance(opts: ScenarioOptions): Promise<
     }
     log('  openapi.v1.json matches regeneration');
 
+    log('Phase 5: notifications envelope requires contractVersion');
+    const { notificationsV1ResponseSchema } = await import('../../../src/api/contract/notifications.js');
+    const omitted = notificationsV1ResponseSchema.safeParse({
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      notifications: [],
+    });
+    if (omitted.success) {
+      throw new Error('notificationsV1ResponseSchema accepted a payload without contractVersion');
+    }
+    const stamped = notificationsV1ResponseSchema.parse({
+      schemaVersion: 1,
+      contractVersion: CURRENT_CONTRACT_VERSION,
+      generatedAt: new Date().toISOString(),
+      notifications: [],
+    });
+    if (stamped.contractVersion.major !== CURRENT_CONTRACT_VERSION.major
+      || stamped.contractVersion.minor !== CURRENT_CONTRACT_VERSION.minor) {
+      throw new Error('notifications contractVersion did not round-trip');
+    }
+    log(`  notifications contractVersion=${JSON.stringify(stamped.contractVersion)}`);
+
     log('contract conformance OK');
     return { verdict: 'pass' };
   });

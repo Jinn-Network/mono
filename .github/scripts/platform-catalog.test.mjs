@@ -899,7 +899,7 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
   const sealed = catalog.releaseGroups['sealed-platform-v1'];
   const implementations = catalog.releaseGroups['implementations-v1'];
   assert.equal(sealed.expectedPackageCount, 13);
-  assert.equal(implementations.expectedPackageCount, 59);
+  assert.equal(implementations.expectedPackageCount, 60);
   assert.deepEqual(sealed.publishPolicies, ['canary-and-stable']);
   assert.deepEqual(implementations.publishPolicies, ['canary-and-stable']);
   assert.equal(sealed.stackPublished, true);
@@ -958,6 +958,6 @@ test('the live catalog publishes sealed-platform-v1 and implementations-v1', () 
   );
   assert.equal(
     loadPublishableCatalogPackages(repoRoot, { releaseGroup: 'implementations-v1', lane: 'canary' }).length,
-    59,
+    60,
   );
 });

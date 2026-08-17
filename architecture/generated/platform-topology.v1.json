@@ -2,10 +2,10 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalPolicy": 2,
-    "implementationsV1": 59,
-    "inventory": 94,
-    "otherPackagesRootEntries": 14,
-    "packagesRootEntries": 88,
+    "implementationsV1": 60,
+    "inventory": 97,
+    "otherPackagesRootEntries": 16,
+    "packagesRootEntries": 91,
     "sealedPlatformV1": 13
   },
   "graph": {
@@ -471,181 +471,6 @@
         "to": "@jinn-network/trust-core"
       },
       {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/attestation-issuer"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/core"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/environment-record"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-catalog-sqlite"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-discovery"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-local-runtime"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-protocol"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-repository"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/execution-evidence-builder"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/execution-recorder"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-binding"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-pipeline"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-projector"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-venue-base"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/plugin"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/policy-identity"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-client"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-facts-task-execution"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-protocol"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-serve"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-transport-http"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/sdk"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-admission"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-backend"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-backend-local"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-evaluation-harness"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-evaluator-adapters"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-launchers"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-profiles"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-protocol"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-supervisor"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-workspace"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-authoring"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-core"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-resolve"
-      },
-      {
         "from": "@jinn-network/core",
         "kind": "runtime",
         "to": "@jinn-network/plugin"
@@ -959,6 +784,201 @@
         "from": "@jinn-network/marketplace-venue-base",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/attestation-issuer"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/core"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/environment-record"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-catalog-sqlite"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-discovery"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-local-runtime"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-protocol"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-repository"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/execution-evidence-builder"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/execution-recorder"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/lifecycle-notifications"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/marketplace-binding"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/marketplace-pipeline"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/marketplace-projector"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/marketplace-venue-base"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/plugin"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/policy-identity"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/read-plane"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-client"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-facts-task-execution"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-serve"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-transport-http"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/sdk"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-admission"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-backend"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-backend-local"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluation-harness"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluator-adapters"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-launchers"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-supervisor"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-workspace"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-authoring"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-observation"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-resolve"
+      },
+      {
+        "from": "@jinn-network/operator-console",
+        "kind": "runtime",
+        "to": "@jinn-network/lifecycle-notifications"
       },
       {
         "from": "@jinn-network/plugin-runtime",
@@ -1556,7 +1576,6 @@
       "@jinn-network/chain-only-gate-harness",
       "@jinn-network/chain-scenarios",
       "@jinn-network/chain-state-extraction",
-      "@jinn-network/client",
       "@jinn-network/core",
       "@jinn-network/environment-record",
       "@jinn-network/environment-verification",
@@ -1581,17 +1600,20 @@
       "@jinn-network/indexer-enrichment",
       "@jinn-network/information-world",
       "@jinn-network/jinn-layer",
+      "@jinn-network/lifecycle-notifications",
       "@jinn-network/marketplace-binding",
       "@jinn-network/marketplace-pipeline",
       "@jinn-network/marketplace-projector",
       "@jinn-network/marketplace-testing",
       "@jinn-network/marketplace-venue-base",
-      "@jinn-network/operator-spa",
+      "@jinn-network/operator",
+      "@jinn-network/operator-console",
       "@jinn-network/plugin",
       "@jinn-network/plugin-runtime",
       "@jinn-network/policy-identity",
       "@jinn-network/policy-optimization",
       "@jinn-network/policy-outcomes",
+      "@jinn-network/read-plane",
       "@jinn-network/record-discovery-client",
       "@jinn-network/record-discovery-facts-benchmarking",
       "@jinn-network/record-discovery-facts-chain-environments",
@@ -1623,6 +1645,7 @@
       "@jinn-network/task-posting",
       "@jinn-network/trust-authoring",
       "@jinn-network/trust-core",
+      "@jinn-network/trust-observation",
       "@jinn-network/trust-resolve",
       "@jinn-network/trust-testing",
       "@jinn-network/website"
@@ -1847,6 +1870,7 @@
             "@jinn-network/task-execution-backend",
             "@jinn-network/trust-resolve"
           ],
+          "@jinn-network/trust-observation": [],
           "@jinn-network/trust-resolve": [],
           "@jinn-network/trust-testing": [
             "@jinn-network/trust-resolve"
@@ -1874,6 +1898,7 @@
             "@jinn-network/task-curation",
             "@jinn-network/task-execution-backend",
             "@jinn-network/task-execution-workspace",
+            "@jinn-network/trust-observation",
             "@jinn-network/trust-resolve"
           ],
           [
@@ -1990,19 +2015,19 @@
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 31,
-      "boundaryPolicies": 23,
-      "catalogManifests": 94,
-      "catalogPublicSurfaces": 1313,
+      "authorityDocuments": 32,
+      "boundaryPolicies": 26,
+      "catalogManifests": 97,
+      "catalogPublicSurfaces": 1316,
       "catalogSchema": 2,
-      "conformancePackedTargets": 56,
-      "conformanceSources": 28,
-      "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 3008,
-      "generatedOutputSources": 1369,
-      "generatorSources": 642,
+      "conformancePackedTargets": 62,
+      "conformanceSources": 31,
+      "decisionRecords": 5,
+      "discoveredFirstPartySurfaces": 2980,
+      "generatedOutputSources": 1378,
+      "generatorSources": 657,
       "marketplaceControl": 2,
-      "requiredGates": 22,
+      "requiredGates": 25,
       "staticControl": 6
     },
     "paths": [
@@ -2460,6 +2485,37 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/layer-publish-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/lifecycle-notifications-package-inventory.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/lifecycle-notifications-packed-types.test.mjs"
+      },
+      {
+        "categories": [
+          "boundaryPolicies",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/lifecycle-notifications-source-boundaries.test.mjs"
       },
       {
         "categories": [
@@ -2954,6 +3010,37 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/published-artifacts-smoke-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/read-plane-package-inventory.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/read-plane-packed-types.test.mjs"
+      },
+      {
+        "categories": [
+          "boundaryPolicies",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/read-plane-source-boundaries.test.mjs"
       },
       {
         "categories": [
@@ -3601,6 +3688,17 @@
       },
       {
         "categories": [
+          "generatorSources",
+          "requiredGates"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/workflows/lifecycle-notifications-ci.yml"
+      },
+      {
+        "categories": [
           "generatorSources"
         ],
         "owners": [
@@ -3669,6 +3767,18 @@
           "@ritsukai"
         ],
         "path": ".github/workflows/npm-publish.yml"
+      },
+      {
+        "categories": [
+          "boundaryPolicies",
+          "generatorSources",
+          "requiredGates"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/workflows/operator-console-ci.yml"
       },
       {
         "categories": [
@@ -3764,6 +3874,17 @@
           "@ritsukai"
         ],
         "path": ".github/workflows/published-artifacts-smoke.yml"
+      },
+      {
+        "categories": [
+          "generatorSources",
+          "requiredGates"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/workflows/read-plane-ci.yml"
       },
       {
         "categories": [
@@ -4012,6 +4133,46 @@
           "@ritsukai"
         ],
         "path": "apps/broadcast-bot/test/state.test.ts"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/operator-console/OPERATOR-APP-SPEC.md"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/operator-console/package.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/operator-console/test"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/operator-console/test/design-tokens.test.mjs"
       },
       {
         "categories": [
@@ -4361,6 +4522,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
       },
       {
@@ -4412,6 +4583,16 @@
           "@ritsukai"
         ],
         "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md"
+      },
+      {
+        "categories": [
+          "decisionRecords"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "log/decisions/2026-08-04-headless-operator-reconciliation.md"
       },
       {
         "categories": [
@@ -4770,16 +4951,6 @@
           "@ritsukai"
         ],
         "path": "operator/fixtures/transcripts/hermes-agent/session-example.json"
-      },
-      {
-        "categories": [
-          "authorityDocuments"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/OPERATOR-APP-SPEC.md"
       },
       {
         "categories": [
@@ -6087,16 +6258,6 @@
       },
       {
         "categories": [
-          "catalogManifests"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/src/dashboard/spa/package.json"
-      },
-      {
-        "categories": [
           "discoveredFirstPartySurfaces"
         ],
         "owners": [
@@ -6933,16 +7094,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "operator/test/api/captures-endpoints.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "operator/test/api/claim-policy-endpoints.test.ts"
       },
       {
@@ -6954,6 +7105,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/api/codex-doctor-endpoint.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/api/contract-notifications-version.test.ts"
       },
       {
         "categories": [
@@ -7004,16 +7165,6 @@
           "@ritsukai"
         ],
         "path": "operator/test/api/events-endpoint.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/feature-flags-inject.test.ts"
       },
       {
         "categories": [
@@ -7153,37 +7304,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "operator/test/api/launcher-endpoints.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/launcher-status.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/launcher-tasks.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/leaderboard-api.test.ts"
+        "path": "operator/test/api/lifecycle-cloudevents.test.ts"
       },
       {
         "categories": [
@@ -7204,6 +7325,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/api/metrics-endpoint.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/api/no-human-surface.test.ts"
       },
       {
         "categories": [
@@ -7283,6 +7414,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "operator/test/api/remote-access.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "operator/test/api/restart-required-state.test.ts"
       },
       {
@@ -7344,36 +7485,6 @@
           "@ritsukai"
         ],
         "path": "operator/test/api/setup-retry-endpoint.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/solvernets-catalog-build.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/solvernets-endpoint.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/api/solvernets-endpoints.test.ts"
       },
       {
         "categories": [
@@ -7504,6 +7615,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/api/task-runs-build.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/api/ui-token.test.ts"
       },
       {
         "categories": [
@@ -7674,6 +7795,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/architecture/golden-envelope.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/architecture/leftover-application-routes-retired.test.ts"
       },
       {
         "categories": [
@@ -8404,6 +8535,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/cli/commands/prediction-scoreboard.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/cli/commands/restart.test.ts"
       },
       {
         "categories": [
@@ -10314,306 +10455,6 @@
           "@ritsukai"
         ],
         "path": "operator/test/daemon/work-loop.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/__screenshots__"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/__screenshots__/983-onboarding"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/__screenshots__/983-onboarding/01-solvernet-step.png"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/__screenshots__/983-onboarding/02-harness-step-not-ready-gated.png"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/__screenshots__/983-onboarding/03-harness-step-ready-enabled.png"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/__screenshots__/983-onboarding/04-silent-flip-operating.png"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/__screenshots__/983-onboarding/05-enter-error-surface.png"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/__screenshots__/activity-outcome-column-502.png"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/activity-outcome-column.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/ai-units-usd-payload.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/claim-failed-notification.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/claim-policy-flow.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/faucet-batch-topup.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/funding-sequence.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/gas-runway-warnings.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/helpers"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/helpers/mock-daemon-api.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/onboarding-flow.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/password-rotation-notification.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/posting-status.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/release-prep"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/release-prep/spa-route-smoke.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/runway-display.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/solvernet-flow.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/spa-config.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/spa.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/status-no-staking-fields.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/task-post-counts.e2e.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "operator/test/dashboard/update-available-notification.e2e.test.ts"
       },
       {
         "categories": [
@@ -14032,6 +13873,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "operator/test/intents/write-control.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "operator/test/learner"
       },
       {
@@ -16482,6 +16333,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/spend/usage.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/state-dir.test.ts"
       },
       {
         "categories": [
@@ -33425,6 +33286,70 @@
       },
       {
         "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/lifecycle-notifications/src/testing.ts"
+      },
+      {
+        "categories": [
           "marketplaceControl"
         ],
         "owners": [
@@ -35814,6 +35739,70 @@
           "@ritsukai"
         ],
         "path": "packages/policy/outcomes/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/read-plane/src/testing.ts"
       },
       {
         "categories": [
@@ -41963,6 +41952,70 @@
       },
       {
         "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/trust/observation/src/testing.ts"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -42919,6 +42972,50 @@
     {
       "boundaryPolicy": {
         "kind": "workflow",
+        "path": ".github/workflows/operator-console-ci.yml"
+      },
+      "classification": "product",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@jinn-network/lifecycle-notifications",
+          "class-variance-authority",
+          "clsx",
+          "lucide-react",
+          "next",
+          "radix-ui",
+          "react",
+          "react-dom",
+          "tailwind-merge"
+        ]
+      },
+      "domain": "operator",
+      "name": "@jinn-network/operator-console",
+      "ownerGroup": "architecture-control",
+      "path": "apps/operator-console",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "private",
+      "releaseGroup": "transitional-or-private",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "operator-console-ci"
+      ],
+      "role": "operator console product",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 4,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "workflow",
         "path": ".github/workflows/website-ci.yml"
       },
       "classification": "product",
@@ -42989,12 +43086,14 @@
           "@jinn-network/evidence-repository",
           "@jinn-network/execution-evidence-builder",
           "@jinn-network/execution-recorder",
+          "@jinn-network/lifecycle-notifications",
           "@jinn-network/marketplace-binding",
           "@jinn-network/marketplace-pipeline",
           "@jinn-network/marketplace-projector",
           "@jinn-network/marketplace-venue-base",
           "@jinn-network/plugin",
           "@jinn-network/policy-identity",
+          "@jinn-network/read-plane",
           "@jinn-network/record-discovery-client",
           "@jinn-network/record-discovery-facts-task-execution",
           "@jinn-network/record-discovery-protocol",
@@ -43013,6 +43112,7 @@
           "@jinn-network/task-execution-workspace",
           "@jinn-network/trust-authoring",
           "@jinn-network/trust-core",
+          "@jinn-network/trust-observation",
           "@jinn-network/trust-resolve",
           "@lmoe/gliner-onnx",
           "@modelcontextprotocol/sdk",
@@ -43061,7 +43161,7 @@
         ]
       },
       "domain": "operator",
-      "name": "@jinn-network/client",
+      "name": "@jinn-network/operator",
       "ownerGroup": "architecture-control",
       "path": "operator",
       "publicSurface": {
@@ -43090,70 +43190,6 @@
         "sunsetCondition": "The operator-daemon cutover is complete and the legacy release coupling is retired."
       },
       "version": "0.2.2"
-    },
-    {
-      "boundaryPolicy": {
-        "kind": "workflow",
-        "path": ".github/workflows/ci.yml"
-      },
-      "classification": "product",
-      "dependencies": {
-        "optional": [],
-        "peer": [],
-        "runtime": [
-          "@hookform/resolvers",
-          "@radix-ui/react-alert-dialog",
-          "@radix-ui/react-dialog",
-          "@radix-ui/react-dropdown-menu",
-          "@radix-ui/react-label",
-          "@radix-ui/react-popover",
-          "@radix-ui/react-progress",
-          "@radix-ui/react-radio-group",
-          "@radix-ui/react-scroll-area",
-          "@radix-ui/react-slot",
-          "@radix-ui/react-switch",
-          "@radix-ui/react-tabs",
-          "@radix-ui/react-tooltip",
-          "@tanstack/react-query",
-          "@tanstack/react-table",
-          "class-variance-authority",
-          "clsx",
-          "html-to-image",
-          "lucide-react",
-          "react",
-          "react-dom",
-          "react-hook-form",
-          "sonner",
-          "tailwind-merge",
-          "tailwindcss-animate",
-          "wouter",
-          "xterm",
-          "xterm-addon-fit",
-          "xterm-addon-web-links",
-          "zod"
-        ]
-      },
-      "domain": "operator",
-      "name": "@jinn-network/operator-spa",
-      "ownerGroup": "architecture-control",
-      "path": "operator/src/dashboard/spa",
-      "publicSurface": {
-        "conformance": [],
-        "fixtures": [],
-        "profiles": [],
-        "schemas": []
-      },
-      "publishPolicy": "private",
-      "releaseGroup": "transitional-or-private",
-      "replacedBy": [],
-      "requiredGateIds": [
-        "client-ci"
-      ],
-      "role": "operator dashboard product",
-      "stability": "candidate",
-      "supersedes": [],
-      "tier": 4,
-      "transition": null
     },
     {
       "boundaryPolicy": {
@@ -45610,6 +45646,42 @@
     {
       "boundaryPolicy": {
         "kind": "source-boundary",
+        "path": ".github/scripts/lifecycle-notifications-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": []
+      },
+      "domain": "lifecycle",
+      "name": "@jinn-network/lifecycle-notifications",
+      "ownerGroup": "architecture-control",
+      "path": "packages/lifecycle-notifications",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-lifecycle-notifications",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "lifecycle-notifications-ci"
+      ],
+      "role": "pure notification derivation from receipts and live-health",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
         "path": ".github/scripts/marketplace-source-boundaries.test.mjs"
       },
       "classification": "platform",
@@ -46002,6 +46074,44 @@
         "policy-ci"
       ],
       "role": "policy-keyed outcomes projection",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/read-plane-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "zod"
+        ]
+      },
+      "domain": "read-plane",
+      "name": "@jinn-network/read-plane",
+      "ownerGroup": "architecture-control",
+      "path": "packages/read-plane",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-read-plane",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "read-plane-ci"
+      ],
+      "role": "health/ready, freshness, SSE resume, constructor token gate, payload classes, OpenAPI generation",
       "stability": "experimental",
       "supersedes": [],
       "tier": 3,
@@ -46807,6 +46917,44 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "zod"
+        ]
+      },
+      "domain": "trust",
+      "name": "@jinn-network/trust-observation",
+      "ownerGroup": "architecture-control",
+      "path": "packages/trust/observation",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "canary-and-stable",
+      "releaseGroup": "implementations-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "trust-ci"
+      ],
+      "role": "Class O/A receipt container profile and writeObservation()",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/trust-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
           "@jinn-network/trust-core",
           "viem"
         ]
@@ -46971,7 +47119,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/config.example.json",
         "relativeSource": "fixtures/config.example.json"
@@ -46980,7 +47128,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/jinn-repo-live-issue-task.example.json",
         "relativeSource": "fixtures/jinn-repo-live-issue-task.example.json"
@@ -46989,7 +47137,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/local-config.json",
         "relativeSource": "fixtures/local-config.json"
@@ -46998,7 +47146,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/mint-candidate-example.json",
         "relativeSource": "fixtures/mint-candidate-example.json"
@@ -47007,7 +47155,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/prediction-apy-v0-intent.example.json",
         "relativeSource": "fixtures/prediction-apy-v0-intent.example.json"
@@ -47016,7 +47164,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/prediction-v1-task.example.json",
         "relativeSource": "fixtures/prediction-v1-task.example.json"
@@ -47025,7 +47173,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/aider/example-analytics.jsonl",
         "relativeSource": "fixtures/transcripts/aider/example-analytics.jsonl"
@@ -47034,7 +47182,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/aider/example-chat-history.md",
         "relativeSource": "fixtures/transcripts/aider/example-chat-history.md"
@@ -47043,7 +47191,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/claude-code/example-session.jsonl",
         "relativeSource": "fixtures/transcripts/claude-code/example-session.jsonl"
@@ -47052,7 +47200,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/claude-code/stream-json-example.jsonl",
         "relativeSource": "fixtures/transcripts/claude-code/stream-json-example.jsonl"
@@ -47061,7 +47209,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/claude-code/stream-json-with-model.jsonl",
         "relativeSource": "fixtures/transcripts/claude-code/stream-json-with-model.jsonl"
@@ -47070,7 +47218,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/codex/example-session.jsonl",
         "relativeSource": "fixtures/transcripts/codex/example-session.jsonl"
@@ -47079,7 +47227,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/codex/exec-json-with-usage.jsonl",
         "relativeSource": "fixtures/transcripts/codex/exec-json-with-usage.jsonl"
@@ -47088,7 +47236,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/codex/wrapped-0-129-mcp-tools.jsonl",
         "relativeSource": "fixtures/transcripts/codex/wrapped-0-129-mcp-tools.jsonl"
@@ -47097,7 +47245,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/continue/dev_data/chat/0.2.0.jsonl",
         "relativeSource": "fixtures/transcripts/continue/dev_data/chat/0.2.0.jsonl"
@@ -47106,7 +47254,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/continue/dev_data/edit/0.2.0.jsonl",
         "relativeSource": "fixtures/transcripts/continue/dev_data/edit/0.2.0.jsonl"
@@ -47115,7 +47263,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/gemini/example-session.jsonl",
         "relativeSource": "fixtures/transcripts/gemini/example-session.jsonl"
@@ -47124,7 +47272,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/hermes-agent/session-example.json",
         "relativeSource": "fixtures/transcripts/hermes-agent/session-example.json"
@@ -47133,7 +47281,7 @@
         "claim": null,
         "export": null,
         "kind": "schemas",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/schemas/jinn-manifest-v1.json",
         "relativeSource": "schemas/jinn-manifest-v1.json"
@@ -51913,6 +52061,18 @@
       },
       {
         "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/lifecycle-notifications",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/lifecycle-notifications/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
         "export": null,
         "kind": "fixtures",
         "package": "@jinn-network/marketplace-binding",
@@ -52606,6 +52766,18 @@
         "packedTargets": [],
         "path": "packages/policy/outcomes/fixtures/projection-golden.json",
         "relativeSource": "fixtures/projection-golden.json"
+      },
+      {
+        "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/read-plane",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/read-plane/src/testing.ts",
+        "relativeSource": "src/testing.ts"
       },
       {
         "claim": null,
@@ -55150,6 +55322,18 @@
       },
       {
         "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/trust-observation",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/trust/observation/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
         "export": null,
         "kind": "fixtures",
         "package": "@jinn-network/trust-testing",
@@ -55363,6 +55547,15 @@
       {
         "conformance": [],
         "fixtures": [],
+        "name": "@jinn-network/operator-console",
+        "path": "apps/operator-console",
+        "profiles": [],
+        "releaseGroup": "transitional-or-private",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
         "name": "@jinn-network/website",
         "path": "apps/website",
         "profiles": [],
@@ -55374,22 +55567,13 @@
         "fixtures": [
           "fixtures"
         ],
-        "name": "@jinn-network/client",
+        "name": "@jinn-network/operator",
         "path": "operator",
         "profiles": [],
         "releaseGroup": "legacy-product-lines",
         "schemas": [
           "schemas"
         ]
-      },
-      {
-        "conformance": [],
-        "fixtures": [],
-        "name": "@jinn-network/operator-spa",
-        "path": "operator/src/dashboard/spa",
-        "profiles": [],
-        "releaseGroup": "transitional-or-private",
-        "schemas": []
       },
       {
         "conformance": [],
@@ -56024,6 +56208,17 @@
         "schemas": []
       },
       {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "name": "@jinn-network/lifecycle-notifications",
+        "path": "packages/lifecycle-notifications",
+        "profiles": [],
+        "releaseGroup": "experimental-lifecycle-notifications",
+        "schemas": []
+      },
+      {
         "conformance": [],
         "fixtures": [
           "fixtures"
@@ -56115,6 +56310,17 @@
         "path": "packages/policy/outcomes",
         "profiles": [],
         "releaseGroup": "experimental-policy",
+        "schemas": []
+      },
+      {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "name": "@jinn-network/read-plane",
+        "path": "packages/read-plane",
+        "profiles": [],
+        "releaseGroup": "experimental-read-plane",
         "schemas": []
       },
       {
@@ -56322,6 +56528,17 @@
         "path": "packages/trust/core",
         "profiles": [],
         "releaseGroup": "sealed-platform-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [],
+        "name": "@jinn-network/trust-observation",
+        "path": "packages/trust/observation",
+        "profiles": [],
+        "releaseGroup": "implementations-v1",
         "schemas": []
       },
       {
@@ -56769,6 +56986,7 @@
             "@jinn-network/task-execution-testing",
             "@jinn-network/task-execution-workspace",
             "@jinn-network/task-posting",
+            "@jinn-network/trust-observation",
             "@jinn-network/trust-resolve",
             "@jinn-network/trust-testing"
           ],
@@ -56880,6 +57098,7 @@
         "@jinn-network/task-posting",
         "@jinn-network/trust-authoring",
         "@jinn-network/trust-core",
+        "@jinn-network/trust-observation",
         "@jinn-network/trust-resolve",
         "@jinn-network/trust-testing"
       ],
@@ -57660,6 +57879,17 @@
           ],
           "environment": "npm-publish",
           "organization": "Jinn-Network",
+          "package": "@jinn-network/trust-observation",
+          "provider": "GitHub Actions",
+          "repository": "mono",
+          "workflow": "stack-npm-publish.yml"
+        },
+        {
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
+          "organization": "Jinn-Network",
           "package": "@jinn-network/trust-resolve",
           "provider": "GitHub Actions",
           "repository": "mono",
@@ -57680,6 +57910,29 @@
     }
   },
   "releaseGroups": {
+    "experimental-lifecycle-notifications": {
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-lifecycle-notifications",
+        "implementations-v1",
+        "sealed-platform-v1"
+      ],
+      "canary": false,
+      "expectedPackageCount": 1,
+      "packages": [
+        "@jinn-network/lifecycle-notifications"
+      ],
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "lifecycle-notifications-ci"
+      ],
+      "stable": false,
+      "stackPublished": false
+    },
     "experimental-policy": {
       "allowedClassifications": [
         "platform"
@@ -57704,6 +57957,29 @@
       "stable": false,
       "stackPublished": false
     },
+    "experimental-read-plane": {
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-read-plane",
+        "implementations-v1",
+        "sealed-platform-v1"
+      ],
+      "canary": false,
+      "expectedPackageCount": 1,
+      "packages": [
+        "@jinn-network/read-plane"
+      ],
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "read-plane-ci"
+      ],
+      "stable": false,
+      "stackPublished": false
+    },
     "implementations-v1": {
       "allowedClassifications": [
         "platform",
@@ -57714,7 +57990,7 @@
         "sealed-platform-v1"
       ],
       "canary": true,
-      "expectedPackageCount": 59,
+      "expectedPackageCount": 60,
       "packages": [
         "@jinn-network/attestation-issuer",
         "@jinn-network/benchmarking-aggregate",
@@ -57773,6 +58049,7 @@
         "@jinn-network/task-execution-testing",
         "@jinn-network/task-execution-workspace",
         "@jinn-network/task-posting",
+        "@jinn-network/trust-observation",
         "@jinn-network/trust-resolve",
         "@jinn-network/trust-testing"
       ],
@@ -57799,7 +58076,9 @@
         "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "experimental-lifecycle-notifications",
         "experimental-policy",
+        "experimental-read-plane",
         "implementations-v1",
         "legacy-product-lines",
         "sealed-platform-v1"
@@ -57807,10 +58086,10 @@
       "canary": false,
       "expectedPackageCount": 6,
       "packages": [
-        "@jinn-network/client",
         "@jinn-network/core",
         "@jinn-network/jinn-layer",
         "@jinn-network/marketplace-pipeline",
+        "@jinn-network/operator",
         "@jinn-network/plugin",
         "@jinn-network/sdk"
       ],
@@ -57875,7 +58154,9 @@
         "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "experimental-lifecycle-notifications",
         "experimental-policy",
+        "experimental-read-plane",
         "implementations-v1",
         "legacy-product-lines",
         "sealed-platform-v1",
@@ -57894,7 +58175,7 @@
         "@jinn-network/explorer-spa",
         "@jinn-network/indexer",
         "@jinn-network/indexer-enrichment",
-        "@jinn-network/operator-spa",
+        "@jinn-network/operator-console",
         "@jinn-network/plugin-runtime",
         "@jinn-network/policy-optimization",
         "@jinn-network/website"
@@ -57907,10 +58188,10 @@
         "autopilot-ci",
         "benchmark-product-ci",
         "broadcast-bot-ci",
-        "client-ci",
         "environments-ci",
         "indexer-ci",
         "indexer-enrichment-ci",
+        "operator-console-ci",
         "plugin-tree-ci",
         "policy-optimization-ci",
         "task-supply-ci",
@@ -57928,7 +58209,7 @@
   },
   "transitions": [
     {
-      "name": "@jinn-network/client",
+      "name": "@jinn-network/operator",
       "path": "operator",
       "publishPolicy": "independent",
       "releaseGroup": "legacy-product-lines",

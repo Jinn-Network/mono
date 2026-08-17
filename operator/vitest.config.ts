@@ -3,23 +3,11 @@ import { fileURLToPath } from 'node:url';
 
 const nodeInclude = [
   'test/**/*.test.ts',
-  // Plugin tests live next to the plugin source under plugins/*/test/.
   'plugins/**/test/**/*.test.ts',
-  // Workspace-package tests live next to the package source under
-  // packages/*/test/ (e.g. @jinn-network/harness-layer).
   'packages/*/test/**/*.test.ts',
-  // SPA unit tests that do not render React components can stay in node.
-  'src/dashboard/spa/src/**/*.test.ts',
-  // Release-tier scenario tests live in *.test.ts siblings next to the
-  // callable *.ts files (which have no Vitest deps and are safe to import
-  // from the orchestrator without triggering Vitest at module load time).
   'test/release/**/*.test.ts',
-  // The release-readiness scaffolding unit test lives next to its source
-  // under scripts/release/ (pure unit test, no network or real spend).
   'scripts/release/**/*.test.ts',
 ];
-
-const spaDomInclude = ['src/dashboard/spa/src/**/*.test.tsx'];
 
 const exclude = [
   'test/e2e/**',
@@ -88,14 +76,6 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: nodeInclude,
-        },
-      },
-      {
-        extends: true,
-        test: {
-          name: 'spa-jsdom',
-          environment: 'jsdom',
-          include: spaDomInclude,
         },
       },
     ],

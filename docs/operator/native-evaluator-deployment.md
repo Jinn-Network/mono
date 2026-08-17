@@ -44,10 +44,10 @@ npm-published package since `deployments/` ships unconditionally — see
 (`operator/src/daemon/native-evaluator-composition.ts:164-174`). Resolve the absolute path to
 your installed copy:
 
-- **Repo checkout / contributor dev**: `<repo>/client/deployments/evaluator/prediction-market-deployment.mjs`.
-- **Published package** (`npm install -g @jinn-network/client`): join the installed
+- **Repo checkout / contributor dev**: `<repo>/operator/deployments/evaluator/prediction-market-deployment.mjs`.
+- **Published package** (`npm install -g @jinn-network/operator`): join the installed
   package root with the same relative path, e.g.
-  `node -e "console.log(require.resolve('@jinn-network/client/package.json').replace('package.json', 'deployments/evaluator/prediction-market-deployment.mjs'))"`.
+  `node -e "console.log(require.resolve('@jinn-network/operator/package.json').replace('package.json', 'deployments/evaluator/prediction-market-deployment.mjs'))"`.
 
 ## Computing the two digests
 
@@ -171,7 +171,7 @@ pick up an edit only on their own next process start / next spawn.
 
 ## The sidecar does not survive an upgrade
 
-`npm install -g @jinn-network/client@latest` **replaces the installed package's whole
+`npm install -g @jinn-network/operator@latest` **replaces the installed package's whole
 directory tree**, including `deployments/evaluator/` — deleting the co-located sidecar
 along with it. After every version bump, the evaluator role host fails to boot
 (`prediction-market-deployment.mjs requires a per-operator sidecar file at ...`) until
@@ -179,7 +179,7 @@ you re-run the create-sidecar step:
 
 ```bash
 node --input-type=module -e "
-import { writePredictionEvaluatorSidecar } from '@jinn-network/client/dist/native-evaluator/deployment-paths.js';
+import { writePredictionEvaluatorSidecar } from '@jinn-network/operator/dist/native-evaluator/deployment-paths.js';
 await writePredictionEvaluatorSidecar({ agent: '<your operator.native.agent value>' });
 "
 ```

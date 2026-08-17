@@ -13,11 +13,8 @@
  * a password and runs `jinn init` if no keystore is found). The panel
  * observes that flow via /v1/bootstrap; it does not drive it.
  *
- * Note 2: there is no `/v1/auth/claude/login` endpoint. claude sign-in
- * happens automatically through the embedded agent session — the wizard
- * is auto-dismissed and the OAuth URL is opened in a new tab via the
- * agent WS bridge (see agent-ws.ts). The operator just completes sign-in
- * in the tab that opens.
+ * Note 2: there is no `/v1/auth/claude/login` HTTP endpoint. Claude sign-in
+ * is `claude auth login` on the CLI (harness `isReady` nextStep.cli).
  */
 import type { Hono } from 'hono';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -41,7 +38,6 @@ import {
 import { createJinnPublicClient, type JinnOnchainNetwork } from '../earning/viem-clients.js';
 import { detectAuthContext, probeClaudeAuth } from '../preflight/claude-auth.js';
 import { checkClaudeBinary, type ClaudeBinaryCheckResult } from '../preflight/claude-binary.js';
-import { triggerAgentSpawn } from '../agent/agent-ws.js';
 import { DEFAULT_CONFIG_PATH, persistTopLevelConfigValue } from '../config.js';
 import { canonicalHarnessName } from '../harnesses/names.js';
 import {
@@ -52,6 +48,7 @@ import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
 import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { markRestartRequired } from './restart-required-state.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -162,7 +159,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   const resolveEarningDir = (): string =>
     config.earningDir ??
     process.env['JINN_EARNING_DIR'] ??
-    join(process.env['HOME'] ?? homedir(), '.jinn-client', 'earning');
+    join(resolveDefaultStateDir(), 'earning');
 
   // Issue #560 batched-topup defaults. Resolved once so the POST /drip batch
   // branch and GET /drip/quota route can't drift. Production callers always
@@ -223,16 +220,6 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       binary,
       ...(probe.email !== undefined ? { email: probe.email } : {}),
     });
-  });
-
-  // POST /v1/auth/claude/spawn — operator clicked Phase 1 Sign-in. Allows
-  // the daemon to spawn its embedded claude session (which then auto-walks
-  // the wizard and emits an auth_url WS frame to the SPA). For returning
-  // operators the daemon already detects auth at startup and pre-allows
-  // spawn; this endpoint is the manual gate-opener for fresh installs.
-  app.post('/v1/auth/claude/spawn', async (c) => {
-    const result = await triggerAgentSpawn();
-    return c.json(result, result.ok ? 202 : 500);
   });
 
   app.post('/v1/setup/claude/install', async (c) => {
@@ -735,7 +722,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
 
     const earningDir =
       process.env['JINN_EARNING_DIR'] ??
-      join(process.env['HOME'] ?? homedir(), '.jinn-client', 'earning');
+      join(resolveDefaultStateDir(), 'earning');
     const store = new FleetStateStore(earningDir);
 
     if (!store.hasMnemonicKeystore() && !store.hasLegacyKeystore()) {
@@ -757,7 +744,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       // Also update the persisted password file so subsequent `jinn run`
       // invocations pick up the new password seamlessly.
       const home = process.env['HOME'] ?? homedir();
-      const pwFilePath = join(home, '.jinn-client', 'keystore-password');
+      const pwFilePath = join(resolveDefaultStateDir({ home }), 'keystore-password');
       mkdirSync(dirname(pwFilePath), { recursive: true, mode: 0o700 });
       writeFileSync(pwFilePath, parsed.data.next + '\n', { mode: 0o600 });
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { JinnConfig } from '../../../src/config.js';
 import { makeCommandCtx } from '../../_support/cli.js';
 import { createPolicyCommand } from '../../../src/cli/commands/policy.js';
@@ -40,5 +40,28 @@ describe('jinn policy', () => {
     await cmd.run(ctx);
     expect(JSON.parse(writes[writes.length - 1]!).code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
+  });
+
+  it('set writes via the intent when the daemon is down', async () => {
+    const writeClaimPolicyIntent = vi.fn(() => ({
+      schemaVersion: 1 as const,
+      generatedAt: '2026-08-17T00:00:00.000Z',
+      verb: 'policy set' as const,
+      restartRequired: true as const,
+      claimPolicy: { mode: 'every-runnable' as const },
+    }));
+    const cmd = createPolicyCommand({
+      loadConfig: () => ({ apiPort: 7331 }) as JinnConfig,
+      requestDaemon: vi.fn(async () => ({ reachable: false })),
+      writeClaimPolicyIntent,
+    });
+    const { ctx, writes, exits } = makeCommandCtx({
+      argv: ['set', '--mode', 'every-runnable', '--json'],
+      tty: false,
+    });
+    await cmd.run(ctx);
+    expect(writeClaimPolicyIntent).toHaveBeenCalledOnce();
+    expect(JSON.parse(writes[writes.length - 1]!).verb).toBe('policy set');
+    expect(exits).toEqual([0]);
   });
 });

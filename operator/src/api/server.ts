@@ -18,10 +18,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
 import type { Server as HttpServer } from 'node:http';
-import { dirname, extname, join, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Store } from '../store/store.js';
 import {
   verifyRequestWithErc8128,
@@ -33,17 +30,16 @@ import { maskUrlsInMessage } from '../rpc/transport.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
 import type { ArtifactSource } from '../types/envelope.js';
-import { addEventsRoutes } from './events-endpoint.js';
+import { addEventsRoutes, createStoreLifecycleTail } from './events-endpoint.js';
 import { addActivityEventsRoutes } from './activity-events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
 import { addNotificationsRoutes } from './notifications-endpoint.js';
-import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
-import {
-  registerSolverNetsEndpoints,
-  type SolverNetsEndpointsDeps,
-} from './solvernets-endpoints.js';
 import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
+import {
+  DEFAULT_API_CORS_ORIGINS,
+  requireRemoteAccess,
+} from './remote-access.js';
 import { addAdminRoutes, type AdminEndpointConfig } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addClaimPolicyRoutes, type ClaimPolicyRoutesConfig } from './claim-policy-endpoints.js';
@@ -53,13 +49,11 @@ import { addHarnessAuthStatusRoutes } from './harness-auth-status-endpoint.js';
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
 import { addHermesDoctorRoutes, type HermesDoctorConfig } from './hermes-doctor-endpoint.js';
 import { addCodexDoctorRoutes, type CodexDoctorConfig } from './codex-doctor-endpoint.js';
-import { addLauncherRoutes, type LauncherRoutesDeps } from './launcher-endpoints.js';
 import {
   addOperatorArtifactsRoutes,
   type OperatorArtifactsRoutesConfig,
 } from './operator-artifacts-endpoint.js';
 import { addStopHookRoutes, type StopHookRoutesDeps } from './stop-hook.js';
-import { addCapturesRoutes, type CapturesRoutesDeps } from './captures.js';
 import { addDiscoveryRoutes } from './discovery-endpoint.js';
 import type { ArchiveReads } from '../archive/reads.js';
 import type { PluginPublicationReader } from '../plugin-registry/publication-reader.js';
@@ -77,6 +71,15 @@ export interface ApiServerConfig {
    * require a bearer token; the bind host is the outer firewall.
    */
   bindHost?: string;
+  /**
+   * When true, operator-class routes may answer non-loopback peers without
+   * attested TLS (headless §9). Default false.
+   */
+  apiInsecureRemote?: boolean;
+  /** CORS origin allowlist. Credentials are never allowed. */
+  apiCorsOrigins?: readonly string[];
+  /** Proxy addresses trusted to set X-Forwarded-Proto / X-Forwarded-For. */
+  apiTrustedProxies?: readonly string[];
   store: Store;
   /**
    * Bearer token required on cost-mutating routes (`POST /artifacts`,
@@ -111,25 +114,7 @@ export interface ApiServerConfig {
   setup?: SetupRoutesConfig;
   /** When set, mounts the §2.15 Claim policy & wiring endpoints (GET/PUT). */
   claimPolicy?: ClaimPolicyRoutesConfig;
-  /**
-   * Launcher mode routes (`/v1/launcher/*`). Mounted only when supplied so
-   * tests and bootstrap-only API instances don't pay the deps wiring cost.
-   * Gated by the same UI token as `/v1/setup/*` — see the `app.use` block
-   * inside `startApiServer` below.
-   */
-  launcher?: LauncherRoutesDeps;
-  /** When set, GET /v1/solvernets exposes the catalog from a daemon registry. */
-  solverNets?: { registry: SolverNetsRegistry };
-  /**
-   * jinn-mono-hqz0: SolverNet creation/launch endpoints (drafts CRUD,
-   * launched CRUD, registry list/by-cid). Deps are populated AFTER
-   * startApiServer returns (the SolverNet subsystem in main.ts depends on
-   * post-bootstrap state), so we accept a holder ref. Routes register
-   * eagerly here and dereference `holder.current` per-request, returning
-   * 503 until the holder is populated.
-   */
-  solverNetsLauncher?: { holder: { current: SolverNetsEndpointsDeps | undefined } };
-  /** When set, POST /v1/setup/agent-binding/retry is mounted so the SPA can
+  /** When set, POST /v1/setup/agent-binding/retry is mounted so the operator can
    *  retry the ERC-1271 bind step for unbound services. */
   agentBinding?: AgentBindingRoutesConfig;
   /**
@@ -143,7 +128,7 @@ export interface ApiServerConfig {
    * unconditional (§14.3): the SPA-only route families and `/v1/events` /
    * `/v1/activity-events` are token-gated on every construction path.
    */
-  ui?: { token: string; handshakeKey: string };
+  ui?: { token: string; handshakeKey: string; expiresAt?: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
   admin?: AdminEndpointConfig;
   /**
@@ -156,8 +141,8 @@ export interface ApiServerConfig {
    * `GET /v1/harnesses/:name/readiness` under the UI token gate.
    * SPA polls the composed endpoint; the join flow uses the per-harness one.
    *
-   * Accepts either a direct registry or a holder ref (same pattern as
-   * solverNetsLauncher). main.ts uses the holder shape because the registry is
+   * Accepts either a direct registry or a holder ref.
+   * main.ts uses the holder shape because the registry is
    * constructed post-bootstrap; routes register eagerly at server start so
    * Hono's matcher includes them before the first request — adding routes
    * after the matcher is built throws (jinn-mono-u34i field repro).
@@ -179,10 +164,8 @@ export interface ApiServerConfig {
   operatorArtifacts?: Omit<OperatorArtifactsRoutesConfig, 'store'>;
   /** Path D local session-end hook endpoint. */
   stopHook?: StopHookRoutesDeps;
-  /** Operator review API for pending captures. */
-  captures?: CapturesRoutesDeps;
   /**
-   * Plugin-publication reader backing the /build page's plug-in routes
+   * Plugin-publication reader backing the plug-in routes
    * (`plugin-publications` / `builder-artifacts` / `plugin-scores`). Direct
    * instance or holder ref (eager-register / late-populate). Required for
    * those routes after Wave-4 D4 — there is no DiscoveryAPI fallback.
@@ -228,12 +211,9 @@ export interface ApiServerConfig {
 export interface ApiServer {
   port: number;
   close(): Promise<void>;
-  /** Underlying node http.Server, exposed so other subsystems (e.g. agent WS bridge)
-   *  can mount on the same port. */
+  /** Underlying node http.Server. */
   server: HttpServer;
-  /** Hono app, exposed so subsystems initialised AFTER startApiServer (e.g. the
-   *  SolverNet subsystem in main.ts) can mount their routes on the same instance.
-   *  See jinn-mono-hqz0. */
+  /** Hono app, exposed so tests can issue in-process requests. */
   app: Hono;
   /**
    * Replace the `status` config the GET /v1/status handler reads. The
@@ -245,144 +225,6 @@ export interface ApiServer {
    */
   setStatusConfig(status: StatusGatherConfig | undefined): void;
 }
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/**
- * Resolve the operator dashboard directory.
- *
- * jinn-client is meant to be installed as a package and run via the `jinn`
- * binary, which executes the compiled `dist/` tree — there `__dirname` is
- * `dist/api/` and the SPA lives at `dist/dashboard/`.
- *
- * Repo contributors running `yarn jinn run` (tsx + src/) do not have
- * `dist/dashboard/` next to `src/api/`. They build the SPA into
- * `src/dashboard/spa/dist/` via `yarn build:spa`. We try both so the dev
- * loop produces the same UI as production after a single SPA build.
- *
- * If neither candidate has an `index.html`, the daemon emits a clear error
- * page rather than silently serving stale or missing assets.
- */
-function resolveDashboardDir(): string | null {
-  const candidates = [
-    join(__dirname, '..', 'dashboard'),                  // packaged: dist/api/.. = dist/dashboard
-    join(__dirname, '..', 'dashboard', 'spa', 'dist'),   // dev: src/api/.. = src/dashboard/spa/dist
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'index.html'))) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-const dashboardDir = resolveDashboardDir() ?? join(__dirname, '..', 'dashboard');
-const assetsDir = join(dashboardDir, 'assets');
-
-/**
- * Resolve the `JINN_ENABLE_EMBEDDED_AGENT` env var. Default off. Anything
- * other than `1` / `true` (case-insensitive) is treated as off so a stray
- * value can't accidentally re-enable the surface.
- *
- * Issue #367: this also has a daemon-side consumer (`main.ts` gates the
- * `/api/agent/ws` bridge on it), so it stays a standalone helper rather than
- * being inlined into `resolveFeatureFlags`.
- */
-export function isEmbeddedAgentEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env['JINN_ENABLE_EMBEDDED_AGENT'];
-  if (raw === undefined) return false;
-  const normalized = raw.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true';
-}
-
-/**
- * Resolve the operator-app feature flags from the daemon environment.
- *
- * Each flag is derived from a `JINN_ENABLE_*` env var ("1" enables). The SPA
- * reads the injected `window.__JINN_FEATURES__` via `lib/features.ts`; absent
- * or partial injection is treated as all-off there, so this can stay a flat
- * boolean record.
- *
- * Issue #327: `pluginBuilderUi` gates the operator-app builder surfaces
- * (`/build` route + Build top-tab). Default-off until the first-run UX is
- * solid; the plug-in substrate (CLI verbs, indexer, Discovery API, docs)
- * stays live regardless.
- *
- * Issue #326 / #367: `embeddedAgent` gates the embedded Claude agent chat
- * surface (operating-shell rail + onboarding "Ask Claude" panel). Migrated
- * here from the `/v1/bootstrap` JSON response so the operator app has a single
- * feature-flag channel — see #367.
- */
-function resolveFeatureFlags(): Record<string, boolean> {
-  return {
-    pluginBuilderUi: process.env['JINN_ENABLE_PLUGIN_BUILDER_UI'] === '1',
-    embeddedAgent: isEmbeddedAgentEnabled(),
-  };
-}
-
-/**
- * Inject the feature-flag bootstrap script into the SPA `index.html`.
- *
- * The script sets `window.__JINN_FEATURES__` before the SPA module loads, so
- * the first render already sees the flags. Inserted immediately before the
- * SPA's `<script type="module">` tag; if that tag is missing the script is
- * appended before `</head>` (or `</body>`) so the SPA still gets it.
- *
- * Exported for unit testing — the runtime call lives in `readSpaIndex`.
- */
-export function injectFeatureFlags(html: string, features: Record<string, boolean>): string {
-  const script = `<script>window.__JINN_FEATURES__=${JSON.stringify(features)};</script>`;
-  const moduleTagMatch = html.match(/<script\b[^>]*type=["']module["'][^>]*>/i);
-  if (moduleTagMatch?.index !== undefined) {
-    return html.slice(0, moduleTagMatch.index) + script + html.slice(moduleTagMatch.index);
-  }
-  if (html.includes('</head>')) {
-    return html.replace('</head>', `${script}</head>`);
-  }
-  if (html.includes('</body>')) {
-    return html.replace('</body>', `${script}</body>`);
-  }
-  return html + script;
-}
-
-function readSpaIndex(): string {
-  try {
-    const html = readFileSync(join(dashboardDir, 'index.html'), 'utf-8');
-    return injectFeatureFlags(html, resolveFeatureFlags());
-  } catch {
-    return [
-      '<!doctype html><html><body style="font-family:system-ui;padding:2rem;max-width:48rem;line-height:1.5">',
-      '<h1>jinn dashboard bundle missing</h1>',
-      '<p>jinn-client is meant to be installed as a published package and launched via the <code>jinn</code> binary. ',
-      'On a healthy install, the operator dashboard ships inside the package.</p>',
-      '<p>If you installed jinn from npm and are seeing this page, the package is corrupted — re-install it.</p>',
-      '<p>If you are running from a checkout of this repo (e.g. <code>yarn jinn run</code>), build the SPA first:</p>',
-      '<pre>yarn build         # full build (recommended)\nyarn build:spa     # SPA only</pre>',
-      '<p>Then re-run <code>jinn run</code>.</p>',
-      '</body></html>',
-    ].join('');
-  }
-}
-
-const ASSET_MIME: Record<string, string> = {
-  '.js': 'application/javascript; charset=utf-8',
-  '.mjs': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.json': 'application/json; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.html': 'text/html; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8',
-};
 
 function parseArtifactSources(value: unknown): ArtifactSource[] | undefined {
   if (value === undefined) return undefined;
@@ -429,10 +271,22 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // `DAEMON_API_TOKEN` bearer (see the gate below), but a bearer credential
   // isn't ambiently attached to cross-origin fetches the way a cookie is —
   // scoping CORS away from it is defense-in-depth, not the auth boundary.
+  const corsOrigins = [...(config.apiCorsOrigins ?? DEFAULT_API_CORS_ORIGINS)];
   app.use(async (c, next) => {
     if (c.req.path === '/api/stop-hook') return next();
-    return cors()(c, next);
+    return cors({
+      origin: (origin) => (origin && corsOrigins.includes(origin) ? origin : ''),
+      credentials: false,
+      allowHeaders: ['Content-Type', 'Authorization', 'x-jinn-ui-token', 'Last-Event-ID'],
+      allowMethods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
+    })(c, next);
   });
+  app.use(
+    requireRemoteAccess({
+      apiInsecureRemote: config.apiInsecureRemote === true,
+      apiTrustedProxies: config.apiTrustedProxies ?? [],
+    }),
+  );
 
   // ── Bearer-token check for cost-mutating / operator-class routes ────────────
   //
@@ -500,26 +354,15 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // never `bearer`-gated. The bearer only ever buys the no-`ui`
   // self-start/test path, where it's the sole available credential.
   const requireOperatorToken: MiddlewareHandler = config.ui
-    ? requireUiToken(config.ui.token)
+    ? requireUiToken(
+        config.ui.expiresAt
+          ? { token: config.ui.token, expiresAt: config.ui.expiresAt }
+          : config.ui.token,
+      )
     : requireBearer;
 
-  // SPA index at /
-  app.get('/', (c) => c.html(readSpaIndex()));
-
-  // Static SPA assets emitted by Vite into dist/dashboard/assets/.
-  app.get('/assets/:filename', (c) => {
-    const filename = c.req.param('filename');
-    // Prevent path traversal: filename must not contain separators.
-    if (!filename || filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
-      return c.notFound();
-    }
-    const filePath = normalize(join(assetsDir, filename));
-    if (!filePath.startsWith(assetsDir)) return c.notFound();
-    if (!existsSync(filePath)) return c.notFound();
-    const data = readFileSync(filePath);
-    const mime = ASSET_MIME[extname(filename).toLowerCase()] ?? 'application/octet-stream';
-    return new Response(new Uint8Array(data), { headers: { 'content-type': mime } });
-  });
+  // Headless §9: the daemon origin has no human surface. GET / names that.
+  app.get('/', (c) => c.json({ error: 'no_human_surface' }, 404));
 
   // Single shared resolver for the enriched `StatusGatherConfig` (issue #2424 review round 2,
   // findings B1/B2). Before this, `/v1/status`'s handler built its OWN enriched wrapper
@@ -624,26 +467,25 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   app.use('/v1/bootstrap', requireOperatorToken);
   app.use('/v1/rewards', requireOperatorToken);
   app.use('/v1/notifications', requireOperatorToken);
-  app.use('/v1/solvernets', requireOperatorToken);
-  app.use('/v1/solvernets/*', requireOperatorToken);
   app.use('/v1/auth/*', requireOperatorToken);
   app.use('/v1/setup/*', requireOperatorToken);
   app.use('/v1/operator', requireOperatorToken);
   app.use('/v1/operator/*', requireOperatorToken);
-  app.use('/v1/launcher', requireOperatorToken);
-  app.use('/v1/launcher/*', requireOperatorToken);
   app.use('/v1/discovery', requireOperatorToken);
   app.use('/v1/discovery/*', requireOperatorToken);
   app.use('/api/admin/*', requireOperatorToken);
   app.use('/api/harness/*', requireOperatorToken);
   app.use('/api/hermes/*', requireOperatorToken);
   app.use('/api/codex/*', requireOperatorToken);
-  app.use('/api/captures/*', requireOperatorToken);
   app.use('/v1/harnesses/*', requireOperatorToken);
   app.use('/v1/debug-report', requireOperatorToken);
   app.use('/v1/debug-report/*', requireOperatorToken);
 
-  addEventsRoutes(app);
+  addEventsRoutes(app, {
+    tail: createStoreLifecycleTail(store),
+    source: `urn:jinn:operator-daemon:${config.bindHost ?? '127.0.0.1'}:${config.port}`,
+    subject: 'urn:jinn:operator:local',
+  });
   addActivityEventsRoutes(app, { store });
 
   if (config.stopHook) {
@@ -655,10 +497,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     // `requireOperatorToken` (which would also accept the ui-token).
     app.use('/api/stop-hook', requireBearer);
     addStopHookRoutes(app, config.stopHook);
-  }
-
-  if (config.captures) {
-    addCapturesRoutes(app, config.captures);
   }
 
   if (config.bootstrap) {
@@ -715,36 +553,6 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     });
   }
 
-  if (config.solverNets) {
-    addSolverNetsRoutes(app, { registry: config.solverNets.registry });
-  }
-
-  // jinn-mono-hqz0: SolverNet creation/launch endpoints. Deps come from a
-  // post-bootstrap subsystem; we register the routes eagerly with a
-  // deps-proxy that dereferences a holder per-request. If the holder is
-  // empty (subsystem not ready yet) the routes effectively no-op via 503
-  // because the underlying handlers can't reach `store`. We surface a
-  // clear 503 by short-circuiting in a middleware before delegating.
-  if (config.solverNetsLauncher) {
-    const { holder } = config.solverNetsLauncher;
-    app.use('/v1/solvernets/drafts', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/drafts/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/launched', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    app.use('/v1/solvernets/launched/*', async (c, next) => holder.current ? next() : c.json({ error: 'subsystem_not_ready', message: 'SolverNet subsystem still initialising' }, 503));
-    // Build a Proxy whose property reads dereference the holder. Route
-    // handlers in solvernets-endpoints.ts read deps.store, deps.launch,
-    // etc. eagerly inside each handler, so per-request dereference is
-    // sufficient.
-    const depsProxy = new Proxy({} as SolverNetsEndpointsDeps, {
-      get(_target, prop) {
-        const live = holder.current;
-        if (!live) return undefined;
-        return live[prop as keyof SolverNetsEndpointsDeps];
-      },
-    });
-    registerSolverNetsEndpoints(app, depsProxy);
-  }
-
   if (config.agentBinding) {
     addAgentBindingRoutes(app, config.agentBinding);
   }
@@ -792,20 +600,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   }
 
   if (config.ui) {
-    // Setup routes (claude auth probe + login spawn, keystore password change)
+    // Setup routes (claude auth probe, keystore password change)
     // gated behind the UI token so external callers can't fingerprint the host
     // or rotate keys.
     addSetupRoutes(app, config.setup);
     if (config.claimPolicy) {
       addClaimPolicyRoutes(app, config.claimPolicy);
     }
-  }
-
-  // Launcher mode routes — gated by the UI token via the `app.use` block
-  // above. The launcher mode SPA is the only legitimate consumer; external
-  // callers cannot fingerprint per-SolverNet generator state without it.
-  if (config.ui && config.launcher) {
-    addLauncherRoutes(app, config.launcher);
   }
 
   // Bearer-token gate for POST /artifacts. Registered as `app.use` so it
@@ -1031,21 +832,8 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     });
   }
 
-  // SPA fallback: any unmatched non-API GET path returns the SPA index.
-  // Lets the SPA own client-side routing without 404s on deep links.
-  app.get('*', (c) => {
-    const path = c.req.path;
-    if (
-      path.startsWith('/v1') ||
-      path.startsWith('/artifacts') ||
-      path.startsWith('/auth') ||
-      path.startsWith('/api') ||
-      path.startsWith('/assets')
-    ) {
-      return c.notFound();
-    }
-    return c.html(readSpaIndex());
-  });
+  // Unmatched GETs are not a human surface.
+  app.get('*', (c) => c.json({ error: 'no_human_surface' }, 404));
 
   return new Promise((resolve, reject) => {
     const server = serve({

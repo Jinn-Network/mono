@@ -9,6 +9,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import { FleetStateStore } from '../../earning/store.js';
 import { decryptMnemonic, encryptMnemonic } from '../../earning/wallet.js';
 import { resolveCliPassword, resolveNewPassword } from '../password.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
 async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
   let parsed;
@@ -64,7 +65,7 @@ async function runBackup(ctx: CommandContext, rest: string[]): Promise<void> {
   }
 
   const earningDir =
-    ctx.env['JINN_EARNING_DIR'] ?? join(process.env['HOME'] ?? '.', '.jinn-client', 'earning');
+    ctx.env['JINN_EARNING_DIR'] ?? join(resolveDefaultStateDir(), 'earning');
   const store = new FleetStateStore(earningDir);
   const keystore = await store.loadMnemonicKeystore();
   const mnemonic = await decryptMnemonic(keystore, resolved.password);
@@ -118,7 +119,7 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
 
   // 1. Resolve earning dir
   const earningDir =
-    ctx.env['JINN_EARNING_DIR'] ?? join(homedir(), '.jinn-client', 'earning');
+    ctx.env['JINN_EARNING_DIR'] ?? join(resolveDefaultStateDir(), 'earning');
   const store = new FleetStateStore(earningDir);
 
   // 2. Check keystore exists
@@ -204,7 +205,7 @@ async function runChangePassword(ctx: CommandContext, rest: string[]): Promise<v
 
   // 9. Delete password file if it exists
   const home = ctx.env['HOME'] ?? homedir();
-  const passwordFilePath = join(home, '.jinn-client', 'keystore-password');
+  const passwordFilePath = join(resolveDefaultStateDir({ home, env: ctx.env }), 'keystore-password');
   let passwordFileDeleted = false;
   if (existsSync(passwordFilePath)) {
     unlinkSync(passwordFilePath);

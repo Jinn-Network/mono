@@ -1,7 +1,7 @@
-# @jinn-network/client — OCI image
+# @jinn-network/operator — OCI image
 #
 # Build from the repository root:
-#   docker build -f operator/Dockerfile -t jinn-client .
+#   docker build -f operator/Dockerfile -t jinn-operator .
 #
 # Run:
 #   docker run -e JINN_PASSWORD=secret jinn-client run
@@ -25,7 +25,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # mono checkout's SDK, core, plugin, and layer packages through Yarn portals,
 # so Docker builds use the repository root as their build context.
 COPY operator/package.json operator/yarn.lock operator/.yarnrc.yml ./operator/
-COPY operator/src/dashboard/spa/package.json ./operator/src/dashboard/spa/package.json
 COPY packages/sdk/package.json packages/sdk/yarn.lock packages/sdk/.yarnrc.yml packages/sdk/README.md ./packages/sdk/
 COPY packages/core/package.json packages/core/yarn.lock packages/core/.yarnrc.yml ./packages/core/
 COPY packages/plugin/package.json packages/plugin/yarn.lock packages/plugin/.yarnrc.yml packages/plugin/process-contract.json ./packages/plugin/
@@ -46,6 +45,7 @@ COPY packages/task-execution/backend/package.json packages/task-execution/backen
 COPY packages/task-execution/profiles/package.json packages/task-execution/profiles/yarn.lock packages/task-execution/profiles/.yarnrc.yml ./packages/task-execution/profiles/
 COPY packages/trust/core/package.json packages/trust/core/yarn.lock packages/trust/core/.yarnrc.yml ./packages/trust/core/
 COPY packages/trust/authoring/package.json packages/trust/authoring/yarn.lock packages/trust/authoring/.yarnrc.yml ./packages/trust/authoring/
+COPY packages/trust/observation/package.json packages/trust/observation/yarn.lock packages/trust/observation/.yarnrc.yml ./packages/trust/observation/
 COPY packages/trust/resolve/package.json packages/trust/resolve/yarn.lock packages/trust/resolve/.yarnrc.yml ./packages/trust/resolve/
 COPY packages/environments/record/package.json packages/environments/record/yarn.lock packages/environments/record/.yarnrc.yml ./packages/environments/record/
 COPY packages/task-supply/admission/package.json packages/task-supply/admission/yarn.lock packages/task-supply/admission/.yarnrc.yml ./packages/task-supply/admission/
@@ -66,6 +66,8 @@ COPY packages/discovery/client/package.json packages/discovery/client/yarn.lock 
 COPY packages/discovery/facts/task-execution/package.json packages/discovery/facts/task-execution/yarn.lock packages/discovery/facts/task-execution/.yarnrc.yml ./packages/discovery/facts/task-execution/
 COPY packages/discovery/transport-http/package.json packages/discovery/transport-http/yarn.lock packages/discovery/transport-http/.yarnrc.yml ./packages/discovery/transport-http/
 COPY packages/discovery/testing/package.json packages/discovery/testing/yarn.lock packages/discovery/testing/.yarnrc.yml ./packages/discovery/testing/
+COPY packages/lifecycle-notifications/package.json packages/lifecycle-notifications/yarn.lock packages/lifecycle-notifications/.yarnrc.yml ./packages/lifecycle-notifications/
+COPY packages/read-plane/package.json packages/read-plane/yarn.lock packages/read-plane/.yarnrc.yml ./packages/read-plane/
 RUN corepack enable && cd operator && yarn install --immutable
 
 # Copy portal-package sources before the client build; `yarn build` builds them
@@ -95,6 +97,7 @@ COPY packages/task-execution/backend/tsconfig.json ./packages/task-execution/bac
 COPY packages/task-execution/profiles/tsconfig.json ./packages/task-execution/profiles/
 COPY packages/trust/core/tsconfig.json ./packages/trust/core/
 COPY packages/trust/authoring/tsconfig.json ./packages/trust/authoring/
+COPY packages/trust/observation/tsconfig.json packages/trust/observation/tsconfig.build.json ./packages/trust/observation/
 COPY packages/policy/identity/tsconfig.json packages/policy/identity/tsconfig.build.json ./packages/policy/identity/
 COPY packages/policy/identity/scripts/ ./packages/policy/identity/scripts/
 COPY packages/trust/resolve/tsconfig.json ./packages/trust/resolve/
@@ -116,6 +119,8 @@ COPY packages/discovery/client/tsconfig.json ./packages/discovery/client/
 COPY packages/discovery/facts/task-execution/tsconfig.json ./packages/discovery/facts/task-execution/
 COPY packages/discovery/transport-http/tsconfig.json ./packages/discovery/transport-http/
 COPY packages/discovery/testing/tsconfig.json ./packages/discovery/testing/
+COPY packages/lifecycle-notifications/tsconfig.json packages/lifecycle-notifications/tsconfig.build.json ./packages/lifecycle-notifications/
+COPY packages/read-plane/tsconfig.json packages/read-plane/tsconfig.build.json ./packages/read-plane/
 COPY packages/evidence/protocol/src/ ./packages/evidence/protocol/src/
 COPY packages/evidence/repository/src/ ./packages/evidence/repository/src/
 COPY packages/evidence/discovery/src/ ./packages/evidence/discovery/src/
@@ -129,6 +134,7 @@ COPY packages/task-execution/backend/src/ ./packages/task-execution/backend/src/
 COPY packages/task-execution/profiles/src/ ./packages/task-execution/profiles/src/
 COPY packages/trust/core/src/ ./packages/trust/core/src/
 COPY packages/trust/authoring/src/ ./packages/trust/authoring/src/
+COPY packages/trust/observation/src/ ./packages/trust/observation/src/
 COPY packages/policy/identity/src/ ./packages/policy/identity/src/
 COPY packages/trust/resolve/src/ ./packages/trust/resolve/src/
 COPY packages/environments/record/src/ ./packages/environments/record/src/
@@ -149,6 +155,8 @@ COPY packages/discovery/client/src/ ./packages/discovery/client/src/
 COPY packages/discovery/facts/task-execution/src/ ./packages/discovery/facts/task-execution/src/
 COPY packages/discovery/transport-http/src/ ./packages/discovery/transport-http/src/
 COPY packages/discovery/testing/src/ ./packages/discovery/testing/src/
+COPY packages/lifecycle-notifications/src/ ./packages/lifecycle-notifications/src/
+COPY packages/read-plane/src/ ./packages/read-plane/src/
 COPY packages/evidence/catalog-sqlite/README.md ./packages/evidence/catalog-sqlite/README.md
 COPY packages/evidence/discovery/README.md ./packages/evidence/discovery/README.md
 COPY packages/evidence/discovery/docs/ ./packages/evidence/discovery/docs/
@@ -208,12 +216,11 @@ COPY packages/task-execution/protocol/fixtures/ ./packages/task-execution/protoc
 COPY packages/task-execution/protocol/README.md ./packages/task-execution/protocol/README.md
 COPY packages/task-execution/backend-local/workspace/README.md ./packages/task-execution/backend-local/workspace/README.md
 COPY packages/trust/resolve/README.md ./packages/trust/resolve/README.md
+COPY packages/trust/observation/README.md ./packages/trust/observation/README.md
+COPY packages/lifecycle-notifications/README.md ./packages/lifecycle-notifications/README.md
+COPY packages/read-plane/README.md ./packages/read-plane/README.md
 
-# Copy source and bundled deployment artifacts. `operator/docs/` is needed at
-# build time because the /build SPA page (hfmf) embeds `quickstart.md` via a
-# Vite `?raw` import — `operator/src/dashboard/spa/src/pages/build/IntroCard.tsx`
-# resolves `../../../../../../docs/build/quickstart.md` relative to itself,
-# which lands at `/app/operator/docs/build/quickstart.md` inside the build stage.
+# Copy source and bundled deployment artifacts.
 COPY operator/src/ ./operator/src/
 COPY operator/deployments/ ./operator/deployments/
 COPY operator/docs/ ./operator/docs/
@@ -228,7 +235,7 @@ RUN yarn build
 
 # Remove development-only portals (including the extracted layer) and their
 # generated .bin shims before node_modules leaves the repository layout.
-RUN yarn workspaces focus @jinn-network/client --production
+RUN yarn workspaces focus @jinn-network/operator --production
 
 # Replace the remaining production core/plugin portals with their
 # publish-shaped runtime directories before node_modules crosses into the

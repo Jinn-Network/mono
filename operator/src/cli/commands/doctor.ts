@@ -242,7 +242,7 @@ function checkDaemonRuntimeReady(): CheckResult {
     detail: `compiled MCP tool module missing (expected ${mcpToolsJsDist})`,
     remedy:
       'The daemon must run from a compiled build. Run `yarn build` before `yarn dev` / `node dist/bin/jinn.js run`, ' +
-      'or reinstall the npm package with `npm install -g @jinn-network/client@latest`.',
+      'or reinstall the npm package with `npm install -g @jinn-network/operator@latest`.',
   };
 }
 

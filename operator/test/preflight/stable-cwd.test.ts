@@ -23,7 +23,19 @@ describe('resolveStableCwd (pure)', () => {
     expect(result.logLine).toBe('[main] chdir to /home/op/.jinn-client/earning (was /tmp/scratch)');
   });
 
-  it('deleted cwd + earningDir missing → falls to /home/op/.jinn-client', () => {
+  it('deleted cwd + earningDir missing → prefers ~/.jinn-operator over ~/.jinn-client', () => {
+    const result = resolveStableCwd({
+      currentCwd: '/tmp/scratch',
+      earningDir: '/home/op/.jinn-operator/earning',
+      homeDir,
+      exists: (p) => p === '/home/op/.jinn-operator' || p === '/home/op/.jinn-client',
+      sep,
+    });
+    expect(result.needsChdir).toBe(true);
+    expect(result.chosenCwd).toBe('/home/op/.jinn-operator');
+  });
+
+  it('deleted cwd + earningDir and ~/.jinn-operator missing → falls to ~/.jinn-client', () => {
     const result = resolveStableCwd({
       currentCwd: '/tmp/scratch',
       earningDir: '/home/op/.jinn-client/earning',

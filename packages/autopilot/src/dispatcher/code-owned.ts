@@ -14,7 +14,7 @@ export interface OwnedPaths {
  * each rule is kept; comments and blank lines are ignored.
  *
  * The repo's CODEOWNERS uses only anchored prefixes — exact files (`/SPEC.md`)
- * and directories (`/operator/src/dashboard/spa/src/pages/`) — which the prefix
+ * and directories (`/apps/operator-console/app/`) — which the prefix
  * matcher covers exactly. Anything the matcher can't represent precisely (a
  * glob, or a bare `/`) sets `hasUnsupportedPattern`; under-matching such a rule
  * would be the UNSAFE direction (mark a human-surface PR approve-eligible), so

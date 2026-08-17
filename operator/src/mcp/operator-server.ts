@@ -19,12 +19,12 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod/v3';
 import type { CommandModule, CommandContext } from '../cli/command.js';
+import { resolveStoredUiToken } from '../api/ui-token.js';
 
 // ── Read-only command imports ───────────────────────────────────────────────
 import defaultInitCommand from '../cli/commands/init.js';
@@ -47,6 +47,7 @@ import claimRewardsCommand from '../cli/commands/claim-rewards.js';
 import defaultRunCommand from '../cli/commands/run.js';
 import updateCommand from '../cli/commands/update.js';
 import { checkPidfileLiveness } from '../preflight/pidfile-liveness.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -198,7 +199,7 @@ export async function startDetachedDaemon(env: NodeJS.ProcessEnv): Promise<
 > {
   const earningDir =
     env['JINN_EARNING_DIR'] ??
-    join(env['HOME'] ?? '.', '.jinn-client', 'earning');
+    join(resolveDefaultStateDir({ env }), 'earning');
   const pidPath = join(earningDir, 'daemon.pid');
 
   const liveness = checkPidfileLiveness({ pidPath });
@@ -281,13 +282,7 @@ export async function stopDetachedDaemon(
 // both forms — see api/handshake.ts).
 
 function uiTokenFromDisk(): string | null {
-  const path = join(homedir(), '.jinn-client', 'ui-token');
-  if (!existsSync(path)) return null;
-  try {
-    return readFileSync(path, 'utf-8').trim();
-  } catch {
-    return null;
-  }
+  return resolveStoredUiToken() ?? null;
 }
 
 function authHeaders(): Record<string, string> {
@@ -650,7 +645,7 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
     'jinn_update',
     [
       'MUTATING: Update the client package and refresh host integrations.',
-      'Step 1: npm update -g @jinn-network/client',
+      'Step 1: npm update -g @jinn-network/operator',
       'Step 2: jinn integrations install (refreshes skills in all configured AI tools).',
       'May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version.',
     ].join(' '),
@@ -830,82 +825,6 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
           method: 'POST',
           headers: authHeaders(),
         });
-        const body = await res.json();
-        return { content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  server.tool(
-    'loop_pause',
-    'Pause a daemon loop by name (creator | engine_watcher | engine_tick | delivery_watcher | reward_claim | balance_topup | jinn_claim | peer_sync). NOTE: stubbed in v1-Slim; returns not_implemented.',
-    {
-      loop: z.string(),
-      confirm: z.boolean().optional(),
-    },
-    async ({ loop, confirm }) => {
-      if (!confirm) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                preview: `would pause loop=${loop}`,
-                confirm_with: `loop_pause with confirm=true and loop=${loop}`,
-              }),
-            },
-          ],
-        };
-      }
-      const port = apiPort();
-      try {
-        const res = await fetch(
-          `http://127.0.0.1:${port}/api/admin/loop/${encodeURIComponent(loop)}/pause`,
-          { method: 'POST', headers: authHeaders() },
-        );
-        const body = await res.json();
-        return { content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ error: String(err) }) }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  server.tool(
-    'loop_resume',
-    'Resume a previously-paused daemon loop. NOTE: stubbed in v1-Slim; returns not_implemented.',
-    {
-      loop: z.string(),
-      confirm: z.boolean().optional(),
-    },
-    async ({ loop, confirm }) => {
-      if (!confirm) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({
-                preview: `would resume loop=${loop}`,
-                confirm_with: `loop_resume with confirm=true and loop=${loop}`,
-              }),
-            },
-          ],
-        };
-      }
-      const port = apiPort();
-      try {
-        const res = await fetch(
-          `http://127.0.0.1:${port}/api/admin/loop/${encodeURIComponent(loop)}/resume`,
-          { method: 'POST', headers: authHeaders() },
-        );
         const body = await res.json();
         return { content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
       } catch (err) {

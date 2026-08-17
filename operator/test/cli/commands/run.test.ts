@@ -63,8 +63,8 @@ describe('run command', () => {
     await run.run(ctx);
     // mainFn must have been invoked (no early exit on missing password).
     expect(fakeDeps.mainFn).toHaveBeenCalled();
-    // Auto-generated password file persists at ~/.jinn-client/keystore-password.
-    const pwPath = join(fakeHome, '.jinn-client', 'keystore-password');
+    // Auto-generated password file persists at ~/.jinn-operator/keystore-password.
+    const pwPath = join(fakeHome, '.jinn-operator', 'keystore-password');
     expect(existsSync(pwPath)).toBe(true);
     const persisted = readFileSync(pwPath, 'utf-8').trim();
     expect(persisted.length).toBeGreaterThanOrEqual(32);

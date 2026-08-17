@@ -11,12 +11,12 @@ Run locally with `jinn run`; this directory is only for the headless hosted depl
 
 ## Shape: thin overlay on the container-native base
 
-`Dockerfile` is a ~4-line overlay on `ghcr.io/jinn-network/client` (the
+`Dockerfile` is a ~4-line overlay on `ghcr.io/jinn-network/operator` (the
 container-native base, #988):
 
 ```dockerfile
 ARG BASE_TAG=latest
-FROM ghcr.io/jinn-network/client:${BASE_TAG}
+FROM ghcr.io/jinn-network/operator:${BASE_TAG}
 RUN if ! command -v gosu >/dev/null 2>&1 || [ ! -f /etc/ssl/certs/ca-certificates.crt ]; then \
       apt-get update \
       && apt-get install -y --no-install-recommends gosu ca-certificates \

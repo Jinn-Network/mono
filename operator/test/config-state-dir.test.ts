@@ -9,7 +9,8 @@ import { defaultStateDir } from '../src/solver-types/swe-rebench-v2.js';
 // engine.implStateDirRoot, and sweRebenchV2StateDir derive — unless a
 // per-key override (file or env) wins. workingDirRoot is deliberately NOT
 // derived (ephemeral, reaped per-task). With JINN_STATE_DIR unset, every
-// default is byte-identical to the legacy ~/.jinn-client/... paths.
+// default is under ~/.jinn-operator/... (F1), with a read-fallback to a
+// populated ~/.jinn-client.
 
 // Env keys this suite mutates on process.env. Saved/restored around each test.
 const MUTATED_ENV = [
@@ -50,11 +51,11 @@ describe('JINN_STATE_DIR derivation in loadConfig', () => {
   }
 
   // Legacy byte-identical defaults (must never change when JINN_STATE_DIR unset).
-  const legacyEarningDir = path.join(os.homedir(), '.jinn-client', 'earning');
-  const legacyDbPath = path.join(os.homedir(), '.jinn-client', 'jinn.db');
-  const legacyImplStateDirRoot = path.join(os.homedir(), '.jinn-client', 'engine', 'impl-state');
-  const legacyWorkingDirRoot = path.join(os.homedir(), '.jinn-client', 'engine', 'work');
-  const legacySweRebenchV2StateDir = path.join(os.homedir(), '.jinn-client', 'swe-rebench-v2');
+  const legacyEarningDir = path.join(os.homedir(), '.jinn-operator', 'earning');
+  const legacyDbPath = path.join(os.homedir(), '.jinn-operator', 'jinn.db');
+  const legacyImplStateDirRoot = path.join(os.homedir(), '.jinn-operator', 'engine', 'impl-state');
+  const legacyWorkingDirRoot = path.join(os.homedir(), '.jinn-operator', 'engine', 'work');
+  const legacySweRebenchV2StateDir = path.join(os.homedir(), '.jinn-operator', 'swe-rebench-v2');
 
   it('(a) STATE_DIR-only: earningDir, dbPath, implStateDirRoot, sweRebenchV2StateDir derive; workingDirRoot stays ephemeral legacy', async () => {
     const configPath = await writeConfigFile({ network: 'testnet' });
@@ -219,7 +220,7 @@ describe('loadConfig sweRebenchV2StateDir (replaces caller idiom + defaultStateD
   it('(e) defaultStateDir() is the legacy constant only (no JINN_STATE_DIR read)', () => {
     process.env['JINN_STATE_DIR'] = '/data';
     expect(defaultStateDir()).toBe(
-      path.join(os.homedir(), '.jinn-client', 'swe-rebench-v2'),
+      path.join(os.homedir(), '.jinn-operator', 'swe-rebench-v2'),
     );
   });
 });

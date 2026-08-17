@@ -15,8 +15,8 @@ describe('resolveCliPassword', () => {
     rmSync(fakeHome, { recursive: true, force: true });
   });
 
-  function writePasswordFile(value: string): void {
-    const dir = join(fakeHome, '.jinn-client');
+  function writePasswordFile(value: string, dirName = '.jinn-client'): void {
+    const dir = join(fakeHome, dirName);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'keystore-password'), value, { mode: 0o600 });
   }
@@ -36,6 +36,12 @@ describe('resolveCliPassword', () => {
     writePasswordFile('from-file\n');
     const r = resolveCliPassword([], { HOME: fakeHome });
     expect(r).toEqual({ ok: true, password: 'from-file' });
+  });
+
+  it('reads ~/.jinn-operator/keystore-password on a fresh home', () => {
+    writePasswordFile('from-operator\n', '.jinn-operator');
+    const r = resolveCliPassword([], { HOME: fakeHome });
+    expect(r).toEqual({ ok: true, password: 'from-operator' });
   });
 
   it('ignores an empty keystore-password file', () => {

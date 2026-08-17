@@ -3,8 +3,8 @@
 Stable SDK surface for Jinn SolverNets, Harnesses, plugins, and typed
 payloads.
 
-Runtime internals live in `@jinn-network/client`. The SDK builds, validates,
-describes, and prepares; the client runs, stores, posts, claims, signs,
+Runtime internals live in `@jinn-network/operator`. The SDK builds, validates,
+describes, and prepares; the operator daemon runs, stores, posts, claims, signs,
 submits, and watches.
 
 ## Install

@@ -71,7 +71,7 @@
 
 ## Operator setup — evaluator role
 
-12. The evaluator harness (`SweRebenchV2EvaluatorHarness`) ships in `@jinn-network/client` and is registered in `buildHarnesses()`. The daemon derives evaluator dispatch from the SolverNet contract; operators do not choose a solver harness for evaluator-only participation. Operators who want to join `roles: ['evaluator']` for swe-rebench-v2 must still prepare local evaluator dependencies:
+12. The evaluator harness (`SweRebenchV2EvaluatorHarness`) ships in `@jinn-network/operator` and is registered in `buildHarnesses()`. The daemon derives evaluator dispatch from the SolverNet contract; operators do not choose a solver harness for evaluator-only participation. Operators who want to join `roles: ['evaluator']` for swe-rebench-v2 must still prepare local evaluator dependencies:
 
     ```bash
     jinn harnesses enable swe-rebench-v2-evaluator

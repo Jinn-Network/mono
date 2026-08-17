@@ -32,8 +32,7 @@ export interface OperatorVerticalDecision {
   readonly readiness:
     | 'explicit-legacy'
     | 'explicit-native-unvalidated'
-    | 'live-closure-missing'
-    | 'live-closure-validated';
+    | 'live-closure-missing';
 }
 
 function sameAddress(left: string, right: string): boolean {

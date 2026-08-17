@@ -62,6 +62,7 @@ import {
   type NativeIdentityStorePaths,
 } from '../../config/write-native-identity.js';
 import { ROLE_SETS, orderedRolesForSet, type RoleSetName } from './native-requester.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
 const OPTIONS = {
   ...COMMON_FLAGS,
@@ -181,7 +182,7 @@ function invalid(ctx: CommandContext, message: string, hint?: string): never {
 }
 
 function defaultOperatorDir(env: NodeJS.ProcessEnv): string {
-  return join(env.HOME ?? homedir(), '.jinn-client');
+  return resolveDefaultStateDir({ home: env.HOME ?? homedir(), env });
 }
 
 /**
@@ -449,7 +450,7 @@ export function resolveCeremonyPassword(input: {
   readonly env: NodeJS.ProcessEnv;
 }): CeremonyPasswordResolution | { readonly refusal: string; readonly hint: string } {
   const home = input.env.HOME ?? homedir();
-  const defaultDir = join(home, '.jinn-client');
+  const defaultDir = resolveDefaultStateDir({ home, env: input.env });
   const fallbackPath = join(defaultDir, 'keystore-password');
   const isDefaultDir = input.dir === defaultDir;
   const fallback = existsSync(fallbackPath)

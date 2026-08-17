@@ -61,7 +61,7 @@ Model / provider precedence: `JINN_HERMES_MODEL` / `JINN_HERMES_PROVIDER` in the
 
 **Do not put provider API keys in the repo's `operator/.env` and expect them to take effect at runtime — they will not reach the harness subprocess.**
 
-`operator/.env` is loaded by `dotenv` in `operator/src/main.ts` **only** when `JINN_LOAD_DEV_ENV=1` or `NODE_ENV=development`, and it is resolved relative to the compiled module inside the repo checkout. The published global package (`npm install -g @jinn-network/client`, then `jinn run`) sets neither of those, and ships no `operator/.env`, so the file is never read in a normal operator install. It exists for repo contributors iterating from source. Use each harness's own auth store / command (the table above) instead.
+`operator/.env` is loaded by `dotenv` in `operator/src/main.ts` **only** when `JINN_LOAD_DEV_ENV=1` or `NODE_ENV=development`, and it is resolved relative to the compiled module inside the repo checkout. The published global package (`npm install -g @jinn-network/operator`, then `jinn run`) sets neither of those, and ships no `operator/.env`, so the file is never read in a normal operator install. It exists for repo contributors iterating from source. Use each harness's own auth store / command (the table above) instead.
 
 **This is a different file from the docker-compose `.env`.** When you run the daemon under Docker Compose, [`operator/README.md`](../../client/README.md) tells you to create a `.env` next to `docker-compose.yml` holding `CLAUDE_CODE_OAUTH_TOKEN` (and `JINN_PASSWORD`). That one is read by `docker-compose` and injected into the container's `process.env`, where the adapter allowlist then picks it up — so it works. The warning here is only about the **repo `operator/.env`** that `main.ts` conditionally loads, not the docker-compose env-file.
 
@@ -75,10 +75,10 @@ The symptom is a delayed, quiet failure rather than a loud startup error:
 
 In all three cases the daemon's readiness check (it probes the responsible harness before spending gas on a claim) records the Task as FAILED locally with a clear reason instead of burning a claim. So a wrong or missing key shows up as harness-not-ready and failing claims, not a crash.
 
-To confirm a key is actually loaded, use the operator app's **per-harness precheck / doctor panel** (the §2.9 Harness Selection surface in [`operator/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md)) — it runs each harness's own readiness probe (the same probe the daemon uses) and reports installed / authenticated / ready, with a re-check action. If the panel says ready, the key is reaching the binary; if it says auth-expired or not-configured, rotate it via the table above and re-check.
+To confirm a key is actually loaded, use the operator console's **per-harness precheck / doctor panel** (the §2.9 Harness Selection surface in [`apps/operator-console/OPERATOR-APP-SPEC.md`](../../apps/operator-console/OPERATOR-APP-SPEC.md)) — it runs each harness's own readiness probe (the same probe the daemon uses) and reports installed / authenticated / ready, with a re-check action. If the panel says ready, the key is reaching the binary; if it says auth-expired or not-configured, rotate it via the table above and re-check.
 
 ## Links
 
 - Operator testnet runbook: [`docs/operator-testnet.md`](../operator-testnet.md)
 - Client README (Docker auth, SolverNet harness toggles): [`operator/README.md`](../../client/README.md)
-- Operator app spec — §2.9 Harness Selection: [`operator/OPERATOR-APP-SPEC.md`](../../client/OPERATOR-APP-SPEC.md)
+- Operator app spec — §2.9 Harness Selection: [`apps/operator-console/OPERATOR-APP-SPEC.md`](../../apps/operator-console/OPERATOR-APP-SPEC.md)

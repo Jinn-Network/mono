@@ -118,7 +118,7 @@ describe('isNewerVersion', () => {
 describe('formatUpdateLogLine', () => {
   it('names the version and the upgrade command', () => {
     expect(formatUpdateLogLine('1.2.3')).toBe(
-      '[version] v1.2.3 of @jinn-network/client is available — run `jinn update` and restart to pick it up',
+      '[version] v1.2.3 of @jinn-network/operator is available — run `jinn update` and restart to pick it up',
     );
   });
 });

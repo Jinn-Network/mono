@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod/v4';
+import { buildOpenApiDocument as buildOpenApiDocumentFromKit } from '@jinn-network/read-plane';
 import { statusV1ResponseSchema } from '../src/api/contract/status.js';
 import { notificationsV1ResponseSchema } from '../src/api/contract/notifications.js';
 import { healthResponseSchema, readyResponseSchema } from '../src/api/contract/health.js';
@@ -71,42 +72,16 @@ const ROUTES: RouteSpec[] = [
   },
 ];
 
-function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
-  // `unrepresentable: 'any'` covers the one deliberately-opaque field in the contract
-  // (`predictionV1.operator`, a `z.custom` — see status.ts's docstring) by emitting `{}`
-  // (JSON Schema "any") for it instead of throwing.
-  return z.toJSONSchema(schema, { target: 'draft-2020-12', unrepresentable: 'any' }) as Record<string, unknown>;
-}
-
 export function buildOpenApiDocument(): Record<string, unknown> {
-  const paths: Record<string, unknown> = {};
-  for (const route of ROUTES) {
-    const jsonSchema = toJsonSchema(route.responseSchema);
-    paths[route.path] = {
-      [route.method]: {
-        summary: route.summary,
-        responses: {
-          '200': {
-            description: 'OK',
-            content: {
-              'application/json': { schema: jsonSchema },
-            },
-          },
-        },
-      },
-    };
-  }
-
-  return {
-    openapi: '3.1.0',
+  return buildOpenApiDocumentFromKit({
     info: {
       title: 'Jinn operator daemon — read contract',
       version: `${CURRENT_CONTRACT_VERSION.major}.${CURRENT_CONTRACT_VERSION.minor}`,
       description:
         'Generated from operator/src/api/contract/ — never handwritten (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 4). Run `tsx scripts/generate-openapi.ts` to regenerate. GET /metrics (Prometheus text exposition, spec §6.2) and the SSE lifecycle tail are referenced here as external profiles, not modeled as paths (spec §6 item 6).',
     },
-    paths,
-  };
+    routes: ROUTES,
+  });
 }
 
 function serialize(doc: Record<string, unknown>): string {

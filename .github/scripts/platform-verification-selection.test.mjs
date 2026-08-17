@@ -79,7 +79,7 @@ test('operator-only and documentation-only changes skip verification', () => {
   // six lanes because `workflow_call` ignores `paths:` filters.
   const result = select([
     'operator/src/cli/commands/native-requester.ts',
-    'operator/src/dashboard/spa/src/App.tsx',
+    'apps/operator-console/app/page.tsx',
     'docs/engineering/handbook.md',
   ]);
   assert.equal(result.run, false);

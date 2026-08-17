@@ -51,10 +51,15 @@ export function resolveStableCwd(input: ResolveStableCwdInput): ResolveStableCwd
     };
   }
 
-  // Prefer the earning dir, then ~/.jinn-client, then $HOME. The terminal
+  // Prefer the earning dir, then ~/.jinn-operator, then ~/.jinn-client, then $HOME.
   // homeDir is the last-resort floor and is chosen even if its exists-probe
   // is false — we never return "nothing".
-  const candidates = [earningDir, joinPath(homeDir, '.jinn-client', sep), homeDir];
+  const candidates = [
+    earningDir,
+    joinPath(homeDir, '.jinn-operator', sep),
+    joinPath(homeDir, '.jinn-client', sep),
+    homeDir,
+  ];
   let chosenCwd = homeDir;
   for (const candidate of candidates) {
     if (candidate === homeDir || exists(candidate)) {

@@ -1,6 +1,6 @@
 # Client Architecture
 
-**What this doc is / is not.** This is the integrating narrative for `@jinn-network/client`: how the operator app, the CLI, and the daemon fit together, what each layer does, and where to look in the code. It is the entry point a new engineer or a curious operator should read before diving in. It is **not** a protocol spec (that's [`SPEC.md`](../SPEC.md)), a CLI contract (that's [`spec/2026-04-14-client-surface.md`](../spec/2026-04-14-client-surface.md)), an operator runbook (that's [`docs/operator-testnet.md`](../docs/operator-testnet.md)), or an extension architecture (that's [`spec/2026-05-01-harness-pack-architecture.md`](../spec/2026-05-01-harness-pack-architecture.md)). Each section here links into the canonical source for its slice; it does not restate them.
+**What this doc is / is not.** This is the integrating narrative for `@jinn-network/operator`: how the operator app, the CLI, and the daemon fit together, what each layer does, and where to look in the code. It is the entry point a new engineer or a curious operator should read before diving in. It is **not** a protocol spec (that's [`SPEC.md`](../SPEC.md)), a CLI contract (that's [`spec/2026-04-14-client-surface.md`](../spec/2026-04-14-client-surface.md)), an operator runbook (that's [`docs/operator-testnet.md`](../docs/operator-testnet.md)), or an extension architecture (that's [`spec/2026-05-01-harness-pack-architecture.md`](../spec/2026-05-01-harness-pack-architecture.md)). Each section here links into the canonical source for its slice; it does not restate them.
 
 ---
 
@@ -70,13 +70,13 @@ Steady-state dashboard with four regions, fed by polling and SSE:
 - **Status** — at-a-glance state for an operator who already knows what they're looking at. Daemon health, in-flight Tasks, recent verdicts, earnings, fleet state, master gas runway, recent activity. Source: `GET /v1/status` (see `src/api/gather-status.ts`), polled at the configured interval.
 - **Visibility** — the "what is the daemon doing right now" surface. A live event stream over SSE on `/v1/events`, populated from a daemon-side ring buffer of structured events. Filterable, pinnable, with a collapsible raw-log tail.
 - **Setup** — the same 11-step state machine, but in steady-state mode it surfaces only what changes after bootstrap (re-keying, fleet scale, identity binding retries).
-- **Agent** — an embedded Claude Code session running in Auto Mode, attached to the operator MCP server so the AI can read daemon state and perform a small set of write operations (submit Task, enable SolverNet, claim rewards) without leaving the panel. Implementation is the agent WebSocket bridge at `src/agent/agent-ws.ts` attached to the same Hono server that serves the SPA.
+- **Operator console** — a separate Next.js app (`apps/operator-console`) consumes the versioned read/control plane over HTTP. The daemon origin has no human surface.
 
 The two-mode design — onboarding takeover, then operating dashboard — is intentional: a new operator's screen is dominated by what they need to do *now*, not by metrics that mean nothing yet.
 
 ### 3.3 Auth and binding
 
-The SPA is loopback-only by default. On startup the daemon prints a one-shot handshake URL with a random `?k=<key>` query param; the launcher opens it and the SPA exchanges the key for a `jinn_ui_token` cookie via `/auth/handshake`. Cost-mutating routes additionally require a bearer token (`DAEMON_API_TOKEN`, generated per-process unless the operator pins one). `GET /v1/status` is token-gated like every other operator-class route (spec §14.5); `GET /health`, `GET /ready`, and `GET /metrics` are the deliberate exception — shallow, unauthenticated-safe liveness/readiness/metrics endpoints for supervisors and scrapers (spec §6.1–§6.2). Details: `src/api/handshake.ts`, `src/api/ui-token.ts`, `src/api/health-endpoint.ts`, `src/api/metrics-endpoint.ts`, the SPA dev README at [`src/dashboard/spa/README.md`](src/dashboard/spa/README.md).
+The operator console is a separate origin (headless §9). On startup the daemon prints a one-shot handshake URL with a random `?k=<key>` query param. Cost-mutating routes additionally require a bearer token (`DAEMON_API_TOKEN`, generated per-process unless the operator pins one). `GET /v1/status` is token-gated like every other operator-class route (spec §14.5); `GET /health`, `GET /ready`, and `GET /metrics` are the deliberate exception — shallow, unauthenticated-safe liveness/readiness/metrics endpoints for supervisors and scrapers (spec §6.1–§6.2). Details: `src/api/handshake.ts`, `src/api/ui-token.ts`, `src/api/health-endpoint.ts`, `src/api/metrics-endpoint.ts`.
 
 ## 4. The CLI substrate
 
@@ -88,7 +88,7 @@ The CLI is the substrate the app drives and the contract external automation wri
 | Monitoring | `status`, `fleet`, `balance`, `history`, `rewards`, `logs` | Read-only. Default to JSON; `--human` for terminal pretty-print. |
 | Action | `tasks submit`, `claim-rewards`, `fleet scale`, `fleet retire`, `withdraw`, `keys backup`, `keys change-password` | Tx-emitting; require `--yes` or TTY confirmation, support `--dry-run`. |
 | Extension | `solver-nets`, `harnesses`, `solver-plugins`, `integrations` | Manage the SolverNet/Harness/Plugin surface and AI-host wiring. |
-| Surface | `mcp`, `ui` | `jinn mcp` runs the operator MCP over stdio; `jinn ui` opens a panel for an already-running daemon. |
+| Surface | `mcp`, `ui` | `jinn mcp` runs the operator MCP over stdio; `jinn ui` opens the operator console (default `http://127.0.0.1:3000`). |
 
 The CLI dispatcher is `src/cli/index.ts`; each verb is a `CommandModule` under `src/cli/commands/<verb>.ts`. New operators only need three: `jinn auth`, `jinn run`, and (when something is wrong) `jinn doctor`.
 
@@ -99,8 +99,8 @@ A `jinn run` process is layered top-to-bottom roughly like this:
 ```
   ┌────────────────────────────────────────────────────────────┐
   │ Operator surfaces                                          │
-  │   SPA · CLI dispatcher · Operator MCP · Agent WS bridge    │
-  │   src/dashboard/spa  src/cli  src/mcp/operator-server      │
+  │   Console (apps/operator-console) · CLI · Operator MCP     │
+  │   src/cli  src/mcp/operator-server                         │
   ├────────────────────────────────────────────────────────────┤
   │ HTTP API + setup-mode controller                           │
   │   Hono server · /v1/* · /auth/* · /artifacts/*             │

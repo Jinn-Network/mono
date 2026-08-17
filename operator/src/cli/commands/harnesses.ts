@@ -22,7 +22,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, resolve, join } from 'node:path';
-import { homedir } from 'node:os';
 import type { CommandContext, CommandModule } from '../command.js';
 import { loadConfig } from '../../config.js';
 import { buildHarnesses } from '../../harnesses/impls/index.js';
@@ -33,8 +32,9 @@ import {
 } from '../../harnesses/manifest/index.js';
 import { verifyPackageHash } from '../../harnesses/external-impls/package-hash.js';
 import { writeModeState } from '../../harnesses/mode-state.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
-const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
+const DEFAULT_CONFIG_PATH = join(resolveDefaultStateDir(), 'config.json');
 
 interface ExternalImplEntry {
   name: string;

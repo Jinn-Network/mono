@@ -7,7 +7,7 @@ vi.mock('../../../../src/preflight/claude-auth.js', () => {
   return {
     probeClaudeAuth,
     CLAUDE_INSTALL_URL: '/v1/setup/claude/install',
-    CLAUDE_AUTH_SPAWN_URL: '/v1/auth/claude/spawn',
+    CLAUDE_AUTH_LOGIN_CLI: 'claude auth login',
     buildClaudeIsReady:
       (opts: { getClaudePath: () => string; getContext: () => string }) =>
       async (_ctx?: unknown) => {
@@ -23,7 +23,7 @@ vi.mock('../../../../src/preflight/claude-auth.js', () => {
           reason: result.detail,
           nextStep: binaryMissing
             ? { description: 'Install Claude Code from the operator app', url: '/v1/setup/claude/install' }
-            : { description: 'Sign in to Claude from the operator app', url: '/v1/auth/claude/spawn' },
+            : { description: 'Sign in with the Claude Code CLI', cli: 'claude auth login' },
         };
       },
   };
@@ -53,7 +53,7 @@ describe('ClaudeMcpPredictionApyImpl.isReady', () => {
     expect(result.ready).toBe(false);
     expect(result.reason).toContain('not logged in');
     expect(result.nextStep?.description).toMatch(/sign in/i);
-    expect(result.nextStep?.url).toBe('/v1/auth/claude/spawn');
+    expect(result.nextStep?.cli).toBe('claude auth login');
   });
 
   it('returns ready=false when claude binary is missing', async () => {
