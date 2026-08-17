@@ -48,7 +48,8 @@ import {
   HARBOR_TRIAL_CONFIG_ROLE,
   HARBOR_TRIAL_RESULT_ROLE,
 } from "./harbor/venue.js";
-import { assertSingleHarborTrial, HarborSelectionManifestSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
+import { assertHarborTrialMatchesCell, assertSingleHarborTrial, HarborSelectionManifestSchema, harborJobSource, harborSelectedTaskNames, harborSelectionManifestBytes, normalizeHarborSavedJobConfig } from "./harbor/manifest.js";
+import { harborArmJobName } from "./harbor/launcher.js";
 import {
   TERMINAL_BENCH_2_REGISTRY_ROLE,
   TERMINAL_BENCH_2_PROFILE,
@@ -565,11 +566,23 @@ async function harborStructureCheck(
     const trial = await exact(find(HARBOR_TRIAL_CONFIG_ROLE)!);
     const jobResult = await exact(find(HARBOR_JOB_RESULT_ROLE)!);
     const trialResult = await exact(find(HARBOR_TRIAL_RESULT_ROLE)!);
-    assertSingleHarborTrial(job, trial, jobResult);
-    const expectedJobName = `jinn-${lineage.submissionSha256.slice(0, 24)}-d${lineage.dispatchIndex}`;
+    const selectedArm = selected.arms.find((arm) => arm.armId === parseCellKey(lineage.cellKey as string).armId);
+    const grain = selected.jobGrain ?? "per-dispatch";
+    if (grain === "per-arm") {
+      const coord = parseCellKey(lineage.cellKey as string);
+      const names = harborSelectedTaskNames(selected.source);
+      assertHarborTrialMatchesCell(job, trial, jobResult, {
+        taskName: names.length === 1 ? names[0]! : typeof trial.task === "object" && trial.task !== null && "name" in trial.task && typeof trial.task.name === "string" ? trial.task.name : "",
+        attempt: coord.replicate,
+      });
+    } else {
+      assertSingleHarborTrial(job, trial, jobResult);
+    }
+    const expectedJobName = grain === "per-arm"
+      ? harborArmJobName(lineage.runSha256 as string, selectedArm?.armId ?? "")
+      : `jinn-${lineage.submissionSha256.slice(0, 24)}-d${lineage.dispatchIndex}`;
     const effectiveJobId = jobResult.id ?? jobResult.job_id;
     const effectiveTrialId = trialResult.id ?? trialResult.trial_id;
-    const selectedArm = selected.arms.find((arm) => arm.armId === parseCellKey(lineage.cellKey as string).armId);
     const sameJson = (left: unknown, right: unknown): boolean => Buffer.from(canonicalJsonBytes(left as never)).equals(Buffer.from(canonicalJsonBytes(right as never)));
     const expectedSource = harborJobSource(selected);
     if (job.job_name !== expectedJobName || harbor.jobName !== expectedJobName || effectiveJobId !== harbor.jobId || effectiveTrialId !== harbor.trialId
@@ -577,7 +590,10 @@ async function harborStructureCheck(
       || !sameJson(job.agents, [selectedArm.jobAgent]) || !sameJson(job.artifacts, selected.outputs.map((output) => output.artifact))
       || (!("tasks" in expectedSource) ? "tasks" in job : !("tasks" in job) || !sameJson(job.tasks, expectedSource.tasks))
       || (!("datasets" in expectedSource) ? "datasets" in job : !("datasets" in job) || !sameJson(job.datasets, expectedSource.datasets))
-      || selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1 || selected.retryPolicy.maxRetries !== 0) throw new Error("Harbor Job identity, lineage, or retry policy does not match the sealed runtime selection");
+      || selected.retryPolicy.maxRetries !== 0
+      || (grain === "per-dispatch" && (selected.retryPolicy.nAttempts !== 1 || selected.retryPolicy.nConcurrent !== 1))
+      || (grain === "per-arm" && (job.n_attempts !== selected.retryPolicy.nAttempts || job.n_concurrent_trials !== selected.retryPolicy.nConcurrent))
+    ) throw new Error("Harbor Job identity, lineage, or retry policy does not match the sealed runtime selection");
     return { name: "harbor-job-trial-structure", status: "pass" };
   } catch (cause) {
     return { name: "harbor-job-trial-structure", status: "fail", detail: cause instanceof Error ? cause.message : String(cause) };

@@ -97,14 +97,19 @@ const ArmSelection = z.object({
   if (arm.jobAgent.model_name !== arm.model.id) context.addIssue({ code: "custom", path: ["jobAgent", "model_name"], message: "must equal resolved model id" });
 });
 
-/** Harbor 0.21 is deliberately constrained to one Job / one Trial / one execution. */
+/** Harbor 0.21 JobConfig may cover planned trials (`n_attempts` = locked replicates). Inner retry stays off. */
 export const HarborSelectionManifestSchema = z.object({
   schema: z.literal(HARBOR_SELECTION_SCHEMA),
   adapter: z.object({ id: z.literal(HARBOR_ADAPTER_ID), version: z.literal("1") }).strict(),
   harbor: z.object({ version: z.string().regex(/^0\.21\.\d+(?:[-+][0-9A-Za-z.-]+)?$/), executableSha256: Sha256 }).strict(),
   source: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("task"), input: TaskInput, jobInput: z.object({ path: z.literal(".jinn-harbor/task") }).strict(), resolved: ResolvedMaterial }).strict(),
-    z.object({ kind: z.literal("dataset"), input: DatasetInput, jobInput: z.object({ path: z.literal(".jinn-harbor/dataset") }).strict(), resolved: ResolvedMaterial, taskName: z.string().min(1) }).strict(),
+    z.object({
+      kind: z.literal("dataset"), input: DatasetInput, jobInput: z.object({ path: z.literal(".jinn-harbor/dataset") }).strict(), resolved: ResolvedMaterial,
+      taskName: z.string().min(1),
+      /** When omitted, the Job filters to `taskName` only (TB 2.0 one-task path). */
+      taskNames: z.array(z.string().min(1)).min(1).optional(),
+    }).strict(),
   ]),
   arms: z.array(ArmSelection).min(1).superRefine((arms, context) => {
     const ids = arms.map((arm) => arm.armId);
@@ -113,23 +118,36 @@ export const HarborSelectionManifestSchema = z.object({
   /** `image` is immutable task/environment material evidence, never EnvironmentConfig.type. */
   environment: z.object({ type: EnvironmentType, image: z.string().regex(/@sha256:[a-f0-9]{64}$/u), configuration: HarborEnvironmentConfigurationSchema }).strict(),
   outputs: z.array(z.object({ name: z.string().min(1), mediaType: z.string().min(1), artifact: ArtifactConfig, nativePath: z.string().regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/u) }).strict()).min(1),
-  retryPolicy: z.object({ nAttempts: z.literal(1), nConcurrent: z.literal(1), maxRetries: z.literal(0) }).strict(),
+  retryPolicy: z.object({ nAttempts: z.number().int().positive(), nConcurrent: z.number().int().positive(), maxRetries: z.literal(0) }).strict(),
+  /** `per-dispatch` is the TB 2.0 one-trial Job. `per-arm` is one Job spanning that arm's planned trials. */
+  jobGrain: z.enum(["per-dispatch", "per-arm"]).optional(),
   /** Product-tier selection profiles may bind extra immutable resolution evidence without
    * teaching this reusable Harbor seam any benchmark-specific policy. */
   profiles: z.record(z.string().url(), Json).optional(),
 }).strict();
 
+const TaskNameList = z.array(z.string().min(1)).min(1);
+const DatasetTaskFilter = {
+  task_names: TaskNameList,
+  n_tasks: z.number().int().positive(),
+} as const;
+function refineTaskFilter(value: { task_names: readonly string[]; n_tasks: number }, context: z.RefinementCtx): void {
+  if (value.n_tasks !== value.task_names.length) {
+    context.addIssue({ code: "custom", message: "n_tasks must equal task_names length", path: ["n_tasks"] });
+  }
+}
+
 /** The exact non-deprecated Harbor 0.21 JobConfig subset emitted by this adapter. */
 const HarborJobConfigBase = z.object({
-  job_name: z.string().min(1), jobs_dir: z.string().min(1), n_attempts: z.literal(1), n_concurrent_trials: z.literal(1),
+  job_name: z.string().min(1), jobs_dir: z.string().min(1), n_attempts: z.number().int().positive(), n_concurrent_trials: z.number().int().positive(),
   retry: z.object({ max_retries: z.literal(0) }).strict(),
   environment: JobEnvironmentConfig,
   agents: z.tuple([JobAgentConfig]), artifacts: z.array(ArtifactConfig).min(1),
 });
 const DatasetExecutionInput = z.union([
-  z.object({ path: LogicalPath, task_names: z.tuple([z.string().min(1)]), n_tasks: z.literal(1) }).strict(),
-  z.object({ name: z.string().min(1), version: z.string().min(1), task_names: z.tuple([z.string().min(1)]), n_tasks: z.literal(1) }).strict(),
-  z.object({ name: z.string().min(1), ref: z.string().min(1), task_names: z.tuple([z.string().min(1)]), n_tasks: z.literal(1) }).strict(),
+  z.object({ path: LogicalPath, ...DatasetTaskFilter }).strict().superRefine(refineTaskFilter),
+  z.object({ name: z.string().min(1), version: z.string().min(1), ...DatasetTaskFilter }).strict().superRefine(refineTaskFilter),
+  z.object({ name: z.string().min(1), ref: z.string().min(1), ...DatasetTaskFilter }).strict().superRefine(refineTaskFilter),
 ]);
 export const HarborJobConfigSchema = z.union([
   HarborJobConfigBase.extend({ tasks: z.tuple([TaskInput]) }).strict(),
@@ -152,7 +170,8 @@ export function normalizeHarborSavedJobConfig(saved: unknown, submitted: unknown
   const committedEnvironmentIsDefault = committed.environment.type === "docker" && Object.keys(committed.environment).length === 1;
   const normalized: Record<string, unknown> = {
     ...document,
-    ...(document.n_attempts === undefined && committed.n_attempts === 1 ? { n_attempts: 1 } : {}),
+    ...(document.n_attempts === undefined ? { n_attempts: committed.n_attempts } : {}),
+    ...(document.n_concurrent_trials === undefined ? { n_concurrent_trials: committed.n_concurrent_trials } : {}),
     ...(retry === undefined && committed.retry.max_retries === 0
       ? { retry: { max_retries: 0 } }
       : typeof retry === "object" && retry !== null && !Array.isArray(retry) && (retry as Record<string, unknown>).max_retries === undefined && committed.retry.max_retries === 0
@@ -172,6 +191,42 @@ export function normalizeHarborSavedJobConfig(saved: unknown, submitted: unknown
   return effective;
 }
 
+export function harborSelectedTaskNames(source: HarborSelectionManifest["source"]): readonly string[] {
+  if (source.kind !== "dataset") return [];
+  return source.taskNames ?? [source.taskName];
+}
+
+function harborTrialTaskName(trial: Readonly<Record<string, unknown>>): string {
+  const task = trial.task;
+  if (typeof task === "object" && task !== null && "name" in task && typeof task.name === "string") return task.name;
+  if (typeof trial.task_name === "string") return trial.task_name;
+  return "";
+}
+
+function harborTrialAttempt(trial: Readonly<Record<string, unknown>>): number {
+  const value = trial.attempt_number ?? trial.attempt;
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : 1;
+}
+
+/** Inner Harbor retry stays off for every grain. Planned `n_attempts` is not a retry. */
+export function assertHarborRetryPinnedOff(
+  job: HarborJobConfig,
+  trial: Readonly<Record<string, unknown>>,
+  jobResult: Readonly<Record<string, unknown>>,
+): void {
+  const stats = jobResult.stats;
+  if (
+    job.retry.max_retries !== 0
+    || (trial.source_trial !== undefined && trial.source_trial !== null)
+    || typeof stats !== "object"
+    || stats === null
+    || Array.isArray(stats)
+    || (stats as Record<string, unknown>).n_retries !== 0
+  ) {
+    throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
+  }
+}
+
 /**
  * Harbor 0.21 does not persist an attempt number in TrialConfig. Prove the
  * effective one-Trial/no-retry execution from the committed JobConfig and
@@ -183,28 +238,42 @@ export function assertSingleHarborTrial(
   trial: Readonly<Record<string, unknown>>,
   jobResult: Readonly<Record<string, unknown>>,
 ): void {
+  assertHarborRetryPinnedOff(job, trial, jobResult);
   const trialAttempt = trial.attempt_number ?? trial.attempt;
-  const stats = jobResult.stats;
   if (
     job.n_attempts !== 1
     || job.n_concurrent_trials !== 1
-    || job.retry.max_retries !== 0
     || (trialAttempt !== undefined && trialAttempt !== 1)
-    || (trial.source_trial !== undefined && trial.source_trial !== null)
     || jobResult.n_total_trials !== 1
-    || typeof stats !== "object"
-    || stats === null
-    || Array.isArray(stats)
-    || (stats as Record<string, unknown>).n_retries !== 0
   ) {
     throw new Error("effective Harbor Job/Trial permits hidden attempts or retries");
   }
 }
 
+export function assertHarborTrialMatchesCell(
+  job: HarborJobConfig,
+  trial: Readonly<Record<string, unknown>>,
+  jobResult: Readonly<Record<string, unknown>>,
+  expected: { readonly taskName: string; readonly attempt: number },
+): void {
+  assertHarborRetryPinnedOff(job, trial, jobResult);
+  const names = "datasets" in job ? job.datasets[0]!.task_names : [];
+  const expectedTrials = job.n_attempts * ("datasets" in job ? job.datasets[0]!.n_tasks : 1);
+  if (
+    job.n_attempts < expected.attempt
+    || harborTrialAttempt(trial) !== expected.attempt
+    || harborTrialTaskName(trial) !== expected.taskName
+    || (names.length > 0 && !names.includes(expected.taskName))
+    || (typeof jobResult.n_total_trials === "number" && jobResult.n_total_trials !== expectedTrials)
+  ) {
+    throw new Error("Harbor Trial does not match the locked cell");
+  }
+}
+
 export function harborJobSource(manifest: HarborSelectionManifest): { readonly tasks: readonly [z.infer<typeof TaskInput>] } | { readonly datasets: readonly [z.infer<typeof DatasetExecutionInput>] } {
-  return manifest.source.kind === "task"
-    ? { tasks: [manifest.source.jobInput] }
-    : { datasets: [{ ...manifest.source.jobInput, task_names: [manifest.source.taskName], n_tasks: 1 }] as [z.infer<typeof DatasetExecutionInput>] };
+  if (manifest.source.kind === "task") return { tasks: [manifest.source.jobInput] };
+  const task_names = [...harborSelectedTaskNames(manifest.source)];
+  return { datasets: [{ ...manifest.source.jobInput, task_names, n_tasks: task_names.length }] as [z.infer<typeof DatasetExecutionInput>] };
 }
 
 export type HarborSelectionManifest = z.infer<typeof HarborSelectionManifestSchema>;

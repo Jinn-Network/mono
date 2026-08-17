@@ -96,6 +96,9 @@ export {
   harborSelectionManifestBytes,
   harborSelectionManifestSha256,
   assertSupportedHarborVersion,
+  assertHarborRetryPinnedOff,
+  assertHarborTrialMatchesCell,
+  harborSelectedTaskNames,
 } from "./runtime/harbor/manifest.js";
 export { HARBOR_ADAPTER_ID, HARBOR_RUNTIME_EVIDENCE_PROFILE } from "./runtime/harbor/manifest.js";
 export {

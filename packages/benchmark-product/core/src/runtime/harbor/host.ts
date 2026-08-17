@@ -13,11 +13,13 @@ export interface HarborRuntimeSelectionRequest {
   readonly executable: string;
   readonly source:
     | { readonly kind: "task"; readonly input: HarborTaskInput; readonly materialPath: string; readonly revision: string }
-    | { readonly kind: "dataset"; readonly input: HarborDatasetInput; readonly materialPath: string; readonly revision: string; readonly taskName: string };
+    | { readonly kind: "dataset"; readonly input: HarborDatasetInput; readonly materialPath: string; readonly revision: string; readonly taskName: string; readonly taskNames?: readonly string[] };
   readonly arms: HarborSelectionManifest["arms"];
   readonly environment: HarborSelectionManifest["environment"];
   readonly outputs: HarborSelectionManifest["outputs"];
   readonly profiles?: HarborSelectionManifest["profiles"];
+  readonly retryPolicy?: HarborSelectionManifest["retryPolicy"];
+  readonly jobGrain?: HarborSelectionManifest["jobGrain"];
 }
 
 export const HarborHostBindingSchema = z.object({ executable: z.string().min(1), sourceMaterialPath: z.string().min(1) }).strict();
@@ -90,13 +92,18 @@ export async function resolveHarborSelection(input: HarborRuntimeSelectionReques
   if (image !== input.environment.image) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
   const source = input.source.kind === "task"
     ? { kind: "task" as const, input: input.source.input, jobInput: { path: ".jinn-harbor/task" as const }, resolved }
-    : { kind: "dataset" as const, input: input.source.input, jobInput: { path: ".jinn-harbor/dataset" as const }, resolved, taskName: input.source.taskName };
+    : {
+      kind: "dataset" as const, input: input.source.input, jobInput: { path: ".jinn-harbor/dataset" as const }, resolved,
+      taskName: input.source.taskName,
+      ...(input.source.taskNames === undefined ? {} : { taskNames: [...input.source.taskNames] }),
+    };
   const manifest = HarborSelectionManifestSchema.parse({
     schema: "jinn.network/benchmark-product/harbor-selection/1",
     adapter: { id: "harbor", version: "1" },
     harbor: { version: resolvedVersion, executableSha256 },
     source, arms: input.arms, environment: input.environment, outputs: input.outputs,
-    retryPolicy: { nAttempts: 1, nConcurrent: 1, maxRetries: 0 },
+    retryPolicy: input.retryPolicy ?? { nAttempts: 1, nConcurrent: 1, maxRetries: 0 },
+    ...(input.jobGrain === undefined ? {} : { jobGrain: input.jobGrain }),
     ...(input.profiles === undefined ? {} : { profiles: input.profiles }),
   });
   return { manifest, binding: { executable, sourceMaterialPath: materialRoot } };

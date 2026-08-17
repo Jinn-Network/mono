@@ -16,6 +16,12 @@ export function harborJobName(submissionSha256: string, dispatch: number): strin
   return `jinn-${submissionSha256.slice(0, 24)}-d${dispatch}`;
 }
 
+export function harborArmJobName(runSha256: string, armId: string): string {
+  if (!/^[a-f0-9]{64}$/.test(runSha256)) throw new TypeError("Harbor per-arm Job naming requires a Run digest");
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(armId)) throw new TypeError("Harbor per-arm Job naming requires a well-formed arm id");
+  return `jinn-${runSha256.slice(0, 24)}-${armId}`;
+}
+
 function requirePinnedHarbor(view: TaskView, manifest: HarborSelectionManifest): void {
   const requirements = view.effectiveRequirements as Record<string, unknown>;
   const harness = requirements.harness as { id?: unknown; version?: unknown } | undefined;

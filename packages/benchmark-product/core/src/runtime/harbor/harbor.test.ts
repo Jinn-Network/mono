@@ -84,7 +84,8 @@ process.stdout.write("fake harbor completed\\n");
 describe("managed Harbor 0.21 lifecycle adapter", () => {
   test("selection is immutable and accepts only Harbor 0.21.x", () => {
     expect(manifest.retryPolicy).toEqual({ nAttempts: 1, nConcurrent: 1, maxRetries: 0 });
-    expect(() => harborSelectionManifestBytes({ ...manifest, retryPolicy: { nAttempts: 2, nConcurrent: 1, maxRetries: 0 } } as never)).toThrow();
+    expect(() => harborSelectionManifestBytes({ ...manifest, retryPolicy: { nAttempts: 2, nConcurrent: 1, maxRetries: 0 } })).not.toThrow();
+    expect(() => harborSelectionManifestBytes({ ...manifest, retryPolicy: { nAttempts: 1, nConcurrent: 1, maxRetries: 1 } } as never)).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, harbor: { ...manifest.harbor, version: "0.22.0" } })).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, environment: { ...manifest.environment, type: manifest.environment.image } } as never)).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, source: { ...manifest.source, input: { path: "/private/host/task" } } } as never)).toThrow();
@@ -132,15 +133,20 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
     expect(datasetSource).not.toHaveProperty("tasks");
   });
 
-  test("append-only reverse indexes reject concurrent Harbor Job/Trial reuse", async () => {
+  test("append-only reverse indexes reject concurrent Harbor Trial remapping", async () => {
     const workspaceDir = await mkdtemp(join(tmpdir(), "harbor-mapping-race-"));
     try {
-      const settled = await Promise.allSettled([
+      const distinctTrials = await Promise.allSettled([
         recordHarborDispatchMapping(workspaceDir, "jinn-dispatch-a", "job-shared", "trial-a"),
         recordHarborDispatchMapping(workspaceDir, "jinn-dispatch-b", "job-shared", "trial-b"),
       ]);
-      expect(settled.filter((value) => value.status === "fulfilled")).toHaveLength(1);
-      expect(settled.filter((value) => value.status === "rejected")).toHaveLength(1);
+      expect(distinctTrials.filter((value) => value.status === "fulfilled")).toHaveLength(2);
+      const remapped = await Promise.allSettled([
+        recordHarborDispatchMapping(workspaceDir, "jinn-dispatch-c", "job-shared", "trial-a"),
+        recordHarborDispatchMapping(workspaceDir, "jinn-dispatch-d", "job-shared", "trial-a"),
+      ]);
+      expect(remapped.filter((value) => value.status === "fulfilled")).toHaveLength(0);
+      expect(remapped.filter((value) => value.status === "rejected")).toHaveLength(2);
     } finally { await rm(workspaceDir, { recursive: true, force: true }); }
   });
 
