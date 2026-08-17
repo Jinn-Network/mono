@@ -156,6 +156,28 @@ export const JinnConfigSchema = z.object({
   apiBindHost: z.string().optional(),
 
   /**
+   * When true, operator-class routes may answer non-loopback peers without
+   * attested TLS (headless §9). Default false. Env: JINN_API_INSECURE_REMOTE.
+   */
+  apiInsecureRemote: z.boolean().default(false),
+
+  /**
+   * CORS origin allowlist for the operator API. No credentials.
+   * Default: the local operator-console origins. Env: JINN_API_CORS_ORIGINS
+   * (comma-separated).
+   */
+  apiCorsOrigins: z
+    .array(z.string().min(1))
+    .default(['http://127.0.0.1:3000', 'http://localhost:3000']),
+
+  /**
+   * Proxy addresses trusted to set `X-Forwarded-Proto` / `X-Forwarded-For`.
+   * Empty by default — a public peer is then 403 unless `apiInsecureRemote`.
+   * Env: JINN_API_TRUSTED_PROXIES (comma-separated).
+   */
+  apiTrustedProxies: z.array(z.string().min(1)).default([]),
+
+  /**
    * The public record-discovery archive plane (headless design §6; one-swap M6, corrected by
    * #2519). Off by default. When `enabled`, the native daemon serves EVERY signed source it owns
    * — requester, solver, and evaluator when configured — on a SEPARATE listener carrying no other
@@ -989,6 +1011,16 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
+  if (env['JINN_API_INSECURE_REMOTE'] !== undefined) {
+    const raw = env['JINN_API_INSECURE_REMOTE'].trim().toLowerCase();
+    merged.apiInsecureRemote = !(raw === '0' || raw === 'false' || raw === 'no' || raw === '');
+  }
+  if (env['JINN_API_CORS_ORIGINS']) {
+    merged.apiCorsOrigins = env['JINN_API_CORS_ORIGINS'].split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  if (env['JINN_API_TRUSTED_PROXIES']) {
+    merged.apiTrustedProxies = env['JINN_API_TRUSTED_PROXIES'].split(',').map((s) => s.trim()).filter(Boolean);
+  }
   {
     // Public archive plane: env wins over the config file (regression guard — `apiBindHost`
     // once shipped inert by reading only its env var and ignoring the config field).
@@ -1484,6 +1516,9 @@ const TRACKED_ENV_VARS = [
   'JINN_BALANCE_TOPUP_INTERVAL_MS',
   'JINN_API_PORT',
   'JINN_API_BIND_HOST',
+  'JINN_API_INSECURE_REMOTE',
+  'JINN_API_CORS_ORIGINS',
+  'JINN_API_TRUSTED_PROXIES',
   'JINN_PUBLIC_ARCHIVE',
   'JINN_PUBLIC_ARCHIVE_BIND_HOST',
   'JINN_PUBLIC_ARCHIVE_PORT',

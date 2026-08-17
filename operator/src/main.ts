@@ -34,7 +34,7 @@ import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.j
 // (jinn-mono-u34i). No direct import needed.
 import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
-import { ensureUiToken } from './api/ui-token.js';
+import { ensureUiTokenRecord, defaultTokenPath } from './api/ui-token.js';
 import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
@@ -587,7 +587,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     allComplete: initialAllComplete,
   });
 
-  const uiToken = ensureUiToken();
+  const uiRecord = ensureUiTokenRecord(defaultTokenPath(config.stateDir));
+  const uiToken = uiRecord.token;
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
   // §14.4: env override wins, else the config-file value, else loopback.
   // Previously this only ever read the env var, so `apiBindHost` written
@@ -684,8 +685,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       store: sharedStore,
       apiToken,
       bindHost: apiBindHost,
+      apiInsecureRemote: config.apiInsecureRemote,
+      apiCorsOrigins: config.apiCorsOrigins,
+      apiTrustedProxies: config.apiTrustedProxies,
       corpus: () => corpusForApi,
-      ui: { token: uiToken, handshakeKey },
+      ui: { token: uiToken, handshakeKey, expiresAt: uiRecord.expiresAt },
       // GET /ready + GET /metrics (spec §5/§6.1–§6.2, issue #2404). Injected
       // (rather than server.ts importing daemon/loop-heartbeat.js directly)
       // per the api→daemon architecture boundary — see the field docstrings

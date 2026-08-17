@@ -46,4 +46,13 @@ describe('api → cli/commands boundary (#2412)', () => {
     }
     expect(offenders, `forbidden api→cli/commands imports:\n${offenders.join('\n')}`).toEqual([]);
   });
+
+  it('claim-policy PUT handlers import write intents, not CLI modules', () => {
+    const src = readFileSync(join(apiDir, 'claim-policy-endpoints.ts'), 'utf-8');
+    expect(src).toMatch(/writeClaimPolicyIntent/);
+    expect(src).toMatch(/writeExecutionWiringIntent/);
+    expect(src).toMatch(/from ['"][^'"]*intents\/claim-policy-write/);
+    expect(src).toMatch(/from ['"][^'"]*intents\/execution-wiring-write/);
+    expect(src).not.toMatch(FORBIDDEN);
+  });
 });

@@ -51,4 +51,27 @@ describe('/auth/handshake', () => {
     });
     expect(ok.status).toBe(200);
   });
+
+  it('requireUiToken rejects an expired token even when the secret matches', async () => {
+    const app = new Hono();
+    app.use(
+      '/protected',
+      requireUiToken({ token: 'correct-token', expiresAt: '2020-01-01T00:00:00.000Z' }),
+    );
+    app.get('/protected', (c) => c.json({ ok: true }));
+    const fail = await app.request('/protected', {
+      headers: { 'x-jinn-ui-token': 'correct-token' },
+    });
+    expect(fail.status).toBe(401);
+  });
+
+  it('requireUiToken rejects a different-length secret without throwing', async () => {
+    const app = new Hono();
+    app.use('/protected', requireUiToken('correct-token'));
+    app.get('/protected', (c) => c.json({ ok: true }));
+    const fail = await app.request('/protected', {
+      headers: { 'x-jinn-ui-token': 'short' },
+    });
+    expect(fail.status).toBe(401);
+  });
 });

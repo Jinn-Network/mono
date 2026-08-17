@@ -19,12 +19,12 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod/v3';
 import type { CommandModule, CommandContext } from '../cli/command.js';
+import { resolveStoredUiToken } from '../api/ui-token.js';
 
 // ── Read-only command imports ───────────────────────────────────────────────
 import defaultInitCommand from '../cli/commands/init.js';
@@ -281,13 +281,7 @@ export async function stopDetachedDaemon(
 // both forms — see api/handshake.ts).
 
 function uiTokenFromDisk(): string | null {
-  const path = join(homedir(), '.jinn-client', 'ui-token');
-  if (!existsSync(path)) return null;
-  try {
-    return readFileSync(path, 'utf-8').trim();
-  } catch {
-    return null;
-  }
+  return resolveStoredUiToken() ?? null;
 }
 
 function authHeaders(): Record<string, string> {

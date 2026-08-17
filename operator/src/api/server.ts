@@ -44,6 +44,10 @@ import {
 } from './solvernets-endpoints.js';
 import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
+import {
+  DEFAULT_API_CORS_ORIGINS,
+  requireRemoteAccess,
+} from './remote-access.js';
 import { addAdminRoutes, type AdminEndpointConfig } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addClaimPolicyRoutes, type ClaimPolicyRoutesConfig } from './claim-policy-endpoints.js';
@@ -77,6 +81,15 @@ export interface ApiServerConfig {
    * require a bearer token; the bind host is the outer firewall.
    */
   bindHost?: string;
+  /**
+   * When true, operator-class routes may answer non-loopback peers without
+   * attested TLS (headless §9). Default false.
+   */
+  apiInsecureRemote?: boolean;
+  /** CORS origin allowlist. Credentials are never allowed. */
+  apiCorsOrigins?: readonly string[];
+  /** Proxy addresses trusted to set X-Forwarded-Proto / X-Forwarded-For. */
+  apiTrustedProxies?: readonly string[];
   store: Store;
   /**
    * Bearer token required on cost-mutating routes (`POST /artifacts`,
@@ -143,7 +156,7 @@ export interface ApiServerConfig {
    * unconditional (§14.3): the SPA-only route families and `/v1/events` /
    * `/v1/activity-events` are token-gated on every construction path.
    */
-  ui?: { token: string; handshakeKey: string };
+  ui?: { token: string; handshakeKey: string; expiresAt?: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
   admin?: AdminEndpointConfig;
   /**
@@ -429,10 +442,22 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // `DAEMON_API_TOKEN` bearer (see the gate below), but a bearer credential
   // isn't ambiently attached to cross-origin fetches the way a cookie is —
   // scoping CORS away from it is defense-in-depth, not the auth boundary.
+  const corsOrigins = [...(config.apiCorsOrigins ?? DEFAULT_API_CORS_ORIGINS)];
   app.use(async (c, next) => {
     if (c.req.path === '/api/stop-hook') return next();
-    return cors()(c, next);
+    return cors({
+      origin: (origin) => (origin && corsOrigins.includes(origin) ? origin : ''),
+      credentials: false,
+      allowHeaders: ['Content-Type', 'Authorization', 'x-jinn-ui-token', 'Last-Event-ID'],
+      allowMethods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
+    })(c, next);
   });
+  app.use(
+    requireRemoteAccess({
+      apiInsecureRemote: config.apiInsecureRemote === true,
+      apiTrustedProxies: config.apiTrustedProxies ?? [],
+    }),
+  );
 
   // ── Bearer-token check for cost-mutating / operator-class routes ────────────
   //
@@ -500,7 +525,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // never `bearer`-gated. The bearer only ever buys the no-`ui`
   // self-start/test path, where it's the sole available credential.
   const requireOperatorToken: MiddlewareHandler = config.ui
-    ? requireUiToken(config.ui.token)
+    ? requireUiToken(
+        config.ui.expiresAt
+          ? { token: config.ui.token, expiresAt: config.ui.expiresAt }
+          : config.ui.token,
+      )
     : requireBearer;
 
   // SPA index at /

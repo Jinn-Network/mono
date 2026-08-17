@@ -9,6 +9,7 @@
  */
 import type { Hono } from 'hono';
 import { claimRewardsIntent, type ClaimRewardsIntentInput } from '../intents/claim-rewards.js';
+import { restartDaemonIntent } from '../intents/restart.js';
 
 export interface AdminRestartOptions {
   /**
@@ -60,7 +61,10 @@ export function addAdminRoutes(app: Hono, cfg: AdminEndpointConfig): void {
     // Defer the actual exit so the response can flush first.
     setTimeout(() => {
       try {
-        cfg.onRestartRequested({ forceRespawn });
+        restartDaemonIntent({
+          requestRestart: cfg.onRestartRequested,
+          forceRespawn,
+        });
       } catch (err) {
         console.error('[admin] restart hook threw:', err);
       }
