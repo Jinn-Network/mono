@@ -146,6 +146,17 @@ export const RunStateSchema = z.object({
     "claim-consistency",
   ])).optional(),
   publishedAt: Rfc3339Schema.optional(),
+  suiteQuote: z.object({
+    executionConformance: z.boolean(),
+    coverage: z.enum(["one_task", "ten_task", "full", "custom"]),
+    leaderboardSubmitReady: z.boolean(),
+    methodLeaderboardEligible: z.boolean(),
+    cellCount: z.string().min(1),
+    harborVersion: z.string().min(1),
+    selectedTaskCount: z.number().int().positive(),
+    armCount: z.number().int().positive(),
+    replicates: z.number().int().positive(),
+  }).strict().optional(),
 }).superRefine((state, context) => {
   if ((state.reportPayloadSha256 === undefined) !== (state.reportRecordSha256 === undefined)) {
     context.addIssue({

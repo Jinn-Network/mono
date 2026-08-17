@@ -23,6 +23,7 @@ import { createRuntimeEvidenceAdapter, createRuntimeVenue } from "../adapter.js"
 import { artifactsDir } from "../../workspace/layout.js";
 import { getSealedBytes } from "../../workspace/sealed-store.js";
 import { recordHarborDispatchMapping } from "../../venue/provisioner.js";
+import { resolveHarborSelection } from "./host.js";
 import { assertSingleHarborTrial, HarborJobConfigSchema, harborJobSource, harborSelectionManifestBytes, normalizeHarborSavedJobConfig, type HarborSelectionManifest } from "./manifest.js";
 import { HARBOR_ATIF_ROLE, HARBOR_LOGS_ROLE, HARBOR_REWARD_ROLE, HARBOR_SELECTION_ROLE, harborEvidenceContributionFromArchive, readHarborDispatchArchive } from "./venue.js";
 
@@ -84,7 +85,9 @@ process.stdout.write("fake harbor completed\\n");
 describe("managed Harbor 0.21 lifecycle adapter", () => {
   test("selection is immutable and accepts only Harbor 0.21.x", () => {
     expect(manifest.retryPolicy).toEqual({ nAttempts: 1, nConcurrent: 1, maxRetries: 0 });
-    expect(() => harborSelectionManifestBytes({ ...manifest, retryPolicy: { nAttempts: 2, nConcurrent: 1, maxRetries: 0 } } as never)).toThrow();
+    expect(() => harborSelectionManifestBytes({ ...manifest, retryPolicy: { nAttempts: 2, nConcurrent: 1, maxRetries: 0 } })).not.toThrow();
+    expect(() => harborSelectionManifestBytes({ ...manifest, retryPolicy: { nAttempts: 1, nConcurrent: 1, maxRetries: 3 } })).not.toThrow();
+    expect(() => harborSelectionManifestBytes({ ...manifest, retryPolicy: { nAttempts: 1, nConcurrent: 1, maxRetries: 1 } } as never)).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, harbor: { ...manifest.harbor, version: "0.22.0" } })).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, environment: { ...manifest.environment, type: manifest.environment.image } } as never)).toThrow();
     expect(() => harborSelectionManifestBytes({ ...manifest, source: { ...manifest.source, input: { path: "/private/host/task" } } } as never)).toThrow();
@@ -132,15 +135,20 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
     expect(datasetSource).not.toHaveProperty("tasks");
   });
 
-  test("append-only reverse indexes reject concurrent Harbor Job/Trial reuse", async () => {
+  test("append-only reverse indexes reject concurrent Harbor Trial remapping", async () => {
     const workspaceDir = await mkdtemp(join(tmpdir(), "harbor-mapping-race-"));
     try {
-      const settled = await Promise.allSettled([
+      const distinctTrials = await Promise.allSettled([
         recordHarborDispatchMapping(workspaceDir, "jinn-dispatch-a", "job-shared", "trial-a"),
         recordHarborDispatchMapping(workspaceDir, "jinn-dispatch-b", "job-shared", "trial-b"),
       ]);
-      expect(settled.filter((value) => value.status === "fulfilled")).toHaveLength(1);
-      expect(settled.filter((value) => value.status === "rejected")).toHaveLength(1);
+      expect(distinctTrials.filter((value) => value.status === "fulfilled")).toHaveLength(2);
+      const remapped = await Promise.allSettled([
+        recordHarborDispatchMapping(workspaceDir, "jinn-dispatch-c", "job-shared", "trial-a"),
+        recordHarborDispatchMapping(workspaceDir, "jinn-dispatch-d", "job-shared", "trial-a"),
+      ]);
+      expect(remapped.filter((value) => value.status === "fulfilled")).toHaveLength(0);
+      expect(remapped.filter((value) => value.status === "rejected")).toHaveLength(2);
     } finally { await rm(workspaceDir, { recursive: true, force: true }); }
   });
 
@@ -459,4 +467,51 @@ describe("managed Harbor 0.21 lifecycle adapter", () => {
       ]));
     } finally { await rm(workspaceDir, { recursive: true, force: true }); }
   }, 120_000);
+
+  test("tagged task.toml docker_image accepts a digest pin of the same repository and still refuses digest drift", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harbor-tagged-image-"));
+    try {
+      const executable = join(root, "harbor");
+      await writeFile(executable, "#!/usr/bin/env node\nprocess.stdout.write(\"harbor 0.21.4\\n\");\n", { mode: 0o700 });
+      await chmod(executable, 0o700);
+      const materialPath = join(root, "task");
+      await mkdir(materialPath);
+      await writeFile(join(materialPath, "task.toml"), "[environment]\ndocker_image = \"alexgshaw/adaptive-rejection-sampler:20251031\"\n");
+      const digest = `alexgshaw/adaptive-rejection-sampler@sha256:${"a".repeat(64)}`;
+      const resolved = await resolveHarborSelection({
+        executable,
+        source: { kind: "task", input: { name: "terminal-bench/adaptive-rejection-sampler", ref: "r1" }, materialPath, revision: "r1" },
+        arms: manifest.arms,
+        environment: { type: "docker", image: digest, configuration: {} },
+        outputs: manifest.outputs,
+      });
+      expect(resolved.manifest.environment.image).toBe(digest);
+
+      await expect(resolveHarborSelection({
+        executable,
+        source: { kind: "task", input: { name: "terminal-bench/adaptive-rejection-sampler", ref: "r1" }, materialPath, revision: "r1" },
+        arms: manifest.arms,
+        environment: { type: "docker", image: `other/repo@sha256:${"a".repeat(64)}`, configuration: {} },
+        outputs: manifest.outputs,
+      })).rejects.toThrow(/does not pin the selected OCI image digest/i);
+
+      await writeFile(join(materialPath, "task.toml"), `[environment]\ndocker_image = "ubuntu@sha256:${"b".repeat(64)}"\n`);
+      await expect(resolveHarborSelection({
+        executable,
+        source: { kind: "task", input: { name: "demo/task", ref: "r1" }, materialPath, revision: "r1" },
+        arms: manifest.arms,
+        environment: { type: "docker", image: `ubuntu@sha256:${"c".repeat(64)}`, configuration: {} },
+        outputs: manifest.outputs,
+      })).rejects.toThrow(/does not pin the selected OCI image digest/i);
+
+      const pinned = `ubuntu@sha256:${"b".repeat(64)}`;
+      await expect(resolveHarborSelection({
+        executable,
+        source: { kind: "task", input: { name: "demo/task", ref: "r1" }, materialPath, revision: "r1" },
+        arms: manifest.arms,
+        environment: { type: "docker", image: pinned, configuration: {} },
+        outputs: manifest.outputs,
+      })).resolves.toMatchObject({ manifest: { environment: { image: pinned } } });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
 });

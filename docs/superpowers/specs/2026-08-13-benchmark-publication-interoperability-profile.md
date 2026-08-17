@@ -2,10 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | 0.2 |
+| **Version** | 0.4 |
 | **Date** | 2026-08-13 |
+| **Amended** | 2026-08-17 — direct-mode job grain ([DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)); official suite protocol and one Job per arm ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)); no §8.4 marketplace rewrite |
 | **Shape** | interoperability profile and design amendment |
-| **Status** | draft; revised after independent design review |
+| **Status** | draft; revised after independent design review; §8.3 grain note added 2026-08-17; §8.3 suite protocol added 2026-08-17 |
 | **Applies to** | any benchmarking product publishing through Jinn, including Colophon |
 | **Depends on** | [stack design principles](./2026-07-30-stack-design-principles.md), [benchmarking application](./2026-07-28-benchmarking-application-design.md), [record discovery](./2026-07-27-record-discovery-protocol-design.md), [evidence publication](./2026-07-25-evidence-publication-design.md), and [execution evidence](./2026-07-23-jinn-execution-evidence-protocol-design.md) |
 | **Companion research** | [Colophon, Harbor, and marketplace publication spike](../../spikes/2026-08-13-colophon-harbor-marketplace-publication.md) |
@@ -100,7 +101,7 @@ This profile fixes:
 - conformance fixtures that direct and marketplace-backed publishers must share.
 
 The eventual conformance profile URI is
-`https://spec.jinn.network/profiles/benchmark-publication/v1`. This document's `0.2` version is the
+`https://spec.jinn.network/profiles/benchmark-publication/v1`. This document's `0.4` version is the
 revision of the draft design; it does not change that intended profile major version.
 
 It does not design:
@@ -126,7 +127,7 @@ The profile follows the stack rule to compose existing standards before inventin
 | Portable execution evidence | Jinn Execution Evidence | runtime-native evidence role contribution |
 | Discovery | Jinn Record Discovery source chains and facts profiles | publication ordering and new accounting facts |
 | Harbor execution | Harbor Task, Dataset, Trial, Job, and result/artifact layout | identity mapping and exact artifact retention |
-| Terminal-Bench | Terminal-Bench 2 through its official Harbor harness; Harbor's published migration mapping for legacy task packages | pin both original and migrated material; disclose conversion |
+| Terminal-Bench | Terminal-Bench 2.1 through its official Harbor harness as a named suite protocol; Harbor's published migration mapping for legacy task packages; Terminal-Bench 2.0 one-task path remains a distinct non-2.1 campaign | pin dataset content-hash revision; disclose coverage vs execution conformance; pin original and migrated material when converting |
 | Agent trajectory | Harbor's Agent Trajectory Interchange Format (ATIF) | reference it byte-exactly; do not translate it |
 | Test result detail | Harbor-produced CTRF where present | retain as native evidence; do not make it mandatory for all runtimes |
 
@@ -530,6 +531,10 @@ The product publication flow consumes contributions through this contract. It do
 Adapters contribute artifact role URIs under namespaces they own. Unknown roles are preserved and
 shown to verifiers; they do not override common semantics.
 
+Inspect has no separate contribution-profile section in this document. Direct-mode job grain for
+Inspect follows the same atoms as Harbor (one sample × arm → one dispatch) and the exclusive
+native-log rule in [`packages/benchmark-product/INSPECT-RUNTIME.md`](../../../packages/benchmark-product/INSPECT-RUNTIME.md).
+
 ### 8.3 Harbor profile
 
 A Harbor contribution should preserve, when produced:
@@ -544,9 +549,10 @@ A Harbor contribution should preserve, when produced:
 - one correlation artifact containing Harbor Job and Trial identifiers.
 
 Harbor Job is operational grouping, not canonical Jinn Run identity. In a direct run one Job may
-conveniently span the Run. Marketplace operators may create independent Jobs for individual
-Trials. Harbor Trial is the closest execution boundary to a single Jinn dispatch and normally
-correlates to one TEP Attempt.
+conveniently span the Run; for an official multi-arm comparison the faithful grain is **one Job
+per arm** spanning that arm's selected tasks and planned trials. Marketplace operators may create
+independent Jobs for individual Trials. Harbor Trial is the closest execution boundary to a
+single Jinn dispatch and normally correlates to one TEP Attempt.
 
 In profile v1, the adapter must disable or reject Harbor settings that can execute an internal
 retry beneath one Jinn dispatch. If another Trial will actually run, the Jinn benchmarking runner
@@ -564,6 +570,57 @@ A completed Harbor Job can be published without rerun only when a Jinn-aware ada
 Submission, Attempt engagement, observation streams, and native correlation during execution.
 Importing an arbitrary historical Job may preserve Harbor-native evidence, but it cannot claim to
 be the original Jinn dispatch under this profile.
+
+**Direct-mode job grain** (amended 2026-08-17, [DR-2026-08-17](../../../log/decisions/2026-08-17-runtime-engine-direct-mode.md)
+and [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)):
+
+- **Allowed.** One Harbor Job per arm spanning that arm's selected tasks and planned trials
+  (`n_attempts` = locked scientific replicates). Terminal-Bench 2.1 locks maintainer
+  `configs/leaderboard.yaml` `retry.max_retries: 3`; TB 2.0 keeps `0`. Each Trial binds 1:1 to
+  a pre-sealed Jinn dispatch; the adapter observes the trial **as it starts** into Submission /
+  Attempt / Execution Evidence, including each Harbor retry start as that cell's next dispatch.
+  Engine retries and Inspect epochs stay pinned off. A replacement Harbor will not retry is a
+  new Submission, filled by a tiny follow-up Harbor job (`n_attempts` = 1, one task) if needed.
+  Two retry authorities over the same failure are forbidden. Hub export still copies the planned
+  Run+arm job only. A two-arm Colophon Run is two planned Harbor Jobs. Job identity for the
+  planned grain is Run + arm, not Submission.
+- **Shipped v1 (TB 2.0 one-task).** One engine invocation per cell. That grain remains valid for
+  the TB 2.0 path and is an adapter constraint, not Jinn identity.
+- **Scheduled (TB 2.1).** The per-arm Job grain above. Inspect stays one execution per cell.
+- **Forbidden.** Two retry authorities over the same cells; synthesizing TEP after a foreign
+  completed job; folding a Job or eval-set into one Execution Evidence record; wearing an official
+  suite name on a custom or cousin method.
+
+**Official suite protocol** (added 2026-08-17, [DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md)):
+
+A publisher who wants to wear a suite name must lock that suite's protocol, not a Colophon-flavored
+cousin on the same tasks. The first named protocol is Terminal-Bench 2.1:
+
+- dataset `terminal-bench/terminal-bench-2-1` at the leaderboard content-hash revision;
+- planned k ≥ 5 trials per selected task as visible replicates, not Harbor inner retry;
+- official env (timeout_multiplier unset or 1.0; no agent/verifier timeout or resource overrides);
+- ATIF trajectories required for Hub packaging.
+
+Comparability is two-axis and must not be collapsed into one bit. Report v2 gains no new required
+fields. Bind a product-sealed `SuiteProtocolSelection` through the existing Run publication
+extension's `registrationArtifacts`. Surface on the product claim package:
+
+- `execution_conformance` — trial settings match the protocol for the selected tasks;
+- `coverage` — `one_task` | `ten_task` | `full` | `custom`;
+- `leaderboard_submit_ready` — full coverage, execution conformance, ≥5 trials on every dataset
+  task accounted after collect as judged or Harbor-error 0, and ATIF bytes on the retained Harbor
+  job. Quote-time method bits and a job `result.json` are not enough.
+
+Named slices (lexicographic first 1 / first 10 / all from the pinned snapshot) are how a publisher
+runs cheaply. A protocol-faithful slice is not a leaderboard-complete run. When not
+`leaderboard_submit_ready`, Report `limitations[]` carries a canonical sentence.
+
+**Hub export** is a derived Harbor-shaped artifact of a Colophon-accounted run, not the claim of
+record. The bundle remains what a third party checks. `leaderboard_submit_ready` may emit an
+uploadable job plus submit instructions. A named slice may retain or upload the job for inspection
+and must not be packaged as a leaderboard submission. Custom or unverifiable runs refuse
+suite-named Hub export. A foreign completed Hub job still cannot be imported as a synthesized TEP
+run. Copy must not claim Colophon placed a leaderboard row while community submissions are closed.
 
 ### 8.4 Jinn marketplace composition
 
