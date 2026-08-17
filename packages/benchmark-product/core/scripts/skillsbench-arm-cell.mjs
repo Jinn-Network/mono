@@ -60,8 +60,10 @@ function blob(id) {
     if (gitBlobId(bytes) !== id) throw new Error(`cached blob ${id} does not hash back`);
     return bytes;
   }
+  // The roster's largest blob is an 82 MB zip, which is ~110 MB once base64-encoded, so a 64 MB
+  // buffer fails it with a bare `spawnSync gh ENOBUFS` that names neither the blob nor the size.
   const raw = execFileSync("gh", ["api", `repos/benchflow-ai/skillsbench/git/blobs/${id}`, "--jq", ".content"],
-    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    { encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
   const bytes = Buffer.from(raw.trim(), "base64");
   if (gitBlobId(bytes) !== id) throw new Error(`blob ${id} does not match its Git object id`);
   writeFileSync(cached, bytes);
