@@ -22,6 +22,18 @@
       "sha256": "726e33332520537276ca8d0fe20d5b25ccd0eeb4b95cf3bfce06d4924673c8c0"
     },
     {
+      "id": "anchor-kit-v1/ots-stamp-provenance.md",
+      "sha256": "5cffbcf153510effe80410b5011af36a8bb7f4b28e656c16eff939476ee4fa54"
+    },
+    {
+      "id": "anchor-kit-v1/real-stamp-v1-complete.ots",
+      "sha256": "948e5dcda5fc5b6824009c865c6e33d96be90de89c0d8a63bdf9b31f2722f806"
+    },
+    {
+      "id": "anchor-kit-v1/real-stamp-v1-pending.ots",
+      "sha256": "32e607d6dc1f32911bf36b559ffc376f9833f054d3e16fe75db3b9d707402694"
+    },
+    {
       "id": "anchor-kit-v1/token-digicert.der",
       "sha256": "eeafaa030a0ae9ab7ec10f1f68e0f6632e696da8b7883a99c00d28b041e2531a"
     },
