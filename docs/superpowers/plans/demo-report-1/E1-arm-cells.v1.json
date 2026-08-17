@@ -1,6 +1,6 @@
 {
   "schema": "jinn.demo1.arm-cells.v1",
-  "status": "PILOT CELLS \u2014 NOT A RESULT. Single-replicate variance is large enough that identical cells disagree.",
+  "status": "PILOT CELLS — NOT A RESULT. Single-replicate variance is large enough that identical cells disagree.",
   "source": {
     "benchmark": "skillsbench",
     "release": "v1.1",
@@ -170,6 +170,1122 @@
         }
       ],
       "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "3d-scan-calc/C-no-instructions/r1": {
+      "taskId": "3d-scan-calc",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 64,
+      "skills": [
+        {
+          "folder": "mesh-analysis",
+          "bodySha256": "2179de46890fa06dfb2bffd25c0a7b975630922bef1a4515480bcdf552954ae8"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "3d-scan-calc/C-no-instructions/r2": {
+      "taskId": "3d-scan-calc",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 99,
+      "skills": [
+        {
+          "folder": "mesh-analysis",
+          "bodySha256": "2179de46890fa06dfb2bffd25c0a7b975630922bef1a4515480bcdf552954ae8"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "adaptive-cruise-control/C-no-instructions/r1": {
+      "taskId": "adaptive-cruise-control",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 150,
+      "skills": [
+        {
+          "folder": "csv-processing",
+          "bodySha256": "0381aa3624c6df910e32607ceab3d6a9b2a0725a2361059c2d87617a8ed448b9"
+        },
+        {
+          "folder": "pid-controller",
+          "bodySha256": "36fdfbe782f25dc8215dcceb0f9de042097479901ef5556e7926f505a73a4ef2"
+        },
+        {
+          "folder": "simulation-metrics",
+          "bodySha256": "b311c97a8c637f1fcad0e782dfac4a0d4ef1aaf0f2b2aeaf2a445cfccdc14e9c"
+        },
+        {
+          "folder": "vehicle-dynamics",
+          "bodySha256": "91233f95069188f05d913ffa71dfdd136fcfefef8d706b849357960e21616000"
+        },
+        {
+          "folder": "yaml-config",
+          "bodySha256": "7c6793e6703c993d9506a75db1af17e7fc9c98bab8080b7af1fe8808d2e360ec"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "adaptive-cruise-control/C-no-instructions/r2": {
+      "taskId": "adaptive-cruise-control",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 408,
+      "skills": [
+        {
+          "folder": "csv-processing",
+          "bodySha256": "0381aa3624c6df910e32607ceab3d6a9b2a0725a2361059c2d87617a8ed448b9"
+        },
+        {
+          "folder": "pid-controller",
+          "bodySha256": "36fdfbe782f25dc8215dcceb0f9de042097479901ef5556e7926f505a73a4ef2"
+        },
+        {
+          "folder": "simulation-metrics",
+          "bodySha256": "b311c97a8c637f1fcad0e782dfac4a0d4ef1aaf0f2b2aeaf2a445cfccdc14e9c"
+        },
+        {
+          "folder": "vehicle-dynamics",
+          "bodySha256": "91233f95069188f05d913ffa71dfdd136fcfefef8d706b849357960e21616000"
+        },
+        {
+          "folder": "yaml-config",
+          "bodySha256": "7c6793e6703c993d9506a75db1af17e7fc9c98bab8080b7af1fe8808d2e360ec"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "azure-bgp-oscillation-route-leak/C-no-instructions/r0": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 93,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/C-no-instructions/r1": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 216,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/C-no-instructions/r2": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 208,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "citation-check/C-no-instructions/r1": {
+      "taskId": "citation-check",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 79,
+      "skills": [
+        {
+          "folder": "citation-management",
+          "bodySha256": "7bce60d31bfa1ce378f04a64feeca869656baba77d82fe5194713eb43b162795"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "citation-check/C-no-instructions/r2": {
+      "taskId": "citation-check",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 90,
+      "skills": [
+        {
+          "folder": "citation-management",
+          "bodySha256": "7bce60d31bfa1ce378f04a64feeca869656baba77d82fe5194713eb43b162795"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "dapt-intrusion-detection/C-no-instructions/r0": {
+      "taskId": "dapt-intrusion-detection",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 125,
+      "skills": [
+        {
+          "folder": "pcap-analysis",
+          "bodySha256": "50493cfb51ab419578bcf6dde508c0d4a1ab142991d9f81a474c20cca1e02d00"
+        },
+        {
+          "folder": "threat-detection",
+          "bodySha256": "f26d43386d41c5d12555789f07696354d06574bd2876fb98eee5734defe1e96e"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "dapt-intrusion-detection/C-no-instructions/r1": {
+      "taskId": "dapt-intrusion-detection",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 105,
+      "skills": [
+        {
+          "folder": "pcap-analysis",
+          "bodySha256": "50493cfb51ab419578bcf6dde508c0d4a1ab142991d9f81a474c20cca1e02d00"
+        },
+        {
+          "folder": "threat-detection",
+          "bodySha256": "f26d43386d41c5d12555789f07696354d06574bd2876fb98eee5734defe1e96e"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "dapt-intrusion-detection/C-no-instructions/r2": {
+      "taskId": "dapt-intrusion-detection",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 79,
+      "skills": [
+        {
+          "folder": "pcap-analysis",
+          "bodySha256": "50493cfb51ab419578bcf6dde508c0d4a1ab142991d9f81a474c20cca1e02d00"
+        },
+        {
+          "folder": "threat-detection",
+          "bodySha256": "f26d43386d41c5d12555789f07696354d06574bd2876fb98eee5734defe1e96e"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "data-to-d3/C-no-instructions/r0": {
+      "taskId": "data-to-d3",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 196,
+      "skills": [
+        {
+          "folder": "d3-visualization",
+          "bodySha256": "862a84bdd28bea0acda8e72c583441a34906741bf1763b4f44b015eaf8c7dade"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "data-to-d3/C-no-instructions/r1": {
+      "taskId": "data-to-d3",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 333,
+      "skills": [
+        {
+          "folder": "d3-visualization",
+          "bodySha256": "862a84bdd28bea0acda8e72c583441a34906741bf1763b4f44b015eaf8c7dade"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "data-to-d3/C-no-instructions/r2": {
+      "taskId": "data-to-d3",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 57,
+      "skills": [
+        {
+          "folder": "d3-visualization",
+          "bodySha256": "862a84bdd28bea0acda8e72c583441a34906741bf1763b4f44b015eaf8c7dade"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "dialogue-parser/C-no-instructions/r0": {
+      "taskId": "dialogue-parser",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.333",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 330,
+      "skills": [
+        {
+          "folder": "dialogue-graph",
+          "bodySha256": "f5e7d5138286aa56cfe3540adb9c7b7e382bc29cbdce17e327b498cf56426912"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2199a62885a12290dc9c5be3ca0681d367576ab7bf037da120e564723292a2f0"
+    },
+    "dialogue-parser/C-no-instructions/r1": {
+      "taskId": "dialogue-parser",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.833",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 166,
+      "skills": [
+        {
+          "folder": "dialogue-graph",
+          "bodySha256": "f5e7d5138286aa56cfe3540adb9c7b7e382bc29cbdce17e327b498cf56426912"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2199a62885a12290dc9c5be3ca0681d367576ab7bf037da120e564723292a2f0"
+    },
+    "dialogue-parser/C-no-instructions/r2": {
+      "taskId": "dialogue-parser",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.667",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 226,
+      "skills": [
+        {
+          "folder": "dialogue-graph",
+          "bodySha256": "f5e7d5138286aa56cfe3540adb9c7b7e382bc29cbdce17e327b498cf56426912"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2199a62885a12290dc9c5be3ca0681d367576ab7bf037da120e564723292a2f0"
+    },
+    "drone-planning-control/C-no-instructions/r0": {
+      "taskId": "drone-planning-control",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 143,
+      "agentSeconds": 902,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/C-no-instructions/r1": {
+      "taskId": "drone-planning-control",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 45,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/C-no-instructions/r2": {
+      "taskId": "drone-planning-control",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 209,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "enterprise-information-search/C-no-instructions/r0": {
+      "taskId": "enterprise-information-search",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 180,
+      "skills": [
+        {
+          "folder": "enterprise-artifact-search",
+          "bodySha256": "556571e455d0a4a80fb7679135553a1fad02dbaf6c54bf8d2bcdca36b5bb1a63"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "enterprise-information-search/C-no-instructions/r1": {
+      "taskId": "enterprise-information-search",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 136,
+      "skills": [
+        {
+          "folder": "enterprise-artifact-search",
+          "bodySha256": "556571e455d0a4a80fb7679135553a1fad02dbaf6c54bf8d2bcdca36b5bb1a63"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "enterprise-information-search/C-no-instructions/r2": {
+      "taskId": "enterprise-information-search",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 128,
+      "skills": [
+        {
+          "folder": "enterprise-artifact-search",
+          "bodySha256": "556571e455d0a4a80fb7679135553a1fad02dbaf6c54bf8d2bcdca36b5bb1a63"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "exam-block-sequencing/C-no-instructions/r0": {
+      "taskId": "exam-block-sequencing",
+      "arm": "C-no-instructions",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 158,
+      "skills": [
+        {
+          "folder": "mip-solver-and-solution-audit",
+          "bodySha256": "930d5f8749df1e277ba31ff0e02cf3876b5db00dec5ee1d962143fdc189cdc61"
+        },
+        {
+          "folder": "ordered-window-sequencing-mip",
+          "bodySha256": "e91605d8ee3d16facd0a8616b59a301f064d7ca14d369c08bd04184437bb7229"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "exam-block-sequencing/C-no-instructions/r1": {
+      "taskId": "exam-block-sequencing",
+      "arm": "C-no-instructions",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 385,
+      "skills": [
+        {
+          "folder": "mip-solver-and-solution-audit",
+          "bodySha256": "930d5f8749df1e277ba31ff0e02cf3876b5db00dec5ee1d962143fdc189cdc61"
+        },
+        {
+          "folder": "ordered-window-sequencing-mip",
+          "bodySha256": "e91605d8ee3d16facd0a8616b59a301f064d7ca14d369c08bd04184437bb7229"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "exam-block-sequencing/C-no-instructions/r2": {
+      "taskId": "exam-block-sequencing",
+      "arm": "C-no-instructions",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 358,
+      "skills": [
+        {
+          "folder": "mip-solver-and-solution-audit",
+          "bodySha256": "930d5f8749df1e277ba31ff0e02cf3876b5db00dec5ee1d962143fdc189cdc61"
+        },
+        {
+          "folder": "ordered-window-sequencing-mip",
+          "bodySha256": "e91605d8ee3d16facd0a8616b59a301f064d7ca14d369c08bd04184437bb7229"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "adaptive-cruise-control/A-native-skill/r0": {
+      "taskId": "adaptive-cruise-control",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 156,
+      "skills": [
+        {
+          "folder": "csv-processing",
+          "bodySha256": "0381aa3624c6df910e32607ceab3d6a9b2a0725a2361059c2d87617a8ed448b9"
+        },
+        {
+          "folder": "pid-controller",
+          "bodySha256": "36fdfbe782f25dc8215dcceb0f9de042097479901ef5556e7926f505a73a4ef2"
+        },
+        {
+          "folder": "simulation-metrics",
+          "bodySha256": "b311c97a8c637f1fcad0e782dfac4a0d4ef1aaf0f2b2aeaf2a445cfccdc14e9c"
+        },
+        {
+          "folder": "vehicle-dynamics",
+          "bodySha256": "91233f95069188f05d913ffa71dfdd136fcfefef8d706b849357960e21616000"
+        },
+        {
+          "folder": "yaml-config",
+          "bodySha256": "7c6793e6703c993d9506a75db1af17e7fc9c98bab8080b7af1fe8808d2e360ec"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "adaptive-cruise-control/A-native-skill/r1": {
+      "taskId": "adaptive-cruise-control",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 28,
+      "skills": [
+        {
+          "folder": "csv-processing",
+          "bodySha256": "0381aa3624c6df910e32607ceab3d6a9b2a0725a2361059c2d87617a8ed448b9"
+        },
+        {
+          "folder": "pid-controller",
+          "bodySha256": "36fdfbe782f25dc8215dcceb0f9de042097479901ef5556e7926f505a73a4ef2"
+        },
+        {
+          "folder": "simulation-metrics",
+          "bodySha256": "b311c97a8c637f1fcad0e782dfac4a0d4ef1aaf0f2b2aeaf2a445cfccdc14e9c"
+        },
+        {
+          "folder": "vehicle-dynamics",
+          "bodySha256": "91233f95069188f05d913ffa71dfdd136fcfefef8d706b849357960e21616000"
+        },
+        {
+          "folder": "yaml-config",
+          "bodySha256": "7c6793e6703c993d9506a75db1af17e7fc9c98bab8080b7af1fe8808d2e360ec"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "adaptive-cruise-control/A-native-skill/r2": {
+      "taskId": "adaptive-cruise-control",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 129,
+      "skills": [
+        {
+          "folder": "csv-processing",
+          "bodySha256": "0381aa3624c6df910e32607ceab3d6a9b2a0725a2361059c2d87617a8ed448b9"
+        },
+        {
+          "folder": "pid-controller",
+          "bodySha256": "36fdfbe782f25dc8215dcceb0f9de042097479901ef5556e7926f505a73a4ef2"
+        },
+        {
+          "folder": "simulation-metrics",
+          "bodySha256": "b311c97a8c637f1fcad0e782dfac4a0d4ef1aaf0f2b2aeaf2a445cfccdc14e9c"
+        },
+        {
+          "folder": "vehicle-dynamics",
+          "bodySha256": "91233f95069188f05d913ffa71dfdd136fcfefef8d706b849357960e21616000"
+        },
+        {
+          "folder": "yaml-config",
+          "bodySha256": "7c6793e6703c993d9506a75db1af17e7fc9c98bab8080b7af1fe8808d2e360ec"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "azure-bgp-oscillation-route-leak/A-native-skill/r0": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 244,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/A-native-skill/r1": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 119,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "azure-bgp-oscillation-route-leak/A-native-skill/r2": {
+      "taskId": "azure-bgp-oscillation-route-leak",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 115,
+      "skills": [
+        {
+          "folder": "azure-bgp",
+          "bodySha256": "4d3f151f74765d5f11ddc0c37dbd2911d5d93e8a6e547ca449ca082d1ad50179"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "dapt-intrusion-detection/A-native-skill/r0": {
+      "taskId": "dapt-intrusion-detection",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 94,
+      "skills": [
+        {
+          "folder": "pcap-analysis",
+          "bodySha256": "50493cfb51ab419578bcf6dde508c0d4a1ab142991d9f81a474c20cca1e02d00"
+        },
+        {
+          "folder": "threat-detection",
+          "bodySha256": "f26d43386d41c5d12555789f07696354d06574bd2876fb98eee5734defe1e96e"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "dapt-intrusion-detection/A-native-skill/r1": {
+      "taskId": "dapt-intrusion-detection",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 88,
+      "skills": [
+        {
+          "folder": "pcap-analysis",
+          "bodySha256": "50493cfb51ab419578bcf6dde508c0d4a1ab142991d9f81a474c20cca1e02d00"
+        },
+        {
+          "folder": "threat-detection",
+          "bodySha256": "f26d43386d41c5d12555789f07696354d06574bd2876fb98eee5734defe1e96e"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "dapt-intrusion-detection/A-native-skill/r2": {
+      "taskId": "dapt-intrusion-detection",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 97,
+      "skills": [
+        {
+          "folder": "pcap-analysis",
+          "bodySha256": "50493cfb51ab419578bcf6dde508c0d4a1ab142991d9f81a474c20cca1e02d00"
+        },
+        {
+          "folder": "threat-detection",
+          "bodySha256": "f26d43386d41c5d12555789f07696354d06574bd2876fb98eee5734defe1e96e"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "data-to-d3/A-native-skill/r1": {
+      "taskId": "data-to-d3",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 227,
+      "skills": [
+        {
+          "folder": "d3-visualization",
+          "bodySha256": "862a84bdd28bea0acda8e72c583441a34906741bf1763b4f44b015eaf8c7dade"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "data-to-d3/A-native-skill/r2": {
+      "taskId": "data-to-d3",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 124,
+      "skills": [
+        {
+          "folder": "d3-visualization",
+          "bodySha256": "862a84bdd28bea0acda8e72c583441a34906741bf1763b4f44b015eaf8c7dade"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/A-native-skill/r0": {
+      "taskId": "drone-planning-control",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 54,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/A-native-skill/r1": {
+      "taskId": "drone-planning-control",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 201,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "drone-planning-control/A-native-skill/r2": {
+      "taskId": "drone-planning-control",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0.000000",
+      "fullPass": false,
+      "agentExit": 143,
+      "agentSeconds": 902,
+      "skills": [
+        {
+          "folder": "attitude-controller-planner",
+          "bodySha256": "ba6f83a4eeb6c8b2c1afeae0721708f1698ee90db39a2b67d601c316623d6f6d"
+        },
+        {
+          "folder": "flight-plan-parser",
+          "bodySha256": "cf48e06d46170d87b9094aa613c1e54383f9a77bcf3c2501a28de5d51cf06426"
+        },
+        {
+          "folder": "motor-model-dynamics",
+          "bodySha256": "9e96e80101f59c8c0cc41f83f62614c480078a2d04f040c5c155c096e72b723b"
+        },
+        {
+          "folder": "plot-quadrotor",
+          "bodySha256": "6b38e6c82bca2aad4f1f868cc94bb0719814db883edea9b7a4a5f21febe54a2e"
+        },
+        {
+          "folder": "position-controller-trajectory-planner",
+          "bodySha256": "f75ba80bfdc925a050d0b3f27f31f91c727964a31772c9815b5ce2876a96f0e0"
+        },
+        {
+          "folder": "stepinfo-3d",
+          "bodySha256": "cd4cc96f160f72167711c5f4ea34855643e429540156d50622df899adc583edd"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "enterprise-information-search/A-native-skill/r0": {
+      "taskId": "enterprise-information-search",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 144,
+      "skills": [
+        {
+          "folder": "enterprise-artifact-search",
+          "bodySha256": "556571e455d0a4a80fb7679135553a1fad02dbaf6c54bf8d2bcdca36b5bb1a63"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "enterprise-information-search/A-native-skill/r1": {
+      "taskId": "enterprise-information-search",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 110,
+      "skills": [
+        {
+          "folder": "enterprise-artifact-search",
+          "bodySha256": "556571e455d0a4a80fb7679135553a1fad02dbaf6c54bf8d2bcdca36b5bb1a63"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "enterprise-information-search/A-native-skill/r2": {
+      "taskId": "enterprise-information-search",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 241,
+      "skills": [
+        {
+          "folder": "enterprise-artifact-search",
+          "bodySha256": "556571e455d0a4a80fb7679135553a1fad02dbaf6c54bf8d2bcdca36b5bb1a63"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+    },
+    "exam-block-sequencing/A-native-skill/r0": {
+      "taskId": "exam-block-sequencing",
+      "arm": "A-native-skill",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 448,
+      "skills": [
+        {
+          "folder": "mip-solver-and-solution-audit",
+          "bodySha256": "930d5f8749df1e277ba31ff0e02cf3876b5db00dec5ee1d962143fdc189cdc61"
+        },
+        {
+          "folder": "ordered-window-sequencing-mip",
+          "bodySha256": "e91605d8ee3d16facd0a8616b59a301f064d7ca14d369c08bd04184437bb7229"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "exam-block-sequencing/A-native-skill/r1": {
+      "taskId": "exam-block-sequencing",
+      "arm": "A-native-skill",
+      "replicate": 1,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 241,
+      "skills": [
+        {
+          "folder": "mip-solver-and-solution-audit",
+          "bodySha256": "930d5f8749df1e277ba31ff0e02cf3876b5db00dec5ee1d962143fdc189cdc61"
+        },
+        {
+          "folder": "ordered-window-sequencing-mip",
+          "bodySha256": "e91605d8ee3d16facd0a8616b59a301f064d7ca14d369c08bd04184437bb7229"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "exam-block-sequencing/A-native-skill/r2": {
+      "taskId": "exam-block-sequencing",
+      "arm": "A-native-skill",
+      "replicate": 2,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "0",
+      "fullPass": false,
+      "agentExit": 0,
+      "agentSeconds": 295,
+      "skills": [
+        {
+          "folder": "mip-solver-and-solution-audit",
+          "bodySha256": "930d5f8749df1e277ba31ff0e02cf3876b5db00dec5ee1d962143fdc189cdc61"
+        },
+        {
+          "folder": "ordered-window-sequencing-mip",
+          "bodySha256": "e91605d8ee3d16facd0a8616b59a301f064d7ca14d369c08bd04184437bb7229"
+        }
+      ],
+      "claudeMdSha256": null,
+      "baseImage": "python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a"
+    },
+    "dapt-intrusion-detection/B-flat-claude-md/r0": {
+      "taskId": "dapt-intrusion-detection",
+      "arm": "B-flat-claude-md",
+      "replicate": 0,
+      "model": "claude-haiku-4-5-20251001",
+      "reward": "1",
+      "fullPass": true,
+      "agentExit": 0,
+      "agentSeconds": 83,
+      "skills": [
+        {
+          "folder": "pcap-analysis",
+          "bodySha256": "50493cfb51ab419578bcf6dde508c0d4a1ab142991d9f81a474c20cca1e02d00"
+        },
+        {
+          "folder": "threat-detection",
+          "bodySha256": "f26d43386d41c5d12555789f07696354d06574bd2876fb98eee5734defe1e96e"
+        }
+      ],
+      "claudeMdSha256": "03a4e03bb8d478905b0d3e0fb33569110750417fccc7de1e35ddf0b1c7a4db98",
       "baseImage": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
     }
   },

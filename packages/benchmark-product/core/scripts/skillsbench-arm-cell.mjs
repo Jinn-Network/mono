@@ -39,7 +39,8 @@ const option = (name, fallback) => {
 };
 const taskId = option("--task", "3d-scan-calc");
 const armIds = (option("--arms", "A,B,C")).split(",");
-const replicate = Number(option("--replicate", "0"));
+const replicates = Number(option("--replicates", "1"));
+const firstReplicate = Number(option("--replicate", "0"));
 
 const ARMS = {
   A: "A-native-skill",
@@ -124,7 +125,12 @@ const results = existsSync(OUT) ? JSON.parse(readFileSync(OUT, "utf8")) : {
   cells: {},
 };
 
+const plan = [];
 for (const armId of armIds) {
+  for (let r = firstReplicate; r < firstReplicate + replicates; r += 1) plan.push([armId, r]);
+}
+
+for (const [armId, replicate] of plan) {
   const arm = ARMS[armId];
   if (arm === undefined) throw new Error(`unknown arm ${armId}`);
   const cellId = `${taskId}/${arm}/r${replicate}`;

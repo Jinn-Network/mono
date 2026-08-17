@@ -321,3 +321,46 @@ declare `network_mode: public` and Decision 6's gate may well resolve to option 
 That is recorded here deliberately, before any code is written, so that a later STOP reads as the
 method working rather than as the method failing. Demo-1's value has never been that it produces a
 number; it is that it refuses to produce one it cannot stand behind.
+
+---
+
+## Decision 7 (2026-08-17) — Slate selection may use upstream skill-uplift
+
+**Operator ruling (Ritsu).** Decision 5's outcome firewall is amended: the task slate may be
+selected using SkillsBench's own published per-task with-skill versus without-skill results.
+
+**Why this does not contaminate the primary contrast.** Demo-1 compares arm A (curated Skill,
+natively delivered) against arm B (the same authenticated bytes in root `CLAUDE.md`). **Both arms
+carry the content.** Upstream's contrast is skill versus no-skill, which is our *manipulation
+check*, `(A ∪ B)` versus C — a different comparison. Selecting on it conditions on "there is
+something to deliver," which is the precondition for the A-versus-B question being answerable at
+all. It does not condition on the delivery mechanism.
+
+Selecting blind does not avoid a choice; it makes a worse one. The blind seven-task set measured
+before this ruling included `3d-scan-calc`, where the model solves the task unaided on every
+replicate and no delivery mechanism could ever show a difference. Cells spent there are wasted by
+construction.
+
+**Source.** `benchflow/skillsbench-leaderboard` on Hugging Face,
+`analysis/experiment_final_selected/coverage_by_task_model_mode.csv`, per task × model × mode.
+Rescue criterion: `without` passes 0 of 3 and `with` passes at least 2 of 3.
+
+**Result.** 24 tasks show a rescue on at least one of `gemini-3.5-flash`, `minimax-m3`, `opus-4.8`;
+six replicate across two models. **15 of the 24 also pass Jinn's own static admission**, and that
+intersection is the slate.
+
+**What still binds.**
+
+- Outcome data selects the slate and nothing else. It may not touch clustering, pool assignment,
+  replacement, execution order, or any reported number.
+- Upstream uplift is **not** evidence for Demo-1. Every unit is re-measured on our own model, in our
+  own pinned environment, with our own controls and replicates.
+- Their rescues were measured on other models. A skill that rescues `gemini-3.5-flash` may leave our
+  model failing both ways. The mitigation is that five of the six two-model rescues were rescued on
+  the *weaker* models rather than `opus-4.8`, which keeps them plausibly within reach.
+- Single-run uplift carries a winner's curse. Our own replicates are the check, not their table.
+
+**Disclosure obligation.** The report must state that the slate was chosen using upstream
+skill-uplift, and must scope its claim accordingly: *among tasks where the curated Skill
+demonstrably helps, does delivery mechanism change the outcome.* It may not be written as a claim
+about SkillsBench as a whole, nor about arbitrary tasks.
