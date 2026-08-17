@@ -187,6 +187,22 @@ function expect(element: DerElement, identifier: number, label: string): DerElem
   return element;
 }
 
+/**
+ * The single element a tagged position holds, refusing a supernumerary sibling.
+ *
+ * DER admits exactly one element inside `ContentInfo.content [0]` and inside
+ * `eContent [0] EXPLICIT`, and exactly one `certificates [0]` field in a
+ * SignedData. Reading the first and ignoring the rest is how a token grows a
+ * second body that this reader never looks at but another verifier might, so a
+ * second element is a refusal rather than remainder.
+ */
+function only(elements: readonly DerElement[], label: string): DerElement {
+  if (elements.length !== 1) {
+    refuse(`${label} holds ${elements.length} element(s); DER admits exactly one.`);
+  }
+  return elements[0]!;
+}
+
 function at(elements: readonly DerElement[], index: number, label: string): DerElement {
   const element = elements[index];
   if (element === undefined) refuse(`${label} is missing.`);
@@ -268,12 +284,19 @@ function readSignedData(proofBytes: Uint8Array): SignedDataParts {
     expect(decodeDer(proofBytes), DER_TAG.SEQUENCE, "ContentInfo"),
     "ContentInfo",
   );
+  if (contentInfo.length !== 2) {
+    refuse(`ContentInfo carries ${contentInfo.length} elements, not a contentType and a content.`);
+  }
   if (readDerOid(at(contentInfo, 0, "ContentInfo.contentType")) !== OID_ID_SIGNED_DATA) {
     refuse("ContentInfo.contentType is not id-signedData (§6.1 rule 1).");
   }
   const wrapper = expect(at(contentInfo, 1, "ContentInfo.content"), CONTEXT_CONSTRUCTED_0, "ContentInfo.content");
   const signedData = children(
-    expect(at(children(wrapper, "ContentInfo.content"), 0, "SignedData"), DER_TAG.SEQUENCE, "SignedData"),
+    expect(
+      only(children(wrapper, "ContentInfo.content"), "ContentInfo.content"),
+      DER_TAG.SEQUENCE,
+      "SignedData",
+    ),
     "SignedData",
   );
 
@@ -287,13 +310,17 @@ function readSignedData(proofBytes: Uint8Array): SignedDataParts {
   const eContentTypeOid = readDerOid(at(encapsulated, 0, "eContentType"));
   const eContentWrapper = expect(at(encapsulated, 1, "eContent"), CONTEXT_CONSTRUCTED_0, "eContent");
   const eContent = expect(
-    at(children(eContentWrapper, "eContent"), 0, "eContent OCTET STRING"),
+    only(children(eContentWrapper, "eContent"), "eContent"),
     DER_TAG.OCTET_STRING,
     "eContent OCTET STRING",
   ).content;
 
   const tail = signedData.slice(3);
-  const certificateSet = tail.find((element) => element.identifier === CONTEXT_CONSTRUCTED_0);
+  const certificateSets = tail.filter((element) => element.identifier === CONTEXT_CONSTRUCTED_0);
+  if (certificateSets.length > 1) {
+    refuse(`SignedData carries ${certificateSets.length} certificates fields; DER admits one.`);
+  }
+  const certificateSet = certificateSets[0];
   const signerInfoSets = tail.filter((element) => element.identifier === DER_TAG.SET);
   if (signerInfoSets.length !== 1) {
     refuse(`SignedData carries ${signerInfoSets.length} signerInfos SETs.`);
@@ -459,15 +486,29 @@ function readImplicitInteger(element: DerElement, label: string): number {
  * §6.1 rule 2: every TSTInfo extension marked critical must be known to this
  * profile, and v1 knows none -- so any critical extension refuses. Non-critical
  * unknown extensions are ignored, which is what `critical` means.
+ *
+ * The shape is checked before the flag is read, and that order is the rule.
+ * `Extension ::= SEQUENCE { extnID OBJECT IDENTIFIER, critical BOOLEAN DEFAULT
+ * FALSE, extnValue OCTET STRING }` puts the flag in the middle; an encoder that
+ * emits `{ extnID, extnValue, critical }` instead moves a TRUE flag past a
+ * position-based read and lands a critical extension in a token that looks
+ * unremarkable. Refusing every shape but the ASN.1 one closes that without
+ * having to guess where a flag might be hiding.
  */
 function assertNoCriticalExtension(element: DerElement): void {
   for (const extension of children(element, "TSTInfo.extensions")) {
     const parts = children(expect(extension, DER_TAG.SEQUENCE, "TSTInfo extension"), "TSTInfo extension");
+    if (parts.length < 2 || parts.length > 3) {
+      refuse(`A TSTInfo extension carries ${parts.length} elements; ASN.1 admits two or three.`);
+    }
     const oid = readDerOid(at(parts, 0, "TSTInfo extension OID"));
-    const flag = parts[1];
-    // `critical BOOLEAN DEFAULT FALSE`: absent means FALSE. The reader has
-    // already refused any BOOLEAN octet other than 0x00 and 0xFF.
-    if (flag?.identifier === DER_TAG.BOOLEAN && flag.content[0] !== 0x00) {
+    expect(at(parts, parts.length - 1, "TSTInfo extension extnValue"), DER_TAG.OCTET_STRING, "TSTInfo extension extnValue");
+    if (parts.length === 2) continue;
+    // `critical BOOLEAN DEFAULT FALSE`: present here, so it must be a BOOLEAN in
+    // the middle position. The reader has already refused any BOOLEAN octet
+    // other than 0x00 and 0xFF.
+    const flag = expect(at(parts, 1, "TSTInfo extension critical"), DER_TAG.BOOLEAN, "TSTInfo extension critical");
+    if (flag.content[0] !== 0x00) {
       refuse(`TSTInfo carries critical extension ${oid}, which this profile does not know (§6.1 rule 2).`);
     }
   }
@@ -564,11 +605,20 @@ function readSigningCertificateV2(value: DerElement): EssCertIdV2 {
  * trailerField [3] DEFAULT 1 }`.
  *
  * The OID names the scheme, not the hash, so a PSS signature over SHA-1 would
- * otherwise sail through an allowlist check that admits `id-RSASSA-PSS`. The
- * engine floors the parameter hash here; the port re-reads the same bytes for
- * the salt length it must pass to the platform.
+ * otherwise sail through an allowlist check that admits `id-RSASSA-PSS`. Two
+ * things are checked here, and the port re-reads the same bytes for the salt
+ * length it must pass to the platform:
+ *
+ * - the parameter hash is floored against the SHA-256 family (§6.1 rule 5);
+ * - it **equals** the SignerInfo `digestAlgorithm` (RFC 4056 §3). Without that
+ *   equality a token could declare SHA-512 in the SignerInfo, satisfy the floor
+ *   with SHA-256 in the parameters, and leave two layers disagreeing about
+ *   which hash the signature covers -- with the port obliged to pick one.
  */
-function assertPssParametersFloor(parameters: Uint8Array | undefined): void {
+function assertPssParametersFloor(
+  parameters: Uint8Array | undefined,
+  signerInfoDigestOid: string,
+): void {
   if (parameters === undefined) {
     refuse("RSASSA-PSS carries no parameters, so its digest defaults to SHA-1 (§6.1 rule 5).");
   }
@@ -581,12 +631,17 @@ function assertPssParametersFloor(parameters: Uint8Array | undefined): void {
     refuse("RSASSA-PSS-params omits hashAlgorithm, so it defaults to SHA-1 (§6.1 rule 5).");
   }
   const algorithm = readAlgorithmIdentifier(
-    at(children(hashAlgorithm, "RSASSA-PSS-params.hashAlgorithm"), 0, "RSASSA-PSS-params.hashAlgorithm"),
+    only(children(hashAlgorithm, "RSASSA-PSS-params.hashAlgorithm"), "RSASSA-PSS-params.hashAlgorithm"),
     "RSASSA-PSS-params.hashAlgorithm",
   );
   if (!ALLOWED_SIGNERINFO_DIGEST_OIDS.includes(algorithm.oid)) {
     refuse(
       `RSASSA-PSS-params.hashAlgorithm is ${algorithm.oid}, below the SHA-256 family floor (§6.1 rule 5).`,
+    );
+  }
+  if (algorithm.oid !== signerInfoDigestOid) {
+    refuse(
+      `RSASSA-PSS-params.hashAlgorithm is ${algorithm.oid} but the SignerInfo digestAlgorithm is ${signerInfoDigestOid}; RFC 4056 §3 requires them to agree.`,
     );
   }
 }
@@ -686,7 +741,7 @@ function verifyTimeStampToken(
     );
   }
   if (signerInfo.signatureAlgorithm.oid === OID_RSASSA_PSS) {
-    assertPssParametersFloor(signerInfo.signatureAlgorithm.parameters);
+    assertPssParametersFloor(signerInfo.signatureAlgorithm.parameters, signerInfo.digestAlgorithm.oid);
   }
 
   // --- Rule 12: the binding, from the caller's side -----------------------

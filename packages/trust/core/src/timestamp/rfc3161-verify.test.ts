@@ -26,7 +26,7 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { sha256 } from "@noble/hashes/sha2.js";
+import { sha256, sha384 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 
 import type {
@@ -45,6 +45,7 @@ import {
   OID_ID_SIGNED_DATA,
   OID_MESSAGE_DIGEST_ATTRIBUTE,
   OID_RSA_ENCRYPTION,
+  OID_RSASSA_PSS,
   OID_SHA256,
   OID_SHA384,
   OID_SIGNING_CERTIFICATE_V2_ATTRIBUTE,
@@ -77,6 +78,34 @@ const generalizedTime = (value: string): Uint8Array =>
   encodeDerElement(DER_TAG.GENERALIZED_TIME, new TextEncoder().encode(value));
 const tagged = (tagNumber: number, ...parts: Uint8Array[]): Uint8Array =>
   encodeDerElement(0xa0 | tagNumber, concat(parts));
+const boolean = (value: boolean): Uint8Array =>
+  encodeDerElement(DER_TAG.BOOLEAN, Uint8Array.of(value ? 0xff : 0x00));
+
+/** `id-sha1` -- named here rather than in `oids.ts`, which pins only algorithms
+ * this profile admits. */
+const OID_SHA1 = "1.3.14.3.2.26";
+const OID_MGF1 = "1.2.840.113549.1.1.8";
+
+/** `RSASSA-PSS-params`, with every field explicit unless a variant omits it. */
+function pssParameters(options: {
+  readonly hashOid?: string;
+  readonly mgfHashOid?: string;
+  readonly saltLength?: number;
+  readonly trailerField?: number;
+  readonly omitHash?: boolean;
+  readonly omitMgf?: boolean;
+  readonly omitSaltLength?: boolean;
+}): Uint8Array {
+  const hashOid = options.hashOid ?? OID_SHA256;
+  return seq(
+    ...(options.omitHash === true ? [] : [tagged(0, seq(oid(hashOid), nul()))]),
+    ...(options.omitMgf === true
+      ? []
+      : [tagged(1, seq(oid(OID_MGF1), seq(oid(options.mgfHashOid ?? hashOid), nul())))]),
+    ...(options.omitSaltLength === true ? [] : [tagged(2, int(options.saltLength ?? 32))]),
+    ...(options.trailerField === undefined ? [] : [tagged(3, int(options.trailerField))]),
+  );
+}
 
 const SUBJECT_SHA256 = "47fe3768e164b8663dd4da743c8f416fa09658c652f21617f45eea8a5a8a705c";
 const OTHER_SHA256 = "0000000000000000000000000000000000000000000000000000000000000001";
@@ -104,11 +133,20 @@ const SUBJECT_GENERAL_NAME = tagged(4, seq(oid("2.5.4.3")));
 interface TokenOptions {
   readonly subjectSha256?: string;
   readonly imprintAlgorithmOid?: string;
+  readonly digestAlgorithmOid?: string;
   readonly signatureAlgorithmOid?: string;
   readonly signatureAlgorithmParameters?: Uint8Array;
   readonly accuracySeconds?: number;
   readonly tsaGeneralName?: Uint8Array;
   readonly omitSigningCertificateV2?: boolean;
+  /** Raw `Extension` elements for the TSTInfo `extensions [1]` field. */
+  readonly tstInfoExtensions?: readonly Uint8Array[];
+  /** A second element beside SignedData inside `ContentInfo.content [0]`. */
+  readonly supernumeraryContent?: boolean;
+  /** A second OCTET STRING beside the body inside `eContent [0]`. */
+  readonly supernumeraryEContent?: boolean;
+  /** A second `certificates [0]` field in the SignedData tail. */
+  readonly duplicateCertificatesField?: boolean;
 }
 
 interface BuiltToken {
@@ -121,6 +159,10 @@ function buildToken(options: TokenOptions = {}): BuiltToken {
   const imprintAlgorithmOid = options.imprintAlgorithmOid ?? OID_SHA256;
   const signatureAlgorithmOid = options.signatureAlgorithmOid ?? OID_ECDSA_WITH_SHA256;
   const imprintDigest = hexToBytes(options.subjectSha256 ?? SUBJECT_SHA256);
+  const digestAlgorithmOid = options.digestAlgorithmOid ?? OID_SHA256;
+  // The messageDigest attribute must be the digest of eContent under whatever
+  // the SignerInfo declares, or rule 4 refuses before the rule under test runs.
+  const digest = digestAlgorithmOid === OID_SHA384 ? sha384 : sha256;
 
   const eContent = seq(
     int(1),
@@ -130,11 +172,12 @@ function buildToken(options: TokenOptions = {}): BuiltToken {
     generalizedTime(GEN_TIME_DER),
     ...(options.accuracySeconds === undefined ? [] : [seq(int(options.accuracySeconds))]),
     ...(options.tsaGeneralName === undefined ? [] : [tagged(0, options.tsaGeneralName)]),
+    ...(options.tstInfoExtensions === undefined ? [] : [tagged(1, ...options.tstInfoExtensions)]),
   );
 
   const attributes = [
     seq(oid(OID_CONTENT_TYPE_ATTRIBUTE), set(oid(OID_ID_CT_TST_INFO))),
-    seq(oid(OID_MESSAGE_DIGEST_ATTRIBUTE), set(octet(sha256(eContent)))),
+    seq(oid(OID_MESSAGE_DIGEST_ATTRIBUTE), set(octet(digest(eContent)))),
     ...(options.omitSigningCertificateV2
       ? []
       : [
@@ -152,7 +195,7 @@ function buildToken(options: TokenOptions = {}): BuiltToken {
   const signerInfo = seq(
     int(1),
     seq(seq(oid("2.5.4.3")), encodeDerElement(DER_TAG.INTEGER, Uint8Array.of(0x2a))),
-    seq(oid(OID_SHA256)),
+    seq(oid(digestAlgorithmOid)),
     signedAttrs,
     options.signatureAlgorithmParameters === undefined
       ? seq(oid(signatureAlgorithmOid))
@@ -162,14 +205,23 @@ function buildToken(options: TokenOptions = {}): BuiltToken {
 
   const signedData = seq(
     int(3),
-    set(seq(oid(OID_SHA256))),
-    seq(oid(OID_ID_CT_TST_INFO), tagged(0, octet(eContent))),
+    set(seq(oid(digestAlgorithmOid))),
+    seq(
+      oid(OID_ID_CT_TST_INFO),
+      options.supernumeraryEContent === true
+        ? tagged(0, octet(eContent), octet(eContent))
+        : tagged(0, octet(eContent)),
+    ),
     tagged(0, CERTIFICATE_DER),
+    ...(options.duplicateCertificatesField === true ? [tagged(0, CERTIFICATE_DER)] : []),
     set(signerInfo),
   );
 
   return {
-    tokenDer: seq(oid(OID_ID_SIGNED_DATA), tagged(0, signedData)),
+    tokenDer: seq(
+      oid(OID_ID_SIGNED_DATA),
+      options.supernumeraryContent === true ? tagged(0, signedData, signedData) : tagged(0, signedData),
+    ),
     signedAttrsSetOf,
     eContent,
   };
@@ -524,6 +576,140 @@ describe("the RFC 3161 anchor proof verifier (design §6.1)", () => {
         proofBytes: buildToken().tokenDer,
       });
       expect(result.status).toBe("invalid");
+    });
+
+    describe("TSTInfo extensions (rule 2)", () => {
+      const UNKNOWN_OID = "2.999.2";
+      const extnValue = octet(Uint8Array.of(0x00));
+
+      test("a non-critical unknown extension is ignored, which is what critical means", () => {
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            tstInfoExtensions: [seq(oid(UNKNOWN_OID), extnValue)],
+          }).tokenDer,
+        });
+        expect(result.status).toBe("present");
+      });
+
+      test("an explicitly non-critical unknown extension is ignored", () => {
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            tstInfoExtensions: [seq(oid(UNKNOWN_OID), boolean(false), extnValue)],
+          }).tokenDer,
+        });
+        expect(result.status).toBe("present");
+      });
+
+      test("a critical unknown extension is invalid", () => {
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            tstInfoExtensions: [seq(oid(UNKNOWN_OID), boolean(true), extnValue)],
+          }).tokenDer,
+        });
+        expect(result.status).toBe("invalid");
+        expect(result.status === "invalid" && result.reason).toContain("critical extension");
+      });
+
+      test("a critical flag encoded after extnValue is invalid, not read as absent", () => {
+        // The measured evasion: `{ extnID, extnValue, critical }` puts a TRUE
+        // flag past a position-based read, so an extension that a shape-blind
+        // verifier calls non-critical is in fact critical.
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            tstInfoExtensions: [seq(oid(UNKNOWN_OID), extnValue, boolean(true))],
+          }).tokenDer,
+        });
+        expect(result.status).toBe("invalid");
+      });
+
+      test("an extension with a fourth element is invalid", () => {
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            tstInfoExtensions: [seq(oid(UNKNOWN_OID), boolean(false), extnValue, extnValue)],
+          }).tokenDer,
+        });
+        expect(result.status).toBe("invalid");
+      });
+    });
+
+    describe("supernumerary elements in tagged positions", () => {
+      test.each([
+        ["ContentInfo.content [0] holding two SignedDatas", { supernumeraryContent: true }],
+        ["eContent [0] holding two OCTET STRINGs", { supernumeraryEContent: true }],
+        ["a second certificates [0] field", { duplicateCertificatesField: true }],
+      ])("%s is invalid", (_name, options: TokenOptions) => {
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken(options).tokenDer,
+        });
+        expect(result.status).toBe("invalid");
+      });
+    });
+
+    describe("RSASSA-PSS parameters (rule 5, RFC 4056 §3)", () => {
+      test("parameters whose hash matches the SignerInfo digest reach the port", () => {
+        const recorder = recordingPorts();
+        const result = createRfc3161AnchorProofVerifier(recorder.ports).verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            signatureAlgorithmOid: OID_RSASSA_PSS,
+            signatureAlgorithmParameters: pssParameters({}),
+          }).tokenDer,
+        });
+        expect(result.status).toBe("present");
+        // The engine floors the parameters; the port re-reads the same bytes for
+        // the salt length, so they must arrive intact.
+        expect(recorder.signatureCalls[0]!.digestAlgorithmOid).toBe(OID_SHA256);
+        expect(bytesToHex(recorder.signatureCalls[0]!.parameters!))
+          .toBe(bytesToHex(pssParameters({})));
+      });
+
+      test.each([
+        ["absent parameters", undefined],
+        ["parameters omitting hashAlgorithm", pssParameters({ omitHash: true })],
+        ["a SHA-1 parameter hash", pssParameters({ hashOid: OID_SHA1 })],
+      ])("%s is invalid", (_name, parameters: Uint8Array | undefined) => {
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            signatureAlgorithmOid: OID_RSASSA_PSS,
+            ...(parameters === undefined ? {} : { signatureAlgorithmParameters: parameters }),
+          }).tokenDer,
+        });
+        expect(result.status).toBe("invalid");
+      });
+
+      test("a parameter hash disagreeing with the SignerInfo digest is invalid", () => {
+        // Both are inside the floor, so only the equality rule catches this --
+        // two layers naming different hashes leaves the port to pick one.
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            digestAlgorithmOid: OID_SHA384,
+            signatureAlgorithmOid: OID_RSASSA_PSS,
+            signatureAlgorithmParameters: pssParameters({ hashOid: OID_SHA256 }),
+          }).tokenDer,
+        });
+        expect(result.status).toBe("invalid");
+        expect(result.status === "invalid" && result.reason).toContain("RFC 4056");
+      });
+
+      test("a matching SHA-384 pair is accepted", () => {
+        const result = verifier.verifyProof({
+          subjectSha256: SUBJECT_SHA256,
+          proofBytes: buildToken({
+            digestAlgorithmOid: OID_SHA384,
+            signatureAlgorithmOid: OID_RSASSA_PSS,
+            signatureAlgorithmParameters: pssParameters({ hashOid: OID_SHA384, saltLength: 48 }),
+          }).tokenDer,
+        });
+        expect(result.status).toBe("present");
+      });
     });
 
     test("a sid matching the certificate's subjectKeyIdentifier form is accepted (rule 7)", () => {

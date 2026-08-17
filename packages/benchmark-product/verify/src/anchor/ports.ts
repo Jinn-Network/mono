@@ -57,9 +57,11 @@ import {
   OID_SHA384_WITH_RSA_ENCRYPTION,
   OID_SHA512,
   OID_SHA512_WITH_RSA_ENCRYPTION,
+  compareCalendarStrictRfc3339Instants,
   decodeDer,
   decodeDerChildren,
   encodeDerElement,
+  isCalendarStrictRfc3339,
   readDerOid,
 } from "@jinn-network/trust-core";
 import type {
@@ -326,9 +328,21 @@ export const anchorCertificateReader: AnchorCertificateReader = {
  * or adversarial certificate set from looping. */
 const MAX_CHAIN_DEPTH = 8;
 
-function validAt(certificate: X509Certificate, instant: number): boolean {
-  return certificate.validFromDate.getTime() <= instant
-    && instant <= certificate.validToDate.getTime();
+/**
+ * Validity at the instant the caller named, judged by the same calendar-strict
+ * RFC 3339 comparator every other trust instant goes through.
+ *
+ * `Date.parse` is deliberately not used. This port is a public export, its
+ * `atTime` can arrive from anywhere, and `Date.parse` accepts bare dates
+ * (`"2026-08-17"`), reads some spellings as local time, and falls back to
+ * implementation-defined parsing for the rest -- three ways for a chain to be
+ * validated at an instant nobody named. A string the comparator cannot judge
+ * yields `undefined`, which reads here as "cannot validate", never as "valid".
+ */
+function validAt(certificate: X509Certificate, atTime: string): boolean {
+  const notBefore = compareCalendarStrictRfc3339Instants(atTime, toRfc3339(certificate.validFromDate));
+  const notAfter = compareCalendarStrictRfc3339Instants(atTime, toRfc3339(certificate.validToDate));
+  return notBefore !== undefined && notAfter !== undefined && notBefore >= 0 && notAfter <= 0;
 }
 
 export const anchorChainVerifier: AnchorChainVerifier = {
@@ -338,8 +352,7 @@ export const anchorChainVerifier: AnchorChainVerifier = {
       // solely against bundle-supplied roots would re-import the self-run
       // problem with extra ceremony. An empty set can never verify.
       if (input.trustAnchorsDer.length === 0) return false;
-      const instant = Date.parse(input.atTime);
-      if (Number.isNaN(instant)) return false;
+      if (!isCalendarStrictRfc3339(input.atTime)) return false;
 
       const anchors = input.trustAnchorsDer.map((der) => new X509Certificate(Buffer.from(der)));
       const anchorFingerprints = new Set(anchors.map((anchor) => anchor.fingerprint256));
@@ -354,7 +367,7 @@ export const anchorChainVerifier: AnchorChainVerifier = {
         // Validity is judged at the token's own genTime, not at the wall clock:
         // a historical token with an expired-but-then-valid chain must not fail
         // for the wrong reason.
-        if (!validAt(current, instant)) return false;
+        if (!validAt(current, input.atTime)) return false;
 
         // A certificate that *is* one of the roots the operator supplied needs
         // no issuance check: the operator trusted those exact bytes, which is
@@ -366,7 +379,7 @@ export const anchorChainVerifier: AnchorChainVerifier = {
         if (anchorFingerprints.has(current.fingerprint256)) return true;
 
         const leaf = current;
-        if (anchors.some((anchor) => issued(leaf, anchor) && validAt(anchor, instant))) return true;
+        if (anchors.some((anchor) => issued(leaf, anchor) && validAt(anchor, input.atTime))) return true;
         const issuer = chain.find((candidate) =>
           candidate.fingerprint256 !== leaf.fingerprint256 && issued(leaf, candidate));
         if (issuer === undefined) return false;
@@ -379,11 +392,29 @@ export const anchorChainVerifier: AnchorChainVerifier = {
   },
 };
 
-/** Name/authority-key linkage plus an actual signature check: `checkIssued`
- * alone compares names, which is not evidence of anything. */
+/**
+ * Whether `issuer` may issue `certificate`, and did.
+ *
+ * `checkIssued` covers name linkage, the authority/subject key identifiers when
+ * present, and the issuer's `keyCertSign` key usage -- but **not** basic
+ * constraints, so a `CA:FALSE` end-entity certificate that happens to assert
+ * `keyCertSign` passes it. That is a measured bypass, not a theoretical one: it
+ * would let a leaf be spliced in as an intermediate. `issuer.ca` is therefore
+ * required before the name check, and the signature is verified after it,
+ * because `checkIssued` proves relationship and not authorship.
+ *
+ * **Disclosed gaps**, in the style §16 uses for the extension-criticality gap
+ * (issue #2761's family): this walk checks issuance, key usage, basic
+ * constraints, and validity at the caller's instant. It does **not** check
+ * revocation (no CRL or OCSP is fetched -- acquisition never runs at
+ * verification time, §4.3), `pathLenConstraint`, or name constraints. A verifier
+ * that needs those runs its own path validation over the same carried chain;
+ * naming the gap is the honest form, and papering over it with a partial
+ * implementation would be worse than either.
+ */
 function issued(certificate: X509Certificate, issuer: X509Certificate): boolean {
   try {
-    return certificate.checkIssued(issuer) && certificate.verify(issuer.publicKey);
+    return issuer.ca && certificate.checkIssued(issuer) && certificate.verify(issuer.publicKey);
   } catch {
     return false;
   }
