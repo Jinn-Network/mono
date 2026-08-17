@@ -34,13 +34,16 @@ const OUT = resolve(REPO_ROOT, "docs/superpowers/plans/demo-report-1/E1-e2e-fixt
 const taskId = process.env.SKILLSBENCH_E2E_TASK ?? "3d-scan-calc";
 
 
-const sh = (c, o = {}) => execSync(c, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...o });
-const gitBlobId = (b) => createHash("sha1").update(`blob ${b.length}\0`, "utf8").update(b).digest("hex");
+interface TreeEntry { readonly path: string; readonly type: string; readonly mode: string; readonly sha: string; readonly size?: number }
+
+const sh = (c: string, o: Record<string, unknown> = {}): string =>
+  execSync(c, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...o }) as unknown as string;
+const gitBlobId = (b: Buffer): string => createHash("sha1").update(`blob ${b.length}\0`, "utf8").update(b).digest("hex");
 
 describe.skipIf(!ENABLED)("SkillsBench non-model end-to-end fixture", () => {
   it("drives one unit through all three arms in real containers", { timeout: 3_600_000 }, async () => {
 
-    function blob(id) {
+    function blob(id: string): Buffer {
       mkdirSync(CACHE, { recursive: true });
       const cached = join(CACHE, id);
       if (existsSync(cached)) {
@@ -57,7 +60,7 @@ describe.skipIf(!ENABLED)("SkillsBench non-model end-to-end fixture", () => {
     }
 
     const treeCache = join(CACHE, `tree-b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af.json`);
-    const tree = JSON.parse(readFileSync(treeCache, "utf8")).tree
+    const tree = (JSON.parse(readFileSync(treeCache, "utf8")).tree as TreeEntry[])
       .filter((e) => e.type === "blob" && e.path.startsWith(`${taskId}/`));
     if (tree.length === 0) throw new Error(`${taskId} has no entries in the cached tree`);
 
@@ -75,17 +78,21 @@ describe.skipIf(!ENABLED)("SkillsBench non-model end-to-end fixture", () => {
     }));
     const statementText = readFileSync(join(dir, "task.md"), "utf8");
     const front = /^---\n([\s\S]*?)\n---\n/u.exec(statementText);
-    const scalar = (k) => (new RegExp(`^\\s{2}${k}:\\s*(\\S+)`, "mu").exec(front[1]) ?? [])[1]?.replace(/^["']|["']$/gu, "");
+    if (front === null) throw new Error(`${taskId}: task.md has no frontmatter`);
+    const scalar = (k: string): string | undefined =>
+      (new RegExp(`^\\s{2}${k}:\\s*(\\S+)`, "mu").exec(front[1]!) ?? [])[1]?.replace(/^["']|["']$/gu, "");
     const folders = [...new Set(entries.filter((e) => e.path.startsWith("environment/skills/") && e.path.split("/").length > 3)
       .map((e) => e.path.split("/")[2]))];
     const skills = folders.map((folder) => ({
       folder, skillMd: readFileSync(join(dir, "environment", "skills", folder, "SKILL.md"), "utf8"),
     }));
 
+    const statementEntry = tree.find((e) => e.path.endsWith("/task.md"));
+    if (statementEntry === undefined) throw new Error(`${taskId}: no task.md in the tree`);
     const unit = buildSkillsBenchUnit({
       task: { name: taskId, treeSha: "0".repeat(40), packageDigest: "0".repeat(64) },
       statement: {
-        path: "task.md", gitBlob: tree.find((e) => e.path.endsWith("/task.md")).sha, bytes: statementText.length,
+        path: "task.md", gitBlob: statementEntry.sha, bytes: statementText.length,
         frontmatter: {
           networkMode: scalar("network_mode") ?? "public", verifierType: scalar("type") ?? "test-script",
           agentTimeoutSec: 900, verifierTimeoutSec: 900,
@@ -109,21 +116,28 @@ describe.skipIf(!ENABLED)("SkillsBench non-model end-to-end fixture", () => {
     // Pin the base image and build once; every arm runs the same image.
     const dockerfile = join(dir, "environment", "Dockerfile");
     const text = readFileSync(dockerfile, "utf8");
-    const reference = /^FROM\s+(\S+)/mu.exec(text)[1];
+    // `FROM` may carry flags (`FROM --platform=… image`); the reference is the first non-flag token.
+    const fromLine = /^FROM\s+(.+)$/mu.exec(text);
+    if (fromLine === null) throw new Error(`${taskId}: Dockerfile has no FROM`);
+    const fromTokens = fromLine[1]!.trim().split(/\s+/u);
+    const referenceIndex = fromTokens.findIndex((token) => !token.startsWith("--"));
+    const reference = fromTokens[referenceIndex]!;
     sh(`docker pull -q ${reference}`);
     const baseDigest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim();
-    writeFileSync(join(dir, "environment", "Dockerfile.pinned"), text.replace(/^FROM\s+\S+/mu, `FROM ${baseDigest}`));
+    const pinnedTokens = [...fromTokens];
+    pinnedTokens[referenceIndex] = baseDigest;
+    writeFileSync(join(dir, "environment", "Dockerfile.pinned"), text.replace(/^FROM\s+.+$/mu, `FROM ${pinnedTokens.join(" ")}`));
     const tag = `jinn-demo1/${taskId}:e2e`;
     sh(`docker build -q -f ${join(dir, "environment", "Dockerfile.pinned")} -t ${tag} ${join(dir, "environment")}`,
       { timeout: 1_800_000 });
 
-    const arms = ["A-native-skill", "B-flat-claude-md", "C-no-instructions"];
+    const arms = ["A-native-skill", "B-flat-claude-md", "C-no-instructions"] as const;
     const workspaces = arms.map((arm) => materializeSkillsBenchWorkspace({
       treatment, arm, packageDir: dir, workspaceDir: join(dir, `ws-${arm}`), claudeMd,
     }));
     verifySkillsBenchWorkspaceTriple(workspaces);
 
-    const results = {};
+    const results: Record<string, { reward: string | null; outcome: string; files: number; resourceParityDigest: string; argv: number }> = {};
     for (const workspace of workspaces) {
       // The NO-OP agent: it does nothing. Every arm must therefore score zero, and any arm that does
       // not has leaked its own answer through materialization.

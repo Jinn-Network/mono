@@ -201,7 +201,7 @@ describe.skipIf(!ENABLED)("Colophon SkillsBench calibration report", () => {
     const artifacts = new Map<string, Uint8Array>();
     const methodBytes = json({ verifier: "skillsbench test.sh", reward: "/logs/verifier/reward.txt", fullSuccess: 1 });
     const methodDigest = recordDigest(methodBytes);
-    const members: Parameters<typeof sealEvidenceCohort>[0]["members"] = [];
+    const members: Array<{ memberKey: string } & Record<string, unknown>> = [];
 
     let index = 1;
     for (const [taskId, row] of units) {
