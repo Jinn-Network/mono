@@ -69,7 +69,7 @@ test('the publisher verifies strict GitHub provenance policy before its receipt-
   assert.ok(block.includes('--release-group ${{ matrix.release_group }}'));
   assert.ok(block.includes('--verification-receipt ".platform-verification-receipt/${{ matrix.release_group }}/verification-receipt.json"'));
   assert.match(block, /--lane canary/u);
-  assert.match(block, /matrix:\n\s+release_group:\n\s+- implementations-v1\n\s+- sealed-platform-v1/u);
+  assert.match(block, /matrix:\n\s+release_group:\n\s+- sealed-platform-v1\n\s+- implementations-v1/u);
 });
 
 test('the final deterministic publication receipt is attested and uploaded', () => {

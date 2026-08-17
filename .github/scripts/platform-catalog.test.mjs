@@ -867,11 +867,34 @@ test('the fixture catalog still exposes one stack-published group', () => {
   );
 });
 
+test('stackPublishedReleaseGroupIds emits callee groups before dependents', () => {
+  const catalog = {
+    releaseGroups: {
+      'implementations-v1': {
+        stackPublished: true,
+        allowedDependencyReleaseGroups: ['implementations-v1', 'sealed-platform-v1'],
+      },
+      'sealed-platform-v1': {
+        stackPublished: true,
+        allowedDependencyReleaseGroups: ['sealed-platform-v1'],
+      },
+      'experimental-policy': {
+        stackPublished: false,
+        allowedDependencyReleaseGroups: ['experimental-policy'],
+      },
+    },
+  };
+  assert.deepEqual(stackPublishedReleaseGroupIds(catalog), [
+    'sealed-platform-v1',
+    'implementations-v1',
+  ]);
+});
+
 test('the live catalog publishes sealed-platform-v1 and implementations-v1', () => {
   const catalog = loadPlatformCatalog(repoRoot);
   assert.deepEqual(stackPublishedReleaseGroupIds(catalog), [
-    'implementations-v1',
     'sealed-platform-v1',
+    'implementations-v1',
   ]);
   const sealed = catalog.releaseGroups['sealed-platform-v1'];
   const implementations = catalog.releaseGroups['implementations-v1'];

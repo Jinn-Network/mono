@@ -177,6 +177,8 @@ jobs:
           CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
           LANE: ${{ inputs.lane }}
         run: |
+          # Sequential pack follows stackPublishedReleaseGroupIds so sealed
+          # packages write dist/ before implementations compile against them.
           groups="$(node --input-type=module <<'NODE'
           import { loadPlatformCatalog, stackPublishedReleaseGroupIds } from './.github/scripts/platform-catalog.mjs';
           process.stdout.write(stackPublishedReleaseGroupIds(loadPlatformCatalog(process.cwd())).join('\n'));

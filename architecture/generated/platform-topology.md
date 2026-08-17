@@ -416,6 +416,30 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/trust-testing | runtime | @jinn-network/trust-resolve |
 
 
+### `sealed-platform-v1` runtime waves
+
+1. `@jinn-network/chain-environment-record`, `@jinn-network/environment-record`, `@jinn-network/evidence-protocol`, `@jinn-network/task-execution-protocol`, `@jinn-network/trust-core`
+2. `@jinn-network/benchmarking-protocol`, `@jinn-network/benchmarking-records`, `@jinn-network/evidence-trace`, `@jinn-network/record-discovery-protocol`, `@jinn-network/task-execution-profiles`, `@jinn-network/trust-authoring`
+3. `@jinn-network/benchmarking-testing`, `@jinn-network/record-discovery-testing`
+
+### `sealed-platform-v1` transitive closure
+
+| Package | Runtime closure |
+| --- | --- |
+| @jinn-network/benchmarking-protocol | @jinn-network/evidence-protocol |
+| @jinn-network/benchmarking-records | @jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
+| @jinn-network/benchmarking-testing | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
+| @jinn-network/chain-environment-record | — |
+| @jinn-network/environment-record | — |
+| @jinn-network/evidence-protocol | — |
+| @jinn-network/evidence-trace | @jinn-network/evidence-protocol<br>@jinn-network/trust-core |
+| @jinn-network/record-discovery-protocol | @jinn-network/trust-core |
+| @jinn-network/record-discovery-testing | @jinn-network/record-discovery-protocol<br>@jinn-network/trust-core |
+| @jinn-network/task-execution-profiles | @jinn-network/task-execution-protocol |
+| @jinn-network/task-execution-protocol | — |
+| @jinn-network/trust-authoring | @jinn-network/trust-core |
+| @jinn-network/trust-core | — |
+
 ### `implementations-v1` runtime waves
 
 1. `@jinn-network/benchmarking-aggregate`, `@jinn-network/benchmarking-interop`, `@jinn-network/benchmarking-run`, `@jinn-network/chain-environment-verification`, `@jinn-network/environment-verification`, `@jinn-network/evidence-derivation`, `@jinn-network/evidence-repository`, `@jinn-network/evidence-trace-decode`, `@jinn-network/execution-evidence-builder`, `@jinn-network/information-world`, `@jinn-network/record-discovery-client`, `@jinn-network/record-discovery-facts-benchmarking`, `@jinn-network/record-discovery-facts-environments`, `@jinn-network/record-discovery-facts-task-execution`, `@jinn-network/record-discovery-facts-trust`, `@jinn-network/record-discovery-serve`, `@jinn-network/task-admission`, `@jinn-network/task-curation`, `@jinn-network/task-execution-backend`, `@jinn-network/task-execution-workspace`, `@jinn-network/trust-resolve`
@@ -488,30 +512,6 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/task-posting | @jinn-network/marketplace-binding<br>@jinn-network/task-execution-backend<br>@jinn-network/trust-resolve |
 | @jinn-network/trust-resolve | — |
 | @jinn-network/trust-testing | @jinn-network/trust-resolve |
-
-### `sealed-platform-v1` runtime waves
-
-1. `@jinn-network/chain-environment-record`, `@jinn-network/environment-record`, `@jinn-network/evidence-protocol`, `@jinn-network/task-execution-protocol`, `@jinn-network/trust-core`
-2. `@jinn-network/benchmarking-protocol`, `@jinn-network/benchmarking-records`, `@jinn-network/evidence-trace`, `@jinn-network/record-discovery-protocol`, `@jinn-network/task-execution-profiles`, `@jinn-network/trust-authoring`
-3. `@jinn-network/benchmarking-testing`, `@jinn-network/record-discovery-testing`
-
-### `sealed-platform-v1` transitive closure
-
-| Package | Runtime closure |
-| --- | --- |
-| @jinn-network/benchmarking-protocol | @jinn-network/evidence-protocol |
-| @jinn-network/benchmarking-records | @jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
-| @jinn-network/benchmarking-testing | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core |
-| @jinn-network/chain-environment-record | — |
-| @jinn-network/environment-record | — |
-| @jinn-network/evidence-protocol | — |
-| @jinn-network/evidence-trace | @jinn-network/evidence-protocol<br>@jinn-network/trust-core |
-| @jinn-network/record-discovery-protocol | @jinn-network/trust-core |
-| @jinn-network/record-discovery-testing | @jinn-network/record-discovery-protocol<br>@jinn-network/trust-core |
-| @jinn-network/task-execution-profiles | @jinn-network/task-execution-protocol |
-| @jinn-network/task-execution-protocol | — |
-| @jinn-network/trust-authoring | @jinn-network/trust-core |
-| @jinn-network/trust-core | — |
 
 ## Release and trusted publishers
 

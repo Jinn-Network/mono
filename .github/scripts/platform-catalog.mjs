@@ -754,10 +754,28 @@ export function loadCatalogPackages(repoRoot, { releaseGroup } = {}) {
 }
 
 export function stackPublishedReleaseGroupIds(catalog) {
-  return Object.entries(catalog.releaseGroups)
+  const ids = Object.entries(catalog.releaseGroups)
     .filter(([, group]) => group.stackPublished === true)
-    .map(([groupId]) => groupId)
-    .sort();
+    .map(([groupId]) => groupId);
+  const idSet = new Set(ids);
+  const remaining = new Set(ids);
+  const ordered = [];
+  while (remaining.size > 0) {
+    const wave = [...remaining]
+      .filter((id) => {
+        const allowed = catalog.releaseGroups[id].allowedDependencyReleaseGroups ?? [];
+        return allowed.every((dep) => dep === id || !idSet.has(dep) || !remaining.has(dep));
+      })
+      .sort();
+    if (wave.length === 0) {
+      throw new Error(
+        `dependency cycle among stack-published release groups: ${[...remaining].sort().join(', ')}`,
+      );
+    }
+    for (const id of wave) remaining.delete(id);
+    ordered.push(...wave);
+  }
+  return ordered;
 }
 
 export function requireStackPublishedReleaseGroup(catalog, releaseGroup) {

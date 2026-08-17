@@ -52,8 +52,8 @@ jobs:
       fail-fast: false
       matrix:
         release_group:
-          - implementations-v1
           - sealed-platform-v1
+          - implementations-v1
     permissions:
       contents: read
       id-token: write
