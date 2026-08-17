@@ -383,6 +383,16 @@
       }
     },
     {
+      "operation": "selectTerminalBench21Runtime",
+      "cliVerb": "runtime terminal-bench-2-1 select",
+      "authorityGated": false,
+      "description": "Resolves a named Terminal-Bench 2.1 slice and binds it to the managed Harbor runtime.",
+      "gui": {
+        "status": "unavailable",
+        "reason": "requires server-configured Terminal-Bench 2.1 and Harbor host paths; browser-supplied paths are forbidden"
+      }
+    },
+    {
       "operation": "selectTerminalBench2Runtime",
       "cliVerb": "runtime terminal-bench-2 select",
       "authorityGated": false,

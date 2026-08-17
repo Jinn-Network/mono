@@ -53,6 +53,8 @@ import {
   INSPECT_SEPARATE_ASSURANCE_LIMITATIONS,
 } from "../runtime/inspect/assurance.js";
 import { INSPECT_ADAPTER_ID } from "../runtime/inspect/manifest.js";
+import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { suiteFactsFromHarborManifest } from "../runtime/suite-protocol/from-harbor.js";
 import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
@@ -199,6 +201,22 @@ export async function verifyRunWorkspace(
       const claim = claimParsed.data;
 
       const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
+      const inspectAdditional = document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
+        && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
+        ? [...INSPECT_SEPARATE_ASSURANCE_LIMITATIONS]
+        : [];
+      const suiteFacts = document.spec.evaluationRuntime?.adapterId === "harbor"
+        ? suiteFactsFromHarborManifest({
+          manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(context.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+          armCount: runRecord.arms.length,
+          itemCount: new Set(matrixRecord.cells.map((cell) => cell.taskDigest)).size,
+          replicates: runRecord.replicates,
+        })
+        : undefined;
+      const additionalLimitations = [
+        ...inspectAdditional,
+        ...(suiteFacts?.limitation === undefined ? [] : [suiteFacts.limitation]),
+      ];
       assertClaimConsistency({
         claim,
         identities: {
@@ -214,10 +232,14 @@ export async function verifyRunWorkspace(
         runRecord,
         draftId: input.draftId,
         assurancePreset: document.spec.assurance.preset,
-        ...(document.spec.evaluationRuntime?.adapterId === INSPECT_ADAPTER_ID
-          && deriveInspectEvaluationStrategy(runRecord.policy.evaluation) === "separate-log-verification"
-          ? { additionalLimitations: INSPECT_SEPARATE_ASSURANCE_LIMITATIONS }
-          : {}),
+        ...(additionalLimitations.length > 0 ? { additionalLimitations } : {}),
+        ...(suiteFacts === undefined ? {} : {
+          suiteComparability: {
+            executionConformance: suiteFacts.quote.executionConformance,
+            coverage: suiteFacts.quote.coverage,
+            leaderboardSubmitReady: suiteFacts.quote.leaderboardSubmitReady,
+          },
+        }),
         ...(previewLog === undefined
           ? {}
           : {

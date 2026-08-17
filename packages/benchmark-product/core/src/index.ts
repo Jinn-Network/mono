@@ -155,6 +155,33 @@ export type {
   TerminalBenchMigrationRequest,
   TerminalBenchMigrationResolution,
 } from "./runtime/terminal-bench-2/host.js";
+export {
+  TERMINAL_BENCH_2_1_DATASET_ID,
+  TERMINAL_BENCH_2_1_DATASET_REF,
+  TERMINAL_BENCH_2_1_PROFILE,
+  TERMINAL_BENCH_2_1_SELECTION_ROLE,
+  TerminalBench21SelectionManifestSchema,
+  terminalBench21SelectionBytes,
+} from "./runtime/terminal-bench-2-1/manifest.js";
+export type { TerminalBench21SelectionManifest } from "./runtime/terminal-bench-2-1/manifest.js";
+export { resolveTerminalBench21Selection } from "./runtime/terminal-bench-2-1/host.js";
+export type {
+  TerminalBench21SelectionRequest,
+  TerminalBench21SelectionResolution,
+} from "./runtime/terminal-bench-2-1/host.js";
+export {
+  SUITE_NOT_LEADERBOARD_READY_LIMITATION,
+  deriveSuiteComparability,
+  officialHarborExecutionConformance,
+  suiteLeaderboardLimitation,
+} from "./runtime/suite-protocol/comparability.js";
+export type { SuiteComparability, SuiteCoverage } from "./runtime/suite-protocol/comparability.js";
+export {
+  SUITE_PROTOCOL_PROFILE,
+  SUITE_PROTOCOL_SELECTION_ROLE,
+  coverageFromSelectedNames,
+  namedSliceTaskNames,
+} from "./runtime/suite-protocol/manifest.js";
 export type {
   AgentRuntimeReadiness,
   AgentRuntimeReadinessCode,
@@ -470,6 +497,7 @@ export {
   selectInspectEvaluation,
   selectHarborRuntime,
   selectTerminalBench2Runtime,
+  selectTerminalBench21Runtime,
   migrateTerminalBenchLegacyTask,
   updateDraft,
 } from "./operations/index.js";
@@ -550,6 +578,8 @@ export type {
   RunStatusCell,
   SelectTerminalBench2RuntimeInput,
   SelectTerminalBench2RuntimeResult,
+  SelectTerminalBench21RuntimeInput,
+  SelectTerminalBench21RuntimeResult,
   RunStatusCounts,
   RunDriverStatus,
   RunStatusResult,

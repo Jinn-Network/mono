@@ -85,11 +85,26 @@ export async function resolveHarborSelection(input: HarborRuntimeSelectionReques
   assertSupportedHarborVersion(resolvedVersion);
   const resolved = resolveHarborMaterial(input.source);
   const materialRoot = realpathSync(input.source.materialPath);
-  const taskTomlPaths = resolved.files.filter((file) => file.path === "task.toml" || file.path.endsWith("/task.toml"));
-  if (taskTomlPaths.length !== 1) throw new TypeError("selected Harbor source must contain exactly one executable task.toml");
-  const taskToml = readFileSync(join(materialRoot, taskTomlPaths[0]!.path), "utf8");
-  const image = /^\s*docker_image\s*=\s*["']([^"']+)["']/mu.exec(taskToml)?.[1];
-  if (image !== input.environment.image) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
+  const selectedNames = input.source.kind === "dataset" && input.source.taskNames !== undefined
+    ? [...input.source.taskNames]
+    : undefined;
+  if (selectedNames !== undefined) {
+    for (const name of selectedNames) {
+      const relative = `${name}/task.toml`;
+      if (!resolved.files.some((file) => file.path === relative)) {
+        throw new TypeError(`selected Harbor dataset is missing package ${relative}`);
+      }
+      const taskToml = readFileSync(join(materialRoot, relative), "utf8");
+      const image = /^\s*docker_image\s*=\s*["']([^"']+)["']/mu.exec(taskToml)?.[1];
+      if (image !== input.environment.image) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
+    }
+  } else {
+    const taskTomlPaths = resolved.files.filter((file) => file.path === "task.toml" || file.path.endsWith("/task.toml"));
+    if (taskTomlPaths.length !== 1) throw new TypeError("selected Harbor source must contain exactly one executable task.toml");
+    const taskToml = readFileSync(join(materialRoot, taskTomlPaths[0]!.path), "utf8");
+    const image = /^\s*docker_image\s*=\s*["']([^"']+)["']/mu.exec(taskToml)?.[1];
+    if (image !== input.environment.image) throw new TypeError("selected Harbor task material does not pin the selected OCI image digest");
+  }
   const source = input.source.kind === "task"
     ? { kind: "task" as const, input: input.source.input, jobInput: { path: ".jinn-harbor/task" as const }, resolved }
     : {

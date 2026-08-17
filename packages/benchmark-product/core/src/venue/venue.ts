@@ -131,6 +131,7 @@ import {
 import { HARBOR_ADAPTER_ID, HarborSelectionManifestSchema, type HarborSelectionManifest } from "../runtime/harbor/manifest.js";
 import { readHarborHostBinding } from "../runtime/harbor/host.js";
 import { makeHarborLauncher, HARBOR_LAUNCHER_ID } from "../runtime/harbor/launcher.js";
+import { suiteSelectionFromHarbor, taskNameByDigestFromSuite } from "../runtime/suite-protocol/from-harbor.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   createEvaluationCellRegistry,
@@ -776,6 +777,9 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
           selectionManifestSha256: options.evaluationRuntime!.selectionManifestSha256,
           manifest: harborSelection,
           host: harborHost,
+          ...(suiteSelectionFromHarbor(harborSelection) === undefined
+            ? {}
+            : { taskNameByDigest: taskNameByDigestFromSuite(suiteSelectionFromHarbor(harborSelection)!) }),
         },
       }),
   });

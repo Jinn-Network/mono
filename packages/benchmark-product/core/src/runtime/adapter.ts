@@ -69,6 +69,18 @@ import {
   terminalBenchMigrationBytes,
   type TerminalBenchMaterial,
 } from "./terminal-bench-2/manifest.js";
+import {
+  TERMINAL_BENCH_2_1_PROFILE,
+  TERMINAL_BENCH_2_1_SELECTION_ROLE,
+  TerminalBench21SelectionManifestSchema,
+  terminalBench21SelectionBytes,
+} from "./terminal-bench-2-1/manifest.js";
+import {
+  SUITE_PROTOCOL_PROFILE,
+  SUITE_PROTOCOL_SELECTION_ROLE,
+  SuiteProtocolSelectionSchema,
+  suiteProtocolSelectionBytes,
+} from "./suite-protocol/manifest.js";
 import { INSPECT_SELECTION_CORRELATION_ROLE } from "@colophon-claims/verify";
 
 export const NATIVE_RUNTIME_ADAPTER_ID = "jinn-native";
@@ -508,6 +520,22 @@ export function runtimeRegistrationArtifacts(workspaceDir: string, binding: Eval
       if (migration.runnable.checksum !== profile.selectedTask.material.checksum) throw new TypeError("Terminal-Bench migration runnable bytes differ from selected task material");
       result.push({ role: TERMINAL_BENCH_MIGRATION_ROLE, artifact: { digest: { sha256: profile.migrationManifestSha256 }, mediaType: "application/json" } });
     }
+  }
+  const tb21 = manifest.profiles?.[TERMINAL_BENCH_2_1_PROFILE];
+  if (tb21 !== undefined) {
+    const profile = TerminalBench21SelectionManifestSchema.parse(tb21);
+    const profileBytes = terminalBench21SelectionBytes(profile);
+    const profileSha256 = sha256Hex(profileBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, profileSha256)).equals(Buffer.from(profileBytes))) throw new TypeError("Terminal-Bench 2.1 profile CAS bytes do not match the Harbor selection");
+    result.push({ role: TERMINAL_BENCH_2_1_SELECTION_ROLE, artifact: { digest: { sha256: profileSha256 }, mediaType: "application/json" } });
+  }
+  const suiteValue = manifest.profiles?.[SUITE_PROTOCOL_PROFILE];
+  if (suiteValue !== undefined) {
+    const suite = SuiteProtocolSelectionSchema.parse(suiteValue);
+    const suiteBytes = suiteProtocolSelectionBytes(suite);
+    const suiteSha256 = sha256Hex(suiteBytes);
+    if (!Buffer.from(getSealedBytes(workspaceDir, suiteSha256)).equals(Buffer.from(suiteBytes))) throw new TypeError("suite protocol CAS bytes do not match the Harbor selection");
+    result.push({ role: SUITE_PROTOCOL_SELECTION_ROLE, artifact: { digest: { sha256: suiteSha256 }, mediaType: "application/json" } });
   }
   return result.sort((left, right) => {
     const leftKey = `${left.role}\u001f${left.artifact.digest.sha256}`;

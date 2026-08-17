@@ -46,6 +46,9 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
+import { HarborSelectionManifestSchema } from "../runtime/harbor/manifest.js";
+import { suiteQuoteFromHarbor } from "../runtime/suite-protocol/from-harbor.js";
+import { getSealedBytes } from "../workspace/sealed-store.js";
 
 export interface RunQuoteInput {
   readonly draftId: string;
@@ -102,6 +105,16 @@ export interface QuotePresentation {
     readonly detail?: string;
   };
   readonly estimatedWallTime?: QuoteEstimatedWallTime;
+  readonly suite?: {
+    readonly executionConformance: boolean;
+    readonly coverage: "one_task" | "ten_task" | "full" | "custom";
+    readonly leaderboardSubmitReady: boolean;
+    readonly cellCount: string;
+    readonly harborVersion: string;
+    readonly selectedTaskCount: number;
+    readonly armCount: number;
+    readonly replicates: number;
+  };
 }
 
 export interface RunQuoteResult {
@@ -223,6 +236,7 @@ function buildQuotePresentation(
   capabilities: BackendCapabilities,
   minVerdicts: number,
   previewLog: PreviewLog | undefined,
+  suite?: QuotePresentation["suite"],
 ): QuotePresentation {
   const runSize = buildRunSize(compiled, quote, minVerdicts);
   const supportedKeys = capabilities.runPinning.keys.map((entry) => entry.key).sort();
@@ -233,6 +247,7 @@ function buildQuotePresentation(
     coverage: { supportedKeys, refusals },
     hardCap: buildHardCap(compiled, quote),
     ...(estimatedWallTime !== undefined ? { estimatedWallTime } : {}),
+    ...(suite === undefined ? {} : { suite }),
   };
 }
 
@@ -306,18 +321,26 @@ export function runQuote(
       }
 
       const previousPublication = readRunState(clockedContext.workspaceDir, input.draftId)?.publication;
+      const minVerdicts = resolveAssurance(document.spec.assurance).minVerdicts;
+      const previewLog = readPreviewLog(clockedContext.workspaceDir, input.draftId);
+      const suite = document.spec.evaluationRuntime?.adapterId === "harbor"
+        ? suiteQuoteFromHarbor({
+          manifest: HarborSelectionManifestSchema.parse(JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(getSealedBytes(clockedContext.workspaceDir, document.spec.evaluationRuntime.selectionManifestSha256)))),
+          armCount: compiled.plannedRun.record.arms.length,
+          itemCount: compiled.benchmarkRecord.items.length,
+          replicates: compiled.plannedRun.record.replicates,
+        })
+        : undefined;
       writeRunState(clockedContext.workspaceDir, input.draftId, {
         draftId: input.draftId,
         specSha256: specDigest(document.spec),
         owner,
         quote,
         quotedAt: at,
-        // The source agent is the durable workspace report-signing did:key, never the mutable
-        // workspace principal or a URL.  This is created at quote time so it is stable before
-        // any later registration receipt makes the identity immutable.
         publication: previousPublication === undefined
           ? createPublicationState({ agentKeyRef: owner })
           : { ...previousPublication, source: { ...previousPublication.source, agentKeyRef: owner } },
+        ...(suite === undefined ? {} : { suiteQuote: suite }),
       });
 
       let draft = document;
@@ -326,12 +349,7 @@ export function runQuote(
         atomicWriteFileSync(draftPath(clockedContext.workspaceDir, input.draftId), JSON.stringify(draft, null, 2));
       }
 
-      // BP-20: RunState (above) is unchanged by this addition — presentation is a derived view
-      // built fresh on every call, never persisted (module header: "presentation renders the
-      // rest of that row on top of the platform's own QuoteReport").
-      const minVerdicts = resolveAssurance(document.spec.assurance).minVerdicts;
-      const previewLog = readPreviewLog(clockedContext.workspaceDir, input.draftId);
-      const presentation = buildQuotePresentation(compiled, quote, capabilities, minVerdicts, previewLog);
+      const presentation = buildQuotePresentation(compiled, quote, capabilities, minVerdicts, previewLog, suite);
 
       return { draft, quote, presentation };
     },
