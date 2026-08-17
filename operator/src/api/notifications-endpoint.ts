@@ -61,7 +61,11 @@ import { isOperationalServiceStep } from '../earning/types.js';
 import { getEventBuffer } from '../events/emitter.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import { isRestartRequired } from './restart-required-state.js';
-import type { NotificationsV1Response, NotificationV1 } from './contract/notifications.js';
+import {
+  notificationSchema,
+  type NotificationsV1Response,
+  type NotificationV1,
+} from './contract/notifications.js';
 import { CURRENT_CONTRACT_VERSION } from './contract/version.js';
 import {
   buildNotifications,
@@ -166,8 +170,10 @@ export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfi
         claimFailed,
       };
 
-      const notifications = buildNotifications(input).sort(
-        (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
+      const notifications = notificationSchema.array().parse(
+        buildNotifications(input).sort(
+          (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
+        ),
       );
 
       const body: NotificationsV1Response = {

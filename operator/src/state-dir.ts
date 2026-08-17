@@ -5,6 +5,9 @@
  * populated `~/.jinn-client` and an empty `~/.jinn-operator` keep reading the
  * legacy directory; one log line names the future copy-forward. `JINN_STATE_DIR`
  * always wins. `JINN_EARNING_DIR` remains a per-key override at its call sites.
+ * When `env` is passed without `home`, `HOME` / `USERPROFILE` on that bag win
+ * over `homedir()`, so MCP and stop-hook callers that inject HOME resolve the
+ * same tree the daemon would.
  */
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -36,7 +39,7 @@ export function resolveDefaultStateDir(options?: {
   log?: (message: string) => void;
 }): string {
   const env = options?.env ?? process.env;
-  const home = options?.home ?? homedir();
+  const home = options?.home ?? env['HOME'] ?? env['USERPROFILE'] ?? homedir();
   const override = env['JINN_STATE_DIR'];
   if (typeof override === 'string' && override.trim() !== '') return override;
 

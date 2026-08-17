@@ -145,7 +145,7 @@ describe('operator MCP helpers', () => {
 
     const { __setExecSyncForTesting } = await import('@/lifecycle/process-discovery.js');
     const home = mkdtempSync(join(tmpdir(), 'jinn-mcp-recycled-pid-'));
-    const earningDir = join(home, '.jinn-client', 'earning');
+    const earningDir = join(home, '.jinn-operator', 'earning');
     mkdirSync(earningDir, { recursive: true });
     writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
 
@@ -170,7 +170,7 @@ describe('operator MCP helpers', () => {
   it('returns already_running when the pidfile records a live jinn daemon', async () => {
     const { __setExecSyncForTesting } = await import('@/lifecycle/process-discovery.js');
     const home = mkdtempSync(join(tmpdir(), 'jinn-mcp-already-running-'));
-    const earningDir = join(home, '.jinn-client', 'earning');
+    const earningDir = join(home, '.jinn-operator', 'earning');
     mkdirSync(earningDir, { recursive: true });
     writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
 
