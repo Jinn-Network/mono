@@ -14,3 +14,7 @@ export * from "./policy.js";
 export * from "./ceremony.js";
 export * from "./interfaces.js";
 export * from "./verify.js";
+export * from "./anchor-provider.js";
+export * from "./timestamp/der.js";
+export * from "./timestamp/oids.js";
+export * from "./timestamp/generalized-time.js";
