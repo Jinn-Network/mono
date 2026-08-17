@@ -108,10 +108,19 @@ const claudeMd = skills.map(({ folder, body: skillBody }) => {
 
 // Build the image once. Every arm grades in the same pinned environment.
 const dockerText = readFileSync(join(pkg, "environment", "Dockerfile"), "utf8");
-const reference = /^FROM\s+(\S+)/mu.exec(dockerText)[1];
+// `FROM` may carry flags — `FROM --platform=linux/amd64 ubuntu:20.04` appears in the roster. The
+// image reference is the first non-flag token; taking `\S+` blindly hands Docker the flag, and the
+// resulting usage error reads nothing like a malformed Dockerfile.
+const fromTokens = /^FROM\s+(.+)$/mu.exec(dockerText)[1].trim().split(/\s+/u);
+const referenceIndex = fromTokens.findIndex((token) => !token.startsWith("--"));
+const reference = fromTokens[referenceIndex];
 sh(`docker pull -q ${reference}`);
 const baseDigest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim();
-writeFileSync(join(pkg, "environment", "Dockerfile.pinned"), dockerText.replace(/^FROM\s+\S+/mu, `FROM ${baseDigest}`));
+// Pin the reference but keep the flags: dropping `--platform` would silently build for the host
+// architecture, which is a different environment than the task declares.
+const pinnedTokens = [...fromTokens];
+pinnedTokens[referenceIndex] = baseDigest;
+writeFileSync(join(pkg, "environment", "Dockerfile.pinned"), dockerText.replace(/^FROM\s+.+$/mu, `FROM ${pinnedTokens.join(" ")}`));
 const tag = `jinn-demo1/${taskId}:cell`;
 sh(`docker build -q -f ${join(pkg, "environment", "Dockerfile.pinned")} -t ${tag} ${join(pkg, "environment")}`, { timeout: 1_800_000 });
 

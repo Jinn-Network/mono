@@ -97,13 +97,21 @@ function materialize(taskId, entries) {
 function pinBase(dir) {
   const path = join(dir, "environment", "Dockerfile");
   const text = readFileSync(path, "utf8");
-  const from = /^FROM\s+(\S+)/mu.exec(text);
+  const from = /^FROM\s+(.+)$/mu.exec(text);
   if (from === null) throw new Error("Dockerfile has no FROM");
-  const reference = from[1];
+  // `FROM` may carry flags — `FROM --platform=linux/amd64 ubuntu:20.04` appears in the roster. The
+  // image reference is the first non-flag token; taking `\S+` blindly pulls the flag instead and
+  // rejects a perfectly good unit on what looks like a Docker usage error.
+  const tokens = from[1].trim().split(/\s+/u);
+  const referenceIndex = tokens.findIndex((token) => !token.startsWith("--"));
+  const reference = tokens[referenceIndex];
   if (reference.includes("@sha256:")) return { pinned: reference, text };
   sh(`docker pull -q ${reference}`);
   const digest = sh(`docker inspect --format '{{index .RepoDigests 0}}' ${reference}`).trim();
-  const pinnedText = text.replace(/^FROM\s+\S+/mu, `FROM ${digest}`);
+  // Pin the reference but keep the flags: dropping `--platform` silently changes the architecture.
+  const pinnedTokens = [...tokens];
+  pinnedTokens[referenceIndex] = digest;
+  const pinnedText = text.replace(/^FROM\s+.+$/mu, `FROM ${pinnedTokens.join(" ")}`);
   writeFileSync(join(dir, "environment", "Dockerfile.pinned"), pinnedText);
   return { pinned: digest, text: pinnedText };
 }
