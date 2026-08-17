@@ -54,7 +54,7 @@ console on `127.0.0.1:3000` talking to `127.0.0.1:7331`.
 ## Daemon: `docker compose up -d`
 
 This reuses the existing [`operator/docker-compose.yml`](operator/docker-compose.yml)
-and the public image `ghcr.io/jinn-network/client`. From the repo root:
+and the public image `ghcr.io/jinn-network/operator`. From the repo root:
 
 ```bash
 cd operator
@@ -67,7 +67,7 @@ echo "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-..." >> .env
 docker compose up -d
 ```
 
-The compose file pulls `ghcr.io/jinn-network/client:latest`, mounts a `jinn-data`
+The compose file pulls `ghcr.io/jinn-network/operator:latest`, mounts a `jinn-data`
 volume at `/data`, and publishes `7331:7331`. Local v1 keeps the API on
 loopback; do **not** set `JINN_API_BIND_HOST=0.0.0.0` unless you have put
 TLS and a trusted proxy in front per §9.
@@ -77,13 +77,13 @@ For a deploy you can reproduce later, edit the `image:` line in
 `operator/docker-compose.yml` from:
 
 ```yaml
-image: ghcr.io/jinn-network/client:latest
+image: ghcr.io/jinn-network/operator:latest
 ```
 
 to a fixed release tag:
 
 ```yaml
-image: ghcr.io/jinn-network/client:<version>
+image: ghcr.io/jinn-network/operator:<version>
 ```
 
 Per-release tags `:<version>`, `:sha-<short>`, and `:latest` are published on
@@ -133,7 +133,7 @@ A reverse proxy in front of `:7331` must forward `X-Forwarded-Proto` and
 ### Railway (daemon only)
 
 Run the same image as a Railway service: point **Source → Image** at
-`ghcr.io/jinn-network/client:<version>` (the package is public — no registry
+`ghcr.io/jinn-network/operator:<version>` (the package is public — no registry
 auth), attach a `/data` volume (`railway volume add --mount-path /data`), set
 `JINN_PASSWORD`, `CLAUDE_CODE_OAUTH_TOKEN`, and `JINN_API_BIND_HOST=0.0.0.0` in
 the Variables panel (the bind-host override is required — Railway's edge proxy

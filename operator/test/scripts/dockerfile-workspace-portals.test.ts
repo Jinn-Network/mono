@@ -269,7 +269,7 @@ describe('client Docker build context', () => {
 
     const buildIndex = dockerfile.indexOf('RUN yarn build');
     const pruneIndex = dockerfile.indexOf(
-      'RUN yarn workspaces focus @jinn-network/client --production',
+      'RUN yarn workspaces focus @jinn-network/operator --production',
     );
     const materializeIndex = dockerfile.indexOf(
       'RUN node scripts/materialize-bundled-workspaces.mjs prepare',

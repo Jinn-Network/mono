@@ -1,7 +1,7 @@
 # SWE-rebench v2 Testnet Acceptance Gate
 
 This is the release-manager gate before opening a public-release PR or creating
-a canary for `@jinn-network/client`.
+a canary for `@jinn-network/operator`.
 
 The canonical gate is app-first. CLI and Docker commands are still useful for
 setup and diagnostics, but they are not sufficient by themselves: the release
@@ -10,7 +10,7 @@ must be proven through the operator console flow documented in
 
 ## Required Local Gates
 
-Run from `client/` on the exact release branch:
+Run from `operator/` on the exact release branch:
 
 ```bash
 yarn typecheck

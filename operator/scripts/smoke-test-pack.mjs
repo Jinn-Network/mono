@@ -31,7 +31,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = join(__dirname, '..');
 const smokeDir = mkdtempSync(join(tmpdir(), 'jinn-pack-smoke-'));
 const smokeEnv = { ...process.env, HOME: smokeDir, NO_COLOR: '1' };
-const installedPackageRoot = join(smokeDir, 'node_modules', '@jinn-network', 'client');
+const installedPackageRoot = join(smokeDir, 'node_modules', '@jinn-network', 'operator');
 const installedBundledWorkspaceRoot = join(
   installedPackageRoot,
   'node_modules',
@@ -200,7 +200,7 @@ try {
       private: true,
       packageManager: 'yarn@4.13.0',
       dependencies: {
-        '@jinn-network/client': `file:${tarball}`,
+        '@jinn-network/operator': `file:${tarball}`,
       },
       // Exercise Yarn's node-modules layout against every exact private workspace bundled in
       // this candidate tarball. A newly bundled workspace can itself depend on another private
@@ -224,7 +224,7 @@ try {
     yarnConsumerDir,
     'node_modules',
     '@jinn-network',
-    'client',
+    'operator',
     'dist',
     'bin',
     'jinn.js',
@@ -248,8 +248,8 @@ try {
       '--input-type=module',
       '--eval',
       [
-        "const trajectory = await import('@jinn-network/client/dist/trajectory/schema.js');",
-        "const corpus = await import('@jinn-network/client/dist/corpus/index.js');",
+        "const trajectory = await import('@jinn-network/operator/dist/trajectory/schema.js');",
+        "const corpus = await import('@jinn-network/operator/dist/corpus/index.js');",
         `const plugin = await import(${JSON.stringify(pathToFileURL(
           join(installedPackageRoot, 'node_modules', '@jinn-network', 'plugin', 'dist', 'index.js'),
         ).href)});`,

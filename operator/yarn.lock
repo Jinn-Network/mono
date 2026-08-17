@@ -811,9 +811,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jinn-network/attestation-issuer@portal:../packages/evidence/attestation-issuer::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/attestation-issuer@portal:../packages/evidence/attestation-issuer::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/attestation-issuer@portal:../packages/evidence/attestation-issuer::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/attestation-issuer@portal:../packages/evidence/attestation-issuer::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
@@ -825,9 +825,209 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/client@workspace:.":
+"@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/client@workspace:."
+  resolution: "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@huggingface/transformers": "npm:^4.2.0"
+    "@jinn-network/plugin": "npm:0.1.2"
+    "@lmoe/gliner-onnx": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    "@secretlint/core": "npm:^13.0.2"
+    "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
+    better-sqlite3: "npm:^12.10.0"
+    canonicalize: "npm:^3.0.0"
+    zod: "npm:^4.4.3"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/environment-record@portal:../packages/environments/record::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/environment-record@portal:../packages/environments/record::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-catalog-sqlite@portal:../packages/evidence/catalog-sqlite::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-catalog-sqlite@portal:../packages/evidence/catalog-sqlite::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    better-sqlite3: "npm:13.0.1"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-discovery@portal:../packages/evidence/discovery::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-discovery@portal:../packages/evidence/discovery::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-local-runtime@portal:../packages/evidence/local-runtime::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-local-runtime@portal:../packages/evidence/local-runtime::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-catalog-sqlite": "npm:0.1.0"
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
+    better-sqlite3: "npm:13.0.1"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-protocol@portal:../packages/evidence/protocol::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-protocol@portal:../packages/evidence/protocol::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-repository@portal:../packages/evidence/repository::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-repository@portal:../packages/evidence/repository::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/execution-evidence-builder@portal:../packages/evidence/execution-evidence-builder::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/execution-evidence-builder@portal:../packages/evidence/execution-evidence-builder::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/execution-recorder@portal:../packages/evidence/execution-recorder::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/execution-recorder@portal:../packages/evidence/execution-recorder::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/execution-evidence-builder": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/core": "npm:0.1.2"
+    "@jinn-network/plugin": "npm:0.1.2"
+    "@modelcontextprotocol/sdk": "npm:^1.27.1"
+    better-sqlite3: "npm:^12.10.0"
+    canonicalize: "npm:^3.0.0"
+    viem: "npm:^2.0.0"
+    yaml: "npm:^2.8.4"
+    zod: "npm:^4.4.3"
+  bin:
+    jinn-distill-mcp: ./dist/bin/jinn-distill-mcp.js
+    jinn-layer: ./dist/bin/jinn-layer.js
+  languageName: node
+  linkType: soft
+
+"@jinn-network/lifecycle-notifications@portal:../packages/lifecycle-notifications::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/lifecycle-notifications@portal:../packages/lifecycle-notifications::locator=%40jinn-network%2Foperator%40workspace%3A."
+  languageName: node
+  linkType: soft
+
+"@jinn-network/marketplace-binding@portal:../packages/marketplace/binding::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/marketplace-binding@portal:../packages/marketplace/binding::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+    "@jinn-network/trust-resolve": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    viem: "npm:^2.0.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/marketplace-pipeline@portal:../packages/marketplace/pipeline::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/marketplace-pipeline@portal:../packages/marketplace/pipeline::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/marketplace-binding": "npm:0.1.0"
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-backend-local": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/marketplace-projector@portal:../packages/marketplace/projector::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/marketplace-projector@portal:../packages/marketplace/projector::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/marketplace-binding": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    viem: "npm:^2.0.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/marketplace-venue-base@portal:../packages/marketplace/venue-base::locator=%40jinn-network%2Foperator%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/marketplace-venue-base@portal:../packages/marketplace/venue-base::locator=%40jinn-network%2Foperator%40workspace%3A."
+  dependencies:
+    "@jinn-network/marketplace-binding": "npm:0.1.0"
+    "@jinn-network/marketplace-projector": "npm:0.1.0"
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@types/better-sqlite3": "npm:7.6.13"
+    better-sqlite3: "npm:13.0.1"
+    viem: "npm:^2.0.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/operator@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/operator@workspace:."
   dependencies:
     "@coinbase/cdp-sdk": "npm:^1.48.2"
     "@ethereumjs/wallet": "npm:^10.0.0"
@@ -936,209 +1136,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/plugin@portal:../packages/plugin::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/core@portal:../packages/core::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@huggingface/transformers": "npm:^4.2.0"
-    "@jinn-network/plugin": "npm:0.1.2"
-    "@lmoe/gliner-onnx": "npm:0.1.0"
-    "@noble/hashes": "npm:^2.2.0"
-    "@secretlint/core": "npm:^13.0.2"
-    "@secretlint/secretlint-rule-preset-recommend": "npm:^13.0.2"
-    better-sqlite3: "npm:^12.10.0"
-    canonicalize: "npm:^3.0.0"
-    zod: "npm:^4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
-  languageName: node
-  linkType: soft
-
-"@jinn-network/environment-record@portal:../packages/environments/record::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/environment-record@portal:../packages/environments/record::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@noble/hashes": "npm:^2.2.0"
-    zod: "npm:4.4.3"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
-  languageName: node
-  linkType: soft
-
-"@jinn-network/evidence-catalog-sqlite@portal:../packages/evidence/catalog-sqlite::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-catalog-sqlite@portal:../packages/evidence/catalog-sqlite::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-discovery": "npm:0.1.0"
-    "@jinn-network/evidence-repository": "npm:0.1.0"
-    better-sqlite3: "npm:13.0.1"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/evidence-discovery@portal:../packages/evidence/discovery::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-discovery@portal:../packages/evidence/discovery::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-protocol": "npm:0.1.0"
-    "@jinn-network/evidence-repository": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
-  languageName: node
-  linkType: soft
-
-"@jinn-network/evidence-local-runtime@portal:../packages/evidence/local-runtime::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-local-runtime@portal:../packages/evidence/local-runtime::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-catalog-sqlite": "npm:0.1.0"
-    "@jinn-network/evidence-discovery": "npm:0.1.0"
-    "@jinn-network/evidence-protocol": "npm:0.1.0"
-    "@jinn-network/evidence-repository": "npm:0.1.0"
-    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
-    "@jinn-network/record-discovery-serve": "npm:0.1.0"
-    better-sqlite3: "npm:13.0.1"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/evidence-protocol@portal:../packages/evidence/protocol::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-protocol@portal:../packages/evidence/protocol::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@noble/hashes": "npm:^2.2.0"
-    zod: "npm:4.4.3"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/evidence-repository@portal:../packages/evidence/repository::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-repository@portal:../packages/evidence/repository::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-protocol": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
-  languageName: node
-  linkType: soft
-
-"@jinn-network/execution-evidence-builder@portal:../packages/evidence/execution-evidence-builder::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/execution-evidence-builder@portal:../packages/evidence/execution-evidence-builder::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-protocol": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
-  languageName: node
-  linkType: soft
-
-"@jinn-network/execution-recorder@portal:../packages/evidence/execution-recorder::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/execution-recorder@portal:../packages/evidence/execution-recorder::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/evidence-protocol": "npm:0.1.0"
-    "@jinn-network/evidence-repository": "npm:0.1.0"
-    "@jinn-network/execution-evidence-builder": "npm:0.1.0"
-  peerDependencies:
-    vitest: ^4.1.8
-  peerDependenciesMeta:
-    vitest:
-      optional: true
-  languageName: node
-  linkType: soft
-
-"@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/jinn-layer@portal:../packages/layer::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/core": "npm:0.1.2"
-    "@jinn-network/plugin": "npm:0.1.2"
-    "@modelcontextprotocol/sdk": "npm:^1.27.1"
-    better-sqlite3: "npm:^12.10.0"
-    canonicalize: "npm:^3.0.0"
-    viem: "npm:^2.0.0"
-    yaml: "npm:^2.8.4"
-    zod: "npm:^4.4.3"
-  bin:
-    jinn-distill-mcp: ./dist/bin/jinn-distill-mcp.js
-    jinn-layer: ./dist/bin/jinn-layer.js
-  languageName: node
-  linkType: soft
-
-"@jinn-network/lifecycle-notifications@portal:../packages/lifecycle-notifications::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/lifecycle-notifications@portal:../packages/lifecycle-notifications::locator=%40jinn-network%2Fclient%40workspace%3A."
-  languageName: node
-  linkType: soft
-
-"@jinn-network/marketplace-binding@portal:../packages/marketplace/binding::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/marketplace-binding@portal:../packages/marketplace/binding::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/task-execution-backend": "npm:0.1.0"
-    "@jinn-network/task-execution-profiles": "npm:0.1.0"
-    "@jinn-network/task-execution-protocol": "npm:0.1.0"
-    "@jinn-network/trust-core": "npm:0.1.0"
-    "@jinn-network/trust-resolve": "npm:0.1.0"
-    "@noble/hashes": "npm:^2.2.0"
-    viem: "npm:^2.0.0"
-    zod: "npm:4.4.3"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/marketplace-pipeline@portal:../packages/marketplace/pipeline::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/marketplace-pipeline@portal:../packages/marketplace/pipeline::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/marketplace-binding": "npm:0.1.0"
-    "@jinn-network/task-execution-backend": "npm:0.1.0"
-    "@jinn-network/task-execution-backend-local": "npm:0.1.0"
-    "@jinn-network/task-execution-protocol": "npm:0.1.0"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/marketplace-projector@portal:../packages/marketplace/projector::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/marketplace-projector@portal:../packages/marketplace/projector::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/marketplace-binding": "npm:0.1.0"
-    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
-    "@jinn-network/record-discovery-serve": "npm:0.1.0"
-    "@jinn-network/task-execution-protocol": "npm:0.1.0"
-    "@noble/hashes": "npm:^2.2.0"
-    viem: "npm:^2.0.0"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/marketplace-venue-base@portal:../packages/marketplace/venue-base::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/marketplace-venue-base@portal:../packages/marketplace/venue-base::locator=%40jinn-network%2Fclient%40workspace%3A."
-  dependencies:
-    "@jinn-network/marketplace-binding": "npm:0.1.0"
-    "@jinn-network/marketplace-projector": "npm:0.1.0"
-    "@jinn-network/task-execution-backend": "npm:0.1.0"
-    "@jinn-network/task-execution-protocol": "npm:0.1.0"
-    "@types/better-sqlite3": "npm:7.6.13"
-    better-sqlite3: "npm:13.0.1"
-    viem: "npm:^2.0.0"
-  languageName: node
-  linkType: soft
-
-"@jinn-network/plugin@portal:../packages/plugin::locator=%40jinn-network%2Fclient%40workspace%3A.":
-  version: 0.0.0-use.local
-  resolution: "@jinn-network/plugin@portal:../packages/plugin::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/plugin@portal:../packages/plugin::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     zod: "npm:^4.4.3"
   peerDependencies:
@@ -1149,26 +1149,26 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/policy-identity@portal:../packages/policy/identity::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/policy-identity@portal:../packages/policy/identity::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/policy-identity@portal:../packages/policy/identity::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/policy-identity@portal:../packages/policy/identity::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@noble/curves": "npm:^2.0.0"
     "@noble/hashes": "npm:^2.2.0"
   languageName: node
   linkType: soft
 
-"@jinn-network/read-plane@portal:../packages/read-plane::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/read-plane@portal:../packages/read-plane::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/read-plane@portal:../packages/read-plane::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/read-plane@portal:../packages/read-plane::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     zod: "npm:4.4.3"
   languageName: node
   linkType: soft
 
-"@jinn-network/record-discovery-client@portal:../packages/discovery/client::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/record-discovery-client@portal:../packages/discovery/client::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/record-discovery-client@portal:../packages/discovery/client::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/record-discovery-client@portal:../packages/discovery/client::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
@@ -1176,9 +1176,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/record-discovery-facts-task-execution@portal:../packages/discovery/facts/task-execution::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/record-discovery-facts-task-execution@portal:../packages/discovery/facts/task-execution::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/record-discovery-facts-task-execution@portal:../packages/discovery/facts/task-execution::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/record-discovery-facts-task-execution@portal:../packages/discovery/facts/task-execution::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
@@ -1187,9 +1187,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/record-discovery-protocol@portal:../packages/discovery/protocol::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/record-discovery-protocol@portal:../packages/discovery/protocol::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/record-discovery-protocol@portal:../packages/discovery/protocol::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/record-discovery-protocol@portal:../packages/discovery/protocol::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/trust-core": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
@@ -1197,18 +1197,18 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/record-discovery-serve@portal:../packages/discovery/serve::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/record-discovery-serve@portal:../packages/discovery/serve::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/record-discovery-serve@portal:../packages/discovery/serve::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/record-discovery-serve@portal:../packages/discovery/serve::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     zod: "npm:4.4.3"
   languageName: node
   linkType: soft
 
-"@jinn-network/record-discovery-testing@portal:../packages/discovery/testing::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/record-discovery-testing@portal:../packages/discovery/testing::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/record-discovery-testing@portal:../packages/discovery/testing::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/record-discovery-testing@portal:../packages/discovery/testing::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     zod: "npm:4.4.3"
@@ -1220,9 +1220,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/record-discovery-transport-http@portal:../packages/discovery/transport-http::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/record-discovery-transport-http@portal:../packages/discovery/transport-http::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/record-discovery-transport-http@portal:../packages/discovery/transport-http::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/record-discovery-transport-http@portal:../packages/discovery/transport-http::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/record-discovery-client": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
@@ -1230,18 +1230,18 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/sdk@portal:../packages/sdk::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/sdk@portal:../packages/sdk::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/sdk@portal:../packages/sdk::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/sdk@portal:../packages/sdk::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     zod: "npm:^4.4.3"
     zod-to-json-schema: "npm:^3.23.0"
   languageName: node
   linkType: soft
 
-"@jinn-network/task-admission@portal:../packages/task-supply/admission::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-admission@portal:../packages/task-supply/admission::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-admission@portal:../packages/task-supply/admission::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-admission@portal:../packages/task-supply/admission::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/environment-record": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
@@ -1256,9 +1256,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-backend-local@portal:../packages/task-execution/backend-local/assembly::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-backend-local@portal:../packages/task-execution/backend-local/assembly::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-backend-local@portal:../packages/task-execution/backend-local/assembly::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-backend-local@portal:../packages/task-execution/backend-local/assembly::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-discovery": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
@@ -1272,17 +1272,17 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-backend@portal:../packages/task-execution/backend::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-backend@portal:../packages/task-execution/backend::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-backend@portal:../packages/task-execution/backend::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-backend@portal:../packages/task-execution/backend::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-evaluation-harness@portal:../packages/task-execution/evaluation-harness::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-evaluation-harness@portal:../packages/task-execution/evaluation-harness::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-evaluation-harness@portal:../packages/task-execution/evaluation-harness::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-evaluation-harness@portal:../packages/task-execution/evaluation-harness::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/attestation-issuer": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
@@ -1295,9 +1295,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-evaluator-adapters@portal:../packages/task-execution/evaluator-adapters::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-evaluator-adapters@portal:../packages/task-execution/evaluator-adapters::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-evaluator-adapters@portal:../packages/task-execution/evaluator-adapters::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-evaluator-adapters@portal:../packages/task-execution/evaluator-adapters::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-evaluation-harness": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
@@ -1306,9 +1306,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-launchers@portal:../packages/task-execution/backend-local/launchers::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-launchers@portal:../packages/task-execution/backend-local/launchers::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-launchers@portal:../packages/task-execution/backend-local/launchers::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-launchers@portal:../packages/task-execution/backend-local/launchers::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
@@ -1317,9 +1317,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-profiles@portal:../packages/task-execution/profiles::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-profiles@portal:../packages/task-execution/profiles::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-profiles@portal:../packages/task-execution/profiles::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-profiles@portal:../packages/task-execution/profiles::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@noble/hashes": "npm:2.2.0"
@@ -1329,45 +1329,45 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-protocol@portal:../packages/task-execution/protocol::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-protocol@portal:../packages/task-execution/protocol::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-protocol@portal:../packages/task-execution/protocol::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-protocol@portal:../packages/task-execution/protocol::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-supervisor@portal:../packages/task-execution/backend-local/supervisor::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-supervisor@portal:../packages/task-execution/backend-local/supervisor::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-supervisor@portal:../packages/task-execution/backend-local/supervisor::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-supervisor@portal:../packages/task-execution/backend-local/supervisor::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
   languageName: node
   linkType: soft
 
-"@jinn-network/task-execution-workspace@portal:../packages/task-execution/backend-local/workspace::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/task-execution-workspace@portal:../packages/task-execution/backend-local/workspace::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/task-execution-workspace@portal:../packages/task-execution/backend-local/workspace::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/task-execution-workspace@portal:../packages/task-execution/backend-local/workspace::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
   languageName: node
   linkType: soft
 
-"@jinn-network/trust-authoring@portal:../packages/trust/authoring::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/trust-authoring@portal:../packages/trust/authoring::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/trust-authoring@portal:../packages/trust/authoring::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/trust-authoring@portal:../packages/trust/authoring::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/trust-core": "npm:0.1.0"
     bs58: "npm:^6.0.0"
   languageName: node
   linkType: soft
 
-"@jinn-network/trust-core@portal:../packages/trust/core::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/trust-core@portal:../packages/trust/core::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/trust-core@portal:../packages/trust/core::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/trust-core@portal:../packages/trust/core::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@noble/curves": "npm:^2.0.0"
     "@noble/hashes": "npm:^2.2.0"
@@ -1375,17 +1375,17 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/trust-observation@portal:../packages/trust/observation::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/trust-observation@portal:../packages/trust/observation::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/trust-observation@portal:../packages/trust/observation::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/trust-observation@portal:../packages/trust/observation::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     zod: "npm:4.4.3"
   languageName: node
   linkType: soft
 
-"@jinn-network/trust-resolve@portal:../packages/trust/resolve::locator=%40jinn-network%2Fclient%40workspace%3A.":
+"@jinn-network/trust-resolve@portal:../packages/trust/resolve::locator=%40jinn-network%2Foperator%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/trust-resolve@portal:../packages/trust/resolve::locator=%40jinn-network%2Fclient%40workspace%3A."
+  resolution: "@jinn-network/trust-resolve@portal:../packages/trust/resolve::locator=%40jinn-network%2Foperator%40workspace%3A."
   dependencies:
     "@jinn-network/trust-core": "npm:0.1.0"
     viem: "npm:^2.0.0"

@@ -195,19 +195,21 @@ The e2e script spawns Anvil, bootstraps from scratch, runs create → restore �
 
 ### How the daemon is meant to be launched
 
-`jinn-client` is published as `@jinn-network/client`. The intended operator
+The operator daemon is published as `@jinn-network/operator` (`@jinn-network/client`
+remains a dual-published alias during the F1 compat window). The intended operator
 flow is:
 
-1. `npm install -g @jinn-network/client@latest` (or `yarn global add …`).
+1. `npm install -g @jinn-network/operator@latest` (or `yarn global add …`).
 2. `jinn run` — the binary in the published package executes the compiled
-   `dist/` tree, which ships the operator dashboard SPA next to the daemon.
+   `dist/` tree. The human surface is the operator console (`apps/operator-console`).
 
 The CLI auto-generates a keystore password on first run and reads it from
-`~/.jinn-client/keystore-password` thereafter; set `JINN_PASSWORD` only if
+`~/.jinn-operator/keystore-password` thereafter (read-fallback from a populated
+`~/.jinn-client` when the new directory is empty); set `JINN_PASSWORD` only if
 you need to manage the password yourself (CI, secrets manager).
 
 ```bash
-jinn run                                   # default config at ~/.jinn-client/config.json
+jinn run                                   # default config at ~/.jinn-operator/config.json
 jinn run --config ./my-config.json         # alternate config file
 JINN_PASSWORD=your-secret jinn run         # supply password via env (no on-disk file)
 ```
@@ -314,14 +316,14 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | _(none — env-only)_  | JINN_SWE_REBENCH_DOCKER_PULL_TIMEOUT_MS | 1800000 (30 min) — separate, far larger bound for `docker pull`; multi-GB eval images legitimately take many minutes on a cold cache. Same expiry semantics as above; `0` disables. |
 | _(none — env-only)_  | JINN_NATIVE_IPFS_FETCH_TIMEOUT_MS | 8000 (8s) — bound per native public-record IPFS `block/get` fetch (`createBaseSepoliaRecordTransport`, #30). Short by design: a locally-pinned block resolves in ms, and an unpinned CID's kubo DHT lookup (which never returns) must be abandoned fast so the eval-spec resolver's #2559 HTTP-locator fallback engages on the timeout the same way it does on a clean miss. Well below the 30s fleet worker lease TTL. A timeout REJECTS (miss/error, never valid empty bytes) so the digest check still guards any bytes that arrive. `0` disables the bound (unbounded); unset/invalid → default. |
 | _(none — env-only)_  | JINN_NATIVE_HTTP_FETCH_TIMEOUT_MS | 20000 (20s) — bound per native public-record HTTP `byLocation` fetch (#30). Larger than the IPFS bound because a legitimately large record served over HTTP can take longer; still below the lease TTL. Same reject/`0`-disables semantics. |
-| _(none — env-only)_  | JINN_AUTOPILOT_CLEANUP_ENABLED | enabled in active mode (default on). Opt out with `false`. Each active cycle sweeps dead attempt worktrees under `~/.jinn-client/autopilot/attempts/v2/`. |
+| _(none — env-only)_  | JINN_AUTOPILOT_CLEANUP_ENABLED | enabled in active mode (default on). Opt out with `false`. Each active cycle sweeps dead attempt worktrees under `~/.jinn-operator/autopilot/attempts/v2/` (legacy `~/.jinn-client/...` is still read when that dir is populated and the new path is empty). |
 | _(none — env-only)_  | JINN_AUTOPILOT_ATTEMPT_GRACE_MS | 1800000 (30 minutes). Dead dirty/ahead/preparing attempts are removed after this grace; clean+pushed attempts are removed immediately. |
 | _(none — env-only)_  | JINN_AUTOPILOT_DISK_FLOOR_GB | 10. Below this free-disk floor on the attempts directory, autopilot force-evicts oldest dead attempts and pauses new worktree-creating claims until space recovers. |
 | _(none — env-only)_  | JINN_EVAL_COMPUTE_USD_PER_HOUR | 0.20 — USD/hr compute rate; evaluator_cost_usd = monotonic grade() elapsed time × rate. Unset → default; invalid/zero or a non-finite computed cost → 0 with a warning. Never blocks an eval. |
 | _(none — env-only)_  | JINN_NET_LIVENESS_WEBHOOK_URL | unset — generic incoming-webhook URL (Slack-compatible) for the cron-driven net-liveness probe (#1044, `yarn net-liveness`, `docs/runbooks/net-liveness.md`). Unset → NO-OP: the probe still classifies and logs, it just never posts. |
 | _(none — env-only)_  | JINN_NET_LIVENESS_THRESHOLD_MINUTES | 30 — staleness threshold (minutes) for the net-liveness probe; converted to Base block-space at 30 blocks/min. |
-| _(none — env-only)_  | JINN_VERSION_CHECK | enabled (default). Gates the start-time npm-registry check (#641) that logs one line when a newer `@jinn-network/client` has been published and backs the dashboard's `update_available` banner. Opt out with `0` / `false` / `no` / empty. Best-effort — a registry outage degrades silently, never gates boot. |
-| _(none — flag/env-only)_  | JINN_NATIVE_CONFIG_PATH | unset — path to the native-v1 structured config file for `jinn run --native-config <path>` (issue #2378). Resolution order: `--native-config` flag > this env var > default `~/.jinn-client/native-config.json`. Deliberately never the legacy `config.json` — the legacy loader's shape-v2 migration and native's strict schema are mutually unsatisfiable on one file, so native gets its own file, own resolver, own loader (`operator/src/daemon/native-config-path.ts`), never routed through `loadConfig`/`migrateConfigShapeV2`. Naming a native config that resolves to effective mode `legacy` (an omitted or explicit `operator.verticalMode: "legacy"`) is `invalid_invocation`, never a silent legacy boot. |
+| _(none — env-only)_  | JINN_VERSION_CHECK | enabled (default). Gates the start-time npm-registry check (#641) that logs one line when a newer `@jinn-network/operator` has been published and backs the dashboard's `update_available` banner. Opt out with `0` / `false` / `no` / empty. Best-effort — a registry outage degrades silently, never gates boot. |
+| _(none — flag/env-only)_  | JINN_NATIVE_CONFIG_PATH | unset — path to the native-v1 structured config file for `jinn run --native-config <path>` (issue #2378). Resolution order: `--native-config` flag > this env var > default `~/.jinn-operator/native-config.json`. Deliberately never the legacy `config.json` — the legacy loader's shape-v2 migration and native's strict schema are mutually unsatisfiable on one file, so native gets its own file, own resolver, own loader (`operator/src/daemon/native-config-path.ts`), never routed through `loadConfig`/`migrateConfigShapeV2`. Naming a native config that resolves to effective mode `legacy` (an omitted or explicit `operator.verticalMode: "legacy"`) is `invalid_invocation`, never a silent legacy boot. |
 
 `JINN_PASSWORD` is env-only — never in config files.
 

@@ -47,6 +47,7 @@ import claimRewardsCommand from '../cli/commands/claim-rewards.js';
 import defaultRunCommand from '../cli/commands/run.js';
 import updateCommand from '../cli/commands/update.js';
 import { checkPidfileLiveness } from '../preflight/pidfile-liveness.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -198,7 +199,7 @@ export async function startDetachedDaemon(env: NodeJS.ProcessEnv): Promise<
 > {
   const earningDir =
     env['JINN_EARNING_DIR'] ??
-    join(env['HOME'] ?? '.', '.jinn-client', 'earning');
+    join(resolveDefaultStateDir({ env }), 'earning');
   const pidPath = join(earningDir, 'daemon.pid');
 
   const liveness = checkPidfileLiveness({ pidPath });
@@ -644,7 +645,7 @@ export function createOperatorServer(deps: OperatorServerDeps = {}): McpServer {
     'jinn_update',
     [
       'MUTATING: Update the client package and refresh host integrations.',
-      'Step 1: npm update -g @jinn-network/client',
+      'Step 1: npm update -g @jinn-network/operator',
       'Step 2: jinn integrations install (refreshes skills in all configured AI tools).',
       'May take 1-2 minutes. Use skip_npm=true to only refresh integrations with the current version.',
     ].join(' '),

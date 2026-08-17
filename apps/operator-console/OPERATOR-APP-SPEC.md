@@ -307,7 +307,7 @@ Components raise state messages locally. The Notifications component is the unio
 - `harness_not_ready`
 - `bootstrap_blocked`
 - `restart_required`
-- `update_available` — a newer `@jinn-network/client` has been published. Backed by the daemon's start-time (and 6-hourly) npm-registry check (#641), surfaced on `/v1/status` as `latestVersion` (with the running `version`). The daemon makes the semver comparison: `latestVersion` holds the latest published version **only when it is strictly newer than the running `version`, else `null`**. The banner derives directly from a non-null `latestVersion`. Gated by `JINN_VERSION_CHECK` (default enabled; opt out with `0`/`false`/`no`/empty). Severity: info.
+- `update_available` — a newer `@jinn-network/operator` has been published. Backed by the daemon's start-time (and 6-hourly) npm-registry check (#641), surfaced on `/v1/status` as `latestVersion` (with the running `version`). The daemon makes the semver comparison: `latestVersion` holds the latest published version **only when it is strictly newer than the running `version`, else `null`**. The banner derives directly from a non-null `latestVersion`. Gated by `JINN_VERSION_CHECK` (default enabled; opt out with `0`/`false`/`no`/empty). Severity: info.
 - `rpc_unreachable`
 - `rpc_all_failed` — every slot in the RPC fallback chain has failed (`AllRpcsFailedError`). Severity: action_required. The masked host list is included.
 - `rpc_primary_degraded` — slot 0 returned HTTP 429 / 5xx during the boot probe or steady-state traffic; a secondary slot served. Severity: informational.

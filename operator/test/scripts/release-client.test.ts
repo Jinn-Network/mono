@@ -40,7 +40,7 @@ function writeClientPackage(clientRoot: string, version = '1.2.3') {
   mkdirp(clientRoot);
   writeFileSync(
     join(clientRoot, 'package.json'),
-    `${JSON.stringify({ name: '@jinn-network/client', version }, null, 2)}\n`,
+    `${JSON.stringify({ name: '@jinn-network/operator', version }, null, 2)}\n`,
   );
 }
 
@@ -342,7 +342,7 @@ describe('release-client runner', () => {
         status: 0,
         stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/tags/client-v1.2.3\n',
       },
-      'npm view @jinn-network/client@1.2.3 version': {
+      'npm view @jinn-network/operator@1.2.3 version': {
         status: 0,
         stdout: '1.2.3\n',
       },
@@ -391,7 +391,7 @@ describe('release-client runner', () => {
         status: 0,
         stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n',
       },
-      'npm view @jinn-network/client@1.2.3 version': () => {
+      'npm view @jinn-network/operator@1.2.3 version': () => {
         npmViewCalls += 1;
         return npmViewCalls === 1
           ? { status: 1, stderr: 'not found' }

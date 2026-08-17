@@ -1,7 +1,7 @@
 // Public contract surface for Jinn external Harness authors.
 //
 // These types are mirrored from `operator/src/harnesses/types.ts` at SDK
-// publish time. The SDK is the stable boundary; @jinn-network/client
+// publish time. The SDK is the stable boundary; @jinn-network/operator
 // internals are not.
 
 export type Hex = `0x${string}`;

@@ -41,6 +41,7 @@ import {
 } from './_jinn-repo-pool.js';
 import { resolvePostingWindowMs } from './_jinn-repo-posting-window.js';
 import { loadHeldOutSlate } from './_swe-rebench-v2-held-out-slate.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 const SOLVER_TYPE = 'jinn-repo.v1';
 const CONTRACT_ID = 'jinn-repo';
@@ -206,7 +207,7 @@ export interface MakeJinnRepoGeneratorForLaunchedRecordOpts {
 function defaultStateDir(): string {
   const stateRoot = process.env['JINN_STATE_DIR'];
   if (stateRoot) return join(stateRoot, 'jinn-repo');
-  return join(process.env['HOME'] ?? '', '.jinn-client', 'jinn-repo');
+  return join(resolveDefaultStateDir(), 'jinn-repo');
 }
 
 export function makeJinnRepoGeneratorForLaunchedRecord(

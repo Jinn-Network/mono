@@ -44,7 +44,8 @@ jobs:
           OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-8)"
           {
-            echo "base_repo=ghcr.io/${OWNER}/client"
+            echo "base_repo=ghcr.io/${OWNER}/operator"
+            echo "base_repo_alias=ghcr.io/${OWNER}/client"
             echo "launcher_repo=ghcr.io/${OWNER}/operator-launcher"
             echo "codex_repo=ghcr.io/${OWNER}/operator-codex"
             echo "sha=${SHORT_SHA}"
@@ -92,6 +93,8 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.base_repo }}:canary-${{ steps.meta.outputs.sha }}
             ${{ steps.meta.outputs.base_repo }}:next
+            ${{ steps.meta.outputs.base_repo_alias }}:canary-${{ steps.meta.outputs.sha }}
+            ${{ steps.meta.outputs.base_repo_alias }}:next
           build-args: |
             JINN_BUILD_COMMIT=${{ github.sha }}
           cache-from: type=gha,scope=operator-base

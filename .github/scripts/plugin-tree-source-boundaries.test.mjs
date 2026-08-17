@@ -67,6 +67,7 @@ const FORBIDDEN_PACKAGES = [
   ...FROZEN_TRIO,
   '@jinn-network/autopilot',
   '@jinn-network/client',
+  '@jinn-network/operator',
   '@jinn-network/indexer',
   '@jinn-network/indexer-enrichment',
   '@jinn-network/sdk',

@@ -1,11 +1,11 @@
-# Releasing @jinn-network/client
+# Releasing @jinn-network/operator
 
 This package is published from the monorepo, but operators consume it as a standalone artifact:
 
-- installed CLI: `npm install -g @jinn-network/client@latest`
-- no-install trial: `npx @jinn-network/client@latest <verb>`
-- legacy no-install form (still supported): `npx -p @jinn-network/client@latest jinn <verb>`
-- container: `ghcr.io/jinn-network/client:<version>`
+- installed CLI: `npm install -g @jinn-network/operator@latest`
+- no-install trial: `npx @jinn-network/operator@latest <verb>`
+- legacy package name (compat window): `npm install -g @jinn-network/client@latest`
+- container: `ghcr.io/jinn-network/operator:<version>` (dual-tagged `ghcr.io/jinn-network/client:<version>` during the F1 window)
 
 The npm workflow uses one trusted-publishing workflow file: [`.github/workflows/npm-publish.yml`](../.github/workflows/npm-publish.yml). Stable releases are cut from tags shaped like `v<semver>` (new, produced by the Monday scaffold workflow) or `client-v<semver>` (legacy). The engineering handbook ([`docs/engineering/handbook.md`](../docs/engineering/handbook.md)) is the canonical reference for the cadence.
 
@@ -135,21 +135,21 @@ itself. The current app-first testnet acceptance gate is documented in
 Release workflow contract:
 
 - `client-vX.Y.Z` must match `operator/package.json` version exactly.
-- npm publishes `@jinn-network/client@X.Y.Z` as `latest`.
+- npm publishes `@jinn-network/operator@X.Y.Z` as `latest` (and dual-publishes `@jinn-network/client@X.Y.Z` during the F1 window).
 - Docker publishes:
-  - `ghcr.io/jinn-network/client:X.Y.Z`
-  - `ghcr.io/jinn-network/client:sha-<shortsha>`
-  - `ghcr.io/jinn-network/client:latest`
+  - `ghcr.io/jinn-network/operator:X.Y.Z` (and dual-tags `ghcr.io/jinn-network/client:…`)
+  - `ghcr.io/jinn-network/operator:sha-<shortsha>`
+  - `ghcr.io/jinn-network/operator:latest`
 
 Post-release verification is performed by `yarn release:client --publish`.
 The underlying checks are:
 
 ```bash
-npm install -g @jinn-network/client@latest
+npm install -g @jinn-network/operator@latest
 jinn version --json
 jinn doctor --json
-docker run --rm ghcr.io/jinn-network/client:X.Y.Z version --json
-docker run --rm ghcr.io/jinn-network/client:X.Y.Z doctor --json
+docker run --rm ghcr.io/jinn-network/operator:X.Y.Z version --json
+docker run --rm ghcr.io/jinn-network/operator:X.Y.Z doctor --json
 ```
 
 The real end-to-end daemon loop stays manual and local. It is intentionally not moved into GitHub Actions CI.

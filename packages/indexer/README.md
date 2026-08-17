@@ -23,7 +23,7 @@ Base Sepolia and Base mainnet.
 
 This package is a normal Ponder app. It runs as its own service — Node process, Postgres backend, GraphQL endpoint on port 42069. Deploy it like any other web service. The canonical patterns (Postgres + `DATABASE_SCHEMA` + views for zero-downtime rolling deploys) are described in `deploy/README.md` and come straight from Ponder's [Self-hosting docs](https://ponder.sh/docs/production/self-hosting). We do not ship custom subsystems on top.
 
-The daemon (`@jinn-network/client`) consumes this service via the GraphQL adapter at `client/src/discovery-client/http.ts`. The daemon does not bundle or embed this package; it talks to it over HTTP like any other backend.
+The daemon (`@jinn-network/operator`) consumes this service via the GraphQL adapter at `operator/src/discovery-client/http.ts`. The daemon does not bundle or embed this package; it talks to it over HTTP like any other backend.
 
 Schema definitions, event handlers, and Ponder runtime live here. The wire contract (the GraphQL queries the daemon issues) lives in the daemon's source tree. Both sides depend on the same schema shape; when the schema changes, both sides update.
 
@@ -222,5 +222,5 @@ handlers use. The two-operator end-to-end (a real Ponder service indexing a live
 testnet contract) is tracked separately.
 
 The daemon-side GraphQL **client** surface (the queries `createHttpDiscoveryClient`
-issues against this service) is covered by `client/src/discovery-client/http.ts`
-in the `@jinn-network/client` package.
+issues against this service) is covered by `operator/src/discovery-client/http.ts`
+in the `@jinn-network/operator` package.

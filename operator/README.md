@@ -1,6 +1,6 @@
-# @jinn-network/client
+# @jinn-network/operator
 
-Jinn protocol client. Runs a headless daemon that participates in the Jinn training loop: create Tasks, solve them through Harnesses, evaluate Solutions, and earn rewards for measured work.
+Jinn operator daemon. Runs a headless daemon that participates in the Jinn training loop: create Tasks, solve them through Harnesses, evaluate Solutions, and earn rewards for measured work.
 
 **New operator?** Start with the full testnet runbook:
 <https://github.com/Jinn-Network/mono/blob/main/docs/operator-testnet.md>
@@ -31,14 +31,16 @@ console Overview page renders that 11-step machine and funding as projections.
 ## Install
 
 ```bash
-npm install -g @jinn-network/client@latest
+npm install -g @jinn-network/operator@latest
 ```
 
 Or with Yarn:
 
 ```bash
-yarn global add @jinn-network/client@latest
+yarn global add @jinn-network/operator@latest
 ```
+
+`@jinn-network/client` remains a dual-published alias during the F1 compat window.
 
 ## Quick start
 
@@ -126,7 +128,7 @@ treat the wallet as hot and keep funds to the gas + rewards minimum.
 ## Try without installing
 
 ```bash
-npx @jinn-network/client@latest doctor
+npx @jinn-network/operator@latest doctor
 ```
 
 ## Let your agent do it
@@ -234,11 +236,11 @@ boundary.
    ```
 
 The compose file lives at `client/docker-compose.yml` if you cloned the
-repo. If you installed via `npm install -g @jinn-network/client@latest`,
+repo. If you installed via `npm install -g @jinn-network/operator@latest`,
 copy it out first:
 
 ```bash
-cp "$(npm root -g)/@jinn-network/client/docker-compose.yml" .
+cp "$(npm root -g)/@jinn-network/operator/docker-compose.yml" .
 ```
 
 ### Fallback: interactive OAuth inside the container
@@ -256,7 +258,7 @@ docker compose up -d
 ### Quick test
 
 ```bash
-docker run --rm ghcr.io/jinn-network/client:latest version --json
+docker run --rm ghcr.io/jinn-network/operator:latest version --json
 ```
 
 ## Operator commands
@@ -310,8 +312,8 @@ All action verbs support `--dry-run` and `--yes`.
 - Add `--human` for readable terminal output.
 - `stderr` is reserved for progress, warnings, and runtime logs.
 - Non-zero exits emit a structured error envelope on stdout with `schemaVersion`, `code`, `exitCode`, `message`, `hint`, and `exampleCli`.
-- Without a global install, use `npx @jinn-network/client@latest <verb> ...`.
-- Backward-compatible legacy form still works: `npx -p @jinn-network/client@latest jinn <verb> ...`.
+- Without a global install, use `npx @jinn-network/operator@latest <verb> ...`.
+- The previous package name still works during the F1 window: `npx @jinn-network/client@latest <verb> ...`.
 
 See the [client surface spec](https://github.com/Jinn-Network/mono/blob/main/spec/2026-04-14-client-surface.md) for the full CLI reference.
 
@@ -448,7 +450,7 @@ Quick answers to the things that typically surprise new operators:
 - **Claude session exits in ~18 seconds with no trades** — usually means
   the daemon ran from source (via `tsx`) instead of the compiled `dist/`,
   so the MCP wrapper couldn't load `mcp-tools.js`. Run `yarn build && yarn
-  dev` (dev) or reinstall via `npm install -g @jinn-network/client@latest`
+  dev` (dev) or reinstall via `npm install -g @jinn-network/operator@latest`
   (operator). `jinn doctor` flags this as `daemon_runtime_ready`.
 - **Bootstrap fails with `Overflow(20, 0)` at `distributor.stake()`** —
   the testnet stOLAS distributor pool is drained. Operators cannot fix

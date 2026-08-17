@@ -470,196 +470,6 @@
         "to": "@jinn-network/trust-core"
       },
       {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/attestation-issuer"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/core"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/environment-record"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-catalog-sqlite"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-discovery"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-local-runtime"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-protocol"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-repository"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/execution-evidence-builder"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/execution-recorder"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/lifecycle-notifications"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-binding"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-pipeline"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-projector"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/marketplace-venue-base"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/plugin"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/policy-identity"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/read-plane"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-client"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-facts-task-execution"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-protocol"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-serve"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/record-discovery-transport-http"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/sdk"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-admission"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-backend"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-backend-local"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-evaluation-harness"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-evaluator-adapters"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-launchers"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-profiles"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-protocol"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-supervisor"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/task-execution-workspace"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-authoring"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-core"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-observation"
-      },
-      {
-        "from": "@jinn-network/client",
-        "kind": "runtime",
-        "to": "@jinn-network/trust-resolve"
-      },
-      {
         "from": "@jinn-network/core",
         "kind": "runtime",
         "to": "@jinn-network/plugin"
@@ -973,6 +783,196 @@
         "from": "@jinn-network/marketplace-venue-base",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/attestation-issuer"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/core"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/environment-record"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-catalog-sqlite"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-discovery"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-local-runtime"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-protocol"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-repository"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/execution-evidence-builder"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/execution-recorder"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/lifecycle-notifications"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/marketplace-binding"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/marketplace-pipeline"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/marketplace-projector"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/marketplace-venue-base"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/plugin"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/policy-identity"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/read-plane"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-client"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-facts-task-execution"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-serve"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-transport-http"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/sdk"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-admission"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-backend"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-backend-local"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluation-harness"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluator-adapters"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-launchers"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-supervisor"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-workspace"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-authoring"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-observation"
+      },
+      {
+        "from": "@jinn-network/operator",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-resolve"
       },
       {
         "from": "@jinn-network/operator-console",
@@ -1575,7 +1575,6 @@
       "@jinn-network/chain-only-gate-harness",
       "@jinn-network/chain-scenarios",
       "@jinn-network/chain-state-extraction",
-      "@jinn-network/client",
       "@jinn-network/core",
       "@jinn-network/environment-record",
       "@jinn-network/environment-verification",
@@ -1606,6 +1605,7 @@
       "@jinn-network/marketplace-projector",
       "@jinn-network/marketplace-testing",
       "@jinn-network/marketplace-venue-base",
+      "@jinn-network/operator",
       "@jinn-network/operator-console",
       "@jinn-network/plugin",
       "@jinn-network/plugin-runtime",
@@ -2107,7 +2107,7 @@
       "conformancePackedTargets": 62,
       "conformanceSources": 31,
       "decisionRecords": 5,
-      "discoveredFirstPartySurfaces": 2969,
+      "discoveredFirstPartySurfaces": 2970,
       "generatedOutputSources": 1358,
       "generatorSources": 657,
       "marketplaceControl": 2,
@@ -16417,6 +16417,16 @@
           "@ritsukai"
         ],
         "path": "operator/test/spend/usage.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "operator/test/state-dir.test.ts"
       },
       {
         "categories": [
@@ -43095,7 +43105,7 @@
         ]
       },
       "domain": "operator",
-      "name": "@jinn-network/client",
+      "name": "@jinn-network/operator",
       "ownerGroup": "architecture-control",
       "path": "operator",
       "publicSurface": {
@@ -47051,7 +47061,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/config.example.json",
         "relativeSource": "fixtures/config.example.json"
@@ -47060,7 +47070,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/jinn-repo-live-issue-task.example.json",
         "relativeSource": "fixtures/jinn-repo-live-issue-task.example.json"
@@ -47069,7 +47079,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/local-config.json",
         "relativeSource": "fixtures/local-config.json"
@@ -47078,7 +47088,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/mint-candidate-example.json",
         "relativeSource": "fixtures/mint-candidate-example.json"
@@ -47087,7 +47097,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/prediction-apy-v0-intent.example.json",
         "relativeSource": "fixtures/prediction-apy-v0-intent.example.json"
@@ -47096,7 +47106,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/prediction-v1-task.example.json",
         "relativeSource": "fixtures/prediction-v1-task.example.json"
@@ -47105,7 +47115,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/aider/example-analytics.jsonl",
         "relativeSource": "fixtures/transcripts/aider/example-analytics.jsonl"
@@ -47114,7 +47124,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/aider/example-chat-history.md",
         "relativeSource": "fixtures/transcripts/aider/example-chat-history.md"
@@ -47123,7 +47133,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/claude-code/example-session.jsonl",
         "relativeSource": "fixtures/transcripts/claude-code/example-session.jsonl"
@@ -47132,7 +47142,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/claude-code/stream-json-example.jsonl",
         "relativeSource": "fixtures/transcripts/claude-code/stream-json-example.jsonl"
@@ -47141,7 +47151,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/claude-code/stream-json-with-model.jsonl",
         "relativeSource": "fixtures/transcripts/claude-code/stream-json-with-model.jsonl"
@@ -47150,7 +47160,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/codex/example-session.jsonl",
         "relativeSource": "fixtures/transcripts/codex/example-session.jsonl"
@@ -47159,7 +47169,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/codex/exec-json-with-usage.jsonl",
         "relativeSource": "fixtures/transcripts/codex/exec-json-with-usage.jsonl"
@@ -47168,7 +47178,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/codex/wrapped-0-129-mcp-tools.jsonl",
         "relativeSource": "fixtures/transcripts/codex/wrapped-0-129-mcp-tools.jsonl"
@@ -47177,7 +47187,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/continue/dev_data/chat/0.2.0.jsonl",
         "relativeSource": "fixtures/transcripts/continue/dev_data/chat/0.2.0.jsonl"
@@ -47186,7 +47196,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/continue/dev_data/edit/0.2.0.jsonl",
         "relativeSource": "fixtures/transcripts/continue/dev_data/edit/0.2.0.jsonl"
@@ -47195,7 +47205,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/gemini/example-session.jsonl",
         "relativeSource": "fixtures/transcripts/gemini/example-session.jsonl"
@@ -47204,7 +47214,7 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/fixtures/transcripts/hermes-agent/session-example.json",
         "relativeSource": "fixtures/transcripts/hermes-agent/session-example.json"
@@ -47213,7 +47223,7 @@
         "claim": null,
         "export": null,
         "kind": "schemas",
-        "package": "@jinn-network/client",
+        "package": "@jinn-network/operator",
         "packedTargets": [],
         "path": "operator/schemas/jinn-manifest-v1.json",
         "relativeSource": "schemas/jinn-manifest-v1.json"
@@ -55337,7 +55347,7 @@
         "fixtures": [
           "fixtures"
         ],
-        "name": "@jinn-network/client",
+        "name": "@jinn-network/operator",
         "path": "operator",
         "profiles": [],
         "releaseGroup": "legacy-product-lines",
@@ -57580,10 +57590,10 @@
       "canary": false,
       "expectedPackageCount": 6,
       "packages": [
-        "@jinn-network/client",
         "@jinn-network/core",
         "@jinn-network/jinn-layer",
         "@jinn-network/marketplace-pipeline",
+        "@jinn-network/operator",
         "@jinn-network/plugin",
         "@jinn-network/sdk"
       ],
@@ -57751,7 +57761,7 @@
   },
   "transitions": [
     {
-      "name": "@jinn-network/client",
+      "name": "@jinn-network/operator",
       "path": "operator",
       "publishPolicy": "independent",
       "releaseGroup": "legacy-product-lines",

@@ -1,7 +1,7 @@
 {
-  "name": "@jinn-network/client",
+  "name": "@jinn-network/operator",
   "version": "0.2.2",
-  "description": "Jinn protocol client — headless daemon for the restoration training loop",
+  "description": "Jinn operator daemon — headless participant in the restoration training loop",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "workspaces": [

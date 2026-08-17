@@ -30,7 +30,7 @@ function candidateRoots() {
   //   - published: operator/dist/scripts/
   // npm/npx may hoist node-pty to an ancestor node_modules, so use normal
   // Node resolution with several package-root candidates instead of assuming
-  // @jinn-network/client/node_modules exists.
+  // @jinn-network/operator/node_modules exists.
   return unique([
     __dirname,
     path.join(__dirname, '..'),

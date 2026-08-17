@@ -1,17 +1,18 @@
 # Railway deploy — codex-harness operator
 
-A reference Railway deployment for a hosted `@jinn-network/client` operator daemon running the **codex** harness against Base Sepolia testnet. This is the recipe currently running service 62 in production; documented here so future operators have a starting point and so the recipe survives operator turnover.
+A reference Railway deployment for a hosted `@jinn-network/operator` operator daemon running the **codex** harness against Base Sepolia testnet. This is the recipe currently running service 62 in production; documented here so future operators have a starting point and so the recipe survives operator turnover.
 
 Operators who want to run locally should use `jinn run` directly (see `operator/README.md`) — this directory is only for headless, hosted deployments.
 
 ## Shape: thin overlay on the container-native base
 
-`Dockerfile` is a ~4-line overlay on `ghcr.io/jinn-network/client` (the
-container-native base, #988):
+`Dockerfile` is a ~4-line overlay on `ghcr.io/jinn-network/operator` (the
+container-native base, #988; `ghcr.io/jinn-network/client` remains a dual-push
+alias during the F1 window):
 
 ```dockerfile
 ARG BASE_TAG=latest
-FROM ghcr.io/jinn-network/client:${BASE_TAG}
+FROM ghcr.io/jinn-network/operator:${BASE_TAG}
 RUN npm install -g @openai/codex@0.133.0
 ENV JINN_CONFIG=/data/config.json
 COPY deploy/railway-operator-codex/seed.sh /usr/local/bin/jinn-codex-seed.sh

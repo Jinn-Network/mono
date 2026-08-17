@@ -50,11 +50,13 @@ jobs:
           fi
 
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-          IMAGE_REPO="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/client"
+          IMAGE_REPO="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/operator"
+          IMAGE_REPO_ALIAS="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/client"
 
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "sha=${SHORT_SHA}" >> "${GITHUB_OUTPUT}"
           echo "image_repo=${IMAGE_REPO}" >> "${GITHUB_OUTPUT}"
+          echo "image_repo_alias=${IMAGE_REPO_ALIAS}" >> "${GITHUB_OUTPUT}"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -108,6 +110,9 @@ jobs:
             ${{ steps.meta.outputs.image_repo }}:${{ steps.meta.outputs.version }}
             ${{ steps.meta.outputs.image_repo }}:sha-${{ steps.meta.outputs.sha }}
             ${{ steps.meta.outputs.image_repo }}:latest
+            ${{ steps.meta.outputs.image_repo_alias }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image_repo_alias }}:sha-${{ steps.meta.outputs.sha }}
+            ${{ steps.meta.outputs.image_repo_alias }}:latest
           build-args: |
             JINN_BUILD_COMMIT=${{ github.sha }}
           platforms: linux/amd64,linux/arm64

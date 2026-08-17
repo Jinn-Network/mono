@@ -16,13 +16,13 @@
 
 import { existsSync } from 'fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'fs/promises';
-import os from 'os';
 import path from 'path';
 import { z } from 'zod/v3';
 import {
   SolverNetManifestV1Schema,
   type SolverNetManifestV1,
 } from '@jinn-network/sdk/solvernets';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ export type DraftSolverNetRecord = z.infer<typeof DraftSolverNetRecordSchema>;
 
 // ── Path constants ─────────────────────────────────────────────────────────
 
-export const DEFAULT_JINN_CLIENT_DIR = path.join(os.homedir(), '.jinn-client');
+export const DEFAULT_JINN_CLIENT_DIR = resolveDefaultStateDir();
 const SOLVERNETS_SUBDIR = 'solvernets';
 const LAUNCHED_SUBDIR = 'launched';
 const DRAFTS_SUBDIR = 'drafts';
@@ -314,7 +314,7 @@ export interface SolverNetStoreOptions {
 }
 
 export function createSolverNetStore(opts: SolverNetStoreOptions = {}): SolverNetStore {
-  const baseDir = opts.baseDir ?? DEFAULT_JINN_CLIENT_DIR;
+  const baseDir = opts.baseDir ?? resolveDefaultStateDir();
   const launchedDir = resolveLaunchedDir(baseDir);
   const draftsDir = resolveDraftsDir(baseDir);
   const manifestsDir = resolveManifestsDir(baseDir);

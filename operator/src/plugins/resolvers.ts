@@ -1,5 +1,4 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { digestDirectory } from './digest.js';
@@ -10,8 +9,9 @@ import type {
   SolverPluginEntry,
   SolverPluginSourceKind,
 } from './types.js';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
-const DEFAULT_VENDOR_ROOT = join(homedir(), '.jinn-client', 'solver-plugins');
+const DEFAULT_VENDOR_ROOT = join(resolveDefaultStateDir(), 'solver-plugins');
 
 function entrySource(entry: SolverPluginEntry): string {
   return typeof entry === 'string' ? entry : entry.source;

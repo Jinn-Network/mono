@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import { createInterface } from 'node:readline';
 import type { CommandContext, CommandModule } from '../command.js';
@@ -15,6 +14,7 @@ import {
 } from '../../preflight/claude-auth.js';
 import { ConfigLoadError, loadConfig } from '../../config.js';
 import { defaultTokenPath, ensureUiToken, rotateUiToken } from '../../api/ui-token.js';
+import { resolveDefaultStateDir } from '../../state-dir.js';
 
 const CONTEXT_LABELS: Record<string, string> = {
   container: 'inside this container',
@@ -22,7 +22,7 @@ const CONTEXT_LABELS: Record<string, string> = {
   bare: 'on this machine',
 };
 
-const DEFAULT_CONFIG_PATH = join(homedir(), '.jinn-client', 'config.json');
+const DEFAULT_CONFIG_PATH = join(resolveDefaultStateDir(), 'config.json');
 
 /**
  * Persist `runtimeMode` into the operator's config file (default:

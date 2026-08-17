@@ -32,7 +32,7 @@ export const PREDICTION_EVALUATOR_METHOD_DESCRIPTOR_PATH = join(
  * itself (never git-committed -- see this repo's `.gitignore` -- and never published in
  * the npm tarball -- see `operator/package.json`'s negated `files` entry). Not part of
  * `moduleDigest`: it carries only per-operator parameters (identity, evidence root),
- * not deployment logic. NOT upgrade-safe: `npm install -g @jinn-network/client@latest`
+ * not deployment logic. NOT upgrade-safe: `npm install -g @jinn-network/operator@latest`
  * replaces this directory, deleting the sidecar with it -- re-run
  * `writePredictionEvaluatorSidecar` (or hand-author the file again) after every version
  * bump. See `docs/operator/native-evaluator-deployment.md` for why this is the sole

@@ -14,11 +14,11 @@ function manifest() {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
-// The published identity is NOT renamed by the directory rename (design §3
-// renames the physical tree only). Pin it so the rename cannot drift it.
+// The published identity is @jinn-network/operator (F1). @jinn-network/client
+// remains a dual-publish alias during the compat window.
 test('operator package keeps its published identity', () => {
   const pkg = manifest();
-  assert.equal(pkg.name, '@jinn-network/client');
+  assert.equal(pkg.name, '@jinn-network/operator');
   assert.equal(pkg.main, './dist/index.js');
   assert.equal(pkg.types, './dist/index.d.ts');
   assert.equal(pkg.packageManager, 'yarn@4.13.0');

@@ -10,7 +10,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { resolveDefaultStateDir } from '../state-dir.js';
 
 const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LEGACY_HEX = /^[0-9a-f]{64}$/i;
@@ -21,7 +21,7 @@ export interface UiTokenRecord {
 }
 
 export function defaultTokenPath(stateDir?: string): string {
-  return join(stateDir ?? join(homedir(), '.jinn-client'), 'ui-token');
+  return join(stateDir ?? resolveDefaultStateDir(), 'ui-token');
 }
 
 function writeRecord(path: string, record: UiTokenRecord): void {
