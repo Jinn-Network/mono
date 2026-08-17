@@ -30,13 +30,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "smol-toml": "^1.7.0",
-    "twitter-api-v2": "^1.18.0",
-    "viem": "^2.55.8",
+    "smol-toml": "^1.8.0",
+    "twitter-api-v2": "^1.29.1",
+    "viem": "^2.55.16",
     "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.2.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.10"
   }
