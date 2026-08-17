@@ -1357,6 +1357,15 @@ mean Harbor's Job or Inspect's eval-set is the claim. Jinn owns lock, cells,
 retry, accounting, and Report; the engine owns the trial. Direct-mode batching
 must not merge evidence.
 
+**Addendum — 2026-08-17, official suite protocol pointer ([DR-2026-08-17-b](../../../log/decisions/2026-08-17-official-suite-protocol.md);
+no new Report v2 required fields, no new record kinds):** Terminal-Bench 2.1
+is a named protocol Colophon wraps. Comparability is two-axis
+(`execution_conformance`, `coverage`, `leaderboard_submit_ready`) on a
+product-sealed selection artifact plus Report `limitations[]`. Hub export is
+a derived artifact, not the claim of record. One Harbor Job per arm spans
+planned trials; Inspect-as-specified and official SWE-bench Verified are
+follow-ons.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product
