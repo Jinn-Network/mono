@@ -514,3 +514,23 @@ test('npm-publish.yml carries no hard-coded @jinn-network/sdk version literal', 
   assert.match(publish, /packages\/sdk\/package\.json/, 'sdk version must be read from packages/sdk/package.json');
   assert.match(publish, /sdk_version=/, 'sdk_version must be exposed as a step output');
 });
+
+test('canary patch pins the bundled SDK dependency to the rewritten workspace version', () => {
+  // pack:smoke / materialize-bundled-workspaces requires operator's declared
+  // @jinn-network/sdk pin to equal packages/sdk's version. Canary rewrites
+  // the workspace to 0.2.0-canary.sha.<commit>; leaving the pin at 0.2.0
+  // skips Publish canary (run 32038429039).
+  const patchAt = publish.indexOf('name: Patch package version for canary publish');
+  assert.notEqual(patchAt, -1, 'canary patch step must exist');
+  const buildAt = publish.indexOf('- run: yarn build', patchAt);
+  assert.notEqual(buildAt, -1, 'yarn build must follow the canary patch');
+  const patch = publish.slice(patchAt, buildAt);
+  assert.match(
+    patch,
+    /sdk\.version = sdk\.version \+ '-canary\.sha\.' \+ process\.env\.JINN_BUILD_COMMIT/,
+  );
+  assert.match(patch, /pkg\.dependencies\['@jinn-network\/sdk'\] = sdk\.version/);
+  const pinAt = patch.indexOf("pkg.dependencies['@jinn-network/sdk'] = sdk.version");
+  const writePkgAt = patch.lastIndexOf("fs.writeFileSync('package.json'");
+  assert.ok(pinAt > -1 && writePkgAt > pinAt, 'package.json must be written after the SDK dependency pin');
+});

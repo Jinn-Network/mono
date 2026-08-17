@@ -158,6 +158,13 @@ describe('packed client workflow coverage', () => {
     expect(patchCanary).toContain("const pluginPath = '../packages/plugin/package.json'");
     expect(patchCanary).toContain('core.version =');
     expect(patchCanary).toContain('plugin.version =');
+    // SDK is a bundledDependency. Rewriting packages/sdk version to
+    // 0.2.0-canary.sha.<commit> without also pinning operator's declared
+    // dependency makes pack:smoke fail in materialize-bundled-workspaces.
+    expect(patchCanary).toContain("pkg.dependencies['@jinn-network/sdk'] = sdk.version");
+    expect(patchCanary.indexOf("pkg.dependencies['@jinn-network/sdk'] = sdk.version")).toBeLessThan(
+      patchCanary.lastIndexOf("fs.writeFileSync('package.json'"),
+    );
   });
 
   it('runs postpublication registry acceptance through Yarn 4', () => {
