@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import { loadCatalogPackages, loadPlatformCatalog } from './platform-catalog.mjs';
+import { loadCatalogPackages, loadPlatformCatalog, loadStackPublishedCatalogPackages } from './platform-catalog.mjs';
 import {
   disableReleaseGroup,
   fixtureCatalog,
@@ -33,19 +33,20 @@ test('catalog-disabled platform groups cannot generate trusted-publisher registr
   try {
     assert.throws(
       () => buildRegistrationList(root),
-      /release group platform-v1 is not eligible for canary publication/u,
+      /no stack-published release group is eligible for canary publication/u,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('every canonical platform-v1 package gets one registration bound to this repo and workflow', () => {
+test('every canonical stack-published package gets one registration bound to this repo and workflow', () => {
   const registrations = buildRegistrationList(repoRoot);
-  const expectedPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+  const expectedPackages = loadStackPublishedCatalogPackages(repoRoot)
     .map((pkg) => pkg.name)
     .sort();
   assert.deepEqual(registrations.map((registration) => registration.package), expectedPackages);
+  assert.equal(registrations.length, 73);
   assert.equal(registrations.length, expectedPackages.length);
   assert.equal(new Set(registrations.map((r) => r.package)).size, registrations.length);
   for (const registration of registrations) {
@@ -62,7 +63,7 @@ test('every canonical platform-v1 package gets one registration bound to this re
 test('registrations exclude every experimental, legacy, and product package', () => {
   const registered = new Set(buildRegistrationList(repoRoot).map((registration) => registration.package));
   const excluded = loadPlatformCatalog(repoRoot).packages.filter((pkg) => (
-    pkg.releaseGroup === 'experimental-environment-supply'
+    pkg.releaseGroup === 'experimental-policy'
     || pkg.releaseGroup === 'legacy-product-lines'
     || pkg.classification === 'product'
     || pkg.classification === 'product-support'
@@ -89,7 +90,7 @@ test('the CLI writes both artifact files', () => {
     const result = spawnSync(process.execPath, [script, '--out', out, '--root', repoRoot], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const json = JSON.parse(readFileSync(join(out, 'trusted-publishers.json'), 'utf8'));
-    assert.equal(json.length, loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' }).length);
+    assert.equal(json.length, loadStackPublishedCatalogPackages(repoRoot).length);
     assert.ok(json.every((entry) => entry.environment === 'npm-publish'));
     assert.ok(json.every((entry) => JSON.stringify(entry.allowedActions) === '["npm publish"]'));
     assert.match(

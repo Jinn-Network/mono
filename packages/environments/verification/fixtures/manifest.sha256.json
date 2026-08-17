@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "attestations-v1/README.md",
+      "sha256": "56c7b53d4168d6cf5818ff4774f7b754ced8fb6c93994a2b77d5a95ba18a7d7d"
+    },
+    {
+      "id": "attestations-v1/error-acquire.json",
+      "sha256": "4dfd874e29a95801cfef5d9b7690e4927bb5f21dbd6dd505ecd38643eb67976b"
+    },
+    {
+      "id": "attestations-v1/stable.json",
+      "sha256": "51c491b2ba281597e07defcaba985002ee5d8e2037af8b84043d82b447df2a8e"
+    },
+    {
+      "id": "attestations-v1/unstable-divergence.json",
+      "sha256": "8e51cab81798430f11f31bfd45f69edf6cea77c3160b4fed53b60c0c101a8bcb"
+    },
+    {
+      "id": "predicate-v1/invalid-controls-omitted.json",
+      "sha256": "3dec1c242bd95d4a80cef7317ecc26a18c04b676f0088bdb07d7fc3dcedec6f8"
+    },
+    {
+      "id": "predicate-v1/invalid-k-below-minimum.json",
+      "sha256": "879b320596227ba310ea4bdb23c627f2387dcc3f58ccd12b427b502f4dfcbbc4"
+    },
+    {
+      "id": "predicate-v1/invalid-prefixed-digest-set.json",
+      "sha256": "afaade6fd7e731a474440e9d17f954bdbddb464afdeb3157da11ee32c9cc2727"
+    },
+    {
+      "id": "predicate-v1/invalid-stable-divergent-per-run.json",
+      "sha256": "630a969fa158efab320eca88fca3c1f92301e1056f8bcad4256ad9693c939961"
+    },
+    {
+      "id": "predicate-v1/stable.json",
+      "sha256": "9d4b2a5669dcf466a281f9e5fd50a4325fd6a7d90881842315cb0e5e6fa4a187"
+    }
+  ],
+  "errata": []
+}

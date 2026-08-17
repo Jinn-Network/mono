@@ -576,7 +576,7 @@ export function parseArgs(argv) {
     ['--expect-public-key-sha256', 'expectPublicKeySha256'],
     ['--out', 'outputPath'],
   ]);
-  const parsed = { repoRoot: process.cwd(), releaseGroup: 'platform-v1', origin: STABLE_ORIGIN };
+  const parsed = { repoRoot: process.cwd(), origin: STABLE_ORIGIN };
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -590,7 +590,9 @@ export function parseArgs(argv) {
     ['receiptPath', '--receipt'],
     ['sourceSha', '--source-sha'],
     ['catalogDigest', '--catalog-digest'],
+    ['releaseGroup', '--release-group'],
     ['lane', '--lane'],
+    ['releaseGroup', '--release-group'],
     ['publicKeyUrl', '--public-key-url'],
     ['expectPublicKeySha256', '--expect-public-key-sha256'],
     ['outputPath', '--out'],

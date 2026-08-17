@@ -71,7 +71,7 @@ function harness(options: {
   readonly finalityFailsOnce?: boolean;
 } = {}): Harness {
   const home = mkdtempSync(join(tmpdir(), 'ceremony-cli-'));
-  const dir = join(home, '.jinn-client');
+  const dir = join(home, '.jinn-operator');
   mkdirSync(dir, { recursive: true });
   const configPath = join(dir, 'config.json');
   const calls: string[] = [];

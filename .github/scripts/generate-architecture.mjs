@@ -19,6 +19,7 @@ import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
   loadPlatformCatalog,
+  stackPublishedReleaseGroupIds,
 } from './platform-catalog.mjs';
 import { buildDependencyGraph, topologicalWaves } from './stack-package-graph.mjs';
 import { buildRegistrationList } from './stack-trusted-publishers.mjs';
@@ -120,15 +121,23 @@ export function buildArchitectureReport(repoRoot) {
       || left.to.localeCompare(right.to)
       || left.kind.localeCompare(right.kind)
   ));
-  const platformPackages = hydrated.filter(({ catalog: pkg }) => pkg.releaseGroup === 'platform-v1');
-  const platformGraph = buildDependencyGraph(platformPackages);
-  const platformReleaseGroup = catalog.releaseGroups['platform-v1'];
-  const platformNames = platformPackages.map(({ name }) => name).sort();
-  const experimental = releaseGroupView(catalog, 'experimental-environment-supply');
+  const stackPublishedIds = stackPublishedReleaseGroupIds(catalog);
+  const stackPublishedGraphs = Object.fromEntries(stackPublishedIds.map((groupId) => {
+    const packages = hydrated.filter(({ catalog: pkg }) => pkg.releaseGroup === groupId);
+    const graph = buildDependencyGraph(packages);
+    return [groupId, {
+      closure: dependencyClosure(graph),
+      waves: topologicalWaves(graph),
+    }];
+  }));
+  const experimentalPolicy = catalog.releaseGroups['experimental-policy']
+    ? releaseGroupView(catalog, 'experimental-policy')
+    : { packages: [] };
   const packagesRoot = catalog.packages.filter(({ path }) => path.startsWith('packages/'));
-  const otherPackagesRoot = packagesRoot.filter(({ releaseGroup }) => (
-    !['platform-v1', 'experimental-environment-supply'].includes(releaseGroup)
-  ));
+  const countedGroups = new Set([...stackPublishedIds, 'experimental-policy']);
+  const otherPackagesRoot = packagesRoot.filter(({ releaseGroup }) => !countedGroups.has(releaseGroup));
+  const sealedCount = catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'sealed-platform-v1').length;
+  const implementationsCount = catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'implementations-v1').length;
   const publicSurfacePackages = packageRecords.map(({ name, path, releaseGroup, publicSurface }) => ({
     name,
     path,
@@ -149,8 +158,9 @@ export function buildArchitectureReport(repoRoot) {
     counts: {
       inventory: catalog.packages.length,
       packagesRootEntries: packagesRoot.length,
-      platformV1: platformNames.length,
-      experimentalEnvironmentSupply: experimental.packages.length,
+      sealedPlatformV1: sealedCount,
+      implementationsV1: implementationsCount,
+      experimentalPolicy: experimentalPolicy.packages.length,
       otherPackagesRootEntries: otherPackagesRoot.length,
       adjacentEntries: catalog.packages.length - packagesRoot.length,
     },
@@ -163,24 +173,33 @@ export function buildArchitectureReport(repoRoot) {
       edgeSections: EDGE_SECTIONS,
       nodes: packageRecords.map(({ name }) => name).sort(),
       edges,
-      platformV1: {
-        closure: dependencyClosure(platformGraph),
-        waves: topologicalWaves(platformGraph),
-      },
+      stackPublished: stackPublishedGraphs,
     },
     release: {
-      platformV1: {
-        packages: platformNames,
+      stackPublished: {
+        packages: catalog.packages
+          .filter(({ releaseGroup }) => stackPublishedIds.includes(releaseGroup))
+          .map(({ name }) => name)
+          .sort(),
         trustedPublishers: buildRegistrationList(root),
-        policy: {
-          publishPolicies: platformReleaseGroup.publishPolicies,
-          stackPublished: platformReleaseGroup.stackPublished,
-          canary: platformReleaseGroup.canary,
-          stable: platformReleaseGroup.stable,
-          stableBlocker: 'stable-publish-gate: live https://spec.jinn.network profile host verification of the same run',
-        },
+        groups: Object.fromEntries(stackPublishedIds.map((groupId) => {
+          const definition = catalog.releaseGroups[groupId];
+          return [groupId, {
+            packages: catalog.packages
+              .filter(({ releaseGroup }) => releaseGroup === groupId)
+              .map(({ name }) => name)
+              .sort(),
+            policy: {
+              publishPolicies: definition.publishPolicies,
+              stackPublished: definition.stackPublished,
+              canary: definition.canary,
+              stable: definition.stable,
+              stableBlocker: 'stable-publish-gate: live https://spec.jinn.network profile host verification of the same run',
+            },
+          }];
+        })),
       },
-      experimentalEnvironmentSupply: experimental,
+      experimentalPolicy,
     },
     publicSurfaces: {
       packages: publicSurfacePackages,
@@ -248,7 +267,7 @@ export function renderArchitectureMarkdown(report) {
     '',
     '## Inventory',
     '',
-    `The catalog contains **${report.counts.inventory}** entries: **${report.counts.platformV1}** \`platform-v1\` packages, **${report.counts.experimentalEnvironmentSupply}** disabled \`experimental-environment-supply\` packages, **${report.counts.otherPackagesRootEntries}** other entries below \`packages/**\`, and **${report.counts.adjacentEntries}** adjacent entries.`,
+    `The catalog contains **${report.counts.inventory}** entries: **${report.counts.sealedPlatformV1}** \`sealed-platform-v1\` packages, **${report.counts.implementationsV1}** \`implementations-v1\` packages, **${report.counts.experimentalPolicy}** disabled \`experimental-policy\` packages, **${report.counts.otherPackagesRootEntries}** other entries below \`packages/**\`, and **${report.counts.adjacentEntries}** adjacent entries.`,
     '',
     '| Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |',
     '| --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |',
@@ -262,17 +281,20 @@ export function renderArchitectureMarkdown(report) {
     '| --- | --- | --- |',
     ...report.graph.edges.map(({ from, kind, to }) => `| ${cell(from)} | ${kind} | ${cell(to)} |`),
     '',
-    '### `platform-v1` runtime waves',
-    '',
-    ...report.graph.platformV1.waves.map((wave, index) => `${index + 1}. ${wave.map((name) => `\`${name}\``).join(', ')}`),
-    '',
-    '### `platform-v1` transitive closure',
-    '',
-    '| Package | Runtime closure |',
-    '| --- | --- |',
-    ...Object.entries(report.graph.platformV1.closure).map(([name, closure]) => (
-      `| ${cell(name)} | ${cell(closure)} |`
-    )),
+    ...Object.entries(report.graph.stackPublished).flatMap(([groupId, view]) => [
+      '',
+      `### \`${groupId}\` runtime waves`,
+      '',
+      ...view.waves.map((wave, index) => `${index + 1}. ${wave.map((name) => `\`${name}\``).join(', ')}`),
+      '',
+      `### \`${groupId}\` transitive closure`,
+      '',
+      '| Package | Runtime closure |',
+      '| --- | --- |',
+      ...Object.entries(view.closure).map(([name, closure]) => (
+        `| ${cell(name)} | ${cell(closure)} |`
+      )),
+    ]),
     '',
     '## Release and trusted publishers',
     '',
@@ -282,12 +304,12 @@ export function renderArchitectureMarkdown(report) {
       `| ${groupId} | ${group.packages.length} | ${cell(group.requiredGateIds)} | ${cell(group.publishPolicies)} | ${group.stackPublished} | ${group.canary} | ${group.stable} |`
     )),
     '',
-    `The exact ${report.release.platformV1.packages.length}-package trusted-publisher set is \`platform-v1\`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live \`jinn.network\` profile hosting verification passes.** The ${report.release.experimentalEnvironmentSupply.packages.length} experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.`,
+    `The exact ${report.release.stackPublished.packages.length}-package trusted-publisher set is the union of stack-published groups. Receipt-gated canary publication is enabled for every stack-published group. **Stable publication is disabled until live \`spec.jinn.network\` profile hosting verification passes.** The ${report.release.experimentalPolicy.packages.length} \`experimental-policy\` packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.`,
     '',
     '| Package | Workflow | Environment field |',
     '| --- | --- | --- |',
-    ...report.release.platformV1.trustedPublishers.map((registration) => (
-      `| ${cell(registration.package)} | ${registration.workflow} | blank |`
+    ...report.release.stackPublished.trustedPublishers.map((registration) => (
+      `| ${cell(registration.package)} | ${registration.workflow} | ${cell(registration.environment)} |`
     )),
     '',
     '## Public surfaces and identity claims',

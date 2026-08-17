@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "prediction-snapshot-v1/README.md",
+      "sha256": "222ba440949299f546a96b0039bbe084e432b4f3d07a09224f84f629b14ae704"
+    },
+    {
+      "id": "prediction-snapshot-v1/admission-receipt.dsse.json",
+      "sha256": "08ec0c0c186ca4109bfb2aaec7e80106008933a51a10c78d4879e02a5471111b"
+    },
+    {
+      "id": "prediction-snapshot-v1/evaluation-spec.json",
+      "sha256": "a6821a066168cb199adf550ec515ad14dc7f9a27587963cbb5cc549732a31e0c"
+    },
+    {
+      "id": "prediction-snapshot-v1/manifest.json",
+      "sha256": "cafeac74acb846e1fca7dbe5ba0df6b617ad7d2f0234bee9ec82d0ae6bd95147"
+    },
+    {
+      "id": "prediction-snapshot-v1/requester.dsse.json",
+      "sha256": "198c65a8a00b370ce6b73a84d18c2f2d0e1bb4f4e38461cf1c140bb2ce9d68ac"
+    },
+    {
+      "id": "prediction-snapshot-v1/submission.json",
+      "sha256": "e65e9abf1caa33321d28e73944d1bdab49ae4f4282ce13d69e9a7251cf8c140b"
+    },
+    {
+      "id": "prediction-snapshot-v1/task.json",
+      "sha256": "c0c3d703b3938a944095dcc91b4ec7da96f1bc10b1bb85b0419440a5f44d1204"
+    },
+    {
+      "id": "prediction-snapshot-v1/verification-key.json",
+      "sha256": "66bb8cbe6a31bd4350fc7d8cbc54b80e1d8d647454e8bcf7031f95625f7b94fd"
+    }
+  ],
+  "errata": []
+}

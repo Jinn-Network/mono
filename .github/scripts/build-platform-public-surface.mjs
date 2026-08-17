@@ -11,6 +11,8 @@ import {
 import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
+  loadPlatformCatalog,
+  resolveRequestedReleaseGroup,
 } from './platform-catalog.mjs';
 import { publicationSurfaceViolations } from './stack-publication-surface.mjs';
 
@@ -21,7 +23,7 @@ export function buildPlatformPublicSurface({
   outputPath,
   sourceSha,
   catalogDigest,
-  releaseGroup = 'platform-v1',
+  releaseGroup,
   lane,
 }) {
   const root = resolve(repoRoot);
@@ -32,9 +34,7 @@ export function buildPlatformPublicSurface({
   if (catalogDigest !== actualDigest) {
     throw new Error(`catalog digest mismatch: expected ${catalogDigest}, checked out catalog is ${actualDigest}`);
   }
-  if (releaseGroup !== 'platform-v1') {
-    throw new Error(`public surface artifact requires platform-v1, got ${releaseGroup}`);
-  }
+  releaseGroup = resolveRequestedReleaseGroup(loadPlatformCatalog(root), releaseGroup);
   if (lane !== 'canary' && lane !== 'stable') {
     throw new Error(`lane must be canary or stable, got ${lane ?? '<missing>'}`);
   }
@@ -61,7 +61,7 @@ export function buildPlatformPublicSurface({
 }
 
 function parseArgs(argv) {
-  const parsed = { repoRoot: process.cwd(), releaseGroup: 'platform-v1' };
+  const parsed = { repoRoot: process.cwd() };
   const fields = new Map([
     ['--root', 'repoRoot'],
     ['--out', 'outputPath'],

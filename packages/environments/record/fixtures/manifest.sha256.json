@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "adversarial-v1/bare-extension-key/document.json",
+      "sha256": "6f60239ff92c1bf5fd3f53e30ba92bb38eda9f963cb6f855bed04cf1be9680d7"
+    },
+    {
+      "id": "adversarial-v1/bare-hex-manifest-digest/document.json",
+      "sha256": "c40dff236005dbd613fabf1ad5ab8211291ff23403d1127cd65d311cf18954bf"
+    },
+    {
+      "id": "adversarial-v1/index-digest-as-manifest/document.json",
+      "sha256": "2ed978732e864699925a1a53e9ef661c0396a1a626258130fea746afe78b13e8"
+    },
+    {
+      "id": "adversarial-v1/manifest.json",
+      "sha256": "ebd031f02967c2d8d75100adab126c1750b918f48a32309f572f27f2eed8b572"
+    },
+    {
+      "id": "adversarial-v1/namespaced-extension-preserved/document.json",
+      "sha256": "9c1876dabfee4ed1cb966f4713b223390bffbf366fec1f97e926ffefb595b61a"
+    },
+    {
+      "id": "adversarial-v1/recanonicalized-bytes/document.bytes",
+      "sha256": "03aea854308c893e0c309f181de897b16038c3935a9e6fffcafc816ea3da4e8b"
+    },
+    {
+      "id": "adversarial-v1/reference-not-ending-in-digest/document.json",
+      "sha256": "b7b0044df45bea39d3efd99be721b64d81f49417928831b9256280053fa9d6c2"
+    },
+    {
+      "id": "adversarial-v1/shell-command-exe-spelling/document.json",
+      "sha256": "9e1019153b8f173f35990d8cfe0afb2c07b8425cc5438dfa549643e5e53ff7ec"
+    },
+    {
+      "id": "adversarial-v1/shell-command/document.json",
+      "sha256": "7185fb2f3a034504fd7aed52b3c3f73c1ef7c44a6eb962fd082287e45744016a"
+    },
+    {
+      "id": "environment/extension.json",
+      "sha256": "b395e4ac993a0aa7a386c883ec69582d75e4ee26a88a53deae1feadfe6f3f3fc"
+    },
+    {
+      "id": "environment/extension.sha256",
+      "sha256": "8bf315d9fc5f73393946a13c8f18817efef04fffca4ab29554010f2bcf31f55d"
+    },
+    {
+      "id": "environment/imported.json",
+      "sha256": "a3524f16f976b17281d4d7deb42490616f0e464ba4f9490f7b5c9ba2c019c273"
+    },
+    {
+      "id": "environment/imported.sha256",
+      "sha256": "f9cb4411bcbb4204498e00cea56ffb24787fe45c73949f157d84feee6489de95"
+    },
+    {
+      "id": "environment/invalid-bare-extension-key.json",
+      "sha256": "6f60239ff92c1bf5fd3f53e30ba92bb38eda9f963cb6f855bed04cf1be9680d7"
+    },
+    {
+      "id": "environment/invalid-bare-hex-manifest-digest.json",
+      "sha256": "c40dff236005dbd613fabf1ad5ab8211291ff23403d1127cd65d311cf18954bf"
+    },
+    {
+      "id": "environment/invalid-index-digest-as-manifest.json",
+      "sha256": "2ed978732e864699925a1a53e9ef661c0396a1a626258130fea746afe78b13e8"
+    },
+    {
+      "id": "environment/invalid-reference-not-ending-in-digest.json",
+      "sha256": "b7b0044df45bea39d3efd99be721b64d81f49417928831b9256280053fa9d6c2"
+    },
+    {
+      "id": "environment/invalid-shell-command-exe-spelling.json",
+      "sha256": "9e1019153b8f173f35990d8cfe0afb2c07b8425cc5438dfa549643e5e53ff7ec"
+    },
+    {
+      "id": "environment/invalid-shell-command.json",
+      "sha256": "7185fb2f3a034504fd7aed52b3c3f73c1ef7c44a6eb962fd082287e45744016a"
+    },
+    {
+      "id": "environment/tier-1.json",
+      "sha256": "d62842d2135b31ff3b5db96120f99fb385101083e6b1e1e47c96e70b91f43a30"
+    },
+    {
+      "id": "environment/tier-1.sha256",
+      "sha256": "340272ca797bd325ee9fbdeb503d5474ef24c0c68a999f125573686250f5a0fe"
+    },
+    {
+      "id": "equivalence/expected-digest.json",
+      "sha256": "473fcf3e10941cbca2a6869e19b9e79924550f86714471948fa0917ba2d303ff"
+    },
+    {
+      "id": "equivalence/input-a.json",
+      "sha256": "03aea854308c893e0c309f181de897b16038c3935a9e6fffcafc816ea3da4e8b"
+    },
+    {
+      "id": "equivalence/input-b.json",
+      "sha256": "2961c67bb720f8f4c78cc9b4e50b3c9dca7b6091fc8f311cbbbb66a2c370da20"
+    }
+  ],
+  "errata": []
+}

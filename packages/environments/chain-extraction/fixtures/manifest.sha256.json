@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": ".gitkeep",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "adversarial-v1/uncovered-entry.json",
+      "sha256": "da68d08ec7e643faeb914a61bcb3d9ac3273b4822ea24ff76ab557524e5378ca"
+    },
+    {
+      "id": "adversarial-v1/unsorted-slots.json",
+      "sha256": "02ed6ac84150d2ef1143b83d1a317bbccc6ad525b4d9e50dbb7fe48ee15d34d2"
+    },
+    {
+      "id": "adversarial-v1/uppercase-hex.json",
+      "sha256": "5026c2153fd90e67b21cb77307105de09f22b5ab80166d4a47fd4832b588e1c3"
+    },
+    {
+      "id": "artifacts-v1/converged.json",
+      "sha256": "88f943e18c002522fb9260051d321f031c498015673e84518fa1d671ce2e12e6"
+    },
+    {
+      "id": "artifacts-v1/converged.sha256",
+      "sha256": "202c7296cc6ad77564556a4428fb8ba96888ab5d1423daa331e021f6c2ec09da"
+    },
+    {
+      "id": "artifacts-v1/minimal.json",
+      "sha256": "86b0c4760ddf0ab2918c7e2ce87821047dfd77ebf6507e38d7d13b34ffe2ce9a"
+    },
+    {
+      "id": "artifacts-v1/minimal.sha256",
+      "sha256": "8e825a758a8b5fc6454d5568052b0d3eb4f536f17e127cbe2df0dd2f947c37e3"
+    },
+    {
+      "id": "coverage-v1/fixture-coverage.json",
+      "sha256": "153346359eb3acbc9527f0522cd88debc7995aae81cda3408ce84806e09ee97f"
+    },
+    {
+      "id": "coverage-v1/fixture-coverage.sha256",
+      "sha256": "81b99aa07d5cd2d0b7115438f116a7475b629c6f70ed6f968c1a14064b77007a"
+    },
+    {
+      "id": "coverage-v1/proof-bundle.json",
+      "sha256": "efa8baf674e7ca1ee3fcf21b97bbb36e7f859b5d4bd8b5348f9b7116148fd831"
+    },
+    {
+      "id": "coverage-v1/proof-bundle.sha256",
+      "sha256": "4c7cf5f215eb68f62d8ac5561fccc4aae5dccfc7fbfd837a26036643b879b59a"
+    }
+  ],
+  "errata": []
+}

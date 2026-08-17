@@ -23,18 +23,20 @@ test('machine view covers the exact catalog split and manifest-owned dependency 
   const report = buildArchitectureReport(repoRoot);
   const catalog = loadPlatformCatalog(repoRoot);
   const packagesRootEntries = catalog.packages.filter(({ path }) => path.startsWith('packages/')).length;
-  const platformV1 = catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'platform-v1').length;
-  const experimentalEnvironmentSupply = catalog.packages.filter(
-    ({ releaseGroup }) => releaseGroup === 'experimental-environment-supply',
+  const sealedPlatformV1 = catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'sealed-platform-v1').length;
+  const implementationsV1 = catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'implementations-v1').length;
+  const experimentalPolicy = catalog.packages.filter(
+    ({ releaseGroup }) => releaseGroup === 'experimental-policy',
   ).length;
 
   assert.deepEqual(report.counts, {
     adjacentEntries: catalog.packages.length - packagesRootEntries,
-    experimentalEnvironmentSupply,
+    experimentalPolicy,
+    implementationsV1,
     inventory: catalog.packages.length,
-    otherPackagesRootEntries: packagesRootEntries - platformV1 - experimentalEnvironmentSupply,
+    otherPackagesRootEntries: packagesRootEntries - sealedPlatformV1 - implementationsV1 - experimentalPolicy,
     packagesRootEntries,
-    platformV1,
+    sealedPlatformV1,
   });
   assert.equal(report.packages.length, catalog.packages.length);
   assert.deepEqual(
@@ -68,25 +70,29 @@ test('runtime graph preserves dependency kinds, excludes dev-only edges, and rec
     from === '@jinn-network/benchmarking-run'
       && to === '@jinn-network/evidence-protocol'
   )), false, 'a dev-only dependency must not enter generated architecture order');
-  for (const wave of report.graph.platformV1.waves) assert.deepEqual(wave, [...wave].sort());
+  for (const view of Object.values(report.graph.stackPublished)) {
+    for (const wave of view.waves) assert.deepEqual(wave, [...wave].sort());
+  }
   assert.equal(
-    Object.keys(report.graph.platformV1.closure).length,
-    report.release.platformV1.packages.length,
+    Object.keys(report.graph.stackPublished['sealed-platform-v1'].closure).length,
+    report.release.stackPublished.groups['sealed-platform-v1'].packages.length,
   );
   assert.deepEqual(
-    report.graph.platformV1.closure['@jinn-network/evidence-protocol'],
+    report.graph.stackPublished['sealed-platform-v1'].closure['@jinn-network/evidence-protocol'],
     [],
   );
-  assert.deepEqual(
-    new Set(report.graph.platformV1.waves.flat()),
-    new Set(report.release.platformV1.packages),
-  );
-  const waveByPackage = new Map(report.graph.platformV1.waves.flatMap(
-    (wave, index) => wave.map((name) => [name, index]),
-  ));
-  for (const [name, dependencies] of Object.entries(report.graph.platformV1.closure)) {
-    for (const dependency of dependencies) {
-      assert.ok(waveByPackage.get(dependency) < waveByPackage.get(name), `${dependency} must precede ${name}`);
+  for (const [groupId, view] of Object.entries(report.graph.stackPublished)) {
+    assert.deepEqual(
+      new Set(view.waves.flat()),
+      new Set(report.release.stackPublished.groups[groupId].packages),
+    );
+    const waveByPackage = new Map(view.waves.flatMap(
+      (wave, index) => wave.map((name) => [name, index]),
+    ));
+    for (const [name, dependencies] of Object.entries(view.closure)) {
+      for (const dependency of dependencies) {
+        assert.ok(waveByPackage.get(dependency) < waveByPackage.get(name), `${dependency} must precede ${name}`);
+      }
     }
   }
 });
@@ -94,27 +100,35 @@ test('runtime graph preserves dependency kinds, excludes dev-only edges, and rec
 test('release, public-surface, ownership, and transition views reuse their canonical authorities', async () => {
   const { buildArchitectureReport } = await implementation;
   const report = buildArchitectureReport(repoRoot);
-  const expectedPlatform = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+  const expectedSealed = loadCatalogPackages(repoRoot, { releaseGroup: 'sealed-platform-v1' })
     .map(({ name }) => name)
     .sort();
+  const expectedImplementations = loadCatalogPackages(repoRoot, { releaseGroup: 'implementations-v1' })
+    .map(({ name }) => name)
+    .sort();
+  const expectedStack = [...expectedSealed, ...expectedImplementations].sort();
 
-  assert.deepEqual(report.release.platformV1.packages, expectedPlatform);
+  assert.deepEqual(report.release.stackPublished.packages, expectedStack);
   assert.deepEqual(
-    report.release.platformV1.trustedPublishers.map(({ package: name }) => name),
-    expectedPlatform,
+    report.release.stackPublished.trustedPublishers.map(({ package: name }) => name),
+    expectedStack,
   );
-  assert.deepEqual(report.release.platformV1.policy, {
-    canary: true,
-    publishPolicies: ['canary-only'],
-    stable: false,
-    stableBlocker: 'stable-publish-gate: live https://spec.jinn.network profile host verification of the same run',
-    stackPublished: true,
-  });
+  assert.deepEqual(report.release.stackPublished.groups['sealed-platform-v1'].packages, expectedSealed);
+  assert.deepEqual(report.release.stackPublished.groups['implementations-v1'].packages, expectedImplementations);
+  for (const groupId of ['sealed-platform-v1', 'implementations-v1']) {
+    assert.deepEqual(report.release.stackPublished.groups[groupId].policy, {
+      canary: true,
+      publishPolicies: ['canary-and-stable'],
+      stable: true,
+      stableBlocker: 'stable-publish-gate: live https://spec.jinn.network profile host verification of the same run',
+      stackPublished: true,
+    });
+  }
   assert.equal(
-    report.release.experimentalEnvironmentSupply.packages.length,
-    loadCatalogPackages(repoRoot, { releaseGroup: 'experimental-environment-supply' }).length,
+    report.release.experimentalPolicy.packages.length,
+    loadCatalogPackages(repoRoot, { releaseGroup: 'experimental-policy' }).length,
   );
-  assert.deepEqual(report.release.experimentalEnvironmentSupply.publishPolicies, ['disabled']);
+  assert.deepEqual(report.release.experimentalPolicy.publishPolicies, ['disabled']);
   assert.ok(report.publicSurfaces.packages.some(({ name, schemas }) => (
     name === '@jinn-network/evidence-trace' && schemas.includes('schemas')
   )));

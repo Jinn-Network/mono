@@ -1,5 +1,7 @@
 # @jinn-network/record-discovery-facts-chain-environments
 
+> Candidate in `implementations-v1`. Eligible for receipt-gated canary; that is not independent ratification.
+
 Facts profiles and record-fact recompute for three record kinds:
 `chain-environment/1.0`, `crypto-environment/1.0`, and `information-world/1.0`.
 

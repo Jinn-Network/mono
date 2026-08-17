@@ -1,8 +1,8 @@
 // node --test suite for verify-live-profile-host.mjs -- zero-dependency, offline.
 //
 // The fake host is built from a real `buildProfileRoot` output in a temp directory and
-// signed with a throwaway Ed25519 key, so the happy path exercises the actual public
-// surface (541 documents at the time of writing, including extensionless profiles,
+// signed with a throwaway Ed25519 key, so the happy path exercises the sealed-platform-v1
+// public surface (hundreds of documents, including extensionless profiles,
 // fixture documents whose `profile` field is a vocabulary name rather than a served
 // path, and both document- and prefix-resolution registered identifiers). Every
 // adversarial case mutates exactly one thing about that host and asserts the gate
@@ -104,7 +104,13 @@ function realFixture() {
   if (cached) return cached;
   const root = temporaryDirectory('jinn-live-host-root-');
   const catalogDigest = catalogSha256(repoRoot);
-  const manifest = buildProfileRoot({ repoRoot, outDir: root, commit: sourceSha, catalogDigest });
+  const manifest = buildProfileRoot({
+    repoRoot,
+    outDir: root,
+    commit: sourceSha,
+    catalogDigest,
+    releaseGroup: 'sealed-platform-v1',
+  });
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
   const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
@@ -118,7 +124,7 @@ function realFixture() {
     schemaVersion: 1,
     sourceSha,
     catalog: { path: PLATFORM_CATALOG_PATH, sha256: catalogDigest },
-    releaseGroup: 'platform-v1',
+    releaseGroup: 'sealed-platform-v1',
     lane: 'canary',
     surfaces: {
       profile: {
@@ -154,7 +160,8 @@ function realFixture() {
     receipt,
     catalogDigest,
     routes,
-    resolvableIdentifiers: loadPlatformCatalog(repoRoot).resolvableIdentifiers ?? [],
+    resolvableIdentifiers: (loadPlatformCatalog(repoRoot).resolvableIdentifiers ?? [])
+      .filter(({ owner }) => manifest.packages.includes(owner)),
   };
   return cached;
 }
@@ -167,7 +174,7 @@ function runArgs(fixture, { routes, receipt, fetchOptions = {}, ...overrides } =
     receiptSha256: 'f'.repeat(64),
     sourceSha,
     catalogDigest: fixture.catalogDigest,
-    releaseGroup: 'platform-v1',
+    releaseGroup: 'sealed-platform-v1',
     lane: 'canary',
     origin: ORIGIN,
     publicKeyUrl: PUBLIC_KEY_URL,
@@ -287,7 +294,7 @@ test('happy path: the host serves the attested manifest, every document and a ve
   assert.equal(result.receipt.origin, ORIGIN);
   assert.equal(result.receipt.sourceSha, sourceSha);
   assert.equal(result.receipt.catalogDigest, fixture.catalogDigest);
-  assert.equal(result.receipt.releaseGroup, 'platform-v1');
+  assert.equal(result.receipt.releaseGroup, 'sealed-platform-v1');
   assert.equal(result.receipt.lane, 'canary');
   assert.equal(result.receipt.verificationReceiptSha256, 'f'.repeat(64));
   assert.equal(result.receipt.profileManifestSha256, sha256(fixture.manifestBytes));
@@ -418,7 +425,13 @@ test('a missing hosted signature sidecar is refused', async () => {
 test('an attested root with no signature sidecar is refused: there is no unsigned path', () => {
   const unsigned = temporaryDirectory('jinn-live-host-unsigned-');
   const catalogDigest = catalogSha256(repoRoot);
-  buildProfileRoot({ repoRoot, outDir: unsigned, commit: sourceSha, catalogDigest });
+  buildProfileRoot({
+    repoRoot,
+    outDir: unsigned,
+    commit: sourceSha,
+    catalogDigest,
+    releaseGroup: 'sealed-platform-v1',
+  });
   assert.ok(!existsSync(join(unsigned, SIGNATURE_FILE_NAME)));
   const fixture = realFixture();
   return expectFailure(
@@ -449,7 +462,13 @@ test('a sidecar whose payload is not the hosted manifest is refused', async () =
   const fixture = realFixture();
   const drifted = temporaryDirectory('jinn-live-host-drifted-sidecar-');
   const catalogDigest = catalogSha256(repoRoot);
-  const manifest = buildProfileRoot({ repoRoot, outDir: drifted, commit: sourceSha, catalogDigest });
+  const manifest = buildProfileRoot({
+    repoRoot,
+    outDir: drifted,
+    commit: sourceSha,
+    catalogDigest,
+    releaseGroup: 'sealed-platform-v1',
+  });
   const otherEnvelope = signManifest(
     Buffer.from(manifestBytes({ ...manifest, lane: 'stable' }), 'utf8'),
     fixture.privateKeyPem,
@@ -707,7 +726,7 @@ test('the CLI exits non-zero and prints FAIL when the gate refuses', () => {
       return { code: error.status, stdout: String(error.stdout ?? '') };
     }
   };
-  const missing = attempt(['--root', '/nonexistent']);
+  const missing = attempt(['--root', '/nonexistent', '--release-group', 'sealed-platform-v1']);
   assert.notEqual(missing.code, 0);
   assert.match(missing.stdout, /^FAIL: /mu);
 
@@ -716,6 +735,7 @@ test('the CLI exits non-zero and prints FAIL when the gate refuses', () => {
     '--receipt', join(realFixture().root, MANIFEST_FILE_NAME),
     '--source-sha', sourceSha,
     '--catalog-digest', realFixture().catalogDigest,
+    '--release-group', 'sealed-platform-v1',
     '--lane', 'stable',
     '--origin', OTHER_ORIGIN,
     '--public-key-url', PUBLIC_KEY_URL,

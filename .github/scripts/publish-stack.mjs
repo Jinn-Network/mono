@@ -3,6 +3,11 @@
 import { resolve } from 'node:path';
 
 import {
+  loadPlatformCatalog,
+  resolveRequestedReleaseGroup,
+  stackPublishedRewriteNames,
+} from './platform-catalog.mjs';
+import {
   buildDependencyGraph,
   discoverStackPackages,
   topologicalWaves,
@@ -18,7 +23,7 @@ export function parsePublishArgs(argv) {
     releaseTag: undefined,
     dryRun: false,
     repoRoot: process.cwd(),
-    releaseGroup: 'platform-v1',
+    releaseGroup: undefined,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -48,10 +53,12 @@ export const EMPTY_PACKAGE_SET_EXIT_CODE = 3;
 
 export class EmptyPackageSetError extends Error {}
 
-export function buildPublishPlan({ repoRoot, mode, sha, releaseTag, releaseGroup = 'platform-v1' }) {
-  const packages = discoverStackPackages(repoRoot, { releaseGroup });
+export function buildPublishPlan({ repoRoot, mode, sha, releaseTag, releaseGroup } = {}) {
+  const catalog = loadPlatformCatalog(repoRoot);
+  const groupId = resolveRequestedReleaseGroup(catalog, releaseGroup);
+  const packages = discoverStackPackages(repoRoot, { releaseGroup: groupId });
   if (packages.length === 0) {
-    throw new EmptyPackageSetError(`no packages found in catalog release group ${releaseGroup}`);
+    throw new EmptyPackageSetError(`no packages found in catalog release group ${groupId}`);
   }
   const baseVersions = new Set(packages.map((pkg) => pkg.manifest.version));
   if (baseVersions.size !== 1) {
@@ -71,7 +78,13 @@ export function buildPublishPlan({ repoRoot, mode, sha, releaseTag, releaseGroup
       spec: `${name}@${version}`,
     };
   }));
-  return { version, distTag, waves, inSetNames: new Set(byName.keys()) };
+  return {
+    version,
+    distTag,
+    waves,
+    releaseGroup: groupId,
+    inSetNames: stackPublishedRewriteNames(catalog, groupId),
+  };
 }
 
 export function renderPlan(plan) {

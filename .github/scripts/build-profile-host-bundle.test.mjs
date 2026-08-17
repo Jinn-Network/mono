@@ -50,7 +50,12 @@ let cachedProfileRoot;
 function realProfileRoot() {
   if (!cachedProfileRoot) {
     cachedProfileRoot = temporaryDirectory('jinn-host-bundle-source-');
-    buildProfileRoot({ repoRoot, outDir: cachedProfileRoot, commit: sourceSha });
+    buildProfileRoot({
+      repoRoot,
+      outDir: cachedProfileRoot,
+      commit: sourceSha,
+      releaseGroup: 'sealed-platform-v1',
+    });
   }
   return cachedProfileRoot;
 }
@@ -222,7 +227,12 @@ test('the bundle is deterministic: the same profile root yields identical bytes'
 
 test('a signature sidecar is carried into the bundle and given a revalidating entry', () => {
   const source = temporaryDirectory('jinn-host-bundle-signed-');
-  const manifest = buildProfileRoot({ repoRoot, outDir: source, commit: sourceSha });
+  const manifest = buildProfileRoot({
+    repoRoot,
+    outDir: source,
+    commit: sourceSha,
+    releaseGroup: 'sealed-platform-v1',
+  });
   const envelope = `${JSON.stringify({ payload: 'e30=', payloadType: 'x', signatures: [] }, null, 2)}\n`;
   writeFileSync(join(source, SIGNATURE_FILE_NAME), envelope, 'utf8');
   const out = temporaryDirectory('jinn-host-bundle-signed-out-');
@@ -242,7 +252,12 @@ test('a signature sidecar is carried into the bundle and given a revalidating en
 
 test('an undeclared file, a digest drift and a non-empty output directory are all refused', () => {
   const stray = temporaryDirectory('jinn-host-bundle-stray-');
-  buildProfileRoot({ repoRoot, outDir: stray, commit: sourceSha });
+  buildProfileRoot({
+    repoRoot,
+    outDir: stray,
+    commit: sourceSha,
+    releaseGroup: 'sealed-platform-v1',
+  });
   writeFileSync(join(stray, 'unexpected.txt'), 'x', 'utf8');
   assert.throws(
     () => buildProfileHostBundle({ profileRoot: stray, outDir: temporaryDirectory('jinn-host-bundle-stray-out-') }),
@@ -250,7 +265,12 @@ test('an undeclared file, a digest drift and a non-empty output directory are al
   );
 
   const drifted = temporaryDirectory('jinn-host-bundle-drift-');
-  const driftManifest = buildProfileRoot({ repoRoot, outDir: drifted, commit: sourceSha });
+  const driftManifest = buildProfileRoot({
+    repoRoot,
+    outDir: drifted,
+    commit: sourceSha,
+    releaseGroup: 'sealed-platform-v1',
+  });
   const victim = driftManifest.documents[0].path;
   writeFileSync(join(drifted, ...victim.split('/')), 'tampered', 'utf8');
   assert.throws(

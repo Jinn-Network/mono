@@ -89,7 +89,7 @@ function temporaryDirectory(prefix) {
 
 let tls;
 let caCertPath;
-/** The catalog's registered identifiers that the platform-v1 release set owns. */
+/** The catalog's registered identifiers that the sealed-platform-v1 release set owns. */
 let registered;
 let full;
 let subset;
@@ -120,7 +120,7 @@ function attestedFixture(root, manifest) {
     schemaVersion: 1,
     sourceSha,
     catalog: { path: PLATFORM_CATALOG_PATH, sha256: catalogDigest },
-    releaseGroup: 'platform-v1',
+    releaseGroup: 'sealed-platform-v1',
     lane: 'canary',
     surfaces: {
       profile: {
@@ -155,7 +155,7 @@ function attestedFixture(root, manifest) {
 // Every path shape a static host guesses wrong about, selected from the real manifest by
 // predicate rather than by name so the selection cannot quietly go stale.
 const HAZARD_SHAPES = [
-  ['an extensionless facts profile', ({ path }) => /^facts\/[^/]+\/v1$/u.test(path)],
+  ['a nested schema beside a profile', ({ path }) => /^profiles\/[^/]+\/v1\/schemas\/.+\.schema\.json$/u.test(path)],
   ['an extensionless task-execution profile', ({ path }) => /^profiles\/[^/]+\/v1$/u.test(path)],
   ['a dot-version segment', ({ path }) => /^task-profiles\/[^/]+\/\d+\.\d+$/u.test(path)],
   ['an @-prefixed fixture document', ({ path }) => path.startsWith('@jinn-network/') && path.endsWith('.json')],
@@ -205,11 +205,17 @@ before(() => {
   writeFileSync(caCertPath, tls.cert, 'utf8');
 
   const fullRoot = temporaryDirectory('jinn-local-host-root-');
-  const manifest = buildProfileRoot({ repoRoot, outDir: fullRoot, commit: sourceSha, catalogDigest });
+  const manifest = buildProfileRoot({
+    repoRoot,
+    outDir: fullRoot,
+    commit: sourceSha,
+    catalogDigest,
+    releaseGroup: 'sealed-platform-v1',
+  });
   const releasePackages = new Set(manifest.packages);
   registered = (loadPlatformCatalog(repoRoot).resolvableIdentifiers ?? [])
     .filter(({ owner }) => releasePackages.has(owner));
-  assert.ok(registered.length > 0, 'the platform-v1 release set must own registered identifiers');
+  assert.ok(registered.length > 0, 'the sealed-platform-v1 release set must own registered identifiers');
   const carved = subsetRoot(fullRoot, manifest);
   full = attestedFixture(fullRoot, manifest);
   subset = attestedFixture(carved.root, carved.manifest);
@@ -253,7 +259,7 @@ function runGate(fixture, origin, {
     '--repo-root', repoRoot,
     '--source-sha', sourceSha,
     '--catalog-digest', catalogDigest,
-    '--release-group', 'platform-v1',
+    '--release-group', 'sealed-platform-v1',
     '--lane', lane,
     '--origin', origin,
     '--public-key-url', `${origin}/${publicKeyPath}`,
@@ -321,7 +327,7 @@ test('the gate passes against a real socket serving the whole real profile root'
     assert.ok([...refused].some((target) => shape.test(target)), `no anti-fallback probe for ${label} was refused`);
   }
 
-  assert.ok(documentCount > 500, `the real surface should be ~541 documents, saw ${documentCount}`);
+  assert.ok(documentCount > 400, `sealed-platform-v1 should host hundreds of documents, saw ${documentCount}`);
   assert.ok(result.receipt, 'a passing run must emit a live-host receipt');
   assert.equal(result.receipt.documentsVerified, documentCount);
   assert.equal(result.receipt.profileManifestSha256, sha256(full.manifestBytes));

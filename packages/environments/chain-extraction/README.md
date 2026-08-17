@@ -1,7 +1,6 @@
 # @jinn-network/chain-state-extraction
 
-> Phase C maturity: experimental and publication disabled. The package has no independent runtime
-> consumer; deterministic extraction acceptance in a real product is a graduation prerequisite.
+> Candidate in `implementations-v1`. Eligible for receipt-gated canary; that is not independent ratification.
 
 Drafts chain environment **candidates** and drives them to convergence.
 

@@ -22,6 +22,7 @@ import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
   loadPlatformCatalog,
+  resolveRequestedReleaseGroup,
 } from './platform-catalog.mjs';
 import { PAYLOAD_TYPE, SIGNATURE_FILE_NAME } from './sign-profile-manifest.mjs';
 import { buildDependencyGraph, topologicalWaves } from './stack-package-graph.mjs';
@@ -90,8 +91,7 @@ function validateConclusions(conclusions, requiredGates) {
       throw new Error(`gate ${gate} must be exact success, got ${String(conclusions[gate])}`);
     }
   }
-  const extras = Object.keys(conclusions).filter((gate) => !requiredGates.includes(gate));
-  if (extras.length > 0) throw new Error(`unknown gate conclusions: ${extras.sort().join(', ')}`);
+  return Object.fromEntries(requiredGates.map((gate) => [gate, conclusions[gate]]));
 }
 
 function requireManifestIdentity(manifest, label, { sourceSha, catalogDigest, releaseGroup, lane }) {
@@ -303,7 +303,6 @@ export function createVerificationReceipt({
   if (existsSync(outputPath)) throw new Error(`refusing to overwrite existing verification receipt ${outputPath}`);
   if (!COMMIT_SHA.test(String(sourceSha))) throw new Error('receipt source SHA must be a 40-character lowercase commit SHA');
   if (!SHA256.test(String(catalogDigest))) throw new Error('receipt catalog digest must be lowercase SHA-256');
-  if (releaseGroup !== 'platform-v1') throw new Error(`receipt release group must be platform-v1, got ${releaseGroup}`);
   if (lane !== 'canary' && lane !== 'stable') throw new Error(`receipt lane must be canary or stable, got ${lane}`);
 
   const root = resolve(repoRoot);
@@ -312,7 +311,8 @@ export function createVerificationReceipt({
     throw new Error(`receipt catalog digest does not match the checked-out catalog: ${actualCatalogDigest}`);
   }
   const catalog = loadPlatformCatalog(root);
-  validateConclusions(
+  releaseGroup = resolveRequestedReleaseGroup(catalog, releaseGroup);
+  const recordedConclusions = validateConclusions(
     conclusions,
     verificationGateConclusionIds(catalog, releaseGroup),
   );
@@ -364,7 +364,7 @@ export function createVerificationReceipt({
         signature: profileSignature,
       },
     },
-    conclusions,
+    conclusions: recordedConclusions,
   };
   mkdirSync(dirname(resolve(outputPath)), { recursive: true });
   writeFileSync(resolve(outputPath), canonicalJsonBytes(receipt), 'utf8');
@@ -374,7 +374,6 @@ export function createVerificationReceipt({
 function parseArgs(argv) {
   const parsed = {
     repoRoot: process.cwd(),
-    releaseGroup: 'platform-v1',
     conclusions: {},
   };
   const fields = new Map([

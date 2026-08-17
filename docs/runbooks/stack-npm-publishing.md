@@ -1,6 +1,7 @@
 # Platform stack npm publishing runbook
 
-**Scope:** the catalog-derived `platform-v1` release group. Its exact package set, runtime waves,
+**Scope:** the catalog-derived stack-published release groups `sealed-platform-v1` (13 packages)
+and `implementations-v1` (59 packages). Their exact package sets, runtime waves,
 trusted-publisher inputs, and policy are generated in the
 [live platform topology](../../architecture/generated/platform-topology.md#release-and-trusted-publishers).
 Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
@@ -8,16 +9,22 @@ Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
 
 ## Current release policy
 
-- The catalog-selected core candidates in `platform-v1` are eligible only for receipt-gated canary
-  publication. A push to `integration/evidence-v1` or `next` uses the `canary` dist-tag and the
-  `npm-publish` GitHub environment.
-- The catalog-selected provisional packages in `experimental-task-supply` and
-  `experimental-environment-supply` are disabled, are not part of the core set, and cannot publish
-  through the stack workflow. Native-role closure is test evidence, not a canary publication promise.
-- Stable publication is mechanically disabled. A stable event may run read-only tag resolution,
-  same-run verification, and `stable-live-host-verification`, but no stable publisher job exists
-  for `stable-publish-gate` to unblock. The hold remains until live `spec.jinn.network` profile
-  hosting is deployed and that gate is observed green against it.
+- Both stack-published groups are catalog-permitted for receipt-gated canary and for a later
+  stable cut (`canary-and-stable`, `stable: true`). That is policy permission, not an operating
+  publisher. A push to `integration/evidence-v1` or `next` still uses the `canary` dist-tag and
+  the `npm-publish` GitHub environment, and the canary job is a matrix over both groups.
+- Canary publication remains **not operationally enabled**. Do not set
+  `PLATFORM_CANARY_PUBLISH_ENABLED=true` from this runbook; the flag stays unset until the
+  trusted-publisher checklist below is complete.
+- The trusted-publisher set is the union of both groups: **72** rows, one registration each,
+  bound to `stack-npm-publish.yml` and `npm-publish`. Per-group publication receipts are a subset
+  of that list.
+- The two `experimental-policy` packages remain disabled and are not part of either
+  stack-published set. Native-role closure is test evidence, not a canary publication promise.
+- Stable publication is still mechanically disabled. A stable event may run read-only tag
+  resolution, same-run verification, and `stable-live-host-verification`, but no stable publisher
+  job exists for `stable-publish-gate` to unblock. The hold remains until live `spec.jinn.network`
+  profile hosting is deployed and that gate is observed green against it.
 - Legacy and product packages remain independent release lines (or private/never-published) under
   their catalog policies and existing workflows. This runbook does not change the layer, SDK,
   client, plugin, or other independent publication paths.
@@ -77,7 +84,8 @@ For every generated row, configure npmjs with:
 The Environment field must equal `npm-publish`, and the allowed action must be exactly
 `npm publish`. This binds registry authority to the final protected publication job; build,
 external-consumer, receipt-construction, and stable-verification jobs never enter that environment.
-The stable lane remains on hold and does not publish from `npm-stable-publish`.
+The stable lane remains on hold and does not publish from `npm-stable-publish`. There is still no
+stable publisher job.
 
 An npm scope owner must complete this once for every generated registration:
 

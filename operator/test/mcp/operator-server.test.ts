@@ -153,7 +153,7 @@ describe('operator MCP helpers', () => {
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
     try {
       const { startDetachedDaemon } = await import('@/mcp/operator-server.js');
-      const promise = startDetachedDaemon({ HOME: home });
+      const promise = startDetachedDaemon({ HOME: home, JINN_EARNING_DIR: earningDir });
       await vi.advanceTimersByTimeAsync(5_000);
       const result = await promise;
 
@@ -178,7 +178,7 @@ describe('operator MCP helpers', () => {
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
     try {
       const { startDetachedDaemon } = await import('@/mcp/operator-server.js');
-      const result = await startDetachedDaemon({ HOME: home });
+      const result = await startDetachedDaemon({ HOME: home, JINN_EARNING_DIR: earningDir });
 
       expect(result).toEqual({
         ok: true,

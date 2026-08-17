@@ -1,8 +1,6 @@
 # @jinn-network/environment-record
 
-> Phase C maturity: experimental and publication disabled. Transitive use in native-role closure
-> is not ratification; an approved record-family decision and independent producers and consumers
-> are required before compatibility is promised.
+> Candidate in `sealed-platform-v1`. Eligible for receipt-gated canary; that is not independent ratification.
 
 The sealed environment description record kind.
 

@@ -1,7 +1,12 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, relative, sep } from 'node:path';
 
-import { loadCatalogPackages } from './platform-catalog.mjs';
+import {
+  loadCatalogPackages,
+  loadPlatformCatalog,
+  loadStackPublishedCatalogPackages,
+  resolveRequestedReleaseGroup,
+} from './platform-catalog.mjs';
 import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
 
 const PUBLICATION_KINDS = ['schemas', 'profiles', 'fixtures'];
@@ -62,9 +67,14 @@ function packedPublicationDirectories(repoRoot, pkg, packedRoots) {
   return [...new Map(found.map((entry) => [`${entry.kind}:${entry.path}`, entry])).values()];
 }
 
-export function publicationSurfaceViolations(repoRoot, { releaseGroup = 'platform-v1' } = {}) {
+export function publicationSurfaceViolations(repoRoot, { releaseGroup } = {}) {
   const violations = [];
-  const packages = loadCatalogPackages(repoRoot, { releaseGroup });
+  const catalog = loadPlatformCatalog(repoRoot);
+  const packages = releaseGroup === undefined
+    ? loadStackPublishedCatalogPackages(repoRoot)
+    : loadCatalogPackages(repoRoot, {
+      releaseGroup: resolveRequestedReleaseGroup(catalog, releaseGroup),
+    });
   const canEnumerate = packages.every((pkg) => (
     PUBLICATION_KINDS.every((kind) => pkg.catalog.publicSurface[kind].every((path) => {
       const absolute = join(repoRoot, pkg.directory, normalizePath(path));

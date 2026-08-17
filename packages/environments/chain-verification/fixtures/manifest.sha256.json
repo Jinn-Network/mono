@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "abi-vectors-v1/vectors.json",
+      "sha256": "038c0c09eeb9ff31c1ab991c7791ace802d869c317fa2605cf0313f7865e6902"
+    },
+    {
+      "id": "attestations-v1/README.md",
+      "sha256": "1a841c220c18111a492b7806a1ce85425ec11351fee965db9f29319e8ab90545"
+    },
+    {
+      "id": "attestations-v1/artifact-unavailable.json",
+      "sha256": "ca69d61333aa0485d02d6e527a4b7d4b7b49782d504227894f1f4ebab45c1672"
+    },
+    {
+      "id": "attestations-v1/composite-chain-only.json",
+      "sha256": "a346fbf0e49c55b1d2745c2f4f0fd5d4e23b5eadcfe4d5107f14aa5b00382e5b"
+    },
+    {
+      "id": "attestations-v1/composite-colliding-origins.json",
+      "sha256": "625a4f4d5836c083ff843ae7a25118fc042f8b29876cdeef9069b5a798a7d650"
+    },
+    {
+      "id": "attestations-v1/coverage-incomplete.json",
+      "sha256": "661be687365ed88353589dea65d4903bf02c98d746f9d20540bea05919eb94fa"
+    },
+    {
+      "id": "attestations-v1/divergent-on-run-3.json",
+      "sha256": "f44a61758607b0f1f9f61fae5cc685b214ef038cd077134eba0e7ddc46ae6893"
+    },
+    {
+      "id": "attestations-v1/fork-backend-refusal.json",
+      "sha256": "e8124b5be586c8b806e0bc839966c50f7dee2d0dfe38cb06e2326e49cb51a268"
+    },
+    {
+      "id": "attestations-v1/sealed-stable.json",
+      "sha256": "df6f062c2ef3f7110bbd08844d6cdceccd28ee0dc8c55515ea93cd427be79dca"
+    },
+    {
+      "id": "attestations-v1/upstream-fetch-succeeds.json",
+      "sha256": "9ef8116a91764d2320addcef373e34c2b8f5133d66779d602aac6cae75ca1a56"
+    },
+    {
+      "id": "predicate-v1/archive-observed.json",
+      "sha256": "1743cc5b483f42c1b9511805e14b495a0e25a869d9fd1fe3099d5eaa35310cf9"
+    },
+    {
+      "id": "predicate-v1/closed-reproducible.json",
+      "sha256": "a7f1efb5b03d35bd8a7229484108eeb01d1364966393e56c236d5188f38d00f7"
+    },
+    {
+      "id": "predicate-v1/invalid-closed-with-divergent-per-run.json",
+      "sha256": "e601c6669be04957261e1ca0bd6564fd5a98f7c7b3e264d5736f4946a80b97dd"
+    },
+    {
+      "id": "predicate-v1/invalid-coverage-uncovered-but-reproducible.json",
+      "sha256": "7a87fa3f1dc4995a7e41773fc59c5e09196d9c7a404ac6930c9b24b8e4712e40"
+    },
+    {
+      "id": "predicate-v1/invalid-k-below-minimum.json",
+      "sha256": "b6b38891241f88256c77ef35e6666b45c1a55a808e6e8ec7f2cc785e2850c682"
+    },
+    {
+      "id": "predicate-v1/invalid-prefixed-digest-set.json",
+      "sha256": "cc45ca88e1f24a10513bd26ce1c91eb36e26ea67c92847402f25c875bc79aa8c"
+    },
+    {
+      "id": "predicate-v1/invalid-reason-outcome-mismatch.json",
+      "sha256": "6e6e3b8195b8124319b72adbdd1d7e8d2ebe5083c45f56cab4ad023d17fe74d7"
+    },
+    {
+      "id": "predicate-v1/invalid-runs-on-non-run-bearing.json",
+      "sha256": "23f09d2225edb8c7b77b49a9e5fd7b70c485aff2566d6337a90ba194028c03c0"
+    },
+    {
+      "id": "predicate-v1/invalid-sealed-without-boundary-probe.json",
+      "sha256": "c692ba1828a6f384b59339c6c2f4c32e09dce2d3c01cfb572c2591e377c20a53"
+    },
+    {
+      "id": "state-read-keys-v1/keys.json",
+      "sha256": "1fce0ea26f588dc0a519225f41baa43fc66dc32c194115d4835e957de39c001b"
+    }
+  ],
+  "errata": []
+}
