@@ -1084,6 +1084,8 @@ Platform canary may still publish as an opt-in integrator/CI train, like `@jinn-
 
 **Not done by this decision:** inventing `stack-v*` tags, flipping catalog `stable: true`, or enabling any publish flag.
 
+**Amendment (2026-08-17, [DR-2026-08-17-c](../../../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md)):** Colophon's **first** public npm cut may pin exact `0.1.0-canary.sha.<fullSha>` versions from one stack-canary receipt. Floating `@canary` remains forbidden. Living on canary forever remains forbidden. The Jinn stable / `spec.jinn.network` hold is unchanged. Subsequent pin changes wait for the first green live-host stable receipt.
+
 ### Decision 5 — Publisher identity (2026-08-15)
 
 **Choice:** **A.** Platform packages publish as `@jinn-network` under Jinn-Network (Decision 3). Products publish under their own npm organizations. Colophon is `@colophon-claims` (Colophon-controlled): public `core`, `cli`, `verify`; `web` stays private. No Colophon package under `@jinn-network`. Not `@colophon` (taken). Not a personal scope.
@@ -1106,13 +1108,13 @@ If the product needs a **new** platform API, Decision 4 still applies: wait for 
 
 ## 17. Draft release design (policy closed 2026-08-15)
 
-This is the design implied by Decisions 1–6. It is **not** applied: no catalog edit, no workflow, no flag, no npm org, no handbook PR.
+This is the design implied by Decisions 1–6. Catalog split and trusted-publisher registration have since landed. [DR-2026-08-17-c](../../../log/decisions/2026-08-17-colophon-first-cut-canary-pin.md) applies a named first-cut exception to Decision 4. [DR-2026-08-17-d](../../../log/decisions/2026-08-17-platform-canary-publish-enabled.md) set the canary flag. `@colophon-claims` is reserved. Product workflow and live spec host are still not applied.
 
 ### Three public objects
 
 | Object | npm identity | Promise | Cadence |
 |---|---|---|---|
-| **Sealed platform** | `@jinn-network/*` (record packages + `benchmarking-testing` + `record-discovery-testing`) | Produce/verify sealed records without running a Jinn product. One version, one receipt. | Canary opt-in; **stable** required before any product may pin (Decision 4). Named cut (`stack-v*` / `latest`) is a new object, not the Monday client cut. |
+| **Sealed platform** | `@jinn-network/*` (record packages + `benchmarking-testing` + `record-discovery-testing`) | Produce/verify sealed records without running a Jinn product. One version, one receipt. | Canary opt-in; **stable** required before any *subsequent* product pin (Decision 4 as amended by DR-2026-08-17-c). Named cut (`stack-v*` / `latest`) is a new object, not the Monday client cut. |
 | **Implementations** | `@jinn-network/*` (backends, launchers, persistence, marketplace/venue, `trust-resolve`, local runtimes, graders, the three kits that already install those, plus Decision 2’s implementation-class former experimentals) | Run, bind, persist, grade. Separate version, separate receipt. | Same custody and lanes as sealed platform (Decision 3). Products pin **both** receipts. |
 | **Product** (Colophon first) | `@colophon-claims` (`core`, `cli`, `verify` public; `web` private) | Independent consumer. | Demand-gated, manual. Several product versions against one stable Jinn pin. Upgrade the pin as a set when a new platform API is needed. Never auto on `next`. |
 
@@ -1127,8 +1129,8 @@ Colophon’s 29 and native-vertical’s 30 remain coupling tests. `experimental-
 1. Catalog PR: replace one 54-row `platform-v1` / `canary-only` with the two groups; allow stable (`canary-and-stable` or equivalent); move the 13 former experimentals per Decision 2; leave Colophon `never` until a product workflow exists.
 2. Trusted-publisher rows for every `@jinn-network` name that will publish; later protect `npm-publish` knowing it also gates **client** canary.
 3. Hosting: signing key, public key URL, `spec.jinn.network` serving real artifacts.
-4. `PLATFORM_CANARY_PUBLISH_ENABLED` only after the runbook checklist — canary still does not authorize a product pin.
-5. First **stable** stack cut (`stack-v*` / `latest`) — the gate Colophon actually waits on.
+4. `PLATFORM_CANARY_PUBLISH_ENABLED` only after the runbook checklist. DR-2026-08-17-c then allows Colophon's **first** public cut to pin that exact receipt.
+5. First **stable** stack cut (`stack-v*` / `latest`) — still required before the next Colophon pin change, and still held on live `spec.jinn.network`.
 6. Reserve `@colophon-claims` (human); then a demand-gated product publish workflow in this mono, distinct from client Rules 8–9.
 7. README banners that still recite the withdrawn graduation caste.
 8. Follow-ups, not gates: split three kit manifests; split `task-admission` barrel.
