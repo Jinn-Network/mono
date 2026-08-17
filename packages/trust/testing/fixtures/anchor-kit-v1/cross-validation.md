@@ -237,14 +237,26 @@ program's P0 gate (not committed — see `capture-provenance.md`). Its trailing
 bytes:
 
 ```
-...  f1 04 6a 83 71 73  f0 08 8a d2 09 08 44 84 f9 94  00
+...  08  f1 04 6a 83 71 73  f0 08 8a d2 09 08 44 84 f9 94  00
      83 df e3 0d 2e f9 0c 8e  2e  2d
      68 74 74 70 73 3a 2f 2f 61 6c 69 63 65 2e 62 74 63 ...
 ```
 
-which decodes as: `prepend`(4 bytes) · `append`(8 bytes) · `sha256` ·
+which decodes as: `sha256` (`08`) · `prepend`(4 bytes) · `append`(8 bytes) ·
 `0x00` (attestation marker) · the pending-attestation tag
 `83dfe30d2ef90c8e` · varbytes(0x2e = 46) wrapping varbytes(0x2d = 45) wrapping
-the calendar URI. That is byte-for-byte the shape
-`serializeDetachedOtsProof` produces for a pending attestation, including the
-doubly length-prefixed URI payload.
+the calendar URI. Note that the last operation before the attestation is the
+`append`, not a hash: the calendar's promise covers the message as it stands at
+that point in the path. That is byte-for-byte the shape
+`serializeDetachedOtsProof` produces, including the doubly length-prefixed URI
+payload.
+
+The same capture is what pinned the **ordering** rules the builders follow.
+Attestations sort by class tag, then by URI *string* for a calendar promise and
+by *numeric* height for a Bitcoin attestation; operations sort by tag, then by
+argument bytes. Sorting the serialized bytes instead agrees on the cross-class
+order and disagrees within a class, because both payloads are length-prefixed —
+for the alice and bob calendars it emits bob first where the reference emits
+alice. A proof the reference tooling reserializes differently is a proof whose
+carried bytes are not the bytes anyone else computes, which is the one property
+§5 rule 2 depends on.

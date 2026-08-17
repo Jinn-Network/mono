@@ -33,7 +33,7 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { bytesToHex, concatenateBytes } from "./der-encoder.js";
+import { concatenateBytes } from "./der-encoder.js";
 
 /** `\x00OpenTimestamps\x00\x00Proof\x00\xbf\x89\xe2\xe8\x84\xe8\x92\x94`. */
 export const OTS_HEADER_MAGIC = concatenateBytes([
@@ -125,25 +125,85 @@ function serializeAttestation(attestation: OtsAttestation): Uint8Array {
   ]);
 }
 
-function attestationSortKey(attestation: OtsAttestation): string {
-  return bytesToHex(serializeAttestation(attestation));
+function attestationTag(attestation: OtsAttestation): Uint8Array {
+  return attestation.kind === "pending"
+    ? OTS_PENDING_ATTESTATION_TAG
+    : OTS_BITCOIN_ATTESTATION_TAG;
+}
+
+/** Lexicographic byte order, a shorter prefix first -- how the reference
+ * implementation's host language compares byte strings. Deliberately *not* the
+ * zero-padded X.690 rule the DER encoder uses for `SET OF`; two formats, two
+ * orderings, and conflating them would silently reorder one of them. */
+function compareBytesLexicographic(left: Uint8Array, right: Uint8Array): number {
+  const shared = Math.min(left.length, right.length);
+  for (let index = 0; index < shared; index += 1) {
+    if (left[index] !== right[index]) return left[index]! < right[index]! ? -1 : 1;
+  }
+  return left.length === right.length ? 0 : left.length < right.length ? -1 : 1;
+}
+
+/**
+ * Attestation order, matching the reference: **by class tag first**, then by the
+ * class's own natural key -- a pending attestation by its URI *string*, a
+ * Bitcoin attestation by its *numeric* height.
+ *
+ * Sorting the serialized bytes instead would agree on the cross-class order (the
+ * tag is a prefix) and disagree within a class, because both payloads are
+ * length-prefixed: two calendar URIs would order by length before content, and
+ * two heights by varuint bytes rather than by value. Either disagreement
+ * produces a proof the reference tooling reserializes differently -- which is
+ * the whole property a byte-exact carried proof depends on (§5 rule 2).
+ */
+function compareAttestations(left: OtsAttestation, right: OtsAttestation): number {
+  const byTag = compareBytesLexicographic(attestationTag(left), attestationTag(right));
+  if (byTag !== 0) return byTag;
+  if (left.kind === "pending" && right.kind === "pending") {
+    // Code-unit order, which matches the reference's code-point order for the
+    // ASCII URIs a calendar publishes. `localeCompare` is banned in this tree
+    // and would be wrong here anyway: the order must not vary by host.
+    return left.uri < right.uri ? -1 : left.uri > right.uri ? 1 : 0;
+  }
+  if (left.kind === "bitcoin" && right.kind === "bitcoin") {
+    return left.height < right.height ? -1 : left.height > right.height ? 1 : 0;
+  }
+  return 0;
+}
+
+/** Operation order, matching the reference: by tag byte, then by argument bytes.
+ * Crypto operations carry no argument, so their tag decides. */
+function compareOperations(left: OtsOperation, right: OtsOperation): number {
+  const leftTag = serializeOperation(left)[0]!;
+  const rightTag = serializeOperation(right)[0]!;
+  if (leftTag !== rightTag) return leftTag < rightTag ? -1 : 1;
+  const leftArgument = left.kind === "sha256" ? new Uint8Array(0) : left.argument;
+  const rightArgument = right.kind === "sha256" ? new Uint8Array(0) : right.argument;
+  return compareBytesLexicographic(leftArgument, rightArgument);
 }
 
 /**
  * Serializes one timestamp node, following the reference implementation's own
- * algorithm: every item but the last is introduced by `0xff`, an attestation
+ * algorithm: attestations sorted and emitted first, then the operation forks in
+ * sorted order; every item but the last is introduced by `0xff`, an attestation
  * item is introduced by `0x00`, and an operation item is its tag followed by the
  * subtree it carries.
+ *
+ * A node with several operations is a **fork**, and forks are the normal shape,
+ * not an edge case: `ots stamp` appends a distinct nonce per calendar, so a real
+ * pending proof already branches at the file digest, and an upgraded one keeps
+ * one branch per calendar. Both branches are walked; a pending branch beside a
+ * complete one neither blocks it nor is erased by it.
  */
 function serializeTimestamp(timestamp: OtsTimestamp): Uint8Array {
-  const attestations = [...timestamp.attestations]
-    .sort((left, right) => (attestationSortKey(left) < attestationSortKey(right) ? -1 : 1));
+  const attestations = [...timestamp.attestations].sort(compareAttestations);
+  const operations = [...timestamp.operations]
+    .sort((left, right) => compareOperations(left.operation, right.operation));
   const parts: Uint8Array[] = [];
   for (const attestation of attestations.slice(0, -1)) {
     parts.push(Uint8Array.of(0xff, 0x00), serializeAttestation(attestation));
   }
   const last = attestations.at(-1);
-  if (timestamp.operations.length === 0) {
+  if (operations.length === 0) {
     if (last === undefined) {
       throw new Error("A terminal timestamp node must carry at least one attestation.");
     }
@@ -153,14 +213,14 @@ function serializeTimestamp(timestamp: OtsTimestamp): Uint8Array {
   if (last !== undefined) {
     parts.push(Uint8Array.of(0xff, 0x00), serializeAttestation(last));
   }
-  for (const step of timestamp.operations.slice(0, -1)) {
+  for (const step of operations.slice(0, -1)) {
     parts.push(
       Uint8Array.of(0xff),
       serializeOperation(step.operation),
       serializeTimestamp(step.next),
     );
   }
-  const lastStep = timestamp.operations.at(-1)!;
+  const lastStep = operations.at(-1)!;
   parts.push(serializeOperation(lastStep.operation), serializeTimestamp(lastStep.next));
   return concatenateBytes(parts);
 }
@@ -209,7 +269,12 @@ export function replayOtsOperations(
 
 // --- Linear-chain builders --------------------------------------------------
 
-function linearTimestamp(
+/**
+ * One unbranched path: the operations applied in order, with the attestations
+ * at the end of it. Exported because a fork is built by giving one node several
+ * of these -- which is what a real multi-calendar proof is.
+ */
+export function otsBranch(
   operations: readonly OtsOperation[],
   attestations: readonly OtsAttestation[],
 ): OtsTimestamp {
@@ -217,9 +282,21 @@ function linearTimestamp(
   const [head, ...rest] = operations;
   return {
     attestations: [],
-    operations: [{ operation: head!, next: linearTimestamp(rest, attestations) }],
+    operations: [{ operation: head!, next: otsBranch(rest, attestations) }],
   };
 }
+
+/** A node that forks into several branches. The serializer orders them; the
+ * caller's order is never load-bearing. */
+export function otsFork(...branches: readonly OtsTimestamp[]): OtsTimestamp {
+  const operations = branches.flatMap((branch) => branch.operations);
+  if (operations.length !== branches.length) {
+    throw new Error("Each branch of a fork must begin with exactly one operation.");
+  }
+  return { attestations: branches.flatMap((branch) => branch.attestations), operations };
+}
+
+const linearTimestamp = otsBranch;
 
 export interface LinearOtsProofOptions {
   readonly fileDigest: Uint8Array;
@@ -237,7 +314,14 @@ export function buildLinearOtsProof(options: LinearOtsProofOptions): Uint8Array 
 // --- Synthetic Bitcoin block headers ---------------------------------------
 
 export const KIT_CALENDAR_URI = "https://calendar.invalid/anchor-kit";
+/** A second calendar. Stamping through several calendars is the standard
+ * mitigation for the availability caveat §6.2 names, so a multi-calendar proof
+ * is the normal shape and the kit carries one. */
+export const KIT_SECOND_CALENDAR_URI = "https://second-calendar.invalid/anchor-kit";
 export const KIT_BITCOIN_BLOCK_HEIGHT = 880_017;
+/** A height the kit deliberately supplies **no** header for: the "material not
+ * supplied for this height" case, which is `present`, not `invalid` (§6.2). */
+export const KIT_UNKNOWN_BITCOIN_BLOCK_HEIGHT = 880_019;
 /** The synthetic block's own time -- verifier-report content, never a sealed
  * byte-fact (§6.2). */
 export const KIT_BITCOIN_BLOCK_TIME = "2026-08-17T12:00:00Z";
@@ -292,9 +376,23 @@ export interface OpenTimestampsKitFixtures {
    * attested height is one the kit supplies a header for, and the commitment is
    * not that header's merkle root. */
   readonly fabricatedCompleteProof: Uint8Array;
+  /**
+   * The shape a real upgraded multi-calendar proof has: the file digest forks,
+   * one branch reaching a Bitcoin attestation that matches `blockHeaders[0]`,
+   * the other still a calendar promise. The complete branch governs and the
+   * pending branch neither blocks it nor disappears.
+   */
+  readonly forkedProof: Uint8Array;
+  /** One node carrying two calendar promises -- the merged shape `ots stamp`
+   * produces when several calendars answer about one message. */
+  readonly twoPendingProof: Uint8Array;
+  /** Structurally complete and genuine, attesting to a height the kit supplies
+   * no header for. */
+  readonly unknownHeightCompleteProof: Uint8Array;
   /** The verifier-side trust material: synthetic headers by height. */
   readonly blockHeaders: readonly KitBlockHeader[];
   readonly blockHeight: number;
+  readonly unknownBlockHeight: number;
 }
 
 /**
@@ -311,6 +409,12 @@ export function createOpenTimestampsKitFixtures(fileDigest: Uint8Array): OpenTim
   ];
   const fabricatedOperations: readonly OtsOperation[] = [
     { kind: "append", argument: Uint8Array.of(0xde, 0xad, 0xbe, 0xef) },
+    { kind: "sha256" },
+  ];
+  // The second calendar's branch: its own nonce, exactly as `ots stamp`
+  // produces one append per calendar from the same file digest.
+  const secondCalendarOperations: readonly OtsOperation[] = [
+    { kind: "append", argument: Uint8Array.of(0x00, 0x01, 0x02, 0x03) },
     { kind: "sha256" },
   ];
   const commitment = replayOtsOperations(fileDigest, genuineOperations);
@@ -335,9 +439,31 @@ export function createOpenTimestampsKitFixtures(fileDigest: Uint8Array): OpenTim
       operations: fabricatedOperations,
       attestations: [{ kind: "bitcoin", height: KIT_BITCOIN_BLOCK_HEIGHT }],
     }),
+    forkedProof: serializeDetachedOtsProof({
+      fileDigest,
+      timestamp: otsFork(
+        // The upgraded branch: the same commitment the standalone complete
+        // proof reaches, so one synthetic header serves both.
+        otsBranch(genuineOperations, [{ kind: "bitcoin", height: KIT_BITCOIN_BLOCK_HEIGHT }]),
+        otsBranch(secondCalendarOperations, [{ kind: "pending", uri: KIT_SECOND_CALENDAR_URI }]),
+      ),
+    }),
+    twoPendingProof: serializeDetachedOtsProof({
+      fileDigest,
+      timestamp: otsBranch(secondCalendarOperations, [
+        { kind: "pending", uri: KIT_CALENDAR_URI },
+        { kind: "pending", uri: KIT_SECOND_CALENDAR_URI },
+      ]),
+    }),
+    unknownHeightCompleteProof: buildLinearOtsProof({
+      fileDigest,
+      operations: genuineOperations,
+      attestations: [{ kind: "bitcoin", height: KIT_UNKNOWN_BITCOIN_BLOCK_HEIGHT }],
+    }),
     blockHeaders: [
       { height: KIT_BITCOIN_BLOCK_HEIGHT, header, time: KIT_BITCOIN_BLOCK_TIME },
     ],
     blockHeight: KIT_BITCOIN_BLOCK_HEIGHT,
+    unknownBlockHeight: KIT_UNKNOWN_BITCOIN_BLOCK_HEIGHT,
   };
 }

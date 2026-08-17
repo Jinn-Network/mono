@@ -95,9 +95,56 @@ describe("the case inventory", () => {
     // Rule 5's three layers are the algorithm floor, which §11 calls family 7.
     expect(families).toContain("§11 family 7");
     // The proof-level §11 families in this packet's scope.
-    for (const family of ["§11 family 1", "§11 family 2", "§11 family 6", "§11 family 10"]) {
+    for (const family of [
+      "§11 family 1",
+      "§11 family 2",
+      "§11 family 6",
+      "§11 family 9",
+      "§11 family 10",
+    ]) {
       expect(families).toContain(family);
     }
+    expect(families).toContain("§6.2 header evaluation");
+  });
+
+  test("the OpenTimestamps cases cover the shapes a real proof actually has", () => {
+    const otsCases = casesFor(OPENTIMESTAMPS_ANCHOR_PROFILE);
+    const named = (fragment: string) =>
+      otsCases.filter((testCase) => testCase.name.includes(fragment));
+
+    // A fork is the normal shape, not an edge case: one branch upgraded, one
+    // still a calendar promise. The complete branch governs, the pending branch
+    // does not block it, and both are the same bytes under two trust settings.
+    const forked = named("forked proof");
+    expect(forked.map((testCase) => testCase.expected.status).sort())
+      .toEqual(["present", "verified"]);
+    expect(new Set(forked.map((testCase) => bytesToHex(testCase.proofBytes))).size).toBe(1);
+
+    // Several calendars answering about one message merge into one node.
+    expect(named("two calendar promises").map((testCase) => testCase.expected.status))
+      .toEqual(["pending", "pending"]);
+
+    // Headers supplied, none for the attested height: the material to evaluate
+    // *this* proof was not supplied, so `present` -- an incomplete header set is
+    // not an accusation against the proof.
+    const unsupplied = named("unsupplied height");
+    expect(unsupplied.length).toBe(1);
+    expect(unsupplied[0]!.trustMaterial).toBe("kit");
+    expect(unsupplied[0]!.expected.status).toBe("present");
+    expect(unsupplied[0]!.expected.facts)
+      .toEqual({ blockHeight: kit.openTimestamps.unknownBlockHeight });
+  });
+
+  test("rule 6 is pinned in both directions: V2 binds, and its explicit default is accepted", () => {
+    const explicit = casesFor(RFC3161_TSA_ANCHOR_PROFILE)
+      .filter((testCase) => testCase.name.includes("states the SHA-256 default explicitly"));
+    expect(explicit.map((testCase) => testCase.expected.status).sort())
+      .toEqual(["present", "verified"]);
+    // The negative names the rule it tests -- the absence of a binding V2
+    // attribute, not the presence of a v1 one (recorded finding 7).
+    expect(casesFor(RFC3161_TSA_ANCHOR_PROFILE).some((testCase) =>
+      testCase.name.includes("v1 SigningCertificate attribute instead of SigningCertificateV2")))
+      .toBe(true);
   });
 
   test("the present/verified flip is the same bytes and the same subject", () => {

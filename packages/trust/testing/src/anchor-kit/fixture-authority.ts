@@ -143,8 +143,24 @@ export interface TimeStampTokenMutations {
   readonly sha1SignerInfoDigest?: boolean;
   /** Rule 5c: a signature algorithm whose digest component is SHA-1. */
   readonly sha1SignatureAlgorithm?: boolean;
-  /** Rule 6a: the v1 `SigningCertificate` attribute (ESSCertID is SHA-1). */
-  readonly signingCertificateV1?: boolean;
+  /**
+   * Rule 6a: the v1 `SigningCertificate` attribute **instead of**
+   * `SigningCertificateV2`. The name is the rule: what refuses is the absence of
+   * a binding V2 attribute, not the presence of a v1 one. A production token can
+   * legitimately carry both -- the captured DigiCert token does -- and is
+   * expected `present`, so a rule engine that refused on sight of a v1 attribute
+   * would reject conformant output (recorded finding 7).
+   */
+  readonly signingCertificateV1InsteadOfV2?: boolean;
+  /**
+   * A **positive** variant, not a negative: `ESSCertIDv2` stating its DEFAULT
+   * SHA-256 `hashAlgorithm` explicitly. DER says a DEFAULT value is omitted, and
+   * conformant producers do omit it -- but producers that state it exist, the
+   * attribute still binds the same certificate under the same digest, and a rule
+   * engine that refused it would be enforcing an encoding preference rather than
+   * §6.1 rule 6. Expected to verify.
+   */
+  readonly explicitSigningCertificateV2Digest?: boolean;
   /** Rule 6b: `SigningCertificateV2` names a certificate not embedded. */
   readonly signingCertificateV2NamesAbsentCertificate?: boolean;
   /** Rule 6c: no embedded certificate at all. */
@@ -335,10 +351,16 @@ function attribute(oid: string, ...values: readonly Uint8Array[]): Uint8Array {
  * DEFAULT value, so the SHA-256 algorithm identifier is absent here exactly as
  * it is absent from production tokens: a rule engine reads "absent" as SHA-256
  * rather than as "unspecified". */
-function signingCertificateV2Attribute(certificateDer: Uint8Array): Uint8Array {
+function signingCertificateV2Attribute(
+  certificateDer: Uint8Array,
+  options: { readonly explicitDigestAlgorithm?: boolean } = {},
+): Uint8Array {
+  const essCertIdV2 = options.explicitDigestAlgorithm
+    ? derSequence(algorithmIdentifier(OID_SHA256), derOctetString(sha256(certificateDer)))
+    : derSequence(derOctetString(sha256(certificateDer)));
   return attribute(
     OID_SIGNING_CERTIFICATE_V2_ATTRIBUTE,
-    derSequence(derSequence(derSequence(derOctetString(sha256(certificateDer))))),
+    derSequence(derSequence(essCertIdV2)),
   );
 }
 
@@ -514,9 +536,11 @@ export function createFixtureAuthority(seed: string): FixtureAuthority {
             options.wrongMessageDigestAttribute ? new Uint8Array(32) : digest(signedEContent),
           ),
         ),
-        options.signingCertificateV1
+        options.signingCertificateV1InsteadOfV2
           ? signingCertificateV1Attribute(certHashTarget)
-          : signingCertificateV2Attribute(certHashTarget),
+          : signingCertificateV2Attribute(certHashTarget, {
+            explicitDigestAlgorithm: options.explicitSigningCertificateV2Digest,
+          }),
       );
 
     // Rule 8: the signature covers the SET OF re-encoding of signedAttrs. The

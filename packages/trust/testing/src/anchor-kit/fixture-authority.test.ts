@@ -406,8 +406,8 @@ describe("every negative fixture carries the defect it is named for", () => {
       .toBe(OID_ECDSA_WITH_SHA1);
   });
 
-  test("rule 6: the v1 attribute, an unembedded certificate, and no certificate", () => {
-    const v1 = walkToken(mint({ signingCertificateV1: true }).tokenDer);
+  test("rule 6: the v1 attribute instead of v2, an unembedded certificate, and none", () => {
+    const v1 = walkToken(mint({ signingCertificateV1InsteadOfV2: true }).tokenDer);
     const v1Attributes = attributesOf(walkSignerInfo(v1.signerInfos[0]!).signedAttrs!);
     expect(v1Attributes.has(OID_SIGNING_CERTIFICATE_ATTRIBUTE)).toBe(true);
     expect(v1Attributes.has(OID_SIGNING_CERTIFICATE_V2_ATTRIBUTE)).toBe(false);
@@ -516,5 +516,34 @@ describe("every negative fixture carries the defect it is named for", () => {
     const tstInfo = walkTstInfo(walkToken(lean.tokenDer).eContent);
     expect(tstInfo.optional).toEqual([]);
     expect(bytesToHex(tstInfo.hashedMessage)).toBe(bytesToHex(SUBJECT));
+  });
+
+  test("the explicit-SHA-256 SigningCertificateV2 variant is positive, not a defect", () => {
+    // Same binding, same certificate, one extra AlgorithmIdentifier: the
+    // attribute states the DEFAULT that DER would omit. A rule engine refusing
+    // it would be enforcing an encoding preference, not §6.1 rule 6.
+    const explicit = mint({ explicitSigningCertificateV2Digest: true });
+    const token = walkToken(explicit.tokenDer);
+    const signerInfo = walkSignerInfo(token.signerInfos[0]!);
+    const essCertIdV2 = children(children(children(
+      attributesOf(signerInfo.signedAttrs!).get(OID_SIGNING_CERTIFICATE_V2_ATTRIBUTE)!,
+    )[0]!)[0]!)[0]!;
+    const fields = children(essCertIdV2);
+    expect(fields.length).toBe(2);
+    expect(readDerOid(children(fields[0]!)[0]!)).toBe(OID_SHA256);
+    expect(bytesToHex(fields[1]!.content))
+      .toBe(bytesToHex(sha256(token.certificates[0]!.bytes)));
+    // Everything else is untouched, signature included.
+    expect(
+      p256.verify(
+        signerInfo.signature,
+        sha256(retagAsSetOf(signerInfo.signedAttrs!.bytes)),
+        subjectPublicKey(token.certificates[0]!.bytes),
+        { format: "der", prehash: false },
+      ),
+    ).toBe(true);
+    // A different token from the default mint, so the suite exercises both
+    // encodings rather than one of them twice.
+    expect(bytesToHex(explicit.tokenDer)).not.toBe(bytesToHex(valid.tokenDer));
   });
 });

@@ -197,9 +197,9 @@ const RFC3161_NEGATIVES: readonly {
     mutations: { sha1SignatureAlgorithm: true },
   },
   {
-    name: "the v1 SigningCertificate attribute (ESSCertID is SHA-1)",
+    name: "the v1 SigningCertificate attribute instead of SigningCertificateV2",
     family: "§11 family 7",
-    mutations: { signingCertificateV1: true },
+    mutations: { signingCertificateV1InsteadOfV2: true },
   },
   {
     name: "SigningCertificateV2 names a certificate not embedded",
@@ -311,6 +311,31 @@ function rfc3161Cases(
         facts: { ...valid.facts },
       },
     },
+    // A second positive shape, pinning the rule engine to enforce rule 6 rather
+    // than an encoding preference: `ESSCertIDv2` stating its DEFAULT SHA-256
+    // algorithm explicitly binds the same certificate under the same digest.
+    ...BOTH_TRUST_MATERIALS.map((trustMaterial): AnchorProofContractCase => {
+      const explicit = kit.authority.mintTimeStampToken({
+        subjectSha256: kit.subjectSha256,
+        explicitSigningCertificateV2Digest: true,
+      });
+      return {
+        name: `a token whose SigningCertificateV2 states the SHA-256 default explicitly is accepted (trust material: ${trustMaterial})`,
+        family: "§6.1 rule 6",
+        profile: RFC3161_TSA_ANCHOR_PROFILE,
+        proofBytes: explicit.tokenDer,
+        subjectSha256: kit.subjectSha256,
+        trustMaterial,
+        expected: trustMaterial === "kit"
+          ? {
+            status: "verified",
+            timeBasis: "authority-time",
+            time: explicit.facts.genTime,
+            facts: { ...explicit.facts },
+          }
+          : { status: "present", timeBasis: "authority-time", facts: { ...explicit.facts } },
+      };
+    }),
     // Rule 12 from the caller's side: the token is untouched and the subject is
     // not the one it covers.
     ...BOTH_TRUST_MATERIALS.map((trustMaterial): AnchorProofContractCase => ({
@@ -429,6 +454,61 @@ function openTimestampsCases(kit: AnchorKitFixtures): readonly AnchorProofContra
       // network to upgrade it (§4.3).
       expected: { status: "pending", timeBasis: "authority-time" },
     })),
+    // The normal shape of a real upgraded multi-calendar proof: the digest forks,
+    // one branch is chain-complete, the other is still a calendar promise. The
+    // complete branch governs; the pending branch neither blocks it nor is
+    // erased by it, and a verifier that walked only the first branch it met
+    // would answer `pending` here.
+    {
+      name: "a forked proof with one complete and one pending branch is present without headers",
+      family: "§11 family 9",
+      profile: OPENTIMESTAMPS_ANCHOR_PROFILE,
+      proofBytes: ots.forkedProof,
+      subjectSha256: kit.subjectSha256,
+      trustMaterial: "none",
+      expected: { status: "present", timeBasis: "chain-time", facts: height },
+    },
+    {
+      name: "the same forked proof is verified against the kit block header",
+      family: "§11 family 9",
+      profile: OPENTIMESTAMPS_ANCHOR_PROFILE,
+      proofBytes: ots.forkedProof,
+      subjectSha256: kit.subjectSha256,
+      trustMaterial: "kit",
+      expected: {
+        status: "verified",
+        timeBasis: "chain-time",
+        time: KIT_BITCOIN_BLOCK_TIME,
+        facts: height,
+      },
+    },
+    ...BOTH_TRUST_MATERIALS.map((trustMaterial): AnchorProofContractCase => ({
+      name: `a node carrying two calendar promises is pending (trust material: ${trustMaterial})`,
+      family: "§11 family 6",
+      profile: OPENTIMESTAMPS_ANCHOR_PROFILE,
+      proofBytes: ots.twoPendingProof,
+      subjectSha256: kit.subjectSha256,
+      trustMaterial,
+      expected: { status: "pending", timeBasis: "authority-time" },
+    })),
+    // Headers supplied, but none for the height this proof attests to. The
+    // material needed to evaluate *this* proof's time basis was not supplied, so
+    // the honest outcome is `present` -- the same answer as no headers at all.
+    // Reporting `invalid` would turn an incomplete header set into an accusation
+    // against the proof.
+    {
+      name: "a complete proof attesting to an unsupplied height is present, not invalid",
+      family: "§6.2 header evaluation",
+      profile: OPENTIMESTAMPS_ANCHOR_PROFILE,
+      proofBytes: ots.unknownHeightCompleteProof,
+      subjectSha256: kit.subjectSha256,
+      trustMaterial: "kit",
+      expected: {
+        status: "present",
+        timeBasis: "chain-time",
+        facts: { blockHeight: ots.unknownBlockHeight },
+      },
+    },
     {
       name: "a fabricated complete proof is present when no block headers are supplied",
       family: "§11 family 10",
